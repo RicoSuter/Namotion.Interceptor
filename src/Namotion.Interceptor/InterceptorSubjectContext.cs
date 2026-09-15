@@ -304,10 +304,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Walks the chain and records where it ends on every state it passed, which is what makes
-    /// building a graph of depth N cost one walk instead of one per level. Iterative because the
-    /// chain is as deep as the subject graph, so recursion overflows the stack and no fixed hop
-    /// limit is correct.
+    /// Resolves the delegation chain using reusable traversal buffers and clears or releases
+    /// them before returning or throwing.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private InterceptorSubjectContext ResolveDelegationChain(ref ContextState state)
@@ -336,6 +334,11 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
+    /// <summary>
+    /// Resolves and caches the delegation chain using caller-owned scratch buffers.
+    /// The caller must clear or release retained buffers on completion, including exceptions.
+    /// </summary>
+    // Encourages the JIT to optimize the walk within its buffer-owning wrapper; inlining remains runtime-dependent.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private InterceptorSubjectContext WalkDelegationChain(ref ContextState state, HashSet<InterceptorSubjectContext> visited, List<DelegationHop> path)
     {
@@ -363,6 +366,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 throw CreateDelegationCycleException();
             }
 
+            // The chain is as deep as the subject graph: iteration avoids stack overflow without a fixed hop limit.
             while (true)
             {
                 var next = currentState.DelegationTarget;

@@ -68,8 +68,9 @@ internal static class ServiceOrderResolver
         return result;
     }
 
+    // Encourages the JIT to avoid a call boundary in partitioning; inlining remains runtime-dependent.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static (int FirstCount, int LastCount) CountGroups<T>(T[] services)
+    private static (int FirstCount, int LastCount) ValidateAndCountGroups<T>(T[] services)
     {
         var firstCount = 0;
         var lastCount = 0;
@@ -87,7 +88,7 @@ internal static class ServiceOrderResolver
 
     private static (T[]? FirstGroup, T[]? MiddleGroup, T[]? LastGroup) PartitionGroups<T>(T[] services)
     {
-        var (firstCount, lastCount) = CountGroups(services);
+        var (firstCount, lastCount) = ValidateAndCountGroups(services);
         var middleCount = services.Length - firstCount - lastCount;
 
         var firstGroup = firstCount > 0 ? new T[firstCount] : null;
@@ -163,11 +164,11 @@ internal static class ServiceOrderResolver
 
         if (resultIndex != count)
         {
-            ThrowCircularDependency(services, inDegree);
+            throw CreateCircularDependencyException(services, inDegree);
         }
     }
 
-    private static void ThrowCircularDependency<T>(T[] services, int[] inDegree)
+    private static InvalidOperationException CreateCircularDependencyException<T>(T[] services, int[] inDegree)
     {
         var cycleTypes = new List<string>();
         for (var i = 0; i < services.Length; i++)
@@ -175,7 +176,7 @@ internal static class ServiceOrderResolver
             if (inDegree[i] > 0)
                 cycleTypes.Add(services[i]!.GetType().Name);
         }
-        throw new InvalidOperationException($"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
+        return new InvalidOperationException($"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
     }
 
     private static void BuildDependencyGraph<T>(T[] services, Dictionary<Type, List<int>> typeToIndices, List<int>[] adjacency, int[] inDegree)
