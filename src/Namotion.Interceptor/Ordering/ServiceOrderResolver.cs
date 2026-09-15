@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Ordering;
@@ -208,6 +209,7 @@ internal static class ServiceOrderResolver
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ProcessReadyServices<T>(T[] services, T[] result, int resultOffset, List<int>[] adjacency, int[] inDegree, SortedSet<int> ready)
     {
         var resultIndex = 0;
