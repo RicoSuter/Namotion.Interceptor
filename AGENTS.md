@@ -105,9 +105,7 @@ The library uses a fluent configuration API:
 
 ## Analyzer Policy
 
-Analyzer suggestions must respect the priorities above. Disabling or suppressing a rule is acceptable when it conflicts with correctness, thread-safety, performance, or an intentional test scenario. Do not change established behavior, add allocations, or abandon a useful optimization solely to satisfy an analyzer.
-
-Before weakening the agreed rule policy or adding a new exception, obtain user approval for the concrete rule, rationale, and proposed scope. Approval already given in the current conversation remains valid; do not ask again for the same decision. Prefer the narrowest reasonable scope, but use a shared exclusion when the rule repeatedly conflicts with an intentional project pattern. Record shared exclusions and their reuse considerations beside the rules in [src/.editorconfig](src/.editorconfig), and record discoveries and deferred work in the main rollout issue's body while the rollout is active.
+Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Get user approval before adding or broadening rule exceptions; prior conversation approval remains valid. Prefer narrow scope. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
 
 ## Key Dependencies
 
