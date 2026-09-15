@@ -336,6 +336,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private InterceptorSubjectContext WalkDelegationChain(ref ContextState state, HashSet<InterceptorSubjectContext> visited, List<DelegationHop> path)
     {
         var backoff = new SpinWait();

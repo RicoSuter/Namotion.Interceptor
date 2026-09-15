@@ -129,8 +129,10 @@ internal static class ServiceOrderResolver
         for (var i = 0; i < count; i++)
         {
             var info = GetOrderInfo(services[i]!.GetType());
-            AddRunsBeforeEdges(i, info.RunsBefore, typeToIndices, adjacency, inDegree);
-            AddRunsAfterEdges(i, info.RunsAfter, typeToIndices, adjacency, inDegree);
+            if (info.RunsBefore.Length > 0)
+                AddRunsBeforeEdges(i, info.RunsBefore, typeToIndices, adjacency, inDegree);
+            if (info.RunsAfter.Length > 0)
+                AddRunsAfterEdges(i, info.RunsAfter, typeToIndices, adjacency, inDegree);
         }
 
         // Kahn's algorithm with sorted ready set (preserves registration order)
@@ -145,14 +147,19 @@ internal static class ServiceOrderResolver
 
         if (resultIndex != count)
         {
-            var cycleTypes = new List<string>();
-            for (var i = 0; i < count; i++)
-            {
-                if (inDegree[i] > 0)
-                    cycleTypes.Add(services[i]!.GetType().Name);
-            }
-            throw new InvalidOperationException($"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
+            ThrowCircularDependency(services, inDegree);
         }
+    }
+
+    private static void ThrowCircularDependency<T>(T[] services, int[] inDegree)
+    {
+        var cycleTypes = new List<string>();
+        for (var i = 0; i < services.Length; i++)
+        {
+            if (inDegree[i] > 0)
+                cycleTypes.Add(services[i]!.GetType().Name);
+        }
+        throw new InvalidOperationException($"Circular dependency detected in service ordering: {string.Join(" -> ", cycleTypes)}");
     }
 
     private static Dictionary<Type, List<int>> MapTypeToIndices<T>(T[] services)
@@ -210,21 +217,20 @@ internal static class ServiceOrderResolver
             ready.Remove(current);
             result[resultOffset + resultIndex++] = services[current];
 
-            ReleaseDependents(adjacency[current], inDegree, ready);
+            var neighbors = adjacency[current];
+            if (neighbors != null)
+                ReleaseDependents(neighbors, inDegree, ready);
         }
 
         return resultIndex;
     }
 
-    private static void ReleaseDependents(List<int>? neighbors, int[] inDegree, SortedSet<int> ready)
+    private static void ReleaseDependents(List<int> neighbors, int[] inDegree, SortedSet<int> ready)
     {
-        if (neighbors != null)
+        foreach (var neighbor in neighbors)
         {
-            foreach (var neighbor in neighbors)
-            {
-                if (--inDegree[neighbor] == 0)
-                    ready.Add(neighbor);
-            }
+            if (--inDegree[neighbor] == 0)
+                ready.Add(neighbor);
         }
     }
 
@@ -239,13 +245,14 @@ internal static class ServiceOrderResolver
     {
         HashSet<Type>? middleTypes = null;
         if (firstGroup != null)
-            ValidateFirstGroupDependencies(firstGroup, middleGroup, lastGroup, ref middleTypes);
+            middleTypes = ValidateFirstGroupDependencies(firstGroup, middleGroup, lastGroup);
         if (lastGroup != null)
-            ValidateLastGroupDependencies(firstGroup, middleGroup, lastGroup, ref middleTypes);
+            ValidateLastGroupDependencies(firstGroup, middleGroup, lastGroup, middleTypes);
     }
 
-    private static void ValidateFirstGroupDependencies<T>(T[] firstGroup, T[]? middleGroup, T[]? lastGroup, ref HashSet<Type>? middleTypes)
+    private static HashSet<Type>? ValidateFirstGroupDependencies<T>(T[] firstGroup, T[]? middleGroup, T[]? lastGroup)
     {
+        HashSet<Type>? middleTypes = null;
         HashSet<Type>? lastTypes = null;
         foreach (var service in firstGroup)
         {
@@ -260,9 +267,11 @@ internal static class ServiceOrderResolver
                         $"where {afterType.Name} is not also [RunsFirst]");
             }
         }
+
+        return middleTypes;
     }
 
-    private static void ValidateLastGroupDependencies<T>(T[]? firstGroup, T[]? middleGroup, T[] lastGroup, ref HashSet<Type>? middleTypes)
+    private static void ValidateLastGroupDependencies<T>(T[]? firstGroup, T[]? middleGroup, T[] lastGroup, HashSet<Type>? middleTypes)
     {
         HashSet<Type>? firstTypes = null;
         foreach (var service in lastGroup)
