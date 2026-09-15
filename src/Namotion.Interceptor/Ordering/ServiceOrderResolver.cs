@@ -42,13 +42,7 @@ internal static class ServiceOrderResolver
 
     private static T[] OrderWithPartitioning<T>(T[] services)
     {
-        var (firstCount, lastCount) = CountGroups(services);
-        var middleCount = services.Length - firstCount - lastCount;
-
-        var firstGroup = firstCount > 0 ? new T[firstCount] : null;
-        var middleGroup = middleCount > 0 ? new T[middleCount] : null;
-        var lastGroup = lastCount > 0 ? new T[lastCount] : null;
-        PartitionGroups(services, firstGroup, middleGroup, lastGroup);
+        var (firstGroup, middleGroup, lastGroup) = PartitionGroups(services);
 
         ValidateCrossGroupDependencies(firstGroup, middleGroup, lastGroup);
 
@@ -59,12 +53,12 @@ internal static class ServiceOrderResolver
         if (firstGroup != null)
         {
             TopologicalSortInto(firstGroup, result, offset);
-            offset += firstCount;
+            offset += firstGroup.Length;
         }
         if (middleGroup != null)
         {
             TopologicalSortInto(middleGroup, result, offset);
-            offset += middleCount;
+            offset += middleGroup.Length;
         }
         if (lastGroup != null)
         {
@@ -91,8 +85,15 @@ internal static class ServiceOrderResolver
         return (firstCount, lastCount);
     }
 
-    private static void PartitionGroups<T>(T[] services, T[]? firstGroup, T[]? middleGroup, T[]? lastGroup)
+    private static (T[]? FirstGroup, T[]? MiddleGroup, T[]? LastGroup) PartitionGroups<T>(T[] services)
     {
+        var (firstCount, lastCount) = CountGroups(services);
+        var middleCount = services.Length - firstCount - lastCount;
+
+        var firstGroup = firstCount > 0 ? new T[firstCount] : null;
+        var middleGroup = middleCount > 0 ? new T[middleCount] : null;
+        var lastGroup = lastCount > 0 ? new T[lastCount] : null;
+
         int firstIndex = 0, middleIndex = 0, lastIndex = 0;
 
         for (var i = 0; i < services.Length; i++)
@@ -103,6 +104,8 @@ internal static class ServiceOrderResolver
             else if (info.RunsLast) lastGroup![lastIndex++] = service;
             else middleGroup![middleIndex++] = service;
         }
+
+        return (firstGroup, middleGroup, lastGroup);
     }
 
     private static T[] TopologicalSort<T>(T[] services)
