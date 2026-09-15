@@ -56,7 +56,9 @@ internal static class SubjectPropertyChangeOperations
             {
                 if (failed is null)
                 {
-                    (successful, failed) = CreateFailureLists(changes, i, successful);
+                    // On the no-exclude path, materialize the successful prefix at the first failure.
+                    successful ??= CopyAppliedChanges(changes[..i]);
+                    failed = [];
                 }
 
                 failed.Add(change);
@@ -72,22 +74,15 @@ internal static class SubjectPropertyChangeOperations
             : (successful!, failed, errors ?? []);
     }
 
-    private static (List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed) CreateFailureLists(
-        ReadOnlySpan<SubjectPropertyChange> changes,
-        int failedIndex,
-        List<SubjectPropertyChange>? successful)
+    private static List<SubjectPropertyChange> CopyAppliedChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        if (successful is null)
+        var successful = new List<SubjectPropertyChange>(changes.Length);
+        for (var index = 0; index < changes.Length; index++)
         {
-            // First failure on the no-exclude path: materialize the successes seen so far.
-            successful = new List<SubjectPropertyChange>(failedIndex);
-            for (var index = 0; index < failedIndex; index++)
-            {
-                successful.Add(changes[index]);
-            }
+            successful.Add(changes[index]);
         }
 
-        return (successful, []);
+        return successful;
     }
 
     /// <summary>
