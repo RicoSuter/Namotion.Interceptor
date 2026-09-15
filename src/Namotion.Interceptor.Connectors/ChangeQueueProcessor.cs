@@ -35,9 +35,14 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ChangeQueueState _queueState;
 
     // Competing disposers wait for the callback; same-thread reentry sees the handler already taken.
+    // Never taken while the queue state's ownership gate is held: the handler is consumer code, so
+    // running it under ownership would let a callback block delivery accounting.
     private readonly Lock _terminalHandlerGate = new();
 
-    private int _flushGate; // 0 = free, 1 = flushing
+    // 0 = free, 1 = flushing. An int rather than a Lock because a flush holds it across the write
+    // handler's await and can release it on another thread, which a thread-affine Lock forbids, and
+    // because refusing a reentrant flush is the point.
+    private int _flushGate;
     private int _lifecycleState;
 
     /// <summary>
@@ -122,11 +127,9 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
-
             _queueState = new ChangeQueueState(
-                _bufferTime > TimeSpan.Zero ? maxQueueDepth : null,
-                dropHandler, logger, tracksDeliveryOutcomes: true);
+                ValidateQueueBound(maxQueueDepth, _bufferTime),
+                dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcomes: true);
             _deliveryRule = ValidateRule(deliveryRule);
 
             _changeMerger = new ChangeMerger();
@@ -168,19 +171,17 @@ public class ChangeQueueProcessor : IDisposable
         _terminalHandler = terminalHandler;
         _completionHandler = completionHandler;
 
-        ValidateMaxQueueDepth(maxQueueDepth, _bufferTime);
-
         _queueState = new ChangeQueueState(
-            _bufferTime > TimeSpan.Zero ? maxQueueDepth : null,
-            dropHandler, logger, tracksDeliveryOutcomes: !writeHandlerOwnsChanges);
+            ValidateQueueBound(maxQueueDepth, _bufferTime),
+            dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcomes: !writeHandlerOwnsChanges);
         _subscription = subscription;
         _deliveryRule = ValidateRule(deliveryRule);
         _changeMerger = new ChangeMerger();
     }
 
-    // Only on the buffered path: a buffer time of zero writes each change as it is dequeued and never
-    // fills the queue this bounds, so the bound is not read there.
-    private static void ValidateMaxQueueDepth(int? maxQueueDepth, TimeSpan bufferTime)
+    // Returns the bound actually in force: only the buffered path fills the queue this bounds, so a
+    // buffer time of zero leaves the queue state unbounded rather than holding a bound nothing reads.
+    private static int? ValidateQueueBound(int? maxQueueDepth, TimeSpan bufferTime)
     {
         if (maxQueueDepth is <= 0 && bufferTime > TimeSpan.Zero)
         {
@@ -189,6 +190,8 @@ public class ChangeQueueProcessor : IDisposable
                 "queue, or a buffer time of zero for the immediate path, which writes each change as it is " +
                 "dequeued and buffers nothing.");
         }
+
+        return bufferTime > TimeSpan.Zero ? maxQueueDepth : null;
     }
 
     // Rejects every unnamed value, not just zero: the delivery decision throws on an unknown rule from
@@ -265,31 +268,7 @@ public class ChangeQueueProcessor : IDisposable
             using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
             var flushTask = periodicTimer is not null
-                ? Task.Run(async () =>
-                {
-                    var flushFailureReported = false;
-                    try
-                    {
-                        while (await periodicTimer.WaitForNextTickAsync(execution.ProcessingToken).ConfigureAwait(false))
-                        {
-                            // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
-                            try
-                            {
-                                await TryFlushAsync(execution.ProcessingToken).ConfigureAwait(false);
-                                flushFailureReported = false;
-                            }
-                            catch (Exception exception) when (exception is not OperationCanceledException)
-                            {
-                                ReportFlushFailure(exception, ref flushFailureReported);
-                            }
-                        }
-                    }
-                    catch (OperationCanceledException) { }
-                    catch (Exception exception)
-                    {
-                        ReportFlushFailure(exception, ref flushFailureReported);
-                    }
-                })
+                ? Task.Run(() => FlushPeriodicallyAsync(periodicTimer, execution.ProcessingToken))
                 : Task.CompletedTask;
 
             if (periodicTimer is null)
@@ -357,6 +336,9 @@ public class ChangeQueueProcessor : IDisposable
             finally
             {
                 execution.ReportFinalizationStarted();
+
+                // Disposed ahead of its using scope: it is what makes the pending WaitForNextTickAsync
+                // return false, so the flush loop awaited below ends promptly.
                 periodicTimer?.Dispose();
                 await flushTask.ConfigureAwait(false);
                 try
@@ -379,6 +361,32 @@ public class ChangeQueueProcessor : IDisposable
             {
                 DisposeMerger();
             }
+        }
+    }
+
+    private async Task FlushPeriodicallyAsync(PeriodicTimer periodicTimer, CancellationToken processingToken)
+    {
+        var flushFailureReported = false;
+        try
+        {
+            while (await periodicTimer.WaitForNextTickAsync(processingToken).ConfigureAwait(false))
+            {
+                // Catch per tick so a consumer callback cannot permanently stop delivery while dequeueing continues.
+                try
+                {
+                    await TryFlushAsync(processingToken).ConfigureAwait(false);
+                    flushFailureReported = false;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    ReportFlushFailure(exception, ref flushFailureReported);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            ReportFlushFailure(exception, ref flushFailureReported);
         }
     }
 
@@ -418,7 +426,7 @@ public class ChangeQueueProcessor : IDisposable
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _queueState.RequeueCancelledDelivery(changes.Span, count);
+            _queueState.RequeueCancelledDelivery(changes.Span);
             throw;
         }
         catch (Exception exception)
@@ -504,7 +512,9 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Disposes the processor and returns the rented buffer to the pool.
+    /// Closes delivery ownership and counts everything still outstanding as dropped, releases an owned
+    /// subscription, releases the merger when no run is live to release it, and fires the terminal
+    /// handler exactly once. Safe to call repeatedly and from several threads at once.
     /// </summary>
     public void Dispose()
     {

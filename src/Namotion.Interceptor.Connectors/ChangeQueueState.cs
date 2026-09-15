@@ -28,6 +28,7 @@ internal sealed class ChangeQueueState
     private readonly int? _maxQueueDepth;
     private readonly Action<long>? _dropHandler;
     private readonly ILogger _logger;
+    private readonly TimeSpan _terminalBound;
 
     private long _dropCount;
     // 0 = idle, positive = active delivery size, ClosedDelivery = permanently closed.
@@ -37,11 +38,13 @@ internal sealed class ChangeQueueState
         int? maxQueueDepth,
         Action<long>? dropHandler,
         ILogger logger,
+        TimeSpan terminalBound,
         bool tracksDeliveryOutcomes)
     {
         _maxQueueDepth = maxQueueDepth;
         _dropHandler = dropHandler;
         _logger = logger;
+        _terminalBound = terminalBound;
         TryBeginDeliveryCallback = tracksDeliveryOutcomes ? TryBeginDeliveryOrCountAsDropped : null;
     }
 
@@ -119,10 +122,12 @@ internal sealed class ChangeQueueState
     /// <summary>
     /// Requeues the active delivery without overflow trimming. A no-op once closure has claimed it.
     /// </summary>
-    public void RequeueCancelledDelivery(ReadOnlySpan<SubjectPropertyChange> changes, int count)
+    public void RequeueCancelledDelivery(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_ownershipGate)
         {
+            // Derived, not passed: the compare-exchange has to settle the same batch this requeues.
+            var count = changes.Length;
             if (Interlocked.CompareExchange(ref _deliveryState, 0, count) != count)
             {
                 return;
@@ -190,7 +195,7 @@ internal sealed class ChangeQueueState
                 _logger.LogWarning(
                     "Gave up waiting after {Timeout} for {Count} changes to be written while stopping. " +
                     "A write handler may already have completed them remotely or may still complete them.",
-                    ChangeQueueProcessor.TeardownFlushBound,
+                    _terminalBound,
                     count);
             }
             catch

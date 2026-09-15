@@ -119,7 +119,7 @@ public class ChangeQueueStateTests
         var buffer = new List<SubjectPropertyChange>();
 
         // Act
-        state.RequeueCancelledDelivery(changes, 2);
+        state.RequeueCancelledDelivery(changes);
         state.DrainBufferedChangesInto(buffer);
         var retryStarted = state.TryBeginDeliveryOrCountAsDropped(2);
         state.CompleteDelivery(2);
@@ -145,11 +145,11 @@ public class ChangeQueueStateTests
         if (closeFirst)
         {
             state.CloseAndCountRemainingAsDropped();
-            state.RequeueCancelledDelivery(changes, 2);
+            state.RequeueCancelledDelivery(changes);
         }
         else
         {
-            state.RequeueCancelledDelivery(changes, 2);
+            state.RequeueCancelledDelivery(changes);
             state.CloseAndCountRemainingAsDropped();
         }
         state.CloseAndCountRemainingAsDropped();
@@ -280,7 +280,7 @@ public class ChangeQueueStateTests
         Assert.True(state.TryBeginDeliveryOrCountAsDropped(2));
 
         // Act
-        await RunConcurrentlyAsync(state.CloseAndCountRemainingAsDropped, () => state.RequeueCancelledDelivery(changes, 2));
+        await RunConcurrentlyAsync(state.CloseAndCountRemainingAsDropped, () => state.RequeueCancelledDelivery(changes));
 
         // Assert
         Assert.Equal(0, state.BufferedCount);
@@ -322,7 +322,7 @@ public class ChangeQueueStateTests
         int? maxQueueDepth = null,
         Action<long>? dropHandler = null,
         bool tracksDeliveryOutcomes = true) =>
-        new(maxQueueDepth, dropHandler, NullLogger.Instance, tracksDeliveryOutcomes);
+        new(maxQueueDepth, dropHandler, NullLogger.Instance, ChangeQueueProcessor.TeardownFlushBound, tracksDeliveryOutcomes);
 
     private static SubjectPropertyChange[] CreateChanges(params string[] values)
     {
