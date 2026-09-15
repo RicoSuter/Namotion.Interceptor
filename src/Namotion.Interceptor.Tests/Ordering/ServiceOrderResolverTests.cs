@@ -172,6 +172,22 @@ public class ServiceOrderResolverTests
     }
 
     [Fact]
+    public void WhenDependencyTypesAreMissing_ThenPreservesRegistrationOrder()
+    {
+        // Arrange
+        var beforeMissing = new ServiceBeforeA();
+        var unrelated = new ServiceB();
+        var afterMissing = new ServiceAfterA();
+        var services = new object[] { beforeMissing, unrelated, afterMissing };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(services, result);
+    }
+
+    [Fact]
     public void ServiceWithDependency_PreservesOrderOfUnrelatedServices()
     {
         // Arrange: Register A, B, C, D, E where A runs before D
