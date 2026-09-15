@@ -29,19 +29,14 @@ internal static class SubjectMetadataExtractor
             return new ExtractionResult(null, diagnostics);
         }
 
-        // Text rather than ValueText: ValueText drops the '@' that escapes a keyword used as a
-        // name, and the bare keyword does not parse. Property names below stay on ValueText,
-        // because they are also emitted as string literals, as nameof arguments and as parts of
-        // derived names such as _Name and OnNameChanged, where the escape would be wrong.
+        // Preserve '@' for keyword class names. Property metadata uses ValueText because its
+        // names also become string literals and derived identifiers such as OnNameChanged.
         var className = typeDeclaration.Identifier.Text;
 
-        // Use the symbol rather than the syntax modifiers: a top-level class without a modifier
-        // defaults to internal, a nested one to private.
+        // Symbol accessibility includes the different top-level and nested defaults.
         var accessModifier = SymbolExtensions.GetAccessModifierFromAccessibility(typeSymbol.DeclaredAccessibility);
 
-        // From the symbol, because 'sealed' may sit on any partial declaration, not necessarily
-        // the attributed one. DetectConstructorState already scans every declaration for the same
-        // reason.
+        // Sealed may appear on another partial declaration.
         var isSealed = typeSymbol.IsSealed;
 
         var containingTypes = SubjectTypeShape.GetContainingTypes(typeDeclaration);
@@ -56,38 +51,31 @@ internal static class SubjectMetadataExtractor
             return new ExtractionResult(null, diagnostics);
         }
 
-        // Collect all partial type declarations
         var allTypeDeclarations = typeSymbol.DeclaringSyntaxReferences
             .Select(r => r.GetSyntax(cancellationToken))
             .OfType<TypeDeclarationSyntax>()
             .ToArray();
 
-        // Collect properties from all partial declarations
         var classProperties = ClassPropertyMetadataExtractor.DeduplicateByName(
             ClassPropertyMetadataExtractor.CollectProperties(typeSymbol, semanticModel, location, diagnostics, cancellationToken),
             typeSymbol.ToDisplayString(),
             location,
             diagnostics);
 
-        // NI0065 runs first and its names are handed to NI0060, which stands down on them. The two
-        // rules are not mutually exclusive and both can match one declaration.
+        // NI0065 takes precedence over NI0060 when both match the same declaration.
         var displacedNames = SubjectPropertyConflicts.ReportPropertiesDisplacingAnAncestorSubject(
             typeSymbol, classProperties, location, diagnostics);
 
         SubjectPropertyConflicts.ReportPropertiesShadowingABaseImplementation(
             typeSymbol, classProperties, displacedNames, location, diagnostics);
 
-        // Collect interface properties with default implementations
         var interfaceProperties = InterfacePropertyMetadataExtractor.ExtractInterfaceDefaultProperties(
             typeSymbol, classProperties, semanticModel.Compilation, location, diagnostics);
 
-        // Combine class properties with interface default properties
         var properties = classProperties.Concat(interfaceProperties).ToList();
 
-        // Collect methods from all partial declarations
         var methods = SubjectMethodMetadataExtractor.CollectMethods(typeSymbol, semanticModel, location, diagnostics, cancellationToken);
 
-        // Detect constructor state
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor,
             parameterlessConstructorSetsRequiredMembers) = SubjectTypeShape.DetectConstructorState(typeSymbol, allTypeDeclarations);
 

@@ -55,11 +55,7 @@ internal static class SubjectMethodMetadataExtractor
             return null;
         }
 
-        // The postfix is an explicit opt-in to interception, so a method that carries it and
-        // still gets dropped is worth reporting: the user asked for a wrapper and silently
-        // did not get one.
-
-        // A method named exactly "WithoutInterceptor" would yield an empty wrapper name.
+        // The postfix opts into interception, so report unsupported methods instead of silently skipping them.
         if (fullMethodName.Length == InterceptedMethodPostfix.Length)
         {
             diagnostics.Add(Diagnostic.Create(
@@ -70,13 +66,8 @@ internal static class SubjectMethodMetadataExtractor
             return null;
         }
 
-        // The emitter drops static and generic shapes, and cannot route an explicit interface
-        // implementation through the executor. The wrapper forwards its parameters by value,
-        // which a plain "ref" or an "out" parameter rejects (CS1620), while "in" and
-        // "ref readonly" accept it, so only the first two are skipped. A by-reference return
-        // type is skipped outright: GetFullTypeName cannot name a RefTypeSyntax, and the
-        // wrapper would otherwise compile with a "void" return that silently dereferences the
-        // ref return into a copy and discards it.
+        // Wrappers forward parameters by value. Ref returns cannot be named by GetFullTypeName
+        // and would otherwise fall back to void, silently discarding the result.
         if (HasUnsupportedDeclarationShape(method) || HasUnsupportedByReferenceShape(method))
         {
             diagnostics.Add(Diagnostic.Create(
@@ -89,9 +80,7 @@ internal static class SubjectMethodMetadataExtractor
 
         var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
 
-        // The capture is silent: in derived mode the only compiler signal is a CS0108 that a
-        // consumer without TreatWarningsAsErrors never sees, and an AddProperties wrapper
-        // produces none at all. NI0063 scans declared members rather than emitted ones.
+        // NI0063 checks declared members, so wrapper-name collisions need a separate check.
         if (GeneratedMemberTable.CollidesWithGeneratedMember(methodName))
         {
             diagnostics.Add(Diagnostic.Create(
@@ -137,22 +126,18 @@ internal static class SubjectMethodMetadataExtractor
     }
 
     /// <summary>
-    /// A "ref readonly" parameter carries both the "ref" and the "readonly" modifier, and unlike a
-    /// plain "ref" it binds to the temporary the wrapper forwards, which only warns with CS9193.
-    /// The generated file suppresses that warning, so only plain "ref" and "out" remain unsupported.
+    /// Returns whether the parameter requires ref or out forwarding.
     /// </summary>
     private static bool HasUnsupportedByReferenceModifier(ParameterSyntax parameter)
     {
+        // Ref readonly accepts the forwarded temporary; generated code suppresses its CS9193 warning.
         var modifiers = parameter.Modifiers;
         return modifiers.Any(SyntaxKind.OutKeyword) ||
                (modifiers.Any(SyntaxKind.RefKeyword) && !modifiers.Any(SyntaxKind.ReadOnlyKeyword));
     }
 
     /// <summary>
-    /// Names the type exactly as the property path does. A hand-built generic name of the form
-    /// "{ContainingNamespace}.{Name}&lt;...&gt;" drops every enclosing type and renders the global
-    /// namespace as the literal "&lt;global namespace&gt;", which does not parse; the fully
-    /// qualified format handles both, so there is nothing left to special-case for generics.
+    /// Returns the fully qualified type name, or null if the syntax or type cannot be resolved.
     /// </summary>
     private static string? GetFullTypeName(TypeSyntax? type, SemanticModel semanticModel)
     {

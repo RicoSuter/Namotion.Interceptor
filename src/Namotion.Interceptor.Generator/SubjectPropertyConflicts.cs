@@ -8,13 +8,10 @@ namespace Namotion.Interceptor.Generator;
 internal static class SubjectPropertyConflicts
 {
     /// <summary>
-    /// A declaration in the subject's own class that displaces a property an ancestor subject already
-    /// contributes to its DefaultProperties. Reported by effect rather than by the 'new' keyword,
-    /// because omitting the keyword is only CS0108 and the displacement is identical either way.
+    /// Reports declarations that displace an ancestor subject's property, with or without 'new'.
     /// </summary>
     /// <remarks>
-    /// Only ancestors carrying [InterceptorSubject] are scanned, so a declaration displacing a property
-    /// of a hand-written base that satisfies the subject base contract is not reported.
+    /// Only ancestors marked [InterceptorSubject] are checked; hand-written subject bases are excluded.
     /// </remarks>
     public static HashSet<string>? ReportPropertiesDisplacingAnAncestorSubject(
         INamedTypeSymbol typeSymbol,
@@ -22,8 +19,7 @@ internal static class SubjectPropertyConflicts
         Location location,
         List<Diagnostic> diagnostics)
     {
-        // Allocate nothing before the early return: every root subject reaches this and leaves through
-        // it, and the IDE re-runs the generator on each keystroke.
+        // Root subjects need no collection allocation during repeated IDE generation.
         List<INamedTypeSymbol>? subjectAncestors = null;
         foreach (var ancestor in SymbolExtensions.EnumerateChain(typeSymbol.BaseType))
         {
@@ -42,18 +38,14 @@ internal static class SubjectPropertyConflicts
 
         foreach (var property in classProperties)
         {
-            // An override shares the slot it already had, so one accessor pair stays reachable, only
-            // one of the two backing fields is ever used, and it displaces nothing. An explicit
-            // implementation is deliberately NOT skipped here: it lands in the highest precedence tier
-            // and would flip an ancestor's intercepted property to a non-intercepted interface read.
+            // Overrides share the inherited slot. Explicit implementations can instead replace
+            // an intercepted ancestor property with a non-intercepted interface read.
             if (property.IsOverride)
             {
                 continue;
             }
 
-            // Abstract ancestor properties are deliberately NOT filtered out. They reach
-            // DefaultProperties like any other, and a plain class between the two subjects can supply
-            // the override that makes a 'new' declaration below it both legal and silent.
+            // Abstract properties also reach DefaultProperties; an intermediate class may implement them.
             var isDisplacing = subjectAncestors.Any(ancestor => ancestor
                 .GetMembers(property.Name)
                 .OfType<IPropertySymbol>()
@@ -71,16 +63,8 @@ internal static class SubjectPropertyConflicts
     }
 
     /// <summary>
-    /// Reports a class-declared property whose name matches an interface member that resolves to an
-    /// implementation outside this type, so that reading through the interface and reading through
-    /// the subject return different values.
+    /// Reports properties shadowing an inherited interface implementation, allowing class and interface reads to diverge.
     /// </summary>
-    /// <remarks>
-    /// Interface implementation is fixed where the interface joins the base list, so a property
-    /// declared further down the hierarchy does not take over the slot. This must not fire on the
-    /// ordinary shape, where the subject itself declares support for the interface and its own
-    /// property is the implementation, nor on an override, which shares the base member's slot.
-    /// </remarks>
     public static void ReportPropertiesShadowingABaseImplementation(
         INamedTypeSymbol typeSymbol,
         IReadOnlyList<PropertyMetadata> classProperties,
@@ -96,10 +80,8 @@ internal static class SubjectPropertyConflicts
 
         foreach (var property in classProperties)
         {
-            // An explicit implementation is by definition the implementation, and an override
-            // shares the slot of the base member it overrides. A name NI0065 already reported keeps
-            // only that report: both rules can match one declaration, and re-listing the interface,
-            // this rule's remedy, would leave the displacement in place.
+            // Explicit implementations and overrides own the slot. Keep only NI0065 for displaced
+            // properties: re-listing the interface would not fix their displacement.
             if (property.ExplicitInterfaceTypeName is not null ||
                 property.IsOverride ||
                 displacedNames?.Contains(property.Name) == true)
@@ -120,12 +102,8 @@ internal static class SubjectPropertyConflicts
     {
         foreach (var interfaceType in typeSymbol.AllInterfaces)
         {
-            // The message claims the base class already implements this member, so that must
-            // be checked directly: an interface the subject itself lists (not one the base type
-            // carries) is the subject's own to implement, even when its own same-named property
-            // fails to bind to it (a type or accessor mismatch, say) and the interface's default
-            // body ends up as the resolved implementation instead. That default is not the base
-            // class's doing, so it must not be blamed as one.
+            // A default implementation from an interface introduced by this subject is not
+            // inherited from its base, even when a same-name property fails to implement it.
             if (!baseType.AllInterfaces.Contains(interfaceType, SymbolEqualityComparer.Default))
             {
                 continue;

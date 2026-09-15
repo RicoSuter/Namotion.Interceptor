@@ -92,11 +92,8 @@ public class SubjectNotificationInheritanceTests
     [Fact]
     public void WhenTheRaiseSitsAboveTheAttributedAncestor_ThenTheSetterStillCallsItBySimpleName()
     {
-        // Arrange: the same shape as above except that ManualInpcBase implements the raise as an
-        // ordinary public member. Middle still emits none of its own, so only a walk of the whole
-        // chain finds the member that answers Leaf's call; a lookup stopping at the attributed
-        // ancestor would drop Leaf to the interface form. This is the shipped ManualInpcPersonBase
-        // shape from Namotion.Interceptor.Tracking.Tests.
+        // Arrange: the callable public raise sits above the attributed ancestor.
+        // The whole-chain lookup must find it, as in the Tracking tests' ManualInpcPersonBase shape.
         const string source = """
             using System.ComponentModel;
             using Namotion.Interceptor;

@@ -67,9 +67,7 @@ public class SubjectBaseInterceptionTests
     [Fact]
     public void WhenSubclassIsHandWritten_ThenItCanUseTheProtectedHelpers()
     {
-        // Arrange: one of the two directions goal 4 asks for. This was CS0122 on every helper the
-        // subclass touches while the generator emitted them private, so the shape is pinned rather
-        // than left to the emitter's modifier choice.
+        // Arrange: a hand-written subclass must be able to call the generated base's protected helpers.
         const string source = """
             using System;
             using System.Collections.Generic;
@@ -129,11 +127,8 @@ public class SubjectBaseInterceptionTests
     [Fact]
     public void WhenHandWrittenSubclassWritesThroughTheHelpers_ThenTheInheritedExecutorInterceptsIt()
     {
-        // Arrange: the test above proves the helpers are reachable, this one proves they work. A
-        // hand-written subclass has no generated DefaultProperties, so its metadata only exists once
-        // AddProperties has run, and the base's ": base(context)" constructor publishes the executor
-        // before this constructor body starts. Registering after the first write would therefore
-        // throw from PropertyReference.Metadata rather than silently skip interception.
+        // Arrange: a hand-written subclass must register metadata before its first intercepted write.
+        // The base constructor has already published the executor, so missing metadata would throw.
         const string source = """
             using System;
             using System.Collections.Generic;
@@ -207,10 +202,7 @@ public class SubjectBaseInterceptionTests
     [Fact]
     public void WhenTheDocumentedHandWrittenBaseHostsAGeneratedSubclass_ThenItsWritesReachTheInterceptor()
     {
-        // Arrange: the other of the two directions goal 4 asks for, and the only test that runs it.
-        // The fixture is read out of docs/generator.md instead of being copied here, so the
-        // contract the documentation asks a base class to satisfy and the contract this test proves
-        // cannot drift apart.
+        // Arrange: read the fixture from docs/generator.md so the documented and tested contracts cannot drift.
         var source = ReadDocumentedConformingBaseFixture();
 
         var writeInterceptor = new RecordingWriteInterceptor();
@@ -227,11 +219,8 @@ public class SubjectBaseInterceptionTests
         // Act
         machineType.GetProperty("SerialNumber")!.SetValue(machine, "serial-written");
 
-        // Assert: the generated setter routes through the hand-written base's SetPropertyValue and
-        // lands on the executor the base's Context published. The field count is what shows it is
-        // the base's and not a second copy emitted into the subclass, and the warning check is what
-        // shows that second copy is not merely unused but absent: a private helper hiding the
-        // inherited protected one is CS0108 in a file the consumer cannot edit.
+        // Assert: the setter uses the base executor. One context field and no hiding warnings
+        // ensure the subclass did not emit a second set of interception members.
         Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "SerialNumber" && Equals(write.Value, "serial-written"));
         Assert.Contains("SerialNumber", machine.Properties.Keys);
         Assert.Equal(1, CountExecutorFields(machineType));
@@ -243,11 +232,8 @@ public class SubjectBaseInterceptionTests
     [Fact]
     public void WhenReferencedBaseHasPrivateHelpers_ThenItFallsBackToRootModeWithNI0062()
     {
-        // Arrange: an attributed base built by an older generator, so its helpers are private and it
-        // has no GetInstanceProperties at all. Either cause alone fails the contract, so the
-        // fallback is what the assertions pin, not one specific missing member.
-        // Branch 1's "declared in source" qualifier is what stops this from selecting derived mode
-        // and emitting CS0122 calls into generated code. The generator is NOT run over the library.
+        // Arrange: simulate an older generated base with private helpers and no GetInstanceProperties.
+        // Do not run the generator over the library; this exercises fallback for an incompatible metadata contract.
         const string librarySource = """
             using System;
             using System.Collections.Concurrent;
@@ -339,11 +325,8 @@ public class SubjectBaseInterceptionTests
     [Fact]
     public void WhenHandWrittenBaseIsGeneric_ThenTheContractIsCheckedWithTypeArgumentsSubstituted()
     {
-        // Arrange: the subject derives from a constructed GenericBase<SubjectPropertyMetadata>, so
-        // the contract lookup has to see the substituted members, not the open definition's.
-        // DefaultProperties is declared in terms of T on purpose: its type only equals the
-        // IReadOnlyDictionary<string, SubjectPropertyMetadata> the check compares against once the
-        // type argument is substituted, so a lookup running against the open definition fails.
+        // Arrange: DefaultProperties matches the contract only after substituting SubjectPropertyMetadata for T.
+        // Looking up members on the open generic definition would incorrectly reject this base.
         const string source = """
             using System;
             using System.Collections.Concurrent;

@@ -148,11 +148,8 @@ public class SubjectMemberCollisionTests
     [Fact]
     public void WhenAWrapperWouldBeNamedAddProperties_ThenNI0040IsReportedAndAddedPropertiesSurvive()
     {
-        // Arrange: the wrapper would be emitted as a public void AddProperties(IEnumerable<...>),
-        // and 'params' is not part of a signature, so it is an implicit implementation of
-        // IInterceptorSubject.AddProperties and takes the slot from the root's explicit one, because
-        // a derived subject re-lists the interface. Neither the generator nor the compiler says
-        // anything about that, which makes it quieter than the capture the guard was written for.
+        // Arrange: a generated AddProperties wrapper would take the root's interface slot because
+        // the derived subject re-lists IInterceptorSubject. 'params' does not distinguish signatures.
         var source = LeafDeclaring(
             "public void AddPropertiesWithoutInterceptor(params IEnumerable<SubjectPropertyMetadata> properties) { }");
 
@@ -173,11 +170,8 @@ public class SubjectMemberCollisionTests
     [Fact]
     public void WhenAWrapperWouldBeNamedInvokeMethodAtAnotherArity_ThenNI0040IsReportedAndTheRealBodyRuns()
     {
-        // Arrange: the accessor helper InvokeMethod ends in "params object?[]", so the generated call site
-        // for a parameterless method, InvokeMethod("Echo", lambda), passes two arguments. A
-        // two-parameter overload is applicable in normal form and therefore beats the helper, which
-        // is only applicable in expanded form, so the wrapper swallows the call. Nothing in the
-        // compiler says a word about it and Echo() returns the wrapper's answer instead of "echo".
+        // Arrange: this two-argument overload beats the params helper for a parameterless invocation,
+        // silently routing Echo to the wrapper instead of the executor.
         var source = LeafDeclaring("""
                 public string EchoWithoutInterceptor() => "echo";
 
@@ -203,11 +197,8 @@ public class SubjectMemberCollisionTests
     [Fact]
     public void WhenAWrapperSharesAnInterceptionMemberNameButNotItsArity_ThenNI0040IsReportedAndNoWrapperIsEmitted()
     {
-        // Arrange: the deliberate inversion of a rule that used to compare the arity and let these
-        // two through. Since InvokeMethod takes a parameter array, no arity is safe, and the guard no
-        // longer reasons about signatures at all. Both wrappers are the accepted false positive: the
-        // author is told to rename, which is loud and recoverable, unlike the capture above. Echo is
-        // here to show that the helper still binds once they are gone.
+        // Arrange: name-based rejection also covers these non-capturing wrappers. Echo verifies
+        // the helper still binds after they are excluded.
         var source = LeafDeclaring("""
                 public object InvokeMethodWithoutInterceptor(string name, object[] arguments) => name;
 
@@ -242,11 +233,8 @@ public class SubjectMemberCollisionTests
     [Fact]
     public void WhenAWrapperIsNamedLikeAnExplicitlyImplementedInterfaceProperty_ThenNI0040IsReported()
     {
-        // Arrange: the deliberate inversion of an exemption for Context, Data and SyncRoot. Those are
-        // explicit interface properties in a generated root, where a method of the same name really
-        // does collide with nothing, but the exemption was keyed on the name rather than on the base,
-        // so it applied just as much to a hand-written base that exposes them publicly, where the
-        // wrapper is a CS0108. The name is now enough on its own.
+        // Arrange: these names are explicit on generated roots but can be public on manual bases,
+        // where a same-named wrapper would produce CS0108.
         var source = LeafDeclaring("public string DataWithoutInterceptor(string tag) => tag;");
 
         // Act

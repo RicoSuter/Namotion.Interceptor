@@ -46,11 +46,8 @@ public class SubjectInheritanceShapeTests
     [Fact]
     public void WhenAPlainClassSitsBetweenTwoSubjectsAcrossAssemblies_ThenTheWalkSkipsItAndNamesTheAttributedAncestor()
     {
-        // Arrange: same A/B/C shape as above, but A and B live in a referenced assembly whose
-        // generated code is already in metadata. That is what separates SubjectAncestry's
-        // Interfaces from AllInterfaces: B inherits IInterceptorSubject from A, so AllInterfaces
-        // reports it on B and the walk would stop at the plain intermediate. The result still
-        // compiles, so only the emitted shape asserted below catches the regression.
+        // Arrange: A and plain intermediate B are in a referenced assembly. AllInterfaces would
+        // incorrectly identify B as the contract provider; compilation alone would not catch this.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;
@@ -260,12 +257,8 @@ public class SubjectInheritanceShapeTests
     [Fact]
     public void WhenBaseSubjectIsInAReferencedAssembly_ThenABaseDeclaredWriteReachesTheInterceptor()
     {
-        // Arrange: the same shape as above, executed. The emitted text cannot show this: the base
-        // property's setter was compiled into the library against the library's own interception members, and
-        // only running it shows that it reaches the executor the leaf's context published rather
-        // than a second one the leaf kept for itself. This is what a consumer deriving from a
-        // subject shipped in a package hits, and the contract check reads the base from metadata
-        // here rather than from source.
+        // Arrange: execute an inherited setter compiled into the library. It must reach the executor
+        // published by the leaf's context, rather than a separate executor owned by the leaf.
         const string librarySource = """
             using Namotion.Interceptor;
             using Namotion.Interceptor.Attributes;

@@ -7,14 +7,12 @@ using Namotion.Interceptor.Generator.Models;
 namespace Namotion.Interceptor.Generator;
 
 /// <summary>
-/// Everything the generator needs to know about the class a subject inherits from: which ancestor
-/// owns the shared interception members, and whether that ancestor exposes enough of it to be inherited from.
+/// Resolves inherited interception members and validates the base contract.
 /// </summary>
 internal static class SubjectBaseContract
 {
     /// <summary>
-    /// Resolves everything the emitter needs to know about the base class, and reports NI0007 and
-    /// NI0062 through NI0064. A null result means generation is suppressed and the caller must emit nothing.
+    /// Resolves the base contract and reports diagnostics. Returns null when the caller must suppress generation.
     /// </summary>
     public static SubjectBaseClass? Resolve(
         INamedTypeSymbol typeSymbol,
@@ -23,9 +21,7 @@ internal static class SubjectBaseContract
         List<Diagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
-        // Resolved from the symbol, not from the attributed declaration's base list: the base list
-        // may sit on a partial declaration other than the attributed one, and the symbol's BaseType
-        // chain is strictly base classes, so an interface in the base list is never mistaken for one.
+        // Symbols include base lists from other partial declarations and exclude interfaces from the base chain.
         var subjectAncestor = SubjectAncestry.FindNearestSubjectAncestor(typeSymbol);
 
         var baseClassTypeName = subjectAncestor?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -34,16 +30,13 @@ internal static class SubjectBaseContract
         var baseClassHasInpc = SubjectAncestry.InheritsNotifyPropertyChanged(typeSymbol, compilation, cancellationToken);
         var hasCallableRaisePropertyChanged = SubjectAncestry.HasCallableRaisePropertyChanged(typeSymbol, compilation, cancellationToken);
 
-        // Root mode emits the whole IInterceptorSubject block; derived mode emits only its own
-        // Properties line. Asked of the NEAREST subject ancestor, never of "some ancestor".
+        // Only the nearest subject ancestor can supply the shared interception members.
         var emitsInterceptionMembers = true;
         IReadOnlyList<string> hiddenMembers = [];
 
         if (subjectAncestor is not null)
         {
-            // An ancestor generated in this very compilation cannot be contract-checked: its
-            // interception members live in source the generator has not emitted yet, so the symbol shows none
-            // of it.
+            // Members generated in this compilation are not yet visible on the ancestor's symbol.
             var ancestorIsGeneratedHere =
                 baseClassHasInterceptorSubject &&
                 SubjectAncestry.WillBeGeneratedInThisCompilation(subjectAncestor, cancellationToken);
@@ -67,8 +60,7 @@ internal static class SubjectBaseContract
             }
             else if (HasUsableDefaultProperties(subjectAncestor, typeSymbol, compilation))
             {
-                // Only emitsInterceptionMembers flips. The ancestor stays the base-class fact source, so
-                // DefaultProperties still concatenates with it and the INPC decision is unchanged.
+                // Root mode must retain the ancestor's DefaultProperties and notification behavior.
                 diagnostics.Add(Diagnostic.Create(
                     Diagnostics.BaseInterceptionMembersCannotBeShared,
                     location,
@@ -88,10 +80,8 @@ internal static class SubjectBaseContract
             }
         }
 
-        // Asked of every root-mode subject with a base class, not only the NI0062 one: an MVVM base
-        // carrying PropertyChanged and RaisePropertyChanged collides just as well. The walk starts at
-        // the immediate base because hiding is decided against the nearest declaration of the name
-        // anywhere above; a generated ancestor has no symbol yet, hence the table lookup.
+        // Any base class can collide in root mode. Generated ancestor members need the table
+        // because they are not yet visible on symbols.
         if (emitsInterceptionMembers)
         {
             hiddenMembers = SubjectAncestry.HasGeneratedSubjectAncestor(typeSymbol, cancellationToken)
@@ -109,12 +99,10 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// The members a class must expose to host a generated subclass, tabulated in
-    /// docs/generator.md. Generated root mode satisfies it by construction.
+    /// Checks the shared-member contract defined in docs/generator.md.
     /// </summary>
     /// <remarks>
-    /// Only the <see cref="KnownTypes.IRaisePropertyChanged"/> clause is not required for the generated
-    /// code to compile; failing it costs that shape derived mode, not the build.
+    /// Missing <see cref="KnownTypes.IRaisePropertyChanged"/> prevents member sharing but can fall back to root mode.
     /// </remarks>
     private static bool SatisfiesContract(
         INamedTypeSymbol ancestor,
@@ -153,9 +141,7 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// A static DefaultProperties, field or property, that is accessible and of a type the emitted
-    /// .Concat(...) accepts. Compared against the constructed symbol rather than a display string,
-    /// because the wrong type produces CS1929 in a generated file. See docs/generator.md.
+    /// Checks for an accessible static DefaultProperties field or property compatible with the emitted Concat call.
     /// </summary>
     private static bool HasUsableDefaultProperties(INamedTypeSymbol ancestor, INamedTypeSymbol subject, Compilation compilation)
     {
@@ -199,9 +185,7 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// IReadOnlyDictionary&lt;string, SubjectPropertyMetadata&gt; as the compilation sees it, or null
-    /// when either half is unreferenced, in which case nothing the generator emits would compile
-    /// anyway.
+    /// Resolves IReadOnlyDictionary&lt;string, SubjectPropertyMetadata&gt;, or null when a required type is missing.
     /// </summary>
     private static INamedTypeSymbol? GetPropertyMetadataDictionaryType(Compilation compilation)
     {
@@ -248,14 +232,10 @@ internal static class SubjectBaseContract
     }
 
     /// <summary>
-    /// Whether the base helper returns what the generated call sites consume. Nullability annotations
-    /// are deliberately not compared: the emitted code accepts both forms, and a base compiled without
-    /// a nullable context would otherwise fail the contract for no reason.
+    /// Checks return-type compatibility with generated calls, ignoring nullability annotations.
     /// </summary>
     /// <remarks>
-    /// The dictionary case additionally requires a reference type, unlike
-    /// <see cref="HasUsableDefaultProperties"/>: this side is the left operand of '??', which rejects a
-    /// value type with CS0019, while the other side only feeds .Concat.
+    /// Dictionary returns must be reference types for the emitted null-coalescing expression.
     /// </remarks>
     private static bool HasExpectedReturnType(
         IMethodSymbol method,

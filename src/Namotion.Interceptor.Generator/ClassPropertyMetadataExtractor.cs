@@ -49,11 +49,7 @@ internal static class ClassPropertyMetadataExtractor
         var typeInfo = declarationModel.GetTypeInfo(property.Type, cancellationToken);
         var fullyQualifiedName = typeInfo.Type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) ?? "object";
 
-        // Resolved once and reused below for the explicit-implementation accessibility
-        // check: an indexer cannot reach this path (it parses as IndexerDeclarationSyntax,
-        // which CollectProperties never passes here), but a static property can, and the
-        // same rule that skips one on the interface-default path must skip it here too,
-        // or it emits a cast-through-the-class accessor that fails CS0176.
+        // Static properties also reach this path; instance access would fail with CS0176.
         var declaredPropertySymbol = declarationModel.GetDeclaredSymbol(property, cancellationToken);
         if (declaredPropertySymbol is not null && SymbolExtensions.IsNeverASubjectProperty(declaredPropertySymbol))
         {
@@ -120,9 +116,7 @@ internal static class ClassPropertyMetadataExtractor
     }
 
     /// <summary>
-    /// Narrows a class-declared explicit implementation's accessors to the ones generated code can
-    /// reach through the implemented member. Returns false, having reported why, when the declaration
-    /// does not become a subject property.
+    /// Retains reachable explicit accessors; reports a diagnostic and returns false if none can be emitted.
     /// </summary>
     private static bool NarrowExplicitAccessors(
         PropertyDeclarationSyntax property, IPropertySymbol? declaredPropertySymbol, Compilation compilation,
@@ -137,10 +131,7 @@ internal static class ClassPropertyMetadataExtractor
 
         var (isGetterAccessible, isSetterAccessible) = SymbolExtensions.GetAccessorAccessibility(
             compilation, implementedMember, typeSymbol, implementedMember.ContainingType);
-        // Reported, unlike the same outcome on the interface-default path: writing
-        // an explicit implementation on the subject itself is an opt-in to it
-        // becoming a subject property, in the author's own file, and silently
-        // dropping it would leave them with no way to find out.
+        // A class-declared implementation opts into a subject property, so report why it is skipped.
         if (!isGetterAccessible && !isSetterAccessible)
         {
             diagnostics.Add(Diagnostic.Create(
@@ -151,8 +142,7 @@ internal static class ClassPropertyMetadataExtractor
             return false;
         }
 
-        // The emitted metadata reflects the interface member's PropertyInfo, not
-        // this declaration's, so anything declared here never reaches the runtime.
+        // Runtime metadata uses the interface member's PropertyInfo, omitting attributes declared here.
         if (property.AttributeLists.Count > 0)
         {
             diagnostics.Add(Diagnostic.Create(
@@ -163,9 +153,7 @@ internal static class ClassPropertyMetadataExtractor
         accessors.HasSetter &= isSetterAccessible;
         accessors.HasInit &= isSetterAccessible;
 
-        // Narrowing can leave both emittable accessors off while HasInit survives,
-        // which would add a key whose getter and setter lambdas are both null. Same
-        // outcome as the inaccessible case above, so it is reported the same way.
+        // An init-only survivor cannot supply either runtime accessor lambda.
         if (!accessors.HasGetter && !accessors.HasSetter)
         {
             diagnostics.Add(Diagnostic.Create(
@@ -180,8 +168,7 @@ internal static class ClassPropertyMetadataExtractor
     }
 
     /// <summary>
-    /// Whether an override that leaves the accessor out still exposes the inherited one to generated
-    /// code, which then emits a lambda for it.
+    /// Returns whether an omitted override accessor is inherited and accessible to generated code.
     /// </summary>
     private static bool HasAccessibleInheritedAccessor(
         IPropertySymbol? declaredPropertySymbol, bool isOverride, bool declaresAccessor, bool isGetter,
@@ -207,9 +194,7 @@ internal static class ClassPropertyMetadataExtractor
     }
 
     /// <summary>
-    /// Two declarations can share a name when a class declares a property and also explicitly
-    /// implements the same interface member. Emitting both produces duplicate dictionary keys,
-    /// so the non-explicit declaration wins, matching what the runtime resolves.
+    /// Selects one property per name, preferring non-explicit declarations to match runtime lookup.
     /// </summary>
     public static IReadOnlyList<PropertyMetadata> DeduplicateByName(
         IReadOnlyList<PropertyMetadata> properties,
@@ -257,17 +242,11 @@ internal static class ClassPropertyMetadataExtractor
         List<PropertyMetadata> result, Dictionary<string, List<PropertyMetadata>> explicitImplementationsByName,
         string subjectDisplayName, Location location, List<Diagnostic> diagnostics)
     {
-        // Reported only once every declaration has been seen, because the winner the message names
-        // is not knowable mid-loop: a class-declared property takes the name whether it is written
-        // before or after the explicit implementations. Iterating the deduplicated result rather
-        // than the dictionary keeps the diagnostic order deterministic.
+        // Winners can change until all declarations are seen. Result order keeps diagnostics deterministic.
         foreach (var winner in result)
         {
-            // Two explicit implementations of one simple name (typically one generic interface at
-            // two instantiations) is the class-declared form of the NI0061 collision: whatever
-            // claims the name, at least one interface member is dropped. A class property colliding
-            // with a single explicit implementation is not: only one of the two comes from an
-            // interface, and the class property is the documented winner.
+            // Multiple explicit implementations lose at least one interface member (NI0061).
+            // A class property colliding with one explicit implementation is an expected winner.
             if (!explicitImplementationsByName.TryGetValue(winner.Name, out var explicitImplementations) ||
                 explicitImplementations.Count < 2)
             {
@@ -293,8 +272,7 @@ internal static class ClassPropertyMetadataExtractor
     }
 
     /// <summary>
-    /// Names an explicitly implemented member the way a compiler error message would, so the
-    /// "global::" the emitter needs in generated code does not leak into a diagnostic.
+    /// Formats an explicit member for diagnostics without the global namespace qualifier.
     /// </summary>
     private static string DescribeExplicitImplementation(PropertyMetadata property)
     {

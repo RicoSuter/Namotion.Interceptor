@@ -11,8 +11,7 @@ internal static class SubjectTypeShape
 {
     public static Diagnostic? Validate(INamedTypeSymbol typeSymbol, TypeDeclarationSyntax typeDeclaration, Location location)
     {
-        // Guards run fundamentally-unsupported shapes before fixable ones, so a subject with more
-        // than one problem points the user at the one they cannot work around by adding a modifier.
+        // Report unsupported shapes before problems fixable by adding modifiers.
         if (typeDeclaration is not ClassDeclarationSyntax)
         {
             return Diagnostic.Create(
@@ -25,9 +24,7 @@ internal static class SubjectTypeShape
             return Diagnostic.Create(Diagnostics.FileTypeNotSupported, location, typeSymbol.Name);
         }
 
-        // Arity, not IsGenericType: Roslyn reports IsGenericType = true for a non-generic type
-        // nested inside a generic one, which would misname the subject here as generic when it is
-        // really the containing type (checked below) that carries the type parameters.
+        // IsGenericType also includes non-generic types nested in generic types; Arity identifies the subject itself.
         if (typeSymbol.Arity > 0)
         {
             return Diagnostic.Create(Diagnostics.GenericTypeNotSupported, location, typeSymbol.Name);
@@ -63,7 +60,6 @@ internal static class SubjectTypeShape
 
     public static string? GetNamespace(TypeDeclarationSyntax typeDeclaration)
     {
-        // Walk up past containing types to find namespace
         SyntaxNode? current = typeDeclaration.Parent;
         while (current is TypeDeclarationSyntax)
         {
@@ -90,8 +86,7 @@ internal static class SubjectTypeShape
     }
 
     /// <summary>
-    /// "record" alone is correct for a record class, because record defaults to a class, but a
-    /// record struct needs both tokens or the partial declarations conflict.
+    /// Returns the declaration keyword, preserving the class or struct qualifier for records.
     /// </summary>
     private static string GetTypeKeyword(TypeDeclarationSyntax typeDeclaration)
     {
@@ -107,25 +102,19 @@ internal static class SubjectTypeShape
     }
 
     /// <summary>
-    /// Detects the constructor state for the class.
-    /// Returns a tuple of:
-    /// - NeedsGeneratedParameterlessConstructor: true if no constructor exists and we need to generate one
-    /// - HasOrWillHaveParameterlessConstructor: true if we have or will generate a parameterless constructor
-    /// - ParameterlessConstructorSetsRequiredMembers: true if the emitted constructors have to carry [SetsRequiredMembers]
+    /// Determines parameterless constructor generation, availability, and required-member attribute requirements.
     /// </summary>
     public static (bool NeedsGeneratedParameterlessConstructor, bool HasOrWillHaveParameterlessConstructor, bool ParameterlessConstructorSetsRequiredMembers) DetectConstructorState(
         INamedTypeSymbol typeSymbol,
         TypeDeclarationSyntax[] allTypeDeclarations)
     {
-        // A static constructor is not an instance constructor, so nothing can chain to it and it
-        // never stands in for the parameterless one the emitted constructors need.
+        // Static constructors cannot satisfy emitted constructor chaining.
         var firstConstructor = allTypeDeclarations
             .SelectMany(c => c.Members)
             .OfType<ConstructorDeclarationSyntax>()
             .FirstOrDefault(constructor => !constructor.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.StaticKeyword)));
 
-        // No constructor at all: generate a parameterless one. A first constructor with parameters
-        // means there is no parameterless one to chain to, so nothing is generated.
+        // Chaining eligibility currently depends on the first declared instance constructor.
         var needsGeneratedParameterlessConstructor = firstConstructor is null;
         var hasOrWillHaveParameterlessConstructor = firstConstructor is null or { ParameterList.Parameters.Count: 0 };
 
@@ -136,22 +125,8 @@ internal static class SubjectTypeShape
     }
 
     /// <summary>
-    /// Whether the parameterless constructor the emitted constructors chain to carries
-    /// [SetsRequiredMembers]. CS9039 rejects a constructor that chains to one with the attribute unless
-    /// it repeats it, for the implicit base chain as much as for ": this()", so the emitted constructors
-    /// mirror it. Read off symbols because the constructor may sit in another partial file than the one
-    /// this extraction's semantic model belongs to.
+    /// Determines whether emitted constructors must propagate [SetsRequiredMembers] from their constructor chain.
     /// </summary>
-    /// <remarks>
-    /// The walk passes through implicitly declared constructors: on a subject the generator replaces
-    /// each of those with an explicit one that mirrors its own base, and that emitted constructor is
-    /// not visible in this compilation's symbols. Passing through a non-subject one is safe too,
-    /// because an implicit constructor above an attributed one is already CS9039 in its own right.
-    /// Constructors read from metadata are never implicit, so a referenced assembly ends the walk on
-    /// its real attribute state. The walk stops at a type that declares required members of its own,
-    /// because an emitted constructor claiming to set them would be lying; that subject keeps the
-    /// CS9039 and has to declare the initializing constructor itself.
-    /// </remarks>
     private static bool ChainedConstructorSetsRequiredMembers(INamedTypeSymbol typeSymbol)
     {
         for (var type = typeSymbol; type is not null; type = type.BaseType)
@@ -162,12 +137,15 @@ internal static class SubjectTypeShape
                 return false;
             }
 
+            // Implicit subject constructors will inherit the base constructor's attribute.
+            // Other constructors already expose their final attribute state.
             if (!constructor.IsImplicitlyDeclared)
             {
                 return constructor.GetAttributes().Any(attribute =>
                     SymbolExtensions.IsTypeOrInheritsFrom(attribute.AttributeClass, KnownTypes.SetsRequiredMembersAttribute));
             }
 
+            // Generated constructors cannot claim to initialize required members declared by this type.
             if (type.GetMembers().Any(member => member is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true }))
             {
                 return false;
