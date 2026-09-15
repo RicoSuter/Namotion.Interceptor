@@ -304,83 +304,18 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Walks the chain and records where it ends on every state it passed, which is what makes
-    /// building a graph of depth N cost one walk instead of one per level. Iterative because the
-    /// chain is as deep as the subject graph, so recursion overflows the stack and no fixed hop
-    /// limit is correct.
+    /// Resolves the delegation chain using reusable traversal buffers and clears or releases
+    /// them before returning or throwing.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S134", Justification = "Temporary: split the concurrent delegation walk in a follow-up while preserving snapshot validation and retry semantics. See rollout issue #545.")]
     private InterceptorSubjectContext ResolveDelegationChain(ref ContextState state)
     {
         var visited = _delegationCycleVisited ??= [];
         var path = _delegationCyclePath ??= [];
 
-        var backoff = new SpinWait();
-
         try
         {
-            while (true)
-            {
-                visited.Clear();
-                path.Clear();
-
-                // Re-pinned every pass, never reused from the caller: a stale first hop would make
-                // every pass reach the same repeat and fail the same confirmation, spinning here
-                // for good after one mutation.
-                var current = this;
-                var currentState = Volatile.Read(ref current._state);
-
-                // Only the entry's own record may be trusted. Everything below is read for topology
-                // alone, the one thing an installed state always describes correctly. A record is a
-                // claim about contexts further down, and because R4 keeps a using set a superset an
-                // invalidation can arrive out of chain order; trusting such a record would cache a
-                // resolution of a context the graph no longer reaches, on a state nothing
-                // invalidates again.
-                if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationMarker))
-                {
-                    throw CreateDelegationCycleException();
-                }
-
-                while (true)
-                {
-                    var next = currentState.DelegationTarget;
-                    if (next is null)
-                    {
-                        CacheResolvedTerminal(path, current, 0);
-                        state = currentState;
-                        return current;
-                    }
-
-                    if (!visited.Add(current))
-                    {
-                        break;
-                    }
-
-                    path.Add(new DelegationHop(current, currentState));
-                    current = next;
-                    currentState = Volatile.Read(ref current._state);
-                }
-
-                if (DelegationLoopStillClosed(path, current, out var loopStart))
-                {
-                    // Every hop that entered visited also entered path, and the break above fires
-                    // only on a context already in visited, so the repeat is always on the path.
-                    Debug.Assert(loopStart < path.Count, "The repeated context was not found on the walked path.");
-
-                    // Only from the loop, never from the acyclic run leading into it: the
-                    // confirmation re-reads the loop's states and nothing else, so a context ahead
-                    // of it reaches the loop by an edge read earlier and possibly rewired since.
-                    CacheResolvedTerminal(path, CyclicDelegationMarker, loopStart);
-                    throw CreateDelegationCycleException();
-                }
-
-                // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
-                // cycle has no state to lose and confirms on the next pass. Backing off because
-                // reaching here means a mutator is rewiring right now and nothing else bounds this
-                // loop; only retries pay it.
-                backoff.SpinOnce();
-            }
+            return WalkDelegationChain(ref state, visited, path);
         }
         finally
         {
@@ -396,6 +331,80 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 visited.Clear();
                 path.Clear();
             }
+        }
+    }
+
+    /// <summary>
+    /// Resolves and caches the delegation chain using caller-owned scratch buffers.
+    /// The caller must clear or release retained buffers on completion, including exceptions.
+    /// </summary>
+    // Encourages the JIT to optimize the walk within its buffer-owning wrapper; inlining remains runtime-dependent.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private InterceptorSubjectContext WalkDelegationChain(ref ContextState state, HashSet<InterceptorSubjectContext> visited, List<DelegationHop> path)
+    {
+        var backoff = new SpinWait();
+
+        while (true)
+        {
+            visited.Clear();
+            path.Clear();
+
+            // Re-pinned every pass, never reused from the caller: a stale first hop would make
+            // every pass reach the same repeat and fail the same confirmation, spinning here
+            // for good after one mutation.
+            var current = this;
+            var currentState = Volatile.Read(ref current._state);
+
+            // Only the entry's own record may be trusted. Everything below is read for topology
+            // alone, the one thing an installed state always describes correctly. A record is a
+            // claim about contexts further down, and because R4 keeps a using set a superset an
+            // invalidation can arrive out of chain order; trusting such a record would cache a
+            // resolution of a context the graph no longer reaches, on a state nothing
+            // invalidates again.
+            if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationMarker))
+            {
+                throw CreateDelegationCycleException();
+            }
+
+            // The chain is as deep as the subject graph: iteration avoids stack overflow without a fixed hop limit.
+            while (true)
+            {
+                var next = currentState.DelegationTarget;
+                if (next is null)
+                {
+                    CacheResolvedTerminal(path, current, 0);
+                    state = currentState;
+                    return current;
+                }
+
+                if (!visited.Add(current))
+                {
+                    break;
+                }
+
+                path.Add(new DelegationHop(current, currentState));
+                current = next;
+                currentState = Volatile.Read(ref current._state);
+            }
+
+            if (DelegationLoopStillClosed(path, current, out var loopStart))
+            {
+                // Every hop that entered visited also entered path, and the break above fires
+                // only on a context already in visited, so the repeat is always on the path.
+                Debug.Assert(loopStart < path.Count, "The repeated context was not found on the walked path.");
+
+                // Only from the loop, never from the acyclic run leading into it: the
+                // confirmation re-reads the loop's states and nothing else, so a context ahead
+                // of it reaches the loop by an edge read earlier and possibly rewired since.
+                CacheResolvedTerminal(path, CyclicDelegationMarker, loopStart);
+                throw CreateDelegationCycleException();
+            }
+
+            // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
+            // cycle has no state to lose and confirms on the next pass. Backing off because
+            // reaching here means a mutator is rewiring right now and nothing else bounds this
+            // loop; only retries pay it.
+            backoff.SpinOnce();
         }
     }
 

@@ -357,9 +357,68 @@ public class ServiceOrderResolverTests
         Assert.Same(last2, result[2]);
     }
 
+    [Fact]
+    public void WhenFirstRunsAfterFirstAndLastRunsBeforeLast_ThenOrdersInstancesWithinGroups()
+    {
+        // Arrange
+        var first = new FirstService();
+        var afterFirst = new FirstServiceWithRunsAfterFirst();
+        var middle = new ServiceA();
+        var beforeLast = new LastServiceWithRunsBeforeLast();
+        var last = new LastService();
+        var services = new object[] { last, afterFirst, middle, beforeLast, first };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(5, result.Length);
+        Assert.Same(first, result[0]);
+        Assert.Same(afterFirst, result[1]);
+        Assert.Same(middle, result[2]);
+        Assert.Same(beforeLast, result[3]);
+        Assert.Same(last, result[4]);
+    }
+
     #endregion
 
     #region Error cases
+
+    [Fact]
+    public void WhenFirstServiceRunsAfterLastService_ThenThrowsCrossGroupDependencyException()
+    {
+        // Arrange
+        var services = new object[] { new FirstServiceWithRunsAfterLast(), new LastService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("[RunsFirst] service FirstServiceWithRunsAfterLast cannot have [RunsAfter(LastService)] where LastService is not also [RunsFirst]", exception.Message);
+    }
+
+    [Fact]
+    public void WhenLastServiceRunsBeforeFirstService_ThenThrowsCrossGroupDependencyException()
+    {
+        // Arrange
+        var services = new object[] { new LastServiceWithRunsBeforeFirst(), new FirstService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("[RunsLast] service LastServiceWithRunsBeforeFirst cannot have [RunsBefore(FirstService)] where FirstService is not also [RunsLast]", exception.Message);
+    }
+
+    [Fact]
+    public void WhenFirstGroupHasValidRunsAfterAndLastRunsBeforeMiddle_ThenRejectsLastDependency()
+    {
+        // Arrange
+        var services = new object[] { new FirstService(), new FirstServiceWithRunsAfterFirst(), new ServiceA(), new LastServiceWithRunsBeforeMiddle() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("[RunsLast] service LastServiceWithRunsBeforeMiddle cannot have [RunsBefore(ServiceA)] where ServiceA is not also [RunsLast]", exception.Message);
+    }
 
     [Fact]
     public void CircularDependency_ThrowsWithTypeNames()
@@ -611,6 +670,14 @@ public class ServiceOrderResolverTests
     [RunsAfter(typeof(LastService))]
     private class LastServiceAfterLast1 { }
 
+    [RunsFirst]
+    [RunsAfter(typeof(FirstService))]
+    private class FirstServiceWithRunsAfterFirst { }
+
+    [RunsLast]
+    [RunsBefore(typeof(LastService))]
+    private class LastServiceWithRunsBeforeLast { }
+
     // Error case services
     [RunsBefore(typeof(Circular2))]
     private class Circular1 { }
@@ -629,6 +696,14 @@ public class ServiceOrderResolverTests
     [RunsLast]
     [RunsBefore(typeof(ServiceA))]
     private class LastServiceWithRunsBeforeMiddle { }
+
+    [RunsFirst]
+    [RunsAfter(typeof(LastService))]
+    private class FirstServiceWithRunsAfterLast { }
+
+    [RunsLast]
+    [RunsBefore(typeof(FirstService))]
+    private class LastServiceWithRunsBeforeFirst { }
 
     // Multi-instance services (duplicate-type aggregation, issue #380)
     private class DuplicatedService { }
