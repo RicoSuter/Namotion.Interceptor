@@ -20,7 +20,7 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS0067
 #pragma warning disable CS9193
 
-    public partial class TemperatureSensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class TemperatureSensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged, global::Namotion.Interceptor.ISubjectPropertyReplay
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -105,6 +105,54 @@ using System.Text.Json.Serialization;
         partial void OnCelsiusChanging(ref double newValue, ref bool cancel);
 
         partial void OnCelsiusChanged(double newValue);
+
+        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName)
+        {
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                return false;
+            }
+            return propertyName switch
+            {
+                nameof(Celsius) => true,
+                _ => false
+            };
+        }
+
+        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)
+        {
+            outcome = default;
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+            switch (propertyName)
+            {
+                case nameof(Celsius):
+                {
+                    var newValue = (double)value!;
+                    var cancel = false;
+                    OnCelsiusChanging(ref newValue, ref cancel);
+                    if (cancel) return;
+                    ((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof(Celsius), newValue, _Celsius, static (o, v) => ((TemperatureSensor)o)._Celsius = v, ref outcome);
+                    if (outcome.Mutated)
+                    {
+                        OnCelsiusChanged(_Celsius);
+                        RaisePropertyChanged(nameof(Celsius));
+                    }
+                    return;
+                }
+                default: throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;

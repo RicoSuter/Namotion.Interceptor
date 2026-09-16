@@ -90,9 +90,15 @@ public struct PropertyWriteContext<TProperty>
 
     /// <summary>
     /// Gets or sets whether the write was performed.
-    /// Set to true by the write action when the value is actually written.
+    /// Set to true by the write action when the value is actually written. Interceptors must preserve
+    /// the actual write status, including when an exception occurs after assignment.
     /// </summary>
     public bool IsWritten { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the equality interceptor accepted an already-current value.
+    /// </summary>
+    public bool IsEqualityAccepted { get; set; }
 
     /// <summary>
     /// The attempted origin paired with the value the source sent (valid when the origin is

@@ -79,6 +79,11 @@ namespace Namotion.Interceptor
     {
         void RaisePropertyChanged(string propertyName);
     }
+    public interface ISubjectPropertyReplay
+    {
+        bool CanReplayProperty(string propertyName);
+        void ReplayProperty(string propertyName, object? value, ref Namotion.Interceptor.PropertyReplayOutcome outcome);
+    }
     public class InterceptorSubjectContext : Namotion.Interceptor.IInterceptorSubjectContext
     {
         public virtual bool AddFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
@@ -143,6 +148,11 @@ namespace Namotion.Interceptor
         public static Namotion.Interceptor.PropertyReference GetPropertyReference(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
         public static void SetPropertyValueWithInterception(this Namotion.Interceptor.PropertyReference property, object? newValue, object? currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?> writeValue) { }
     }
+    public struct PropertyReplayOutcome
+    {
+        public bool Accepted { get; set; }
+        public bool Mutated { get; set; }
+    }
     public readonly struct SubjectChangeContext
     {
         public System.DateTimeOffset? ReceivedTimestamp { get; }
@@ -204,6 +214,7 @@ namespace Namotion.Interceptor.Interceptors
         public object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
         public override bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
+        public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue, ref Namotion.Interceptor.PropertyReplayOutcome outcome) { }
         public static Namotion.Interceptor.Interceptors.IInterceptorExecutor GetOrCreate(ref Namotion.Interceptor.Interceptors.IInterceptorExecutor? context, Namotion.Interceptor.IInterceptorSubject subject) { }
     }
     public delegate object? InvokeMethodInterceptionDelegate(ref Namotion.Interceptor.Interceptors.MethodInvocationContext context);
@@ -220,6 +231,7 @@ namespace Namotion.Interceptor.Interceptors
     public struct PropertyWriteContext<TProperty>
     {
         public TProperty CurrentValue { get; }
+        public bool IsEqualityAccepted { get; set; }
         public bool IsWritten { get; set; }
         public TProperty NewValue { get; set; }
         public Namotion.Interceptor.ChangeOrigin Origin { get; }

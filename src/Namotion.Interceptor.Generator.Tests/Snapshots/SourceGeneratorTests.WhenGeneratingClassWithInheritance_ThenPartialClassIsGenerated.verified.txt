@@ -20,7 +20,7 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS0067
 #pragma warning disable CS9193
 
-    public partial class Person : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class Person : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged, global::Namotion.Interceptor.ISubjectPropertyReplay
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -130,6 +130,69 @@ using System.Text.Json.Serialization;
         partial void OnLastNameChanging(ref string newValue, ref bool cancel);
 
         partial void OnLastNameChanged(string newValue);
+
+        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName)
+        {
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                return false;
+            }
+            return propertyName switch
+            {
+                nameof(FirstName) => true,
+                nameof(LastName) => true,
+                _ => false
+            };
+        }
+
+        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)
+        {
+            outcome = default;
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+            switch (propertyName)
+            {
+                case nameof(FirstName):
+                {
+                    var newValue = (string)value!;
+                    var cancel = false;
+                    OnFirstNameChanging(ref newValue, ref cancel);
+                    if (cancel) return;
+                    ((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof(FirstName), newValue, _FirstName, static (o, v) => ((Person)o)._FirstName = v, ref outcome);
+                    if (outcome.Mutated)
+                    {
+                        OnFirstNameChanged(_FirstName);
+                        RaisePropertyChanged(nameof(FirstName));
+                    }
+                    return;
+                }
+                case nameof(LastName):
+                {
+                    var newValue = (string)value!;
+                    var cancel = false;
+                    OnLastNameChanging(ref newValue, ref cancel);
+                    if (cancel) return;
+                    ((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof(LastName), newValue, _LastName, static (o, v) => ((Person)o)._LastName = v, ref outcome);
+                    if (outcome.Mutated)
+                    {
+                        OnLastNameChanged(_LastName);
+                        RaisePropertyChanged(nameof(LastName));
+                    }
+                    return;
+                }
+                default: throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;

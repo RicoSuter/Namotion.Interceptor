@@ -1,6 +1,6 @@
 # Transactions
 
-The `Namotion.Interceptor.Tracking` package provides transaction support for batching property changes and committing them atomically. This is particularly useful when integrating with external data sources (OPC UA, MQTT, databases) where you want to write multiple changes as a single operation, or when you need to ensure consistency across multiple property updates.
+The `Namotion.Interceptor.Tracking` package provides transaction support for batching property changes and committing them with a configurable failure policy. This is particularly useful when integrating with external data sources (OPC UA, MQTT, databases) where you want to write multiple changes as a single operation, or when you need to ensure consistency across multiple property updates.
 
 ## When to Use Transactions
 
@@ -28,6 +28,12 @@ var context = InterceptorSubjectContext
     .WithTransactions() // Required for in-memory transaction support (opt-in)
     .WithSourceTransactions(); // Required for source write transaction support (opt-in)
 ```
+
+## Replay Support
+
+Commit requires each pending property to support `ISubjectPropertyReplay`, so it can distinguish a rejected write from an assignment followed by an exception. The current generator supplies this contract for nonvirtual partial setters on root subjects, including those inherited without being hidden or replaced. New properties declared on derived subjects, virtual/override properties, manual or dynamic setters, and subjects built with older generators require an explicit compatible implementation.
+
+`CommitAsync` validates the entire batch before source writes or local replay. An unsupported property throws `NotSupportedException` naming the subject and property, leaving the pending changes available until disposal or retry. Replay validates support again because metadata can change while a source writer awaits. A custom implementation must report acceptance and mutation truthfully, including after an exception; see the interface contract.
 
 ## Basic Usage
 
@@ -131,18 +137,20 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 
 | Value | Description |
 |-------|-------------|
-| `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. |
-| `Rollback` | All-or-nothing across all properties - any failure reverts everything. |
+| `BestEffort` | Keep successful changes; attempt to restore failed local writes and their source writes. |
+| `Rollback` | On any failure, attempt to restore all local mutations and successful source writes. |
 
 **Behavior comparison:**
 
 | Scenario | BestEffort | Rollback |
 |----------|------------|----------|
 | All succeed | All changes applied | All changes applied |
-| Source write fails | Successful applied, failed not applied | All reverted |
-| Local apply fails | Successful applied, failed sources rolled back | All reverted |
-| Consistency | Per-property (each stays in sync) | All-or-nothing |
-| Use when | Partial progress acceptable | Full atomicity required |
+| Source write fails | Successful applied, failed not applied | Source rollback attempted; local replay skipped |
+| Local apply fails | Successful retained; failed local mutations and sources restored where possible | All local mutations and source writes restored where possible |
+| Consistency | Per-property when compensation succeeds | Batch restoration when compensation succeeds |
+| Use when | Partial progress acceptable | Whole-batch restoration preferred |
+
+A changing-hook veto or interceptor suppression during replay counts as failure. If assignment succeeds before a hook or observer throws, compensation includes that mutation. Compensation uses the property setter and can itself be rejected or throw; `SubjectTransactionException` reports those failures. Callback side effects and notifications already delivered cannot be undone.
 
 ### Locking
 
@@ -620,7 +628,7 @@ When writing to multiple sources, true atomicity is not guaranteed:
 2. On failure, successful sources are rolled back (best effort)
 3. During rollback, sources may temporarily have inconsistent values
 
-For strict atomicity, use a single source per transaction or implement application-level compensation.
+Strict atomicity requires a source-provided atomic operation; local and external side effects may still require application-level recovery when compensation fails.
 
 ### Rollback is Best-Effort
 

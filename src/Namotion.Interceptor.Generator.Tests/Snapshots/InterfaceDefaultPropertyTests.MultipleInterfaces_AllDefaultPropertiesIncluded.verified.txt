@@ -20,7 +20,7 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS0067
 #pragma warning disable CS9193
 
-    public partial class WeatherStation : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class WeatherStation : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged, global::Namotion.Interceptor.ISubjectPropertyReplay
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -142,6 +142,69 @@ using System.Text.Json.Serialization;
         partial void OnHumidityChanging(ref double newValue, ref bool cancel);
 
         partial void OnHumidityChanged(double newValue);
+
+        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName)
+        {
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                return false;
+            }
+            return propertyName switch
+            {
+                nameof(Temperature) => true,
+                nameof(Humidity) => true,
+                _ => false
+            };
+        }
+
+        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)
+        {
+            outcome = default;
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+            switch (propertyName)
+            {
+                case nameof(Temperature):
+                {
+                    var newValue = (double)value!;
+                    var cancel = false;
+                    OnTemperatureChanging(ref newValue, ref cancel);
+                    if (cancel) return;
+                    ((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof(Temperature), newValue, _Temperature, static (o, v) => ((WeatherStation)o)._Temperature = v, ref outcome);
+                    if (outcome.Mutated)
+                    {
+                        OnTemperatureChanged(_Temperature);
+                        RaisePropertyChanged(nameof(Temperature));
+                    }
+                    return;
+                }
+                case nameof(Humidity):
+                {
+                    var newValue = (double)value!;
+                    var cancel = false;
+                    OnHumidityChanging(ref newValue, ref cancel);
+                    if (cancel) return;
+                    ((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof(Humidity), newValue, _Humidity, static (o, v) => ((WeatherStation)o)._Humidity = v, ref outcome);
+                    if (outcome.Mutated)
+                    {
+                        OnHumidityChanged(_Humidity);
+                        RaisePropertyChanged(nameof(Humidity));
+                    }
+                    return;
+                }
+                default: throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;

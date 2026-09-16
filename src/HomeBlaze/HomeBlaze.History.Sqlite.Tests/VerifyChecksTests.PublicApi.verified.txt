@@ -38,7 +38,7 @@ namespace HomeBlaze.History.Sqlite
     [Namotion.Interceptor.Attributes.InterceptorSubject]
     [System.ComponentModel.Category("History")]
     [System.ComponentModel.Description("Persists [State] history to partitioned SQLite files (priority 50).")]
-    public class SqliteHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
+    public class SqliteHistoryStoreSubject : Microsoft.Extensions.Hosting.BackgroundService, HomeBlaze.Abstractions.IConfigurable, HomeBlaze.Abstractions.ITitleProvider, HomeBlaze.History.Abstractions.IHistoryStore, Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.IRaisePropertyChanged, Namotion.Interceptor.ISubjectPropertyReplay, Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler, System.ComponentModel.INotifyPropertyChanged
     {
         public SqliteHistoryStoreSubject(Microsoft.Extensions.Logging.ILogger<HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject> logger) { }
         [HomeBlaze.Abstractions.Attributes.Configuration]

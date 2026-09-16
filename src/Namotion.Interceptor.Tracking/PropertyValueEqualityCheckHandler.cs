@@ -17,5 +17,9 @@ public class PropertyValueEqualityCheckHandler : IWriteInterceptor
         {
             next(ref context);
         }
+        else
+        {
+            context.IsEqualityAccepted = true;
+        }
     }
 }

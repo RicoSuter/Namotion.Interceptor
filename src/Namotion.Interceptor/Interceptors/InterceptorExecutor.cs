@@ -80,6 +80,23 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     }
 
     /// <summary>
+    /// Sets a property and preserves its replay outcome even if the interceptor chain throws.
+    /// </summary>
+    public void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, ref PropertyReplayOutcome outcome)
+    {
+        var context = new PropertyWriteContext<TProperty>(this, new PropertyReference(_subject, propertyName), currentValue, newValue);
+        try
+        {
+            ExecuteInterceptedWrite(ref context, writeValue);
+        }
+        finally
+        {
+            outcome.Mutated = context.IsWritten;
+            outcome.Accepted = context.IsWritten || context.IsEqualityAccepted;
+        }
+    }
+
+    /// <summary>
     /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
     /// context's timestamp cache. Lets the cascade share the trigger's captured time without
     /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.

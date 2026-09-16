@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Performance;
 namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
-/// Represents a transaction that captures property changes and commits them atomically.
+/// Represents a transaction that buffers property changes and applies them according to its failure policy.
 /// Changes are buffered until <see cref="CommitAsync"/> is called.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Transaction buffering, commit, failure handling and disposal coordinate one shared state; splitting these responsibilities would fragment its synchronization and lifecycle invariants.")]
@@ -310,6 +310,9 @@ public sealed class SubjectTransaction : IDisposable
     /// Thrown when commit is called from a different async flow than the one the transaction is active in,
     /// when the transaction was already committed, or when another commit is already in progress.
     /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// Thrown before source writes or local replay when a pending property cannot report exact replay outcomes.
+    /// </exception>
     /// <exception cref="SubjectTransactionException">
     /// Thrown when one or more changes failed to commit. A registered <see cref="ITransactionWriter"/>
     /// that throws instead of reporting failures makes the transaction terminal (it must be disposed,
@@ -390,15 +393,15 @@ public sealed class SubjectTransaction : IDisposable
             using (EnterCommitModelAccess())
             {
                 ThrowIfConflictsDetected(changes.Span);
+                ValidateReplaySupport(changes.Span);
 
-                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
+                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, _failureHandling);
 
                 if (applyFailed.Count > 0)
                 {
                     if (_failureHandling == TransactionFailureHandling.Rollback)
                     {
-                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
-                        failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
+                        failure = CreateFailureException([], applyFailed, applyErrors);
                     }
                     else
                     {
@@ -436,6 +439,7 @@ public sealed class SubjectTransaction : IDisposable
             using (EnterCommitModelAccess())
             {
                 ThrowIfConflictsDetected(changes.Span);
+                ValidateReplaySupport(changes.Span);
             }
 
             using var timeoutCts = CreateCommitTimeoutCts();
@@ -512,15 +516,9 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> applied;
         IReadOnlyList<SubjectPropertyChange> applyFailed;
         IReadOnlyList<Exception> applyErrors;
-        IReadOnlyList<SubjectPropertyChange> revertFailed = [];
-        IReadOnlyList<Exception> revertErrors = [];
         using (EnterCommitModelAccess())
         {
-            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
-            if (applyFailed.Count > 0 && _failureHandling == TransactionFailureHandling.Rollback)
-            {
-                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
-            }
+            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude, _failureHandling);
         }
 
         if (applyFailed.Count > 0)
@@ -534,11 +532,11 @@ public sealed class SubjectTransaction : IDisposable
                 // the documented Rollback contract). Exclude source-bound changes (in 'written'; failedSource
                 // is empty on this branch) and anything already reported as an apply/revert failure.
                 var rolledBackLocals = SubjectPropertyChangeOperations.ExcludeByProperty(
-                    changes.Span, written, SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed));
+                    changes.Span, written, applyFailed);
                 return CreateFailureException(
                     [],
-                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, revertFailed, sourceRevert.Failed),
-                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
+                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, sourceRevert.Errors));
             }
 
             // BestEffort: keep source == model for failed-apply properties by reverting only the
@@ -570,6 +568,20 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         return null;
+    }
+
+    private static void ValidateReplaySupport(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        foreach (var change in changes)
+        {
+            var property = change.Property;
+            if (property.Subject is not ISubjectPropertyReplay replay || !replay.CanReplayProperty(property.Name))
+            {
+                throw new NotSupportedException(
+                    $"Property '{property.Subject.GetType().FullName}.{property.Name}' does not support exact transaction replay outcomes. " +
+                    "Regenerate the subject with a compatible generator or implement ISubjectPropertyReplay for this property.");
+            }
+        }
     }
 
     private static PropertyReference[] CaptureSnapshotProperties(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -802,7 +814,7 @@ public sealed class SubjectTransaction : IDisposable
         var message = _failureHandling switch
         {
             TransactionFailureHandling.BestEffort => "One or more changes failed. Successful changes have been applied.",
-            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted; rollback failures are reported in the errors.",
             _ => "One or more changes failed."
         };
 

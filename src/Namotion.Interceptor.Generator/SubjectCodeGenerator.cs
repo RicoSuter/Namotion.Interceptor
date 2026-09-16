@@ -23,6 +23,7 @@ internal static class SubjectCodeGenerator
         EmitDefaultProperties(builder, metadata);
         EmitConstructors(builder, metadata);
         EmitProperties(builder, metadata);
+        EmitPropertyReplayImplementation(builder, metadata);
         EmitMethods(builder, metadata);
         EmitHelperMethods(builder, metadata);
         EmitClassClosing(builder);
@@ -150,6 +151,11 @@ internal static class SubjectCodeGenerator
         var interfaces = metadata.BaseClass.HasInpc
             ? "IInterceptorSubject"
             : "IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged";
+
+        if (metadata.Properties.Any(property => CanEmitReplay(property, metadata)))
+        {
+            interfaces += ", global::Namotion.Interceptor.ISubjectPropertyReplay";
+        }
 
         builder.AppendLine($"    {metadata.AccessModifier} partial class {metadata.ClassName} : {interfaces}");
         builder.AppendLine("    {");
@@ -429,20 +435,101 @@ internal static class SubjectCodeGenerator
             var accessorText = property.HasInit ? "init" : "set";
             var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
 
-            var raisePropertyChangedCall = GetRaisePropertyChangedCall(property, metadata);
-
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");
-            builder.AppendLine("                var newValue = value;");
-            builder.AppendLine("                var cancel = false;");
-            builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
-            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
-            builder.AppendLine("                {");
-            builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
-            builder.AppendLine($"                    {raisePropertyChangedCall};");
-            builder.AppendLine("                }");
+            EmitSetterBody(builder, property, metadata, replay: false);
             builder.AppendLine("            }");
         }
+    }
+
+    private static void EmitPropertyReplayImplementation(StringBuilder builder, SubjectMetadata metadata)
+    {
+        var properties = metadata.Properties.Where(property => CanEmitReplay(property, metadata)).ToArray();
+        if (properties.Length == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine("        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName)");
+        builder.AppendLine("        {");
+        EmitReplayMetadataGuard(builder, "return false;");
+        builder.AppendLine("            return propertyName switch");
+        builder.AppendLine("            {");
+        foreach (var property in properties)
+        {
+            builder.AppendLine($"                nameof({property.Name}) => true,");
+        }
+        builder.AppendLine("                _ => false");
+        builder.AppendLine("            };");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+        builder.AppendLine("        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)");
+        builder.AppendLine("        {");
+        builder.AppendLine("            outcome = default;");
+        EmitReplayMetadataGuard(builder, "throw new global::System.NotSupportedException($\"Property '{propertyName}' does not support exact transaction replay outcomes.\");");
+        builder.AppendLine("            switch (propertyName)");
+        builder.AppendLine("            {");
+        foreach (var property in properties)
+        {
+            builder.AppendLine($"                case nameof({property.Name}):");
+            builder.AppendLine("                {");
+            EmitSetterBody(builder, property, metadata, replay: true);
+            builder.AppendLine("                    return;");
+            builder.AppendLine("                }");
+        }
+        builder.AppendLine("                default: throw new global::System.NotSupportedException($\"Property '{propertyName}' does not support exact transaction replay outcomes.\");");
+        builder.AppendLine("            }");
+        builder.AppendLine("        }");
+        builder.AppendLine();
+    }
+
+    private static void EmitReplayMetadataGuard(StringBuilder builder, string failureStatement)
+    {
+        // Keep this check in replay itself: a derived implementation of CanReplayProperty must not
+        // authorize writes through inherited replay code to a displaced backing field.
+        builder.AppendLine("            var activeProperties = ((IInterceptorSubject)this).Properties;");
+        builder.AppendLine("            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&");
+        builder.AppendLine("                (!activeProperties.TryGetValue(propertyName, out var actual) ||");
+        builder.AppendLine("                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||");
+        builder.AppendLine("                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))");
+        builder.AppendLine("            {");
+        builder.AppendLine($"                {failureStatement}");
+        builder.AppendLine("            }");
+    }
+
+    private static bool CanEmitReplay(PropertyMetadata property, SubjectMetadata metadata)
+    {
+        if (metadata.HasOwnReplayImplementation ||
+            !metadata.BaseClass.EmitsInterceptionMembers || metadata.BaseClass.HasInterceptorSubject)
+        {
+            return false;
+        }
+
+        return property.IsPartial && property.HasSetter && !property.IsVirtual && !property.IsOverride;
+    }
+
+    private static void EmitSetterBody(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata, bool replay)
+    {
+        var indentation = replay ? "                    " : "                ";
+        var raisePropertyChangedCall = GetRaisePropertyChangedCall(property, metadata);
+        var valueExpression = replay ? $"({property.FullTypeName})value!" : "value";
+        builder.AppendLine($"{indentation}var newValue = {valueExpression};");
+        builder.AppendLine($"{indentation}var cancel = false;");
+        builder.AppendLine($"{indentation}On{property.Name}Changing(ref newValue, ref cancel);");
+        if (replay)
+        {
+            builder.AppendLine($"{indentation}if (cancel) return;");
+            builder.AppendLine($"{indentation}((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v, ref outcome);");
+            builder.AppendLine($"{indentation}if (outcome.Mutated)");
+        }
+        else
+        {
+            builder.AppendLine($"{indentation}if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
+        }
+        builder.AppendLine($"{indentation}{{");
+        builder.AppendLine($"{indentation}    On{property.Name}Changed(_{property.Name});");
+        builder.AppendLine($"{indentation}    {raisePropertyChangedCall};");
+        builder.AppendLine($"{indentation}}}");
     }
 
     private static string GetRaisePropertyChangedCall(PropertyMetadata property, SubjectMetadata metadata)

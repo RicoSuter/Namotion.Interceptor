@@ -1,3 +1,4 @@
+using System.Buffers;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
@@ -15,7 +16,7 @@ internal static class SubjectPropertyChangeOperations
     /// need the applied set; with exclusions, or on any failure, Successful is populated.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, TransactionFailureHandling? failureHandling = null)
     {
         HashSet<PropertyReference>? excluded = null;
         if (exclude is { Count: > 0 })
@@ -27,12 +28,12 @@ internal static class SubjectPropertyChangeOperations
             }
         }
 
-        return ApplyLocalChanges(changes, excluded);
+        return ApplyLocalChanges(changes, excluded, failureHandling);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, TransactionFailureHandling? failureHandling)
     {
         // When excluded is null the applied set equals the input on success, so Successful stays null
         // (returned empty) until the first failure. When excluded is set the applied set differs from the
@@ -40,21 +41,30 @@ internal static class SubjectPropertyChangeOperations
         List<SubjectPropertyChange>? successful = excluded is null ? null : new List<SubjectPropertyChange>(changes.Length);
         List<SubjectPropertyChange>? failed = null;
         List<Exception>? errors = null;
+        var rentedOutcomes = changes.Length <= 256 ? null : ArrayPool<byte>.Shared.Rent(changes.Length);
+        Span<byte> outcomes = rentedOutcomes is null
+            ? stackalloc byte[changes.Length]
+            : rentedOutcomes.AsSpan(0, changes.Length);
+        outcomes.Clear();
 
-        for (var i = 0; i < changes.Length; i++)
+        try
         {
-            var change = changes[i];
-            if (excluded is not null && excluded.Contains(change.Property))
+            for (var i = 0; i < changes.Length; i++)
             {
-                continue;
-            }
+                var change = changes[i];
+                if (excluded is not null && excluded.Contains(change.Property))
+                {
+                    continue;
+                }
 
-            if (change.TryApplyLocalChange(out var error))
-            {
-                successful?.Add(change);
-            }
-            else
-            {
+                var accepted = change.TryApplyLocalChange(out var error, out var mutated);
+                outcomes[i] = GetCompensationOutcome(accepted, mutated);
+                if (accepted)
+                {
+                    successful?.Add(change);
+                    continue;
+                }
+
                 if (failed is null)
                 {
                     // On the no-exclude path, materialize the successful prefix at the first failure.
@@ -68,11 +78,57 @@ internal static class SubjectPropertyChangeOperations
                     (errors ??= []).Add(error);
                 }
             }
-        }
 
-        return failed is null
-            ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
-            : (successful!, failed, errors ?? []);
+            if (failed is not null)
+            {
+                CompensateLocalChanges(changes, outcomes, failureHandling, failed, ref errors);
+            }
+
+            return (successful ?? (IReadOnlyList<SubjectPropertyChange>)[],
+                failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
+        }
+        finally
+        {
+            if (rentedOutcomes is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rentedOutcomes);
+            }
+        }
+    }
+
+    private static byte GetCompensationOutcome(bool accepted, bool mutated)
+    {
+        if (!mutated) return 0;
+        return accepted ? (byte)1 : (byte)2;
+    }
+
+    private static void CompensateLocalChanges(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        ReadOnlySpan<byte> outcomes,
+        TransactionFailureHandling? failureHandling,
+        List<SubjectPropertyChange> failed,
+        ref List<Exception>? errors)
+    {
+        if (!failureHandling.HasValue) return;
+
+        for (var index = changes.Length - 1; index >= 0; index--)
+        {
+            if (outcomes[index] == 0 ||
+                (failureHandling == TransactionFailureHandling.BestEffort && outcomes[index] != 2))
+            {
+                continue;
+            }
+
+            var original = changes[index];
+            if (!original.ToRollbackChange().TryApplyLocalChange(out var error, out _))
+            {
+                failed.Add(original);
+                if (error is not null)
+                {
+                    (errors ??= []).Add(error);
+                }
+            }
+        }
     }
 
     private static List<SubjectPropertyChange> CopyAppliedChanges(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -86,43 +142,13 @@ internal static class SubjectPropertyChangeOperations
         return successful;
     }
 
-    /// <summary>
-    /// Reverts previously-applied local changes by applying their inverse values in reverse order.
-    /// On failure the reported change is the original forward change (not the inverted rollback record),
-    /// so <see cref="SubjectTransactionException.FailedChanges"/> always holds the change that was submitted,
-    /// consistent with the source-revert path. Returns any revert failures and errors so the caller can fold
-    /// them into the exception.
-    /// </summary>
-    internal static (IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors) RevertLocalChanges(
-        IReadOnlyList<SubjectPropertyChange> applied)
+    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error, out bool mutated)
     {
-        List<SubjectPropertyChange>? failed = null;
-        List<Exception>? errors = null;
-
-        // Reverse order so dependent properties unwind in the opposite order they were applied.
-        for (var i = applied.Count - 1; i >= 0; i--)
-        {
-            var original = applied[i];
-            var rollback = original.ToRollbackChange();
-
-            if (!rollback.TryApplyLocalChange(out var error))
-            {
-                (failed ??= []).Add(original);
-                if (error != null)
-                {
-                    (errors ??= []).Add(error);
-                }
-            }
-        }
-
-        return (failed ?? (IReadOnlyList<SubjectPropertyChange>)[], errors ?? (IReadOnlyList<Exception>)[]);
-    }
-
-    private static bool TryApplyLocalChange(this SubjectPropertyChange change, out Exception? error)
-    {
+        var outcome = default(PropertyReplayOutcome);
         try
         {
-            var metadata = change.Property.Metadata;
+            var replay = change.Property.Subject as ISubjectPropertyReplay ?? throw new NotSupportedException(
+                $"Property '{change.Property.Name}' does not support exact transaction replay outcomes.");
             var newValue = change.GetNewValue<object?>();
             // Local origins arm no stamp: an absent stamp and a Local stamp both finalize to Local
             // (FinalizeOrigin short-circuits on Local before reading the sent value), so skip
@@ -132,23 +158,27 @@ internal static class SubjectPropertyChangeOperations
             {
                 if (change.Origin.Kind == ChangeOriginKind.Local)
                 {
-                    metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                    replay.ReplayProperty(change.Property.Name, newValue, ref outcome);
                 }
                 else
                 {
                     using (PendingOrigin.Set(change.Property, change.Origin, newValue))
                     {
-                        metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                        replay.ReplayProperty(change.Property.Name, newValue, ref outcome);
                     }
                 }
             }
-            error = null;
-            return true;
+            error = outcome.Accepted ? null : new InvalidOperationException($"Property '{change.Property.Name}' rejected the transaction replay.");
+            return outcome.Accepted;
         }
         catch (Exception ex)
         {
             error = ex;
             return false;
+        }
+        finally
+        {
+            mutated = outcome.Mutated;
         }
     }
 
