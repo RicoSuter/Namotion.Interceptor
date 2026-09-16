@@ -56,7 +56,7 @@ public class ChangeQueueStateTests
     {
         // Arrange
         var state = CreateState();
-        Assert.True(state.TryBeginDeliveryCallback!(2));
+        Assert.True(state.TryBeginDeliveryOrCountAsDropped(2));
 
         // Act
         state.CompleteDelivery(2);
@@ -243,7 +243,7 @@ public class ChangeQueueStateTests
 
         // Act
         state.CloseAndCountRemainingAsDropped();
-        var deliveryStarted = state.TryBeginDeliveryCallback!(buffer.Count);
+        var deliveryStarted = state.TryBeginDeliveryOrCountAsDropped(buffer.Count);
 
         // Assert
         Assert.False(deliveryStarted);
@@ -254,7 +254,7 @@ public class ChangeQueueStateTests
     public void WhenTheHandlerOwnsDelivery_ThenOnlyBufferedChangesAreCountedOnClosure()
     {
         // Arrange
-        var state = CreateState(tracksDeliveryOutcomes: false);
+        var state = CreateState();
         var changes = CreateChanges("handed off", "still buffered");
         var buffer = new List<SubjectPropertyChange>();
         state.Enqueue(changes[0]);
@@ -265,7 +265,6 @@ public class ChangeQueueStateTests
         state.CloseAndCountRemainingAsDropped();
 
         // Assert
-        Assert.Null(state.TryBeginDeliveryCallback);
         Assert.Equal("handed off", Assert.Single(buffer).GetNewValue<string>());
         Assert.Equal(1, state.DropCount);
         Assert.Equal(0, state.BufferedCount);
@@ -320,9 +319,8 @@ public class ChangeQueueStateTests
 
     private static ChangeQueueState CreateState(
         int? maxQueueDepth = null,
-        Action<long>? dropHandler = null,
-        bool tracksDeliveryOutcomes = true) =>
-        new(maxQueueDepth, dropHandler, NullLogger.Instance, ChangeQueueProcessor.TeardownFlushBound, tracksDeliveryOutcomes);
+        Action<long>? dropHandler = null) =>
+        new(maxQueueDepth, dropHandler, NullLogger.Instance, ChangeQueueProcessor.TeardownFlushBound);
 
     private static SubjectPropertyChange[] CreateChanges(params string[] values)
     {

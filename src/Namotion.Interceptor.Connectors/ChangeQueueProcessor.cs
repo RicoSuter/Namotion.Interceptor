@@ -10,6 +10,17 @@ namespace Namotion.Interceptor.Connectors;
 /// Processes property changes from a queue, buffering and merging them before writing.
 /// Used by both client sources and server background services.
 /// </summary>
+/// <remarks>
+/// One run has two concurrent loops: a dequeue loop that filters changes and either writes them
+/// immediately or buffers them, and, when a buffer time is set, a periodic loop that flushes what
+/// the first one buffered. Flushes never overlap, because a flush gate refuses a second one, and
+/// deliveries never overlap, because the queue state admits one at a time. A change therefore takes
+/// exactly one of two paths to the write handler: written as dequeued, or merged and flushed.
+/// <para>
+/// <see cref="ChangeQueueState"/> owns every accepted change until its outcome is known, and
+/// <see cref="ChangeQueueExecution"/> owns the run's cancellation and its bounded finalization.
+/// </para>
+/// </remarks>
 public class ChangeQueueProcessor : IDisposable
 {
     /// <summary>
@@ -31,6 +42,10 @@ public class ChangeQueueProcessor : IDisposable
     private readonly bool _writeHandlerOwnsChanges;
     private Action? _terminalHandler;
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
+
+    // Null when the write handler owns delivery and no outcome is accounted here. Cached so a flush
+    // does not allocate one per merge.
+    private readonly Func<int, bool>? _tryBeginDelivery;
 
     private readonly ChangeQueueState _queueState;
 
@@ -129,7 +144,8 @@ public class ChangeQueueProcessor : IDisposable
         {
             _queueState = new ChangeQueueState(
                 ValidateQueueBound(maxQueueDepth, _bufferTime),
-                dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcomes: true);
+                dropHandler, logger, TeardownFlushBound);
+            _tryBeginDelivery = _queueState.TryBeginDeliveryOrCountAsDropped;
             _deliveryRule = ValidateRule(deliveryRule);
 
             _changeMerger = new ChangeMerger();
@@ -173,7 +189,8 @@ public class ChangeQueueProcessor : IDisposable
 
         _queueState = new ChangeQueueState(
             ValidateQueueBound(maxQueueDepth, _bufferTime),
-            dropHandler, logger, TeardownFlushBound, tracksDeliveryOutcomes: !writeHandlerOwnsChanges);
+            dropHandler, logger, TeardownFlushBound);
+        _tryBeginDelivery = writeHandlerOwnsChanges ? null : _queueState.TryBeginDeliveryOrCountAsDropped;
         _subscription = subscription;
         _deliveryRule = ValidateRule(deliveryRule);
         _changeMerger = new ChangeMerger();
@@ -475,14 +492,14 @@ public class ChangeQueueProcessor : IDisposable
             var mergedChanges = _changeMerger!.Merge(
                 CollectionsMarshal.AsSpan(_flushChanges),
                 _deliveryRule,
-                _queueState.TryBeginDeliveryCallback);
+                _tryBeginDelivery);
 
             if (mergedChanges.Length > 0)
             {
                 await WriteChangesAsync(
                     mergedChanges,
                     cancellationToken,
-                    deliveryStarted: _queueState.TryBeginDeliveryCallback is not null).ConfigureAwait(false);
+                    deliveryStarted: !_writeHandlerOwnsChanges).ConfigureAwait(false);
             }
         }
         finally

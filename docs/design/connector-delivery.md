@@ -10,9 +10,7 @@ the code and has been rediscovered more than once.
 - `ChangeQueueState` tracks buffered changes, the active delivery, and drops. Its private lock keeps cancellation, failure, and closure from counting the same batch twice.
 - `ChangeQueueExecution` coordinates one whole `ProcessAsync` call, including all flushes and bounded shutdown. It is not one flush or retry attempt.
 
-The processor owns the scratch batch between draining and beginning delivery; a merge failure in that window is outside delivery-state accounting. When the write handler owns delivery, handed-off changes belong to that handler instead.
-
-A stop signal or finalization report starts the shutdown timeout. At the limit, the processor closes delivery ownership while unfinished work is observed in the background. Late completion cannot reopen that state. A terminal drop means delivery is locally unconfirmed, not that the remote write did not happen. See [Flushing On Stop](../connectors.md#flushing-on-stop) for the consumer-facing behavior.
+Late completion cannot reopen a closed delivery state. A terminal drop means delivery is locally unconfirmed, not that the remote write did not happen. See [Flushing On Stop](../connectors.md#flushing-on-stop) for the consumer-facing behavior.
 
 ## The supersession invariant
 

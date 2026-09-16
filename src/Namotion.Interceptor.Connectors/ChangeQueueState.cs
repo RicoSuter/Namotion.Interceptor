@@ -11,8 +11,8 @@ namespace Namotion.Interceptor.Connectors;
 /// The caller serializes delivery cycles. After draining, the caller owns the scratch batch until
 /// delivery begins; a merge failure in that window is not counted here.
 /// <para>
-/// When the write handler owns delivery, the caller bypasses delivery tracking. Only buffered changes
-/// and their drops are tracked here; handed-off changes belong to the handler.
+/// When the write handler owns delivery, the caller never begins a delivery here, so only buffered
+/// changes and their drops are tracked; handed-off changes belong to the handler.
 /// </para>
 /// </remarks>
 internal sealed class ChangeQueueState
@@ -28,7 +28,7 @@ internal sealed class ChangeQueueState
     private readonly int? _maxQueueDepth;
     private readonly Action<long>? _dropHandler;
     private readonly ILogger _logger;
-    private readonly TimeSpan _terminalBound;
+    private readonly TimeSpan _teardownFlushBound;
 
     private long _dropCount;
     // 0 = idle, positive = active delivery size, ClosedDelivery = permanently closed.
@@ -38,20 +38,13 @@ internal sealed class ChangeQueueState
         int? maxQueueDepth,
         Action<long>? dropHandler,
         ILogger logger,
-        TimeSpan terminalBound,
-        bool tracksDeliveryOutcomes)
+        TimeSpan teardownFlushBound)
     {
         _maxQueueDepth = maxQueueDepth;
         _dropHandler = dropHandler;
         _logger = logger;
-        _terminalBound = terminalBound;
-        TryBeginDeliveryCallback = tracksDeliveryOutcomes ? TryBeginDeliveryOrCountAsDropped : null;
+        _teardownFlushBound = teardownFlushBound;
     }
-
-    /// <summary>
-    /// Cached callback that begins a delivery or counts it as dropped; null when the handler owns delivery.
-    /// </summary>
-    public Func<int, bool>? TryBeginDeliveryCallback { get; }
 
     /// <summary>Changes dropped by overflow or failure, or left locally unconfirmed at closure.</summary>
     public long DropCount => Interlocked.Read(ref _dropCount);
@@ -195,7 +188,7 @@ internal sealed class ChangeQueueState
                 _logger.LogWarning(
                     "Gave up waiting after {Timeout} for {Count} changes to be written while stopping. " +
                     "A write handler may already have completed them remotely or may still complete them.",
-                    _terminalBound,
+                    _teardownFlushBound,
                     count);
             }
             catch

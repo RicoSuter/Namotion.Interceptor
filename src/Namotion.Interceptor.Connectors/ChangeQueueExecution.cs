@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 /// <remarks>
 /// Use each instance once. The core must report finalization before cleanup that may block.
-/// A stop signal or finalization report starts the teardown timeout. Abandoned work is observed in
+/// A stop signal or finalization report starts the teardown flush bound. Abandoned work is observed in
 /// the background, and token sources are disposed after the core and cancellation callbacks settle.
 /// </remarks>
 internal sealed class ChangeQueueExecution
@@ -16,11 +16,11 @@ internal sealed class ChangeQueueExecution
     private readonly CancellationTokenSource _teardownTokenSource = new();
     private readonly TaskCompletionSource<ExceptionDispatchInfo?> _finalizationStarted =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TimeSpan _teardownTimeout;
+    private readonly TimeSpan _teardownFlushBound;
 
-    public ChangeQueueExecution(TimeSpan teardownTimeout)
+    public ChangeQueueExecution(TimeSpan teardownFlushBound)
     {
-        _teardownTimeout = teardownTimeout;
+        _teardownFlushBound = teardownFlushBound;
 
         // Captured tokens remain readable after their sources are disposed.
         ProcessingToken = _processingTokenSource.Token;
@@ -30,7 +30,7 @@ internal sealed class ChangeQueueExecution
     /// <summary>Cancelled when a stop or finalization report is observed.</summary>
     public CancellationToken ProcessingToken { get; }
 
-    /// <summary>Cancelled at the teardown timeout; used for the final flush and handoff.</summary>
+    /// <summary>Cancelled at the teardown flush bound; used for the final flush and handoff.</summary>
     public CancellationToken TeardownToken { get; }
 
     /// <summary>Reports ordinary finalization. Only the first finalization report is retained.</summary>
@@ -43,14 +43,14 @@ internal sealed class ChangeQueueExecution
         _finalizationStarted.TrySetResult(ExceptionDispatchInfo.Capture(fault));
 
     /// <summary>
-    /// Runs the core until completion or abandonment at the teardown timeout.
+    /// Runs the core until completion or abandonment at the teardown flush bound.
     /// </summary>
     /// <param name="core">Work that uses this execution's tokens and reports when finalization starts.</param>
     /// <param name="stopSignal">Completes when the caller requests cancellation.</param>
     /// <returns>
     /// Whether the core was abandoned, with the reported fault if finalization was observed before a stop.
     /// The caller settles abandoned delivery ownership before rethrowing that fault. If the core finishes
-    /// within the timeout, its exception propagates directly.
+    /// within the bound, its exception propagates directly.
     /// </returns>
     public async Task<(bool WasAbandoned, ExceptionDispatchInfo? Fault)> RunAsync(Func<Task> core, Task stopSignal)
     {
@@ -72,7 +72,7 @@ internal sealed class ChangeQueueExecution
         var processingCancellationTask = _processingTokenSource.CancelAsync();
         var teardownCancellationTask = Task.CompletedTask;
         using var boundCancellation = new CancellationTokenSource();
-        var boundExpiry = Task.Delay(_teardownTimeout, boundCancellation.Token);
+        var boundExpiry = Task.Delay(_teardownFlushBound, boundCancellation.Token);
         try
         {
             if (await Task.WhenAny(coreTask, boundExpiry).ConfigureAwait(false) == coreTask)
@@ -96,7 +96,7 @@ internal sealed class ChangeQueueExecution
         }
     }
 
-    // Awaiting these tasks here would extend the teardown timeout indefinitely.
+    // Awaiting these tasks here would extend the teardown flush bound indefinitely.
     private void ObserveCompletionInBackground(Task coreTask, Task processingCancellationTask, Task teardownCancellationTask)
     {
         _ = Task.WhenAll(coreTask, processingCancellationTask, teardownCancellationTask).ContinueWith(
