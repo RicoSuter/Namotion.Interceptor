@@ -180,13 +180,15 @@ internal sealed class SingleAttachmentHost<TService>
             return;
         }
 
+        // Captured at the gate rather than deeper in, and outside the try so the catch commits against
+        // this same reading: every status this path writes has to lose to a stop that lands while it
+        // runs, and writing Starting first would otherwise put the wrapper back on a status that reads
+        // as not stopped. A capture taken at the moment of a commit would compare the generation with
+        // itself and gate nothing.
+        var generation = CaptureStopGeneration();
+
         try
         {
-            // Captured at the gate rather than deeper in: every status this path writes has to lose to a
-            // stop that lands while it runs, and writing Starting first would otherwise put the wrapper
-            // back on a status that reads as not stopped.
-            var generation = CaptureStopGeneration();
-
             if (!TryCommitActive(generation, ServiceStatus.Starting, message: null))
             {
                 return;
@@ -241,9 +243,7 @@ internal sealed class SingleAttachmentHost<TService>
             // No OperationCanceledException filter: the only wait on the caller's token in this try is
             // the startable wait, which reports its own cancellation and returns instead of throwing,
             // so a filter could only swallow a genuine start failure and report it as a clean stop.
-            // Its own capture: the one above is out of scope here, and a stop that landed during the
-            // failed start still outranks the failure.
-            TryCommitActive(CaptureStopGeneration(), ServiceStatus.Error, exception.Message);
+            TryCommitActive(generation, ServiceStatus.Error, exception.Message);
             _logger.LogError(exception, "Failed to start {Service} for {Target}", _owner.LogName, _owner.LogTarget);
         }
         finally
