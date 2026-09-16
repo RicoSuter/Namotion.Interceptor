@@ -109,17 +109,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             return;
         }
 
-        var subjectInterceptors = context.Property.Subject.Context
-            .GetServices<SubjectTransactionInterceptor>();
-        var isBoundToThisContext = subjectInterceptors.Length == 1
-            ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
-            : ContainsByReference(subjectInterceptors, transaction.Interceptor);
-
-        if (!isBoundToThisContext)
-        {
-            throw new InvalidOperationException(
-                $"Cannot modify property '{context.Property.Metadata.Name}': Transaction is bound to a different context.");
-        }
+        ValidateTransactionContext(context.Property, transaction);
 
         // Origin comparison can run user equality code, so resolve it before taking the transaction lock.
         var resolvedOrigin = context.GetFinalOrigin();
@@ -138,6 +128,28 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         next(ref context);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ValidateTransactionContext(PropertyReference property, SubjectTransaction transaction)
+    {
+        var subjectInterceptors = property.Subject.Context
+            .GetServices<SubjectTransactionInterceptor>();
+        var isBoundToThisContext = subjectInterceptors.Length == 1
+            ? ReferenceEquals(subjectInterceptors[0], transaction.Interceptor)
+            : ContainsByReference(subjectInterceptors, transaction.Interceptor);
+
+        if (!isBoundToThisContext)
+        {
+            ThrowTransactionContextMismatch(property);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowTransactionContextMismatch(PropertyReference property)
+    {
+        throw new InvalidOperationException(
+            $"Cannot modify property '{property.Metadata.Name}': Transaction is bound to a different context.");
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

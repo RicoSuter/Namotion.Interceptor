@@ -105,7 +105,7 @@ The library uses a fluent configuration API:
 
 ## Analyzer Policy
 
-Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Get user approval before adding or broadening rule exceptions; prior conversation approval remains valid. Prefer narrow scope. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
+Sonar diagnostics (`S`-prefixed IDs) may appear as build errors under warnings-as-errors. Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Do not add complexity, allocations, or CPU overhead merely to satisfy a rule; propose a narrow, documented exception instead. Compiler errors and correctness defects still require fixes. Get user approval before adding or broadening exceptions; prior approval remains valid. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
 
 ## Key Dependencies
 

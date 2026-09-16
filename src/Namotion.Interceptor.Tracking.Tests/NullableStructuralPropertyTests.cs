@@ -62,7 +62,7 @@ public class NullableStructuralPropertyTests
         // Assert
         // Before the classification fix this emitted Kind=Value carrying the raw boxed collection,
         // which leaks subject children into the scalar value channel.
-        var properties = update.Subjects[update.Root!];
+        var properties = update.Subjects[update.Root];
         Assert.Equal(
             SubjectPropertyUpdateKind.Collection,
             properties[nameof(NullableStructuralHolder.ImmutableCars)].Kind);
