@@ -27,7 +27,7 @@ public static class ParentsHandlerExtensions
     public static TRoot? TryGetFirstParent<TRoot>(this IInterceptorSubject subject)
         where TRoot : class
     {
-        var visited = new HashSet<IInterceptorSubject>();
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
         var queue = new Queue<IInterceptorSubject>();
         queue.Enqueue(subject);
 

@@ -433,7 +433,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 if (dependencyUpdate == DependencyUpdate.Unchanged)
                 {
-                    break;
+                    return result;
                 }
             }
 

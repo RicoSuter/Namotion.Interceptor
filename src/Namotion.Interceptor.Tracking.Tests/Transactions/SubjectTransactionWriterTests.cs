@@ -36,6 +36,45 @@ public class SubjectTransactionWriterTests
             .WithTransactions();
     }
 
+    [Theory]
+    [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.Rollback)]
+    [InlineData(TransactionLocking.Exclusive, TransactionFailureHandling.BestEffort)]
+    [InlineData(TransactionLocking.Optimistic, TransactionFailureHandling.Rollback)]
+    [InlineData(TransactionLocking.Optimistic, TransactionFailureHandling.BestEffort)]
+    public async Task WhenWriterResolutionFails_ThenCommitCanBeRetriedAfterCorrectingRegistration(
+        TransactionLocking locking, TransactionFailureHandling failureHandling)
+    {
+        // Arrange
+        var context = CreateTransactionContext();
+        var writer = new NonMarkingTransactionWriter();
+        var conflictingWriter = new NonMarkingTransactionWriter();
+        var fallback = InterceptorSubjectContext.Create();
+        context.AddService<ITransactionWriter>(writer);
+        fallback.AddService<ITransactionWriter>(conflictingWriter);
+        context.AddFallbackContext(fallback);
+        var person = new Person(context) { FirstName = "original" };
+        using var transaction = await context.BeginTransactionAsync(failureHandling, locking);
+        person.FirstName = "pending";
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => transaction.CommitAsync(CancellationToken.None).AsTask());
+        Assert.Equal(0, writer.WriteCalls);
+        Assert.Equal(0, conflictingWriter.WriteCalls);
+        var pending = Assert.Single(transaction.GetPendingChanges());
+        Assert.Equal("original", pending.GetOldValue<string>());
+        Assert.Equal("pending", pending.GetNewValue<string>());
+
+        context.RemoveFallbackContext(fallback);
+        person.FirstName = "updated";
+        await transaction.CommitAsync(CancellationToken.None);
+
+        Assert.Equal("updated", person.FirstName);
+        Assert.Equal(1, writer.WriteCalls);
+        Assert.Equal(0, conflictingWriter.WriteCalls);
+        Assert.Empty(transaction.GetPendingChanges());
+    }
+
     [Fact]
     public async Task WhenSourceValueIsTransformedBeforeCapture_ThenTheCapturedOriginIsLocal()
     {
@@ -339,11 +378,16 @@ public class SubjectTransactionWriterTests
     /// </summary>
     private sealed class NonMarkingTransactionWriter : ITransactionWriter
     {
+        public int WriteCalls { get; private set; }
+
         public ValueTask<SourceWriteResult> WriteToSourcesAsync(
             Memory<SubjectPropertyChange> changes,
             TransactionRequirement requirement,
             CancellationToken cancellationToken)
-            => new(new SourceWriteResult([], [], [], RevertState: null));
+        {
+            WriteCalls++;
+            return new(new SourceWriteResult([], [], [], RevertState: null));
+        }
 
         public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
             IReadOnlyList<SubjectPropertyChange> written,

@@ -328,7 +328,18 @@ public sealed class SubjectTransaction : IDisposable
             }
         }
 
-        var writer = Context.TryGetService<ITransactionWriter>();
+        ITransactionWriter? writer;
+        try
+        {
+            writer = Context.TryGetService<ITransactionWriter>();
+        }
+        catch
+        {
+            // No commit work has started, so a corrected registration can be retried.
+            Volatile.Write(ref _commitStarted, 0);
+            throw;
+        }
+
         if (writer is null)
         {
             // No source writer: the entire commit is local. For the default (Exclusive) locking

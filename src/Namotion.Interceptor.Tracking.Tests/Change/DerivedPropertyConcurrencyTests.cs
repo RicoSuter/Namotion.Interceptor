@@ -195,6 +195,8 @@ public class DerivedPropertyConcurrencyTests
 
         // Assert
         Assert.False(weakTire.IsAlive, "Detached tire should be garbage collected");
+        // Keep the owning graph alive so stale references cannot disappear with it.
+        GC.KeepAlive(context);
     }
 
     [Fact]
