@@ -75,6 +75,24 @@ public class RecalculateDerivedPropertyTests
             .Create()
             .WithFullPropertyTracking();
 
+        var sensor = new ExternalSensor(context);
+
+        // Act
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.Label));
+        property.RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Null(sensor.Label);
+    }
+
+    [Fact]
+    public void WhenRecalculateCalledOnNonDerivedPropertyWithSubscriber_ThenValueUnchangedAndNoNotificationFired()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
         var sensor = new ExternalSensor(context) { Label = "unchanged" };
         var changes = new List<SubjectPropertyChange>();
         context
