@@ -41,7 +41,8 @@ public class SubjectPropertyChangeOperationsTests
         ];
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude: null);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(
+            changes, exclude: null, TransactionFailureHandling.BestEffort);
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -69,7 +70,8 @@ public class SubjectPropertyChangeOperationsTests
         var exclude = new List<SubjectPropertyChange> { second };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(
+            changes, exclude, TransactionFailureHandling.BestEffort);
 
         // Assert
         Assert.Equal("John", person.FirstName);
@@ -98,7 +100,8 @@ public class SubjectPropertyChangeOperationsTests
         var exclude = new List<SubjectPropertyChange> { third, first };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(
+            changes, exclude, TransactionFailureHandling.BestEffort);
 
         // Assert
         Assert.Null(person.FirstName);
@@ -125,9 +128,12 @@ public class SubjectPropertyChangeOperationsTests
         SubjectPropertyChange[] changes = [first, failing, third];
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude: null);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(
+            changes, exclude: null, TransactionFailureHandling.BestEffort);
 
         // Assert
+        Assert.Equal("John", person.FirstName);
+        Assert.Equal("Tesla", car.Name);
         Assert.Contains(failing, failed);
         Assert.NotEmpty(errors);
         Assert.Contains(first, successful);
@@ -153,7 +159,8 @@ public class SubjectPropertyChangeOperationsTests
         var exclude = new List<SubjectPropertyChange> { excluded };
 
         // Act
-        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude);
+        var (successful, failed, errors) = SubjectPropertyChangeOperations.ApplyLocalChanges(
+            changes, exclude, TransactionFailureHandling.BestEffort);
 
         // Assert
         Assert.Equal("John", person.FirstName); // applied

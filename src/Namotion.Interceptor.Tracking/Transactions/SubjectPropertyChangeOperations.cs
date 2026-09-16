@@ -8,6 +8,10 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 /// </summary>
 internal static class SubjectPropertyChangeOperations
 {
+    private const byte NoMutation = 0;
+    private const byte SuccessfulMutation = 1;
+    private const byte FailedMutation = 2;
+
     /// <summary>
     /// Applies all changes in the span except those whose <see cref="SubjectPropertyChange.Property"/>
     /// matches a change in <paramref name="exclude"/> (matched via a <see cref="HashSet{T}"/> of excluded
@@ -16,7 +20,7 @@ internal static class SubjectPropertyChangeOperations
     /// need the applied set; with exclusions, or on any failure, Successful is populated.
     /// </summary>
     internal static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, TransactionFailureHandling? failureHandling = null)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, IReadOnlyList<SubjectPropertyChange>? exclude, TransactionFailureHandling failureHandling)
     {
         HashSet<PropertyReference>? excluded = null;
         if (exclude is { Count: > 0 })
@@ -33,7 +37,7 @@ internal static class SubjectPropertyChangeOperations
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
-        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, TransactionFailureHandling? failureHandling)
+        ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded, TransactionFailureHandling failureHandling)
     {
         // When excluded is null the applied set equals the input on success, so Successful stays null
         // (returned empty) until the first failure. When excluded is set the applied set differs from the
@@ -98,23 +102,21 @@ internal static class SubjectPropertyChangeOperations
 
     private static byte GetCompensationOutcome(bool accepted, bool mutated)
     {
-        if (!mutated) return 0;
-        return accepted ? (byte)1 : (byte)2;
+        if (!mutated) return NoMutation;
+        return accepted ? SuccessfulMutation : FailedMutation;
     }
 
     private static void CompensateLocalChanges(
         ReadOnlySpan<SubjectPropertyChange> changes,
         ReadOnlySpan<byte> outcomes,
-        TransactionFailureHandling? failureHandling,
+        TransactionFailureHandling failureHandling,
         List<SubjectPropertyChange> failed,
         ref List<Exception>? errors)
     {
-        if (!failureHandling.HasValue) return;
-
         for (var index = changes.Length - 1; index >= 0; index--)
         {
-            if (outcomes[index] == 0 ||
-                (failureHandling == TransactionFailureHandling.BestEffort && outcomes[index] != 2))
+            if (outcomes[index] == NoMutation ||
+                (failureHandling == TransactionFailureHandling.BestEffort && outcomes[index] != FailedMutation))
             {
                 continue;
             }

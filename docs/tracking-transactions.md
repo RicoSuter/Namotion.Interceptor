@@ -31,7 +31,7 @@ var context = InterceptorSubjectContext
 
 ## Replay Support
 
-Commit requires each pending property to support `ISubjectPropertyReplay`, so it can distinguish a rejected write from an assignment followed by an exception. The current generator supplies this contract for nonvirtual partial setters on root subjects, including those inherited without being hidden or replaced. New properties declared on derived subjects, virtual/override properties, manual or dynamic setters, and subjects built with older generators require an explicit compatible implementation.
+Commit requires each pending property to support `ISubjectPropertyReplay`, so it can distinguish a rejected write from an assignment followed by an exception. The current generator supplies this contract for nonvirtual partial setters declared across compatible generated inheritance hierarchies, including through unmarked intermediate types and modern separately compiled generated ancestors. C# `new` properties declared on generated derived subjects, virtual/override properties, manual or dynamic setters, helper-name collisions, and subjects built with older generators require an explicit compatible implementation.
 
 `CommitAsync` validates the entire batch before source writes or local replay. An unsupported property throws `NotSupportedException` naming the subject and property, leaving the pending changes available until disposal or retry. Replay validates support again because metadata can change while a source writer awaits. A custom implementation must report acceptance and mutation truthfully, including after an exception; see the interface contract.
 
@@ -226,13 +226,16 @@ using var tx = await context.BeginTransactionAsync(
 
 When `CommitAsync()` is called, changes are processed in stages. The exact flow depends on whether `WithSourceTransactions()` is configured.
 
+Before either flow starts, the entire pending batch is checked for conflicts and exact replay support. A failed preflight touches neither sources nor the local model, preserves the pending changes, and can be retried after the cause is corrected.
+
 ### Without Source Transactions
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
-2. If any apply fails and `Rollback` mode: revert successful applies
-3. Fire change notifications
+1. **Apply all changes** to the local model through their property setters.
+2. If an apply fails, compensate every failed mutation in `BestEffort` mode or every mutation in `Rollback` mode.
+
+Each apply and compensation runs the normal setter pipeline, so hooks and notifications occur as that individual write lands. They are not deferred until the rest of the batch or its compensation completes.
 
 ### With Source Transactions
 
@@ -254,14 +257,7 @@ Stage 2 applies source-bound changes marked with a `Confirmed` origin carrying t
 
 Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransactionWriter` is registered by `WithSourceTransactions()`. Replacing it is an advanced scenario, see [Implementing a Custom Transaction Writer](#implementing-a-custom-transaction-writer).
 
-**Rollback behavior on failure:**
-
-| Failure Stage | BestEffort | Rollback |
-|---------------|------------|----------|
-| Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
-| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
-
-Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
+Failure handling follows the canonical [Failure Handling](#failure-handling) contract. A failed local apply can require both local and source compensation; consistency is restored only when every required compensation succeeds.
 
 Revert operations call setters with old values, which also trigger `OnChanging/OnChanged` methods.
 
@@ -327,6 +323,7 @@ catch (SubjectTransactionConflictException ex)
 |-----------|-------|
 | `InvalidOperationException` | Nested transactions, already committed, transactions not enabled, committing from a different async flow |
 | `ObjectDisposedException` | Using a disposed transaction |
+| `NotSupportedException` | Whole-batch replay-support preflight failed before any source or local write; pending changes remain available for retry |
 | `OperationCanceledException` | Commit timeout during source revert (source-write timeouts are reported via `SubjectTransactionException`) |
 
 ### Failure Flows and Consistency
@@ -334,7 +331,7 @@ catch (SubjectTransactionConflictException ex)
 A commit attempt ends in one of three states:
 
 - **Committed**: the commit succeeded. The transaction is finished and must be disposed.
-- **Failed, retryable**: the commit aborted before the local model was touched, either before anything was written at all (conflict detected, optimistic lock not acquired) or because a commit timeout interrupted it. The pending changes remain intact and `CommitAsync` can be called again on the same transaction. See [Retry After Conflict Detection](#retry-after-conflict-detection).
+- **Failed, retryable**: the commit aborted before anything was written (replay support failed, a conflict was detected, or the optimistic lock was not acquired), or a commit timeout interrupted source compensation. The pending changes remain intact and `CommitAsync` can be called again on the same transaction after the cause is corrected. See [Retry After Conflict Detection](#retry-after-conflict-detection).
 - **Failed, terminal**: the commit got past the source-write stage, so writes may have reached sources or the local model, and compensation (reverts) already ran once. The pending changes are cleared, a second `CommitAsync` throws `InvalidOperationException`, and the transaction must be disposed and replaced with a new one. Retrying would replay the snapshot onto state that has already moved, for example re-pushing values to a source that already accepted them.
 
 Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
@@ -346,9 +343,9 @@ The tables below list every flow and its end state per property. "Old" means the
 | Scenario | Mode | Local model ends as | Outcome |
 |----------|------|---------------------|---------|
 | All applies succeed | any | new | committed |
-| Some applies fail | BestEffort | applied keep new, failed keep old | terminal failure, reported per change |
-| Some applies fail, reverts succeed | Rollback | all old | terminal failure |
-| Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+| Some applies fail, required reverts succeed | BestEffort | successful keep new, failed return old | terminal failure, reported per change |
+| Some applies fail, required reverts succeed | Rollback | all old | terminal failure |
+| Some applies fail, a required local revert also fails | any | may include unrestored values | terminal failure, affected properties are in `FailedChanges` |
 
 Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
 
@@ -357,11 +354,11 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | Scenario | Mode | Source ends | Local ends | Outcome |
 |----------|------|-------------|------------|---------|
 | All source writes and applies succeed | any | new | new | committed |
-| Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
+| Replay support, conflict, or optimistic-lock preflight fails | any | old | old | retryable failure |
 | A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
-| A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
+| A source write fails or times out; remaining local applies succeed | BestEffort | succeeded new, failed old | matches source | terminal failure |
 | A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
-| A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
+| A local apply fails, all required local and source reverts succeed | BestEffort | successful new, failed-apply old | matches source | terminal failure |
 | Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
 | Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
 
@@ -370,13 +367,13 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
 |----------|------|-------------|------------|---------|------------|
 | Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
-| A source revert fails or throws | any | new on the stuck source | old | terminal failure | source ahead of local |
-| A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
+| A source revert fails or throws after local restoration succeeds | any | new on the stuck source | old | terminal failure | source ahead of local |
+| A local revert fails after source restoration succeeds | any | old | may remain new | terminal failure | local ahead of source |
 | Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
 
 Three root causes account for every divergence:
 
-1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
+1. **A compensating write failed.** Local and source reverts are inverse writes, not an undo. Either can fail or throw, leaving the property unrestored. The failure is reported through `FailedChanges` and `Errors`.
 2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
 3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
 
@@ -398,9 +395,7 @@ public partial class GpioDevice
 }
 ```
 
-When `OnChanging/OnChanged` throws:
-- **BestEffort mode**: Other successful changes are applied, failure reported
-- **Rollback mode**: All previous stages are reverted (sources + successful local changes)
+When `OnChanging/OnChanged` throws, the mutation is compensated according to [Failure Handling](#failure-handling). The original callback error and any compensation errors are reported together.
 
 ### Derived Properties
 
@@ -571,8 +566,8 @@ TransactionAwaitable BeginTransactionAsync(
 ### Enums
 
 **TransactionFailureHandling:**
-- `BestEffort` - Apply successful changes, rollback failed ones (per-property consistency)
-- `Rollback` - All-or-nothing across all properties
+
+See [Failure Handling](#failure-handling) for the policy contract and [Failure Flows and Consistency](#failure-flows-and-consistency) for possible end states.
 
 **TransactionLocking:**
 - `Exclusive` - Lock at begin, hold until dispose

@@ -539,8 +539,8 @@ public sealed class SubjectTransaction : IDisposable
                     SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, sourceRevert.Errors));
             }
 
-            // BestEffort: keep source == model for failed-apply properties by reverting only the
-            // source writes whose property failed to apply (matched by Property equality).
+            // BestEffort reverts source writes for failed applies; consistency also depends on the
+            // corresponding local compensation having succeeded.
             var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
