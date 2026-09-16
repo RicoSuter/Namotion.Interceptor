@@ -56,6 +56,8 @@ public class SubjectPropertyUpdate
 
     /// <summary>
     /// Total count of collection/dictionary after all operations.
+    /// With no operations and a complete set of valid item references, declares the final membership.
+    /// Unspecified properties of retained children are preserved.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("count")]

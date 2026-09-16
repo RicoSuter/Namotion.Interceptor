@@ -48,6 +48,24 @@ internal static class SubjectUpdateFactory
         try
         {
             builder.Initialize(rootSubject, processors);
+            propertyChanges = builder.MergeChanges(propertyChanges);
+
+            // Merging can place a child's change before its parent assignment. Prepare complete
+            // payloads first so sparse changes retain their captured values, timestamps and attributes.
+            for (var i = 0; i < propertyChanges.Length; i++)
+            {
+                var property = propertyChanges[i].Property.TryGetRegisteredProperty();
+                if (property?.IsSubjectReference == true && IsPropertyIncluded(property, processors) &&
+                    propertyChanges[i].GetNewValue<IInterceptorSubject?>() is { } item)
+                {
+                    // Reserve the owner before traversal so a child's backreference stays sparse.
+                    builder.GetOrCreateId(property.Parent.Subject);
+                    if (!ReferenceEquals(item, rootSubject) && !ReferenceEquals(item, property.Parent.Subject))
+                    {
+                        ProcessSubjectComplete(item, builder);
+                    }
+                }
+            }
 
             for (var i = 0; i < propertyChanges.Length; i++)
             {
@@ -74,13 +92,29 @@ internal static class SubjectUpdateFactory
 
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
+        {
+            builder.HasUnregisteredSubjects = true;
             return;
+        }
 
         var properties = builder.GetOrCreateProperties(subjectId);
 
         foreach (var property in registeredSubject.Properties)
         {
             if (!property.HasGetter || property.IsAttribute)
+                continue;
+
+            // A computed derived property that holds subjects is a projection: it owns nothing, so the
+            // subjects behind it are often outside the graph and contribute no payload, and an id that
+            // describes nothing is worse on the wire than saying nothing at all. Skipped at the source
+            // so no receiver has to reason about it.
+            //
+            // The setter test asks whether the value is stored on this side, which is what separates a
+            // projection from a real edge, and not whether a receiver could write it. A stored [Derived]
+            // property carries an ordinary edge and is still published. Value typed derived properties
+            // are published too: a receiver may display them or rely on this side to compute them, and
+            // they carry no reference that can dangle.
+            if (property.CanContainSubjects && property.Reference.Metadata.IsDerived && !property.HasSetter)
                 continue;
 
             if (!IsPropertyIncluded(property, builder.Processors))
@@ -237,6 +271,7 @@ internal static class SubjectUpdateFactory
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Object;
+        update.Id = null;
 
         if (item is not null)
         {

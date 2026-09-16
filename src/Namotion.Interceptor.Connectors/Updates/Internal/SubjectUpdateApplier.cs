@@ -98,6 +98,13 @@ internal static class SubjectUpdateApplier
         if (registeredProperty is null)
             return;
 
+        // Every branch below ends in a write, so a property this model cannot write could only fail.
+        // Whether a property is writable is a fact about this model rather than the producer's, and a
+        // producer may legitimately publish one for a receiver to display, so this is an expected shape
+        // and is ignored rather than reported.
+        if (!registeredProperty.HasSetter)
+            return;
+
         try
         {
             switch (propertyUpdate.Kind)
@@ -164,9 +171,9 @@ internal static class SubjectUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        if (propertyUpdate.Id is not null &&
-            context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties))
+        if (propertyUpdate.Id is not null)
         {
+            var itemProperties = context.GetSubjectProperties(propertyUpdate.Id);
             if (property.GetValue() is IInterceptorSubject existingItem)
             {
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))
