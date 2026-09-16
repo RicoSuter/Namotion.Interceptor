@@ -39,15 +39,20 @@ public class SubjectReplayInheritanceTests
         }
     }
 
-    [Fact]
-    public void WhenAncestorIsCompiledSeparately_ThenOwnAndInheritedReplayAreSupported()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void WhenAncestorIsCompiledSeparately_ThenOwnAndInheritedReplayAreSupported(bool generatedMiddle, bool redeclareSubject)
     {
         // Arrange
-        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution("""
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution($$"""
             using Namotion.Interceptor.Attributes;
             [InterceptorSubject]
             public partial class Root { public partial int RootValue { get; set; } }
-            public class Bridge : Root { }
+            {{(generatedMiddle ? "[InterceptorSubject] public partial class Middle : Root { public partial int MiddleValue { get; set; } }" : "public class Middle : Root { }")}}
+            public class Bridge : Middle{{(redeclareSubject ? ", Namotion.Interceptor.IInterceptorSubject" : "")}} { }
             """, """
             using Namotion.Interceptor.Attributes;
             [InterceptorSubject]
@@ -66,6 +71,51 @@ public class SubjectReplayInheritanceTests
             Assert.Equal(42, property.GetValue!(subject));
             Assert.True(outcome.Mutated);
         }
+    }
+
+    [Theory]
+    [InlineData("protected new InterceptorExecutor GetPropertyReplayExecutor() => new(this);")]
+    [InlineData("public new static int GetPropertyReplayExecutor() => 0;")]
+    [InlineData("public new int GetPropertyReplayExecutor => 0;")]
+    [InlineData("protected new virtual InterceptorExecutor GetPropertyReplayExecutor() => new(this);")]
+    [InlineData("protected InterceptorExecutor GetPropertyReplayExecutor(int ignored) => new(this);")]
+    [InlineData("protected new bool CanReplayGeneratedProperty(string propertyName) => true;")]
+    [InlineData("protected new void ReplayGeneratedProperty(string propertyName, object value, ref PropertyReplayOutcome outcome) { outcome.Accepted = true; }")]
+    public void WhenCompiledProviderHidesReplayHelper_ThenReplayRejectsAndOrdinarySetterUsesItsInterceptor(string declaration)
+    {
+        // Arrange
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution($$"""
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+            using Namotion.Interceptor.Interceptors;
+            [InterceptorSubject]
+            public partial class Root { public partial int RootValue { get; set; } }
+            public class Bridge : Root, IInterceptorSubject
+            {
+                {{declaration}}
+            }
+            """, """
+            [Namotion.Interceptor.Attributes.InterceptorSubject]
+            public partial class Leaf : Bridge { public partial int Value { get; set; } }
+            """);
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        var interceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext.Create().WithService(() => interceptor);
+        var subjectType = result.LoadAssembly().GetType("Leaf")!;
+        var subject = (IInterceptorSubject)Activator.CreateInstance(subjectType, context)!;
+        var outcome = default(PropertyReplayOutcome);
+
+        // Act
+        subject.Properties["Value"].SetValue!(subject, 10);
+
+        // Assert
+        Assert.False(((ISubjectPropertyReplay)subject).CanReplayProperty("Value"));
+        Assert.Throws<NotSupportedException>(() => ((ISubjectPropertyReplay)subject).ReplayProperty("Value", 20, ref outcome));
+        Assert.Equal(10, subject.Properties["Value"].GetValue!(subject));
+        Assert.Equal(new object[] { 10 }, interceptor.Writes.Select(write => write.Value));
+        Assert.False(outcome.Accepted);
+        Assert.False(outcome.Mutated);
     }
 
     [Theory]

@@ -46,7 +46,7 @@ internal static class SubjectReplayContract
         var replayInterface = compilation.GetTypeByMetadataName(KnownTypes.ISubjectPropertyReplay);
         return replayInterface is not null && replayInterface.GetMembers().Any(member =>
             subject.FindImplementationForInterfaceMember(member) is { } implementation &&
-            !implementation.GetAttributes().Any(attribute => attribute.AttributeClass?.ToDisplayString() == "System.Runtime.CompilerServices.CompilerGeneratedAttribute"));
+            !IsGenerated(implementation));
     }
 
     private static bool HasCompiledContract(INamedTypeSymbol ancestor, INamedTypeSymbol subject, Compilation compilation)
@@ -78,7 +78,21 @@ internal static class SubjectReplayContract
     }
 
     private static IMethodSymbol? FindMethod(INamedTypeSymbol ancestor, INamedTypeSymbol subject, Compilation compilation, string name)
-        => SymbolExtensions.AccessibleMembers(ancestor, subject, compilation, name)
-            .OfType<IMethodSymbol>()
-            .FirstOrDefault(method => !method.IsStatic && !method.IsVirtual && !method.IsOverride && method.TypeParameters.Length == 0);
+    {
+        // A nearer handwritten member must not be skipped or combined with generated helpers above it.
+        var member = SymbolExtensions.HidableMembers(ancestor, subject, compilation, name).FirstOrDefault();
+        return member is IMethodSymbol { IsStatic: false, IsVirtual: false, IsOverride: false, TypeParameters.Length: 0 } method &&
+               OwnsGeneratedReplay(method.ContainingType, compilation) ? method : null;
+    }
+
+    private static bool OwnsGeneratedReplay(INamedTypeSymbol type, Compilation compilation)
+    {
+        var replayInterface = compilation.GetTypeByMetadataName(KnownTypes.ISubjectPropertyReplay);
+        return replayInterface is not null && replayInterface.GetMembers().All(member =>
+            type.FindImplementationForInterfaceMember(member) is { } implementation &&
+            SymbolEqualityComparer.Default.Equals(implementation.ContainingType, type) && IsGenerated(implementation));
+    }
+
+    private static bool IsGenerated(ISymbol member)
+        => member.GetAttributes().Any(attribute => attribute.AttributeClass?.ToDisplayString() == "System.Runtime.CompilerServices.CompilerGeneratedAttribute");
 }
