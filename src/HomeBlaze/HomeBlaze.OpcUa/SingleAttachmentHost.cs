@@ -91,6 +91,8 @@ internal sealed class SingleAttachmentHost<TService>
     /// waited for from the subject's own StopAsync or from the unwind in <see cref="RunAsync"/>, so it
     /// can never park inside the handler's stop transition for that subject.
     /// </summary>
+    private readonly SemaphoreSlim _attachmentGate = new(1, 1);
+
     /// <summary>
     /// Orders a status commit against a stop. The gate cannot do this: the unwind writes Stopped without
     /// taking it, deliberately, because taking it there would wait on the very transition the unwind runs
@@ -106,7 +108,6 @@ internal sealed class SingleAttachmentHost<TService>
     /// </summary>
     private int _stopGeneration;
 
-    private readonly SemaphoreSlim _attachmentGate = new(1, 1);
 
     /// <summary>
     /// The single attachment the wrapper owns, or null when nothing is attached. Read and written only
@@ -181,14 +182,19 @@ internal sealed class SingleAttachmentHost<TService>
 
         try
         {
-            // Cleared ahead of the status: the text stands under Error alone.
-            _owner.StatusMessage = null;
-            _owner.Status = ServiceStatus.Starting;
+            // Captured at the gate rather than deeper in: every status this path writes has to lose to a
+            // stop that lands while it runs, and writing Starting first would otherwise put the wrapper
+            // back on a status that reads as not stopped.
+            var generation = CaptureStopGeneration();
+
+            if (!TryCommitActive(generation, ServiceStatus.Starting, message: null))
+            {
+                return;
+            }
 
             if (_owner.GetConfigurationError() is { } configurationError)
             {
-                _owner.Status = ServiceStatus.Error;
-                _owner.StatusMessage = configurationError;
+                TryCommitActive(generation, ServiceStatus.Error, configurationError);
                 return;
             }
 
@@ -217,8 +223,7 @@ internal sealed class SingleAttachmentHost<TService>
                     // Dropped rather than kept, which would report Starting forever.
                     _owner.DetachHostedService(attachment);
 
-                    _owner.Status = ServiceStatus.Error;
-                    _owner.StatusMessage = NotAttachedMessage;
+                    TryCommitActive(generation, ServiceStatus.Error, NotAttachedMessage);
                     _logger.LogWarning(
                         "{Service} for {Target} was not started: the subject is not attached to a running host.",
                         _owner.LogName, _owner.LogTarget);
@@ -228,7 +233,7 @@ internal sealed class SingleAttachmentHost<TService>
                 _attachment = attachment;
             }
 
-            UpdateFromAttachment();
+            UpdateFromAttachment(generation);
             _logger.LogInformation("{Service} started for {Target}", _owner.LogName, _owner.LogTarget);
         }
         catch (Exception exception)
@@ -236,8 +241,9 @@ internal sealed class SingleAttachmentHost<TService>
             // No OperationCanceledException filter: the only wait on the caller's token in this try is
             // the startable wait, which reports its own cancellation and returns instead of throwing,
             // so a filter could only swallow a genuine start failure and report it as a clean stop.
-            _owner.Status = ServiceStatus.Error;
-            _owner.StatusMessage = exception.Message;
+            // Its own capture: the one above is out of scope here, and a stop that landed during the
+            // failed start still outranks the failure.
+            TryCommitActive(CaptureStopGeneration(), ServiceStatus.Error, exception.Message);
             _logger.LogError(exception, "Failed to start {Service} for {Target}", _owner.LogName, _owner.LogTarget);
         }
         finally
@@ -265,10 +271,17 @@ internal sealed class SingleAttachmentHost<TService>
                 return;
             }
 
-            // Cleared ahead of the status: a wrapper that faulted with its attachment still held
-            // arrives here from Error, and the text stands under Error alone.
-            _owner.StatusMessage = null;
-            _owner.Status = ServiceStatus.Stopping;
+            lock (_statusLock)
+            {
+                // Under the lock but not generation guarded: this is itself a stop, so it never loses to
+                // one. Paired so the unwind cannot land between the two writes and leave Stopping on top
+                // of the Stopped it just reported.
+                //
+                // Cleared ahead of the status: a wrapper that faulted with its attachment still held
+                // arrives here from Error, and the text stands under Error alone.
+                _owner.StatusMessage = null;
+                _owner.Status = ServiceStatus.Stopping;
+            }
 
             try
             {
@@ -333,7 +346,7 @@ internal sealed class SingleAttachmentHost<TService>
 
         try
         {
-            UpdateFromAttachment();
+            UpdateFromAttachment(CaptureStopGeneration());
         }
         finally
         {
@@ -346,20 +359,13 @@ internal sealed class SingleAttachmentHost<TService>
     /// handler creates, faults and disposes the instance on its own chain, so polling the handle is the
     /// only way those outcomes reach the UI. Must be called with <see cref="_attachmentGate"/> held.
     /// </summary>
-    private void UpdateFromAttachment()
+    private void UpdateFromAttachment(int generation)
     {
         if (_attachment is not { } attachment || _owner.Status is ServiceStatus.Stopping or ServiceStatus.Stopped)
         {
             return;
         }
 
-        // Captured before anything is read, so every commit below can tell whether a stop landed while
-        // this round was running.
-        int generation;
-        lock (_statusLock)
-        {
-            generation = _stopGeneration;
-        }
 
         // Read below the fault, not above it: a retry start clears the fault before it enters its start
         // window, so a reading taken above would still be settled for a fault this poll is about to act
@@ -372,7 +378,7 @@ internal sealed class SingleAttachmentHost<TService>
             // Re-checked inside the lock rather than trusting the guard this round read on entry: the
             // two are many statements apart, several of them full interceptor chain passes, and a stop
             // landing between them would otherwise be overwritten for good.
-            if (!TryCommitFault(fault, generation))
+            if (!TryCommitActive(generation, ServiceStatus.Error, fault.Message, _owner.ResetDiagnostics))
             {
                 return;
             }
@@ -388,11 +394,6 @@ internal sealed class SingleAttachmentHost<TService>
             return;
         }
 
-        // Cleared here and not only on the start path: the handler clears a stale fault on the next
-        // successful transition, so a recovered attachment would otherwise keep reporting Running beside
-        // the error text of the transition that failed.
-        _owner.StatusMessage = null;
-
         // One reading, so the state and the instance cannot disagree: a start in flight may already have
         // published its tree, and dropping it here would take that tree back out of the graph underneath
         // the factory. Reading them separately is what let a stale state stand beside a fresh instance.
@@ -407,65 +408,59 @@ internal sealed class SingleAttachmentHost<TService>
                 _owner.DropInstanceState();
             }
 
-            TryCommitStarting(generation);
+            TryCommitActive(generation, ServiceStatus.Starting, message: null);
             return;
         }
 
-        TryCommitRunning(instance, generation);
+        TryCommitActive(generation, ServiceStatus.Running, message: null, () => _owner.ApplyDiagnostics(instance));
     }
 
-    /// <summary>Commits a reconciled status unless a stop has landed since this round read its guard.</summary>
-    private bool TryCommitFault(Exception fault, int generation)
+    /// <summary>Reads the stop generation an operation must commit against.</summary>
+    private int CaptureStopGeneration()
     {
         lock (_statusLock)
         {
-            if (HasStopped(generation))
-            {
-                return false;
-            }
-
-            // Status first, message second: this moves the wrapper to Error, and the text must never be
-            // readable under a status that does not carry it.
-            _owner.Status = ServiceStatus.Error;
-            _owner.StatusMessage = fault.Message;
-            _owner.ResetDiagnostics();
-            return true;
-        }
-    }
-
-    /// <inheritdoc cref="TryCommitFault" />
-    private void TryCommitStarting(int generation)
-    {
-        lock (_statusLock)
-        {
-            if (!HasStopped(generation))
-            {
-                _owner.Status = ServiceStatus.Starting;
-            }
-        }
-    }
-
-    /// <inheritdoc cref="TryCommitFault" />
-    private void TryCommitRunning(TService instance, int generation)
-    {
-        lock (_statusLock)
-        {
-            if (HasStopped(generation))
-            {
-                return;
-            }
-
-            _owner.Status = ServiceStatus.Running;
-            _owner.ApplyDiagnostics(instance);
+            return _stopGeneration;
         }
     }
 
     /// <summary>
-    /// Whether a stop has already reported itself. Read under <see cref="_statusLock"/> by every commit,
-    /// which is what makes the reading and the write it decides one step rather than two.
+    /// Writes a status that claims the wrapper is doing something, unless a stop has landed since
+    /// <paramref name="generation"/> was captured, and reports whether it wrote.
     /// </summary>
-    private bool HasStopped(int generation)
-        => _stopGeneration != generation || _owner.Status is ServiceStatus.Stopping or ServiceStatus.Stopped;
+    /// <remarks>
+    /// The check and the write are one step because the unwind reports Stopped without the gate every
+    /// other writer holds, so ordering against it cannot come from the gate. The generation is what that
+    /// check reads, rather than the status itself: any writer can move the status off Stopped, and one
+    /// that did would make a later reading of it say the wrapper is running again.
+    /// </remarks>
+    private bool TryCommitActive(int generation, ServiceStatus status, string? message, Action? afterCommit = null)
+    {
+        lock (_statusLock)
+        {
+            if (_stopGeneration != generation)
+            {
+                return false;
+            }
+
+            if (status is ServiceStatus.Error)
+            {
+                // Status first when moving to Error, message first when moving away from it: the text
+                // stands under Error alone and must never be readable beside a status that lacks it.
+                _owner.Status = status;
+                _owner.StatusMessage = message;
+            }
+            else
+            {
+                _owner.StatusMessage = message;
+                _owner.Status = status;
+            }
+
+            afterCommit?.Invoke();
+            return true;
+        }
+    }
+
 
 
     /// <summary>
