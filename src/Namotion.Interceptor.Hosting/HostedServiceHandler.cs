@@ -318,6 +318,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 }
                 catch
                 {
+                    // Stopped as well as disposed, because the generic host stops a service whose own
+                    // StartAsync threw rather than treating it as never started, and a service that
+                    // acquired a handle before throwing has nowhere else to release it: the instance is
+                    // never recorded, so every later stop reads Current as null and returns.
+                    await StopFailedStartAsync(instance, subject).ConfigureAwait(false);
+
                     if (target.IsHandlerOwnedInstance)
                     {
                         await DisposeInstanceAsync(instance).ConfigureAwait(false);
@@ -495,10 +501,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     target.SetFault(exception);
                     Logger?.LogError(exception, "Failed to stop hosted service for subject {Subject}.", subject);
                 }
-
-                if (target.IsHandlerOwnedInstance)
+                finally
                 {
-                    await DisposeInstanceAsync(instance).ConfigureAwait(false);
+                    // In the finally rather than after the catch: Current is already cleared, so an
+                    // escape from anything above would leave the instance reachable from nothing.
+                    if (target.IsHandlerOwnedInstance)
+                    {
+                        await DisposeInstanceAsync(instance).ConfigureAwait(false);
+                    }
                 }
             }
             finally
@@ -513,6 +523,26 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 signal?.TrySetResult();
             }
         };
+
+    /// <summary>
+    /// Stops an instance whose own start threw, reporting a failure here rather than raising it.
+    /// </summary>
+    /// <remarks>
+    /// Contains its own failure for the reason on <see cref="DisposeInstanceAsync"/>: this runs inside a
+    /// catch that rethrows the start's exception, which is the one a caller waits for, and an escape
+    /// from here would replace it and skip the dispose behind it.
+    /// </remarks>
+    private async Task StopFailedStartAsync(IHostedService instance, IInterceptorSubject subject)
+    {
+        try
+        {
+            await instance.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            Logger?.LogError(exception, "Failed to stop hosted service for subject {Subject} after its start failed.", subject);
+        }
+    }
 
     private async Task DisposeInstanceAsync(IHostedService instance)
     {

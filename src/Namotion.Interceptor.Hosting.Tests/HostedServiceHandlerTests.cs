@@ -519,6 +519,42 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
+    public async Task WhenAStartFaults_ThenTheInstanceIsStopped()
+    {
+        // Arrange - the generic host stops a service whose own StartAsync threw rather than treating it
+        // as never started, and a service that acquired a handle before throwing has nowhere else to
+        // release it: the instance is never recorded, so every later stop reads Current as null.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var person = new Person(context);
+            var instance = new TrackedBackgroundService { ThrowOnStart = true };
+
+            // Act
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                person.AttachHostedServiceAsync(() => instance, CancellationToken.None));
+
+            // Assert
+            Assert.True(instance.IsStopped);
+        });
+    }
+
+    [Fact]
+    public async Task WhenASubjectsOwnStartFaults_ThenTheSubjectIsStopped()
+    {
+        // Arrange - the subject half matters more than the attachment half, because the handler never
+        // disposes a subject, so the stop is the only cleanup it gets.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            // Act
+            var subject = new ThrowingHostedSubject(context);
+            await ((IInterceptorSubject)subject).TryGetSubjectTarget()!.DrainAsync();
+
+            // Assert
+            Assert.Equal(1, subject.StopCount);
+        });
+    }
+
+    [Fact]
     public async Task WhenATransitionFaultedEarlier_ThenTheNextSuccessfulOneClearsTheFault()
     {
         // Arrange - a stale Fault would make a later successful attach throw, and the OPC UA wrappers
