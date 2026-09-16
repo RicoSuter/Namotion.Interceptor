@@ -79,29 +79,25 @@ public static class ParentsHandlerExtensions
         private readonly HashSet<SubjectParent> _set = [];
         private volatile ImmutableArray<SubjectParent>[]? _cache; // Box in array for volatile
 
-        public bool Add(SubjectParent parent)
+        public void Add(SubjectParent parent)
         {
             lock (_lock)
             {
                 if (_set.Add(parent))
                 {
                     _cache = null; // Invalidate cache
-                    return true;
                 }
-                return false;
             }
         }
 
-        public bool Remove(SubjectParent parent)
+        public void Remove(SubjectParent parent)
         {
             lock (_lock)
             {
                 if (_set.Remove(parent))
                 {
                     _cache = null; // Invalidate cache
-                    return true;
                 }
-                return false;
             }
         }
 

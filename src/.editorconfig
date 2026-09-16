@@ -62,6 +62,11 @@ dotnet_diagnostic.S1144.severity = none
 # When reusing: keep the rule if such fixtures are uncommon. Production remains checked.
 dotnet_diagnostic.S2325.severity = none
 
+# S1215: Explicit garbage collection should not be used.
+# Disabled in tests: forced collection is required for reclamation and memory-lifetime checks.
+# When reusing: keep the rule where tests do not deliberately verify garbage collection. Production remains checked.
+dotnet_diagnostic.S1215.severity = none
+
 # Verify snapshots must preserve their exact text representation.
 [*.{received,verified}.{txt}]
 charset = utf-8-bom
