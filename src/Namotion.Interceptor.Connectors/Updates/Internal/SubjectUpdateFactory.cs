@@ -104,6 +104,19 @@ internal static class SubjectUpdateFactory
             if (!property.HasGetter || property.IsAttribute)
                 continue;
 
+            // A computed derived property that holds subjects is a projection: it owns nothing, so the
+            // subjects behind it are often outside the graph and contribute no payload, and an id that
+            // describes nothing is worse on the wire than saying nothing at all. Skipped at the source
+            // so no receiver has to reason about it.
+            //
+            // The setter test asks whether the value is stored on this side, which is what separates a
+            // projection from a real edge, and not whether a receiver could write it. A stored [Derived]
+            // property carries an ordinary edge and is still published. Value typed derived properties
+            // are published too: a receiver may display them or rely on this side to compute them, and
+            // they carry no reference that can dangle.
+            if (property.CanContainSubjects && property.Reference.Metadata.IsDerived && !property.HasSetter)
+                continue;
+
             if (!IsPropertyIncluded(property, builder.Processors))
                 continue;
 
