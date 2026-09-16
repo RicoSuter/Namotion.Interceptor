@@ -23,6 +23,9 @@ internal static class MemberNames
     /// emitted members need a 'new' modifier, and the emitter decides that one for itself.
     /// </summary>
     public const string DefaultProperties = "DefaultProperties";
+    public const string GetPropertyReplayExecutor = "GetPropertyReplayExecutor";
+    public const string CanReplayGeneratedProperty = "CanReplayGeneratedProperty";
+    public const string ReplayGeneratedProperty = "ReplayGeneratedProperty";
 }
 
 /// <summary>
@@ -107,11 +110,16 @@ internal static class GeneratedMemberTable
         ["Context", "Data", "SyncRoot", "AddProperties"];
 
     /// <summary>
-    /// Derived from <see cref="AccessorHelpers"/> rather than repeated, so a fifth helper added there
-    /// cannot be contract-checked and silently escape the hiding rule.
+    /// Names reserved by the generated replay contract.
+    /// </summary>
+    public static readonly string[] ReplayMemberNames =
+        [MemberNames.GetPropertyReplayExecutor, MemberNames.CanReplayGeneratedProperty, MemberNames.ReplayGeneratedProperty];
+
+    /// <summary>
+    /// The ordinary and replay helpers protected by the inherited-member hiding rule.
     /// </summary>
     public static readonly string[] GeneratedMemberNames =
-        AccessorHelpers.Select(shape => shape.Name).ToArray();
+        AccessorHelpers.Select(shape => shape.Name).Concat(ReplayMemberNames).ToArray();
 
     /// <summary>
     /// Every member root mode emits that a generated copy further up the chain would hide, the two

@@ -93,16 +93,7 @@ internal static class SubjectMetadataExtractor
                 baseClass,
                 properties,
                 methods,
-                HasOwnReplayImplementation(typeSymbol, semanticModel.Compilation)),
+                SubjectReplayContract.CanGenerate(typeSymbol, semanticModel.Compilation, cancellationToken)),
             diagnostics);
-    }
-
-    private static bool HasOwnReplayImplementation(INamedTypeSymbol typeSymbol, Compilation compilation)
-    {
-        var replayInterface = compilation.GetTypeByMetadataName(KnownTypes.ISubjectPropertyReplay);
-        return replayInterface is not null && replayInterface.GetMembers().Any(member =>
-            SymbolEqualityComparer.Default.Equals(
-                typeSymbol.FindImplementationForInterfaceMember(member)?.ContainingType,
-                typeSymbol));
     }
 }

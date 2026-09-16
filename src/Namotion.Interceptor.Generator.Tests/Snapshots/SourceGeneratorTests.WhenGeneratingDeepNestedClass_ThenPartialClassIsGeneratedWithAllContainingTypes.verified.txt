@@ -106,7 +106,15 @@ namespace TestNamespace
 
         partial void OnValueChanged(int newValue);
 
-        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName)
+        protected global::Namotion.Interceptor.Interceptors.InterceptorExecutor GetPropertyReplayExecutor() => (global::Namotion.Interceptor.Interceptors.InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this);
+
+        [global::System.Runtime.CompilerServices.CompilerGenerated]
+        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName) => CanReplayGeneratedProperty(propertyName);
+
+        [global::System.Runtime.CompilerServices.CompilerGenerated]
+        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome) => ReplayGeneratedProperty(propertyName, value, ref outcome);
+
+        protected bool CanReplayGeneratedProperty(string propertyName)
         {
             var activeProperties = ((IInterceptorSubject)this).Properties;
             if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
@@ -123,7 +131,7 @@ namespace TestNamespace
             };
         }
 
-        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)
+        protected void ReplayGeneratedProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)
         {
             outcome = default;
             var activeProperties = ((IInterceptorSubject)this).Properties;
@@ -142,7 +150,7 @@ namespace TestNamespace
                     var cancel = false;
                     OnValueChanging(ref newValue, ref cancel);
                     if (cancel) return;
-                    ((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((DeepNestedSubject)o)._Value = v, ref outcome);
+                    GetPropertyReplayExecutor().SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((DeepNestedSubject)o)._Value = v, ref outcome);
                     if (outcome.Mutated)
                     {
                         OnValueChanged(_Value);

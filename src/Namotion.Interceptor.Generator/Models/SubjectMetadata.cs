@@ -15,4 +15,4 @@ internal sealed record SubjectMetadata(
     SubjectBaseClass BaseClass,
     IReadOnlyList<PropertyMetadata> Properties,
     IReadOnlyList<MethodMetadata> Methods,
-    bool HasOwnReplayImplementation = false);
+    bool EmitsPropertyReplay = false);

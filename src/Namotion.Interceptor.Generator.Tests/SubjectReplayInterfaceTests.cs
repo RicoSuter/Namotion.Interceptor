@@ -329,20 +329,22 @@ public class SubjectReplayInterfaceTests
     }
 
     [Fact]
-    public void WhenGeneratedDerivedAddsProperty_ThenInheritedReplayRejectsItWithoutMutation()
+    public void WhenGeneratedDerivedAddsProperty_ThenReplayUpdatesItsOwnProperty()
     {
         // Arrange
         var subject = new ReplayInterfaceDerived { Value = 1, Other = 3 };
         var outcome = default(PropertyReplayOutcome);
 
-        // Act & Assert
-        Assert.False(((ISubjectPropertyReplay)subject).CanReplayProperty(nameof(subject.Other)));
-        Assert.Throws<NotSupportedException>(() =>
-            ((ISubjectPropertyReplay)subject).ReplayProperty(nameof(subject.Other), 2, ref outcome));
+        // Act
+        var canReplay = ((ISubjectPropertyReplay)subject).CanReplayProperty(nameof(subject.Other));
+        ((ISubjectPropertyReplay)subject).ReplayProperty(nameof(subject.Other), 2, ref outcome);
+
+        // Assert
+        Assert.True(canReplay);
         Assert.Equal(1, subject.Value);
-        Assert.Equal(3, subject.Other);
-        Assert.False(outcome.Accepted);
-        Assert.False(outcome.Mutated);
+        Assert.Equal(2, subject.Other);
+        Assert.True(outcome.Accepted);
+        Assert.True(outcome.Mutated);
     }
 
     [Fact]

@@ -152,7 +152,7 @@ internal static class SubjectCodeGenerator
             ? "IInterceptorSubject"
             : "IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged";
 
-        if (metadata.Properties.Any(property => CanEmitReplay(property, metadata)))
+        if (metadata.EmitsPropertyReplay)
         {
             interfaces += ", global::Namotion.Interceptor.ISubjectPropertyReplay";
         }
@@ -444,13 +444,25 @@ internal static class SubjectCodeGenerator
 
     private static void EmitPropertyReplayImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
-        var properties = metadata.Properties.Where(property => CanEmitReplay(property, metadata)).ToArray();
-        if (properties.Length == 0)
+        if (!metadata.EmitsPropertyReplay)
         {
             return;
         }
 
-        builder.AppendLine("        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName)");
+        var properties = metadata.Properties.Where(property => CanEmitReplay(property, metadata)).ToArray();
+        var hidingModifier = metadata.BaseClass.EmitsInterceptionMembers ? "" : "new ";
+        if (metadata.BaseClass.EmitsInterceptionMembers)
+        {
+            builder.AppendLine($"        {ProtectedUnlessSealed(metadata)} global::Namotion.Interceptor.Interceptors.InterceptorExecutor {MemberNames.GetPropertyReplayExecutor}() => (global::Namotion.Interceptor.Interceptors.InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this);");
+            builder.AppendLine();
+        }
+        builder.AppendLine("        [global::System.Runtime.CompilerServices.CompilerGenerated]");
+        builder.AppendLine($"        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName) => {MemberNames.CanReplayGeneratedProperty}(propertyName);");
+        builder.AppendLine();
+        builder.AppendLine("        [global::System.Runtime.CompilerServices.CompilerGenerated]");
+        builder.AppendLine($"        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome) => {MemberNames.ReplayGeneratedProperty}(propertyName, value, ref outcome);");
+        builder.AppendLine();
+        builder.AppendLine($"        {hidingModifier}{ProtectedUnlessSealed(metadata)} bool {MemberNames.CanReplayGeneratedProperty}(string propertyName)");
         builder.AppendLine("        {");
         EmitReplayMetadataGuard(builder, "return false;");
         builder.AppendLine("            return propertyName switch");
@@ -459,11 +471,13 @@ internal static class SubjectCodeGenerator
         {
             builder.AppendLine($"                nameof({property.Name}) => true,");
         }
-        builder.AppendLine("                _ => false");
+        builder.AppendLine(metadata.BaseClass.EmitsInterceptionMembers
+            ? "                _ => false"
+            : $"                _ => base.{MemberNames.CanReplayGeneratedProperty}(propertyName)");
         builder.AppendLine("            };");
         builder.AppendLine("        }");
         builder.AppendLine();
-        builder.AppendLine("        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)");
+        builder.AppendLine($"        {hidingModifier}{ProtectedUnlessSealed(metadata)} void {MemberNames.ReplayGeneratedProperty}(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)");
         builder.AppendLine("        {");
         builder.AppendLine("            outcome = default;");
         EmitReplayMetadataGuard(builder, "throw new global::System.NotSupportedException($\"Property '{propertyName}' does not support exact transaction replay outcomes.\");");
@@ -477,7 +491,14 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("                    return;");
             builder.AppendLine("                }");
         }
-        builder.AppendLine("                default: throw new global::System.NotSupportedException($\"Property '{propertyName}' does not support exact transaction replay outcomes.\");");
+        if (metadata.BaseClass.EmitsInterceptionMembers)
+        {
+            builder.AppendLine("                default: throw new global::System.NotSupportedException($\"Property '{propertyName}' does not support exact transaction replay outcomes.\");");
+        }
+        else
+        {
+            builder.AppendLine($"                default: base.{MemberNames.ReplayGeneratedProperty}(propertyName, value, ref outcome); return;");
+        }
         builder.AppendLine("            }");
         builder.AppendLine("        }");
         builder.AppendLine();
@@ -498,15 +519,8 @@ internal static class SubjectCodeGenerator
     }
 
     private static bool CanEmitReplay(PropertyMetadata property, SubjectMetadata metadata)
-    {
-        if (metadata.HasOwnReplayImplementation ||
-            !metadata.BaseClass.EmitsInterceptionMembers || metadata.BaseClass.HasInterceptorSubject)
-        {
-            return false;
-        }
-
-        return property.IsPartial && property.HasSetter && !property.IsVirtual && !property.IsOverride;
-    }
+        => property is { IsPartial: true, HasSetter: true, IsVirtual: false, IsOverride: false } &&
+           (metadata.BaseClass.TypeName is null || !property.IsNew);
 
     private static void EmitSetterBody(StringBuilder builder, PropertyMetadata property, SubjectMetadata metadata, bool replay)
     {
@@ -519,7 +533,7 @@ internal static class SubjectCodeGenerator
         if (replay)
         {
             builder.AppendLine($"{indentation}if (cancel) return;");
-            builder.AppendLine($"{indentation}((InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this)).SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v, ref outcome);");
+            builder.AppendLine($"{indentation}{MemberNames.GetPropertyReplayExecutor}().SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v, ref outcome);");
             builder.AppendLine($"{indentation}if (outcome.Mutated)");
         }
         else
