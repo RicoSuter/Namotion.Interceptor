@@ -362,13 +362,13 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
 | Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
 
-**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Returned compensation failures are reported in `FailedChanges` and `Errors`; a propagated source-revert timeout has no such result lists, and a throwing writer cannot report which sources it touched:
 
 | Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
 |----------|------|-------------|------------|---------|------------|
-| Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
+| Commit timeout during source revert | any | may be partially reverted | depends on forward writes and completed or failed local compensation | retryable failure | may persist unless a later retry restores agreement |
 | A source revert fails or throws after local restoration succeeds | any | new on the stuck source | old | terminal failure | source ahead of local |
-| A local revert fails after source restoration succeeds | any | old | may remain new | terminal failure | local ahead of source |
+| A local revert fails and source restoration succeeds | any | old | may remain new | terminal failure | local ahead of source |
 | Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
 
 Three root causes account for every divergence:
