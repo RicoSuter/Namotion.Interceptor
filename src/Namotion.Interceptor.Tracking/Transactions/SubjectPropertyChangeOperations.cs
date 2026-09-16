@@ -30,6 +30,7 @@ internal static class SubjectPropertyChangeOperations
         return ApplyLocalChanges(changes, excluded);
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1541", Justification = "Extracting this failure bookkeeping reproduced slower single-source commits despite unchanged allocations; keep it inline unless an alternative passes the same benchmark comparison.")]
     private static (IReadOnlyList<SubjectPropertyChange> Successful, IReadOnlyList<SubjectPropertyChange> Failed, IReadOnlyList<Exception> Errors)
         ApplyLocalChanges(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? excluded)
     {
@@ -54,35 +55,24 @@ internal static class SubjectPropertyChangeOperations
             }
             else
             {
-                RecordApplyFailure(changes[..i], change, error, ref successful, ref failed, ref errors);
+                if (failed is null)
+                {
+                    // On the no-exclude path, materialize the successful prefix at the first failure.
+                    successful ??= CopyAppliedChanges(changes[..i]);
+                    failed = [];
+                }
+
+                failed.Add(change);
+                if (error != null)
+                {
+                    (errors ??= []).Add(error);
+                }
             }
         }
 
         return failed is null
             ? (successful ?? (IReadOnlyList<SubjectPropertyChange>)[], [], [])
             : (successful!, failed, errors ?? []);
-    }
-
-    private static void RecordApplyFailure(
-        ReadOnlySpan<SubjectPropertyChange> appliedPrefix,
-        SubjectPropertyChange change,
-        Exception? error,
-        ref List<SubjectPropertyChange>? successful,
-        ref List<SubjectPropertyChange>? failed,
-        ref List<Exception>? errors)
-    {
-        if (failed is null)
-        {
-            // On the no-exclude path, materialize the successful prefix at the first failure.
-            successful ??= CopyAppliedChanges(appliedPrefix);
-            failed = [];
-        }
-
-        failed.Add(change);
-        if (error != null)
-        {
-            (errors ??= []).Add(error);
-        }
     }
 
     private static List<SubjectPropertyChange> CopyAppliedChanges(ReadOnlySpan<SubjectPropertyChange> changes)
