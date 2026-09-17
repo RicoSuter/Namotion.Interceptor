@@ -58,7 +58,7 @@ var update = SubjectUpdate.CreatePartialUpdateFromChanges(rootSubject, changes, 
 var json = JsonSerializer.Serialize(update);
 ```
 
-A subject that a change assigns to a reference, or inserts into a collection or dictionary, arrives with its complete property set and attributes. So does every subject reached through its first parent while that payload is built, such as the children of a newly attached subtree. This holds in any arrival order: changes to properties that hold subjects are processed before value and attribute changes, which then apply their captured values and timestamps on top. A reference to the root, to the subject that owns the changed property, or to a subject whose first parent lies elsewhere (a back or cross reference into the existing tree) is sent as an ID only.
+A subject that a change assigns to a reference, or inserts into a collection or dictionary, arrives with its complete property set and attributes. So does every subject the update mentions for the first time while that payload is built, such as the children of a newly attached subtree. A subject the update already carries an entry for is expanded a second time only when this reference is its first parent, which is what keeps a back or cross reference from pulling in a subtree the update states elsewhere. This holds in any arrival order: changes to properties that hold subjects are processed before value and attribute changes, which then apply their captured values and timestamps on top. A reference to the root and a reference to the subject that owns the changed property are sent as an ID only.
 
 Once a subject carries a complete payload in an update, a further change to one of its subject-holding properties in the same batch does not turn that property back into an incremental diff. The complete payload already states the final structure, and a receiver building the subject from it has no baseline the diff could apply to. Value and attribute changes still apply on top, which is how their captured values and timestamps survive.
 
@@ -115,6 +115,12 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.
 // Apply update as a local change (no source tracking).
 subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 ```
+
+### Properties the Receiver Cannot Write
+
+Whether a property has a setter is a fact about the receiving model, not the producer's, and a producer may legitimately publish one for a receiver to display. A property without a setter is therefore an expected shape rather than a failure: its own value is silently not written, and nothing is reported.
+
+Only that property's value is dropped. A reference or container the receiver already holds still carries the update through to its subtree, so a nested value behind a `get`-only or `init`-only reference arrives, and a sparse item update reaches an existing item of a read-only collection or dictionary. What such a property cannot receive is a new membership: the rebuilt container is not written, and a reference holding `null` is left alone rather than being given a subject it has nowhere to store. Attributes of a property without a setter apply as usual.
 
 ### When a Property Fails to Apply
 
@@ -214,6 +220,7 @@ Apply structural changes in two sub-phases:
 - All moves reference the state **after** removes/inserts have been applied
 - Multiple moves are applied simultaneously (each move reads from the snapshot)
 - Move `fromIndex` accounts for prior removes (intermediate index, not original)
+- Moves arrive as a **complete permutation**: the producer emits one Move for every retained item whose position changed, so every reordered slot is written from the snapshot. An applier must not read a single Move as a shift or a rotation of the items around it; one Move on its own overwrites its target and leaves a duplicate behind.
 
 | Operation | Index semantics |
 |-----------|-----------------|
@@ -229,15 +236,16 @@ Transform `[A, B, C]` → `[C, B]` (remove A, swap remaining):
 {
   "operations": [
     { "action": "Remove", "index": 0 },
-    { "action": "Move", "fromIndex": 1, "index": 0 }
+    { "action": "Move", "fromIndex": 1, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 1 }
   ]
 }
 ```
 
-After `Remove(0)`: `[B, C]` (indices 0, 1)
-After `Move(from=1, to=0)`: `[C, B]`
+After `Remove(0)`: `[B, C]` (indices 0, 1), which is the snapshot both moves read from
+After both moves: `[C, B]`
 
-Note: The move's `fromIndex` is 1 (C's position after the remove), not 2 (C's original position).
+Note: C's `fromIndex` is 1 (its position after the remove), not 2 (its original position). B moves too, even though only C changed place relative to the original collection: the swap is stated as both halves so the snapshot writes cover every slot.
 
 ### Phase 2: Property Updates
 
@@ -284,11 +292,15 @@ After: `[C, A, B]`
 {
   "kind": "Collection",
   "operations": [
-    { "action": "Move", "fromIndex": 2, "index": 0 }
+    { "action": "Move", "fromIndex": 2, "index": 0 },
+    { "action": "Move", "fromIndex": 0, "index": 1 },
+    { "action": "Move", "fromIndex": 1, "index": 2 }
   ],
   "count": 3
 }
 ```
+
+Every retained item is named, because each one sits at a new index: the rotation is stated as three snapshot writes rather than as one item moving past the others.
 
 Move operations contain only indices - no item data is transmitted, keeping payloads small even for large objects.
 
@@ -421,7 +433,8 @@ In partial updates, collection or dictionary entries without `count` are sparse 
 - **No "clear collection" operation**: clearing N items emits N individual Remove operations.
 - **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
-- **Shared subjects** have no identity across updates, so a subject referenced from two places arrives on the receiver as two instances unless both references are in the same update. Within one update the C# applier binds each ID to the subject it names and resolves later references to that same subject, including references back to the root, but only where it creates the value: a property that already holds a different subject keeps its own instance and receives the payload.
+- **Shared subjects** have no identity across updates, so a subject referenced from two places arrives on the receiver as two instances unless both references are in the same update. Within one update the C# applier binds each ID to the subject it names and resolves later references to that same subject, including references back to the root, but only where it creates the value and only where the bound subject fits the target's declared type: a property that already holds a different subject keeps its own instance and receives the payload, and a property whose type the bound subject does not satisfy gets an instance of its own.
+- **Complete membership matches by position or key**, not by subject identity, so when membership moves a different subject into a position the receiver applies the new payload onto the instance already sitting there, and that instance keeps every property the payload does not mention.
 - **Dictionary keys** are carried in the item or operation's `index` field and converted to the declared key type before lookup. Dictionary entries require a dictionary-declared property; attempting to encode them through a positional collection declaration throws `NotSupportedException`. Dictionary wrappers must expose subject values as key/value pairs through non-generic enumeration; value-only subject enumerators are rejected because their keys cannot be preserved.
 - **Collection factories** infer a unique element type from the declared collection or dictionary interfaces. Legacy collections implementing only non-generic `ICollection` retain the convention of using their single generic argument as the element type; legacy dictionaries implementing only non-generic `IDictionary` use their two generic arguments as key and value types. Untyped or ambiguous declarations throw `NotSupportedException`. The default factory creates arrays, `List<T>`, and `Dictionary<TKey, TValue>`; supply an `ISubjectFactory` for declarations requiring another concrete container type.
 

@@ -108,6 +108,33 @@ public class SubjectUpdateReferenceIntegrityTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAComputedSubjectProjectionIsAnAttribute_ThenNoUpdateCarriesIt(bool partial)
+    {
+        // Arrange
+        var projected = new Person { FirstName = "Projected" };
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root" };
+        var registeredProperty = source.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!;
+        registeredProperty.AddDerivedAttribute("Projection", typeof(Person), _ => projected, setValue: null);
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<string?>(new PropertyReference(source, nameof(Person.FirstName)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, "Root")
+        ];
+
+        // Act
+        var update = partial
+            ? SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, [])
+            : SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Assert
+        Assert.DoesNotContain(update.Subjects.Values, properties => properties.Values
+            .Any(property => property.Attributes?.ContainsKey("Projection") == true));
+        Assert.Equal(update.Root, Assert.Single(update.Subjects).Key);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]

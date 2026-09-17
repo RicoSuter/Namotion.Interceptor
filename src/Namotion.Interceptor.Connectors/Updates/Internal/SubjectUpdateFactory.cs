@@ -439,6 +439,9 @@ internal static class SubjectUpdateFactory
             if (!attribute.HasGetter)
                 continue;
 
+            if (IsComputedSubjectProjection(attribute))
+                continue;
+
             if (!IsPropertyIncluded(attribute, builder.Processors))
                 continue;
 
