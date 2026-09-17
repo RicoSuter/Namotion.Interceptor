@@ -793,7 +793,7 @@ public sealed class SubjectTransaction : IDisposable
         var message = _failureHandling switch
         {
             TransactionFailureHandling.BestEffort => "One or more changes failed. Successful changes have been applied.",
-            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted; rollback failures are reported in the errors.",
             _ => "One or more changes failed."
         };
 
