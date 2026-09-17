@@ -31,12 +31,21 @@ internal sealed class SubjectUpdateBuilder
 
     public HashSet<IInterceptorSubject> PathVisited { get; } = new(ReferenceEqualityComparer.Instance);
 
+    /// <summary>
+    /// Changes held back until the subject-holding changes of a batch are processed, with the registered
+    /// property already resolved for each.
+    /// </summary>
+    public List<(int Index, RegisteredSubjectProperty Property)> DeferredChanges { get; } = [];
+
+    public IInterceptorSubject RootSubject { get; private set; } = null!;
+
     public ReadOnlySpan<SubjectPropertyChange> MergeChanges(ReadOnlySpan<SubjectPropertyChange> changes)
         => changes.Length <= 1 ? changes : (_changeMerger ??= new ChangeMerger()).Merge(changes).Span;
 
     public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
         Processors = processors;
+        RootSubject = rootSubject;
         GetOrCreateId(rootSubject); // Ensure root subject gets ID "1"
     }
 
@@ -235,8 +244,10 @@ internal sealed class SubjectUpdateBuilder
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
         PathVisited.Clear();
+        DeferredChanges.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
+        RootSubject = null!;
     }
 
     private void ApplyTransformations()

@@ -616,6 +616,50 @@ public class SubjectUpdateCycleTests
         await Verify(partialUpdate).DisableDateCounting();
     }
 
+    [Fact]
+    public void WhenTheRootIsAssignedToABackReference_ThenOnlyItsIdIsSent()
+    {
+        // Arrange
+        var child = new Person { FirstName = "Child" };
+        var root = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root", Mother = child };
+        child.Father = root;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<Person?>(new PropertyReference(child, nameof(Person.Father)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, root)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert
+        var rootProperties = update.Subjects[update.Root];
+        Assert.Equal(new[] { nameof(Person.Mother) }, rootProperties.Keys);
+        Assert.Equal(update.Root, update.Subjects[rootProperties[nameof(Person.Mother)].Id!][nameof(Person.Father)].Id);
+    }
+
+    [Fact]
+    public void WhenASubjectIsAssignedToItsOwnReference_ThenOnlyItsIdIsSent()
+    {
+        // Arrange
+        var node = new CycleTestNode { Name = "Node" };
+        var root = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry()) { Name = "Root", Child = node };
+        node.Self = node;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<CycleTestNode?>(new PropertyReference(node, nameof(CycleTestNode.Self)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, node)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert
+        var nodeId = update.Subjects[update.Root][nameof(CycleTestNode.Child)].Id!;
+        Assert.Equal(new[] { nameof(CycleTestNode.Self) }, update.Subjects[nodeId].Keys);
+        Assert.Equal(nodeId, update.Subjects[nodeId][nameof(CycleTestNode.Self)].Id);
+    }
+
     /// <summary>
     /// Helper to find a subject ID that has a specific property value.
     /// </summary>

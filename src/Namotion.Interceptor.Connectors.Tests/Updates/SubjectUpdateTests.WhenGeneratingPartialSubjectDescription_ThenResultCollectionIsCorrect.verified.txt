@@ -18,12 +18,6 @@
             Id: 4
           }
         ],
-        Items: [
-          {
-            Index: 1,
-            Id: 4
-          }
-        ],
         Count: 2
       },
       father: {

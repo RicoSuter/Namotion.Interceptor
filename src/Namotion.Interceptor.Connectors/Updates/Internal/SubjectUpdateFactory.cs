@@ -50,26 +50,25 @@ internal static class SubjectUpdateFactory
             builder.Initialize(rootSubject, processors);
             propertyChanges = builder.MergeChanges(propertyChanges);
 
-            // Merging can place a child's change before its parent assignment. Prepare complete
-            // payloads first so sparse changes retain their captured values, timestamps and attributes.
+            // Subject-holding changes run first, so every assigned or inserted subject is complete before
+            // value and attribute changes write their captured values and timestamps over it. Arrival
+            // order cannot be relied on: merging can place a child's change before its parent's assignment.
+            var deferredChanges = builder.DeferredChanges;
             for (var i = 0; i < propertyChanges.Length; i++)
             {
                 var property = propertyChanges[i].Property.TryGetRegisteredProperty();
-                if (property?.IsSubjectReference == true && IsPropertyIncluded(property, processors) &&
-                    propertyChanges[i].GetNewValue<IInterceptorSubject?>() is { } item)
-                {
-                    // Reserve the owner before traversal so a child's backreference stays sparse.
-                    builder.GetOrCreateId(property.Parent.Subject);
-                    if (!ReferenceEquals(item, rootSubject) && !ReferenceEquals(item, property.Parent.Subject))
-                    {
-                        ProcessSubjectComplete(item, builder);
-                    }
-                }
+                if (property is null)
+                    continue;
+
+                if (property.CanContainSubjects)
+                    ProcessPropertyChange(propertyChanges[i], property, rootSubject, builder);
+                else
+                    deferredChanges.Add((i, property));
             }
 
-            for (var i = 0; i < propertyChanges.Length; i++)
+            foreach (var (index, property) in deferredChanges)
             {
-                ProcessPropertyChange(propertyChanges[i], rootSubject, builder);
+                ProcessPropertyChange(propertyChanges[index], property, rootSubject, builder);
             }
 
             return builder.Build(rootSubject);
@@ -104,17 +103,7 @@ internal static class SubjectUpdateFactory
             if (!property.HasGetter || property.IsAttribute)
                 continue;
 
-            // A computed derived property that holds subjects is a projection: it owns nothing, so the
-            // subjects behind it are often outside the graph and contribute no payload, and an id that
-            // describes nothing is worse on the wire than saying nothing at all. Skipped at the source
-            // so no receiver has to reason about it.
-            //
-            // The setter test asks whether the value is stored on this side, which is what separates a
-            // projection from a real edge, and not whether a receiver could write it. A stored [Derived]
-            // property carries an ordinary edge and is still published. Value typed derived properties
-            // are published too: a receiver may display them or rely on this side to compute them, and
-            // they carry no reference that can dangle.
-            if (property.CanContainSubjects && property.Reference.Metadata.IsDerived && !property.HasSetter)
+            if (IsComputedSubjectProjection(property))
                 continue;
 
             if (!IsPropertyIncluded(property, builder.Processors))
@@ -127,18 +116,31 @@ internal static class SubjectUpdateFactory
         }
     }
 
+    /// <summary>
+    /// A computed derived property that holds subjects is a projection: it owns nothing, so the
+    /// subjects behind it are often outside the graph and contribute no payload, and an id that
+    /// describes nothing is worse on the wire than saying nothing at all. Skipped at the source,
+    /// in complete payloads and in changes alike, so no receiver has to reason about it.
+    /// </summary>
+    /// <remarks>
+    /// The setter test asks whether the value is stored on this side, which is what separates a
+    /// projection from a real edge, and not whether a receiver could write it. A stored [Derived]
+    /// property carries an ordinary edge and is still published. Value typed derived properties
+    /// are published too: a receiver may display them or rely on this side to compute them, and
+    /// they carry no reference that can dangle.
+    /// </remarks>
+    private static bool IsComputedSubjectProjection(RegisteredSubjectProperty property)
+        => property.CanContainSubjects && property.Reference.Metadata.IsDerived && !property.HasSetter;
+
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
+        RegisteredSubjectProperty registeredProperty,
         IInterceptorSubject rootSubject,
         SubjectUpdateBuilder builder)
     {
         var changedSubject = change.Property.Subject;
-        var registeredProperty = change.Property.TryGetRegisteredProperty();
 
-        if (registeredProperty is null)
-            return;
-
-        if (!IsPropertyIncluded(registeredProperty, builder.Processors))
+        if (IsComputedSubjectProjection(registeredProperty) || !IsPropertyIncluded(registeredProperty, builder.Processors))
             return;
 
         var subjectId = builder.GetOrCreateId(changedSubject);
@@ -200,7 +202,7 @@ internal static class SubjectUpdateFactory
         }
         else if (property.IsSubjectReference)
         {
-            BuildObjectReference(update, value as IInterceptorSubject, builder);
+            BuildObjectReference(update, value as IInterceptorSubject, property, isAssignment: false, builder);
         }
         else
         {
@@ -255,7 +257,7 @@ internal static class SubjectUpdateFactory
         }
         else if (property.IsSubjectReference)
         {
-            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
+            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), property, isAssignment: true, builder);
         }
         else
         {
@@ -268,26 +270,46 @@ internal static class SubjectUpdateFactory
     private static void BuildObjectReference(
         SubjectPropertyUpdate update,
         IInterceptorSubject? item,
+        RegisteredSubjectProperty property,
+        bool isAssignment,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Object;
         update.Id = null;
 
-        if (item is not null)
-        {
-            var (id, isNew) = builder.GetOrCreateIdWithStatus(item);
-            update.Id = id;
+        if (item is null)
+            return;
 
-            // Only process the complete subject if it's newly encountered.
-            // If the subject already had an ID, it's part of the existing tree
-            // and we should only add a reference to it, not all its properties.
-            // This prevents circular references from causing the entire tree
-            // to be included in partial updates.
-            if (isNew)
-            {
-                ProcessSubjectComplete(item, builder);
-            }
+        var (id, isNew) = builder.GetOrCreateIdWithStatus(item);
+        update.Id = id;
+
+        // Ids are minted per message, so an existing id only means something earlier in this message
+        // referenced the subject, not that the receiver has it. An assigned subject is new at this
+        // position and needs its complete payload, unless it is the root or the owner. A subject reached
+        // while completing another one is expanded only through its first parent, so a back or cross
+        // reference to a subject the tree already holds stays an id rather than pulling in that subtree.
+        if (isAssignment
+                ? !ReferenceEquals(item, builder.RootSubject) && !ReferenceEquals(item, property.Parent.Subject)
+                : isNew || IsReachedThroughFirstParent(item, property, builder))
+        {
+            ProcessSubjectComplete(item, builder);
         }
+    }
+
+    private static bool IsReachedThroughFirstParent(
+        IInterceptorSubject item,
+        RegisteredSubjectProperty property,
+        SubjectUpdateBuilder builder)
+    {
+        if (ReferenceEquals(item, builder.RootSubject) || builder.ProcessedSubjects.Contains(item))
+            return false;
+
+        var registeredSubject = item.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+            return false;
+
+        var parents = registeredSubject.Parents;
+        return parents.Length > 0 && ReferenceEquals(parents[0].Property, property);
     }
 
     /// <summary>
@@ -305,7 +327,9 @@ internal static class SubjectUpdateFactory
 
         while (current is not null && current.Subject != rootSubject)
         {
-            if (!builder.PathVisited.Add(current.Subject))
+            // A completed subject is already referenced by whatever completed it, so its path exists. Walking
+            // on would add a sparse item beside the insert operation that introduced it.
+            if (builder.ProcessedSubjects.Contains(current.Subject) || !builder.PathVisited.Add(current.Subject))
                 break;
 
             if (current.Parents.Length == 0)

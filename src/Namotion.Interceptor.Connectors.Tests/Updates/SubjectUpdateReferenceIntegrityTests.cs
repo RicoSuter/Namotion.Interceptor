@@ -86,6 +86,27 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.Equal("Existing", mirrored!.FirstName);
     }
 
+    [Fact]
+    public void WhenAComputedSubjectProjectionChanges_ThenThePartialUpdateOmitsIt()
+    {
+        // Arrange
+        var mother = new Person { FirstName = "Mother", LastName = "Subtree" };
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root", Mother = mother };
+        source.TryGetRegisteredSubject()!.AddDerivedProperty("Projection", typeof(Person), subject => ((Person)subject).Mother);
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<Person?>(new PropertyReference(source, "Projection"),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, mother)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
+
+        // Assert
+        Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey("Projection"));
+        Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey(nameof(Person.LastName)));
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
