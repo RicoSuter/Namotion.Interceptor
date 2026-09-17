@@ -4,12 +4,12 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
-/// Context for applying a SubjectUpdate. Tracks processed subjects to prevent cycles.
-/// Designed to be pooled and reused.
+/// Context for applying a SubjectUpdate. Binds the subjects an update names, which resolves repeated
+/// references and prevents cycles. Designed to be pooled and reused.
 /// </summary>
 internal sealed class SubjectUpdateApplyContext
 {
-    private readonly HashSet<string> _processedSubjectIds = [];
+    private readonly Dictionary<string, IInterceptorSubject> _subjectsById = [];
     private List<(RegisteredSubjectProperty Property, Exception Exception)>? _failures;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
@@ -68,8 +68,20 @@ internal sealed class SubjectUpdateApplyContext
             ? properties
             : throw new InvalidOperationException($"Subject update references missing subject '{subjectId}'.");
 
-    public bool TryMarkAsProcessed(string subjectId)
-        => _processedSubjectIds.Add(subjectId);
+    /// <summary>
+    /// Binds the subject an ID names for the rest of this update, and reports whether the ID was still
+    /// unbound, which is what decides who applies its payload. A second reference to the same ID
+    /// therefore neither reapplies the payload nor cycles.
+    /// </summary>
+    public bool TryBindSubject(string subjectId, IInterceptorSubject subject)
+        => _subjectsById.TryAdd(subjectId, subject);
+
+    /// <summary>
+    /// Gets the subject already bound to an ID in this update, or <c>null</c> while it is unbound. IDs are
+    /// scoped to one update, so nothing bound here may outlive it.
+    /// </summary>
+    public IInterceptorSubject? TryGetBoundSubject(string subjectId)
+        => _subjectsById.GetValueOrDefault(subjectId);
 
     /// <summary>
     /// Records a property that could not be applied. The batch continues; the collected failures are
@@ -86,7 +98,7 @@ internal sealed class SubjectUpdateApplyContext
     /// </summary>
     public void Clear()
     {
-        _processedSubjectIds.Clear();
+        _subjectsById.Clear();
         _failures = null;
         Subjects = null!;
         SubjectFactory = null!;

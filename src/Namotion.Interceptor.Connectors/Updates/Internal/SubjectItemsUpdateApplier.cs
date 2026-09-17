@@ -111,7 +111,7 @@ internal static class SubjectItemsUpdateApplier
                         (completeIndices is null || workingItems[index] is not null))
                     {
                         // Update existing item
-                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
+                        if (context.TryBindSubject(collectionUpdate.Id, workingItems[index]))
                         {
                             SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
                         }
@@ -214,7 +214,7 @@ internal static class SubjectItemsUpdateApplier
                     var itemProps = context.GetSubjectProperties(collUpdate.Id);
                     if (workingDictionary.TryGetValue(key, out var existing))
                     {
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
+                        if (context.TryBindSubject(collUpdate.Id, existing))
                         {
                             SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
                         }
@@ -278,12 +278,18 @@ internal static class SubjectItemsUpdateApplier
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
     {
+        // An ID another property or item already bound names that same subject, so it enters the container
+        // rather than being recreated from the payload it already applied.
+        var boundItem = context.TryGetBoundSubject(subjectId);
+        if (boundItem is not null)
+        {
+            return boundItem;
+        }
+
         var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
         newItem.Context.AddFallbackContext(parent.Context);
-        if (context.TryMarkAsProcessed(subjectId))
-        {
-            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
-        }
+        context.TryBindSubject(subjectId, newItem);
+        SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
         return newItem;
     }
 }

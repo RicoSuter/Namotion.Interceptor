@@ -31,7 +31,7 @@ internal static class SubjectUpdateApplier
         try
         {
             context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
-            context.TryMarkAsProcessed(update.Root);
+            context.TryBindSubject(update.Root, subject);
             ApplyPropertyUpdates(subject, rootProperties, context);
             failures = context.Failures;
         }
@@ -176,18 +176,23 @@ internal static class SubjectUpdateApplier
             var itemProperties = context.GetSubjectProperties(propertyUpdate.Id);
             if (property.GetValue() is IInterceptorSubject existingItem)
             {
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
+                if (context.TryBindSubject(propertyUpdate.Id, existingItem))
                 {
                     ApplyPropertyUpdates(existingItem, itemProperties, context);
                 }
             }
             else
             {
-                var newItem = context.SubjectFactory.CreateSubject(property);
-                newItem.Context.AddFallbackContext(parent.Context);
-
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
+                // One ID is one subject within an update, so a reference to an ID another property
+                // already bound points at that same subject rather than a second copy of it. This is
+                // what carries a back reference to the root, whose payload the root itself applied.
+                var newItem = context.TryGetBoundSubject(propertyUpdate.Id);
+                if (newItem is null)
                 {
+                    newItem = context.SubjectFactory.CreateSubject(property);
+                    newItem.Context.AddFallbackContext(parent.Context);
+
+                    context.TryBindSubject(propertyUpdate.Id, newItem);
                     ApplyPropertyUpdates(newItem, itemProperties, context);
                 }
 
