@@ -257,6 +257,39 @@ public class SubjectUpdateBatchTests
         Assert.Equal(1, fatherProperties[nameof(Person.Children)].Count);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAnAssignedSubjectsCollectionAlsoChangesInTheSameBatch_ThenItsFinalMembershipArrives(bool assignmentFirst)
+    {
+        // Arrange
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root" };
+        var target = CreateMirror(source);
+        var firstChild = new Person { FirstName = "First" };
+        var secondChild = new Person { FirstName = "Second" };
+        var assigned = new Person { FirstName = "Assigned", Children = [firstChild] };
+        var oldChildren = assigned.Children;
+        source.Mother = assigned;
+        assigned.Children = [firstChild, secondChild];
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var assignment = SubjectPropertyChange.Create<Person?>(new PropertyReference(source, nameof(Person.Mother)),
+            ChangeOrigin.Local, timestamp, null, null, assigned);
+        var childrenChange = SubjectPropertyChange.Create<List<Person>>(new PropertyReference(assigned, nameof(Person.Children)),
+            ChangeOrigin.Local, timestamp, null, oldChildren, assigned.Children);
+        SubjectPropertyChange[] changes = assignmentFirst ? [assignment, childrenChange] : [childrenChange, assignment];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var childrenUpdate = update.Subjects[update.Subjects[update.Root][nameof(Person.Mother)].Id!][nameof(Person.Children)];
+        Assert.Null(childrenUpdate.Operations);
+        Assert.Equal(2, childrenUpdate.Count);
+        Assert.Equal(new[] { "First", "Second" }, target.Mother!.Children.Select(child => child.FirstName));
+    }
+
     private static IInterceptorSubjectContext CreateContextWritingOnAttach(Action<Person> write)
     {
         return InterceptorSubjectContext

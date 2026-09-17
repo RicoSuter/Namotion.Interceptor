@@ -146,6 +146,16 @@ internal static class SubjectUpdateFactory
         var subjectId = builder.GetOrCreateId(changedSubject);
         var properties = builder.GetOrCreateProperties(subjectId);
 
+        // A complete payload already states this subject's final structure, and the receiver may be
+        // building the subject from it, so it has no baseline for an incremental step. Value and
+        // attribute changes still apply on top, which is what carries their captured values.
+        if (registeredProperty.CanContainSubjects &&
+            builder.ProcessedSubjects.Contains(changedSubject) &&
+            properties.ContainsKey(registeredProperty.Name))
+        {
+            return;
+        }
+
         if (registeredProperty.IsAttribute)
         {
             ProcessAttributeChange(registeredProperty, change, properties, builder);

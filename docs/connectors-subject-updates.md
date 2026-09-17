@@ -60,6 +60,8 @@ var json = JsonSerializer.Serialize(update);
 
 A subject that a change assigns to a reference, or inserts into a collection or dictionary, arrives with its complete property set and attributes. So does every subject reached through its first parent while that payload is built, such as the children of a newly attached subtree. This holds in any arrival order: changes to properties that hold subjects are processed before value and attribute changes, which then apply their captured values and timestamps on top. A reference to the root, to the subject that owns the changed property, or to a subject whose first parent lies elsewhere (a back or cross reference into the existing tree) is sent as an ID only.
 
+Once a subject carries a complete payload in an update, a further change to one of its subject-holding properties in the same batch does not turn that property back into an incremental diff. The complete payload already states the final structure, and a receiver building the subject from it has no baseline the diff could apply to. Value and attribute changes still apply on top, which is how their captured values and timestamps survive.
+
 ### Filtering with Processors
 
 `ISubjectUpdateProcessor` controls which properties and attributes appear in updates. The `IsIncluded` method is called for each property **and each attribute** during update creation:
