@@ -302,7 +302,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         next(ref context);
 
         var metadata = context.Property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>())
+
+        // A non-intercepted property stores nothing, so it owns no subject, yet derived notifications still
+        // publish through this chain. The attach scan and both detach paths already skip these properties.
+        if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects<TProperty>())
         {
             return;
         }
