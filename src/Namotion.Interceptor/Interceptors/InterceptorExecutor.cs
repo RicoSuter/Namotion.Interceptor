@@ -76,6 +76,12 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             newValue);
 
         ExecuteInterceptedWrite(ref context, writeValue);
+        if (context.IsObserved && !context.IsWritten &&
+            EqualityComparer<TProperty>.Default.Equals(context.CurrentValue, context.NewValue))
+        {
+            context.ReportEqualityAccepted();
+        }
+
         return context.IsWritten;
     }
 

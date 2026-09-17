@@ -143,6 +143,17 @@ namespace Namotion.Interceptor
         public static Namotion.Interceptor.PropertyReference GetPropertyReference(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
         public static void SetPropertyValueWithInterception(this Namotion.Interceptor.PropertyReference property, object? newValue, object? currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?> writeValue) { }
     }
+    public sealed class PropertyWriteOutcome
+    {
+        public PropertyWriteOutcome() { }
+        public bool Accepted { get; }
+        public bool Mutated { get; }
+        public Namotion.Interceptor.PropertyWriteOutcomeScope Arm(Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, object? sentValue) { }
+    }
+    public readonly ref struct PropertyWriteOutcomeScope : System.IDisposable
+    {
+        public void Dispose() { }
+    }
     public readonly struct SubjectChangeContext
     {
         public System.DateTimeOffset? ReceivedTimestamp { get; }
