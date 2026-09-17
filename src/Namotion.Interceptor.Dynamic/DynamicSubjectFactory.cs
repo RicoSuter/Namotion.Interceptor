@@ -39,8 +39,11 @@ public class DynamicSubjectFactory
                     property.Name,
                     property.PropertyType,
                     property.GetCustomAttributesIncludingInterfaces(),
-                    property.GetValue,
-                    property.SetValue,
+                    // A method group is never null, so passing it unconditionally made HasGetter and
+                    // HasSetter true for every property. Consumers read HasSetter to decide whether a
+                    // property is writable, for example the OPC UA server when exposing a node.
+                    property.CanRead ? property.GetValue : null,
+                    property.CanWrite ? property.SetValue : null,
                     isIntercepted: true,
                     isDynamic: false))
                 .ToArray();
