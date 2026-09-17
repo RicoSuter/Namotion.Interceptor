@@ -302,7 +302,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         next(ref context);
 
         var metadata = context.Property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>())
+
+        // A property that does not route its own accessors through the executor stores nothing, so it owns
+        // no subject. Derived properties still reach this method: DerivedPropertyChangeHandler publishes a
+        // recalculated value through the write chain with a no-op write delegate purely to raise the change.
+        // The attach scan and both detach paths already skip these properties, so attaching here would add a
+        // reference that nothing ever releases.
+        if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects<TProperty>())
         {
             return;
         }
