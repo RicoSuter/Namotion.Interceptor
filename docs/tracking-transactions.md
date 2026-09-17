@@ -331,7 +331,7 @@ A commit attempt ends in one of three states:
 
 Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
 
-Compensation is driven by what each replayed write actually did, not by what it was asked to do. `Rollback` restores every change that mutated the model, in the reverse of the order it was applied. `BestEffort` restores only the mutations whose write then failed, leaving accepted writes standing. A write whose final value already equalled the current one is a success that mutated nothing, so there is nothing to restore.
+Compensation is driven by what each replayed write actually did, not by what it was asked to do. `Rollback` restores every change that mutated the model, in the reverse of the order it was applied. `BestEffort` restores only the mutations whose write then failed, leaving accepted writes standing. A write whose value, after the subject's own changing hook ran, already equalled the current one is a success that mutated nothing, so there is nothing to restore.
 
 Compensation is not an undo. It leaves behind everything the forward write already caused, including delivered change notifications and the side effects of `OnChanging/OnChanged` methods, validators and observers, and being an ordinary write it can fail. A restore failure is reported as an additional exception in `Errors`; the property appears in `FailedChanges` only if its own write failed or its source revert failed.
 

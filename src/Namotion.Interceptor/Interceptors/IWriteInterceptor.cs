@@ -104,6 +104,7 @@ public struct PropertyWriteContext<TProperty>
     /// Records that the terminal assignment completed. Called inside the terminal's lock, so the fact is
     /// recorded before any hook or observer can throw over it.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void ReportMutated()
     {
         if (_outcome is not null)
@@ -114,9 +115,10 @@ public struct PropertyWriteContext<TProperty>
     }
 
     /// <summary>
-    /// Records that the write stopped short of assignment because its final value already equalled the
-    /// current one, which is a successful no-op rather than a rejection.
+    /// Records that the write stopped short of assignment because the value it was given already equalled
+    /// the current one, which is a successful no-op rather than a rejection.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void ReportEqualityAccepted()
     {
         if (_outcome is not null)

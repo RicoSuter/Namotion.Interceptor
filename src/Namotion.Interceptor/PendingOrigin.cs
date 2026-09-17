@@ -11,13 +11,18 @@ namespace Namotion.Interceptor;
 /// <see cref="Arm"/> (and <see cref="Set"/>, its outcome-free form) stores a frame for exactly
 /// one write of one property; the matching write chain consumes the whole frame at
 /// <c>PropertyWriteContext</c> construction, so the outcome rides the lookup the origin already
-/// pays for. Nested writes (hooks, INPC handlers, derived recalculations) never inherit it: the
-/// slot is either already consumed or targets a different property. The scope captures the
-/// previous frame and restores it on dispose (a zero-allocation stack through nested ref structs,
-/// like SubjectChangeContextScope), so a cancelled write cannot leak the stamp or leave an outcome
-/// armed for an unrelated later write, and a nested armed write cannot destroy an outer frame.
-/// Same-property re-entry from OnChanging is unsupported (the inner invocation consumes the
-/// frame). Thread-static by design: arm and consume happen synchronously within one call frame,
+/// pays for. A nested write of a different property (a hook, an INPC handler, a derived
+/// recalculation) never consumes it, because the frame targets one property; a nested re-entry on
+/// the armed property does, whether from OnChanging or from a derived recalculation cascading into
+/// it, so the outcome then describes that inner write rather than the one the caller issued. The
+/// scope captures the previous frame and restores it on dispose (a zero-allocation stack through
+/// nested ref structs, like SubjectChangeContextScope), which bounds the arming to the scope's
+/// extent: within it, the next write of the target property is the one observed, even after an
+/// earlier write of it was cancelled before reaching the chain; after disposal a cancelled write
+/// has leaked neither the stamp nor the outcome, and a nested armed write cannot destroy an outer
+/// frame. Same-property re-entry from OnChanging is unsupported for that reason (the inner
+/// invocation consumes the frame).
+/// Thread-static by design: arm and consume happen synchronously within one call frame,
 /// never across await. Internal: producers use intent-level APIs (SetValueFromSource,
 /// ApplySubjectUpdate, transaction replay) and <see cref="PropertyWriteOutcome.Arm"/>.
 /// </summary>
