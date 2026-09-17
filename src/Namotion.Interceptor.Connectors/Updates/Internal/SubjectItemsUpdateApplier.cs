@@ -19,6 +19,12 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
+        // A container this model cannot write can only receive updates for the items it already holds:
+        // a new item has nowhere to be stored, so none is created, and the rebuilt container is not
+        // written. The working list is still walked, because that is what maps an incoming index onto
+        // the item the producer meant.
+        var canWriteContainer = property.HasSetter;
+
         var existingValue = property.GetValue();
         var workingItems = SubjectValueConvert.ToSubjectMutableList(existingValue);
         var completeIndices = GetCompleteMembership(propertyUpdate, context, static (index, _) => ConvertIndexToInt(index));
@@ -50,7 +56,7 @@ internal static class SubjectItemsUpdateApplier
                         break;
 
                     case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null)
+                        if (operation.Id is not null && canWriteContainer)
                         {
                             var itemProps = context.GetSubjectProperties(operation.Id);
                             var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
@@ -111,12 +117,12 @@ internal static class SubjectItemsUpdateApplier
                         (completeIndices is null || workingItems[index] is not null))
                     {
                         // Update existing item
-                        if (context.TryBindSubject(collectionUpdate.Id, workingItems[index]))
+                        if (context.TryClaimSubjectPayload(collectionUpdate.Id, workingItems[index]))
                         {
                             SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
                         }
                     }
-                    else if (index >= 0 && index <= workingItems.Count)
+                    else if (index >= 0 && index <= workingItems.Count && canWriteContainer)
                     {
                         // Create new item at append position (for complete updates rebuilding the collection)
                         var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
@@ -130,7 +136,7 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        if (structureChanged)
+        if (structureChanged && canWriteContainer)
         {
             var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
             context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
@@ -146,6 +152,9 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
+        // See the collection path for what a container this model cannot write can receive.
+        var canWriteContainer = property.HasSetter;
+
         var targetKeyType = SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(property.Type).Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
@@ -190,7 +199,7 @@ internal static class SubjectItemsUpdateApplier
                         break;
 
                     case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null)
+                        if (operation.Id is not null && canWriteContainer)
                         {
                             var itemProps = context.GetSubjectProperties(operation.Id);
                             var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
@@ -214,12 +223,12 @@ internal static class SubjectItemsUpdateApplier
                     var itemProps = context.GetSubjectProperties(collUpdate.Id);
                     if (workingDictionary.TryGetValue(key, out var existing))
                     {
-                        if (context.TryBindSubject(collUpdate.Id, existing))
+                        if (context.TryClaimSubjectPayload(collUpdate.Id, existing))
                         {
                             SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
                         }
                     }
-                    else
+                    else if (canWriteContainer)
                     {
                         var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
                         workingDictionary[key] = newItem;
@@ -229,7 +238,7 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        if (structureChanged)
+        if (structureChanged && canWriteContainer)
         {
             var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
             context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
@@ -279,17 +288,35 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         // An ID another property or item already bound names that same subject, so it enters the container
-        // rather than being recreated from the payload it already applied.
+        // rather than being recreated from the payload it already applied. Two properties of unrelated
+        // subject types may still name one ID, and the bound instance then fits only one of them, so an
+        // item type mismatch gets its own instance instead of an insert that throws.
         var boundItem = context.TryGetBoundSubject(subjectId);
-        if (boundItem is not null)
+        if (boundItem is not null && GetItemType(property).IsInstanceOfType(boundItem))
         {
             return boundItem;
         }
 
         var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
         newItem.Context.AddFallbackContext(parent.Context);
-        context.TryBindSubject(subjectId, newItem);
-        SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+
+        // Claiming before recursing is what terminates a payload that references itself.
+        if (context.TryClaimSubjectPayload(subjectId, newItem))
+        {
+            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+        }
+
         return newItem;
     }
+
+    /// <summary>
+    /// The declared type of one item of a subject container, which is what an instance has to satisfy
+    /// before it can enter that container.
+    /// </summary>
+    private static Type GetItemType(RegisteredSubjectProperty property)
+        => property.Type.IsArray
+            ? property.Type.GetElementType()!
+            : property.IsSubjectDictionary
+                ? SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(property.Type).Value
+                : SubjectFactoryExtensions.GetCollectionElementType(property.Type);
 }

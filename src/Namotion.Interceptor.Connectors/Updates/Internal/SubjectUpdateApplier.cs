@@ -31,7 +31,7 @@ internal static class SubjectUpdateApplier
         try
         {
             context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
-            context.TryBindSubject(update.Root, subject);
+            context.TryClaimSubjectPayload(update.Root, subject);
             ApplyPropertyUpdates(subject, rootProperties, context);
             failures = context.Failures;
         }
@@ -98,19 +98,21 @@ internal static class SubjectUpdateApplier
         if (registeredProperty is null)
             return;
 
-        // Every branch below ends in a write, so a property this model cannot write could only fail.
-        // Whether a property is writable is a fact about this model rather than the producer's, and a
-        // producer may legitimately publish one for a receiver to display, so this is an expected shape
-        // and is ignored rather than reported.
-        if (!registeredProperty.HasSetter)
-            return;
-
         try
         {
             switch (propertyUpdate.Kind)
             {
                 case SubjectPropertyUpdateKind.Value:
                 {
+                    // Whether a property is writable is a fact about this model rather than the
+                    // producer's, and a producer may legitimately publish one for a receiver to display,
+                    // so an unwritable property is an expected shape: it is dropped before the value is
+                    // even converted rather than reported as a failure. The kinds below cannot drop the
+                    // update this early, because a reference or container the receiver already holds
+                    // still has to carry the nested payloads through to its subtree.
+                    if (!registeredProperty.HasSetter)
+                        break;
+
                     if (context.TransformValueBeforeApply is not null)
                     {
                         // Convert once BEFORE the transform runs; this converted instance is the value the
@@ -176,30 +178,38 @@ internal static class SubjectUpdateApplier
             var itemProperties = context.GetSubjectProperties(propertyUpdate.Id);
             if (property.GetValue() is IInterceptorSubject existingItem)
             {
-                if (context.TryBindSubject(propertyUpdate.Id, existingItem))
+                if (context.TryClaimSubjectPayload(propertyUpdate.Id, existingItem))
                 {
                     ApplyPropertyUpdates(existingItem, itemProperties, context);
                 }
             }
-            else
+            // An empty property this model cannot write has nowhere to put the subject, so nothing is
+            // created and the ID stays unbound for whichever property can hold it.
+            else if (property.HasSetter)
             {
                 // One ID is one subject within an update, so a reference to an ID another property
                 // already bound points at that same subject rather than a second copy of it. This is
                 // what carries a back reference to the root, whose payload the root itself applied.
+                // Two properties of unrelated subject types may still name one ID, and the bound
+                // instance then fits only one of them, so a type mismatch gets its own instance
+                // instead of a write that throws.
                 var newItem = context.TryGetBoundSubject(propertyUpdate.Id);
-                if (newItem is null)
+                if (newItem is null || !property.Type.IsInstanceOfType(newItem))
                 {
                     newItem = context.SubjectFactory.CreateSubject(property);
                     newItem.Context.AddFallbackContext(parent.Context);
 
-                    context.TryBindSubject(propertyUpdate.Id, newItem);
-                    ApplyPropertyUpdates(newItem, itemProperties, context);
+                    // Claiming before recursing is what terminates a payload that references itself.
+                    if (context.TryClaimSubjectPayload(propertyUpdate.Id, newItem))
+                    {
+                        ApplyPropertyUpdates(newItem, itemProperties, context);
+                    }
                 }
 
                 context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
             }
         }
-        else
+        else if (property.HasSetter)
         {
             context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
         }

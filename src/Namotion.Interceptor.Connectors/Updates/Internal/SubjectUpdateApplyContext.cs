@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -10,6 +11,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal sealed class SubjectUpdateApplyContext
 {
     private readonly Dictionary<string, IInterceptorSubject> _subjectsById = [];
+    private readonly HashSet<(string Id, IInterceptorSubject Subject)> _claimedPayloads = new(PayloadClaimComparer.Instance);
     private List<(RegisteredSubjectProperty Property, Exception Exception)>? _failures;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
@@ -69,12 +71,26 @@ internal sealed class SubjectUpdateApplyContext
             : throw new InvalidOperationException($"Subject update references missing subject '{subjectId}'.");
 
     /// <summary>
-    /// Binds the subject an ID names for the rest of this update, and reports whether the ID was still
-    /// unbound, which is what decides who applies its payload. A second reference to the same ID
-    /// therefore neither reapplies the payload nor cycles.
+    /// Claims the payload of an ID for <paramref name="subject"/>: binds the subject the ID names while
+    /// the ID is still unbound, and reports whether <paramref name="subject"/> still has to receive that
+    /// payload.
     /// </summary>
-    public bool TryBindSubject(string subjectId, IInterceptorSubject subject)
-        => _subjectsById.TryAdd(subjectId, subject);
+    /// <remarks>
+    /// An ID already bound to a <em>different</em> instance still yields <c>true</c>, which is the
+    /// documented rule for a shared subject: a position that already holds another instance keeps it and
+    /// receives the payload. Only the exact subject that already took this ID's payload is turned away,
+    /// so a cycle terminates and no instance applies one payload twice.
+    /// </remarks>
+    public bool TryClaimSubjectPayload(string subjectId, IInterceptorSubject subject)
+    {
+        if (!_claimedPayloads.Add((subjectId, subject)))
+            return false;
+
+        // The first binding wins: it is what later references to this ID resolve to, so a position
+        // holding another instance must not steal the ID from the subject that already carries it.
+        _subjectsById.TryAdd(subjectId, subject);
+        return true;
+    }
 
     /// <summary>
     /// Gets the subject already bound to an ID in this update, or <c>null</c> while it is unbound. IDs are
@@ -99,10 +115,27 @@ internal sealed class SubjectUpdateApplyContext
     public void Clear()
     {
         _subjectsById.Clear();
+        _claimedPayloads.Clear();
         _failures = null;
         Subjects = null!;
         SubjectFactory = null!;
         Origin = default;
         TransformValueBeforeApply = null;
+    }
+
+    /// <summary>
+    /// Compares payload claims by ID and by subject <em>identity</em>. A subject may override equality,
+    /// so the default comparer would let two equal but distinct instances share one claim and silently
+    /// skip the second one's payload.
+    /// </summary>
+    private sealed class PayloadClaimComparer : IEqualityComparer<(string Id, IInterceptorSubject Subject)>
+    {
+        public static readonly PayloadClaimComparer Instance = new();
+
+        public bool Equals((string Id, IInterceptorSubject Subject) first, (string Id, IInterceptorSubject Subject) second)
+            => ReferenceEquals(first.Subject, second.Subject) && first.Id == second.Id;
+
+        public int GetHashCode((string Id, IInterceptorSubject Subject) value)
+            => HashCode.Combine(value.Id, RuntimeHelpers.GetHashCode(value.Subject));
     }
 }
