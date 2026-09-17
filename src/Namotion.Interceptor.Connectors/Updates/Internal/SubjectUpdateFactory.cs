@@ -61,14 +61,14 @@ internal static class SubjectUpdateFactory
                     continue;
 
                 if (property.CanContainSubjects)
-                    ProcessPropertyChange(propertyChanges[i], property, rootSubject, builder);
+                    ProcessPropertyChange(propertyChanges[i], property, canContainSubjects: true, builder);
                 else
                     deferredChanges.Add((i, property));
             }
 
             foreach (var (index, property) in deferredChanges)
             {
-                ProcessPropertyChange(propertyChanges[index], property, rootSubject, builder);
+                ProcessPropertyChange(propertyChanges[index], property, canContainSubjects: false, builder);
             }
 
             return builder.Build(rootSubject);
@@ -135,12 +135,17 @@ internal static class SubjectUpdateFactory
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
         RegisteredSubjectProperty registeredProperty,
-        IInterceptorSubject rootSubject,
+        bool canContainSubjects,
         SubjectUpdateBuilder builder)
     {
         var changedSubject = change.Property.Subject;
 
         if (IsComputedSubjectProjection(registeredProperty) || !IsPropertyIncluded(registeredProperty, builder.Processors))
+            return;
+
+        // Before an id is minted or an entry created, because stopping the path walk at the excluded edge
+        // would leave the changed subject's entry in the update: unreachable, but still transmitted.
+        if (builder.Processors.Length > 0 && !IsPathToRootIncluded(changedSubject, builder))
             return;
 
         var subjectId = builder.GetOrCreateId(changedSubject);
@@ -149,7 +154,7 @@ internal static class SubjectUpdateFactory
         // A complete payload already states this subject's final structure, and the receiver may be
         // building the subject from it, so it has no baseline for an incremental step. Value and
         // attribute changes still apply on top, which is what carries their captured values.
-        if (registeredProperty.CanContainSubjects &&
+        if (canContainSubjects &&
             builder.ProcessedSubjects.Contains(changedSubject) &&
             properties.ContainsKey(registeredProperty.Name))
         {
@@ -174,7 +179,7 @@ internal static class SubjectUpdateFactory
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
 
-        BuildPathToRoot(changedSubject, rootSubject, builder);
+        BuildPathToRoot(changedSubject, builder);
     }
 
     private static SubjectPropertyUpdate CreatePropertyUpdate(
@@ -323,19 +328,50 @@ internal static class SubjectUpdateFactory
     }
 
     /// <summary>
+    /// Whether every ancestor edge <see cref="BuildPathToRoot"/> would state survives the processors.
+    /// A processor that excludes a property hides everything behind it, so a change reached only through
+    /// an excluded edge is dropped rather than shipped with the excluded property name that names it.
+    /// </summary>
+    private static bool IsPathToRootIncluded(
+        IInterceptorSubject subject,
+        SubjectUpdateBuilder builder)
+    {
+        builder.ReachabilityVisited.Clear();
+        var current = subject.TryGetRegisteredSubject();
+
+        // Mirrors the walk and the stop conditions of BuildPathToRoot: wherever that one stops stating
+        // edges, there is no further edge left for a processor to exclude.
+        while (current is not null && current.Subject != builder.RootSubject)
+        {
+            if (builder.ProcessedSubjects.Contains(current.Subject) || !builder.ReachabilityVisited.Add(current.Subject))
+                break;
+
+            if (current.Parents.Length == 0)
+                break;
+
+            var parentProperty = current.Parents[0].Property;
+            if (!IsPropertyIncluded(parentProperty, builder.Processors))
+                return false;
+
+            current = parentProperty.Parent;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Builds the path from a changed subject up to the root subject by adding
     /// property references for each parent in the hierarchy.
     /// Only traverses the first parent (canonical registration path) in DAG structures.
     /// </summary>
     private static void BuildPathToRoot(
         IInterceptorSubject subject,
-        IInterceptorSubject rootSubject,
         SubjectUpdateBuilder builder)
     {
         builder.PathVisited.Clear();
         var current = subject.TryGetRegisteredSubject();
 
-        while (current is not null && current.Subject != rootSubject)
+        while (current is not null && current.Subject != builder.RootSubject)
         {
             // A completed subject is already referenced by whatever completed it, so its path exists. Walking
             // on would add a sparse item beside the insert operation that introduced it.

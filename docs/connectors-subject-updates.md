@@ -89,6 +89,8 @@ Connectors that use `ChangeQueueProcessor` for real-time updates have two filter
 
 Both layers should apply the same filtering logic. The `propertyFilter` is an optimization for the change path; `IsIncluded` is the authoritative filter that also covers complete updates (initial sync), where no `ChangeQueueProcessor` is involved.
 
+Exclusion covers everything reached through an excluded property: a change is dropped entirely, carrying neither its own entry nor any path entry, when the path from its subject up to the update root crosses a property `IsIncluded` rejects. A permissions-style processor can therefore hide a subtree by excluding the single property that holds it.
+
 Connectors with an `IPathProvider` can delegate to `pathProvider.IsPropertyIncluded` in both layers to keep filtering consistent:
 
 ```csharp
@@ -121,6 +123,8 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.
 Whether a property has a setter is a fact about the receiving model, not the producer's, and a producer may legitimately publish one for a receiver to display. A property without a setter is therefore an expected shape rather than a failure: its own value is silently not written, and nothing is reported.
 
 Only that property's value is dropped. A reference or container the receiver already holds still carries the update through to its subtree, so a nested value behind a `get`-only or `init`-only reference arrives, and a sparse item update reaches an existing item of a read-only collection or dictionary. What such a property cannot receive is a new membership: the rebuilt container is not written, and a reference holding `null` is left alone rather than being given a subject it has nowhere to store. Attributes of a property without a setter apply as usual.
+
+The two drops are reported differently. A dropped structural payload, meaning an unwritable reference that stays empty, a skipped container rebuild or an item that is not created, is logged as one warning per update naming the affected properties: the producer described a child the receiving model cannot hold, and nothing converges later. A dropped value is not logged, because a producer publishing a value-typed derived property that the receiving model computes itself would make that warning fire on nearly every message.
 
 ### When a Property Fails to Apply
 

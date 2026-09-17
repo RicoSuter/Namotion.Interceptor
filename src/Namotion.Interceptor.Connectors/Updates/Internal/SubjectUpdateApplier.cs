@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Performance;
@@ -28,17 +29,26 @@ internal static class SubjectUpdateApplier
 
         var context = ContextPool.Rent();
         List<(RegisteredSubjectProperty Property, Exception Exception)>? failures = null;
+        List<string>? droppedStructuralProperties = null;
         try
         {
             context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
             context.TryClaimSubjectPayload(update.Root, subject);
             ApplyPropertyUpdates(subject, rootProperties, context);
             failures = context.Failures;
+            droppedStructuralProperties = context.DroppedStructuralProperties;
         }
         finally
         {
             context.Clear();
             ContextPool.Return(context);
+        }
+
+        // Reported before the failures are thrown, so a batch that also failed somewhere still says which
+        // children it could not hold.
+        if (droppedStructuralProperties is not null)
+        {
+            WarnAboutDroppedStructure(subject, droppedStructuralProperties);
         }
 
         if (failures is null)
@@ -57,6 +67,20 @@ internal static class SubjectUpdateApplier
             $"{failures.Count} property updates could not be applied: " +
             string.Join(", ", failures.Select(failure => failure.Property.Name)),
             failures.Select(failure => failure.Exception));
+    }
+
+    /// <summary>
+    /// Reports the properties whose structural payload was dropped. A dropped value converges the moment
+    /// the receiver computes or receives it again, but a child the model cannot store never appears, so
+    /// this is the only notice a reader gets.
+    /// </summary>
+    private static void WarnAboutDroppedStructure(IInterceptorSubject rootSubject, List<string> droppedProperties)
+    {
+        SubjectUpdateLog.TryGetWarningLogger(rootSubject)?.LogWarning(
+            "Dropped the incoming structure of the properties {DroppedProperties} of subject {SubjectType} " +
+            "because they have no setter, so the described children have nowhere to be stored. Give these " +
+            "properties a setter, or construct the children in the receiving model itself.",
+            string.Join(", ", droppedProperties), rootSubject.GetType().FullName);
     }
 
     internal static void ApplyPropertyUpdates(
@@ -185,7 +209,11 @@ internal static class SubjectUpdateApplier
             }
             // An empty property this model cannot write has nowhere to put the subject, so nothing is
             // created and the ID stays unbound for whichever property can hold it.
-            else if (property.HasSetter)
+            else if (!property.HasSetter)
+            {
+                context.RecordDroppedStructure(property);
+            }
+            else
             {
                 // One ID is one subject within an update, so a reference to an ID another property
                 // already bound points at that same subject rather than a second copy of it. This is

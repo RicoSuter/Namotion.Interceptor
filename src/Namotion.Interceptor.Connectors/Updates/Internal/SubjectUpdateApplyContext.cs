@@ -13,6 +13,7 @@ internal sealed class SubjectUpdateApplyContext
     private readonly Dictionary<string, IInterceptorSubject> _subjectsById = [];
     private readonly HashSet<(string Id, IInterceptorSubject Subject)> _claimedPayloads = new(PayloadClaimComparer.Instance);
     private List<(RegisteredSubjectProperty Property, Exception Exception)>? _failures;
+    private List<string>? _droppedStructuralProperties;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -110,6 +111,19 @@ internal sealed class SubjectUpdateApplyContext
     public List<(RegisteredSubjectProperty Property, Exception Exception)>? Failures => _failures;
 
     /// <summary>
+    /// Records a property whose structural payload had nowhere to go because this model cannot write it.
+    /// Unlike a dropped value, nothing makes such a child appear later, so the caller reports these once
+    /// the whole update has been walked.
+    /// </summary>
+    public void RecordDroppedStructure(RegisteredSubjectProperty property)
+        => (_droppedStructuralProperties ??= []).Add(property.Name);
+
+    /// <summary>
+    /// The properties whose structural payload was dropped, or <c>null</c> while none was.
+    /// </summary>
+    public List<string>? DroppedStructuralProperties => _droppedStructuralProperties;
+
+    /// <summary>
     /// Clears the context for reuse. Call before returning to pool.
     /// </summary>
     public void Clear()
@@ -117,6 +131,7 @@ internal sealed class SubjectUpdateApplyContext
         _subjectsById.Clear();
         _claimedPayloads.Clear();
         _failures = null;
+        _droppedStructuralProperties = null;
         Subjects = null!;
         SubjectFactory = null!;
         Origin = default;

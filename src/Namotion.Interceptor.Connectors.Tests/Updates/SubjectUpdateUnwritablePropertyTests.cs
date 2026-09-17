@@ -1,5 +1,6 @@
 using System.Reactive.Concurrency;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -164,5 +165,100 @@ public class SubjectUpdateUnwritablePropertyTests
         // Assert
         Assert.Equal("Original", target.Label);
         Assert.Equal("Applied", target.Name);
+    }
+
+    [Fact]
+    public void WhenAStructuralPayloadNamesAPropertyWithoutASetter_ThenOneWarningNamesEveryDroppedProperty()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)));
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "2"
+                    },
+                    [nameof(InitOnlyTypesTestNode.Items)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Insert,
+                                Index = 0,
+                                Id = "3"
+                            }
+                        ]
+                    },
+                    [nameof(InitOnlyTypesTestNode.Label)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Dropped"
+                    }
+                },
+                ["2"] = new() { [nameof(InitOnlyTypesTestNode.Name)] = new SubjectPropertyUpdate { Value = "New child" } },
+                ["3"] = new() { [nameof(InitOnlyTypesTestNode.Name)] = new SubjectPropertyUpdate { Value = "New item" } }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(nameof(InitOnlyTypesTestNode.Child), warning);
+        Assert.Contains(nameof(InitOnlyTypesTestNode.Items), warning);
+        Assert.DoesNotContain(nameof(InitOnlyTypesTestNode.Label), warning);
+        Assert.Null(target.Child);
+        Assert.Empty(target.Items);
+    }
+
+    [Fact]
+    public void WhenOnlyAValueNamesAPropertyWithoutASetter_ThenNothingIsLogged()
+    {
+        // Arrange: a producer legitimately publishes value typed derived properties the receiving model
+        // computes itself, so warning here would fire on nearly every message.
+        var logger = new RecordingLogger();
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
+        {
+            Label = "Original"
+        };
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Label)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Dropped"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Empty(logger.Warnings);
+        Assert.Empty(logger.Errors);
+        Assert.Equal("Original", target.Label);
     }
 }

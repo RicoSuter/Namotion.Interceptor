@@ -10,8 +10,6 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal sealed class SubjectUpdateBuilder
 {
-    private const string LoggerCategory = "Namotion.Interceptor.Connectors.Updates";
-
     private int _nextId;
     private ChangeMerger? _changeMerger;
     private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new(ReferenceEqualityComparer.Instance);
@@ -32,6 +30,12 @@ internal sealed class SubjectUpdateBuilder
     public HashSet<IInterceptorSubject> PathVisited { get; } = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
+    /// Scratch set for the reachability walk that runs before a change is emitted. Kept separate from
+    /// <see cref="PathVisited"/>, which the path walk clears at its own start.
+    /// </summary>
+    public HashSet<IInterceptorSubject> ReachabilityVisited { get; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
     /// Changes held back until the subject-holding changes of a batch are processed, with the registered
     /// property already resolved for each.
     /// </summary>
@@ -50,14 +54,7 @@ internal sealed class SubjectUpdateBuilder
     }
 
     public string GetOrCreateId(IInterceptorSubject subject)
-    {
-        if (!_subjectToId.TryGetValue(subject, out var id))
-        {
-            id = (++_nextId).ToString();
-            _subjectToId[subject] = id;
-        }
-        return id;
-    }
+        => GetOrCreateIdWithStatus(subject).Id;
 
     /// <summary>
     /// Gets an existing ID for a subject, or creates a new one.
@@ -85,14 +82,16 @@ internal sealed class SubjectUpdateBuilder
         return properties;
     }
 
-    public bool SubjectHasUpdates(IInterceptorSubject subject)
-    {
-        if (_subjectToId.TryGetValue(subject, out var id))
-        {
-            return Subjects.TryGetValue(id, out var properties) && properties.Count > 0;
-        }
-        return false;
-    }
+    /// <summary>
+    /// The id of a subject that already carries property updates in this build, or <c>null</c> when it
+    /// has no id yet or nothing has been written for it. Never mints an id, so asking does not put an
+    /// empty subject into the update.
+    /// </summary>
+    public string? TryGetIdWithUpdates(IInterceptorSubject subject)
+        => _subjectToId.TryGetValue(subject, out var id) &&
+           Subjects.TryGetValue(id, out var properties) && properties.Count > 0
+            ? id
+            : null;
 
     public void TrackPropertyUpdate(
         SubjectPropertyUpdate update,
@@ -150,15 +149,11 @@ internal sealed class SubjectUpdateBuilder
             return;
         }
 
-        var logger = rootSubject.Context.TryGetService<ILoggerFactory>()?.CreateLogger(LoggerCategory);
-        if (logger?.IsEnabled(LogLevel.Warning) == true)
-        {
-            logger.LogWarning(
-                "Omitted the update properties {OmittedProperties} of subject {SubjectType} because they reference " +
-                "subjects without Registry metadata. Register the referenced subjects or exclude these properties " +
-                "with an ISubjectUpdateProcessor.",
-                string.Join(", ", omittedProperties), rootSubject.GetType().FullName);
-        }
+        SubjectUpdateLog.TryGetWarningLogger(rootSubject)?.LogWarning(
+            "Omitted the update properties {OmittedProperties} of subject {SubjectType} because they reference " +
+            "subjects without Registry metadata. Register the referenced subjects or exclude these properties " +
+            "with an ISubjectUpdateProcessor.",
+            string.Join(", ", omittedProperties), rootSubject.GetType().FullName);
     }
 
     private static void OmitDanglingReferences(
@@ -244,6 +239,7 @@ internal sealed class SubjectUpdateBuilder
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
         PathVisited.Clear();
+        ReachabilityVisited.Clear();
         DeferredChanges.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];

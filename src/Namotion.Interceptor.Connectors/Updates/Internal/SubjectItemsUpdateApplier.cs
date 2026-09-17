@@ -24,6 +24,7 @@ internal static class SubjectItemsUpdateApplier
         // written. The working list is still walked, because that is what maps an incoming index onto
         // the item the producer meant.
         var canWriteContainer = property.HasSetter;
+        var droppedStructure = false;
 
         var existingValue = property.GetValue();
         var workingItems = SubjectValueConvert.ToSubjectMutableList(existingValue);
@@ -56,15 +57,22 @@ internal static class SubjectItemsUpdateApplier
                         break;
 
                     case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && canWriteContainer)
+                        if (operation.Id is not null)
                         {
-                            var itemProps = context.GetSubjectProperties(operation.Id);
-                            var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
-                            if (index >= workingItems.Count)
-                                workingItems.Add(newItem);
+                            if (!canWriteContainer)
+                            {
+                                droppedStructure = true;
+                            }
                             else
-                                workingItems.Insert(index, newItem);
-                            structureChanged = true;
+                            {
+                                var itemProps = context.GetSubjectProperties(operation.Id);
+                                var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
+                                if (index >= workingItems.Count)
+                                    workingItems.Add(newItem);
+                                else
+                                    workingItems.Insert(index, newItem);
+                                structureChanged = true;
+                            }
                         }
                         break;
                 }
@@ -95,10 +103,18 @@ internal static class SubjectItemsUpdateApplier
         // Apply sparse property updates
         if (propertyUpdate.Items is { Count: > 0 })
         {
-            var itemUpdates = completeIndices is not null && workingItems.Count < completeIndices.Count
-                ? propertyUpdate.Items.OrderBy(item => ConvertIndexToInt(item.Index))
-                : (IEnumerable<SubjectPropertyItemUpdate>)propertyUpdate.Items;
-            foreach (var collectionUpdate in itemUpdates)
+            // Complete membership names every position exactly once, so filling the gap with nulls up
+            // front lets each item be written at its own index. Nothing is appended, which is what made
+            // the arrival order matter, and every null is overwritten by the item that owns its slot.
+            if (completeIndices is not null && canWriteContainer)
+            {
+                while (workingItems.Count < completeIndices.Count)
+                {
+                    workingItems.Add(null!);
+                }
+            }
+
+            foreach (var collectionUpdate in propertyUpdate.Items)
             {
                 var index = ConvertIndexToInt(collectionUpdate.Index);
 
@@ -122,24 +138,43 @@ internal static class SubjectItemsUpdateApplier
                             SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
                         }
                     }
-                    else if (index >= 0 && index <= workingItems.Count && canWriteContainer)
+                    else if (index >= 0 && index <= workingItems.Count)
                     {
-                        // Create new item at append position (for complete updates rebuilding the collection)
-                        var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
-                        if (index >= workingItems.Count)
-                            workingItems.Add(newItem);
+                        if (!canWriteContainer)
+                        {
+                            droppedStructure = true;
+                        }
                         else
-                            workingItems[index] = newItem;
-                        structureChanged = true;
+                        {
+                            // Create new item at append position (for complete updates rebuilding the collection)
+                            var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
+                            if (index >= workingItems.Count)
+                                workingItems.Add(newItem);
+                            else
+                                workingItems[index] = newItem;
+                            structureChanged = true;
+                        }
                     }
                 }
             }
         }
 
-        if (structureChanged && canWriteContainer)
+        if (structureChanged)
         {
-            var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
-            context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
+            if (canWriteContainer)
+            {
+                var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
+            }
+            else
+            {
+                droppedStructure = true;
+            }
+        }
+
+        if (droppedStructure)
+        {
+            context.RecordDroppedStructure(property);
         }
     }
 
@@ -154,6 +189,7 @@ internal static class SubjectItemsUpdateApplier
     {
         // See the collection path for what a container this model cannot write can receive.
         var canWriteContainer = property.HasSetter;
+        var droppedStructure = false;
 
         var targetKeyType = SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(property.Type).Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
@@ -199,12 +235,19 @@ internal static class SubjectItemsUpdateApplier
                         break;
 
                     case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && canWriteContainer)
+                        if (operation.Id is not null)
                         {
-                            var itemProps = context.GetSubjectProperties(operation.Id);
-                            var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
-                            workingDictionary[key] = newItem;
-                            structureChanged = true;
+                            if (!canWriteContainer)
+                            {
+                                droppedStructure = true;
+                            }
+                            else
+                            {
+                                var itemProps = context.GetSubjectProperties(operation.Id);
+                                var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
+                                workingDictionary[key] = newItem;
+                                structureChanged = true;
+                            }
                         }
                         break;
                 }
@@ -228,7 +271,11 @@ internal static class SubjectItemsUpdateApplier
                             SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
                         }
                     }
-                    else if (canWriteContainer)
+                    else if (!canWriteContainer)
+                    {
+                        droppedStructure = true;
+                    }
+                    else
                     {
                         var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
                         workingDictionary[key] = newItem;
@@ -238,10 +285,22 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        if (structureChanged && canWriteContainer)
+        if (structureChanged)
         {
-            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
-            context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
+            if (canWriteContainer)
+            {
+                var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
+            }
+            else
+            {
+                droppedStructure = true;
+            }
+        }
+
+        if (droppedStructure)
+        {
+            context.RecordDroppedStructure(property);
         }
     }
 
