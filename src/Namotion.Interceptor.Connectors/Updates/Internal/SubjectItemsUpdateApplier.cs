@@ -146,7 +146,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var targetKeyType = SubjectFactoryExtensions.GetCollectionTypes(property.Type, dictionary: true).Key!;
+        var targetKeyType = SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(property.Type).Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 

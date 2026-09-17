@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Connectors;
 
 public static class SubjectFactoryExtensions
 {
-    private static readonly ConcurrentDictionary<(Type Type, bool Dictionary), (Type? Key, Type Element)> CollectionTypes = new();
+    private static readonly ConcurrentDictionary<(Type Type, bool Dictionary), (Type? Key, Type Element)> ContainerTypes = new();
 
     public static IInterceptorSubject CreateSubject(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
     {
@@ -38,7 +38,9 @@ public static class SubjectFactoryExtensions
         }
         else
         {
-            itemType = GetCollectionTypes(propertyType, propertyType.IsSubjectDictionaryType()).Element;
+            itemType = propertyType.IsSubjectDictionaryType()
+                ? GetDictionaryKeyAndValueTypes(propertyType).Value
+                : GetCollectionElementType(propertyType);
         }
 
         return subjectFactory.CreateSubject(
@@ -46,9 +48,25 @@ public static class SubjectFactoryExtensions
             serviceProvider);
     }
 
-    internal static (Type? Key, Type Element) GetCollectionTypes(Type propertyType, bool dictionary = false)
+    internal static Type GetCollectionElementType(Type propertyType)
+        => GetContainerTypes(propertyType, dictionary: false).Element;
+
+    internal static (Type Key, Type Value) GetDictionaryKeyAndValueTypes(Type propertyType)
     {
-        return CollectionTypes.GetOrAdd((propertyType, dictionary), static shape =>
+        // The dictionary shape either yields a key type or throws, which the collection shape does not,
+        // so this is the only place the nullable key of the shared lookup is resolved.
+        var (key, value) = GetContainerTypes(propertyType, dictionary: true);
+        return (key!, value);
+    }
+
+    /// <remarks>
+    /// Which shape to read is the caller's requirement rather than a fact about the type, so it stays a
+    /// parameter: reading a dictionary-declared property as a positional collection, or the reverse, is
+    /// how a declaration that cannot carry the incoming update is turned into a <see cref="NotSupportedException"/>.
+    /// </remarks>
+    private static (Type? Key, Type Element) GetContainerTypes(Type propertyType, bool dictionary)
+    {
+        return ContainerTypes.GetOrAdd((propertyType, dictionary), static shape =>
         {
             var itemTypes = shape.Type.GetInterfaces().Append(shape.Type)
                 .Where(type => type.IsGenericType && (shape.Dictionary
