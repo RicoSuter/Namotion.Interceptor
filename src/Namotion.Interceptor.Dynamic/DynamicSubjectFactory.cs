@@ -39,8 +39,6 @@ public class DynamicSubjectFactory
                     property.Name,
                     property.PropertyType,
                     property.GetCustomAttributesIncludingInterfaces(),
-                    // A method group is never null, so passing it unconditionally made HasGetter and
-                    // HasSetter true for every property.
                     property.CanRead ? property.GetValue : null,
                     property.CanWrite ? property.SetValue : null,
                     isIntercepted: true,
