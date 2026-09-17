@@ -43,11 +43,10 @@ internal static class SubjectPropertyChangeOperations
         Span<byte> outcomes = rentedOutcomes is null
             ? stackalloc byte[changes.Length]
             : rentedOutcomes.AsSpan(0, changes.Length);
-        if (rentedOutcomes is not null)
-        {
-            // stackalloc is already zeroed by localsinit; only a pooled array can carry stale bytes.
-            outcomes.Clear();
-        }
+        // Cleared on both paths rather than relying on localsinit to zero the stackalloc: a later
+        // SkipLocalsInit would otherwise leave stale bytes here, and a stale byte makes compensation
+        // issue an inverse write for a change that was never applied, silently and with no test signal.
+        outcomes.Clear();
 
         try
         {
@@ -165,6 +164,10 @@ internal static class SubjectPropertyChangeOperations
 
     private static bool TryApplyLocalChange(this SubjectPropertyChange change, PropertyWriteOutcome outcome, out Exception? error, out bool mutated)
     {
+        // Set before the try: the finally below reads the outcome, which still holds the previous
+        // change's result until Arm clears it, so a throw reaching the finally first would attribute
+        // that mutation to this change and compensate a property this change never touched.
+        mutated = false;
         try
         {
             var metadata = change.Property.Metadata;
