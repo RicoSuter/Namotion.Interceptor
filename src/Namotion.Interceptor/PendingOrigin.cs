@@ -15,6 +15,8 @@ namespace Namotion.Interceptor;
 /// recalculation) never consumes it, because the frame targets one property; a nested re-entry on
 /// the armed property does, whether from OnChanging or from a derived recalculation cascading into
 /// it, so the outcome then describes that inner write rather than the one the caller issued. The
+/// cascade entry point has no equality-acceptance step, so an outcome it consumes reports a mutation
+/// but never an accepted no-op: a recalculation to an equal value leaves both flags clear. The
 /// scope captures the previous frame and restores it on dispose (a zero-allocation stack through
 /// nested ref structs, like SubjectChangeContextScope), which bounds the arming to the scope's
 /// extent: within it, the next write of the target property is the one observed, even after an

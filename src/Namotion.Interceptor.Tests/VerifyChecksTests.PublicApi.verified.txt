@@ -150,7 +150,7 @@ namespace Namotion.Interceptor
         public bool Mutated { get; }
         public Namotion.Interceptor.PropertyWriteOutcomeScope Arm(Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.ChangeOrigin origin, object? sentValue) { }
     }
-    public readonly ref struct PropertyWriteOutcomeScope : System.IDisposable
+    public readonly ref struct PropertyWriteOutcomeScope
     {
         public void Dispose() { }
     }

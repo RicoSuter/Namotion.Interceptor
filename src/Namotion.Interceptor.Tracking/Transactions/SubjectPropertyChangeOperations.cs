@@ -81,7 +81,7 @@ internal static class SubjectPropertyChangeOperations
                 continue;
             }
 
-            var accepted = change.TryApplyLocalChange(outcome, out var error, out var mutated);
+            var accepted = change.TryApplyLocalChange(outcome, isRestore: false, out var error, out var mutated);
             outcomes[i] = ClassifyMutation(accepted, mutated);
             if (accepted)
             {
@@ -155,18 +155,18 @@ internal static class SubjectPropertyChangeOperations
                 continue;
             }
 
-            if (!changes[index].ToRollbackChange().TryApplyLocalChange(outcome, out var error, out _) && error is not null)
+            if (!changes[index].ToRollbackChange().TryApplyLocalChange(outcome, isRestore: true, out var error, out _) && error is not null)
             {
                 (errors ??= []).Add(error);
             }
         }
     }
 
-    private static bool TryApplyLocalChange(this SubjectPropertyChange change, PropertyWriteOutcome outcome, out Exception? error, out bool mutated)
+    private static bool TryApplyLocalChange(this SubjectPropertyChange change, PropertyWriteOutcome outcome, bool isRestore, out Exception? error, out bool mutated)
     {
-        // Set before the try: the finally below reads the outcome, which still holds the previous
-        // change's result until Arm clears it, so a throw reaching the finally first would attribute
-        // that mutation to this change and compensate a property this change never touched.
+        // Assigned inside the arming scope, never from the outer exit paths: the outcome is reused across
+        // the batch and still holds the previous change's flags until Arm clears them, so reading it after
+        // a throw that happened before Arm would blame this change for that change's mutation.
         mutated = false;
         try
         {
@@ -178,22 +178,28 @@ internal static class SubjectPropertyChangeOperations
             using (SubjectChangeContext.WithTimestamps(change.ChangedTimestamp, change.ReceivedTimestamp))
             using (outcome.Arm(change.Property, change.Origin, newValue))
             {
-                metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                try
+                {
+                    metadata.SetValue?.Invoke(change.Property.Subject, newValue);
+                }
+                finally
+                {
+                    // A changed hook or observer that throws after the assignment unwinds past this scope,
+                    // and its mutation must still be recorded so compensation restores it.
+                    mutated = outcome.Mutated;
+                }
             }
 
+            var operation = isRestore ? "restore" : "replay";
             error = outcome.Accepted
                 ? null
-                : new InvalidOperationException($"Property '{change.Property.Name}' did not accept the transaction replay.");
+                : new InvalidOperationException($"Property '{change.Property.Name}' did not accept the transaction {operation}.");
             return outcome.Accepted;
         }
         catch (Exception exception)
         {
             error = exception;
             return false;
-        }
-        finally
-        {
-            mutated = outcome.Mutated;
         }
     }
 

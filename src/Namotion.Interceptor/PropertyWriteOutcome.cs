@@ -11,11 +11,12 @@ namespace Namotion.Interceptor;
 public sealed class PropertyWriteOutcome
 {
     /// <summary>
-    /// Gets whether the write reached assignment, or stopped short of it because the value it was given
-    /// already equalled the current one, which is a successful no-op. Derived from the values the write
-    /// started with, so a write that was refused at a value already equal to the current one is
-    /// indistinguishable from an accepted no-op; nothing was mutated in either case, so there is nothing
-    /// to compensate. A write of a differing value that was cancelled, vetoed or suppressed is not accepted.
+    /// Gets whether the write reached assignment, or stopped short of it because its value, after the
+    /// subject's own changing hook ran, already equalled the current one, which is a successful no-op.
+    /// Derived from the values the write started with, so a write that was refused at a value already
+    /// equal to the current one is indistinguishable from an accepted no-op; nothing was mutated in
+    /// either case, so there is nothing to compensate. A write of a differing value that was cancelled,
+    /// vetoed or suppressed is not accepted.
     /// </summary>
     public bool Accepted { get; internal set; }
 
@@ -27,9 +28,11 @@ public sealed class PropertyWriteOutcome
     /// <summary>
     /// Arms this outcome for the next write of <paramref name="property"/> on this thread and clears the
     /// previous result. Dispose the scope once that write has returned or thrown. A write of any other
-    /// property leaves this outcome untouched, including one nested inside the armed write; a nested
-    /// re-entrant write of the armed property itself (from its changing hook, or a derived recalculation
-    /// cascading into it) is the one that consumes the arming and reports here.
+    /// property leaves this outcome untouched, including one nested inside the armed write. A nested
+    /// re-entrant write of the armed property itself consumes the arming and reports here instead. From
+    /// its changing hook that is a full report; from a derived recalculation cascading into it, only a
+    /// mutation is reported, never an accepted no-op, so a recalculation to an equal value leaves both
+    /// flags clear.
     /// </summary>
     public PropertyWriteOutcomeScope Arm(PropertyReference property, ChangeOrigin origin, object? sentValue)
     {
@@ -45,7 +48,7 @@ public sealed class PropertyWriteOutcome
 /// write of it was cancelled before reaching the chain; after disposal no later write on the thread can
 /// claim the outcome.
 /// </summary>
-public readonly ref struct PropertyWriteOutcomeScope : IDisposable
+public readonly ref struct PropertyWriteOutcomeScope
 {
     private readonly PendingOriginScope _scope;
 
@@ -59,7 +62,10 @@ public readonly ref struct PropertyWriteOutcomeScope : IDisposable
         _isArmed = true;
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Restores the pending write frame that was current before <see cref="PropertyWriteOutcome.Arm"/>,
+    /// which ends the arming. A default instance restores nothing.
+    /// </summary>
     public void Dispose()
     {
         if (_isArmed)

@@ -121,7 +121,9 @@ public class SubjectTransactionReplayOutcomeTests
         Assert.Same(subject, failedChange.Property.Subject);
         Assert.Equal("old", failedChange.GetOldValue<string>());
         Assert.Equal("new", failedChange.GetNewValue<string>());
-        Assert.Equal(2, exception.Errors.Count);
+        Assert.Collection(exception.Errors,
+            error => Assert.Equal("Hook failed after assignment.", error.Message),
+            error => Assert.Equal("Property 'Value' did not accept the transaction restore.", error.Message));
         if (withWriter)
         {
             Assert.Equal("old", writer.Values[new PropertyReference(subject, nameof(subject.Value))]);
@@ -145,6 +147,32 @@ public class SubjectTransactionReplayOutcomeTests
         Assert.Equal("old", failing.Value);
         Assert.Same(failing, Assert.Single(result.Failed).Property.Subject);
         Assert.Single(result.Errors);
+    }
+
+    [Theory]
+    [InlineData(TransactionFailureHandling.Rollback)]
+    [InlineData(TransactionFailureHandling.BestEffort)]
+    public void WhenChangeFailsBeforeItsWriteIsArmed_ThenPreviousMutationIsNotAttributedToIt(TransactionFailureHandling policy)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var mutating = new ReplayOutcomeSubject(context) { Value = "old" };
+        var other = new ReplayOutcomeSubject(context) { Value = "old" };
+        // Resolving the metadata of a property the subject does not have throws before the outcome is
+        // armed for this change, while it still carries the previous change's flags.
+        var missingProperty = SubjectPropertyChange.Create(
+            new PropertyReference(other, "Missing"), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, "old", "new");
+        SubjectPropertyChange[] changes = [CreateChange(mutating), missingProperty];
+
+        // Act
+        var result = SubjectPropertyChangeOperations.ApplyLocalChanges(changes, exclude: null, policy);
+
+        // Assert
+        Assert.Same(other, Assert.Single(result.Failed).Property.Subject);
+        var error = Assert.IsType<InvalidOperationException>(Assert.Single(result.Errors));
+        Assert.Contains("No metadata found for property 'Missing'", error.Message);
+        Assert.Equal(policy == TransactionFailureHandling.Rollback ? "old" : "new", mutating.Value);
+        Assert.Equal(policy == TransactionFailureHandling.Rollback ? 1 : 0, mutating.RestoreAttempts);
     }
 
     [Theory]
