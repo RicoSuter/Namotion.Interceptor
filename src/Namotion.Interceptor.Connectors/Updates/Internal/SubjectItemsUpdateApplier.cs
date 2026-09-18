@@ -191,7 +191,7 @@ internal static class SubjectItemsUpdateApplier
         var canWriteContainer = property.HasSetter;
         var droppedStructure = false;
 
-        var targetKeyType = SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(property.Type).Key;
+        var targetKeyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
@@ -376,6 +376,6 @@ internal static class SubjectItemsUpdateApplier
         => property.Type.IsArray
             ? property.Type.GetElementType()!
             : property.IsSubjectDictionary
-                ? SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(property.Type).Value
-                : SubjectFactoryExtensions.GetCollectionElementType(property.Type);
+                ? property.Type.GetDictionaryKeyAndValueTypes().Value
+                : property.Type.GetCollectionElementType();
 }

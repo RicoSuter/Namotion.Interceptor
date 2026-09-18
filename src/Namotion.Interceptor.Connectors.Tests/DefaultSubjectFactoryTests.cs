@@ -10,27 +10,20 @@ namespace Namotion.Interceptor.Connectors.Tests;
 public class DefaultSubjectFactoryTests
 {
     [Theory]
-    [InlineData(typeof(IEnumerable), false)]
-    [InlineData(typeof(IEnumerable), true)]
-    [InlineData(typeof(ICollection), false)]
-    [InlineData(typeof(ICollection), true)]
-    [InlineData(typeof(ArrayList), false)]
-    [InlineData(typeof(ArrayList), true)]
-    [InlineData(typeof(AmbiguousSequence), false)]
-    [InlineData(typeof(AmbiguousSequence), true)]
-    [InlineData(typeof(TaggedAmbiguousSequence<int>), false)]
-    [InlineData(typeof(TaggedAmbiguousSequence<int>), true)]
-    public void WhenACollectionHasNoKnownElementType_ThenFactoryReportsTheUnsupportedDeclaration(Type propertyType, bool createCollection)
+    [InlineData(typeof(IEnumerable))]
+    [InlineData(typeof(ICollection))]
+    [InlineData(typeof(ArrayList))]
+    [InlineData(typeof(AmbiguousSequence))]
+    [InlineData(typeof(TaggedAmbiguousSequence<int>))]
+    public void WhenACollectionHasNoKnownElementType_ThenFactoryReportsTheUnsupportedDeclaration(Type propertyType)
     {
         // Arrange
         var property = new RegisteredSubjectProperty(new RegisteredSubject(new Person()), "Children", propertyType, []);
         var factory = DefaultSubjectFactory.Instance;
 
         // Act & Assert
-        if (createCollection)
-            Assert.Throws<NotSupportedException>(() => factory.CreateSubjectCollection(propertyType, new Person()));
-        else
-            Assert.Throws<NotSupportedException>(() => factory.CreateCollectionSubject(property, 0));
+        Assert.Throws<NotSupportedException>(() => factory.CreateCollectionSubject(property, 0));
+        Assert.Throws<NotSupportedException>(() => factory.CreateSubjectCollection(propertyType, new Person()));
     }
 
     [Theory]
@@ -39,8 +32,11 @@ public class DefaultSubjectFactoryTests
     [InlineData(typeof(PersonList))]
     [InlineData(typeof(TaggedCollection<Person, int>))]
     [InlineData(typeof(LegacyCollection<Person>))]
+    [InlineData(typeof(SubjectAndTextSequence))]
+    [InlineData(typeof(TaggedPersonList<int>))]
     [InlineData(typeof(Dictionary<string, Person>))]
     [InlineData(typeof(PersonMap))]
+    [InlineData(typeof(TaggedPersonMap<int, int>))]
     public void WhenACollectionHasAKnownElementType_ThenFactoryCreatesTheSubject(Type propertyType)
     {
         // Arrange
@@ -70,8 +66,19 @@ public class DefaultSubjectFactoryTests
     private sealed class PersonList : List<Person>;
     private sealed class PersonMap : Dictionary<string, Person>;
     private sealed class TaggedCollection<TItem, TTag> : List<TItem>;
+    private sealed class TaggedPersonList<TTag> : List<Person>;
+    private sealed class TaggedPersonMap<TFirstTag, TSecondTag> : Dictionary<string, Person>;
     private sealed class LegacyCollection<TItem> : CollectionBase;
     private sealed class TaggedAmbiguousSequence<TTag> : AmbiguousSequence;
+
+    /// <summary>
+    /// Enumerates its subjects and, separately, text. Only one of the two item types can hold a
+    /// subject, which is what the collection classifier keys on, so the declaration is not ambiguous.
+    /// </summary>
+    private sealed class SubjectAndTextSequence : List<Person>, IEnumerable<string>
+    {
+        IEnumerator<string> IEnumerable<string>.GetEnumerator() => Enumerable.Empty<string>().GetEnumerator();
+    }
 
     private class AmbiguousSequence : IEnumerable<Person>, IEnumerable<MyClass>
     {

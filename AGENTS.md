@@ -103,6 +103,10 @@ The library uses a fluent configuration API:
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
 
+## Analyzer Policy
+
+Sonar diagnostics (`S`-prefixed IDs) may appear as build errors under warnings-as-errors. Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Do not add complexity, allocations, or CPU overhead merely to satisfy a rule; propose a narrow, documented exception instead. Compiler errors and correctness defects still require fixes. Get user approval before adding or broadening exceptions; prior approval remains valid. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
+
 ## Key Dependencies
 
 Versions are pinned in the project files, not here, so read them from there.

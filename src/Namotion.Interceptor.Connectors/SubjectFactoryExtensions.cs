@@ -27,43 +27,25 @@ public static class SubjectFactoryExtensions
     /// </summary>
     internal static IInterceptorSubject CreateCollectionSubject(this ISubjectFactory subjectFactory, Type propertyType, object? index, IServiceProvider? serviceProvider)
     {
-        Type? itemType;
-        if (index is null)
-        {
-            itemType = propertyType;
-        }
-        else if (propertyType.IsArray)
-        {
-            itemType = propertyType.GetElementType();
-        }
-        else
-        {
-            itemType = propertyType.IsSubjectDictionaryType()
-                ? GetDictionaryKeyAndValueTypes(propertyType).Value
-                : GetCollectionElementType(propertyType);
-        }
+        var itemType = index is null ? propertyType
+            : propertyType.IsArray ? propertyType.GetElementType()
+            : GetContainerTypes(propertyType, dictionary: propertyType.IsSubjectDictionaryType()).Element;
 
         return subjectFactory.CreateSubject(
             itemType ?? throw new InvalidOperationException("Unknown collection element type"),
             serviceProvider);
     }
 
-    internal static Type GetCollectionElementType(Type propertyType)
+    internal static Type GetCollectionElementType(this Type propertyType)
         => GetContainerTypes(propertyType, dictionary: false).Element;
 
-    internal static (Type Key, Type Value) GetDictionaryKeyAndValueTypes(Type propertyType)
+    internal static (Type Key, Type Value) GetDictionaryKeyAndValueTypes(this Type propertyType)
     {
-        // The dictionary shape either yields a key type or throws, which the collection shape does not,
-        // so this is the only place the nullable key of the shared lookup is resolved.
+        // The dictionary shape returns a key or throws, so the shared lookup's nullable key is never null here.
         var (key, value) = GetContainerTypes(propertyType, dictionary: true);
         return (key!, value);
     }
 
-    /// <remarks>
-    /// Which shape to read is the caller's requirement rather than a fact about the type, so it stays a
-    /// parameter: reading a dictionary-declared property as a positional collection, or the reverse, is
-    /// how a declaration that cannot carry the incoming update is turned into a <see cref="NotSupportedException"/>.
-    /// </remarks>
     private static (Type? Key, Type Element) GetContainerTypes(Type propertyType, bool dictionary)
     {
         return ContainerTypes.GetOrAdd((propertyType, dictionary), static shape =>
@@ -77,7 +59,22 @@ public static class SubjectFactoryExtensions
                 .Distinct()
                 .ToArray();
 
-            // Legacy IDictionary wrappers used their two generic arguments as key/value types.
+            // The classifier that routed the property here accepts a container when any one of its
+            // enumerable instantiations has a subject-capable item type, so a container that also
+            // enumerates something else must not be rejected as ambiguous. Only a container with more
+            // than one subject-capable item type still is.
+            if (itemTypes.Length > 1)
+            {
+                var subjectItemTypes = itemTypes.Where(static types => types.Element.IsSubjectReferenceType()).ToArray();
+                if (subjectItemTypes.Length == 1)
+                {
+                    return subjectItemTypes[0];
+                }
+            }
+
+            // The two fallbacks below read the declaring type's own generic arguments by position, which
+            // is the only place a non-generic IDictionary or ICollection names its item types. A
+            // declaration that orders them differently resolves backwards and cannot be detected here.
             if (shape.Dictionary && itemTypes.Length == 0 && typeof(IDictionary).IsAssignableFrom(shape.Type) &&
                 shape.Type.GenericTypeArguments is { Length: 2 } genericArguments)
             {

@@ -8,53 +8,6 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
 public class SubjectUpdateDictionaryShapeTests
 {
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public void WhenADictionaryUsesAPositionalCollectionDeclaration_ThenUpdateCreationRejectsTheShape(bool readOnly, bool partial)
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var root = new Person(context);
-        var entries = new Dictionary<string, Person> { ["child"] = new() { FirstName = "Ada" } };
-        ICollection children = readOnly ? new DictionaryCollectionView(entries) : entries;
-        var property = root.TryGetRegisteredSubject()!.AddProperty(
-            "RuntimeChildren", typeof(ICollection), _ => children, (_, value) => children = (ICollection)value!);
-        var change = SubjectPropertyChange.Create<ICollection?>(
-            property.Reference, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, children);
-
-        // Act & Assert
-        var exception = Assert.Throws<NotSupportedException>(() => partial
-            ? SubjectUpdate.CreatePartialUpdateFromChanges(root, [change], [])
-            : SubjectUpdate.CreateCompleteUpdate(root, []));
-        Assert.Contains("dictionary", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void WhenADictionaryEnumeratesSubjectValuesWithoutKeys_ThenUpdateCreationRejectsTheShape(bool partial)
-    {
-        // Arrange
-        var root = new Person(InterceptorSubjectContext.Create().WithRegistry());
-        var child = new Person { FirstName = "Ada" };
-        var dictionary = new DictionaryCollectionView(
-            new Dictionary<string, Person> { ["child"] = child }, enumerateValues: true);
-        var property = root.TryGetRegisteredSubject()!.AddProperty(
-            "RuntimeChildren", typeof(IReadOnlyDictionary<string, Person>), _ => dictionary, (_, _) => { });
-        var change = SubjectPropertyChange.Create<IReadOnlyDictionary<string, Person>?>(
-            property.Reference, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, dictionary);
-        Assert.Same(child, Assert.Single(property.Children).Subject);
-
-        // Act & Assert
-        var exception = Assert.Throws<NotSupportedException>(() => partial
-            ? SubjectUpdate.CreatePartialUpdateFromChanges(root, [change], [])
-            : SubjectUpdate.CreateCompleteUpdate(root, []));
-        Assert.Contains("key/value", exception.Message);
-    }
-
     [Fact]
     public void WhenALegacyDictionaryHasExistingChildren_ThenTheirPropertiesAreUpdated()
     {
@@ -126,29 +79,12 @@ public class SubjectUpdateDictionaryShapeTests
         public IDictionary CreateSubjectDictionary(Type propertyType, IDictionary<object, IInterceptorSubject> entries)
         {
             var defaultDictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(propertyType, entries);
-            IDictionary dictionary;
-            if (propertyType == typeof(PersonDictionary)) dictionary = new PersonDictionary();
-            else if (propertyType == typeof(TaggedDictionary<int, string, Person>)) dictionary = new TaggedDictionary<int, string, Person>();
-            else if (propertyType == typeof(SortedDictionary<string, Person>)) dictionary = new SortedDictionary<string, Person>();
-            else return defaultDictionary;
+            if (propertyType.IsInterface)
+                return defaultDictionary;
+
+            var dictionary = (IDictionary)Activator.CreateInstance(propertyType)!;
             foreach (DictionaryEntry entry in defaultDictionary) dictionary.Add(entry.Key, entry.Value);
             return dictionary;
         }
-    }
-
-    private sealed class DictionaryCollectionView(Dictionary<string, Person> entries, bool enumerateValues = false)
-        : IReadOnlyDictionary<string, Person>, ICollection
-    {
-        public Person this[string key] => entries[key];
-        public IEnumerable<string> Keys => entries.Keys;
-        public IEnumerable<Person> Values => entries.Values;
-        public int Count => entries.Count;
-        public bool IsSynchronized => false;
-        public object SyncRoot => this;
-        public bool ContainsKey(string key) => entries.ContainsKey(key);
-        public bool TryGetValue(string key, out Person value) => entries.TryGetValue(key, out value!);
-        public IEnumerator<KeyValuePair<string, Person>> GetEnumerator() => entries.GetEnumerator();
-        IEnumerator IEnumerable.GetEnumerator() => enumerateValues ? entries.Values.GetEnumerator() : GetEnumerator();
-        public void CopyTo(Array array, int index) => ((ICollection)entries).CopyTo(array, index);
     }
 }

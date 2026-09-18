@@ -24,8 +24,7 @@ internal static class SymbolExtensions
     }
 
     /// <summary>
-    /// Whether the type implements the named interface, including through a base class and through
-    /// interface inheritance. AllInterfaces already covers both, so no recursion is needed.
+    /// Checks whether the type is or implements the named interface, including inherited interfaces.
     /// </summary>
     public static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
     {
@@ -69,10 +68,7 @@ internal static class SymbolExtensions
     }
 
     /// <summary>
-    /// The members of a given name that member lookup from <paramref name="accessingType"/> would find
-    /// on the chain starting at <paramref name="baseType"/>. Statics are dropped because none of the
-    /// call sites the generator emits can reach one, and inaccessible members because they neither
-    /// hide nor bind. Contrast <see cref="HidableMembers"/>, which must see statics.
+    /// Enumerates accessible instance members with the given name along the base chain.
     /// </summary>
     public static IEnumerable<ISymbol> AccessibleMembers(
         INamedTypeSymbol baseType,
@@ -84,11 +80,7 @@ internal static class SymbolExtensions
             .Where(member => !member.IsStatic && compilation.IsSymbolAccessibleWithin(member, accessingType));
 
     /// <summary>
-    /// The members of a given name on the base chain that a member emitted into
-    /// <paramref name="accessingType"/> can hide. Same as <see cref="AccessibleMembers"/> except that
-    /// statics are kept: C# hiding is not staticness-sensitive, so a static base member of one of those names is hidden by the emitted instance member and produces the same CS0108 an instance one
-    /// would. Accessibility still applies, because an inaccessible member is neither hidden nor found
-    /// by member lookup.
+    /// Enumerates accessible base members with the given name, including statics that instance members can hide.
     /// </summary>
     public static IEnumerable<ISymbol> HidableMembers(
         INamedTypeSymbol baseType,
@@ -98,4 +90,52 @@ internal static class SymbolExtensions
         => EnumerateChain(baseType)
             .SelectMany(type => type.GetMembers(name))
             .Where(member => compilation.IsSymbolAccessibleWithin(member, accessingType));
+
+    /// <summary>
+    /// Identifies indexers and static properties, which cannot become subject properties.
+    /// </summary>
+    /// <remarks>
+    /// Ignore these shapes without NI0040, including explicit implementations and interface defaults.
+    /// </remarks>
+    public static bool IsNeverASubjectProperty(IPropertySymbol property)
+    {
+        return property.IsIndexer || property.IsStatic;
+    }
+
+    /// <summary>
+    /// Checks accessor reachability from <paramref name="typeSymbol"/> through a receiver cast to <paramref name="throughType"/>.
+    /// </summary>
+    public static (bool IsGetterAccessible, bool IsSetterAccessible) GetAccessorAccessibility(
+        Compilation compilation,
+        IPropertySymbol member,
+        INamedTypeSymbol typeSymbol,
+        ITypeSymbol throughType)
+    {
+        if (!compilation.IsSymbolAccessibleWithin(member, typeSymbol, throughType))
+        {
+            return (false, false);
+        }
+
+        // Individual accessors can be less accessible than the property.
+        var isGetterAccessible = member.GetMethod is { } getMethod &&
+            compilation.IsSymbolAccessibleWithin(getMethod, typeSymbol, throughType);
+        var isSetterAccessible = member.SetMethod is { } setMethod &&
+            compilation.IsSymbolAccessibleWithin(setMethod, typeSymbol, throughType);
+
+        return (isGetterAccessible, isSetterAccessible);
+    }
+
+    public static string GetAccessModifierFromAccessibility(Accessibility accessibility)
+    {
+        return accessibility switch
+        {
+            Accessibility.Public => "public",
+            Accessibility.Internal => "internal",
+            Accessibility.Protected => "protected",
+            Accessibility.ProtectedOrInternal => "protected internal",
+            Accessibility.ProtectedAndInternal => "private protected",
+            Accessibility.Private => "private",
+            _ => "public"  // Interface members default to public
+        };
+    }
 }

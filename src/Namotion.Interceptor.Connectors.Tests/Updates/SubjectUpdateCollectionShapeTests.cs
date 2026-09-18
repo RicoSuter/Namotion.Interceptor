@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateCollectionShapeTests
 {
     [Fact]
-    public void WhenALegacyCollectionNamesItsItemTypeOnlyAsAGenericArgument_ThenItsChildrenRoundtrip()
+    public void WhenALegacyCollectionNamesItsItemTypeOnlyAsAGenericArgument_ThenItsChildrenAreRebuiltInTheDefaultContainer()
     {
         // Arrange
         var source = new Person(InterceptorSubjectContext.Create().WithRegistry());
@@ -33,7 +33,9 @@ public class SubjectUpdateCollectionShapeTests
         var propertyUpdate = update.Subjects[update.Root]["RuntimeChildren"];
         Assert.Equal(SubjectPropertyUpdateKind.Collection, propertyUpdate.Kind);
         Assert.Equal(0, Assert.Single(propertyUpdate.Items!).Index);
-        var child = Assert.Single(Assert.IsAssignableFrom<IEnumerable>(targetChildren).Cast<Person>());
+        // The element type is inferred, the declared container type is not: the default factory
+        // rebuilds the members into a List<T> rather than into another LegacyCollection<Person>.
+        var child = Assert.Single(Assert.IsType<List<Person>>(targetChildren));
         Assert.Equal("Ada", child.FirstName);
     }
 

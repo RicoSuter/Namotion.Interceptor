@@ -5,7 +5,7 @@ public class ExplicitInterfaceTests
     [Fact]
     public void WhenSubInterfaceExplicitlyImplementsMember_ThenGeneratedCodeCompiles()
     {
-        // Arrange (case A, the shape reported in issue 428)
+        // Arrange (case A, the user-reported shape)
         const string source = @"
 using Namotion.Interceptor.Attributes;
 namespace Repro
@@ -134,7 +134,7 @@ namespace Repro
     [Fact]
     public void WhenReportedIssueShapeIsUsed_ThenGeneratedCodeCompiles()
     {
-        // Arrange: issue 428's shape, renamed, including the global namespace
+        // Arrange: the user-reported shape, renamed, including the global namespace
         const string source = @"
 using Namotion.Interceptor.Attributes;
 
