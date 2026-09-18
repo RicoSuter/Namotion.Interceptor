@@ -1,6 +1,8 @@
 using System.Reactive.Concurrency;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -17,20 +19,23 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateUnwritablePropertyTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void WhenAReferenceIsInitOnly_ThenTheNestedChangeStillReachesTheExistingChild(bool partial)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void WhenAReferenceOrCollectionIsInitOnly_ThenANestedChangeStillReachesTheExistingChild(bool collection, bool partial)
     {
         // Arrange
         var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var sourceChild = new InitOnlyTypesTestNode { Name = "Stale" };
-        var source = new InitOnlyTypesTestNode(sourceContext) { Name = "Root", Child = sourceChild };
-        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext.Create().WithRegistry())
-        {
-            Name = "Root",
-            Child = new InitOnlyTypesTestNode { Name = "Stale" }
-        };
-        var existingChild = target.Child!;
+        var source = collection
+            ? new InitOnlyTypesTestNode(sourceContext) { Items = [sourceChild] }
+            : new InitOnlyTypesTestNode(sourceContext) { Child = sourceChild };
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var existingChild = new InitOnlyTypesTestNode { Name = "Stale" };
+        var target = collection
+            ? new InitOnlyTypesTestNode(targetContext) { Items = [existingChild] }
+            : new InitOnlyTypesTestNode(targetContext) { Child = existingChild };
 
         var changes = new List<SubjectPropertyChange>();
         sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
@@ -43,35 +48,8 @@ public class SubjectUpdateUnwritablePropertyTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        Assert.Same(existingChild, target.Child);
-        Assert.Equal("Alice", target.Child!.Name);
-    }
-
-    [Fact]
-    public void WhenACollectionIsInitOnly_ThenASparseItemUpdateStillReachesTheExistingItem()
-    {
-        // Arrange
-        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
-        var sourceItem = new InitOnlyTypesTestNode { Name = "Stale" };
-        var source = new InitOnlyTypesTestNode(sourceContext) { Name = "Root", Items = [sourceItem] };
-        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext.Create().WithRegistry())
-        {
-            Name = "Root",
-            Items = [new InitOnlyTypesTestNode { Name = "Stale" }]
-        };
-        var existingItem = target.Items[0];
-
-        var changes = new List<SubjectPropertyChange>();
-        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
-        sourceItem.Name = "Alice";
-
-        // Act
-        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
-
-        // Assert
-        Assert.Same(existingItem, Assert.Single(target.Items));
-        Assert.Equal("Alice", target.Items[0].Name);
+        Assert.Same(existingChild, collection ? Assert.Single(target.Items) : target.Child);
+        Assert.Equal("Alice", existingChild.Name);
     }
 
     [Fact]
@@ -129,12 +107,93 @@ public class SubjectUpdateUnwritablePropertyTests
         Assert.Equal("Updated", target.Items[0].Name);
     }
 
-    [Fact]
-    public void WhenAValueUpdateNamesAPropertyWithoutASetter_ThenItIsIgnoredWithoutFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenADictionaryIsInitOnly_ThenANewKeyIsDroppedWhileAnExistingChildIsStillUpdated(bool completeMembership)
     {
-        // Arrange: the payload does not even convert to the property type, so a value this model
-        // cannot store must be dropped before the conversion rather than reported as a failure.
-        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext.Create().WithRegistry())
+        // Arrange
+        var logger = new RecordingLogger();
+        var existingChild = new InitOnlyTypesTestNode { Name = "Stale" };
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
+        {
+            Lookup = new() { ["existing"] = existingChild }
+        };
+        var lookupUpdate = completeMembership
+            ? new SubjectPropertyUpdate
+            {
+                Kind = SubjectPropertyUpdateKind.Dictionary,
+                Count = 2,
+                Items =
+                [
+                    new SubjectPropertyItemUpdate { Index = "existing", Id = "2" },
+                    new SubjectPropertyItemUpdate { Index = "added", Id = "3" }
+                ]
+            }
+            : new SubjectPropertyUpdate
+            {
+                Kind = SubjectPropertyUpdateKind.Dictionary,
+                Operations =
+                [
+                    new SubjectCollectionOperation
+                    {
+                        Action = SubjectCollectionOperationType.Insert,
+                        Index = "added",
+                        Id = "3"
+                    }
+                ],
+                Items = [new SubjectPropertyItemUpdate { Index = "existing", Id = "2" }]
+            };
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new() { [nameof(InitOnlyTypesTestNode.Lookup)] = lookupUpdate },
+                ["2"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Name)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Updated"
+                    }
+                },
+                ["3"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Name)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Added"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var entry = Assert.Single(target.Lookup);
+        Assert.Equal("existing", entry.Key);
+        Assert.Same(existingChild, entry.Value);
+        Assert.Equal("Updated", existingChild.Name);
+        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Lookup)}", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
+    public void WhenAValueUpdateNamesAPropertyWithoutASetter_ThenItIsIgnoredWithoutFailureOrWarning()
+    {
+        // Arrange: the payload does not even convert to the property type, so a value this model cannot
+        // store must be dropped before the conversion. A producer legitimately publishes values the
+        // receiving model computes itself, so warning here would fire on nearly every message.
+        var logger = new RecordingLogger();
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
         {
             Label = "Original"
         };
@@ -165,6 +224,8 @@ public class SubjectUpdateUnwritablePropertyTests
         // Assert
         Assert.Equal("Original", target.Label);
         Assert.Equal("Applied", target.Name);
+        Assert.Empty(logger.Warnings);
+        Assert.Empty(logger.Errors);
     }
 
     [Fact]
@@ -225,17 +286,18 @@ public class SubjectUpdateUnwritablePropertyTests
     }
 
     [Fact]
-    public void WhenOnlyAValueNamesAPropertyWithoutASetter_ThenNothingIsLogged()
+    public void WhenNestedSubjectsDropStructure_ThenTheWarningNamesEachDroppedPropertyOnceByItsOwnerType()
     {
-        // Arrange: a producer legitimately publishes value typed derived properties the receiving model
-        // computes itself, so warning here would fire on nearly every message.
+        // Arrange: the node below a root of another type drops its own Child, and so does each of its two
+        // items, so one qualified property name is dropped three times.
         var logger = new RecordingLogger();
-        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+        var node = new InitOnlyTypesTestNode { Items = [new InitOnlyTypesTestNode(), new InitOnlyTypesTestNode()] };
+        var target = new InitOnlyTypesTestHolder(InterceptorSubjectContext
             .Create()
             .WithRegistry()
             .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
         {
-            Label = "Original"
+            Node = node
         };
         var update = new SubjectUpdate
         {
@@ -244,12 +306,48 @@ public class SubjectUpdateUnwritablePropertyTests
             {
                 ["1"] = new()
                 {
-                    [nameof(InitOnlyTypesTestNode.Label)] = new SubjectPropertyUpdate
+                    [nameof(InitOnlyTypesTestHolder.Node)] = new SubjectPropertyUpdate
                     {
-                        Kind = SubjectPropertyUpdateKind.Value,
-                        Value = "Dropped"
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "2"
                     }
-                }
+                },
+                ["2"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "3"
+                    },
+                    [nameof(InitOnlyTypesTestNode.Items)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Index = 0, Id = "4" },
+                            new SubjectPropertyItemUpdate { Index = 1, Id = "5" }
+                        ]
+                    },
+                    [nameof(InitOnlyTypesTestNode.Lookup)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Dictionary,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Insert,
+                                Index = "added",
+                                Id = "6"
+                            }
+                        ]
+                    }
+                },
+                ["3"] = new(),
+                ["4"] = new() { [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "7" } },
+                ["5"] = new() { [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "8" } },
+                ["6"] = new(),
+                ["7"] = new(),
+                ["8"] = new()
             }
         };
 
@@ -257,8 +355,23 @@ public class SubjectUpdateUnwritablePropertyTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        Assert.Empty(logger.Warnings);
-        Assert.Empty(logger.Errors);
-        Assert.Equal("Original", target.Label);
+        var warning = Assert.Single(logger.Warnings);
+        var droppedChild = $"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Child)}";
+        Assert.Single(Regex.Matches(warning, Regex.Escape(droppedChild)));
+        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Lookup)}", warning);
+        Assert.DoesNotContain($"{nameof(InitOnlyTypesTestHolder)}.{nameof(InitOnlyTypesTestNode.Child)}", warning);
+        Assert.Null(node.Child);
+        Assert.All(node.Items, item => Assert.Null(item.Child));
+        Assert.Empty(node.Lookup);
     }
+}
+
+/// <summary>
+/// Holds an <see cref="InitOnlyTypesTestNode"/> through a writable reference, so a property that node
+/// cannot write belongs to a type other than the root the update is applied to.
+/// </summary>
+[InterceptorSubject]
+public partial class InitOnlyTypesTestHolder
+{
+    public partial InitOnlyTypesTestNode? Node { get; set; }
 }

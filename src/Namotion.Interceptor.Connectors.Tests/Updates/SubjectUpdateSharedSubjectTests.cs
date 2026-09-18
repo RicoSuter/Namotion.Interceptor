@@ -28,7 +28,14 @@ public class SubjectUpdateSharedSubjectTests
             Root = "r",
             Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
             {
-                ["r"] = CreateRootProperties(membershipFirst),
+                ["r"] = InOrder(membershipFirst,
+                    nameof(Person.Mother), new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "m" },
+                    nameof(Person.Children), new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 1,
+                        Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "m" }]
+                    }),
                 ["m"] = new()
                 {
                     [nameof(Person.FirstName)] = new SubjectPropertyUpdate
@@ -47,6 +54,114 @@ public class SubjectUpdateSharedSubjectTests
         Assert.Same(existingChild, Assert.Single(target.Children));
         Assert.Equal("Eve", target.Children[0].FirstName);
         Assert.Equal("Eve", target.Mother!.FirstName);
+    }
+
+    [Fact]
+    public void WhenAPositionHoldingAnotherInstanceReceivesABoundId_ThenALaterReferenceResolvesToTheFirstBinding()
+    {
+        // Arrange: the applier walks insertion order, so Mother binds a new instance to the ID before the
+        // child position that keeps its own instance, and Father is resolved last.
+        var target = new Person(InterceptorSubjectContext.Create().WithRegistry())
+        {
+            Children = [new Person { FirstName = "Stale" }]
+        };
+        var existingChild = target.Children[0];
+        var update = new SubjectUpdate
+        {
+            Root = "r",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["r"] = new()
+                {
+                    [nameof(Person.Mother)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "m" },
+                    [nameof(Person.Children)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 1,
+                        Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "m" }]
+                    },
+                    [nameof(Person.Father)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "m" }
+                },
+                ["m"] = new()
+                {
+                    [nameof(Person.FirstName)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Eve"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Same(existingChild, Assert.Single(target.Children));
+        Assert.Equal("Eve", existingChild.FirstName);
+        Assert.NotNull(target.Mother);
+        Assert.NotSame(existingChild, target.Mother);
+        Assert.Same(target.Mother, target.Father);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenOneIdReachesTwoPositionsHoldingEqualButDistinctInstances_ThenEachInstanceReceivesThePayload(bool reversed)
+    {
+        // Arrange: the two instances compare equal, so only a payload claim by reference identity lets the
+        // second one receive the payload the first one already took.
+        var first = new ValueEqualWireSubject { EqualityKey = "child" };
+        var second = new ValueEqualWireSubject { EqualityKey = "child" };
+        var target = new ValueEqualWireSubject(InterceptorSubjectContext.Create().WithRegistry())
+        {
+            EqualityKey = "root",
+            Children = [first, second]
+        };
+        List<SubjectPropertyItemUpdate> items =
+        [
+            new SubjectPropertyItemUpdate { Index = 0, Id = "c" },
+            new SubjectPropertyItemUpdate { Index = 1, Id = "c" }
+        ];
+        if (reversed)
+        {
+            items.Reverse();
+        }
+
+        var update = new SubjectUpdate
+        {
+            Root = "r",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["r"] = new()
+                {
+                    [nameof(ValueEqualWireSubject.Children)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 2,
+                        Items = items
+                    }
+                },
+                ["c"] = new()
+                {
+                    [nameof(ValueEqualWireSubject.Value)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = 7
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Collection(target.Children,
+            child => Assert.Same(first, child),
+            child => Assert.Same(second, child));
+        Assert.Equal(7, first.Value);
+        Assert.Equal(7, second.Value);
     }
 
     [Fact]
@@ -99,7 +214,6 @@ public class SubjectUpdateSharedSubjectTests
     {
         // Arrange
         var target = new MixedTypeFleet(InterceptorSubjectContext.Create().WithRegistry());
-        var rootProperties = new Dictionary<string, SubjectPropertyUpdate>();
         var primary = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "v" };
         var cars = new SubjectPropertyUpdate
         {
@@ -114,25 +228,12 @@ public class SubjectUpdateSharedSubjectTests
                 }
             ]
         };
-
-        // Insertion order is what the applier walks, so it decides which position mints the instance.
-        if (collectionFirst)
-        {
-            rootProperties[nameof(MixedTypeFleet.Cars)] = cars;
-            rootProperties[nameof(MixedTypeFleet.Primary)] = primary;
-        }
-        else
-        {
-            rootProperties[nameof(MixedTypeFleet.Primary)] = primary;
-            rootProperties[nameof(MixedTypeFleet.Cars)] = cars;
-        }
-
         var update = new SubjectUpdate
         {
             Root = "f",
             Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
             {
-                ["f"] = rootProperties,
+                ["f"] = InOrder(collectionFirst, nameof(MixedTypeFleet.Primary), primary, nameof(MixedTypeFleet.Cars), cars),
                 ["v"] = new()
                 {
                     [nameof(FleetCar.Label)] = new SubjectPropertyUpdate
@@ -152,30 +253,94 @@ public class SubjectUpdateSharedSubjectTests
         Assert.Equal("Rusty", Assert.Single(target.Cars).Label);
     }
 
-    private static Dictionary<string, SubjectPropertyUpdate> CreateRootProperties(bool membershipFirst)
+    [Fact]
+    public void WhenAProducedUpdateNamesOneSubjectFromABaseAndADerivedPosition_ThenItsSelfReferenceResolvesAndApplyTerminates()
     {
-        var properties = new Dictionary<string, SubjectPropertyUpdate>();
-        var mother = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "m" };
-        var children = new SubjectPropertyUpdate
+        // Arrange: the base-typed position binds an instance the derived position cannot hold, and the
+        // subject refers to itself through the derived type.
+        var trailer = new FleetTrailer { Label = "Flatbed" };
+        trailer.Coupled = trailer;
+        var source = new MixedTypeFleet(InterceptorSubjectContext.Create().WithRegistry()) { Lead = trailer, Trailer = trailer };
+        var target = new MixedTypeFleet(InterceptorSubjectContext.Create().WithRegistry());
+        var factory = new CountingSubjectFactory();
+
+        // Act
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), factory, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal(2, factory.CreatedSubjects);
+        Assert.Same(target.Trailer, target.Trailer!.Coupled);
+        Assert.Equal("Flatbed", target.Trailer.Label);
+        Assert.Equal("Flatbed", target.Lead!.Label);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAnIdThatCannotFitAnItemPositionListsItselfAsItsOwnItem_ThenOneInstanceIsCreatedPerType(bool collectionFirst)
+    {
+        // Arrange
+        var target = new MixedTypeFleet(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
         {
-            Kind = SubjectPropertyUpdateKind.Collection,
-            Count = 1,
-            Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "m" }]
+            Root = "r",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["r"] = InOrder(collectionFirst,
+                    nameof(MixedTypeFleet.Primary), new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" },
+                    nameof(MixedTypeFleet.Cars), new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 1,
+                        Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "x" }]
+                    }),
+                ["x"] = new()
+                {
+                    [nameof(FleetCar.Towed)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 1,
+                        Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "x" }]
+                    }
+                }
+            }
         };
+        var factory = new CountingSubjectFactory();
 
-        // Insertion order is what the applier walks, so it decides which position mints the instance.
-        if (membershipFirst)
-        {
-            properties[nameof(Person.Children)] = children;
-            properties[nameof(Person.Mother)] = mother;
-        }
-        else
-        {
-            properties[nameof(Person.Mother)] = mother;
-            properties[nameof(Person.Children)] = children;
-        }
+        // Act
+        target.ApplySubjectUpdate(update, factory, ChangeOrigin.Local);
 
-        return properties;
+        // Assert
+        Assert.Equal(2, factory.CreatedSubjects);
+        Assert.IsType<FleetTruck>(target.Primary);
+        var car = Assert.Single(target.Cars);
+        Assert.Same(car, Assert.Single(car.Towed));
+    }
+
+    // Insertion order is what the applier walks, so it decides which position mints the instance.
+    private static Dictionary<string, SubjectPropertyUpdate> InOrder(bool reversed,
+        string firstName, SubjectPropertyUpdate first, string secondName, SubjectPropertyUpdate second)
+        => reversed
+            ? new() { [secondName] = second, [firstName] = first }
+            : new() { [firstName] = first, [secondName] = second };
+
+    /// <summary>
+    /// Counts the subjects it creates and stops a runaway apply long before it could exhaust the stack.
+    /// </summary>
+    private sealed class CountingSubjectFactory : ISubjectFactory
+    {
+        public int CreatedSubjects { get; private set; }
+
+        public IInterceptorSubject CreateSubject(Type type, IServiceProvider? serviceProvider)
+            => ++CreatedSubjects > 20
+                ? throw new InvalidOperationException("The apply created subjects without bound.")
+                : DefaultSubjectFactory.Instance.CreateSubject(type, serviceProvider);
+
+        public IEnumerable<IInterceptorSubject?> CreateSubjectCollection(Type propertyType, params IEnumerable<IInterceptorSubject?> children)
+            => DefaultSubjectFactory.Instance.CreateSubjectCollection(propertyType, children);
+
+        public System.Collections.IDictionary CreateSubjectDictionary(Type propertyType, IDictionary<object, IInterceptorSubject> entries)
+            => DefaultSubjectFactory.Instance.CreateSubjectDictionary(propertyType, entries);
     }
 }
 
@@ -194,16 +359,43 @@ public partial class MixedTypeFleet
     public partial FleetTruck? Primary { get; set; }
 
     public partial List<FleetCar> Cars { get; set; }
+
+    public partial FleetVehicle? Lead { get; set; }
+
+    public partial FleetTrailer? Trailer { get; set; }
 }
 
 [InterceptorSubject]
 public partial class FleetCar
 {
+    public FleetCar()
+    {
+        Towed = [];
+    }
+
     public partial string? Label { get; set; }
+
+    public partial List<FleetCar> Towed { get; set; }
 }
 
 [InterceptorSubject]
 public partial class FleetTruck
 {
     public partial string? Label { get; set; }
+}
+
+[InterceptorSubject]
+public partial class FleetVehicle
+{
+    public partial string? Label { get; set; }
+}
+
+/// <summary>
+/// Derived from <see cref="FleetVehicle"/>, so a base-typed position binds an instance this type's own
+/// positions cannot hold.
+/// </summary>
+[InterceptorSubject]
+public partial class FleetTrailer : FleetVehicle
+{
+    public partial FleetTrailer? Coupled { get; set; }
 }

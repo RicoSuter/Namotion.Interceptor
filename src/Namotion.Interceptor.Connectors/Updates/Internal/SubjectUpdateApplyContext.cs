@@ -12,8 +12,9 @@ internal sealed class SubjectUpdateApplyContext
 {
     private readonly Dictionary<string, IInterceptorSubject> _subjectsById = [];
     private readonly HashSet<(string Id, IInterceptorSubject Subject)> _claimedPayloads = new(PayloadClaimComparer.Instance);
+    private Dictionary<(string Id, Type Type), IInterceptorSubject>? _subjectsByIdAndType;
     private List<(RegisteredSubjectProperty Property, Exception Exception)>? _failures;
-    private List<string>? _droppedStructuralProperties;
+    private List<(Type SubjectType, string PropertyName)>? _droppedStructuralProperties;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -74,7 +75,8 @@ internal sealed class SubjectUpdateApplyContext
     /// <summary>
     /// Claims the payload of an ID for <paramref name="subject"/>: binds the subject the ID names while
     /// the ID is still unbound, and reports whether <paramref name="subject"/> still has to receive that
-    /// payload.
+    /// payload. Pass <paramref name="createdForType"/> for a subject created for a position of that type,
+    /// so it is bound for that type when the ID already names a subject that does not fit it.
     /// </summary>
     /// <remarks>
     /// An ID already bound to a <em>different</em> instance still yields <c>true</c>, which is the
@@ -82,23 +84,42 @@ internal sealed class SubjectUpdateApplyContext
     /// receives the payload. Only the exact subject that already took this ID's payload is turned away,
     /// so a cycle terminates and no instance applies one payload twice.
     /// </remarks>
-    public bool TryClaimSubjectPayload(string subjectId, IInterceptorSubject subject)
+    public bool TryClaimSubjectPayload(string subjectId, IInterceptorSubject subject, Type? createdForType = null)
     {
         if (!_claimedPayloads.Add((subjectId, subject)))
             return false;
 
         // The first binding wins: it is what later references to this ID resolve to, so a position
         // holding another instance must not steal the ID from the subject that already carries it.
-        _subjectsById.TryAdd(subjectId, subject);
+        // A subject created only because that one does not fit its type is bound for the type before
+        // its payload is applied, or a reference to the same ID and type inside that payload would
+        // create another instance on every level without end.
+        if (!_subjectsById.TryAdd(subjectId, subject) && createdForType is not null)
+        {
+            (_subjectsByIdAndType ??= []).TryAdd((subjectId, createdForType), subject);
+        }
+
         return true;
     }
 
+    /// <summary>Whether an ID is already bound to a subject in this update.</summary>
+    public bool IsBound(string subjectId)
+        => _subjectsById.ContainsKey(subjectId);
+
     /// <summary>
-    /// Gets the subject already bound to an ID in this update, or <c>null</c> while it is unbound. IDs are
-    /// scoped to one update, so nothing bound here may outlive it.
+    /// Gets the subject an ID is bound to for a position of <paramref name="declaredType"/>, or <c>null</c>
+    /// when none fits yet. One ID names one subject within an update, so a later reference resolves to
+    /// that instance rather than a copy; only where two positions of unrelated types name one ID does a
+    /// position get the instance created for its own type. IDs are scoped to one update, so nothing bound
+    /// here may outlive it.
     /// </summary>
-    public IInterceptorSubject? TryGetBoundSubject(string subjectId)
-        => _subjectsById.GetValueOrDefault(subjectId);
+    public IInterceptorSubject? TryGetBoundSubject(string subjectId, Type declaredType)
+    {
+        var subject = _subjectsById.GetValueOrDefault(subjectId);
+        return subject is null || declaredType.IsInstanceOfType(subject)
+            ? subject
+            : _subjectsByIdAndType?.GetValueOrDefault((subjectId, declaredType));
+    }
 
     /// <summary>
     /// Records a property that could not be applied. The batch continues; the collected failures are
@@ -113,15 +134,23 @@ internal sealed class SubjectUpdateApplyContext
     /// <summary>
     /// Records a property whose structural payload had nowhere to go because this model cannot write it.
     /// Unlike a dropped value, nothing makes such a child appear later, so the caller reports these once
-    /// the whole update has been walked.
+    /// the whole update has been walked. A property that several instances of one type drop is recorded once.
     /// </summary>
     public void RecordDroppedStructure(RegisteredSubjectProperty property)
-        => (_droppedStructuralProperties ??= []).Add(property.Name);
+    {
+        var droppedProperty = (property.Subject.GetType(), property.Name);
+        var droppedProperties = _droppedStructuralProperties ??= [];
+        if (!droppedProperties.Contains(droppedProperty))
+        {
+            droppedProperties.Add(droppedProperty);
+        }
+    }
 
     /// <summary>
-    /// The properties whose structural payload was dropped, or <c>null</c> while none was.
+    /// The properties whose structural payload was dropped, each with the type of the subject that owns
+    /// it, or <c>null</c> while none was.
     /// </summary>
-    public List<string>? DroppedStructuralProperties => _droppedStructuralProperties;
+    public List<(Type SubjectType, string PropertyName)>? DroppedStructuralProperties => _droppedStructuralProperties;
 
     /// <summary>
     /// Clears the context for reuse. Call before returning to pool.
@@ -129,6 +158,7 @@ internal sealed class SubjectUpdateApplyContext
     public void Clear()
     {
         _subjectsById.Clear();
+        _subjectsByIdAndType?.Clear();
         _claimedPayloads.Clear();
         _failures = null;
         _droppedStructuralProperties = null;

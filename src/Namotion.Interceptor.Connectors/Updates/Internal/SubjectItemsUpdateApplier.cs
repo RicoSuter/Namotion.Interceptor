@@ -20,20 +20,26 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         // A container this model cannot write can only receive updates for the items it already holds:
-        // a new item has nowhere to be stored, so none is created, and the rebuilt container is not
-        // written. The working list is still walked, because that is what maps an incoming index onto
-        // the item the producer meant.
+        // a new item has nowhere to be stored, so none is created, and a structure change is reported as
+        // dropped instead of written. The working list is still walked, because that is what maps an
+        // incoming index onto the item the producer meant.
         var canWriteContainer = property.HasSetter;
-        var droppedStructure = false;
 
         var existingValue = property.GetValue();
         var workingItems = SubjectValueConvert.ToSubjectMutableList(existingValue);
         var completeIndices = GetCompleteMembership(propertyUpdate, context, static (index, _) => ConvertIndexToInt(index));
-        var structureChanged = completeIndices is not null && existingValue is null;
-        if (completeIndices is not null && workingItems.Count > completeIndices.Count)
+        var structureChanged = completeIndices is not null &&
+            (existingValue is null || workingItems.Count != completeIndices.Count);
+        if (completeIndices is not null)
         {
-            workingItems.RemoveRange(completeIndices.Count, workingItems.Count - completeIndices.Count);
-            structureChanged = true;
+            // Complete membership names every position once, so padding with nulls lets each item be written
+            // at its own index whatever the arrival order, and every null is overwritten by the item that
+            // owns its slot.
+            if (workingItems.Count > completeIndices.Count)
+                workingItems.RemoveRange(completeIndices.Count, workingItems.Count - completeIndices.Count);
+
+            while (workingItems.Count < completeIndices.Count)
+                workingItems.Add(null!);
         }
 
         // Apply structural operations in two phases:
@@ -59,20 +65,16 @@ internal static class SubjectItemsUpdateApplier
                     case SubjectCollectionOperationType.Insert:
                         if (operation.Id is not null)
                         {
-                            if (!canWriteContainer)
+                            if (canWriteContainer)
                             {
-                                droppedStructure = true;
-                            }
-                            else
-                            {
-                                var itemProps = context.GetSubjectProperties(operation.Id);
-                                var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
+                                var itemProperties = context.GetSubjectProperties(operation.Id);
+                                var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProperties, context);
                                 if (index >= workingItems.Count)
                                     workingItems.Add(newItem);
                                 else
                                     workingItems.Insert(index, newItem);
-                                structureChanged = true;
                             }
+                            structureChanged = true;
                         }
                         break;
                 }
@@ -103,17 +105,6 @@ internal static class SubjectItemsUpdateApplier
         // Apply sparse property updates
         if (propertyUpdate.Items is { Count: > 0 })
         {
-            // Complete membership names every position exactly once, so filling the gap with nulls up
-            // front lets each item be written at its own index. Nothing is appended, which is what made
-            // the arrival order matter, and every null is overwritten by the item that owns its slot.
-            if (completeIndices is not null && canWriteContainer)
-            {
-                while (workingItems.Count < completeIndices.Count)
-                {
-                    workingItems.Add(null!);
-                }
-            }
-
             foreach (var collectionUpdate in propertyUpdate.Items)
             {
                 var index = ConvertIndexToInt(collectionUpdate.Index);
@@ -128,32 +119,27 @@ internal static class SubjectItemsUpdateApplier
 
                 if (collectionUpdate.Id is not null)
                 {
-                    var itemProps = context.GetSubjectProperties(collectionUpdate.Id);
+                    var itemProperties = context.GetSubjectProperties(collectionUpdate.Id);
                     if (index >= 0 && index < workingItems.Count &&
                         (completeIndices is null || workingItems[index] is not null))
                     {
                         // Update existing item
                         if (context.TryClaimSubjectPayload(collectionUpdate.Id, workingItems[index]))
                         {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
+                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProperties, context);
                         }
                     }
                     else if (index >= 0 && index <= workingItems.Count)
                     {
-                        if (!canWriteContainer)
+                        if (canWriteContainer)
                         {
-                            droppedStructure = true;
-                        }
-                        else
-                        {
-                            // Create new item at append position (for complete updates rebuilding the collection)
-                            var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
+                            var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProperties, context);
                             if (index >= workingItems.Count)
                                 workingItems.Add(newItem);
                             else
                                 workingItems[index] = newItem;
-                            structureChanged = true;
                         }
+                        structureChanged = true;
                     }
                 }
             }
@@ -168,13 +154,8 @@ internal static class SubjectItemsUpdateApplier
             }
             else
             {
-                droppedStructure = true;
+                context.RecordDroppedStructure(property);
             }
-        }
-
-        if (droppedStructure)
-        {
-            context.RecordDroppedStructure(property);
         }
     }
 
@@ -189,36 +170,32 @@ internal static class SubjectItemsUpdateApplier
     {
         // See the collection path for what a container this model cannot write can receive.
         var canWriteContainer = property.HasSetter;
-        var droppedStructure = false;
 
         var targetKeyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
-        var structureChanged = false;
 
         var existingValue = property.GetValue();
+        var completeKeys = GetCompleteMembership(propertyUpdate, context,
+            static (key, keyType) => ConvertDictionaryKey(key, keyType!), targetKeyType);
+
+        // The working dictionary omits null and non-subject entries, so the original container is counted.
+        var structureChanged = completeKeys is not null && (existingValue is null ||
+            (existingValue is ICollection collection
+                ? collection.Count
+                : ((IEnumerable)existingValue).Cast<object>().Count()) != completeKeys.Count);
+
         if (existingValue is not null)
         {
             foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
             {
-                if (entry.Value is IInterceptorSubject subject)
-                    workingDictionary[entry.Key] = subject;
-            }
-        }
+                if (entry.Value is not IInterceptorSubject subject)
+                    continue;
 
-        var completeKeys = GetCompleteMembership(propertyUpdate, context,
-            static (key, keyType) => ConvertDictionaryKey(key, keyType!), targetKeyType);
-        if (completeKeys is not null)
-        {
-            foreach (var key in workingDictionary.Keys.Where(key => !completeKeys.Contains(key)).ToArray())
-            {
-                workingDictionary.Remove(key);
-                structureChanged = true;
+                if (completeKeys is null || completeKeys.Contains(entry.Key))
+                    workingDictionary[entry.Key] = subject;
+                else
+                    structureChanged = true;
             }
-            // The working dictionary omits null/non-subject entries; count the original container too.
-            structureChanged |= existingValue is null ||
-                (existingValue is ICollection collection
-                    ? collection.Count
-                    : ((IEnumerable)existingValue).Cast<object>().Count()) != completeKeys.Count;
         }
 
         // Apply structural operations
@@ -237,17 +214,12 @@ internal static class SubjectItemsUpdateApplier
                     case SubjectCollectionOperationType.Insert:
                         if (operation.Id is not null)
                         {
-                            if (!canWriteContainer)
+                            if (canWriteContainer)
                             {
-                                droppedStructure = true;
+                                var itemProperties = context.GetSubjectProperties(operation.Id);
+                                workingDictionary[key] = CreateAndApplyItem(parent, property, key, operation.Id, itemProperties, context);
                             }
-                            else
-                            {
-                                var itemProps = context.GetSubjectProperties(operation.Id);
-                                var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
-                                workingDictionary[key] = newItem;
-                                structureChanged = true;
-                            }
+                            structureChanged = true;
                         }
                         break;
                 }
@@ -257,28 +229,26 @@ internal static class SubjectItemsUpdateApplier
         // Apply sparse property updates
         if (propertyUpdate.Items is { Count: > 0 })
         {
-            foreach (var collUpdate in propertyUpdate.Items)
+            foreach (var itemUpdate in propertyUpdate.Items)
             {
-                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
+                var key = ConvertDictionaryKey(itemUpdate.Index, targetKeyType);
 
-                if (collUpdate.Id is not null)
+                if (itemUpdate.Id is not null)
                 {
-                    var itemProps = context.GetSubjectProperties(collUpdate.Id);
+                    var itemProperties = context.GetSubjectProperties(itemUpdate.Id);
                     if (workingDictionary.TryGetValue(key, out var existing))
                     {
-                        if (context.TryClaimSubjectPayload(collUpdate.Id, existing))
+                        if (context.TryClaimSubjectPayload(itemUpdate.Id, existing))
                         {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
+                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProperties, context);
                         }
-                    }
-                    else if (!canWriteContainer)
-                    {
-                        droppedStructure = true;
                     }
                     else
                     {
-                        var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
-                        workingDictionary[key] = newItem;
+                        if (canWriteContainer)
+                        {
+                            workingDictionary[key] = CreateAndApplyItem(parent, property, key, itemUpdate.Id, itemProperties, context);
+                        }
                         structureChanged = true;
                     }
                 }
@@ -294,13 +264,8 @@ internal static class SubjectItemsUpdateApplier
             }
             else
             {
-                droppedStructure = true;
+                context.RecordDroppedStructure(property);
             }
-        }
-
-        if (droppedStructure)
-        {
-            context.RecordDroppedStructure(property);
         }
     }
 
@@ -311,7 +276,7 @@ internal static class SubjectItemsUpdateApplier
         Type? keyType = null) where TIndex : notnull
     {
         // Complete membership can carry sparse child properties; only the item coverage matters.
-        if (update.Count is not { } count || count < 0 ||
+        if (update.Count is not { } count ||
             update.Operations is { Count: > 0 } || (update.Items?.Count ?? 0) != count)
             return null;
 
@@ -346,21 +311,22 @@ internal static class SubjectItemsUpdateApplier
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
     {
-        // An ID another property or item already bound names that same subject, so it enters the container
-        // rather than being recreated from the payload it already applied. Two properties of unrelated
-        // subject types may still name one ID, and the bound instance then fits only one of them, so an
-        // item type mismatch gets its own instance instead of an insert that throws.
-        var boundItem = context.TryGetBoundSubject(subjectId);
-        if (boundItem is not null && GetItemType(property).IsInstanceOfType(boundItem))
+        // The item type costs a lookup, so it is resolved only for an ID that is already bound.
+        Type? itemType = null;
+        if (context.IsBound(subjectId))
         {
-            return boundItem;
+            itemType = GetItemType(property);
+            if (context.TryGetBoundSubject(subjectId, itemType) is { } boundItem)
+            {
+                return boundItem;
+            }
         }
 
         var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
         newItem.Context.AddFallbackContext(parent.Context);
 
         // Claiming before recursing is what terminates a payload that references itself.
-        if (context.TryClaimSubjectPayload(subjectId, newItem))
+        if (context.TryClaimSubjectPayload(subjectId, newItem, itemType))
         {
             SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
         }

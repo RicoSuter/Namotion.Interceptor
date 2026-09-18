@@ -29,10 +29,12 @@ internal static class SubjectUpdateApplier
 
         var context = ContextPool.Rent();
         List<(RegisteredSubjectProperty Property, Exception Exception)>? failures = null;
-        List<string>? droppedStructuralProperties = null;
+        List<(Type SubjectType, string PropertyName)>? droppedStructuralProperties = null;
         try
         {
             context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
+
+            // Binds the root's ID, so a back reference to the root resolves to this subject.
             context.TryClaimSubjectPayload(update.Root, subject);
             ApplyPropertyUpdates(subject, rootProperties, context);
             failures = context.Failures;
@@ -69,18 +71,16 @@ internal static class SubjectUpdateApplier
             failures.Select(failure => failure.Exception));
     }
 
-    /// <summary>
-    /// Reports the properties whose structural payload was dropped. A dropped value converges the moment
-    /// the receiver computes or receives it again, but a child the model cannot store never appears, so
-    /// this is the only notice a reader gets.
-    /// </summary>
-    private static void WarnAboutDroppedStructure(IInterceptorSubject rootSubject, List<string> droppedProperties)
+    private static void WarnAboutDroppedStructure(
+        IInterceptorSubject rootSubject, List<(Type SubjectType, string PropertyName)> droppedProperties)
     {
         SubjectUpdateLog.TryGetWarningLogger(rootSubject)?.LogWarning(
-            "Dropped the incoming structure of the properties {DroppedProperties} of subject {SubjectType} " +
-            "because they have no setter, so the described children have nowhere to be stored. Give these " +
-            "properties a setter, or construct the children in the receiving model itself.",
-            string.Join(", ", droppedProperties), rootSubject.GetType().FullName);
+            "Dropped the incoming structure of the properties {DroppedProperties} while applying an update to " +
+            "subject {SubjectType}. These properties have no setter, so the described children have nowhere to " +
+            "be stored. Give them a setter, or construct the children in the receiving model itself.",
+            string.Join(", ", droppedProperties.Select(droppedProperty =>
+                $"{droppedProperty.SubjectType.Name}.{droppedProperty.PropertyName}")),
+            rootSubject.GetType().FullName);
     }
 
     internal static void ApplyPropertyUpdates(
@@ -128,12 +128,10 @@ internal static class SubjectUpdateApplier
             {
                 case SubjectPropertyUpdateKind.Value:
                 {
-                    // Whether a property is writable is a fact about this model rather than the
-                    // producer's, and a producer may legitimately publish one for a receiver to display,
-                    // so an unwritable property is an expected shape: it is dropped before the value is
-                    // even converted rather than reported as a failure. The kinds below cannot drop the
-                    // update this early, because a reference or container the receiver already holds
-                    // still has to carry the nested payloads through to its subtree.
+                    // A producer may publish a property this model cannot write, so its value is dropped
+                    // before it is even converted rather than reported as a failure. The kinds below must
+                    // not drop this early: a reference or container the receiver already holds still
+                    // carries the nested payloads to its subtree.
                     if (!registeredProperty.HasSetter)
                         break;
 
@@ -215,20 +213,14 @@ internal static class SubjectUpdateApplier
             }
             else
             {
-                // One ID is one subject within an update, so a reference to an ID another property
-                // already bound points at that same subject rather than a second copy of it. This is
-                // what carries a back reference to the root, whose payload the root itself applied.
-                // Two properties of unrelated subject types may still name one ID, and the bound
-                // instance then fits only one of them, so a type mismatch gets its own instance
-                // instead of a write that throws.
-                var newItem = context.TryGetBoundSubject(propertyUpdate.Id);
-                if (newItem is null || !property.Type.IsInstanceOfType(newItem))
+                var newItem = context.TryGetBoundSubject(propertyUpdate.Id, property.Type);
+                if (newItem is null)
                 {
                     newItem = context.SubjectFactory.CreateSubject(property);
                     newItem.Context.AddFallbackContext(parent.Context);
 
                     // Claiming before recursing is what terminates a payload that references itself.
-                    if (context.TryClaimSubjectPayload(propertyUpdate.Id, newItem))
+                    if (context.TryClaimSubjectPayload(propertyUpdate.Id, newItem, property.Type))
                     {
                         ApplyPropertyUpdates(newItem, itemProperties, context);
                     }

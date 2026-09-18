@@ -16,8 +16,7 @@ public class SubjectUpdateMembershipTests
         IReadOnlyDictionary<string, Person> children = new GenericOnlyDictionary(new() { ["stale"] = null! });
         target.TryGetRegisteredSubject()!.AddProperty("ReadOnlyChildren", typeof(IReadOnlyDictionary<string, Person>),
             _ => children, (_, value) => children = (IReadOnlyDictionary<string, Person>)value!);
-        var update = CreateUpdate(dictionary: true, count: 0);
-        update.Subjects[update.Root] = new() { ["ReadOnlyChildren"] = update.Subjects[update.Root][nameof(Person.Relationships)] };
+        var update = CreateUpdate(dictionary: true, count: 0, propertyName: "ReadOnlyChildren");
 
         // Act
         Apply(target, update, json: true);
@@ -77,9 +76,9 @@ public class SubjectUpdateMembershipTests
         Apply(target, update, json);
 
         // Assert
-        Assert.Equal(retained, GetChildren(target, dictionary));
-        Assert.Same(retained[0], GetChildren(target, dictionary)[0]);
-        Assert.Same(retained[1], GetChildren(target, dictionary)[1]);
+        Assert.Collection(GetChildren(target, dictionary),
+            child => Assert.Same(retained[0], child),
+            child => Assert.Same(retained[1], child));
         Assert.Equal("Updated", retained[0].FirstName);
         Assert.Equal("Second", retained[1].FirstName);
         Assert.All(retained, child => Assert.Equal("Retained", child.LastName));
@@ -187,16 +186,50 @@ public class SubjectUpdateMembershipTests
         var children = new Dictionary<int, Person> { [1] = new(), [2] = new(), [3] = new() };
         target.TryGetRegisteredSubject()!.AddProperty("IntegerChildren", typeof(Dictionary<int, Person>),
             _ => children, (_, value) => children = (Dictionary<int, Person>)value!);
-        var update = CreateUpdate(dictionary: true, count: 2);
-        var propertyUpdate = update.Subjects[update.Root][nameof(Person.Relationships)];
-        update.Subjects[update.Root] = new() { ["IntegerChildren"] = propertyUpdate };
-        propertyUpdate.Items = [new() { Index = json ? 1 : "1", Id = "first" }, new() { Index = json ? 2 : alias ? "01" : "2", Id = "second" }];
+        var update = CreateUpdate(dictionary: true, count: 2, propertyName: "IntegerChildren");
+        update.Subjects[update.Root]["IntegerChildren"].Items = [new() { Index = json ? 1 : "1", Id = "first" }, new() { Index = json ? 2 : alias ? "01" : "2", Id = "second" }];
 
         // Act
         Apply(target, update, json);
 
         // Assert
         Assert.Equal(alias ? new[] { 1, 2, 3 } : new[] { 1, 2 }, children.Keys.Order());
+    }
+
+    [Fact]
+    public void WhenASubjectIsReattachedWhileItsCollectionShrinks_ThenTheMirrorKeepsOnlyTheRemainingChild()
+    {
+        // Arrange
+        var remainingChild = new Person { FirstName = "Kept" };
+        var removedChild = new Person { FirstName = "Gone" };
+        var mother = new Person { FirstName = "Mom", Children = [remainingChild, removedChild] };
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { Mother = mother };
+        var mirror = new Person(InterceptorSubjectContext.Create().WithRegistry());
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // One batch shrinks the collection, then detaches and re-attaches its owner.
+        var previousChildren = mother.Children;
+        mother.Children = [remainingChild];
+        source.Mother = null;
+        source.Mother = mother;
+        var timestamp = DateTimeOffset.UtcNow;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create(new PropertyReference(mother, nameof(Person.Children)),
+                ChangeOrigin.Local, timestamp, null, previousChildren, mother.Children),
+            SubjectPropertyChange.Create<Person?>(new PropertyReference(source, nameof(Person.Mother)),
+                ChangeOrigin.Local, timestamp, null, mother, null),
+            SubjectPropertyChange.Create<Person?>(new PropertyReference(source, nameof(Person.Mother)),
+                ChangeOrigin.Local, timestamp, null, null, mother)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
+        mirror.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal("Mom", mirror.Mother!.FirstName);
+        Assert.Equal(["Kept"], mirror.Mother.Children.Select(child => child.FirstName));
     }
 
     private static Person CreateTarget()
@@ -216,14 +249,14 @@ public class SubjectUpdateMembershipTests
         ? target.Relationships!.OrderBy(entry => entry.Key).Select(entry => entry.Value).ToArray()
         : target.Children.ToArray();
 
-    private static SubjectUpdate CreateUpdate(bool dictionary, int count) => new()
+    private static SubjectUpdate CreateUpdate(bool dictionary, int count, string? propertyName = null) => new()
     {
         Root = "root",
         Subjects = new()
         {
             ["root"] = new()
             {
-                [PropertyName(dictionary)] = new()
+                [propertyName ?? PropertyName(dictionary)] = new()
                 {
                     Kind = dictionary ? SubjectPropertyUpdateKind.Dictionary : SubjectPropertyUpdateKind.Collection,
                     Count = count,

@@ -462,41 +462,21 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Same(target, target.Self);
     }
 
-    [Fact]
-    public void WhenAnUpdateNamesOneSubjectTwice_ThenBothReferencesApplyToOneInstance()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAnUpdateNamesOneSubjectFromTwoPositions_ThenBothPositionsHoldOneInstance(bool collection)
     {
         // Arrange
         var target = new Person(InterceptorSubjectContext.Create().WithRegistry());
-        var update = new SubjectUpdate
-        {
-            Root = "1",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+        var firstPosition = collection
+            ? new SubjectPropertyUpdate
             {
-                ["1"] = new()
-                {
-                    [nameof(Person.Mother)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "2" },
-                    [nameof(Person.Father)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "2" }
-                },
-                ["2"] = new()
-                {
-                    [nameof(Person.FirstName)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Shared" }
-                }
+                Kind = SubjectPropertyUpdateKind.Collection,
+                Count = 1,
+                Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "2" }]
             }
-        };
-
-        // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
-
-        // Assert
-        Assert.Equal("Shared", target.Mother!.FirstName);
-        Assert.Same(target.Mother, target.Father);
-    }
-
-    [Fact]
-    public void WhenACollectionItemIsAlsoReferenced_ThenBothPositionsHoldOneInstance()
-    {
-        // Arrange
-        var target = new Person(InterceptorSubjectContext.Create().WithRegistry());
+            : new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "2" };
         var update = new SubjectUpdate
         {
             Root = "1",
@@ -504,12 +484,7 @@ public partial class SubjectUpdateExtensionsTests
             {
                 ["1"] = new()
                 {
-                    [nameof(Person.Children)] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Count = 1,
-                        Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "2" }]
-                    },
+                    [collection ? nameof(Person.Children) : nameof(Person.Father)] = firstPosition,
                     [nameof(Person.Mother)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "2" }
                 },
                 ["2"] = new()
@@ -523,8 +498,8 @@ public partial class SubjectUpdateExtensionsTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        Assert.Equal("Shared", Assert.Single(target.Children).FirstName);
-        Assert.Same(target.Children[0], target.Mother);
+        Assert.Equal("Shared", target.Mother!.FirstName);
+        Assert.Same(target.Mother, collection ? Assert.Single(target.Children) : target.Father);
     }
 
     [Fact]
