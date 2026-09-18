@@ -11,25 +11,11 @@
     SubjectId_2: {
       firstName: {
         Kind: Value,
-        Value: NewPerson,
-        Timestamp: {Scrubbed}
-      }
-    },
-    SubjectId_3: {
-      firstName: {
-        Kind: Value,
-        Value: NewMother,
-        Timestamp: {Scrubbed}
-      }
-    },
-    SubjectId_4: {
-      firstName: {
-        Kind: Value,
         Value: NewChild1,
         Timestamp: {Scrubbed}
       }
     },
-    SubjectId_5: {
+    SubjectId_3: {
       firstName: {
         Kind: Value,
         Value: NewChild3,

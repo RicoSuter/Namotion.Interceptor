@@ -33,13 +33,13 @@
           }
         }
       },
+      LastName: {
+        Kind: Value
+      },
       FullName: {
         Kind: Value,
         Value: NewChild ,
         Timestamp: DateTimeOffset_2
-      },
-      LastName: {
-        Kind: Value
       },
       Father: {
         Kind: Object

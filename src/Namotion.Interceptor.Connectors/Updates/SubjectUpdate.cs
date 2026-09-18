@@ -15,13 +15,9 @@ public class SubjectUpdate
     /// The ID the sender gave the root subject of this update.
     /// </summary>
     /// <remarks>
-    /// Set on every update this library builds, complete and partial alike, and it is a mapping hint
-    /// rather than an identity assignment: the receiver resolves it to its own root subject for the
-    /// duration of one apply, and the local root keeps its own ID. A partial update whose root has no
-    /// changed properties of its own still carries it, and then names an ID that is absent from
-    /// <see cref="Subjects"/>: without it a subject that references the sender's root, such as a
-    /// parent pointer, resolves against nothing in the receiver's registry and the reference is lost
-    /// for good, because the sender considers the state delivered and never resends it.
+    /// Set on every update this library builds, and a mapping hint rather than an identity assignment: the
+    /// receiver resolves it to its own root subject for one apply, and the local root keeps its own ID. It
+    /// can name an ID that has no entry in <see cref="Subjects"/>.
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("root")]
@@ -35,15 +31,12 @@ public class SubjectUpdate
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; init; } = new();
 
     /// <summary>
-    /// Set of subject IDs that contain complete state in this update. The applier must not create a
-    /// subject for an ID outside this set, because that would produce a default-valued instance the
-    /// sender never resends complete state for, so it can never converge.
+    /// Set of subject IDs whose complete state this update carries. The applier creates no subject for an
+    /// ID outside this set.
     /// </summary>
     /// <remarks>
-    /// <c>null</c> means ALL subjects in the update are complete, and only a complete update may say
-    /// so. A partial update always carries the set, empty included: a partial update whose only
-    /// structural change is a reorder or a removal introduces no new subject and marks nothing
-    /// complete, and it has to state that explicitly rather than fall back on the null shorthand.
+    /// <c>null</c> means all subjects in the update are complete, which only a complete update states. A
+    /// partial update always carries the set, also when it is empty.
     /// </remarks>
     [JsonPropertyName("completeSubjectIds")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

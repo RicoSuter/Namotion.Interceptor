@@ -2,18 +2,6 @@
   Root: SubjectId_1,
   Subjects: {
     SubjectId_1: {
-      name: {
-        Kind: Value,
-        Value: Root_Final,
-        Timestamp: {Scrubbed},
-        Attributes: {
-          status: {
-            Kind: Value,
-            Value: status_Final,
-            Timestamp: {Scrubbed}
-          }
-        }
-      },
       child: {
         Kind: Object,
         Timestamp: {Scrubbed},
@@ -30,6 +18,18 @@
             Id: SubjectId_4
           }
         ]
+      },
+      name: {
+        Kind: Value,
+        Value: Root_Final,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          status: {
+            Kind: Value,
+            Value: status_Final,
+            Timestamp: {Scrubbed}
+          }
+        }
       }
     },
     SubjectId_2: {

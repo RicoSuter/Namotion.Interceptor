@@ -125,6 +125,34 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     }
 
     /// <inheritdoc />
+    void ISubjectIdRegistryWriter.ReplaceSubjectId(IInterceptorSubject subject, string id)
+    {
+        lock (_knownSubjects)
+        {
+            if (_subjectIdToSubject.TryGetValue(id, out var existing) && !ReferenceEquals(existing, subject))
+            {
+                throw new InvalidOperationException(
+                    $"Subject ID '{id}' is already in use by a different subject.");
+            }
+
+            var oldId = subject.TryGetSubjectId();
+            if (oldId is not null &&
+                _subjectIdToSubject.TryGetValue(oldId, out var holder) && ReferenceEquals(holder, subject))
+            {
+                _subjectIdToSubject.Remove(oldId);
+            }
+
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public bool TryGetSubjectById(string subjectId, out IInterceptorSubject subject)
     {
         lock (_knownSubjects)

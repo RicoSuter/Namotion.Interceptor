@@ -5,16 +5,19 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
-/// Context for applying a SubjectUpdate. Tracks processed subjects to prevent cycles.
-/// Designed to be pooled and reused.
+/// Context for applying a SubjectUpdate. Binds the subjects an update names and tracks which payloads were
+/// applied. Designed to be pooled and reused.
 /// </summary>
 internal sealed class SubjectUpdateApplyContext
 {
-    private readonly HashSet<string> _processedSubjectIds = [];
-    private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
     private readonly Dictionary<string, IInterceptorSubject> _boundSubjects = [];
-    private readonly List<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> _deferredAttributeUpdates = [];
+    private readonly HashSet<string> _processedSubjectIds = [];
+    private readonly Queue<(IInterceptorSubject Subject, string SubjectId, string PropertyName, Dictionary<string, SubjectPropertyUpdate> Attributes)> _deferredAttributeUpdates = [];
+    private IInterceptorSubject _rootSubject = null!;
+    private HashSet<string>? _completeSubjectIds;
+    private HashSet<string>? _ignoredSubjectIds;
     private List<(PropertyReference Property, Exception Exception)>? _failures;
+    private List<(Type SubjectType, string PropertyName)>? _droppedStructuralProperties;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -22,40 +25,26 @@ internal sealed class SubjectUpdateApplyContext
     public Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? TransformValueBeforeApply { get; private set; }
 
     /// <summary>
-    /// The subject ID registry from the root subject's context. Stored here so that newly created
-    /// subjects (whose contexts may not yet have services resolved via fallback) don't need to
-    /// look up the registry themselves.
+    /// The subject ID registry of the root subject's context, which resolves the subjects this update names.
     /// </summary>
     public ISubjectIdRegistry SubjectIdRegistry { get; private set; } = null!;
 
     /// <summary>
-    /// The service provider of the root subject's context, used to construct subjects created by
-    /// this update. Resolved once from the root because a subject created during the apply has no
-    /// fallback context yet, so asking its own context would yield null and downgrade construction
-    /// to a parameterless activation, which fails for subject types with a dependency-injected
-    /// constructor nested more than one level deep in a single update.
+    /// The service provider of the root subject's context, which constructs the subjects this update creates.
     /// </summary>
     public IServiceProvider? ServiceProvider { get; private set; }
 
-    private HashSet<string>? _completeSubjectIds;
-
-    /// <summary>
-    /// Returns true if the subject ID has complete state in this update.
-    /// null means all subjects are complete (e.g., a full initial-state update).
-    /// </summary>
-    public bool IsSubjectComplete(string subjectId)
-        => _completeSubjectIds is null || _completeSubjectIds.Contains(subjectId);
-
     public void Initialize(
-        IInterceptorSubjectContext rootContext,
-        Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects,
-        HashSet<string>? completeSubjectIds,
+        IInterceptorSubject rootSubject,
+        SubjectUpdate update,
         ISubjectFactory subjectFactory,
         ChangeOrigin origin,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply)
     {
-        Subjects = subjects;
-        _completeSubjectIds = completeSubjectIds;
+        var rootContext = rootSubject.Context;
+        _rootSubject = rootSubject;
+        Subjects = update.Subjects;
+        _completeSubjectIds = update.CompleteSubjectIds;
         SubjectFactory = subjectFactory;
         Origin = origin;
         TransformValueBeforeApply = transformValueBeforeApply;
@@ -64,65 +53,141 @@ internal sealed class SubjectUpdateApplyContext
     }
 
     /// <summary>
-    /// Pre-resolves all subject IDs to their instances using the live registry.
-    /// Must be called before structural changes are applied, so that subjects
-    /// concurrently detached by another mutation can still be found afterwards.
+    /// Returns true if the subject ID has complete state in this update.
+    /// null means all subjects are complete (e.g., a full initial-state update).
     /// </summary>
-    public void PreResolveSubjects(IEnumerable<string> subjectIds)
-    {
-        foreach (var subjectId in subjectIds)
-        {
-            if (SubjectIdRegistry.TryGetSubjectById(subjectId, out var subject))
-            {
-                _preResolvedSubjects[subjectId] = subject;
-            }
-        }
-    }
+    public bool IsSubjectComplete(string subjectId)
+        => _completeSubjectIds is null || _completeSubjectIds.Contains(subjectId);
 
     /// <summary>
-    /// Binds <paramref name="subjectId"/> to <paramref name="subject"/> for the rest of this apply.
+    /// Binds <paramref name="subjectId"/> to <paramref name="subject"/> for the rest of this apply, which a
+    /// subject the registry cannot resolve by that ID needs: the local root, whose ID differs from the
+    /// sender's, a created subject until it is rooted, and a subject that adopts the ID.
     /// </summary>
     /// <remarks>
-    /// Two kinds of subject are bound: the ones this apply creates, and the local root subject, bound
-    /// to the update's <see cref="SubjectUpdate.Root"/> mapping hint. Neither is reachable through the
-    /// ID registry under the update's ID. A created subject is not registered until its subtree is
-    /// rooted, which happens after it is populated, and the sender's root ID is not the receiver's.
-    /// Without this binding a second reference to the same ID inside one apply misses the registry and
-    /// fabricates a duplicate instance that is never populated, because the ID's properties were
-    /// already consumed by the first instance. Both instances get rooted, the registry keeps the first
-    /// one in its reverse index, and the duplicate becomes an invisible, permanently default-valued
-    /// node that no later update can reach.
+    /// Every later reference to the ID within this apply has to resolve to the bound instance, including one
+    /// inside the bound subject's own payload. A reference that misses would create a second instance which
+    /// never receives the ID's payload, because the first instance consumed it.
     /// </remarks>
     public void BindSubject(string subjectId, IInterceptorSubject subject)
         => _boundSubjects[subjectId] = subject;
 
-    /// <summary>
-    /// Tries to resolve a subject bound by this apply, see <see cref="BindSubject"/>. Callers must
-    /// consult this before deciding that an ID is unknown and a subject has to be created for it.
-    /// </summary>
-    public bool TryGetBoundSubject(string subjectId, out IInterceptorSubject subject)
-        => _boundSubjects.TryGetValue(subjectId, out subject!);
-
-    /// <summary>
-    /// Tries to resolve a subject by ID. Checks the subjects bound by this apply first (created here
-    /// or mapped from the update's root hint, neither of which the registry can resolve), then the
-    /// pre-resolved cache (captured before structural changes), then the live registry (for subjects
-    /// this apply has already rooted).
-    /// </summary>
+    /// <summary>Resolves a subject bound by this apply, then through the registry.</summary>
     public bool TryResolveSubject(string subjectId, out IInterceptorSubject subject)
+        => _boundSubjects.TryGetValue(subjectId, out subject!) || SubjectIdRegistry.TryGetSubjectById(subjectId, out subject!);
+
+    /// <summary>
+    /// Creates the subject <paramref name="subjectId"/> names, binds it and applies its payload, or returns
+    /// <c>null</c> and counts the drop when the update does not mark it complete.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The update marks the subject complete but carries no payload for it.</exception>
+    public IInterceptorSubject? TryCreateSubject(string subjectId, Type type)
     {
-        if (_boundSubjects.TryGetValue(subjectId, out subject!))
+        if (!IsSubjectComplete(subjectId))
         {
-            return true;
+            // The sender assumes the receiver already holds the subject. A subject created from nothing would
+            // stay default-valued, because the sender does not resend its state; the next update that
+            // completes it heals the gap.
+            RecordDroppedSubject(subjectId);
+            return null;
         }
 
-        if (_preResolvedSubjects.TryGetValue(subjectId, out subject!))
+        if (!Subjects.TryGetValue(subjectId, out var properties))
         {
-            return true;
+            throw new InvalidOperationException(
+                $"The update references subject '{subjectId}' as complete but carries no properties for it.");
         }
 
-        return SubjectIdRegistry.TryGetSubjectById(subjectId, out subject!);
+        var subject = SubjectFactory.CreateSubject(type, ServiceProvider);
+        subject.SetSubjectId(subjectId);
+        BindSubject(subjectId, subject);
+        _processedSubjectIds.Add(subjectId);
+
+        // Populated before it enters the graph, so that a concurrent reader never observes it partly applied.
+        // A property failing after this leaves it bound, so a later reference to the ID still roots it.
+        SubjectUpdateApplier.ApplyPropertyUpdates(subject, subjectId, properties, this);
+        return subject;
     }
+
+    /// <summary>
+    /// Binds <paramref name="subjectId"/>, which resolves to no subject here, to <paramref name="subject"/>, a
+    /// subject held by a property this model cannot write, and gives the subject that ID in place of any it has.
+    /// Returns <c>false</c> when this apply already names the subject by another ID.
+    /// </summary>
+    public bool TryAdoptSubject(string subjectId, IInterceptorSubject subject)
+    {
+        var existingId = subject.TryGetSubjectId();
+        if (existingId != subjectId)
+        {
+            if (ReferenceEquals(subject, _rootSubject) ||
+                (existingId is not null && (_processedSubjectIds.Contains(existingId) || _boundSubjects.ContainsKey(existingId))))
+            {
+                return false;
+            }
+
+            // The receiver may have given the subject an ID of its own, or the sender restarted with new IDs.
+            subject.ReplaceSubjectId(subjectId);
+        }
+
+        BindSubject(subjectId, subject);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies the payload <paramref name="subjectId"/> carries to <paramref name="subject"/>, unless this
+    /// apply already applied it.
+    /// </summary>
+    public void ApplySubjectPayload(IInterceptorSubject subject, string subjectId)
+    {
+        if (Subjects.TryGetValue(subjectId, out var properties) && TryMarkAsProcessed(subjectId))
+        {
+            SubjectUpdateApplier.ApplyPropertyUpdates(subject, subjectId, properties, this);
+        }
+    }
+
+    /// <summary>
+    /// Records the subjects <paramref name="propertyUpdate"/> names, and those their entries name in turn, as
+    /// ignored: named by a property this model does not declare, an entry left unapplied is no drop.
+    /// </summary>
+    public void IgnoreNamedSubjects(SubjectPropertyUpdate propertyUpdate)
+    {
+        if (propertyUpdate.Id is { } subjectId)
+        {
+            IgnoreSubject(subjectId);
+        }
+
+        if (propertyUpdate.Items is { } items)
+        {
+            foreach (var item in items)
+            {
+                IgnoreSubject(item.Id);
+            }
+        }
+
+        if (propertyUpdate.Attributes is { } attributes)
+        {
+            foreach (var (_, attributeUpdate) in attributes)
+            {
+                IgnoreNamedSubjects(attributeUpdate);
+            }
+        }
+    }
+
+    private void IgnoreSubject(string subjectId)
+    {
+        if ((_ignoredSubjectIds ??= []).Add(subjectId) && Subjects.TryGetValue(subjectId, out var properties))
+        {
+            foreach (var (_, propertyUpdate) in properties)
+            {
+                IgnoreNamedSubjects(propertyUpdate);
+            }
+        }
+    }
+
+    public bool IsIgnored(string subjectId) => _ignoredSubjectIds?.Contains(subjectId) == true;
+
+    public bool TryMarkAsProcessed(string subjectId)
+        => _processedSubjectIds.Add(subjectId);
 
     /// <summary>
     /// Writes <paramref name="value"/> to <paramref name="property"/> under the update's origin,
@@ -158,23 +223,41 @@ internal sealed class SubjectUpdateApplyContext
         }
     }
 
-    public bool TryMarkAsProcessed(string subjectId)
-        => _processedSubjectIds.Add(subjectId);
+    /// <summary>
+    /// Queues the attribute updates of a subject the registry does not know yet, to be applied once the
+    /// update has rooted it.
+    /// </summary>
+    public void DeferAttributeUpdates(
+        IInterceptorSubject subject, string subjectId, string propertyName, Dictionary<string, SubjectPropertyUpdate> attributes)
+        => _deferredAttributeUpdates.Enqueue((subject, subjectId, propertyName, attributes));
+
+    public bool TryDequeueDeferredAttributeUpdates(
+        out (IInterceptorSubject Subject, string SubjectId, string PropertyName, Dictionary<string, SubjectPropertyUpdate> Attributes) entry)
+        => _deferredAttributeUpdates.TryDequeue(out entry);
 
     /// <summary>
-    /// The attribute updates queued for subjects populated before they entered the graph, in the
-    /// order they were queued. Attribute names resolve through the registry, which only knows a
-    /// subject once it is rooted, so these are applied after all structural writes have landed.
+    /// Records an inbound subject that could not be resolved and was left out of the apply. Every drop of
+    /// an inbound subject goes through here.
     /// </summary>
-    public IReadOnlyList<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> DeferredAttributeUpdates
-        => _deferredAttributeUpdates;
+    public void RecordDroppedSubject(string subjectId)
+        => SubjectUpdateDiagnostics.RecordDroppedInboundSubjectUpdate();
 
     /// <summary>
-    /// Queues the attribute updates contained in <paramref name="properties"/> for
-    /// <paramref name="subject"/>, to be applied once the subject is rooted.
+    /// Records a property whose structure this model cannot store because it has no setter. The caller
+    /// reports them in one warning once the whole update was applied.
     /// </summary>
-    public void DeferAttributeUpdates(IInterceptorSubject subject, Dictionary<string, SubjectPropertyUpdate> properties)
-        => _deferredAttributeUpdates.Add((subject, properties));
+    public void RecordDroppedStructure(PropertyReference property)
+    {
+        var droppedProperty = (property.Subject.GetType(), property.Name);
+        var droppedProperties = _droppedStructuralProperties ??= [];
+        if (!droppedProperties.Contains(droppedProperty))
+        {
+            droppedProperties.Add(droppedProperty);
+        }
+    }
+
+    /// <summary>The properties whose structure was dropped, or <c>null</c> when none was.</summary>
+    public List<(Type SubjectType, string PropertyName)>? DroppedStructuralProperties => _droppedStructuralProperties;
 
     /// <summary>
     /// Records a property that could not be applied. The batch continues; the collected failures are
@@ -191,12 +274,14 @@ internal sealed class SubjectUpdateApplyContext
     /// </summary>
     public void Clear()
     {
-        _processedSubjectIds.Clear();
-        _preResolvedSubjects.Clear();
         _boundSubjects.Clear();
+        _processedSubjectIds.Clear();
         _deferredAttributeUpdates.Clear();
+        _rootSubject = null!;
         _completeSubjectIds = null;
+        _ignoredSubjectIds?.Clear();
         _failures = null;
+        _droppedStructuralProperties = null;
         Subjects = null!;
         SubjectFactory = null!;
         Origin = default;

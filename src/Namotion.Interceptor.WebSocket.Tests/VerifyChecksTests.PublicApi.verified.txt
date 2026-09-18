@@ -162,10 +162,6 @@ namespace Namotion.Interceptor.WebSocket.Server
     {
         public int ConnectionCount { get; }
         public long CurrentSequence { get; }
-        public long DroppedInboundSubjectUpdates { get; }
-        public long DroppedOutboundChanges { get; }
-        public long MetadataFallbackSerializations { get; }
-        public long UnknownInboundProperties { get; }
     }
     public sealed class WebSocketSubjectChangeProcessor : Microsoft.Extensions.Hosting.BackgroundService
     {

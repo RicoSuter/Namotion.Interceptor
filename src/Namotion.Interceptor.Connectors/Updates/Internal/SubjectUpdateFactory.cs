@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
@@ -15,12 +14,6 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal static class SubjectUpdateFactory
 {
     private static readonly ObjectPool<SubjectUpdateBuilder> BuilderPool = new(() => new SubjectUpdateBuilder());
-
-    /// <summary>Tripwire: complete-state serializations of momentarily unregistered subjects (metadata path).</summary>
-    internal static long MetadataFallbackSerializationCount;
-
-    /// <summary>Tripwire: outbound changes dropped because their subject was momentarily unregistered.</summary>
-    internal static long DroppedUnregisteredChangeCount;
 
     /// <summary>
     /// Creates a complete update with all properties for the given subject.
@@ -55,10 +48,34 @@ internal static class SubjectUpdateFactory
         try
         {
             builder.Initialize(rootSubject, processors, isPartialUpdate: true);
+            propertyChanges = builder.MergeChanges(propertyChanges);
 
+            // Subject-holding changes run first, so that the subjects they complete are built before the value
+            // changes write their captured values over them: a batch arrives in any order.
+            var valueChanges = builder.ValueChanges;
             for (var i = 0; i < propertyChanges.Length; i++)
             {
-                ProcessPropertyChange(propertyChanges[i], builder);
+                var property = propertyChanges[i].Property.TryGetRegisteredProperty();
+                if (property is null)
+                {
+                    // The subject left the graph after the change was captured. A change that attaches it again
+                    // carries its complete state.
+                    SubjectUpdateDiagnostics.RecordDroppedOutboundChange();
+                    continue;
+                }
+
+                if (!builder.IsPublished(property) || !builder.IsReachable(property.Parent))
+                    continue;
+
+                if (property.CanContainSubjects)
+                    ProcessStructuralChange(propertyChanges[i], property, builder);
+                else
+                    valueChanges.Add((i, property));
+            }
+
+            foreach (var (index, property) in valueChanges)
+            {
+                ProcessValueChange(propertyChanges[index], property, builder);
             }
 
             return builder.Build(rootSubject);
@@ -70,365 +87,69 @@ internal static class SubjectUpdateFactory
         }
     }
 
-    internal static void ProcessSubjectComplete(
-        IInterceptorSubject subject,
-        SubjectUpdateBuilder builder)
+    /// <summary>
+    /// Adds the complete state of <paramref name="subject"/> to the update unless it already holds it. A partial
+    /// update never completes its root, which every receiver holds.
+    /// </summary>
+    internal static void ProcessSubjectComplete(IInterceptorSubject subject, SubjectUpdateBuilder builder)
     {
-        var subjectId = builder.GetOrCreateId(subject);
-
-        if (!builder.ProcessedSubjects.Add(subject))
+        if (builder.IsComplete(subject) || (builder.IsPartialUpdate && ReferenceEquals(subject, builder.RootSubject)))
             return;
 
-        builder.MarkSubjectComplete(subjectId);
-
+        var properties = builder.MarkComplete(subject);
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
         {
-            // Subject is in the graph (reachable via structural properties) but momentarily
-            // unregistered: a concurrent structural mutation wrote it to the backing store
-            // but the lifecycle interceptor hasn't processed/registered it yet.
-            // Use the subject's own property metadata to create a complete snapshot.
-            // This avoids producing an empty entry that causes permanent divergence
-            // (empty properties can't converge via re-sync since the applier skips
-            // properties not present in the update).
-            Interlocked.Increment(ref MetadataFallbackSerializationCount);
-            ProcessSubjectFromMetadata(subject, subjectId, builder);
+            // Its attach is still in progress, a captured change named it after it left the graph, or the context
+            // has no registry: leaving it out would lose every member listed next to it.
+            ProcessSubjectFromMetadata(subject, properties, builder);
             return;
         }
-
-        var properties = builder.GetOrCreateProperties(subjectId);
 
         foreach (var property in registeredSubject.Properties)
         {
-            if (!property.HasGetter || property.IsAttribute)
+            if (!property.HasGetter || property.IsAttribute || !builder.IsPublished(property))
                 continue;
 
-            if (!IsPropertyIncluded(property, builder.Processors))
-                continue;
-
-            if (properties.TryGetValue(property.Name, out var existingUpdate))
-            {
-                // Property was already set by a value change earlier in this batch.
-                // Preserve the change-based value but ensure attributes are populated,
-                // since value changes don't include attributes.
-                if (existingUpdate.Attributes is null)
-                {
-                    existingUpdate.Attributes = CreateAttributeUpdates(property, builder);
-                }
-            }
-            else
-            {
-                var propertyUpdate = CreatePropertyUpdate(property, builder);
-                properties[property.Name] = propertyUpdate;
-
-                builder.TrackPropertyUpdate(propertyUpdate, property, properties);
-            }
+            // Replaces what a change stated for the property: the complete state is the current one, and a
+            // structural change it replaces may list members as known that are new to this receiver.
+            var propertyUpdate = CreatePropertyUpdate(property, builder);
+            properties[property.Name] = propertyUpdate;
+            builder.TrackPropertyUpdate(propertyUpdate, property, properties);
         }
-    }
-
-    private static void ProcessPropertyChange(
-        SubjectPropertyChange change,
-        SubjectUpdateBuilder builder)
-    {
-        var changedSubject = change.Property.Subject;
-        var registeredProperty = change.Property.TryGetRegisteredProperty();
-
-        if (registeredProperty is null)
-        {
-            // The subject is momentarily unregistered (a concurrent structural mutation detached it).
-            // Drop the change: the structural update that re-attaches the subject serializes its
-            // complete state (see ProcessSubjectFromMetadata), so the value converges through that
-            // path. The counter is the production tripwire for this drop.
-            Interlocked.Increment(ref DroppedUnregisteredChangeCount);
-            return;
-        }
-
-        if (!IsPropertyIncluded(registeredProperty, builder.Processors))
-            return;
-
-        var (subjectId, isNewToBuilder) = builder.GetOrCreateIdWithStatus(changedSubject);
-        if (isNewToBuilder)
-        {
-            // Track that this subject was first encountered via a value change, not via
-            // a structural reference. If a structural change (ObjectRef/Collection/Dictionary)
-            // later references this subject in the same batch, ProcessSubjectComplete must
-            // still be called to populate the remaining properties.
-            builder.SubjectsWithPartialChanges.Add(changedSubject);
-        }
-
-        var properties = builder.GetOrCreateProperties(subjectId);
-
-        if (registeredProperty.IsAttribute)
-        {
-            ProcessAttributeChange(registeredProperty, change, properties, builder);
-        }
-        else
-        {
-            // Try to get existing update (may have been created by earlier attribute changes)
-            if (!properties.TryGetValue(registeredProperty.Name, out var propertyUpdate))
-            {
-                propertyUpdate = new SubjectPropertyUpdate();
-                properties[registeredProperty.Name] = propertyUpdate;
-            }
-
-            // Update the property value in place (preserves any existing attributes)
-            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder);
-            builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
-        }
-    }
-
-    private static SubjectPropertyUpdate CreatePropertyUpdate(
-        RegisteredSubjectProperty property,
-        SubjectUpdateBuilder builder)
-    {
-        var value = property.GetValue();
-        var timestamp = property.Reference.TryGetWriteTimestamp();
-
-        var update = new SubjectPropertyUpdate { Timestamp = timestamp };
-
-        if (property.IsSubjectDictionary)
-        {
-            update.Kind = SubjectPropertyUpdateKind.Dictionary;
-            if (value is not null)
-            {
-                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value, builder);
-            }
-        }
-        else if (property.IsSubjectCollection)
-        {
-            update.Kind = SubjectPropertyUpdateKind.Collection;
-            if (value is not null)
-            {
-                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value, builder);
-            }
-        }
-        else if (property.IsSubjectReference)
-        {
-            BuildObjectReference(update, value as IInterceptorSubject, builder);
-        }
-        else
-        {
-            update.Kind = SubjectPropertyUpdateKind.Value;
-            update.Value = value;
-        }
-
-        update.Attributes = CreateAttributeUpdates(property, builder);
-
-        return update;
     }
 
     /// <summary>
-    /// Applies a property change to an existing update in place.
-    /// This preserves any existing attributes on the update.
+    /// Adds the complete state of a subject without Registry metadata from its own property metadata. Processors
+    /// cannot filter these properties and no attributes are added, since both are described by Registry metadata.
     /// </summary>
-    private static void ApplyPropertyChangeToUpdate(
-        SubjectPropertyUpdate update,
-        RegisteredSubjectProperty property,
-        SubjectPropertyChange change,
-        SubjectUpdateBuilder builder)
-    {
-        update.Timestamp = change.ChangedTimestamp;
-
-        // Collection and dictionary values are read as object: the change storage only satisfies a
-        // typed read when the requested type matches the stored one exactly or is a reference type
-        // the stored value can be cast to, so a struct-typed collection such as ImmutableArray<T>
-        // would throw. SubjectItemsUpdateFactory normalizes the raw value.
-        if (property.IsSubjectDictionary)
-        {
-            update.Kind = SubjectPropertyUpdateKind.Dictionary;
-
-            var newValue = change.GetNewValue<object?>();
-            if (newValue is not null)
-            {
-                SubjectItemsUpdateFactory.BuildDictionaryUpdate(update,
-                    change.GetOldValue<object?>(), newValue, builder);
-            }
-        }
-        else if (property.IsSubjectCollection)
-        {
-            update.Kind = SubjectPropertyUpdateKind.Collection;
-
-            var newValue = change.GetNewValue<object?>();
-            if (newValue is not null)
-            {
-                SubjectItemsUpdateFactory.BuildCollectionUpdate(update,
-                    change.GetOldValue<object?>(),
-                    newValue, builder);
-            }
-        }
-        else if (property.IsSubjectReference)
-        {
-            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
-        }
-        else
-        {
-            update.Kind = SubjectPropertyUpdateKind.Value;
-            update.Value = change.GetNewValue<object?>();
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void BuildObjectReference(
-        SubjectPropertyUpdate update,
-        IInterceptorSubject? item,
-        SubjectUpdateBuilder builder)
-    {
-        update.Kind = SubjectPropertyUpdateKind.Object;
-
-        if (item is not null)
-        {
-            var (id, isNew) = builder.GetOrCreateIdWithStatus(item);
-            update.Id = id;
-
-            // Process the complete subject if it's newly encountered OR if a value change
-            // earlier in the same batch created its ID without populating complete properties.
-            // ProcessSubjectComplete uses ProcessedSubjects.Add to prevent circular references
-            // and ContainsKey to preserve explicitly changed properties.
-            if (isNew || builder.SubjectsWithPartialChanges.Remove(item))
-            {
-                ProcessSubjectComplete(item, builder);
-            }
-        }
-    }
-
-    private static Dictionary<string, SubjectPropertyUpdate>? CreateAttributeUpdates(
-        RegisteredSubjectProperty property,
-        SubjectUpdateBuilder builder)
-    {
-        Dictionary<string, SubjectPropertyUpdate>? attributes = null;
-
-        foreach (var attribute in property.Attributes)
-        {
-            if (!attribute.HasGetter)
-                continue;
-
-            if (!IsPropertyIncluded(attribute, builder.Processors))
-                continue;
-
-            attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-
-            // Reuse the same property update logic for attributes
-            var attributeUpdate = CreatePropertyUpdate(attribute, builder);
-            attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
-            builder.TrackPropertyUpdate(attributeUpdate, attribute, attributes);
-        }
-
-        return attributes;
-    }
-
-    private static void ProcessAttributeChange(
-        RegisteredSubjectProperty attributeProperty,
-        SubjectPropertyChange change,
-        Dictionary<string, SubjectPropertyUpdate> subjectProperties,
-        SubjectUpdateBuilder builder)
-    {
-        // Find the root property
-        var rootProperty = attributeProperty;
-        while (rootProperty.IsAttribute)
-        {
-            rootProperty = rootProperty.GetAttributedProperty();
-        }
-
-        if (!subjectProperties.TryGetValue(rootProperty.Name, out var rootUpdate))
-        {
-            rootUpdate = new SubjectPropertyUpdate();
-            subjectProperties[rootProperty.Name] = rootUpdate;
-        }
-
-        // Navigate/create an attribute chain (excluding the last one, which we'll create from change)
-        var currentUpdate = rootUpdate;
-        var attributeChain = new List<RegisteredSubjectProperty>();
-        var currentProperty = attributeProperty;
-        while (currentProperty.IsAttribute)
-        {
-            attributeChain.Add(currentProperty);
-            currentProperty = currentProperty.GetAttributedProperty();
-        }
-        attributeChain.Reverse();
-
-        // Navigate to the parent of the target attribute
-        for (var i = 0; i < attributeChain.Count - 1; i++)
-        {
-            var chainedAttribute = attributeChain[i];
-            currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-            var attributeName = chainedAttribute.AttributeMetadata.AttributeName;
-
-            if (!currentUpdate.Attributes.TryGetValue(attributeName, out var nestedAttributeUpdate))
-            {
-                nestedAttributeUpdate = new SubjectPropertyUpdate();
-                currentUpdate.Attributes[attributeName] = nestedAttributeUpdate;
-            }
-
-            currentUpdate = nestedAttributeUpdate;
-        }
-
-        // Get or create the final attribute update
-        var finalAttribute = attributeChain[^1];
-        currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-        var finalAttributeName = finalAttribute.AttributeMetadata.AttributeName;
-
-        if (!currentUpdate.Attributes.TryGetValue(finalAttributeName, out var attributeUpdate))
-        {
-            attributeUpdate = new SubjectPropertyUpdate();
-            currentUpdate.Attributes[finalAttributeName] = attributeUpdate;
-        }
-
-        // Apply the change in place (preserves any existing nested attributes)
-        ApplyPropertyChangeToUpdate(attributeUpdate, attributeProperty, change, builder);
-        builder.TrackPropertyUpdate(attributeUpdate, attributeProperty, currentUpdate.Attributes);
-    }
-
-    /// <summary>
-    /// Fallback path for subjects that are in the graph but momentarily unregistered.
-    /// Uses the subject's own property metadata (always available, even without registry)
-    /// to create property updates. Skips processor filtering and attribute processing
-    /// since those require registry information.
-    /// </summary>
-    /// <remarks>
-    /// Two consequences follow from the missing registry information, both inherent to this path
-    /// rather than oversights. First, <see cref="ISubjectUpdateProcessor"/> filtering cannot run
-    /// because processors filter on <see cref="RegisteredSubjectProperty"/> and the subject is by
-    /// definition unregistered here, so a property a processor normally hides is serialized through
-    /// this fallback. Consumers that use processors for visibility rather than for shaping must not
-    /// treat them as a confidentiality boundary. Second, the emitted property updates carry no
-    /// timestamp, unlike the ones built by CreatePropertyUpdate.
-    /// </remarks>
     private static void ProcessSubjectFromMetadata(
         IInterceptorSubject subject,
-        string subjectId,
+        Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateBuilder builder)
     {
-        var properties = builder.GetOrCreateProperties(subjectId);
+        SubjectUpdateDiagnostics.RecordMetadataFallbackSerialization();
 
         foreach (var (propertyName, metadata) in subject.Properties)
         {
-            if (metadata.GetValue is null || metadata.IsDerived)
+            if (metadata.GetValue is null || IsComputedSubjectProjection(in metadata))
                 continue;
 
-            var value = metadata.GetValue.Invoke(subject);
-            var propertyType = metadata.Type;
+            var value = metadata.GetValue(subject);
+            var update = new SubjectPropertyUpdate
+            {
+                Timestamp = new PropertyReference(subject, propertyName).TryGetWriteTimestamp()
+            };
 
-            var update = new SubjectPropertyUpdate();
-
-            if (propertyType.IsSubjectDictionaryType())
+            var type = metadata.Type;
+            if (type.IsSubjectReferenceType())
             {
-                update.Kind = SubjectPropertyUpdateKind.Dictionary;
-                if (value is not null)
-                {
-                    SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value, builder);
-                }
+                BuildObjectReference(update, value as IInterceptorSubject, previousItem: null, property: null, isChange: false, builder);
             }
-            else if (propertyType.IsSubjectCollectionType())
+            else if (type.CanContainSubjects())
             {
-                update.Kind = SubjectPropertyUpdateKind.Collection;
-                if (value is not null)
-                {
-                    SubjectItemsUpdateFactory.BuildCollectionComplete(update, value, builder);
-                }
-            }
-            else if (propertyType.IsSubjectReferenceType())
-            {
-                BuildObjectReference(update, value as IInterceptorSubject, builder);
+                SubjectItemsUpdateFactory.BuildItems(update, type.IsSubjectDictionaryType(), property: null,
+                    value, previousValue: null, isChange: false, builder);
             }
             else
             {
@@ -440,16 +161,169 @@ internal static class SubjectUpdateFactory
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsPropertyIncluded(
+    /// <summary>
+    /// A derived property that holds subjects and has no setter is a computed projection: it owns nothing,
+    /// so neither complete payloads nor changes publish it, and the applier ignores an update naming it.
+    /// </summary>
+    internal static bool IsComputedSubjectProjection(in SubjectPropertyMetadata metadata)
+        => metadata is { IsDerived: true, SetValue: null } && metadata.Type.CanContainSubjects();
+
+    /// <inheritdoc cref="IsComputedSubjectProjection(in SubjectPropertyMetadata)"/>
+    internal static bool IsComputedSubjectProjection(RegisteredSubjectProperty property)
+        => property.CanContainSubjects && IsComputedSubjectProjection(property.Reference.Metadata);
+
+    private static void ProcessStructuralChange(
+        SubjectPropertyChange change,
         RegisteredSubjectProperty property,
-        ISubjectUpdateProcessor[] processors)
+        SubjectUpdateBuilder builder)
     {
-        for (var i = 0; i < processors.Length; i++)
+        if (builder.IsComplete(property.Parent.Subject))
         {
-            if (!processors[i].IsIncluded(property))
-                return false;
+            // Its complete payload already states the current structure, with every member complete.
+            return;
         }
-        return true;
+
+        // Written into the update the property may already have, which can hold its attributes. Read as object:
+        // a typed read of the change storage throws for a struct-typed collection such as ImmutableArray<T>,
+        // and the builders below normalize the raw value.
+        var (update, parent) = GetOrCreatePropertyUpdate(property, builder);
+        if (property.IsSubjectReference)
+        {
+            BuildObjectReference(update, change.GetNewValue<object?>() as IInterceptorSubject,
+                change.GetOldValue<object?>() as IInterceptorSubject, property, isChange: true, builder);
+        }
+        else
+        {
+            SubjectItemsUpdateFactory.BuildItems(update, property.IsSubjectDictionary, property,
+                change.GetNewValue<object?>(), change.GetOldValue<object?>(), isChange: true, builder);
+        }
+
+        update.Timestamp = change.ChangedTimestamp;
+        builder.TrackPropertyUpdate(update, property, parent);
+    }
+
+    private static void ProcessValueChange(
+        SubjectPropertyChange change,
+        RegisteredSubjectProperty property,
+        SubjectUpdateBuilder builder)
+    {
+        var (update, parent) = GetOrCreatePropertyUpdate(property, builder);
+        update.Kind = SubjectPropertyUpdateKind.Value;
+        update.Value = change.GetNewValue<object?>();
+        update.Timestamp = change.ChangedTimestamp;
+        builder.TrackPropertyUpdate(update, property, parent);
+    }
+
+    /// <summary>
+    /// Gets or creates the update of <paramref name="property"/> in its subject's entry, nested in the update
+    /// of the property it is attached to for an attribute, together with the dictionary holding it.
+    /// </summary>
+    private static (SubjectPropertyUpdate Update, Dictionary<string, SubjectPropertyUpdate> Parent) GetOrCreatePropertyUpdate(
+        RegisteredSubjectProperty property,
+        SubjectUpdateBuilder builder)
+    {
+        var parent = property.IsAttribute
+            ? GetOrCreatePropertyUpdate(property.GetAttributedProperty(), builder).Update.Attributes ??= []
+            : builder.GetOrCreateProperties(builder.GetOrCreateId(property.Parent.Subject));
+
+        var name = GetUpdateName(property);
+        if (!parent.TryGetValue(name, out var update))
+        {
+            update = new SubjectPropertyUpdate();
+            parent[name] = update;
+        }
+
+        return (update, parent);
+    }
+
+    private static string GetUpdateName(RegisteredSubjectProperty property)
+        => property.IsAttribute ? property.AttributeMetadata.AttributeName : property.Name;
+
+    /// <summary>
+    /// Creates the update of the current value of <paramref name="property"/>.
+    /// </summary>
+    private static SubjectPropertyUpdate CreatePropertyUpdate(
+        RegisteredSubjectProperty property,
+        SubjectUpdateBuilder builder)
+    {
+        var value = property.GetValue();
+        var update = new SubjectPropertyUpdate { Timestamp = property.Reference.TryGetWriteTimestamp() };
+
+        if (property.IsSubjectReference)
+        {
+            BuildObjectReference(update, value as IInterceptorSubject, previousItem: null, property, isChange: false, builder);
+        }
+        else if (property.CanContainSubjects)
+        {
+            SubjectItemsUpdateFactory.BuildItems(update, property.IsSubjectDictionary, property,
+                value, previousValue: null, isChange: false, builder);
+        }
+        else
+        {
+            update.Kind = SubjectPropertyUpdateKind.Value;
+            update.Value = value;
+        }
+
+        update.Attributes = CreateAttributeUpdates(property, builder);
+        return update;
+    }
+
+    private static void BuildObjectReference(
+        SubjectPropertyUpdate update,
+        IInterceptorSubject? item,
+        IInterceptorSubject? previousItem,
+        RegisteredSubjectProperty? property,
+        bool isChange,
+        SubjectUpdateBuilder builder)
+    {
+        update.Kind = SubjectPropertyUpdateKind.Object;
+        if (item is null)
+            return;
+
+        if (!ReferenceEquals(item, previousItem))
+            StateMember(item, property, isChange, builder);
+
+        update.Id = builder.GetOrCreateId(item);
+    }
+
+    /// <summary>
+    /// Adds the complete state of <paramref name="item"/>, a subject <paramref name="property"/> newly holds,
+    /// when the receiver may not hold it yet. A change completes it, unless it is the subject owning the
+    /// property. A complete payload of a partial update completes it only through its first published parent:
+    /// held there before, it is known, and added there in this batch, it is completed where it was added. A
+    /// payload built from metadata has no <paramref name="property"/>, which is never the first published parent.
+    /// </summary>
+    internal static void StateMember(
+        IInterceptorSubject item,
+        RegisteredSubjectProperty? property,
+        bool isChange,
+        SubjectUpdateBuilder builder)
+    {
+        var isHeldElsewhere = isChange
+            ? ReferenceEquals(item, property?.Parent.Subject)
+            : !builder.IsExpandedThrough(item, property);
+
+        if (!isHeldElsewhere)
+            ProcessSubjectComplete(item, builder);
+    }
+
+    private static Dictionary<string, SubjectPropertyUpdate>? CreateAttributeUpdates(
+        RegisteredSubjectProperty property,
+        SubjectUpdateBuilder builder)
+    {
+        Dictionary<string, SubjectPropertyUpdate>? attributes = null;
+
+        foreach (var attribute in property.Attributes)
+        {
+            if (!attribute.HasGetter || IsComputedSubjectProjection(attribute) || !builder.IsIncluded(attribute))
+                continue;
+
+            var attributeUpdate = CreatePropertyUpdate(attribute, builder);
+            attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
+            attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
+            builder.TrackPropertyUpdate(attributeUpdate, attribute, attributes);
+        }
+
+        return attributes;
     }
 }

@@ -7,22 +7,22 @@
         Timestamp: {Scrubbed},
         Id: SubjectId_2
       },
+      father: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: SubjectId_3
+      },
       children: {
         Kind: Collection,
         Timestamp: {Scrubbed},
         Items: [
           {
-            Id: SubjectId_3
+            Id: SubjectId_4
           },
           {
-            Id: SubjectId_4
+            Id: SubjectId_5
           }
         ]
-      },
-      father: {
-        Kind: Object,
-        Timestamp: {Scrubbed},
-        Id: SubjectId_5
       }
     },
     SubjectId_2: {
@@ -63,7 +63,44 @@
         Kind: Dictionary
       }
     },
-    SubjectId_4: {
+    SubjectId_3: {
+      firstName: {
+        Kind: Value,
+        Value: MyFather,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      lastName: {
+        Kind: Value
+      },
+      fullName: {
+        Kind: Value,
+        Value: MyFather 
+      },
+      father: {
+        Kind: Object
+      },
+      mother: {
+        Kind: Object
+      },
+      children: {
+        Kind: Collection
+      },
+      relationships: {
+        Kind: Dictionary
+      }
+    },
+    SubjectId_5: {
       firstName: {
         Kind: Value,
         Value: John,
@@ -100,48 +137,11 @@
       relationships: {
         Kind: Dictionary
       }
-    },
-    SubjectId_5: {
-      firstName: {
-        Kind: Value,
-        Value: MyFather,
-        Attributes: {
-          maxLength: {
-            Kind: Value,
-            Value: 123,
-            Attributes: {
-              unit: {
-                Kind: Value,
-                Value: Count
-              }
-            }
-          }
-        }
-      },
-      lastName: {
-        Kind: Value
-      },
-      fullName: {
-        Kind: Value,
-        Value: MyFather 
-      },
-      father: {
-        Kind: Object
-      },
-      mother: {
-        Kind: Object
-      },
-      children: {
-        Kind: Collection
-      },
-      relationships: {
-        Kind: Dictionary
-      }
     }
   },
   CompleteSubjectIds: [
     SubjectId_2,
-    SubjectId_4,
+    SubjectId_3,
     SubjectId_5
   ]
 }

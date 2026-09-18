@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -15,15 +16,6 @@ internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
 
-    /// <summary>
-    /// Tripwire: inbound subject updates and structural item references dropped because their
-    /// subject stayed unresolvable.
-    /// </summary>
-    internal static long DroppedInboundSubjectUpdateCount;
-
-    /// <summary>Tripwire: inbound properties skipped because the subject does not declare them.</summary>
-    internal static long UnknownInboundPropertyCount;
-
     public static void ApplyUpdate(
         IInterceptorSubject subject,
         SubjectUpdate update,
@@ -32,98 +24,35 @@ internal static class SubjectUpdateApplier
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         var context = ContextPool.Rent();
-        List<(PropertyReference Property, Exception Exception)>? failures = null;
+        List<(PropertyReference Property, Exception Exception)>? failures;
+        List<(Type SubjectType, string PropertyName)>? droppedStructuralProperties;
+        Exception? detachFailure = null;
         try
         {
-            context.Initialize(subject.Context, update.Subjects, update.CompleteSubjectIds, subjectFactory, origin, transformValueBeforeApply);
-            context.PreResolveSubjects(update.Subjects.Keys);
+            context.Initialize(subject, update, subjectFactory, origin, transformValueBeforeApply);
 
-            if (update.Root is not null)
+            // Keeps a subject that moves between properties within this update attached and registered, and so
+            // resolvable by its ID.
+            var batchScope = subject.Context.TryGetLifecycleInterceptor()?.CreateBatchScope(subject.Context);
+            try
             {
-                // Bind the sender's root ID to the local root subject, so that a reference back to
-                // the root resolves to it. Without the binding the ID misses the receiver's registry
-                // (the root's ID differs between sender and receiver) and either fabricates a
-                // default-valued phantom root whose registration then hijacks the ID in the reverse
-                // index, or, on a partial update that marks nothing complete, drops the reference and
-                // diverges permanently because the sender considers the state delivered.
-                context.BindSubject(update.Root, subject);
+                ApplySubjects(subject, update, context);
             }
-
-            // Batch scope: defer last-detach processing so subjects moving between structural
-            // properties within this update stay attached and registered throughout.
-            // PreResolveSubjects above handles the concurrent-mutation race (different thread);
-            // the scope handles the apply-path move race (same thread).
-            var lifecycle = subject.Context.TryGetLifecycleInterceptor();
-            using (lifecycle?.CreateBatchScope(subject.Context))
+            finally
             {
-                if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
+                try
                 {
-                    // The Root field identifies which subject ID in the update corresponds to the
-                    // local root subject. The root's ID may differ between sender and receiver;
-                    // Root is a mapping hint, not an identity assignment.
-                    context.TryMarkAsProcessed(update.Root);
-                    ApplyPropertyUpdates(subject, rootProperties, context);
+                    batchScope?.Dispose();
                 }
-
-                // Process remaining subjects by ID lookup. Partial updates can contain changes to
-                // subjects not reachable from the root's changed properties. Subjects not found on
-                // the first pass are retried after all known subjects are processed: structural
-                // processing in the first pass may create them.
-                List<(string SubjectId, Dictionary<string, SubjectPropertyUpdate> Properties)>? deferred = null;
-                foreach (var (subjectId, properties) in update.Subjects)
+                catch (Exception exception) when (context.Failures is not null)
                 {
-                    if (context.TryResolveSubject(subjectId, out var targetSubject))
-                    {
-                        if (context.TryMarkAsProcessed(subjectId))
-                        {
-                            ApplyPropertyUpdates(targetSubject, properties, context);
-                        }
-                    }
-                    else
-                    {
-                        deferred ??= [];
-                        deferred.Add((subjectId, properties));
-                    }
+                    // A lifecycle handler failing on a deferred detach must not hide the property failures.
+                    detachFailure = exception;
                 }
-
-                // Applied before the retry pass below, because a subject-valued attribute can be what
-                // creates and populates the subject a deferred entry addresses. The retry pass is the
-                // last chance for such an entry, and it consumes the ID whether it applies or drops it,
-                // so anything still able to create subjects has to have run first.
-                var appliedAttributeUpdates = ApplyDeferredAttributeUpdates(context, 0);
-
-                if (deferred is not null)
-                {
-                    foreach (var (subjectId, properties) in deferred)
-                    {
-                        if (!context.TryMarkAsProcessed(subjectId))
-                        {
-                            // Already applied in this pass, so nothing was dropped and the tripwire must
-                            // not fire: either the root (whose sender-side ID is a mapping hint that never
-                            // resolves in the receiver's registry) or a subject that a later structural
-                            // entry created and populated.
-                            continue;
-                        }
-
-                        if (context.SubjectIdRegistry.TryGetSubjectById(subjectId, out var targetSubject))
-                        {
-                            ApplyPropertyUpdates(targetSubject, properties, context);
-                        }
-                        else
-                        {
-                            // The subject was not created by structural processing and is not in the
-                            // registry: drop the update. The next update carrying the subject's
-                            // complete state converges it. The counter is the production tripwire.
-                            Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
-                        }
-                    }
-                }
-
-                // The retry pass can root further subjects, which queue attribute updates of their own.
-                ApplyDeferredAttributeUpdates(context, appliedAttributeUpdates);
             }
 
             failures = context.Failures;
+            droppedStructuralProperties = context.DroppedStructuralProperties;
         }
         finally
         {
@@ -131,146 +60,190 @@ internal static class SubjectUpdateApplier
             ContextPool.Return(context);
         }
 
+        if (droppedStructuralProperties is not null)
+        {
+            SubjectUpdateLog.TryGetWarningLogger(subject)?.LogWarning(
+                "Dropped the incoming structure of the properties {DroppedProperties} while applying an update to " +
+                "subject {SubjectType}. These properties have no setter, so the described children have nowhere to " +
+                "be stored. Give them a setter, or construct the children in the receiving model itself.",
+                SubjectUpdateLog.DescribeProperties(droppedStructuralProperties),
+                subject.GetType().FullName);
+        }
+
         if (failures is null)
         {
             return;
         }
 
-        // A single failure is rethrown as itself, with its original stack, so a caller that catches a
-        // specific exception type keeps working exactly as before this change.
-        if (failures.Count == 1)
+        // A single failure is rethrown as itself, with its original stack, for a caller that catches a
+        // specific exception type.
+        if (failures.Count == 1 && detachFailure is null)
         {
             ExceptionDispatchInfo.Capture(failures[0].Exception).Throw();
         }
 
+        var exceptions = failures.Select(failure => failure.Exception);
         throw new AggregateException(
             $"{failures.Count} property updates could not be applied: " +
             string.Join(", ", failures.Select(failure => failure.Property.Name)),
-            failures.Select(failure => failure.Exception));
+            detachFailure is null ? exceptions : exceptions.Append(detachFailure));
     }
 
-    /// <summary>
-    /// Applies the property updates of <paramref name="properties"/> to <paramref name="subject"/>.
-    /// Set <paramref name="deferAttributes"/> for a subject that is still being populated before it
-    /// enters the graph: attribute names resolve through the registry, which does not know the subject
-    /// until it is rooted, so its attribute updates are queued and applied once the whole update is in.
-    /// </summary>
+    private static void ApplySubjects(IInterceptorSubject rootSubject, SubjectUpdate update, SubjectUpdateApplyContext context)
+    {
+        if (update.Root is not null)
+        {
+            // The sender's root ID is not the local root's, so a reference back to the root resolves only
+            // through this binding.
+            context.BindSubject(update.Root, rootSubject);
+            context.ApplySubjectPayload(rootSubject, update.Root);
+        }
+
+        // An entry whose subject is not resolvable yet may be created by a structural property applied later.
+        foreach (var (subjectId, properties) in update.Subjects)
+        {
+            if (context.TryResolveSubject(subjectId, out var subject) && context.TryMarkAsProcessed(subjectId))
+            {
+                ApplyPropertyUpdates(subject, subjectId, properties, context);
+            }
+        }
+
+        // Before the entries are settled: a subject-holding attribute can create the subject an entry addresses.
+        ApplyDeferredAttributeUpdates(context);
+
+        foreach (var (subjectId, properties) in update.Subjects)
+        {
+            if (!context.TryMarkAsProcessed(subjectId))
+                continue;
+
+            if (context.TryResolveSubject(subjectId, out var subject))
+            {
+                ApplyPropertyUpdates(subject, subjectId, properties, context);
+            }
+            else if (!context.IsIgnored(subjectId))
+            {
+                // Neither held here nor created by this update. The next update carrying the subject's complete
+                // state converges it.
+                context.RecordDroppedSubject(subjectId);
+            }
+        }
+
+        ApplyDeferredAttributeUpdates(context);
+    }
+
     internal static void ApplyPropertyUpdates(
         IInterceptorSubject subject,
+        string subjectId,
         Dictionary<string, SubjectPropertyUpdate> properties,
-        SubjectUpdateApplyContext context,
-        bool deferAttributes = false)
+        SubjectUpdateApplyContext context)
     {
-        var hasDeferredAttributes = false;
+        RegisteredSubject? registeredSubject = null;
         foreach (var (propertyName, propertyUpdate) in properties)
         {
-            // Apply attributes first
             if (propertyUpdate.Attributes is not null)
             {
-                if (deferAttributes)
+                registeredSubject ??= subject.TryGetRegisteredSubject();
+                if (registeredSubject is not null)
                 {
-                    hasDeferredAttributes = true;
+                    ApplyAttributeUpdates(registeredSubject, propertyName, propertyUpdate.Attributes, context);
                 }
                 else
                 {
-                    ApplyAttributeUpdates(subject, propertyName, propertyUpdate.Attributes, context);
+                    // Attribute names resolve through the registry, which knows a created subject only once
+                    // the update has rooted it.
+                    context.DeferAttributeUpdates(subject, subjectId, propertyName, propertyUpdate.Attributes);
                 }
             }
 
-            ApplyPropertyUpdate(subject, new PropertyReference(subject, propertyName), propertyUpdate, context);
-        }
-
-        if (hasDeferredAttributes)
-        {
-            context.DeferAttributeUpdates(subject, properties);
+            ApplyPropertyUpdate(subject, propertyName, propertyUpdate, context);
         }
     }
 
     private static void ApplyAttributeUpdates(
-        IInterceptorSubject subject,
+        RegisteredSubject subject,
         string propertyName,
         Dictionary<string, SubjectPropertyUpdate> attributes,
         SubjectUpdateApplyContext context)
     {
         foreach (var (attributeName, attributeUpdate) in attributes)
         {
-            var registeredAttribute = subject
-                .TryGetRegisteredSubject()?
-                .TryGetPropertyAttribute(propertyName, attributeName);
-
+            var registeredAttribute = subject.TryGetPropertyAttribute(propertyName, attributeName);
             if (registeredAttribute is not null)
             {
-                ApplyPropertyUpdate(subject, new PropertyReference(subject, registeredAttribute.Name), attributeUpdate, context);
+                ApplyPropertyUpdate(subject.Subject, registeredAttribute.Name, attributeUpdate, context);
             }
-        }
-    }
-
-    /// <summary>
-    /// Applies the attribute updates queued for subjects that were created and populated before they
-    /// entered the graph, starting at <paramref name="startIndex"/>. An entry is queued before its
-    /// subject is rooted, which is why it is deferred at all; the structural call that queues it roots
-    /// the subject before returning, and this loop only advances after that call returns, so a subject
-    /// is rooted by the time its entry is processed and the registry can map attribute names to their
-    /// backing properties. Returns the number of entries applied so far, to pass as the next start
-    /// index, so a second call picks up only what was queued after the first one returned.
-    /// </summary>
-    private static int ApplyDeferredAttributeUpdates(SubjectUpdateApplyContext context, int startIndex)
-    {
-        // Indexed on purpose: applying a subject-valued attribute whose target is newly created can
-        // queue that target's own attribute updates, appending to this list while it is walked. The
-        // index loop processes the appended entries instead of throwing on a modified collection.
-        var deferredUpdates = context.DeferredAttributeUpdates;
-        for (var index = startIndex; index < deferredUpdates.Count; index++)
-        {
-            var (subject, properties) = deferredUpdates[index];
-            foreach (var (propertyName, propertyUpdate) in properties)
+            else
             {
-                if (propertyUpdate.Attributes is not null)
-                {
-                    ApplyAttributeUpdates(subject, propertyName, propertyUpdate.Attributes, context);
-                }
+                SkipUndeclaredProperty(attributeUpdate, context);
             }
         }
+    }
 
-        return deferredUpdates.Count;
+    private static void ApplyDeferredAttributeUpdates(SubjectUpdateApplyContext context)
+    {
+        // Applying an attribute can create subjects that queue their own attribute updates.
+        while (context.TryDequeueDeferredAttributeUpdates(out var entry))
+        {
+            if (entry.Subject.TryGetRegisteredSubject() is { } registeredSubject)
+            {
+                ApplyAttributeUpdates(registeredSubject, entry.PropertyName, entry.Attributes, context);
+            }
+            else
+            {
+                // The subject never entered the graph, so its attributes have no registered property to go to.
+                context.RecordDroppedSubject(entry.SubjectId);
+            }
+        }
+    }
+
+    private static void SkipUndeclaredProperty(SubjectPropertyUpdate propertyUpdate, SubjectUpdateApplyContext context)
+    {
+        SubjectUpdateDiagnostics.RecordUnknownInboundProperty();
+        context.IgnoreNamedSubjects(propertyUpdate);
     }
 
     /// <summary>
-    /// Applies a single property update using the subject's own property metadata
-    /// (via <see cref="PropertyReference"/>). This does not depend on the registry:
-    /// the subject always knows its own properties, even when momentarily unregistered
-    /// or not yet attached (a newly created subject being populated before rooting).
+    /// Applies a single property update using the subject's own property metadata, which a subject has
+    /// even while it is not registered, such as a created subject populated before it is rooted.
     /// </summary>
     private static void ApplyPropertyUpdate(
         IInterceptorSubject subject,
-        PropertyReference property,
+        string propertyName,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        if (!subject.Properties.ContainsKey(property.Name))
+        if (!subject.Properties.TryGetValue(propertyName, out var metadata))
         {
-            Interlocked.Increment(ref UnknownInboundPropertyCount);
+            SkipUndeclaredProperty(propertyUpdate, context);
             return;
         }
 
+        // No producer publishes a projection, and walking into one whose getter creates a subject on every
+        // read would never end.
+        if (SubjectUpdateFactory.IsComputedSubjectProjection(metadata))
+        {
+            return;
+        }
+
+        var property = new PropertyReference(subject, propertyName);
         try
         {
             switch (propertyUpdate.Kind)
             {
                 case SubjectPropertyUpdateKind.Value:
-                    ApplyValueUpdate(subject, property, propertyUpdate, context);
+                    ApplyValueUpdate(property, in metadata, propertyUpdate, context);
                     break;
 
                 case SubjectPropertyUpdateKind.Object:
-                    ApplyObjectUpdate(property, propertyUpdate, context);
+                    ApplyObjectUpdate(property, in metadata, propertyUpdate, context);
                     break;
 
                 case SubjectPropertyUpdateKind.Collection:
-                    SubjectItemsUpdateApplier.ApplyCollectionUpdate(property, propertyUpdate, context);
+                    SubjectItemsUpdateApplier.ApplyCollectionUpdate(property, in metadata, propertyUpdate, context);
                     break;
 
                 case SubjectPropertyUpdateKind.Dictionary:
-                    SubjectItemsUpdateApplier.ApplyDictionaryUpdate(property, propertyUpdate, context);
+                    SubjectItemsUpdateApplier.ApplyDictionaryUpdate(property, in metadata, propertyUpdate, context);
                     break;
             }
         }
@@ -282,20 +255,26 @@ internal static class SubjectUpdateApplier
         }
         catch (Exception exception)
         {
-            // One property must not cost its siblings. Every other inbound path already catches per
-            // property; this applier was the only one that abandoned the rest of the batch.
+            // One property must not cost its siblings: the failure is reported once the batch is done.
             context.RecordFailure(property, exception);
         }
     }
 
     private static void ApplyValueUpdate(
-        IInterceptorSubject subject,
         PropertyReference property,
+        in SubjectPropertyMetadata metadata,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
+        // A producer may publish a value this model computes itself, so it is dropped before it is even
+        // converted rather than reported as a failure.
+        if (metadata.SetValue is null)
+        {
+            return;
+        }
+
         var registeredProperty = context.TransformValueBeforeApply is not null
-            ? subject.TryGetRegisteredProperty(property.Name)
+            ? property.Subject.TryGetRegisteredProperty(property.Name)
             : null;
 
         if (context.TransformValueBeforeApply is not null && registeredProperty is not null)
@@ -310,100 +289,106 @@ internal static class SubjectUpdateApplier
             // substituted a new value, so a locally corrected value differs from the evidence
             // and the origin correctly demotes to Local.
             var rawValue = propertyUpdate.Value;
-            var sentValue = ConvertValue(rawValue, property.Metadata.Type);
+            var sentValue = ConvertValue(rawValue, metadata.Type);
             context.TransformValueBeforeApply.Invoke(registeredProperty, propertyUpdate);
             var value = ReferenceEquals(propertyUpdate.Value, rawValue)
                 ? sentValue
-                : ConvertValue(propertyUpdate.Value, property.Metadata.Type);
+                : ConvertValue(propertyUpdate.Value, metadata.Type);
             context.SetPropertyValue(property, propertyUpdate.Timestamp, value, sentValue);
         }
         else
         {
-            var value = ConvertValue(propertyUpdate.Value, property.Metadata.Type);
+            var value = ConvertValue(propertyUpdate.Value, metadata.Type);
             context.SetPropertyValue(property, propertyUpdate.Timestamp, value);
         }
     }
 
     private static void ApplyObjectUpdate(
         PropertyReference property,
+        in SubjectPropertyMetadata metadata,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        if (propertyUpdate.Id is null)
+        if (metadata.SetValue is null)
+        {
+            ApplyObjectUpdateToHeldSubject(property, in metadata, propertyUpdate, context);
+            return;
+        }
+
+        if (propertyUpdate.Id is not { } subjectId)
         {
             context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
             return;
         }
 
-        // Resolve the target subject from the subjects this apply has bound and then from the ID
-        // registry; do NOT read the backing store, to avoid racing a concurrent structural
-        // mutation whose write landed before its lifecycle processing.
-        IInterceptorSubject targetItem;
-        bool isNew;
-
-        if (context.TryGetBoundSubject(propertyUpdate.Id, out var bound))
+        // Resolved from the subjects this apply bound and the registry, never from the backing store, which
+        // a concurrent structural write may already have changed before its lifecycle processing.
+        var existingSubject = ResolveSubject(subjectId, metadata.Type, context);
+        if (existingSubject is null)
         {
-            // A subject this apply already bound to the ID: one it created earlier, which the
-            // registry cannot resolve until its subtree is rooted, or the local root mapped from
-            // the update's root hint. Its ID is already assigned, and the local root's own ID is a
-            // different one that must not be reassigned.
-            targetItem = bound;
-            isNew = false;
-        }
-        else if (context.SubjectIdRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
-        {
-            targetItem = existing;
-            isNew = false;
-
-            if (targetItem.TryGetSubjectId() != propertyUpdate.Id)
+            var createdSubject = context.TryCreateSubject(subjectId, metadata.Type);
+            if (createdSubject is not null)
             {
-                targetItem.SetSubjectId(propertyUpdate.Id);
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, createdSubject);
             }
-        }
-        else if (context.IsSubjectComplete(propertyUpdate.Id))
-        {
-            // The subject has complete state in this update, so creating it is safe.
-            targetItem = context.SubjectFactory.CreateSubject(property.Metadata.Type, context.ServiceProvider);
-            isNew = true;
-            targetItem.SetSubjectId(propertyUpdate.Id);
 
-            // Bind before populating: a property inside this subtree can reference the same ID
-            // again (a self reference, a cycle, or a second parent), and every such reference has
-            // to resolve to this instance.
-            context.BindSubject(propertyUpdate.Id, targetItem);
-        }
-        else
-        {
-            // A reference to a subject that should exist but doesn't (a concurrent structural
-            // mutation removed it). Skip: the next update carrying its complete state heals it.
-            // The reference is lost until then, so count it as a drop.
-            Interlocked.Increment(ref DroppedInboundSubjectUpdateCount);
             return;
         }
 
-        // For NEW subjects (no context, no interceptors yet): populate properties before the
-        // SetValue below, so the subgraph is complete before it enters the graph and concurrent
-        // readers of the backing store see fully populated instances.
-        if (isNew)
+        context.SetPropertyValue(property, propertyUpdate.Timestamp, existingSubject);
+        context.ApplySubjectPayload(existingSubject, subjectId);
+    }
+
+    /// <summary>
+    /// Applies an object update to a property this model cannot write: the subject it holds takes the payload
+    /// of the subject the update names, adopting its ID unless that ID names another subject here.
+    /// </summary>
+    private static void ApplyObjectUpdateToHeldSubject(
+        PropertyReference property,
+        in SubjectPropertyMetadata metadata,
+        SubjectPropertyUpdate propertyUpdate,
+        SubjectUpdateApplyContext context)
+    {
+        if (propertyUpdate.Id is not { } subjectId)
         {
-            if (context.Subjects.TryGetValue(propertyUpdate.Id, out var newItemProperties) &&
-                context.TryMarkAsProcessed(propertyUpdate.Id))
-            {
-                ApplyPropertyUpdates(targetItem, newItemProperties, context, deferAttributes: true);
-            }
+            return;
         }
 
-        context.SetPropertyValue(property, propertyUpdate.Timestamp, targetItem);
-
-        // For EXISTING subjects (context and interceptors live): apply properties after rooting.
-        if (!isNew)
+        var heldSubject = metadata.GetValue?.Invoke(property.Subject) as IInterceptorSubject;
+        if (!context.TryResolveSubject(subjectId, out var subject) &&
+            heldSubject is not null &&
+            context.TryAdoptSubject(subjectId, heldSubject))
         {
-            if (context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties) &&
-                context.TryMarkAsProcessed(propertyUpdate.Id))
-            {
-                ApplyPropertyUpdates(targetItem, itemProperties, context);
-            }
+            subject = heldSubject;
         }
+
+        if (heldSubject is null || !ReferenceEquals(subject, heldSubject))
+        {
+            context.RecordDroppedStructure(property);
+            return;
+        }
+
+        context.ApplySubjectPayload(heldSubject, subjectId);
+    }
+
+    /// <summary>
+    /// Resolves the subject an ID names, or returns <c>null</c> when it is unknown here.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The subject does not fit <paramref name="declaredType"/>.</exception>
+    internal static IInterceptorSubject? ResolveSubject(string subjectId, Type declaredType, SubjectUpdateApplyContext context)
+    {
+        if (!context.TryResolveSubject(subjectId, out var subject))
+        {
+            return null;
+        }
+
+        if (!declaredType.IsInstanceOfType(subject))
+        {
+            throw new InvalidOperationException(
+                $"The update names subject '{subjectId}', a {subject.GetType().FullName}, for a position of type {declaredType.FullName}.");
+        }
+
+        return subject;
     }
 
     internal static object? ConvertValue(object? value, Type targetType)

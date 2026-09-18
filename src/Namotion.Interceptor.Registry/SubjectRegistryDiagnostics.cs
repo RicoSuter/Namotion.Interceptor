@@ -8,12 +8,9 @@ namespace Namotion.Interceptor.Registry;
 public static class SubjectRegistryDiagnostics
 {
     /// <summary>
-    /// A duplicate subject ID was seen at attach, which means something fabricated a subject: two
-    /// distinct instances claim the same stable ID, so one of them was created for an ID that already
-    /// belonged to another. The registry keeps the first instance in its ID index and leaves the
-    /// second unreachable by ID, which is why nothing else reports the problem. A rising counter means
-    /// an update applier, a deserializer or application code created a subject it should have resolved,
-    /// and the unreachable instance stays permanently default-valued because no update can address it.
+    /// Attaches of a subject whose ID another subject already holds. The registry keeps the first instance
+    /// in its ID index, so the second cannot be addressed by ID. A rising count means an update applier, a
+    /// deserializer or application code created a subject for an ID it should have resolved.
     /// </summary>
     public static long DuplicateSubjectIdAttaches => Volatile.Read(ref SubjectRegistry.DuplicateSubjectIdAttachCount);
 }

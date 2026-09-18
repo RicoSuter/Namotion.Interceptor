@@ -964,4 +964,285 @@ public class StableIdApplyTests
         // that rises during a healthy apply cannot signal a real convergence gap.
         Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
     }
+
+    [Fact]
+    public void WhenAMovedSubjectLaterReceivesItsFormerParentAsChild_ThenTheReceiverContextsFormNoCycle()
+    {
+        // Arrange: the receiver applies each move by adding the new reference before removing the old one
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var subject = new CycleTestNode { Name = "Subject" };
+        var formerParent = new CycleTestNode { Name = "FormerParent", Child = subject };
+        var middle = new CycleTestNode { Name = "Middle", Child = formerParent };
+        var newParent = new CycleTestNode { Name = "NewParent" };
+        var root = new CycleTestNode(context) { Name = "Root", Child = middle, Items = [newParent] };
+        var mirror = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(root, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Act: move the subject to its new parent, then move its former parent below it
+        var firstMove = CaptureChanges(context, () =>
+        {
+            newParent.Child = subject;
+            formerParent.Child = null;
+        });
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreatePartialUpdateFromChanges(root, firstMove, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        var secondMove = CaptureChanges(context, () =>
+        {
+            middle.Child = null;
+            subject.Child = formerParent;
+        });
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreatePartialUpdateFromChanges(root, secondMove, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert: a delegation cycle would make every service lookup of these subjects throw
+        var mirroredSubject = mirror.Items[0].Child!;
+        var mirroredFormerParent = mirroredSubject.Child!;
+        Assert.Equal("FormerParent", mirroredFormerParent.Name);
+        Assert.NotNull(mirroredSubject.TryGetRegisteredSubject());
+        Assert.NotNull(mirroredFormerParent.TryGetRegisteredSubject());
+        Assert.Null(mirror.Child!.Child);
+    }
+
+    [Fact]
+    public void WhenAHeldDictionaryListsAnEntryWithoutAKey_ThenTheEntryIsCountedAsDropped()
+    {
+        // Arrange
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Lookup)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Dictionary,
+                        Items = [new SubjectPropertyItemUpdate { Id = "keyless" }]
+                    }
+                }
+            }
+        };
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Empty(target.Lookup);
+        Assert.Equal(droppedBefore + 1, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Fact]
+    public void WhenACreatedSubjectNeverEntersTheGraph_ThenItsAttributeUpdatesAreCountedAsDropped()
+    {
+        // Arrange: the collection creates "created", whose attribute waits for it to be rooted, then fails
+        var target = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = new()
+                {
+                    [nameof(CycleTestNode.Items)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items = [new SubjectPropertyItemUpdate { Id = "created" }, new SubjectPropertyItemUpdate { Id = "missing" }]
+                    }
+                },
+                ["created"] = new()
+                {
+                    [nameof(CycleTestNode.Name)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Created",
+                        Attributes = new() { ["Status"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "idle" } }
+                    }
+                }
+            }
+        };
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        Assert.Throws<InvalidOperationException>(() =>
+            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+
+        // Assert
+        Assert.Empty(target.Items);
+        Assert.Equal(droppedBefore + 1, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Fact]
+    public void WhenAnUpdateNamesAnAttributeTheReceiverDoesNotDeclare_ThenItIsCountedAsUnknown()
+    {
+        // Arrange
+        var target = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = new()
+                {
+                    [nameof(CycleTestNode.Name)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Root",
+                        Attributes = new() { ["Undeclared"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = 1 } }
+                    }
+                }
+            }
+        };
+        var unknownBefore = SubjectUpdateDiagnostics.UnknownInboundProperties;
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal("Root", target.Name);
+        Assert.Equal(unknownBefore + 1, SubjectUpdateDiagnostics.UnknownInboundProperties);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void WhenEntriesAreNamedOnlyThroughAPropertyTheReceiverDoesNotDeclare_ThenNoDropIsCounted(bool attribute, bool nestedInAttribute)
+    {
+        // Arrange: "first" and, through it, "second" are reachable only through the undeclared property
+        var undeclared = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "first" };
+        var target = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = attribute
+                    ? new()
+                    {
+                        [nameof(CycleTestNode.Name)] = new SubjectPropertyUpdate
+                        {
+                            Kind = SubjectPropertyUpdateKind.Value,
+                            Value = "Root",
+                            Attributes = new() { ["Undeclared"] = undeclared }
+                        }
+                    }
+                    : new() { ["Undeclared"] = undeclared },
+                ["first"] = nestedInAttribute
+                    ? new()
+                    {
+                        [nameof(CycleTestNode.Name)] = new SubjectPropertyUpdate
+                        {
+                            Kind = SubjectPropertyUpdateKind.Value,
+                            Value = "First",
+                            Attributes = new() { ["Reference"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "second" } }
+                        }
+                    }
+                    : new()
+                    {
+                        [nameof(CycleTestNode.Items)] = new SubjectPropertyUpdate
+                        {
+                            Kind = SubjectPropertyUpdateKind.Collection,
+                            Items = [new SubjectPropertyItemUpdate { Id = "second" }]
+                        }
+                    },
+                ["second"] = new()
+                {
+                    [nameof(CycleTestNode.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Second" }
+                }
+            },
+            CompleteSubjectIds = []
+        };
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Fact]
+    public void WhenADeferredDetachFailsAfterAPropertyFailed_ThenBothFailuresSurface()
+    {
+        // Arrange
+        var existing = new CycleTestNode { Name = "Existing" };
+        var handler = new ThrowingDetachHandler(existing);
+        var target = new CycleTestNode(InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithService<Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler>(() => handler, service => service is ThrowingDetachHandler))
+        {
+            Items = [existing]
+        };
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = new()
+                {
+                    [nameof(CycleTestNode.Items)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Collection, Items = [] },
+                    [nameof(CycleTestNode.Child)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "missing" }
+                }
+            }
+        };
+
+        // Act
+        var exception = Assert.Throws<AggregateException>(() =>
+            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+
+        // Assert
+        Assert.Contains(exception.InnerExceptions, inner => inner.Message.Contains("'missing'"));
+        Assert.Contains(exception.InnerExceptions, inner => inner.Message == ThrowingDetachHandler.Message);
+        Assert.Empty(target.Items);
+    }
+
+    [Fact]
+    public void WhenTheSenderRestartsWithNewIds_ThenASettablePositionReceivesANewInstance()
+    {
+        // Arrange
+        var mirror = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(CreateSource("First"), []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        var firstChild = mirror.Child!;
+
+        // Act: a restarted sender assigns new IDs to an equal graph
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(CreateSource("Restarted"), []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.NotSame(firstChild, mirror.Child);
+        Assert.Equal("Restarted", mirror.Child!.Name);
+        Assert.Null(firstChild.TryGetRegisteredSubject());
+
+        static CycleTestNode CreateSource(string name) => new(InterceptorSubjectContext.Create().WithRegistry())
+        {
+            Name = "Root",
+            Child = new CycleTestNode { Name = name }
+        };
+    }
+
+    private sealed class ThrowingDetachHandler(IInterceptorSubject subject) : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
+    {
+        public const string Message = "Handler failure during detach.";
+
+        public void HandleLifecycleChange(Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+            {
+                throw new InvalidOperationException(Message);
+            }
+        }
+    }
+
+    private static SubjectPropertyChange[] CaptureChanges(IInterceptorSubjectContext context, Action change)
+    {
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance).Subscribe(changes.Add))
+        {
+            change();
+        }
+
+        return changes.ToArray();
+    }
 }
