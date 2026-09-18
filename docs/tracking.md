@@ -450,6 +450,7 @@ var referenceCount = subject.GetReferenceCount();
 - Subjects created directly with context (root subjects) have `refs: 0` - they have no property references pointing to them
 - Subjects attached via properties have their reference count incremented/decremented on add/remove
 - `GetReferenceCount()` returns property reference count, not total attachment count
+- Only intercepted properties count: a non-partial `[Derived]` getter that returns a subject adds no reference, because it stores nothing. Dynamic and registry-added properties are intercepted and do count.
 
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 

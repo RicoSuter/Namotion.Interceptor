@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
+    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
@@ -216,27 +216,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         if (isLastDetach)
         {
             _attachedSubjects.Remove(subject);
-
-            foreach (var entry in subject.Properties)
-            {
-                var subjectProperty = new PropertyReference(subject, entry.Key);
-
-                var metadata = entry.Value;
-                if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
-                {
-                    // Use _lastProcessedValues (what was actually attached) instead of the backing
-                    // store, which may contain unattached children from a concurrent next() call.
-                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
-                    {
-                        children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
-                    }
-
-                    _lastProcessedValues.Remove(subjectProperty);
-                }
-
-                subject.DetachSubjectProperty(subjectProperty);
-            }
+            children = DetachSubjectProperties(subject);
         }
 
         var count = subject.DecrementReferenceCount();
@@ -268,6 +248,34 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    private List<(IInterceptorSubject subject, PropertyReference property, object? index)>? DetachSubjectProperties(
+        IInterceptorSubject subject)
+    {
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
+        foreach (var entry in subject.Properties)
+        {
+            var subjectProperty = new PropertyReference(subject, entry.Key);
+
+            var metadata = entry.Value;
+            if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+            {
+                // Use _lastProcessedValues (what was actually attached) instead of the backing
+                // store, which may contain unattached children from a concurrent next() call.
+                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
+                {
+                    children ??= GetList();
+                    FindSubjectsInProperty(subjectProperty, lastProcessed, children, null);
+                }
+
+                _lastProcessedValues.Remove(subjectProperty);
+            }
+
+            subject.DetachSubjectProperty(subjectProperty);
+        }
+
+        return children;
+    }
+
     private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
         if (subject is ILifecycleHandler subjectHandler)
@@ -294,7 +302,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         next(ref context);
 
         var metadata = context.Property.Metadata;
-        if (!metadata.Type.CanContainSubjects<TProperty>())
+
+        // A non-intercepted property stores nothing, so it owns no subject, yet derived notifications still
+        // publish through this chain. The attach scan and both detach paths already skip these properties.
+        if (!metadata.IsIntercepted || !metadata.Type.CanContainSubjects<TProperty>())
         {
             return;
         }
@@ -316,78 +327,96 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
             }
 
-            if ((lastProcessed is not (null or IInterceptorSubject or IEnumerable) || lastProcessed is string) &&
-                (newValue is not (null or IInterceptorSubject or IEnumerable) || newValue is string))
+            if (IsScalarValue(lastProcessed) && IsScalarValue(newValue))
             {
                 return;
             }
 
-            var oldCollectedSubjects = GetList();
-            var newCollectedSubjects = GetList();
-            var oldTouchedSubjects = GetSubjectHashSet();
-            var newTouchedSubjects = GetSubjectHashSet();
+            ReconcilePropertySubjects(ref context, lastProcessed, newValue);
+        }
+    }
 
-            try
+    private static bool IsScalarValue(object? value)
+    {
+        // Null transitions still need reconciliation to update the stored baseline.
+        return value is not (null or IInterceptorSubject or IEnumerable) || value is string;
+    }
+
+    private void ReconcilePropertySubjects<TProperty>(ref PropertyWriteContext<TProperty> context,
+        object? lastProcessed, object? newValue)
+    {
+        var oldCollectedSubjects = GetList();
+        var newCollectedSubjects = GetList();
+        var oldTouchedSubjects = GetSubjectHashSet();
+        var newTouchedSubjects = GetSubjectHashSet();
+
+        try
+        {
+            FindSubjectsInProperty(context.Property, lastProcessed, oldCollectedSubjects, oldTouchedSubjects);
+            FindSubjectsInProperty(context.Property, newValue, newCollectedSubjects, newTouchedSubjects);
+
+            // Detach in reverse order so that collection children are removed from the end first.
+            // RemoveChild searches backwards to match this order for O(1) per removal.
+            for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
             {
-                FindSubjectsInProperty(context.Property, lastProcessed, oldCollectedSubjects, oldTouchedSubjects);
-                FindSubjectsInProperty(context.Property, newValue, newCollectedSubjects, newTouchedSubjects);
-
-                // Detach in reverse order so that collection children are removed from the end first.
-                // RemoveChild searches backwards to match this order for O(1) per removal.
-                for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
+                var (subject, property, index) = oldCollectedSubjects[i];
+                if (!newTouchedSubjects.Contains(subject))
                 {
-                    var (subject, property, index) = oldCollectedSubjects[i];
-                    if (!newTouchedSubjects.Contains(subject))
-                    {
-                        DetachFromProperty(subject, context.Property.Subject.Context, property, index);
-                    }
-                }
-
-                for (var i = 0; i < newCollectedSubjects.Count; i++)
-                {
-                    var (subject, property, index) = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(subject))
-                    {
-                        AttachToProperty(subject, context.Property.Subject.Context, property, index);
-                    }
-                }
-
-                _lastProcessedValues[context.Property] = newValue;
-
-                // Parent was concurrently detached between next() and lock acquisition.
-                // Undo: remove dangling _lastProcessedValues and detach orphaned children.
-                if (!_attachedSubjects.ContainsKey(context.Property.Subject))
-                {
-                    _lastProcessedValues.Remove(context.Property);
-                    for (var i = 0; i < newCollectedSubjects.Count; i++)
-                    {
-                        var (subject, property, index) = newCollectedSubjects[i];
-                        if (!oldTouchedSubjects.Contains(subject))
-                        {
-                            DetachFromProperty(subject, context.Property.Subject.Context, property, index);
-                        }
-                    }
-
-                    return;
-                }
-
-                // Refresh child index metadata for retained subjects whose
-                // positions may have shifted in the new collection.
-                if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
-                {
-                    var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
-                    for (var i = 0; i < handlers.Length; i++)
-                    {
-                        handlers[i].RefreshCollectionProperty(context.Property, newValue);
-                    }
+                    DetachFromProperty(subject, context.Property.Subject.Context, property, index);
                 }
             }
-            finally
+
+            for (var i = 0; i < newCollectedSubjects.Count; i++)
             {
-                ReturnList(oldCollectedSubjects);
-                ReturnList(newCollectedSubjects);
-                ReturnSubjectHashSet(oldTouchedSubjects);
-                ReturnSubjectHashSet(newTouchedSubjects);
+                var (subject, property, index) = newCollectedSubjects[i];
+                if (!oldTouchedSubjects.Contains(subject))
+                {
+                    AttachToProperty(subject, context.Property.Subject.Context, property, index);
+                }
+            }
+
+            _lastProcessedValues[context.Property] = newValue;
+
+            // Parent was concurrently detached between next() and lock acquisition.
+            // Undo: remove dangling _lastProcessedValues and detach orphaned children.
+            if (!_attachedSubjects.ContainsKey(context.Property.Subject))
+            {
+                _lastProcessedValues.Remove(context.Property);
+                DetachOrphanedSubjects(ref context, newCollectedSubjects, oldTouchedSubjects);
+
+                return;
+            }
+
+            // Refresh child index metadata for retained subjects whose
+            // positions may have shifted in the new collection.
+            if (newValue is IEnumerable && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+            {
+                var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
+                for (var i = 0; i < handlers.Length; i++)
+                {
+                    handlers[i].RefreshCollectionProperty(context.Property, newValue);
+                }
+            }
+        }
+        finally
+        {
+            ReturnList(oldCollectedSubjects);
+            ReturnList(newCollectedSubjects);
+            ReturnSubjectHashSet(oldTouchedSubjects);
+            ReturnSubjectHashSet(newTouchedSubjects);
+        }
+    }
+
+    private void DetachOrphanedSubjects<TProperty>(ref PropertyWriteContext<TProperty> context,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> newCollectedSubjects,
+        HashSet<IInterceptorSubject> oldTouchedSubjects)
+    {
+        for (var i = 0; i < newCollectedSubjects.Count; i++)
+        {
+            var (subject, property, index) = newCollectedSubjects[i];
+            if (!oldTouchedSubjects.Contains(subject))
+            {
+                DetachFromProperty(subject, context.Property.Subject.Context, property, index);
             }
         }
     }
@@ -456,14 +485,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
 
             case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject subjectItem)
-                    {
-                        touchedSubjects?.Add(subjectItem);
-                        collectedSubjects.Add((subjectItem, property, entry.Key));
-                    }
-                }
+                FindSubjectsInDictionary(property, dictionary, collectedSubjects, touchedSubjects);
                 return;
 
             case ICollection collection:
@@ -485,33 +507,49 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 return;
 
             case IEnumerable enumerable:
-                // Read-only types (no ICollection): dispatch on declared property shape.
-                if (property.Metadata.Type.IsSubjectDictionaryType())
-                {
-                    foreach (var item in enumerable)
-                    {
-                        if (item is null) continue;
-                        if (SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var subjectItem))
-                        {
-                            touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, key));
-                        }
-                    }
-                }
-                else
-                {
-                    var i = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (item is IInterceptorSubject subjectItem)
-                        {
-                            touchedSubjects?.Add(subjectItem);
-                            collectedSubjects.Add((subjectItem, property, i));
-                        }
-                        i++;
-                    }
-                }
+                FindSubjectsInEnumerable(property, enumerable, collectedSubjects, touchedSubjects);
                 return;
+        }
+    }
+
+    private static void FindSubjectsInDictionary(PropertyReference property, IDictionary dictionary,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
+        HashSet<IInterceptorSubject>? touchedSubjects)
+    {
+        foreach (DictionaryEntry entry in dictionary)
+        {
+            if (entry.Value is IInterceptorSubject subjectItem)
+            {
+                touchedSubjects?.Add(subjectItem);
+                collectedSubjects.Add((subjectItem, property, entry.Key));
+            }
+        }
+    }
+
+    private static void FindSubjectsInEnumerable(PropertyReference property, IEnumerable enumerable,
+        List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
+        HashSet<IInterceptorSubject>? touchedSubjects)
+    {
+        // A pair carries its key, but a dictionary type is free to enumerate as its values
+        // instead, and a broad declaration (object, plain interface) never classifies as a
+        // dictionary, so the value's own type has to answer when the declared one cannot.
+        var isKeyed = property.Metadata.Type.IsSubjectDictionaryType() ||
+                      enumerable.GetType().IsSubjectDictionaryType();
+        var index = 0;
+        foreach (var item in enumerable)
+        {
+            if (isKeyed && item is not null &&
+                SubjectLookup.TryGetSubjectFromKeyValuePair(item, out var key, out var keyedItem))
+            {
+                touchedSubjects?.Add(keyedItem);
+                collectedSubjects.Add((keyedItem, property, key));
+            }
+            else if (item is IInterceptorSubject subjectItem)
+            {
+                touchedSubjects?.Add(subjectItem);
+                collectedSubjects.Add((subjectItem, property, index));
+            }
+            index++;
         }
     }
 
@@ -528,7 +566,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private static HashSet<IInterceptorSubject> GetSubjectHashSet()
     {
         _subjectHashSetPool ??= new Stack<HashSet<IInterceptorSubject>>();
-        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8);
+        return _subjectHashSetPool.Count > 0 ? _subjectHashSetPool.Pop() : new HashSet<IInterceptorSubject>(8, ReferenceEqualityComparer.Instance);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
