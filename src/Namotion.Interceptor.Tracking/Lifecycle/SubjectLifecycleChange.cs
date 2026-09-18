@@ -30,12 +30,14 @@ public readonly struct SubjectLifecycleChange
     public bool IsContextDetach { get; init; }
 
     /// <summary>
-    /// Gets the property reference whose removal earlier in the same lifecycle batch scope left the subject
-    /// without references, set only on the attach which re-adds one before that deferred detach is processed.
-    /// The subject left and re-entered the graph, so <see cref="IsContextAttach"/> is false on such an attach
-    /// even though the added reference is its only one. Internal because it exists for
-    /// <see cref="ContextInheritanceHandler"/> to follow the subject to its new parent, which is the only
-    /// reconciliation a deferred detach leaves undone.
+    /// Gets the properties still referencing the subject after a removed property reference, as known to the
+    /// interceptor reporting the change.
     /// </summary>
-    internal PropertyReference? MovedFromProperty { get; init; }
+    internal PropertyReferenceSet References { get; init; }
+
+    /// <summary>
+    /// Gets whether the added reference is the first after a batch scope deferred the detach of the subject,
+    /// so that the subject stayed attached without a reference in between.
+    /// </summary>
+    internal bool EndsDeferredDetach { get; init; }
 }

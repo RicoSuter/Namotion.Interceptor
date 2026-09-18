@@ -185,6 +185,23 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
+    /// Gets the first fallback context that belongs to a subject, which is the one a subject attached
+    /// through a property inherits from, or <c>null</c> when there is none.
+    /// </summary>
+    internal InterceptorSubjectContext? TryGetSubjectFallbackContext()
+    {
+        foreach (var fallbackContext in Volatile.Read(ref _state).FallbackContexts)
+        {
+            if (fallbackContext is IInterceptorExecutor)
+            {
+                return fallbackContext;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Swaps one fallback context for another in a single published state.
     /// Removing and adding separately would report the subject as leaving and re-entering the graph,
     /// which takes the subject and its children out of it (see
