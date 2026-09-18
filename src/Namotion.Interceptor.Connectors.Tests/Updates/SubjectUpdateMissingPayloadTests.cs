@@ -57,4 +57,45 @@ public class SubjectUpdateMissingPayloadTests
         Assert.Equal("Old", child.FirstName);
         Assert.Equal("Updated", target.FirstName);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAnInsertIntoAContainerWithoutASetterReferencesAMissingSubject_ThenApplyReportsFailure(bool dictionary)
+    {
+        // Arrange
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new()
+            {
+                ["1"] = new()
+                {
+                    [dictionary ? nameof(InitOnlyTypesTestNode.Lookup) : nameof(InitOnlyTypesTestNode.Items)] = new()
+                    {
+                        Kind = dictionary ? SubjectPropertyUpdateKind.Dictionary : SubjectPropertyUpdateKind.Collection,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Insert,
+                                Index = dictionary ? "added" : 0,
+                                Id = "missing"
+                            }
+                        ]
+                    }
+                }
+            }
+        };
+
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+
+        // Assert
+        Assert.Contains("missing", exception.Message);
+        Assert.Empty(target.Items);
+        Assert.Empty(target.Lookup);
+    }
 }

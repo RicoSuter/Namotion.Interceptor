@@ -148,6 +148,8 @@ public class SubjectUpdateMembershipTests
     [InlineData(false, "negative-index")]
     [InlineData(false, "operations")]
     [InlineData(true, "operations")]
+    [InlineData(false, "unmarked")]
+    [InlineData(true, "unmarked")]
     public void WhenMembershipIsNotComplete_ThenUnlistedMembersArePreserved(bool dictionary, string scenario)
     {
         // Arrange
@@ -166,13 +168,16 @@ public class SubjectUpdateMembershipTests
             case "operations":
                 propertyUpdate.Operations = [new() { Action = SubjectCollectionOperationType.Remove, Index = dictionary ? "absent" : 99 }];
                 break;
+            case "unmarked": propertyUpdate.Mode = SubjectPropertyUpdateMode.Incremental; break;
         }
 
         // Act
         Apply(target, update, json: true);
 
-        // Assert
-        Assert.Equal(original, GetChildren(target, dictionary));
+        // Assert: two IDs name the first position in the duplicate scenario, and one instance takes the
+        // payload of one ID only, so there the first position gets a new instance.
+        var namedTwice = scenario == "duplicate" ? 1 : 0;
+        Assert.Equal(original.Skip(namedTwice), GetChildren(target, dictionary).Skip(namedTwice));
     }
 
     [Theory]
@@ -259,6 +264,7 @@ public class SubjectUpdateMembershipTests
                 [propertyName ?? PropertyName(dictionary)] = new()
                 {
                     Kind = dictionary ? SubjectPropertyUpdateKind.Dictionary : SubjectPropertyUpdateKind.Collection,
+                    Mode = SubjectPropertyUpdateMode.Complete,
                     Count = count,
                     Items = count == 0 ? null : [new() { Index = dictionary ? "first" : 0, Id = "first" }, new() { Index = dictionary ? "second" : 1, Id = "second" }]
                 }

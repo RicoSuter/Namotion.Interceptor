@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Collections;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -27,18 +30,19 @@ internal static class SubjectItemsUpdateApplier
 
         var existingValue = property.GetValue();
         var workingItems = SubjectValueConvert.ToSubjectMutableList(existingValue);
-        var completeIndices = GetCompleteMembership(propertyUpdate, context, static (index, _) => ConvertIndexToInt(index));
-        var structureChanged = completeIndices is not null &&
-            (existingValue is null || workingItems.Count != completeIndices.Count);
-        if (completeIndices is not null)
+        var isComplete = IsCompleteCollectionMembership(propertyUpdate, context);
+        var structureChanged = isComplete &&
+            (existingValue is null || workingItems.Count != propertyUpdate.Count);
+        if (isComplete)
         {
             // Complete membership names every position once, so padding with nulls lets each item be written
             // at its own index whatever the arrival order, and every null is overwritten by the item that
             // owns its slot.
-            if (workingItems.Count > completeIndices.Count)
-                workingItems.RemoveRange(completeIndices.Count, workingItems.Count - completeIndices.Count);
+            var count = propertyUpdate.Count!.Value;
+            if (workingItems.Count > count)
+                workingItems.RemoveRange(count, workingItems.Count - count);
 
-            while (workingItems.Count < completeIndices.Count)
+            while (workingItems.Count < count)
                 workingItems.Add(null!);
         }
 
@@ -65,9 +69,9 @@ internal static class SubjectItemsUpdateApplier
                     case SubjectCollectionOperationType.Insert:
                         if (operation.Id is not null)
                         {
+                            var itemProperties = context.GetSubjectProperties(operation.Id);
                             if (canWriteContainer)
                             {
-                                var itemProperties = context.GetSubjectProperties(operation.Id);
                                 var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProperties, context);
                                 if (index >= workingItems.Count)
                                     workingItems.Add(newItem);
@@ -121,15 +125,13 @@ internal static class SubjectItemsUpdateApplier
                 {
                     var itemProperties = context.GetSubjectProperties(collectionUpdate.Id);
                     if (index >= 0 && index < workingItems.Count &&
-                        (completeIndices is null || workingItems[index] is not null))
+                        workingItems[index] is { } existingItem &&
+                        SubjectUpdateApplier.TryApplyToHeldSubject(collectionUpdate.Id, existingItem, itemProperties, context))
                     {
-                        // Update existing item
-                        if (context.TryClaimSubjectPayload(collectionUpdate.Id, workingItems[index]))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProperties, context);
-                        }
+                        continue;
                     }
-                    else if (index >= 0 && index <= workingItems.Count)
+
+                    if (index >= 0 && index <= workingItems.Count)
                     {
                         if (canWriteContainer)
                         {
@@ -175,76 +177,84 @@ internal static class SubjectItemsUpdateApplier
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
 
         var existingValue = property.GetValue();
-        var completeKeys = GetCompleteMembership(propertyUpdate, context,
-            static (key, keyType) => ConvertDictionaryKey(key, keyType!), targetKeyType);
-
-        // The working dictionary omits null and non-subject entries, so the original container is counted.
-        var structureChanged = completeKeys is not null && (existingValue is null ||
-            (existingValue is ICollection collection
-                ? collection.Count
-                : ((IEnumerable)existingValue).Cast<object>().Count()) != completeKeys.Count);
-
-        if (existingValue is not null)
+        var completeKeys = TryGetCompleteDictionaryMembership(propertyUpdate, context, targetKeyType, workingDictionary);
+        try
         {
-            foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
-            {
-                if (entry.Value is not IInterceptorSubject subject)
-                    continue;
+            // The working dictionary omits null and non-subject entries, so the original container is counted.
+            var structureChanged = completeKeys is not null && (existingValue is null ||
+                (existingValue is ICollection collection
+                    ? collection.Count
+                    : ((IEnumerable)existingValue).Cast<object>().Count()) != propertyUpdate.Count);
 
-                if (completeKeys is null || completeKeys.Contains(entry.Key))
-                    workingDictionary[entry.Key] = subject;
-                else
-                    structureChanged = true;
-            }
-        }
-
-        // Apply structural operations
-        if (propertyUpdate.Operations is { Count: > 0 })
-        {
-            foreach (var operation in propertyUpdate.Operations)
+            if (existingValue is not null)
             {
-                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
-                switch (operation.Action)
+                foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
                 {
-                    case SubjectCollectionOperationType.Remove:
-                        if (workingDictionary.Remove(key))
-                            structureChanged = true;
-                        break;
+                    if (entry.Value is not IInterceptorSubject subject)
+                        continue;
 
-                    case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null)
-                        {
-                            if (canWriteContainer)
-                            {
-                                var itemProperties = context.GetSubjectProperties(operation.Id);
-                                workingDictionary[key] = CreateAndApplyItem(parent, property, key, operation.Id, itemProperties, context);
-                            }
-                            structureChanged = true;
-                        }
-                        break;
+                    if (completeKeys is null)
+                    {
+                        workingDictionary[entry.Key] = subject;
+                        continue;
+                    }
+
+                    // Complete membership seeded an entry for every listed key, so an unlisted key has none.
+                    ref var member = ref CollectionsMarshal.GetValueRefOrNullRef(workingDictionary, entry.Key);
+                    if (Unsafe.IsNullRef(ref member))
+                        structureChanged = true;
+                    else
+                        member = subject;
                 }
             }
-        }
 
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
-        {
-            foreach (var itemUpdate in propertyUpdate.Items)
+            // Apply structural operations
+            if (propertyUpdate.Operations is { Count: > 0 })
             {
-                var key = ConvertDictionaryKey(itemUpdate.Index, targetKeyType);
-
-                if (itemUpdate.Id is not null)
+                foreach (var operation in propertyUpdate.Operations)
                 {
-                    var itemProperties = context.GetSubjectProperties(itemUpdate.Id);
-                    if (workingDictionary.TryGetValue(key, out var existing))
+                    var key = ConvertDictionaryKey(operation.Index, targetKeyType);
+                    switch (operation.Action)
                     {
-                        if (context.TryClaimSubjectPayload(itemUpdate.Id, existing))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProperties, context);
-                        }
+                        case SubjectCollectionOperationType.Remove:
+                            if (workingDictionary.Remove(key))
+                                structureChanged = true;
+                            break;
+
+                        case SubjectCollectionOperationType.Insert:
+                            if (operation.Id is not null)
+                            {
+                                var itemProperties = context.GetSubjectProperties(operation.Id);
+                                if (canWriteContainer)
+                                {
+                                    workingDictionary[key] = CreateAndApplyItem(parent, property, key, operation.Id, itemProperties, context);
+                                }
+                                structureChanged = true;
+                            }
+                            break;
                     }
-                    else
+                }
+            }
+
+            // Apply sparse property updates
+            if (propertyUpdate.Items is { Count: > 0 } items)
+            {
+                for (var i = 0; i < items.Count; i++)
+                {
+                    var itemUpdate = items[i];
+                    var key = completeKeys is not null
+                        ? completeKeys[i]
+                        : ConvertDictionaryKey(itemUpdate.Index, targetKeyType);
+
+                    if (itemUpdate.Id is not null)
                     {
+                        var itemProperties = context.GetSubjectProperties(itemUpdate.Id);
+                        if (workingDictionary.GetValueOrDefault(key) is { } existingItem &&
+                            SubjectUpdateApplier.TryApplyToHeldSubject(itemUpdate.Id, existingItem, itemProperties, context))
+                        {
+                            continue;
+                        }
+
                         if (canWriteContainer)
                         {
                             workingDictionary[key] = CreateAndApplyItem(parent, property, key, itemUpdate.Id, itemProperties, context);
@@ -253,44 +263,120 @@ internal static class SubjectItemsUpdateApplier
                     }
                 }
             }
-        }
 
-        if (structureChanged)
+            if (structureChanged)
+            {
+                if (canWriteContainer)
+                {
+                    var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
+                    context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
+                }
+                else
+                {
+                    context.RecordDroppedStructure(property);
+                }
+            }
+        }
+        finally
         {
-            if (canWriteContainer)
-            {
-                var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
-                context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
-            }
-            else
-            {
-                context.RecordDroppedStructure(property);
-            }
+            if (completeKeys is { Length: > 0 })
+                ArrayPool<object>.Shared.Return(completeKeys, clearArray: true);
         }
     }
 
-    private static HashSet<TIndex>? GetCompleteMembership<TIndex>(
+    /// <summary>
+    /// Whether an update marked <see cref="SubjectPropertyUpdateMode.Complete"/> states a whole membership:
+    /// no operations, a count equal to the number of items, and an ID with a payload on every item. The
+    /// callers check the positions or keys.
+    /// </summary>
+    private static bool HasCompleteMembershipShape(SubjectPropertyUpdate update, SubjectUpdateApplyContext context)
+    {
+        if (update.Mode != SubjectPropertyUpdateMode.Complete ||
+            update.Count is not { } count ||
+            update.Operations is { Count: > 0 } ||
+            (update.Items?.Count ?? 0) != count)
+        {
+            return false;
+        }
+
+        if (update.Items is { } items)
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (items[i].Id is not { } subjectId || !context.Subjects.ContainsKey(subjectId))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a collection update states a whole membership whose indices are distinct and cover every
+    /// position from zero through the count.
+    /// </summary>
+    private static bool IsCompleteCollectionMembership(SubjectPropertyUpdate update, SubjectUpdateApplyContext context)
+    {
+        if (!HasCompleteMembershipShape(update, context))
+            return false;
+
+        var count = update.Count!.Value;
+        if (count == 0)
+            return true;
+
+        Span<bool> covered = count <= 256 ? stackalloc bool[count] : new bool[count];
+        covered.Clear();
+
+        var items = update.Items!;
+        for (var i = 0; i < items.Count; i++)
+        {
+            var index = ConvertIndexToInt(items[i].Index);
+            if ((uint)index >= (uint)count || covered[index])
+                return false;
+
+            covered[index] = true;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the keys of a dictionary update that states a whole membership, converted to
+    /// <paramref name="keyType"/> in the order of its items, and seeds <paramref name="workingDictionary"/>
+    /// with a <c>null</c> member per key, which the existing entries and then the items fill. Returns
+    /// <c>null</c> and leaves the working dictionary empty when the update does not state a whole membership,
+    /// which includes a duplicate converted key. A returned array that is not empty is rented from
+    /// <see cref="ArrayPool{T}.Shared"/> and holds its keys in the first slots only.
+    /// </summary>
+    private static object[]? TryGetCompleteDictionaryMembership(
         SubjectPropertyUpdate update,
         SubjectUpdateApplyContext context,
-        Func<object, Type?, TIndex> convertIndex,
-        Type? keyType = null) where TIndex : notnull
+        Type keyType,
+        Dictionary<object, IInterceptorSubject> workingDictionary)
     {
-        // Complete membership can carry sparse child properties; only the item coverage matters.
-        if (update.Count is not { } count ||
-            update.Operations is { Count: > 0 } || (update.Items?.Count ?? 0) != count)
+        if (!HasCompleteMembershipShape(update, context))
             return null;
 
-        var indices = new HashSet<TIndex>();
-        foreach (var item in update.Items ?? [])
+        var count = update.Count!.Value;
+        if (count == 0)
+            return [];
+
+        var items = update.Items!;
+        var keys = ArrayPool<object>.Shared.Rent(count);
+        for (var i = 0; i < count; i++)
         {
-            var index = convertIndex(item.Index, keyType);
-            if (update.Kind == SubjectPropertyUpdateKind.Collection &&
-                index is int position && (position < 0 || position >= count))
+            var key = ConvertDictionaryKey(items[i].Index, keyType);
+            if (!workingDictionary.TryAdd(key, null!))
+            {
+                workingDictionary.Clear();
+                ArrayPool<object>.Shared.Return(keys, clearArray: true);
                 return null;
-            if (!indices.Add(index) || item.Id is null || !context.Subjects.ContainsKey(item.Id))
-                return null;
+            }
+
+            keys[i] = key;
         }
-        return indices;
+
+        return keys;
     }
 
     private static int ConvertIndexToInt(object index) => index switch
@@ -326,7 +412,7 @@ internal static class SubjectItemsUpdateApplier
         newItem.Context.AddFallbackContext(parent.Context);
 
         // Claiming before recursing is what terminates a payload that references itself.
-        if (context.TryClaimSubjectPayload(subjectId, newItem, itemType))
+        if (context.ClaimSubjectPayload(subjectId, newItem, itemType) == SubjectPayloadClaim.Claimed)
         {
             SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
         }

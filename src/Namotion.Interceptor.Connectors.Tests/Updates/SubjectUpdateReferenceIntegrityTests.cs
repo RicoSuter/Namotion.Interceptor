@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -115,6 +116,38 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.NotNull(mother.TryGetRegisteredSubject());
         Assert.NotNull(update.Subjects[update.Root][nameof(Person.Mother)].Id);
         Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey("Projection"));
+    }
+
+    [Fact]
+    public void WhenAnUpdateNamesAComputedSubjectProjection_ThenItIsIgnoredAndTheApplyTerminates()
+    {
+        // Arrange: the projection returns a new registered subject on every read, so an applier walking into
+        // it never ends. Creating stops long before that could exhaust the stack.
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var createdSubjects = 0;
+        MintingProjectionNode Mint() => ++createdSubjects > 20
+            ? throw new InvalidOperationException("The apply walked into the projection without bound.")
+            : new MintingProjectionNode(context) { CreateProjected = Mint };
+        var target = new MintingProjectionNode(context) { CreateProjected = Mint };
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new()
+            {
+                ["1"] = new()
+                {
+                    [nameof(MintingProjectionNode.Name)] = new() { Kind = SubjectPropertyUpdateKind.Value, Value = "Applied" },
+                    [nameof(MintingProjectionNode.Projection)] = new() { Kind = SubjectPropertyUpdateKind.Object, Id = "1" }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal("Applied", target.Name);
+        Assert.Equal(0, createdSubjects);
     }
 
     [Fact]
@@ -309,4 +342,19 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.Empty(target.Children);
         Assert.Empty(target.Relationships!);
     }
+}
+
+/// <summary>
+/// Model whose derived subject property creates a new subject on every read: a computed projection, which
+/// no producer publishes and no applier may walk into.
+/// </summary>
+[InterceptorSubject]
+public partial class MintingProjectionNode
+{
+    public Func<MintingProjectionNode>? CreateProjected { get; init; }
+
+    public partial string? Name { get; set; }
+
+    [Derived]
+    public MintingProjectionNode? Projection => CreateProjected?.Invoke();
 }

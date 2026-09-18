@@ -317,6 +317,88 @@ public class SubjectUpdateSharedSubjectTests
         Assert.Same(car, Assert.Single(car.Towed));
     }
 
+    [Fact]
+    public void WhenOneIdNamesABaseThenALeafThenAMidTypedPosition_ThenTheMidPositionReusesTheLeafInstance()
+    {
+        // Arrange: the instance created for the base position fits neither other position, and the one
+        // created for the leaf position also fits the mid position.
+        var target = new LayeredHolder(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "r",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["r"] = new()
+                {
+                    [nameof(LayeredHolder.Base)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" },
+                    [nameof(LayeredHolder.Leaf)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" },
+                    [nameof(LayeredHolder.Mid)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" }
+                },
+                ["x"] = new()
+                {
+                    [nameof(LayeredBase.Label)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Shared"
+                    }
+                }
+            }
+        };
+        var factory = new CountingSubjectFactory();
+
+        // Act
+        target.ApplySubjectUpdate(update, factory, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal(2, factory.CreatedSubjects);
+        Assert.IsType<LayeredLeaf>(target.Leaf);
+        Assert.Same(target.Leaf, target.Mid);
+        Assert.Equal("Shared", target.Mid!.Label);
+        Assert.Equal("Shared", target.Base!.Label);
+    }
+
+    [Theory]
+    [InlineData("reference")]
+    [InlineData("list")]
+    [InlineData("dictionary")]
+    public void WhenAMirrorSharesOneInstanceBetweenTwoPositionsTheSourceHasSplit_ThenACompleteUpdateGivesEachPositionItsOwnSubject(string position)
+    {
+        // Arrange
+        var shared = new Person { FirstName = "Stale" };
+        var first = new Person { FirstName = "First" };
+        var second = new Person { FirstName = "Second" };
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry());
+        var mirror = new Person(InterceptorSubjectContext.Create().WithRegistry());
+        switch (position)
+        {
+            case "reference":
+                (source.Father, source.Mother) = (first, second);
+                (mirror.Father, mirror.Mother) = (shared, shared);
+                break;
+            case "list":
+                source.Children = [first, second];
+                mirror.Children = [shared, shared];
+                break;
+            default:
+                source.Relationships = new() { ["first"] = first, ["second"] = second };
+                mirror.Relationships = new() { ["first"] = shared, ["second"] = shared };
+                break;
+        }
+
+        // Act
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Person[] positions = position switch
+        {
+            "reference" => [mirror.Father!, mirror.Mother!],
+            "list" => [.. mirror.Children],
+            _ => [mirror.Relationships!["first"], mirror.Relationships["second"]]
+        };
+        Assert.Same(shared, positions[0]);
+        Assert.Equal(["First", "Second"], positions.Select(person => person.FirstName));
+    }
+
     // Insertion order is what the applier walks, so it decides which position mints the instance.
     private static Dictionary<string, SubjectPropertyUpdate> InOrder(bool reversed,
         string firstName, SubjectPropertyUpdate first, string secondName, SubjectPropertyUpdate second)
@@ -398,4 +480,36 @@ public partial class FleetVehicle
 public partial class FleetTrailer : FleetVehicle
 {
     public partial FleetTrailer? Coupled { get; set; }
+}
+
+/// <summary>
+/// Holds one position per level of a three-level hierarchy, declared from the base down to the leaf and
+/// then the middle level.
+/// </summary>
+[InterceptorSubject]
+public partial class LayeredHolder
+{
+    public partial LayeredBase? Base { get; set; }
+
+    public partial LayeredLeaf? Leaf { get; set; }
+
+    public partial LayeredMid? Mid { get; set; }
+}
+
+[InterceptorSubject]
+public partial class LayeredBase
+{
+    public partial string? Label { get; set; }
+}
+
+[InterceptorSubject]
+public partial class LayeredMid : LayeredBase
+{
+    public partial string? MidLabel { get; set; }
+}
+
+[InterceptorSubject]
+public partial class LayeredLeaf : LayeredMid
+{
+    public partial string? LeafLabel { get; set; }
 }

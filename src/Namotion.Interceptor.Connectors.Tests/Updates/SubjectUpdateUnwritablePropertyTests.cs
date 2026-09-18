@@ -72,6 +72,7 @@ public class SubjectUpdateUnwritablePropertyTests
                     [nameof(InitOnlyTypesTestNode.Items)] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Collection,
+                        Mode = SubjectPropertyUpdateMode.Complete,
                         Count = 2,
                         Items =
                         [
@@ -126,6 +127,7 @@ public class SubjectUpdateUnwritablePropertyTests
             ? new SubjectPropertyUpdate
             {
                 Kind = SubjectPropertyUpdateKind.Dictionary,
+                Mode = SubjectPropertyUpdateMode.Complete,
                 Count = 2,
                 Items =
                 [
@@ -226,6 +228,86 @@ public class SubjectUpdateUnwritablePropertyTests
         Assert.Equal("Applied", target.Name);
         Assert.Empty(logger.Warnings);
         Assert.Empty(logger.Errors);
+    }
+
+    [Fact]
+    public void WhenANullReferenceUpdateNamesAReferenceWithoutASetter_ThenTheHeldSubjectStaysWithoutFailureOrWarning()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var existingChild = new InitOnlyTypesTestNode { Name = "Existing" };
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
+        {
+            Child = existingChild
+        };
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Same(existingChild, target.Child);
+        Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
+    public void WhenAReplacedReferenceNamesAReferenceWithoutASetter_ThenTheHeldSubjectKeepsItsValuesAndTheStructureIsReportedDropped()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var existingChild = new InitOnlyTypesTestNode { Name = "Existing" };
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
+        {
+            Child = existingChild
+        };
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Mode = SubjectPropertyUpdateMode.Replaced,
+                        Id = "2"
+                    }
+                },
+                ["2"] = new()
+                {
+                    [nameof(InitOnlyTypesTestNode.Name)] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Replacement"
+                    }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Same(existingChild, target.Child);
+        Assert.Equal("Existing", existingChild.Name);
+        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Child)}", Assert.Single(logger.Warnings));
     }
 
     [Fact]

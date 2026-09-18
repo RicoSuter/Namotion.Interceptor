@@ -49,6 +49,7 @@ internal static class SubjectItemsUpdateFactory
         if (collectionValue is null)
             return;
 
+        update.Mode = SubjectPropertyUpdateMode.Complete;
         var items = SubjectValueConvert.ToSubjectList(collectionValue);
         update.Count = items.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
@@ -148,6 +149,7 @@ internal static class SubjectItemsUpdateFactory
         if (dictionaryValue is null)
             return;
 
+        update.Mode = SubjectPropertyUpdateMode.Complete;
         var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 

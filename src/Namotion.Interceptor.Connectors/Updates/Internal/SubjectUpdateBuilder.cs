@@ -35,6 +35,12 @@ internal sealed class SubjectUpdateBuilder
     /// </summary>
     public List<(int Index, RegisteredSubjectProperty Property)> DeferredChanges { get; } = [];
 
+    /// <summary>
+    /// The subject references this batch reassigned to a different subject, whose update entries are marked
+    /// <see cref="SubjectPropertyUpdateMode.Replaced"/> once the update is built.
+    /// </summary>
+    public List<RegisteredSubjectProperty> ReplacedReferences { get; } = [];
+
     public IInterceptorSubject RootSubject { get; private set; } = null!;
 
     public ReadOnlySpan<SubjectPropertyChange> MergeChanges(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -278,6 +284,7 @@ internal sealed class SubjectUpdateBuilder
         ProcessedSubjects.Clear();
         PathVisited.Clear();
         DeferredChanges.Clear();
+        ReplacedReferences.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
         RootSubject = null!;

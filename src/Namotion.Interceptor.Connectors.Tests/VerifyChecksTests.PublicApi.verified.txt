@@ -456,6 +456,10 @@ namespace Namotion.Interceptor.Connectors.Updates
         [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter?))]
         [System.Text.Json.Serialization.JsonPropertyName("kind")]
         public Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdateKind Kind { get; set; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter?))]
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        [System.Text.Json.Serialization.JsonPropertyName("mode")]
+        public Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdateMode Mode { get; set; }
         [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         [System.Text.Json.Serialization.JsonPropertyName("operations")]
         public System.Collections.Generic.List<Namotion.Interceptor.Connectors.Updates.SubjectCollectionOperation>? Operations { get; set; }
@@ -473,6 +477,12 @@ namespace Namotion.Interceptor.Connectors.Updates
         Object = 2,
         Collection = 3,
         Dictionary = 4,
+    }
+    public enum SubjectPropertyUpdateMode
+    {
+        Incremental = 0,
+        Complete = 1,
+        Replaced = 2,
     }
     public class SubjectUpdate
     {

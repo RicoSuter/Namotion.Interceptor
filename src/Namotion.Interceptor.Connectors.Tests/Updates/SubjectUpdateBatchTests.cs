@@ -370,6 +370,26 @@ public class SubjectUpdateBatchTests
             .WithService(() => new WriteOnAttachInitializer(write));
     }
 
+    [Fact]
+    public void WhenARetainedChildChangesBeforeItsCollectionGainsAMember_ThenTheChildsChangeReachesTheMirror()
+    {
+        // Arrange: the collection diff has to name the retained child the child's own change already wrote.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var retained = new Person { FirstName = "Retained" };
+        var source = new Person(context) { FirstName = "Root", Children = [retained] };
+        var mirror = CreateMirror(source);
+        var changes = CaptureChanges(context);
+        retained.Mother = new Person { FirstName = "Added mother" };
+        source.Children = [retained, new Person { FirstName = "Added child" }];
+
+        // Act
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal("Added mother", mirror.Children[0].Mother?.FirstName);
+        Assert.Equal("Added child", mirror.Children[1].FirstName);
+    }
+
     private static List<SubjectPropertyChange> CaptureChanges(IInterceptorSubjectContext context)
     {
         var changes = new List<SubjectPropertyChange>();

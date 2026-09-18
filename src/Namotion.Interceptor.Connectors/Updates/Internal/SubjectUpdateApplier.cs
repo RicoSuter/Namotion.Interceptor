@@ -35,7 +35,7 @@ internal static class SubjectUpdateApplier
             context.Initialize(update.Subjects, subjectFactory, origin, transformValueBeforeApply);
 
             // Binds the root's ID, so a back reference to the root resolves to this subject.
-            context.TryClaimSubjectPayload(update.Root, subject);
+            context.ClaimSubjectPayload(update.Root, subject);
             ApplyPropertyUpdates(subject, rootProperties, context);
             failures = context.Failures;
             droppedStructuralProperties = context.DroppedStructuralProperties;
@@ -122,6 +122,14 @@ internal static class SubjectUpdateApplier
         if (registeredProperty is null)
             return;
 
+        // No producer publishes a projection, and walking into one whose getter creates a subject on every
+        // read would never end. A value update needs no check, as it already skips a property without a setter.
+        if (propertyUpdate.Kind != SubjectPropertyUpdateKind.Value &&
+            SubjectUpdateFactory.IsComputedSubjectProjection(registeredProperty))
+        {
+            return;
+        }
+
         try
         {
             switch (propertyUpdate.Kind)
@@ -195,43 +203,73 @@ internal static class SubjectUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        if (propertyUpdate.Id is not null)
+        if (propertyUpdate.Id is not { } subjectId)
         {
-            var itemProperties = context.GetSubjectProperties(propertyUpdate.Id);
-            if (property.GetValue() is IInterceptorSubject existingItem)
+            // Like a value this model cannot write, a clear it cannot store is ignored rather than reported.
+            if (property.HasSetter)
             {
-                if (context.TryClaimSubjectPayload(propertyUpdate.Id, existingItem))
-                {
-                    ApplyPropertyUpdates(existingItem, itemProperties, context);
-                }
+                context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
             }
-            // An empty property this model cannot write has nowhere to put the subject, so nothing is
-            // created and the ID stays unbound for whichever property can hold it.
-            else if (!property.HasSetter)
-            {
-                context.RecordDroppedStructure(property);
-            }
-            else
-            {
-                var newItem = context.TryGetBoundSubject(propertyUpdate.Id, property.Type);
-                if (newItem is null)
-                {
-                    newItem = context.SubjectFactory.CreateSubject(property);
-                    newItem.Context.AddFallbackContext(parent.Context);
 
-                    // Claiming before recursing is what terminates a payload that references itself.
-                    if (context.TryClaimSubjectPayload(propertyUpdate.Id, newItem, property.Type))
-                    {
-                        ApplyPropertyUpdates(newItem, itemProperties, context);
-                    }
-                }
+            return;
+        }
 
-                context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
+        var itemProperties = context.GetSubjectProperties(subjectId);
+
+        // A replaced reference names another subject than the one held there, so that one never takes the payload.
+        if (propertyUpdate.Mode != SubjectPropertyUpdateMode.Replaced &&
+            property.GetValue() is IInterceptorSubject existingItem &&
+            TryApplyToHeldSubject(subjectId, existingItem, itemProperties, context))
+        {
+            return;
+        }
+
+        // A property this model cannot write has nowhere to put the subject, so nothing is created and the
+        // ID stays unbound for whichever property can hold it.
+        if (!property.HasSetter)
+        {
+            context.RecordDroppedStructure(property);
+            return;
+        }
+
+        var newItem = context.TryGetBoundSubject(subjectId, property.Type);
+        if (newItem is null)
+        {
+            newItem = context.SubjectFactory.CreateSubject(property);
+            newItem.Context.AddFallbackContext(parent.Context);
+
+            // Claiming before recursing is what terminates a payload that references itself.
+            if (context.ClaimSubjectPayload(subjectId, newItem, property.Type) == SubjectPayloadClaim.Claimed)
+            {
+                ApplyPropertyUpdates(newItem, itemProperties, context);
             }
         }
-        else if (property.HasSetter)
+
+        context.SetPropertyValue(property, propertyUpdate.Timestamp, newItem);
+    }
+
+    /// <summary>
+    /// Applies the payload of an ID to the subject a position already holds, and returns whether that
+    /// subject stays at the position. It does not when it already took another ID's payload in this update,
+    /// because two IDs are two source subjects.
+    /// </summary>
+    internal static bool TryApplyToHeldSubject(
+        string subjectId,
+        IInterceptorSubject heldSubject,
+        Dictionary<string, SubjectPropertyUpdate> properties,
+        SubjectUpdateApplyContext context)
+    {
+        switch (context.ClaimSubjectPayload(subjectId, heldSubject))
         {
-            context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
+            case SubjectPayloadClaim.Claimed:
+                ApplyPropertyUpdates(heldSubject, properties, context);
+                return true;
+
+            case SubjectPayloadClaim.AlreadyClaimed:
+                return true;
+
+            default:
+                return false;
         }
     }
 

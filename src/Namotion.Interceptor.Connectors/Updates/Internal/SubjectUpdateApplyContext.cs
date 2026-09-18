@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -11,8 +11,11 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal sealed class SubjectUpdateApplyContext
 {
     private readonly Dictionary<string, IInterceptorSubject> _subjectsById = [];
-    private readonly HashSet<(string Id, IInterceptorSubject Subject)> _claimedPayloads = new(PayloadClaimComparer.Instance);
     private Dictionary<(string Id, Type Type), IInterceptorSubject>? _subjectsByIdAndType;
+
+    // By identity, because a subject may override Equals and two equal but distinct instances each take a payload.
+    private readonly Dictionary<IInterceptorSubject, string> _claimedIdsBySubject = new(ReferenceEqualityComparer.Instance);
+
     private List<(RegisteredSubjectProperty Property, Exception Exception)>? _failures;
     private List<(Type SubjectType, string PropertyName)>? _droppedStructuralProperties;
 
@@ -73,21 +76,28 @@ internal sealed class SubjectUpdateApplyContext
             : throw new InvalidOperationException($"Subject update references missing subject '{subjectId}'.");
 
     /// <summary>
-    /// Claims the payload of an ID for <paramref name="subject"/>: binds the subject the ID names while
-    /// the ID is still unbound, and reports whether <paramref name="subject"/> still has to receive that
-    /// payload. Pass <paramref name="createdForType"/> for a subject created for a position of that type,
-    /// so it is bound for that type when the ID already names a subject that does not fit it.
+    /// Claims the payload of an ID for <paramref name="subject"/>, and binds the subject the ID names while
+    /// the ID is still unbound. A subject takes the payload of at most one ID per update. Pass
+    /// <paramref name="createdForType"/> for a subject created for a position of that type, so it is bound
+    /// for that type when the ID already names a subject that does not fit it.
     /// </summary>
     /// <remarks>
-    /// An ID already bound to a <em>different</em> instance still yields <c>true</c>, which is the
-    /// documented rule for a shared subject: a position that already holds another instance keeps it and
-    /// receives the payload. Only the exact subject that already took this ID's payload is turned away,
-    /// so a cycle terminates and no instance applies one payload twice.
+    /// An ID already bound to a <em>different</em> instance still yields <see cref="SubjectPayloadClaim.Claimed"/>,
+    /// which is the documented rule for a shared subject: a position that already holds another instance
+    /// keeps it and receives the payload, unless that instance already took another ID's payload.
+    /// <see cref="SubjectPayloadClaim.AlreadyClaimed"/> is what terminates a cycle.
     /// </remarks>
-    public bool TryClaimSubjectPayload(string subjectId, IInterceptorSubject subject, Type? createdForType = null)
+    public SubjectPayloadClaim ClaimSubjectPayload(string subjectId, IInterceptorSubject subject, Type? createdForType = null)
     {
-        if (!_claimedPayloads.Add((subjectId, subject)))
-            return false;
+        ref var claimedId = ref CollectionsMarshal.GetValueRefOrAddDefault(_claimedIdsBySubject, subject, out var exists);
+        if (exists)
+        {
+            return claimedId == subjectId
+                ? SubjectPayloadClaim.AlreadyClaimed
+                : SubjectPayloadClaim.ClaimedByAnotherId;
+        }
+
+        claimedId = subjectId;
 
         // The first binding wins: it is what later references to this ID resolve to, so a position
         // holding another instance must not steal the ID from the subject that already carries it.
@@ -99,7 +109,7 @@ internal sealed class SubjectUpdateApplyContext
             (_subjectsByIdAndType ??= []).TryAdd((subjectId, createdForType), subject);
         }
 
-        return true;
+        return SubjectPayloadClaim.Claimed;
     }
 
     /// <summary>Whether an ID is already bound to a subject in this update.</summary>
@@ -109,16 +119,30 @@ internal sealed class SubjectUpdateApplyContext
     /// <summary>
     /// Gets the subject an ID is bound to for a position of <paramref name="declaredType"/>, or <c>null</c>
     /// when none fits yet. One ID names one subject within an update, so a later reference resolves to
-    /// that instance rather than a copy; only where two positions of unrelated types name one ID does a
-    /// position get the instance created for its own type. IDs are scoped to one update, so nothing bound
-    /// here may outlive it.
+    /// that instance rather than a copy. Where that instance does not fit the position, any instance
+    /// already created for the ID that does fit is used, so each ID yields at most one instance per
+    /// declared type. IDs are scoped to one update, so nothing bound here may outlive it.
     /// </summary>
     public IInterceptorSubject? TryGetBoundSubject(string subjectId, Type declaredType)
     {
         var subject = _subjectsById.GetValueOrDefault(subjectId);
-        return subject is null || declaredType.IsInstanceOfType(subject)
-            ? subject
-            : _subjectsByIdAndType?.GetValueOrDefault((subjectId, declaredType));
+        if (subject is null || declaredType.IsInstanceOfType(subject))
+            return subject;
+
+        if (_subjectsByIdAndType is null)
+            return null;
+
+        if (_subjectsByIdAndType.TryGetValue((subjectId, declaredType), out subject))
+            return subject;
+
+        // An instance created for a more derived type also fits this one.
+        foreach (var ((id, _), candidate) in _subjectsByIdAndType)
+        {
+            if (id == subjectId && declaredType.IsInstanceOfType(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -159,28 +183,12 @@ internal sealed class SubjectUpdateApplyContext
     {
         _subjectsById.Clear();
         _subjectsByIdAndType?.Clear();
-        _claimedPayloads.Clear();
+        _claimedIdsBySubject.Clear();
         _failures = null;
         _droppedStructuralProperties = null;
         Subjects = null!;
         SubjectFactory = null!;
         Origin = default;
         TransformValueBeforeApply = null;
-    }
-
-    /// <summary>
-    /// Compares payload claims by ID and by subject <em>identity</em>. A subject may override equality,
-    /// so the default comparer would let two equal but distinct instances share one claim and silently
-    /// skip the second one's payload.
-    /// </summary>
-    private sealed class PayloadClaimComparer : IEqualityComparer<(string Id, IInterceptorSubject Subject)>
-    {
-        public static readonly PayloadClaimComparer Instance = new();
-
-        public bool Equals((string Id, IInterceptorSubject Subject) first, (string Id, IInterceptorSubject Subject) second)
-            => ReferenceEquals(first.Subject, second.Subject) && first.Id == second.Id;
-
-        public int GetHashCode((string Id, IInterceptorSubject Subject) value)
-            => HashCode.Combine(value.Id, RuntimeHelpers.GetHashCode(value.Subject));
     }
 }

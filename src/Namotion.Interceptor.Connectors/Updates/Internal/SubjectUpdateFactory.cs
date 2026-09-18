@@ -62,14 +62,33 @@ internal static class SubjectUpdateFactory
                     continue;
 
                 if (property.CanContainSubjects)
+                {
+                    if (property.IsSubjectReference && IsReassignment(propertyChanges[i]))
+                        builder.ReplacedReferences.Add(property);
+
                     ProcessPropertyChange(propertyChanges[i], property, canContainSubjects: true, builder);
+                }
                 else
+                {
                     deferredChanges.Add((i, property));
+                }
             }
 
             foreach (var (index, property) in deferredChanges)
             {
                 ProcessPropertyChange(propertyChanges[index], property, canContainSubjects: false, builder);
+            }
+
+            // A reassigned reference can reach the update through a complete payload built for its subject,
+            // which knows nothing of the change, so the mode is stated once everything is built, and before
+            // Build lets a processor rename the keys the entries are found by.
+            foreach (var property in builder.ReplacedReferences)
+            {
+                if (builder.TryGetIdWithUpdates(property.Parent.Subject) is { } subjectId &&
+                    TryGetPropertyUpdate(builder.Subjects[subjectId], property) is { Kind: SubjectPropertyUpdateKind.Object, Id: not null } update)
+                {
+                    update.Mode = SubjectPropertyUpdateMode.Replaced;
+                }
             }
 
             return builder.Build(rootSubject);
@@ -124,11 +143,20 @@ internal static class SubjectUpdateFactory
 
     /// <summary>
     /// A derived property that holds subjects and has no setter is a computed projection: it owns nothing,
-    /// so neither complete payloads nor changes publish it. The setter tells whether the value is stored on
-    /// this side, so a [Derived] property with a setter is an ordinary edge and still published.
+    /// so neither complete payloads nor changes publish it, and the applier ignores an update naming it.
+    /// The setter tells whether the value is stored on this side, so a [Derived] property with a setter is
+    /// an ordinary edge and still published.
     /// </summary>
-    private static bool IsComputedSubjectProjection(RegisteredSubjectProperty property)
+    internal static bool IsComputedSubjectProjection(RegisteredSubjectProperty property)
         => property.CanContainSubjects && property.Reference.Metadata.IsDerived && !property.HasSetter;
+
+    /// <summary>
+    /// Whether a change to a subject reference ends on a different subject than it started with, compared by
+    /// reference because a subject may override Equals. A clear is not one: it already states no subject.
+    /// </summary>
+    private static bool IsReassignment(SubjectPropertyChange change)
+        => change.GetNewValue<IInterceptorSubject?>() is { } newSubject &&
+           !ReferenceEquals(newSubject, change.GetOldValue<IInterceptorSubject?>());
 
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
@@ -257,6 +285,7 @@ internal static class SubjectUpdateFactory
         SubjectUpdateBuilder builder)
     {
         update.Timestamp = change.ChangedTimestamp;
+        update.Mode = SubjectPropertyUpdateMode.Incremental;
 
         if (property.IsSubjectDictionary)
         {

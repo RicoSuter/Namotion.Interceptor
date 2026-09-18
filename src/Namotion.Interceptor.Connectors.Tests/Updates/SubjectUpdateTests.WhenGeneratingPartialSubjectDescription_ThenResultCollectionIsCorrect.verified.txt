@@ -22,11 +22,13 @@
       },
       father: {
         Kind: Object,
+        Mode: Replaced,
         Timestamp: {Scrubbed},
         Id: 3
       },
       mother: {
         Kind: Object,
+        Mode: Replaced,
         Timestamp: {Scrubbed},
         Id: 2
       }
@@ -34,6 +36,7 @@
     2: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -73,6 +76,7 @@
     3: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -111,6 +115,7 @@
     4: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
