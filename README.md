@@ -275,7 +275,7 @@ var context = InterceptorSubjectContext
     .WithRegistry();
 
 var person = new Person(context);
-var registered = person.TryGetRegisteredSubject()!; // not null: the context has WithRegistry()
+var registered = person.TryGetRegisteredSubject()!;
 
 foreach (var property in registered.Properties)
 {
