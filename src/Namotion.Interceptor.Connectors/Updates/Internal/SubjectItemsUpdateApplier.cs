@@ -134,7 +134,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var targetKeyType = property.Type.GenericTypeArguments[0];
+        var targetKeyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
