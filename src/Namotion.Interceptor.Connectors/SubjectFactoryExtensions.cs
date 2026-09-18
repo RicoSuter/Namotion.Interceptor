@@ -36,10 +36,10 @@ public static class SubjectFactoryExtensions
             serviceProvider);
     }
 
-    internal static Type GetCollectionElementType(Type propertyType)
+    internal static Type GetCollectionElementType(this Type propertyType)
         => GetContainerTypes(propertyType, dictionary: false).Element;
 
-    internal static (Type Key, Type Value) GetDictionaryKeyAndValueTypes(Type propertyType)
+    internal static (Type Key, Type Value) GetDictionaryKeyAndValueTypes(this Type propertyType)
     {
         // The dictionary shape returns a key or throws, so the shared lookup's nullable key is never null here.
         var (key, value) = GetContainerTypes(propertyType, dictionary: true);

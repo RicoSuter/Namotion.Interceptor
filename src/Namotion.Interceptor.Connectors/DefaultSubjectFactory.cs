@@ -42,7 +42,7 @@ public class DefaultSubjectFactory : ISubjectFactory
             return (IInterceptorSubject?[])array;
         }
 
-        var itemType = SubjectFactoryExtensions.GetCollectionElementType(propertyType);
+        var itemType = propertyType.GetCollectionElementType();
         var collectionType = ListTypeCache.GetOrAdd(itemType, static t => typeof(List<>).MakeGenericType(t));
 
         var collection = (IList)Activator.CreateInstance(collectionType)!;
@@ -59,7 +59,7 @@ public class DefaultSubjectFactory : ISubjectFactory
     {
         var dictionaryType = DictionaryTypeCache.GetOrAdd(propertyType, static t =>
         {
-            var (key, value) = SubjectFactoryExtensions.GetDictionaryKeyAndValueTypes(t);
+            var (key, value) = t.GetDictionaryKeyAndValueTypes();
             return typeof(Dictionary<,>).MakeGenericType(key, value);
         });
 
