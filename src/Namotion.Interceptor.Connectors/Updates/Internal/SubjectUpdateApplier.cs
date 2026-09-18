@@ -240,6 +240,7 @@ internal static class SubjectUpdateApplier
         // read would never end.
         if (SubjectUpdateFactory.IsComputedSubjectProjection(metadata))
         {
+            context.IgnoreNamedSubjects(propertyUpdate);
             return;
         }
 
@@ -382,7 +383,7 @@ internal static class SubjectUpdateApplier
 
         if (heldSubject is null || !ReferenceEquals(subject, heldSubject))
         {
-            context.RecordDroppedStructure(property);
+            context.DropStructure(property, propertyUpdate);
             return;
         }
 

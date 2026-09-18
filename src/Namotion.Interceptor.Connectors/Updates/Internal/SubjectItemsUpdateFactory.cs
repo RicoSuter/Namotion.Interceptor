@@ -15,7 +15,8 @@ internal static class SubjectItemsUpdateFactory
     /// <summary>
     /// States the members of <paramref name="value"/>, a <c>null</c> value as no items. A member that is not a
     /// member of <paramref name="previousValue"/> is stated through
-    /// <see cref="SubjectUpdateFactory.StateMember"/>, and every member is when there is no previous value.
+    /// <see cref="SubjectUpdateFactory.StateMember"/>, and left out when that states nothing; every member is
+    /// when there is no previous value.
     /// </summary>
     internal static void BuildItems(
         SubjectPropertyUpdate update,
@@ -62,8 +63,8 @@ internal static class SubjectItemsUpdateFactory
             for (var i = 0; i < newItems.Count; i++)
             {
                 var item = newItems[i];
-                if (previousItems?.Contains(item) != true)
-                    SubjectUpdateFactory.StateMember(item, property, isChange, builder);
+                if (previousItems?.Contains(item) != true && !SubjectUpdateFactory.StateMember(item, property, isChange, builder))
+                    continue;
 
                 update.Items.Add(new SubjectPropertyItemUpdate { Id = builder.GetOrCreateId(item) });
             }
@@ -97,8 +98,8 @@ internal static class SubjectItemsUpdateFactory
                 previousDictionary.Contains(entry.Key) &&
                 ReferenceEquals(previousDictionary[entry.Key], item);
 
-            if (!isPreviousMember)
-                SubjectUpdateFactory.StateMember(item, property, isChange, builder);
+            if (!isPreviousMember && !SubjectUpdateFactory.StateMember(item, property, isChange, builder))
+                continue;
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {

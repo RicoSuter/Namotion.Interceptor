@@ -283,6 +283,8 @@ public interface ISubjectSource : ISubjectConnector
 }
 ```
 
+`WriteBatchSize` caps the changes one `WriteChangesAsync` call receives through `WriteChangesInBatchesAsync`, where 0 means no limit. A property that changes more than once in the batch is first merged by commit revision. Every subject-holding change goes into the first call, which may therefore exceed the batch size: a receiver completes a subject from the change that attaches it, and keeps a moved subject only when the change removing it and the one adding it arrive together. Value changes fill the first call up to the batch size and are sliced by it after that.
+
 Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch, as well as the four synchronization-state members. See the XML docs on `ISubjectSource` for their exact contract, including the lock-free requirement on `RootSubject`/`State`/`StateChangeTime`/`LastSynchronizedAt` and the obligation to register with every reachable `SourceMonitor`.
 
 A direct implementer needs **two** diagnostics members, not one, because C# has no covariant implicit interface implementation: the property that satisfies `ISubjectSource.Diagnostics` cannot also satisfy `ISubjectConnector.Diagnostics`, so the base interface's member is implemented explicitly and forwards to it.

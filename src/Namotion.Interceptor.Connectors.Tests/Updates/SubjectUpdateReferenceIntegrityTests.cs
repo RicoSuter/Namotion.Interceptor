@@ -15,7 +15,7 @@ public class SubjectUpdateReferenceIntegrityTests
     [InlineData(nameof(Person.Father))]
     [InlineData(nameof(Person.Children))]
     [InlineData(nameof(Person.Relationships))]
-    public void WhenABatchReferencesASubjectThatLeftTheGraph_ThenItsStateIsSerializedFromItsMetadata(string propertyName)
+    public void WhenABatchReferencesASubjectThatLeftTheGraph_ThenOnlyItsReferenceIsLeftOut(string propertyName)
     {
         // Arrange
         var source = new Person(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { FirstName = "Root" };
@@ -47,14 +47,13 @@ public class SubjectUpdateReferenceIntegrityTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
 
-        // Assert
+        // Assert: a reference is left out whole, a container keeps its entry without the member
         Assert.Null(removed.TryGetRegisteredSubject());
-        var removedId = removed.TryGetSubjectId()!;
-        var propertyUpdate = update.Subjects[update.Root!][propertyName];
-        Assert.Contains(removedId, propertyUpdate.Id is { } id ? [id] : propertyUpdate.Items!.Select(item => item.Id));
-        Assert.Equal("Ada", update.Subjects[removedId][nameof(Person.FirstName)].Value);
-        Assert.Contains(removedId, update.CompleteSubjectIds!);
-        Assert.Equal("Root", update.Subjects[update.Root!][nameof(Person.FirstName)].Value);
+        var rootProperties = Assert.Single(update.Subjects).Value;
+        Assert.Equal(propertyName != nameof(Person.Father), rootProperties.TryGetValue(propertyName, out var propertyUpdate));
+        Assert.Empty(propertyUpdate?.Items ?? []);
+        Assert.Empty(update.CompleteSubjectIds!);
+        Assert.Equal("Root", rootProperties[nameof(Person.FirstName)].Value);
     }
 
     [Fact]
@@ -177,7 +176,7 @@ public class SubjectUpdateReferenceIntegrityTests
     }
 
     [Fact]
-    public void WhenTwoChangesReferenceASubjectThatLeftTheGraph_ThenItIsSerializedOnceWithoutAWarning()
+    public void WhenTwoChangesReferenceASubjectThatLeftTheGraph_ThenBothReferencesAreLeftOutWithoutAWarning()
     {
         // Arrange
         var logger = new RecordingLogger();
@@ -204,12 +203,27 @@ public class SubjectUpdateReferenceIntegrityTests
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
 
         // Assert
-        var removedId = removed.TryGetSubjectId()!;
-        Assert.Equal(removedId, update.Subjects[person.TryGetSubjectId()!][nameof(PersonWithRoot.Father)].Id);
-        Assert.Equal(removedId, update.Subjects[mother.TryGetSubjectId()!][nameof(PersonWithRoot.Father)].Id);
-        Assert.Equal(removedId, Assert.Single(update.CompleteSubjectIds!));
-        Assert.Equal("Removed", update.Subjects[removedId][nameof(PersonWithRoot.FirstName)].Value);
+        Assert.Empty(update.Subjects);
+        Assert.Empty(update.CompleteSubjectIds!);
         Assert.Empty(logger.Warnings);
+    }
+
+    [Fact]
+    public void WhenAReferencedSubjectLeftTheGraphBeforeTheBatchIsBuilt_ThenNoPropertyAProcessorExcludesIsSent()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context) { FirstName = "Root" };
+        var added = new Person { FirstName = "Added", LastName = "Secret" };
+        var batch = CaptureChanges(context, () => source.Father = added);
+        source.Father = null;
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, batch, [new LastNameExcludingProcessor()]);
+
+        // Assert
+        Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey(nameof(Person.LastName)));
+        Assert.Empty(update.CompleteSubjectIds!);
     }
 
     [Fact]
@@ -269,6 +283,61 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.Equal(["Kept", "Added"], mirror.Children.Select(child => child.FirstName));
     }
 
+    [Theory]
+    [InlineData(nameof(Person.Father))]
+    [InlineData(nameof(Person.Children))]
+    [InlineData(nameof(Person.Relationships))]
+    public void WhenAPartialUpdateIsBuiltWhileAnAddedMemberIsStillAttaching_ThenTheMemberArrivesComplete(string propertyName)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context) { FirstName = "Root" };
+        var mirror = new Person(InterceptorSubjectContext.Create().WithRegistry());
+        mirror.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        var added = new Person { FirstName = "Added" };
+        object? oldValue = propertyName switch
+        {
+            nameof(Person.Children) => source.Children,
+            nameof(Person.Relationships) => source.Relationships,
+            _ => null
+        };
+        object newValue = propertyName switch
+        {
+            nameof(Person.Children) => new List<Person> { added },
+            nameof(Person.Relationships) => new Dictionary<string, Person> { ["added"] = added },
+            _ => added
+        };
+
+        // Runs innermost, so the update is built after the backing store holds the new member and before the
+        // lifecycle attaches it.
+        SubjectUpdate? update = null;
+        var isAddedRegistered = true;
+        context.AddService<IWriteInterceptor>(new AfterStoreWriteInterceptor(propertyName, () =>
+        {
+            isAddedRegistered = added.TryGetRegisteredSubject() is not null;
+            SubjectPropertyChange[] changes =
+            [
+                SubjectPropertyChange.Create<object?>(new PropertyReference(source, propertyName),
+                    ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue)
+            ];
+            update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
+        }));
+
+        // Act
+        source.TryGetRegisteredProperty(propertyName)!.SetValue(newValue);
+        mirror.ApplySubjectUpdate(update!, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.False(isAddedRegistered);
+        var mirrored = propertyName switch
+        {
+            nameof(Person.Children) => Assert.Single(mirror.Children),
+            nameof(Person.Relationships) => Assert.Single(mirror.Relationships!).Value,
+            _ => mirror.Father
+        };
+        Assert.Equal("Added", mirrored!.FirstName);
+    }
+
     private static SubjectPropertyChange[] CaptureChanges(IInterceptorSubjectContext context, Action change)
     {
         var changes = new List<SubjectPropertyChange>();
@@ -278,6 +347,12 @@ public class SubjectUpdateReferenceIntegrityTests
         }
 
         return changes.ToArray();
+    }
+
+    private sealed class LastNameExcludingProcessor : ISubjectUpdateProcessor
+    {
+        public bool IsIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property)
+            => property.Name != nameof(Person.LastName);
     }
 
     /// <summary>Invokes a callback right after the backing store of one property was written.</summary>

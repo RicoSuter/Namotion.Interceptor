@@ -100,8 +100,8 @@ internal static class SubjectUpdateFactory
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
         {
-            // Its attach is still in progress, a captured change named it after it left the graph, or the context
-            // has no registry: leaving it out would lose every member listed next to it.
+            // A property holds it while its attach is still in progress, it was written into the property in place,
+            // or the context has no registry: leaving it out would lose every member listed next to it.
             ProcessSubjectFromMetadata(subject, properties, builder);
             return;
         }
@@ -135,28 +135,12 @@ internal static class SubjectUpdateFactory
             if (metadata.GetValue is null || IsComputedSubjectProjection(in metadata))
                 continue;
 
-            var value = metadata.GetValue(subject);
             var update = new SubjectPropertyUpdate
             {
                 Timestamp = new PropertyReference(subject, propertyName).TryGetWriteTimestamp()
             };
 
-            var type = metadata.Type;
-            if (type.IsSubjectReferenceType())
-            {
-                BuildObjectReference(update, value as IInterceptorSubject, previousItem: null, property: null, isChange: false, builder);
-            }
-            else if (type.CanContainSubjects())
-            {
-                SubjectItemsUpdateFactory.BuildItems(update, type.IsSubjectDictionaryType(), property: null,
-                    value, previousValue: null, isChange: false, builder);
-            }
-            else
-            {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = value;
-            }
-
+            BuildCurrentValue(update, metadata.Type, metadata.GetValue(subject), property: null, builder);
             properties[propertyName] = update;
         }
     }
@@ -183,19 +167,33 @@ internal static class SubjectUpdateFactory
             return;
         }
 
-        // Written into the update the property may already have, which can hold its attributes. Read as object:
-        // a typed read of the change storage throws for a struct-typed collection such as ImmutableArray<T>,
-        // and the builders below normalize the raw value.
+        // Read as object: a typed read of the change storage throws for a struct-typed collection such as
+        // ImmutableArray<T>, and the builders below normalize the raw value.
+        var newValue = change.GetNewValue<object?>();
+        var item = newValue as IInterceptorSubject;
+        if (property.IsSubjectReference && item is not null && HasLeftGraph(item, property))
+        {
+            // The change that took it out of the graph again states the current value.
+            return;
+        }
+
+        // Written into the update the property may already have, which can hold its attributes.
         var (update, parent) = GetOrCreatePropertyUpdate(property, builder);
         if (property.IsSubjectReference)
         {
-            BuildObjectReference(update, change.GetNewValue<object?>() as IInterceptorSubject,
-                change.GetOldValue<object?>() as IInterceptorSubject, property, isChange: true, builder);
+            update.Kind = SubjectPropertyUpdateKind.Object;
+            if (item is not null)
+            {
+                if (!ReferenceEquals(item, change.GetOldValue<object?>()))
+                    StateMember(item, property, isChange: true, builder);
+
+                update.Id = builder.GetOrCreateId(item);
+            }
         }
         else
         {
             SubjectItemsUpdateFactory.BuildItems(update, property.IsSubjectDictionary, property,
-                change.GetNewValue<object?>(), change.GetOldValue<object?>(), isChange: true, builder);
+                newValue, change.GetOldValue<object?>(), isChange: true, builder);
         }
 
         update.Timestamp = change.ChangedTimestamp;
@@ -246,16 +244,35 @@ internal static class SubjectUpdateFactory
         RegisteredSubjectProperty property,
         SubjectUpdateBuilder builder)
     {
-        var value = property.GetValue();
         var update = new SubjectPropertyUpdate { Timestamp = property.Reference.TryGetWriteTimestamp() };
+        BuildCurrentValue(update, property.Type, property.GetValue(), property, builder);
+        update.Attributes = CreateAttributeUpdates(property, builder);
+        return update;
+    }
 
-        if (property.IsSubjectReference)
+    /// <summary>
+    /// States <paramref name="value"/>, the current value of a property of <paramref name="type"/>, which
+    /// <paramref name="property"/> is unless the owner has no Registry metadata.
+    /// </summary>
+    private static void BuildCurrentValue(
+        SubjectPropertyUpdate update,
+        Type type,
+        object? value,
+        RegisteredSubjectProperty? property,
+        SubjectUpdateBuilder builder)
+    {
+        if (type.IsSubjectReferenceType())
         {
-            BuildObjectReference(update, value as IInterceptorSubject, previousItem: null, property, isChange: false, builder);
+            update.Kind = SubjectPropertyUpdateKind.Object;
+            if (value is IInterceptorSubject item)
+            {
+                StateMember(item, property, isChange: false, builder);
+                update.Id = builder.GetOrCreateId(item);
+            }
         }
-        else if (property.CanContainSubjects)
+        else if (type.CanContainSubjects())
         {
-            SubjectItemsUpdateFactory.BuildItems(update, property.IsSubjectDictionary, property,
+            SubjectItemsUpdateFactory.BuildItems(update, type.IsSubjectDictionaryType(), property,
                 value, previousValue: null, isChange: false, builder);
         }
         else
@@ -263,48 +280,76 @@ internal static class SubjectUpdateFactory
             update.Kind = SubjectPropertyUpdateKind.Value;
             update.Value = value;
         }
-
-        update.Attributes = CreateAttributeUpdates(property, builder);
-        return update;
-    }
-
-    private static void BuildObjectReference(
-        SubjectPropertyUpdate update,
-        IInterceptorSubject? item,
-        IInterceptorSubject? previousItem,
-        RegisteredSubjectProperty? property,
-        bool isChange,
-        SubjectUpdateBuilder builder)
-    {
-        update.Kind = SubjectPropertyUpdateKind.Object;
-        if (item is null)
-            return;
-
-        if (!ReferenceEquals(item, previousItem))
-            StateMember(item, property, isChange, builder);
-
-        update.Id = builder.GetOrCreateId(item);
     }
 
     /// <summary>
     /// Adds the complete state of <paramref name="item"/>, a subject <paramref name="property"/> newly holds,
-    /// when the receiver may not hold it yet. A change completes it, unless it is the subject owning the
-    /// property. A complete payload of a partial update completes it only through its first published parent:
-    /// held there before, it is known, and added there in this batch, it is completed where it was added. A
-    /// payload built from metadata has no <paramref name="property"/>, which is never the first published parent.
+    /// when the receiver may not hold it yet, and returns whether the item is stated at all. A change completes
+    /// it, unless it is the subject owning the property, and leaves it out when it has no Registry metadata and
+    /// the property no longer holds it: it left the graph after the change was captured. A complete payload of
+    /// a partial update completes it only through its first published parent: held there before, it is known,
+    /// and added there in this batch, it is completed where it was added. A payload built from metadata has no
+    /// <paramref name="property"/>, which is never the first published parent.
     /// </summary>
-    internal static void StateMember(
+    internal static bool StateMember(
         IInterceptorSubject item,
         RegisteredSubjectProperty? property,
         bool isChange,
         SubjectUpdateBuilder builder)
     {
-        var isHeldElsewhere = isChange
-            ? ReferenceEquals(item, property?.Parent.Subject)
-            : !builder.IsExpandedThrough(item, property);
+        if (isChange)
+        {
+            if (ReferenceEquals(item, property!.Parent.Subject))
+                return true;
 
-        if (!isHeldElsewhere)
-            ProcessSubjectComplete(item, builder);
+            if (HasLeftGraph(item, property))
+                return false;
+        }
+        else if (!builder.IsExpandedThrough(item, property))
+        {
+            return true;
+        }
+
+        ProcessSubjectComplete(item, builder);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="item"/>, named by a captured change of <paramref name="property"/>, left the graph
+    /// since: it has no Registry metadata and the property no longer holds it. One the property still holds is
+    /// being attached.
+    /// </summary>
+    private static bool HasLeftGraph(IInterceptorSubject item, RegisteredSubjectProperty property)
+        => item.TryGetRegisteredSubject() is null && !IsHeldBy(property, item);
+
+    private static bool IsHeldBy(RegisteredSubjectProperty property, IInterceptorSubject item)
+    {
+        var value = property.GetValue();
+        if (property.IsSubjectReference)
+            return ReferenceEquals(value, item);
+
+        if (value is null)
+            return false;
+
+        if (property.IsSubjectDictionary)
+        {
+            foreach (System.Collections.DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(value))
+            {
+                if (ReferenceEquals(entry.Value, item))
+                    return true;
+            }
+
+            return false;
+        }
+
+        var members = SubjectValueConvert.ToSubjectList(value);
+        for (var i = 0; i < members.Count; i++)
+        {
+            if (ReferenceEquals(members[i], item))
+                return true;
+        }
+
+        return false;
     }
 
     private static Dictionary<string, SubjectPropertyUpdate>? CreateAttributeUpdates(

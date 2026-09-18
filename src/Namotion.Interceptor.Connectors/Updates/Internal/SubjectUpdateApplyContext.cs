@@ -16,6 +16,8 @@ internal sealed class SubjectUpdateApplyContext
     private IInterceptorSubject _rootSubject = null!;
     private HashSet<string>? _completeSubjectIds;
     private HashSet<string>? _ignoredSubjectIds;
+    private HashSet<string>? _namedSubjectIds;
+    private bool _areNamedSubjectIdsCollected;
     private List<(PropertyReference Property, Exception Exception)>? _failures;
     private List<(Type SubjectType, string PropertyName)>? _droppedStructuralProperties;
     private HashSet<string>? _droppedSubjectIds;
@@ -120,8 +122,8 @@ internal sealed class SubjectUpdateApplyContext
         var existingId = subject.TryGetSubjectId();
         if (existingId != subjectId)
         {
-            if (ReferenceEquals(subject, _rootSubject) ||
-                (existingId is not null && (_processedSubjectIds.Contains(existingId) || _boundSubjects.ContainsKey(existingId))))
+            // The sender still uses an ID it names anywhere in the update for another subject.
+            if (ReferenceEquals(subject, _rootSubject) || (existingId is not null && IsNamed(existingId)))
             {
                 return false;
             }
@@ -132,6 +134,52 @@ internal sealed class SubjectUpdateApplyContext
 
         BindSubject(subjectId, subject);
         return true;
+    }
+
+    /// <summary>
+    /// Whether the update names <paramref name="subjectId"/>: as an entry, a reference or an item.
+    /// </summary>
+    private bool IsNamed(string subjectId)
+    {
+        var namedSubjectIds = _namedSubjectIds ??= [];
+        if (!_areNamedSubjectIdsCollected)
+        {
+            _areNamedSubjectIdsCollected = true;
+            foreach (var (entrySubjectId, properties) in Subjects)
+            {
+                namedSubjectIds.Add(entrySubjectId);
+                foreach (var (_, propertyUpdate) in properties)
+                {
+                    AddNamedSubjects(namedSubjectIds, propertyUpdate);
+                }
+            }
+        }
+
+        return namedSubjectIds.Contains(subjectId);
+    }
+
+    private static void AddNamedSubjects(HashSet<string> namedSubjectIds, SubjectPropertyUpdate propertyUpdate)
+    {
+        if (propertyUpdate.Id is { } subjectId)
+        {
+            namedSubjectIds.Add(subjectId);
+        }
+
+        if (propertyUpdate.Items is { } items)
+        {
+            foreach (var item in items)
+            {
+                namedSubjectIds.Add(item.Id);
+            }
+        }
+
+        if (propertyUpdate.Attributes is { } attributes)
+        {
+            foreach (var (_, attributeUpdate) in attributes)
+            {
+                AddNamedSubjects(namedSubjectIds, attributeUpdate);
+            }
+        }
     }
 
     /// <summary>
@@ -254,11 +302,14 @@ internal sealed class SubjectUpdateApplyContext
     public IReadOnlyCollection<string>? DroppedSubjectIds => _droppedSubjectIds;
 
     /// <summary>
-    /// Records a property whose structure this model cannot store because it has no setter. The caller
-    /// reports them in one warning once the whole update was applied.
+    /// Records a property whose structure this model cannot store because it has no setter, and ignores the
+    /// subjects it names, which are no drop: nothing here could hold them. The caller reports the properties in
+    /// one warning once the whole update was applied.
     /// </summary>
-    public void RecordDroppedStructure(PropertyReference property)
+    public void DropStructure(PropertyReference property, SubjectPropertyUpdate propertyUpdate)
     {
+        IgnoreNamedSubjects(propertyUpdate);
+
         var droppedProperty = (property.Subject.GetType(), property.Name);
         var droppedProperties = _droppedStructuralProperties ??= [];
         if (!droppedProperties.Contains(droppedProperty))
@@ -291,6 +342,8 @@ internal sealed class SubjectUpdateApplyContext
         _rootSubject = null!;
         _completeSubjectIds = null;
         _ignoredSubjectIds?.Clear();
+        _namedSubjectIds?.Clear();
+        _areNamedSubjectIdsCollected = false;
         _failures = null;
         _droppedStructuralProperties = null;
         _droppedSubjectIds = null;

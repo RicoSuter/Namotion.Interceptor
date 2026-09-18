@@ -66,13 +66,15 @@ public static class SubjectSourceExtensions
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
+        var batchSize = source.WriteBatchSize;
+        var isSingleBatch = batchSize <= 0 || changes.Length <= batchSize;
+
+        // Disposed only once the result is built, which may still read the sliced changes.
+        using var slices = isSingleBatch ? default : SubjectChangeSlices.Create(changes, batchSize);
         var confirmedCount = 0;
         try
         {
-            var count = changes.Length;
-            var batchSize = source.WriteBatchSize;
-
-            if (batchSize <= 0 || count <= batchSize)
+            if (isSingleBatch)
             {
                 // Single batch - delegate directly to source (zero allocation on success)
                 var result = await source.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
@@ -84,11 +86,10 @@ public static class SubjectSourceExtensions
             }
 
             // Multi-batch: process sequentially, stop on first failure
-            for (var i = 0; i < count; i += batchSize)
+            changes = slices.Changes;
+            while (confirmedCount < changes.Length)
             {
-                var currentBatchSize = Math.Min(batchSize, count - i);
-                var batch = changes.Slice(i, currentBatchSize);
-
+                var batch = slices.GetSlice(confirmedCount);
                 var batchResult = await source.WriteChangesAsync(batch, cancellationToken).ConfigureAwait(false);
                 if (batchResult.Error is not null)
                 {
@@ -97,7 +98,7 @@ public static class SubjectSourceExtensions
                     var batchFailed = batchResult.FailedChanges.IsEmpty
                         ? batch
                         : batchResult.FailedChanges.AsMemory();
-                    var remaining = changes.Slice(i + currentBatchSize);
+                    var remaining = changes.Slice(confirmedCount + batch.Length);
                     if (remaining.IsEmpty)
                     {
                         return WriteResult.PartialFailure(batchFailed, batchResult.Error);
@@ -111,7 +112,7 @@ public static class SubjectSourceExtensions
                         ImmutableCollectionsMarshal.AsImmutableArray(failedChanges), batchResult.Error);
                 }
 
-                confirmedCount = i + currentBatchSize;
+                confirmedCount += batch.Length;
             }
 
             // All batches succeeded (zero allocation)

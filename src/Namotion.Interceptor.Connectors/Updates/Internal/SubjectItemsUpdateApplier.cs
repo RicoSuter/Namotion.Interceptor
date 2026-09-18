@@ -196,7 +196,7 @@ internal static class SubjectItemsUpdateApplier
 
         if (!isHeld)
         {
-            context.RecordDroppedStructure(property);
+            context.DropStructure(property, propertyUpdate);
         }
     }
 

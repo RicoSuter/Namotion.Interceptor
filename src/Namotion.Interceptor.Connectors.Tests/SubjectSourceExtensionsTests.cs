@@ -496,6 +496,7 @@ public class SubjectSourceExtensionsTests
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();
+        subjectMock.Setup(subject => subject.Properties).Returns(new Dictionary<string, SubjectPropertyMetadata>());
         return SubjectPropertyChange.Create(
             new PropertyReference(subjectMock.Object, $"Property{id}"),
             ChangeOrigin.Local,

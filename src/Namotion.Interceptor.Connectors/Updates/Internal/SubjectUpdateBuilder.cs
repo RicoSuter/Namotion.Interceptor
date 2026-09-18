@@ -68,23 +68,9 @@ internal sealed class SubjectUpdateBuilder
     /// newest value, so that neither an intermediate value nor the arrival order reaches the update.
     /// </summary>
     public ReadOnlySpan<SubjectPropertyChange> MergeChanges(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        // A batch from a change queue is merged already, so only the check for a repeat is paid then.
-        try
-        {
-            for (var i = 0; i < changes.Length; i++)
-            {
-                if (!_changedProperties.Add(changes[i].Property))
-                    return (_changeMerger ??= new ChangeMerger()).Merge(changes).Span;
-            }
-
-            return changes;
-        }
-        finally
-        {
-            _changedProperties.Clear();
-        }
-    }
+        => ChangeMerger.HasRepeatedProperty(changes, _changedProperties)
+            ? (_changeMerger ??= new ChangeMerger()).Merge(changes).Span
+            : changes;
 
     public bool IsIncluded(RegisteredSubjectProperty property)
     {

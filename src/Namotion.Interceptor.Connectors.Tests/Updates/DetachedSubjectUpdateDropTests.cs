@@ -163,40 +163,45 @@ public class DetachedSubjectUpdateDropTests
     }
 
     [Fact]
-    public void WhenStructuralChangeReferencesUnregisteredSubject_ThenCompleteStateIsSerializedFromMetadata()
+    public void WhenStructuralChangeReferencesASubjectThePropertyDoesNotHold_ThenOnlyThatReferenceIsLeftOut()
     {
-        // Arrange - a registered root whose structural change references a subject that has no
-        // context and is not registered anywhere. Without the metadata path, the serializer
-        // would emit a reference to an ID with no properties entry, which a receiver
-        // materializes as a default-valued subject that can never converge.
+        // Arrange - a registered root whose captured structural change references a subject that has no
+        // Registry metadata and that the property does not hold, so it left the graph after the capture.
+        // The change that took it out states the current value, and serializing the subject from its own
+        // metadata would publish properties no processor could filter.
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        var root = new Person(context);
+        var root = new Person(context) { FirstName = "Root" };
         var unregisteredChild = new Person { FirstName = "Detached" };
 
-        var change = SubjectPropertyChange.Create(
-            new PropertyReference(root, nameof(Person.Father)),
-            ChangeOrigin.Local,
-            DateTimeOffset.UtcNow,
-            null,
-            oldValue: (Person?)null,
-            newValue: unregisteredChild);
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create(
+                new PropertyReference(root, nameof(Person.Father)),
+                ChangeOrigin.Local,
+                DateTimeOffset.UtcNow,
+                null,
+                oldValue: (Person?)null,
+                newValue: unregisteredChild),
+            SubjectPropertyChange.Create(
+                new PropertyReference(root, nameof(Person.FirstName)),
+                ChangeOrigin.Local,
+                DateTimeOffset.UtcNow,
+                null,
+                oldValue: "Old",
+                newValue: "Root")
+        ];
 
         // Act
-        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, [change], []);
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
 
-        // Assert - the child's ID is referenced AND its complete state is present and marked complete
-        var rootId = root.TryGetSubjectId();
-        Assert.NotNull(rootId);
-        var fatherUpdate = update.Subjects[rootId!][nameof(Person.Father)];
-        Assert.Equal(SubjectPropertyUpdateKind.Object, fatherUpdate.Kind);
-        Assert.NotNull(fatherUpdate.Id);
-        Assert.True(update.Subjects.ContainsKey(fatherUpdate.Id!), "referenced subject must have a properties entry");
-        Assert.Equal("Detached", update.Subjects[fatherUpdate.Id!][nameof(Person.FirstName)].Value);
-        Assert.NotNull(update.CompleteSubjectIds);
-        Assert.Contains(fatherUpdate.Id!, update.CompleteSubjectIds!);
+        // Assert - the reference is left out, the rest of the change batch is not
+        var rootProperties = Assert.Single(update.Subjects).Value;
+        Assert.False(rootProperties.ContainsKey(nameof(Person.Father)));
+        Assert.Equal("Root", rootProperties[nameof(Person.FirstName)].Value);
+        Assert.Empty(update.CompleteSubjectIds!);
     }
 }
