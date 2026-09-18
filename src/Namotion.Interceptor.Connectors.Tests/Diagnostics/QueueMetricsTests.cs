@@ -219,6 +219,25 @@ public class QueueMetricsTests
     }
 
     [Fact]
+    public void WhenAReporterBelongsToThePreviousEpoch_ThenItsLateDropsAreIgnored()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundChanges));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var oldReporter = metrics.CreateDropReporter();
+        oldReporter(1);
+
+        // Act
+        metrics.Reset();
+        var currentReporter = metrics.CreateDropReporter();
+        oldReporter(2);
+        currentReporter(3);
+
+        // Assert
+        Assert.Equal(3, diagnostics.TotalDropped);
+    }
+
+    [Fact]
     public void WhenRegistrationIsReplacedAfterReset_ThenTotalDroppedKeepsLaterDrops()
     {
         // Arrange

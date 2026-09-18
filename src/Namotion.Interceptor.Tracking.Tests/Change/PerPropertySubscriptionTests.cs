@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Testing;
 using System.Linq.Expressions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -122,7 +123,9 @@ public class PerPropertySubscriptionTests
         var person = new Person(context);
         var received = new List<(string? OldValue, string? NewValue)>();
 
-        var writer = Task.Run(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         // Act: install while the write is in flight (post-gate, pre-commit), then release the commit.

@@ -14,6 +14,7 @@ internal sealed class SubjectUpdateApplyContext
     private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
     private readonly Dictionary<string, IInterceptorSubject> _boundSubjects = [];
     private readonly List<(IInterceptorSubject Subject, Dictionary<string, SubjectPropertyUpdate> Properties)> _deferredAttributeUpdates = [];
+    private List<(PropertyReference Property, Exception Exception)>? _failures;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -176,6 +177,16 @@ internal sealed class SubjectUpdateApplyContext
         => _deferredAttributeUpdates.Add((subject, properties));
 
     /// <summary>
+    /// Records a property that could not be applied. The batch continues; the collected failures are
+    /// thrown once by the caller when the whole update has been walked.
+    /// </summary>
+    public void RecordFailure(PropertyReference property, Exception exception)
+        => (_failures ??= []).Add((property, exception));
+
+    /// <summary>The failures recorded so far, or <c>null</c> when every property applied.</summary>
+    public List<(PropertyReference Property, Exception Exception)>? Failures => _failures;
+
+    /// <summary>
     /// Clears the context for reuse. Call before returning to pool.
     /// </summary>
     public void Clear()
@@ -185,6 +196,7 @@ internal sealed class SubjectUpdateApplyContext
         _boundSubjects.Clear();
         _deferredAttributeUpdates.Clear();
         _completeSubjectIds = null;
+        _failures = null;
         Subjects = null!;
         SubjectFactory = null!;
         Origin = default;

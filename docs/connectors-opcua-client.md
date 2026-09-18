@@ -398,7 +398,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
-`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts what the queue threw away since `StartTime`. With `WriteRetryQueueSize = 0` read `TotalDropped` as a floor rather than the whole loss: it still counts writes discarded because there is no queue to park them in, but not the connect-window drain, which has no ownership filter and so cannot attribute its discards to one source. See [Known Limitations](connectors.md#known-limitations).
+`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts capacity eviction, failed or terminally unconfirmed writes, and owned connect-window writes that cannot be retained since `StartTime`. A capacity of 0 retains nothing but still counts those owned writes. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations).
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -524,8 +524,9 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `TeardownFlushTimeout` | 5s | Max wait for the buffered outbound batch on stop, 0 to discard it (see [Flushing On Stop](connectors.md#flushing-on-stop)) |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+
+Final outbound delivery on stop shares the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
 ## Extensibility
 
@@ -650,11 +651,13 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
 
-**`IsOperational` here means the client has a live session with its subscriptions set up.** It stays false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay never reports itself as serving.
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
 
 It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 This client measures both throughput directions, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are never `null` here.
+
+This built-in client registers the `ClaimedPropertyCount` gauge, so it reports the measured number of currently owned properties, including zero.
 
 | Member | Meaning |
 |---|---|
@@ -698,7 +701,7 @@ This client measures both throughput directions, so `Throughput.IncomingPerSecon
 
 The sub-block counters survive a reconnect. `PollingManager` and `ReadAfterWriteManager` are rebuilt on every connect attempt, including failed ones, but their counters are owned by the source, so they do not rebase to zero during the reconnect storm that is exactly when they matter.
 
-`OutboundRetries.TotalDropped` is a floor rather than the whole outbound loss when the client is configured with `WriteRetryQueueSize = 0`: see [Write Retry Queue During Disconnection](#write-retry-queue-during-disconnection).
+For outbound retry capacity, depth, and drop accounting, including capacity 0, see [Write Retry Queue During Disconnection](#write-retry-queue-during-disconnection).
 
 ## Direct Session Access
 
@@ -763,7 +766,7 @@ Write queue operations use `Interlocked` operations for thread-safe counter upda
 **Update ordering:**
 By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
 
-For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
+Set `SubscriptionSequentialPublishing = true` to order subscription messages at the cost of reduced throughput. This does not order them against local writes: a transaction commit does not wait for subscription echoes, and a delayed notification can overwrite newer local state or cause a transaction conflict.
 
 To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 

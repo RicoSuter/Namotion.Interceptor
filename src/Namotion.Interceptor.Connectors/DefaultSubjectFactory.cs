@@ -44,7 +44,7 @@ public class DefaultSubjectFactory : ISubjectFactory
             return (IInterceptorSubject?[])array;
         }
 
-        var itemType = propertyType.GenericTypeArguments[0];
+        var itemType = propertyType.GetCollectionElementType();
         var collectionType = ListTypeCache.GetOrAdd(itemType, static t => typeof(List<>).MakeGenericType(t));
 
         var collection = (IList)Activator.CreateInstance(collectionType)!;
@@ -62,7 +62,7 @@ public class DefaultSubjectFactory : ISubjectFactory
 
     private static Func<IList, object> CreateCollectionMaterializer(Type propertyType)
     {
-        var itemType = propertyType.GenericTypeArguments[0];
+        var itemType = propertyType.GetCollectionElementType();
         var listType = typeof(List<>).MakeGenericType(itemType);
         if (propertyType.IsAssignableFrom(listType))
         {
@@ -91,9 +91,9 @@ public class DefaultSubjectFactory : ISubjectFactory
             return list => constructor.Invoke([list]);
         }
 
-        throw new InvalidOperationException(
-            $"Could not create a subject collection of type '{propertyType}': the type is not assignable " +
-            $"from 'List<{itemType.Name}>' and provides no way to build it from a sequence of items.");
+        // Nothing builds the declared type, so the members are handed over in the List<T>, which a
+        // property typed as object, or declared through a non-generic interface, can still accept.
+        return static list => list;
     }
 
     private static object? TryGetStaticEmptyInstance(Type type)
@@ -137,12 +137,11 @@ public class DefaultSubjectFactory : ISubjectFactory
     {
         var dictionaryType = DictionaryTypeCache.GetOrAdd(propertyType, static t =>
         {
-            var keyType = t.GenericTypeArguments[0];
-            var valueType = t.GenericTypeArguments[1];
-            return typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+            var (key, value) = t.GetDictionaryKeyAndValueTypes();
+            return typeof(Dictionary<,>).MakeGenericType(key, value);
         });
 
-        var keyType = propertyType.GenericTypeArguments[0];
+        var keyType = dictionaryType.GenericTypeArguments[0];
         var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
         foreach (var entry in entries)
         {

@@ -11,14 +11,14 @@ internal sealed class SubjectUpdateBuilder
 {
     private Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> _subjects = new();
 
-    private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();
+    private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<
         SubjectPropertyUpdate, (RegisteredSubjectProperty Property, 
         IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
 
-    public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
+    public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
     /// Tracks subjects whose IDs were first created by a value change (ProcessPropertyChange),
@@ -26,7 +26,7 @@ internal sealed class SubjectUpdateBuilder
     /// When a structural reference later encounters such a subject, ProcessSubjectComplete
     /// must still be called to populate the remaining properties that weren't in the change.
     /// </summary>
-    public HashSet<IInterceptorSubject> SubjectsWithPartialChanges { get; } = [];
+    public HashSet<IInterceptorSubject> SubjectsWithPartialChanges { get; } = new(ReferenceEqualityComparer.Instance);
 
     private bool _isPartialUpdate;
     private HashSet<string>? _completeSubjectIds;

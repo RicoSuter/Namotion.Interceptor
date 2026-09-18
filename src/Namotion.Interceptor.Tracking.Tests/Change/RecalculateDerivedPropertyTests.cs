@@ -77,9 +77,35 @@ public class RecalculateDerivedPropertyTests
 
         var sensor = new ExternalSensor(context);
 
-        // Act & Assert
+        // Act
         var property = new PropertyReference(sensor, nameof(ExternalSensor.Label));
         property.RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Null(sensor.Label);
+    }
+
+    [Fact]
+    public void WhenRecalculateCalledOnNonDerivedPropertyWithSubscriber_ThenValueUnchangedAndNoNotificationFired()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var sensor = new ExternalSensor(context) { Label = "unchanged" };
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        // Act
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.Label));
+        property.RecalculateDerivedProperty();
+
+        // Assert
+        Assert.Equal("unchanged", sensor.Label);
+        Assert.Empty(changes);
     }
 
     [Fact]
@@ -587,7 +613,8 @@ public class RecalculateDerivedPropertyTests
             .Subscribe(change => secondTrackedValue = change.GetNewValue<string?>());
 
         // Act
-        var firstTask = Task.Run(async () =>
+        // Both evaluations must be in flight together for the overlap this test needs.
+        var firstTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (await firstContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
             {
@@ -595,7 +622,7 @@ public class RecalculateDerivedPropertyTests
                 new PropertyReference(first, nameof(TransactionCascadeSubject.Probe)).RecalculateDerivedProperty();
             }
         });
-        var secondTask = Task.Run(async () =>
+        var secondTask = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(async () =>
         {
             using (await secondContext.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
             {

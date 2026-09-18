@@ -112,6 +112,19 @@ To create a **partial update**, collect the set of property changes since the la
 
 **Outbound churn under concurrent structural mutations:** a property change can reach the update factory for a subject that is momentarily unregistered, because a concurrent structural mutation wrote it into the backing store but the lifecycle interceptor has not attached it yet. Such a change is dropped rather than serialized, and the drop is counted in `SubjectUpdateDiagnostics.DroppedOutboundChanges`. Separately, when a structural reference (an `Object`, `Collection`, or `Dictionary` item) reaches a subject that is momentarily unregistered, the factory does not emit a bare ID reference with no properties entry, because a receiver would materialize that as a default-valued subject that can never converge. Instead it serializes the subject's complete state from the subject's own property metadata (`ProcessSubjectFromMetadata`), bypassing registry-backed processor filtering since that requires registry information. Each use of this fallback path is counted in `SubjectUpdateDiagnostics.MetadataFallbackSerializations`. See [Drop Policy and Diagnostics](#drop-policy-and-diagnostics) below.
 
+### When a Property Fails to Apply
+
+A property that throws is skipped and the rest of the update still applies, including the properties of nested subjects, for every update kind. Applying is not all-or-nothing.
+
+The call still reports failure once every property has been attempted. A single failure is rethrown as itself, keeping its original type and stack, so a caller catching a specific exception type is unaffected. Several failures are wrapped in an `AggregateException` whose message names the properties.
+
+Two limits follow from applying in place rather than staging:
+
+- A collection or dictionary item whose own property fails is still inserted, carrying a default for that property, so the parent references a new item that is only partly populated.
+- A failure raised by the collection or dictionary machinery itself, such as a dictionary key that cannot be converted to the declared key type (see [Dictionary Key Types](#dictionary-key-types)), is contained at that property, which keeps its previous items.
+
+What a caller does with the failure is its own decision; see [Inbound Update Error Handling](connectors.md#inbound-update-error-handling) for what the built-in connector infrastructure does.
+
 ## Property Update Kinds
 
 Each property update has a `kind` that determines how it is serialized and applied.
@@ -217,7 +230,7 @@ This complete-state model avoids computing diff operations against a previous co
 
 ## Circular References
 
-Circular references are handled naturally by the flat structure. Each subject appears exactly once in the `subjects` dictionary, and references use string IDs:
+Circular references are handled naturally by the flat structure. Each subject instance appears exactly once in the `subjects` dictionary, and references use string IDs. Distinct instances retain distinct IDs even when their `Equals` implementation considers them equal:
 
 ```json
 {
@@ -255,6 +268,8 @@ When a collection or dictionary property is `null`, it keeps its declared `kind`
 - **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections and dictionaries use the complete-state `items` model.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
 - **Dictionary keys** are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+- **Element types** are read from the declared collection or dictionary interfaces and must resolve uniquely. A legacy wrapper implementing only the non-generic `ICollection` or `IDictionary` falls back to its own generic arguments, read by position. A declaration naming several possible item types, of which more than one could hold a subject, and one naming none at all both throw `NotSupportedException`. This runs before any `ISubjectFactory` is consulted, so a factory cannot change which item subject is created for an incoming update or which key type a dictionary update is converted to.
+- **Container types** are the factory's choice. The default factory creates arrays, `List<T>` and `Dictionary<TKey, TValue>`, so a dictionary property declared as a more specific container receives a `Dictionary<TKey, TValue>` instead. A collection property whose declared type cannot hold a `List<T>` is built from the items through the type's static `Empty` instance and `AddRange` (for example `ImmutableArray<T>`) or a constructor taking them (for example `ReadOnlyCollection<T>`), and throws `InvalidOperationException` when the type offers neither. Supply an `ISubjectFactory` to create any other declared type.
 
 ## Attributes
 

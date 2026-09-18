@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -31,6 +32,7 @@ internal static class SubjectUpdateApplier
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         var context = ContextPool.Rent();
+        List<(PropertyReference Property, Exception Exception)>? failures = null;
         try
         {
             context.Initialize(subject.Context, update.Subjects, update.CompleteSubjectIds, subjectFactory, origin, transformValueBeforeApply);
@@ -120,12 +122,31 @@ internal static class SubjectUpdateApplier
                 // The retry pass can root further subjects, which queue attribute updates of their own.
                 ApplyDeferredAttributeUpdates(context, appliedAttributeUpdates);
             }
+
+            failures = context.Failures;
         }
         finally
         {
             context.Clear();
             ContextPool.Return(context);
         }
+
+        if (failures is null)
+        {
+            return;
+        }
+
+        // A single failure is rethrown as itself, with its original stack, so a caller that catches a
+        // specific exception type keeps working exactly as before this change.
+        if (failures.Count == 1)
+        {
+            ExceptionDispatchInfo.Capture(failures[0].Exception).Throw();
+        }
+
+        throw new AggregateException(
+            $"{failures.Count} property updates could not be applied: " +
+            string.Join(", ", failures.Select(failure => failure.Property.Name)),
+            failures.Select(failure => failure.Exception));
     }
 
     /// <summary>
@@ -232,23 +253,38 @@ internal static class SubjectUpdateApplier
             return;
         }
 
-        switch (propertyUpdate.Kind)
+        try
         {
-            case SubjectPropertyUpdateKind.Value:
-                ApplyValueUpdate(subject, property, propertyUpdate, context);
-                break;
+            switch (propertyUpdate.Kind)
+            {
+                case SubjectPropertyUpdateKind.Value:
+                    ApplyValueUpdate(subject, property, propertyUpdate, context);
+                    break;
 
-            case SubjectPropertyUpdateKind.Object:
-                ApplyObjectUpdate(property, propertyUpdate, context);
-                break;
+                case SubjectPropertyUpdateKind.Object:
+                    ApplyObjectUpdate(property, propertyUpdate, context);
+                    break;
 
-            case SubjectPropertyUpdateKind.Collection:
-                SubjectItemsUpdateApplier.ApplyCollectionUpdate(property, propertyUpdate, context);
-                break;
+                case SubjectPropertyUpdateKind.Collection:
+                    SubjectItemsUpdateApplier.ApplyCollectionUpdate(property, propertyUpdate, context);
+                    break;
 
-            case SubjectPropertyUpdateKind.Dictionary:
-                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(property, propertyUpdate, context);
-                break;
+                case SubjectPropertyUpdateKind.Dictionary:
+                    SubjectItemsUpdateApplier.ApplyDictionaryUpdate(property, propertyUpdate, context);
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is not an apply failure. Let a shutdown unwind now rather than surfacing
+            // at the end of the batch as though this property were bad.
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // One property must not cost its siblings. Every other inbound path already catches per
+            // property; this applier was the only one that abandoned the rest of the batch.
+            context.RecordFailure(property, exception);
         }
     }
 

@@ -28,7 +28,10 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     /// </summary>
     internal static long DuplicateSubjectIdAttachCount;
 
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
+        ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
+
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
 
@@ -51,7 +54,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             if (snapshot is not null)
                 return snapshot;
 
-            snapshot = _knownSubjects.ToImmutableDictionary();
+            snapshot = EmptyKnownSubjects.AddRange(_knownSubjects);
             Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
             return snapshot;
         }

@@ -38,7 +38,7 @@ public class OpcUaServerLivenessTests
 
         // Act
         await AsyncTestHelpers.WaitUntilAsync(
-            () => serverService.Diagnostics.IsOperational,
+            () => serverService.Diagnostics.IsOperational == true,
             message: "The server should report operational once it has started serving.");
 
         // Assert
@@ -72,7 +72,7 @@ public class OpcUaServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => serverService.Diagnostics.IsOperational,
+                () => serverService.Diagnostics.IsOperational == true,
                 message: "The server should report operational once it has started serving.");
 
             var firstOperationalTime = serverService.Diagnostics.OperationalChangeTime;
@@ -84,7 +84,7 @@ public class OpcUaServerLivenessTests
             // The timestamp only moves when the flag does, so this also pins that the server reported
             // itself down between the two runs rather than staying up across the restart.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => serverService.Diagnostics.IsOperational &&
+                () => serverService.Diagnostics.IsOperational == true &&
                       serverService.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The server should report operational again after restarting.");
 
@@ -117,7 +117,7 @@ public class OpcUaServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => serverService.Diagnostics.IsOperational,
+                () => serverService.Diagnostics.IsOperational == true,
                 message: "The server should report operational once it has started serving.");
 
             // Act

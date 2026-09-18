@@ -2,8 +2,6 @@
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
-#pragma warning disable CS0659
-
 /// <summary>
 /// Automatically assigns or removes the parent context as fallback context to attached and detached subjects.
 /// </summary>
@@ -50,4 +48,6 @@ public class ContextInheritanceHandler : ILifecycleHandler
     {
         return obj is ContextInheritanceHandler;
     }
+
+    public override int GetHashCode() => typeof(ContextInheritanceHandler).GetHashCode();
 }

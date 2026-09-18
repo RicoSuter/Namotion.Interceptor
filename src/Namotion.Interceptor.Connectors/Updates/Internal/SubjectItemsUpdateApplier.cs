@@ -88,7 +88,7 @@ internal static class SubjectItemsUpdateApplier
         }
 
         var idRegistry = context.SubjectIdRegistry;
-        var targetKeyType = metadata.Type.GenericTypeArguments[0];
+        var targetKeyType = metadata.Type.GetDictionaryKeyAndValueTypes().Key;
 
         // Phase 1: Resolve or create subjects, set IDs on new subjects.
         // For NEW subjects (no context, no interceptors): apply properties immediately.

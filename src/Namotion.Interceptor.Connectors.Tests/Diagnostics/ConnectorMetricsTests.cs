@@ -1,23 +1,24 @@
 using Namotion.Interceptor.Connectors.Diagnostics;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Connectors.Tests.Diagnostics;
 
 public class ConnectorMetricsTests
 {
     [Fact]
-    public void WhenNeverStarted_ThenNotOperationalAndNoTimestamps()
+    public void WhenLivenessIsNeverReported_ThenOperationalStateAndTimestampAreNull()
     {
         // Arrange
         var metrics = new ConnectorMetrics();
 
         // Act
         var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkStarted();
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
-        Assert.Null(diagnostics.StartTime);
-        Assert.Null(diagnostics.LastError);
+        Assert.NotNull(diagnostics.StartTime);
     }
 
     [Fact]
@@ -33,6 +34,21 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.True(diagnostics.IsOperational);
+        Assert.NotNull(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenMarkedNotOperationalFirst_ThenFalseAndTimestampArePublished()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+
+        // Act
+        metrics.MarkNotOperational();
+
+        // Assert
+        Assert.False(diagnostics.IsOperational);
         Assert.NotNull(diagnostics.OperationalChangeTime);
     }
 
@@ -127,7 +143,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenStoppedWithoutEverBeingOperational_ThenNoTransitionTimestampIsInvented()
+    public void WhenUnmonitoredConnectorIsStopped_ThenLivenessBecomesFalseAndLateReportsAreIgnored()
     {
         // Arrange
         var metrics = new ConnectorMetrics();
@@ -135,9 +151,44 @@ public class ConnectorMetricsTests
 
         // Act
         metrics.MarkStopped();
+        metrics.MarkOperational();
+
+        // Assert: a stopped connector is known not to be serving even though it never measured that.
+        Assert.False(diagnostics.IsOperational);
+        Assert.NotNull(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenMonitoredConnectorIsRestarted_ThenLivenessReturnsToUnavailable()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkOperational();
+        metrics.MarkStopped();
+
+        // Act
+        metrics.MarkStarted();
+
+        // Assert: the new epoch reports nothing observed rather than the previous epoch's value and a
+        // timestamp from before it began.
+        Assert.Null(diagnostics.IsOperational);
+        Assert.Null(diagnostics.OperationalChangeTime);
+    }
+
+    [Fact]
+    public void WhenUnmonitoredConnectorIsRestarted_ThenLivenessRemainsNullUntilExplicitlyReported()
+    {
+        // Arrange
+        var metrics = new ConnectorMetrics();
+        var diagnostics = new ConnectorDiagnostics(metrics);
+        metrics.MarkStopped();
+
+        // Act
+        metrics.MarkStarted();
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
     }
 
@@ -196,7 +247,7 @@ public class ConnectorMetricsTests
 
         // Assert
         Assert.NotEqual(firstStart, diagnostics.StartTime);
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Equal(0, diagnostics.OutboundChanges.TotalDropped);
         Assert.Equal(0, diagnostics.OutboundRetries.TotalDropped);
         Assert.Equal(0, diagnostics.InboundBuffer.TotalDropped);
@@ -221,22 +272,15 @@ public class ConnectorMetricsTests
         ClockTestHelpers.WaitForClockTick();
 
         // Act
-        // LongRunning, so this runs on a dedicated thread rather than a pool thread: Reset signals
-        // Entered and then parks its caller for the rest of the test. A pool thread doing that
-        // publishes the awaiting continuation into its own local queue and then never drains that
-        // queue again, leaving it reachable only by work stealing, which a busy worker reaches only
-        // after its own local queue and the global one. Under load the wait below then times out
-        // even though Entered completed microseconds after the start.
-        var restart = Task.Factory.StartNew(
-            metrics.MarkStarted,
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
-
-        await resettable.Entered.WaitAsync(TimeSpan.FromSeconds(5));
+        // Off the thread pool: the restart parks inside the resettable for as long as this test holds
+        // it, and a pool work item can wait seconds to be scheduled at all while the rest of the
+        // assembly runs, which times out the wait below for a reason the test does not cover.
+        var restart = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(metrics.MarkStarted, "restart reset");
 
         try
         {
+            await resettable.Entered.WaitAsync(TimeSpan.FromSeconds(30));
+
             // Assert
             Assert.Equal(firstStart, diagnostics.StartTime);
         }
@@ -279,7 +323,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenNoClaimedPropertyProviderIsRegistered_ThenCountIsZero()
+    public void WhenNoClaimedPropertyProviderIsRegistered_ThenCountIsUnavailable()
     {
         // Arrange
         var metrics = new SourceMetrics();
@@ -288,7 +332,7 @@ public class ConnectorMetricsTests
         var diagnostics = new SourceDiagnostics(metrics);
 
         // Assert
-        Assert.Equal(0, diagnostics.ClaimedPropertyCount);
+        Assert.Null(diagnostics.ClaimedPropertyCount);
     }
 
     [Fact]
@@ -308,7 +352,7 @@ public class ConnectorMetricsTests
     }
 
     [Fact]
-    public void WhenClaimedPropertyProviderThrows_ThenCountIsZeroInsteadOfThrowing()
+    public void WhenClaimedPropertyProviderThrows_ThenCountIsUnavailableInsteadOfThrowing()
     {
         // Arrange
         var metrics = new SourceMetrics();
@@ -319,7 +363,7 @@ public class ConnectorMetricsTests
         var count = diagnostics.ClaimedPropertyCount;
 
         // Assert
-        Assert.Equal(0, count);
+        Assert.Null(count);
     }
 
     [Fact]

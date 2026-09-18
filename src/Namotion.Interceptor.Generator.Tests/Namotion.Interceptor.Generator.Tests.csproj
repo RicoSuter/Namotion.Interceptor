@@ -9,6 +9,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" PrivateAssets="all" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.10" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
