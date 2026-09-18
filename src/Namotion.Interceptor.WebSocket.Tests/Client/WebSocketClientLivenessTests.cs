@@ -539,9 +539,9 @@ public class WebSocketClientLivenessTests
     [Fact]
     public async Task WhenAWriteHappensAfterReconnectButBeforeLoad_ThenItParksUntilTheLoadAndReconcileComplete()
     {
-        // Arrange - design document case D4: the reconnect's socket is writable, and its receive loop
-        // is already running, before the load has applied the Welcome and the reconcile has judged the
-        // retry queue against it.
+        // Arrange - a write in the window where the reconnect's socket is writable and its receive loop is
+        // already running, but the load has not applied the Welcome and the reconcile has not judged the
+        // retry queue against it yet.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
         await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
@@ -589,8 +589,8 @@ public class WebSocketClientLivenessTests
     [Fact]
     public async Task WhenAWriteHappensAfterAForceKilledReconnectButBeforeLoad_ThenItParksUntilTheLoadAndReconcileComplete()
     {
-        // Arrange - design document case D4, through the other of the two BeginResume() call sites: the
-        // WasForceKilled catch arm rather than drop detection. Both routes lead into
+        // Arrange - the same window as the test above, reached through the other of the two BeginResume()
+        // call sites: the WasForceKilled catch arm rather than drop detection. Both routes lead into
         // ReconnectAndResumeAsync and through the same BeforeReconnectInitialStateLoad seam, so a fix
         // that only guards the drop-detection route would leave this one open.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
