@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
-/// Resolves the logger the update machinery reports through, for both the creating and the applying side.
+/// Resolves the logger subject update warnings are reported through.
 /// </summary>
 internal static class SubjectUpdateLog
 {

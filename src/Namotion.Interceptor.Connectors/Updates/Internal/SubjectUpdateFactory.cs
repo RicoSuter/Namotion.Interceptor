@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -80,20 +81,23 @@ internal static class SubjectUpdateFactory
         }
     }
 
-    internal static void ProcessSubjectComplete(
+    /// <summary>
+    /// Writes the complete payload of <paramref name="subject"/> unless this build already did, and returns its id.
+    /// </summary>
+    internal static string ProcessSubjectComplete(
         IInterceptorSubject subject,
         SubjectUpdateBuilder builder)
     {
         var subjectId = builder.GetOrCreateId(subject);
 
         if (!builder.ProcessedSubjects.Add(subject))
-            return;
+            return subjectId;
 
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
         {
             builder.HasUnregisteredSubjects = true;
-            return;
+            return subjectId;
         }
 
         var properties = builder.GetOrCreateProperties(subjectId);
@@ -114,21 +118,15 @@ internal static class SubjectUpdateFactory
 
             builder.TrackPropertyUpdate(propertyUpdate, property, properties);
         }
+
+        return subjectId;
     }
 
     /// <summary>
-    /// A computed derived property that holds subjects is a projection: it owns nothing, so the
-    /// subjects behind it are often outside the graph and contribute no payload, and an id that
-    /// describes nothing is worse on the wire than saying nothing at all. Skipped at the source,
-    /// in complete payloads and in changes alike, so no receiver has to reason about it.
+    /// A derived property that holds subjects and has no setter is a computed projection: it owns nothing,
+    /// so neither complete payloads nor changes publish it. The setter tells whether the value is stored on
+    /// this side, so a [Derived] property with a setter is an ordinary edge and still published.
     /// </summary>
-    /// <remarks>
-    /// The setter test asks whether the value is stored on this side, which is what separates a
-    /// projection from a real edge, and not whether a receiver could write it. A stored [Derived]
-    /// property carries an ordinary edge and is still published. Value typed derived properties
-    /// are published too: a receiver may display them or rely on this side to compute them, and
-    /// they carry no reference that can dangle.
-    /// </remarks>
     private static bool IsComputedSubjectProjection(RegisteredSubjectProperty property)
         => property.CanContainSubjects && property.Reference.Metadata.IsDerived && !property.HasSetter;
 
@@ -153,11 +151,13 @@ internal static class SubjectUpdateFactory
 
         // A complete payload already states this subject's final structure, and the receiver may be
         // building the subject from it, so it has no baseline for an incremental step. Value and
-        // attribute changes still apply on top, which is what carries their captured values.
+        // attribute changes still apply on top, which is what carries their captured values. The path is
+        // still stated, because the payload may hang off a reference other than the first parent.
         if (canContainSubjects &&
             builder.ProcessedSubjects.Contains(changedSubject) &&
-            properties.ContainsKey(registeredProperty.Name))
+            TryGetPropertyUpdate(properties, registeredProperty) is not null)
         {
+            BuildPathToRoot(changedSubject, builder);
             return;
         }
 
@@ -180,6 +180,22 @@ internal static class SubjectUpdateFactory
         }
 
         BuildPathToRoot(changedSubject, builder);
+    }
+
+    /// <summary>
+    /// The update this build holds for <paramref name="property"/>, found for an attribute in the
+    /// attributes of the update of the property it is attached to.
+    /// </summary>
+    private static SubjectPropertyUpdate? TryGetPropertyUpdate(
+        Dictionary<string, SubjectPropertyUpdate> properties,
+        RegisteredSubjectProperty property)
+    {
+        if (!property.IsAttribute)
+            return properties.GetValueOrDefault(property.Name);
+
+        return TryGetPropertyUpdate(properties, property.GetAttributedProperty())?.Attributes is { } attributes
+            ? attributes.GetValueOrDefault(property.AttributeMetadata.AttributeName)
+            : null;
     }
 
     private static SubjectPropertyUpdate CreatePropertyUpdate(
@@ -315,20 +331,13 @@ internal static class SubjectUpdateFactory
         IInterceptorSubject item,
         RegisteredSubjectProperty property,
         SubjectUpdateBuilder builder)
-    {
-        if (ReferenceEquals(item, builder.RootSubject) || builder.ProcessedSubjects.Contains(item))
-            return false;
-
-        var registeredSubject = item.TryGetRegisteredSubject();
-        if (registeredSubject is null)
-            return false;
-
-        var parents = registeredSubject.Parents;
-        return parents.Length > 0 && ReferenceEquals(parents[0].Property, property);
-    }
+        => !ReferenceEquals(item, builder.RootSubject) &&
+           !builder.ProcessedSubjects.Contains(item) &&
+           item.TryGetRegisteredSubject()?.Parents is { Length: > 0 } parents &&
+           ReferenceEquals(parents[0].Property, property);
 
     /// <summary>
-    /// Whether every ancestor edge <see cref="BuildPathToRoot"/> would state survives the processors.
+    /// Whether every ancestor edge <see cref="BuildPathToRoot"/> walks survives the processors.
     /// A processor that excludes a property hides everything behind it, so a change reached only through
     /// an excluded edge is dropped rather than shipped with the excluded property name that names it.
     /// </summary>
@@ -336,26 +345,46 @@ internal static class SubjectUpdateFactory
         IInterceptorSubject subject,
         SubjectUpdateBuilder builder)
     {
-        builder.ReachabilityVisited.Clear();
+        builder.PathVisited.Clear();
         var current = subject.TryGetRegisteredSubject();
 
-        // Mirrors the walk and the stop conditions of BuildPathToRoot: wherever that one stops stating
-        // edges, there is no further edge left for a processor to exclude.
-        while (current is not null && current.Subject != builder.RootSubject)
+        while (TryGetNextPathParent(current, builder, out var parent))
         {
-            if (builder.ProcessedSubjects.Contains(current.Subject) || !builder.ReachabilityVisited.Add(current.Subject))
-                break;
-
-            if (current.Parents.Length == 0)
-                break;
-
-            var parentProperty = current.Parents[0].Property;
-            if (!IsPropertyIncluded(parentProperty, builder.Processors))
+            if (!IsPropertyIncluded(parent.Property, builder.Processors))
                 return false;
 
-            current = parentProperty.Parent;
+            current = parent.Property.Parent;
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the first parent of <paramref name="current"/> on the walk towards the root, or returns <c>false</c>
+    /// where the walk stops. Both path walks step through here, so the processor check covers exactly the
+    /// edges the build states.
+    /// </summary>
+    private static bool TryGetNextPathParent(
+        [NotNullWhen(true)] RegisteredSubject? current,
+        SubjectUpdateBuilder builder,
+        out SubjectPropertyParent parent)
+    {
+        parent = default;
+
+        // The walk passes completed subjects: whatever completed one need not be reachable itself, such as an
+        // ancestor completed because a back reference to it was assigned.
+        if (current is null ||
+            current.Subject == builder.RootSubject ||
+            !builder.PathVisited.Add(current.Subject))
+        {
+            return false;
+        }
+
+        var parents = current.Parents;
+        if (parents.Length == 0)
+            return false;
+
+        parent = parents[0];
         return true;
     }
 
@@ -371,31 +400,22 @@ internal static class SubjectUpdateFactory
         builder.PathVisited.Clear();
         var current = subject.TryGetRegisteredSubject();
 
-        while (current is not null && current.Subject != builder.RootSubject)
+        while (TryGetNextPathParent(current, builder, out var parent))
         {
-            // A completed subject is already referenced by whatever completed it, so its path exists. Walking
-            // on would add a sparse item beside the insert operation that introduced it.
-            if (builder.ProcessedSubjects.Contains(current.Subject) || !builder.PathVisited.Add(current.Subject))
-                break;
-
-            if (current.Parents.Length == 0)
-                break;
-
-            var parentInfo = current.Parents[0];
-            var parentProperty = parentInfo.Property;
+            var parentProperty = parent.Property;
             var parentSubject = parentProperty.Parent;
 
             var parentId = builder.GetOrCreateId(parentSubject.Subject);
             var parentProperties = builder.GetOrCreateProperties(parentId);
             var childId = builder.GetOrCreateId(current.Subject);
 
-            if (parentInfo.Index is not null)
+            if (parent.Index is not null)
             {
                 var kind = parentProperty.IsSubjectDictionary
                     ? SubjectPropertyUpdateKind.Dictionary
                     : SubjectPropertyUpdateKind.Collection;
             
-                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId, kind);
+                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parent.Index, childId, kind);
             }
             else
             {
@@ -407,7 +427,8 @@ internal static class SubjectUpdateFactory
     }
 
     /// <summary>
-    /// Adds a collection or dictionary item reference to the parent's property update.
+    /// Adds a collection or dictionary item reference to the parent's property update, unless the update
+    /// already references the child through an item or an Insert operation.
     /// Appends to an existing update or creates a new one with the specified kind.
     /// </summary>
     private static void AddCollectionOrDictionaryItemToParent(
@@ -419,17 +440,10 @@ internal static class SubjectUpdateFactory
     {
         if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
         {
-            existingUpdate.Items ??= [];
+            if (ReferencesItem(existingUpdate, childId))
+                return;
 
-            // Skip if this subject is already referenced in Items (multiple property
-            // changes on the same child each trigger BuildPathToRoot)
-            for (var i = 0; i < existingUpdate.Items.Count; i++)
-            {
-                if (existingUpdate.Items[i].Id == childId)
-                    return;
-            }
-
-            existingUpdate.Items.Add(new SubjectPropertyItemUpdate
+            (existingUpdate.Items ??= []).Add(new SubjectPropertyItemUpdate
             {
                 Index = index,
                 Id = childId
@@ -446,8 +460,35 @@ internal static class SubjectUpdateFactory
     }
 
     /// <summary>
+    /// Whether <paramref name="update"/> already references the child: several changes on one child each
+    /// state its edge, and a child the update inserts arrives through its Insert operation.
+    /// </summary>
+    private static bool ReferencesItem(SubjectPropertyUpdate update, string childId)
+    {
+        if (update.Items is { } items)
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (items[i].Id == childId)
+                    return true;
+            }
+        }
+
+        if (update.Operations is { } operations)
+        {
+            for (var i = 0; i < operations.Count; i++)
+            {
+                if (operations[i].Action == SubjectCollectionOperationType.Insert && operations[i].Id == childId)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Adds a single item reference to the parent's property update.
-    /// Skips if the property already exists (avoids overwriting).
+    /// Skips if the property already has an update, which may be a complete payload or an assignment.
     /// </summary>
     private static void AddSingleReferenceToParent(
         Dictionary<string, SubjectPropertyUpdate> parentProperties,

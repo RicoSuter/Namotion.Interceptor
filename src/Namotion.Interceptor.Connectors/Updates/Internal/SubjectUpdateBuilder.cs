@@ -30,12 +30,6 @@ internal sealed class SubjectUpdateBuilder
     public HashSet<IInterceptorSubject> PathVisited { get; } = new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// Scratch set for the reachability walk that runs before a change is emitted. Kept separate from
-    /// <see cref="PathVisited"/>, which the path walk clears at its own start.
-    /// </summary>
-    public HashSet<IInterceptorSubject> ReachabilityVisited { get; } = new(ReferenceEqualityComparer.Instance);
-
-    /// <summary>
     /// Changes held back until the subject-holding changes of a batch are processed, with the registered
     /// property already resolved for each.
     /// </summary>
@@ -123,8 +117,6 @@ internal sealed class SubjectUpdateBuilder
             update = Processors[i].TransformSubjectUpdate(subject, update);
         }
 
-        // Only walk the result when the build actually reached a subject without Registry metadata,
-        // which a well-formed batch still does whenever a later change detached an earlier reference.
         if (HasUnregisteredSubjects)
         {
             OmitDanglingReferences(subject, update);
@@ -136,12 +128,15 @@ internal sealed class SubjectUpdateBuilder
     /// <summary>
     /// Omits properties with missing subject payloads and logs a warning, preserving the receiver's values.
     /// </summary>
-    private static void OmitDanglingReferences(IInterceptorSubject rootSubject, SubjectUpdate update)
+    private void OmitDanglingReferences(IInterceptorSubject rootSubject, SubjectUpdate update)
     {
-        List<string>? omittedProperties = null;
-        foreach (var properties in update.Subjects.Values)
+        List<(string SubjectId, List<string> PropertyNames)>? omittedProperties = null;
+        foreach (var (subjectId, properties) in update.Subjects)
         {
-            OmitDanglingReferences(properties, update.Subjects, ref omittedProperties);
+            if (OmitDanglingReferences(properties, update.Subjects) is { } propertyNames)
+            {
+                (omittedProperties ??= []).Add((subjectId, propertyNames));
+            }
         }
 
         if (omittedProperties is null)
@@ -150,17 +145,21 @@ internal sealed class SubjectUpdateBuilder
         }
 
         SubjectUpdateLog.TryGetWarningLogger(rootSubject)?.LogWarning(
-            "Omitted the update properties {OmittedProperties} of subject {SubjectType} because they reference " +
-            "subjects without Registry metadata. Register the referenced subjects or exclude these properties " +
-            "with an ISubjectUpdateProcessor.",
-            string.Join(", ", omittedProperties), rootSubject.GetType().FullName);
+            "Omitted the update properties {OmittedProperties} because they reference subjects without Registry " +
+            "metadata. Register the referenced subjects or exclude these properties with an ISubjectUpdateProcessor. " +
+            "A subject detached after its change was captured needs neither and converges with the next update.",
+            DescribeOmittedProperties(omittedProperties));
     }
 
-    private static void OmitDanglingReferences(
+    /// <summary>
+    /// Removes the properties and attributes with missing subject payloads, and returns their names, or
+    /// <c>null</c> when none was removed.
+    /// </summary>
+    private static List<string>? OmitDanglingReferences(
         Dictionary<string, SubjectPropertyUpdate> properties,
-        Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects,
-        ref List<string>? omittedProperties)
+        Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects)
     {
+        List<string>? omittedNames = null;
         List<string>? danglingProperties = null;
         foreach (var (name, property) in properties)
         {
@@ -168,15 +167,20 @@ internal sealed class SubjectUpdateBuilder
             {
                 (danglingProperties ??= []).Add(name);
             }
-            else if (property.Attributes is not null)
+            else if (property.Attributes is not null &&
+                     OmitDanglingReferences(property.Attributes, subjects) is { } omittedAttributes)
             {
-                OmitDanglingReferences(property.Attributes, subjects, ref omittedProperties);
+                omittedNames ??= [];
+                foreach (var attributeName in omittedAttributes)
+                {
+                    omittedNames.Add($"{name}@{attributeName}");
+                }
             }
         }
 
         if (danglingProperties is null)
         {
-            return;
+            return omittedNames;
         }
 
         foreach (var name in danglingProperties)
@@ -184,7 +188,41 @@ internal sealed class SubjectUpdateBuilder
             properties.Remove(name);
         }
 
-        (omittedProperties ??= []).AddRange(danglingProperties);
+        if (omittedNames is null)
+        {
+            return danglingProperties;
+        }
+
+        omittedNames.AddRange(danglingProperties);
+        return omittedNames;
+    }
+
+    /// <summary>
+    /// Names each omitted property once, qualified by the type of the subject that owns it.
+    /// </summary>
+    private string DescribeOmittedProperties(List<(string SubjectId, List<string> PropertyNames)> omittedProperties)
+    {
+        var subjectTypes = new Dictionary<string, Type>(_subjectToId.Count);
+        foreach (var (subject, id) in _subjectToId)
+        {
+            subjectTypes[id] = subject.GetType();
+        }
+
+        var names = new List<string>();
+        foreach (var (subjectId, propertyNames) in omittedProperties)
+        {
+            var ownerName = subjectTypes.TryGetValue(subjectId, out var subjectType) ? subjectType.Name : null;
+            foreach (var propertyName in propertyNames)
+            {
+                var name = ownerName is null ? propertyName : $"{ownerName}.{propertyName}";
+                if (!names.Contains(name))
+                {
+                    names.Add(name);
+                }
+            }
+        }
+
+        return string.Join(", ", names);
     }
 
     private static bool HasDanglingReference(
@@ -239,7 +277,6 @@ internal sealed class SubjectUpdateBuilder
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
         PathVisited.Clear();
-        ReachabilityVisited.Clear();
         DeferredChanges.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];

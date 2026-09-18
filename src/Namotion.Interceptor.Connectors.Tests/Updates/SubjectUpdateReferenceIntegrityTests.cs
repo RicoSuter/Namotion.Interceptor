@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -9,30 +10,24 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateReferenceIntegrityTests
 {
     [Theory]
-    [InlineData("object")]
-    [InlineData("collection")]
-    [InlineData("dictionary")]
-    public void WhenABatchReferencesASubjectThatLeftTheGraph_ThenCreationOmitsTheReferencingProperty(string shape)
+    [InlineData(nameof(Person.Father))]
+    [InlineData(nameof(Person.Children))]
+    [InlineData(nameof(Person.Relationships))]
+    public void WhenABatchReferencesASubjectThatLeftTheGraph_ThenCreationOmitsTheReferencingProperty(string propertyName)
     {
         // Arrange
         var source = new Person(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { FirstName = "Root" };
         var removed = new Person { FirstName = "Ada" };
-        var propertyName = shape switch
+        object? empty = propertyName switch
         {
-            "collection" => nameof(Person.Children),
-            "dictionary" => nameof(Person.Relationships),
-            _ => nameof(Person.Father)
-        };
-        object? empty = shape switch
-        {
-            "collection" => new List<Person>(),
-            "dictionary" => new Dictionary<string, Person>(),
+            nameof(Person.Children) => new List<Person>(),
+            nameof(Person.Relationships) => new Dictionary<string, Person>(),
             _ => null
         };
-        object? referencing = shape switch
+        object? referencing = propertyName switch
         {
-            "collection" => new List<Person> { removed },
-            "dictionary" => new Dictionary<string, Person> { ["child"] = removed },
+            nameof(Person.Children) => new List<Person> { removed },
+            nameof(Person.Relationships) => new Dictionary<string, Person> { ["child"] = removed },
             _ => removed
         };
         var property = source.TryGetRegisteredProperty(propertyName)!;
@@ -59,9 +54,7 @@ public class SubjectUpdateReferenceIntegrityTests
     [Fact]
     public void WhenACompleteUpdateIsCreatedForAModelWithADetachedProjection_ThenTheSnapshotIsBuiltAndApplied()
     {
-        // Arrange: the WebSocket welcome handshake builds exactly this snapshot inside a generic catch
-        // that disposes the connection, so a throw here would drop every client of a model whose
-        // projection resolves after attachment, right after Hello, forever.
+        // Arrange: connector handshakes send this snapshot, so creating it must not throw
         var source = new Person(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry())
         {
             FirstName = "Ada",
@@ -107,6 +100,58 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey(nameof(Person.LastName)));
     }
 
+    [Fact]
+    public void WhenAComputedSubjectProjectionReturnsASubjectOfTheGraph_ThenTheCompleteUpdateOmitsIt()
+    {
+        // Arrange
+        var mother = new Person { FirstName = "Mother" };
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root", Mother = mother };
+        source.TryGetRegisteredSubject()!.AddDerivedProperty("Projection", typeof(Person), subject => ((Person)subject).Mother);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Assert
+        Assert.NotNull(mother.TryGetRegisteredSubject());
+        Assert.NotNull(update.Subjects[update.Root][nameof(Person.Mother)].Id);
+        Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey("Projection"));
+    }
+
+    [Fact]
+    public void WhenNestedPropertiesAreOmitted_ThenTheWarningNamesEachOnceWithItsOwnerType()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        context.AddService<ILoggerFactory>(new RecordingLoggerFactory(logger));
+        var mother = new PersonWithRoot { FirstName = "Mother" };
+        var person = new PersonWithRoot { FirstName = "Person", Mother = mother };
+        var root = new PersonRoot(context) { Name = "Root", Person = person };
+        var removed = new PersonWithRoot { FirstName = "Removed" };
+        person.Father = removed;
+        mother.Father = removed;
+        var timestamp = DateTimeOffset.UtcNow;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<PersonWithRoot?>(new PropertyReference(person, nameof(PersonWithRoot.Father)),
+                ChangeOrigin.Local, timestamp, null, null, removed),
+            SubjectPropertyChange.Create<PersonWithRoot?>(new PropertyReference(mother, nameof(PersonWithRoot.Father)),
+                ChangeOrigin.Local, timestamp, null, null, removed)
+        ];
+        person.Father = null; // the referenced subject leaves the graph while the batch still names it
+        mother.Father = null;
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert
+        Assert.DoesNotContain(update.Subjects.Values, properties => properties.ContainsKey(nameof(PersonWithRoot.Father)));
+        var warning = Assert.Single(logger.Warnings);
+        var ownedPropertyName = $"{nameof(PersonWithRoot)}.{nameof(PersonWithRoot.Father)}";
+        Assert.Equal(1, warning.Split(ownedPropertyName).Length - 1);
+        Assert.DoesNotContain($"{nameof(PersonRoot)}.", warning);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -134,70 +179,46 @@ public class SubjectUpdateReferenceIntegrityTests
         Assert.Equal(update.Root, Assert.Single(update.Subjects).Key);
     }
 
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public void WhenAnItemReferencesAMissingSubject_ThenApplyReportsFailureAndPreservesTheCollection(bool dictionary, bool insert)
+    [Fact]
+    public void WhenASubjectHoldingAttributeReferencesAnUnregisteredSubject_ThenTheCompleteUpdateOmitsTheAttribute()
     {
-        // Arrange
-        var child = new Person { FirstName = "Old" };
-        var target = new Person(InterceptorSubjectContext.Create().WithRegistry())
-        {
-            Children = [child],
-            Relationships = new Dictionary<string, Person> { ["child"] = child }
-        };
-        var originalChildren = target.Children;
-        var originalRelationships = target.Relationships;
-        object index = dictionary ? "child" : 0;
-        var propertyUpdate = new SubjectPropertyUpdate
-        {
-            Kind = dictionary ? SubjectPropertyUpdateKind.Dictionary : SubjectPropertyUpdateKind.Collection,
-            Count = 1,
-            Operations = insert ? [new SubjectCollectionOperation { Action = SubjectCollectionOperationType.Insert, Index = index, Id = "missing" }] : null,
-            Items = insert ? null : [new SubjectPropertyItemUpdate { Index = index, Id = "missing" }]
-        };
-        var update = new SubjectUpdate
-        {
-            Root = "1",
-            Subjects = new()
-            {
-                ["1"] = new()
-                {
-                    [dictionary ? "Relationships" : "Children"] = propertyUpdate,
-                    ["FirstName"] = new() { Kind = SubjectPropertyUpdateKind.Value, Value = "Updated" }
-                }
-            }
-        };
+        // Arrange: the list is filled in place, so its subject is never attached and has no Registry metadata.
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root" };
+        List<Person> friends = [];
+        source.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!
+            .AddAttribute("Friends", typeof(List<Person>), _ => friends, (_, value) => friends = (List<Person>)value!);
+        friends.Add(new Person { FirstName = "Detached" });
 
         // Act
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
 
         // Assert
-        Assert.Contains("missing", exception.Message);
-        Assert.Same(originalChildren, target.Children);
-        Assert.Same(originalRelationships, target.Relationships);
-        Assert.Same(child, Assert.Single(target.Children));
-        Assert.Same(child, target.Relationships!["child"]);
-        Assert.Equal("Old", child.FirstName);
-        Assert.Equal("Updated", target.FirstName);
+        var firstName = update.Subjects[update.Root][nameof(Person.FirstName)];
+        Assert.Equal("Root", firstName.Value);
+        Assert.False(firstName.Attributes?.ContainsKey("Friends") ?? false);
+        Assert.Single(update.Subjects);
     }
 
-    [Fact]
-    public void WhenABatchUpdatesAChildAndThenClearsItsReference_ThenTheClearedReferenceCarriesNoStaleId()
+    [Theory]
+    [InlineData(nameof(Person.FirstName))]
+    [InlineData(nameof(Person.Children))]
+    public void WhenABatchUpdatesAChildAndThenClearsItsReference_ThenTheClearedReferenceCarriesNoStaleId(string childPropertyName)
     {
-        // Arrange: the child's own change builds the path back to the root, which stamps the parent
-        // reference with the child's ID, and the clear then reuses that same property update.
+        // Arrange: a value change on the child runs after the clear, but a subject-holding one runs before it
+        // and builds the path back to the root, which stamps the reference with the child's ID the clear reuses.
         var source = new Person(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
         var mother = new Person { FirstName = "Ada" };
         source.Mother = mother;
+        var oldChildren = mother.Children;
+        mother.Children = [new Person { FirstName = "Kid" }];
         var timestamp = DateTimeOffset.UtcNow;
         SubjectPropertyChange[] changes =
         [
-            SubjectPropertyChange.Create<string?>(new PropertyReference(mother, nameof(Person.FirstName)),
-                ChangeOrigin.Local, timestamp, null, "Ada", "Grace"),
+            childPropertyName == nameof(Person.Children)
+                ? SubjectPropertyChange.Create<List<Person>>(new PropertyReference(mother, nameof(Person.Children)),
+                    ChangeOrigin.Local, timestamp, null, oldChildren, mother.Children)
+                : SubjectPropertyChange.Create<string?>(new PropertyReference(mother, nameof(Person.FirstName)),
+                    ChangeOrigin.Local, timestamp, null, "Ada", "Grace"),
             SubjectPropertyChange.Create<Person?>(new PropertyReference(source, nameof(Person.Mother)),
                 ChangeOrigin.Local, timestamp, null, mother, null)
         ];

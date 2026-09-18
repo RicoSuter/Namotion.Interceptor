@@ -251,10 +251,46 @@ public class SubjectUpdateBatchTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
 
-        // Assert: on the update, because the C# applier applies a payload at the first reference to its id only
+        // Assert: on the update, since the rule is about what the producer states
         var fatherProperties = update.Subjects[update.Subjects[update.Root][nameof(Person.Father)].Id!];
         Assert.Equal("Shared", fatherProperties[nameof(Person.LastName)].Value);
         Assert.Equal(1, fatherProperties[nameof(Person.Children)].Count);
+    }
+
+    [Theory]
+    [InlineData(nameof(Person.LastName), false)]
+    [InlineData(nameof(Person.LastName), true)]
+    [InlineData(nameof(Person.Children), false)]
+    [InlineData(nameof(Person.Children), true)]
+    public void WhenASubjectAssignedToASecondReferenceAlsoChanges_ThenItsFirstParentPathIsStated(string changedPropertyName, bool assignmentFirst)
+    {
+        // Arrange
+        var mother = new Person { FirstName = "Mother", LastName = "Old" };
+        var source = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root", Mother = mother };
+        var oldChildren = mother.Children;
+        mother.LastName = "New";
+        mother.Children = [new Person { FirstName = "Inserted" }];
+        source.Father = mother;
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var memberChange = changedPropertyName == nameof(Person.Children)
+            ? SubjectPropertyChange.Create<List<Person>>(new PropertyReference(mother, nameof(Person.Children)),
+                ChangeOrigin.Local, timestamp, null, oldChildren, mother.Children)
+            : SubjectPropertyChange.Create<string?>(new PropertyReference(mother, nameof(Person.LastName)),
+                ChangeOrigin.Local, timestamp, null, "Old", "New");
+        var assignment = SubjectPropertyChange.Create<Person?>(new PropertyReference(source, nameof(Person.Father)),
+            ChangeOrigin.Local, timestamp, null, null, mother);
+        SubjectPropertyChange[] changes = assignmentFirst ? [assignment, memberChange] : [memberChange, assignment];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
+
+        // Assert: on the update, since the rule is about what the producer states
+        var rootProperties = update.Subjects[update.Root];
+        var motherId = rootProperties[nameof(Person.Mother)].Id;
+        Assert.Equal(rootProperties[nameof(Person.Father)].Id, motherId);
+        Assert.Equal("New", update.Subjects[motherId!][nameof(Person.LastName)].Value);
+        Assert.Equal(1, update.Subjects[motherId!][nameof(Person.Children)].Count);
     }
 
     [Theory]
@@ -288,6 +324,41 @@ public class SubjectUpdateBatchTests
         Assert.Null(childrenUpdate.Operations);
         Assert.Equal(2, childrenUpdate.Count);
         Assert.Equal(new[] { "First", "Second" }, target.Mother!.Children.Select(child => child.FirstName));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAnAssignedSubjectsSubjectHoldingAttributeAlsoChangesInTheSameBatch_ThenItsCompleteValueArrives(bool assignmentFirst)
+    {
+        // Arrange
+        var source = new Person(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { FirstName = "Root" };
+        var firstFriend = new Person { FirstName = "First" };
+        var secondFriend = new Person { FirstName = "Second" };
+        var assigned = new Person { FirstName = "Assigned" };
+        List<Person> friends = [firstFriend];
+        source.Father = assigned;
+        var attribute = assigned.TryGetRegisteredSubject()!.TryGetProperty(nameof(Person.FirstName))!
+            .AddAttribute("Friends", typeof(List<Person>), _ => friends, (_, value) => friends = (List<Person>)value!);
+        var oldFriends = friends;
+        attribute.SetValue(new List<Person> { firstFriend, secondFriend });
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var assignment = SubjectPropertyChange.Create<Person?>(new PropertyReference(source, nameof(Person.Father)),
+            ChangeOrigin.Local, timestamp, null, null, assigned);
+        var attributeChange = SubjectPropertyChange.Create<object?>(attribute.Reference,
+            ChangeOrigin.Local, timestamp, null, oldFriends, friends);
+        SubjectPropertyChange[] changes = assignmentFirst ? [assignment, attributeChange] : [attributeChange, assignment];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes, []);
+
+        // Assert
+        var assignedProperties = update.Subjects[update.Subjects[update.Root][nameof(Person.Father)].Id!];
+        var friendsUpdate = assignedProperties[nameof(Person.FirstName)].Attributes!["Friends"];
+        Assert.Null(friendsUpdate.Operations);
+        Assert.Equal(2, friendsUpdate.Count);
+        Assert.Equal(2, friendsUpdate.Items!.Count);
     }
 
     private static IInterceptorSubjectContext CreateContextWritingOnAttach(Action<Person> write)

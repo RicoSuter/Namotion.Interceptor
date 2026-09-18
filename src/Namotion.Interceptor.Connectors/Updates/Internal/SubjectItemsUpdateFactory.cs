@@ -12,10 +12,7 @@ internal static class SubjectItemsUpdateFactory
     private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool = new(() => new CollectionDiffBuilder());
 
     /// <summary>
-    /// Emits one Insert operation per new item and completes its payload. A collection indexes by
-    /// position and a dictionary by key, which is the only difference between the two diff paths, so
-    /// <typeparamref name="TIndex"/> carries it and each instantiation boxes exactly what the index
-    /// assignment boxed before.
+    /// Emits one Insert operation per new item, indexed by position or key, and completes its payload.
     /// </summary>
     private static void AddInsertOperations<TIndex>(
         List<(TIndex Index, IInterceptorSubject Item)>? newItems,
@@ -27,8 +24,7 @@ internal static class SubjectItemsUpdateFactory
 
         foreach (var (index, item) in newItems)
         {
-            var itemId = builder.GetOrCreateId(item);
-            SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+            var itemId = SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
 
             operations ??= [];
             operations.Add(new SubjectCollectionOperation
@@ -59,9 +55,7 @@ internal static class SubjectItemsUpdateFactory
 
         for (var i = 0; i < items.Count; i++)
         {
-            var item = items[i];
-            var itemId = builder.GetOrCreateId(item);
-            SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+            var itemId = SubjectUpdateFactory.ProcessSubjectComplete(items[i], builder);
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
@@ -161,8 +155,7 @@ internal static class SubjectItemsUpdateFactory
         {
             if (entry.Value is not IInterceptorSubject subject) continue;
 
-            var itemId = builder.GetOrCreateId(subject);
-            SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
+            var itemId = SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
