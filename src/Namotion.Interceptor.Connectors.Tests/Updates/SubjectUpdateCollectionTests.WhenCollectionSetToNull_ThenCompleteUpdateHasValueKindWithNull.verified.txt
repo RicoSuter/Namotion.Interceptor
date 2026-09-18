@@ -11,6 +11,7 @@
       },
       Lookup: {
         Kind: Dictionary,
+        Mode: Complete,
         Count: 0
       },
       Name: {

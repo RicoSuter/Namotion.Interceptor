@@ -12,6 +12,31 @@ internal static class SubjectItemsUpdateFactory
     private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool = new(() => new CollectionDiffBuilder());
 
     /// <summary>
+    /// Emits one Insert operation per new item, indexed by position or key, and completes its payload.
+    /// </summary>
+    private static void AddInsertOperations<TIndex>(
+        List<(TIndex Index, IInterceptorSubject Item)>? newItems,
+        ref List<SubjectCollectionOperation>? operations,
+        SubjectUpdateBuilder builder)
+    {
+        if (newItems is null)
+            return;
+
+        foreach (var (index, item) in newItems)
+        {
+            var itemId = SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+
+            operations ??= [];
+            operations.Add(new SubjectCollectionOperation
+            {
+                Action = SubjectCollectionOperationType.Insert,
+                Index = index!,
+                Id = itemId
+            });
+        }
+    }
+
+    /// <summary>
     /// Builds a complete collection update with all items.
     /// </summary>
     internal static void BuildCollectionComplete(
@@ -24,15 +49,14 @@ internal static class SubjectItemsUpdateFactory
         if (collectionValue is null)
             return;
 
+        update.Mode = SubjectPropertyUpdateMode.Complete;
         var items = SubjectValueConvert.ToSubjectList(collectionValue);
         update.Count = items.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
         for (var i = 0; i < items.Count; i++)
         {
-            var item = items[i];
-            var itemId = builder.GetOrCreateId(item);
-            SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+            var itemId = SubjectUpdateFactory.ProcessSubjectComplete(items[i], builder);
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
@@ -69,23 +93,7 @@ internal static class SubjectItemsUpdateFactory
                 out var newItemsToProcess,
                 out var reorderedItems);
 
-            // Add Insert operations for new items
-            if (newItemsToProcess is not null)
-            {
-                foreach (var (index, item) in newItemsToProcess)
-                {
-                    var itemId = builder.GetOrCreateId(item);
-                    SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
-
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Insert,
-                        Index = index,
-                        Id = itemId
-                    });
-                }
-            }
+            AddInsertOperations(newItemsToProcess, ref operations, builder);
 
             // Add Move operations for reordered items
             if (reorderedItems is not null)
@@ -106,9 +114,8 @@ internal static class SubjectItemsUpdateFactory
             List<SubjectPropertyItemUpdate>? updates = null;
             foreach (var item in changeBuilder.GetRetainedItems())
             {
-                if (builder.SubjectHasUpdates(item))
+                if (builder.TryGetIdWithUpdates(item) is { } itemId)
                 {
-                    var itemId = builder.GetOrCreateId(item);
                     var newIndex = changeBuilder.GetNewIndex(item);
                     updates ??= [];
                     updates.Add(new SubjectPropertyItemUpdate
@@ -142,6 +149,7 @@ internal static class SubjectItemsUpdateFactory
         if (dictionaryValue is null)
             return;
 
+        update.Mode = SubjectPropertyUpdateMode.Complete;
         var dictionary = SubjectValueConvert.ToSubjectDictionary(dictionaryValue);
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
@@ -149,8 +157,7 @@ internal static class SubjectItemsUpdateFactory
         {
             if (entry.Value is not IInterceptorSubject subject) continue;
 
-            var itemId = builder.GetOrCreateId(subject);
-            SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
+            var itemId = SubjectUpdateFactory.ProcessSubjectComplete(subject, builder);
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
@@ -208,23 +215,7 @@ internal static class SubjectItemsUpdateFactory
                 }
             }
 
-            // Add Insert operations for new items
-            if (newItemsToProcess is not null)
-            {
-                foreach (var (key, item) in newItemsToProcess)
-                {
-                    var itemId = builder.GetOrCreateId(item);
-                    SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
-
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Insert,
-                        Index = key,
-                        Id = itemId
-                    });
-                }
-            }
+            AddInsertOperations(newItemsToProcess, ref operations, builder);
 
             // Generate sparse updates for entries retained by reference (common items).
             // changeBuilder already partitioned new-vs-retained during GetDictionaryChanges,
@@ -232,10 +223,9 @@ internal static class SubjectItemsUpdateFactory
             List<SubjectPropertyItemUpdate>? updates = null;
             foreach (var (key, item) in changeBuilder.GetRetainedDictionaryItems())
             {
-                if (!builder.SubjectHasUpdates(item))
+                if (builder.TryGetIdWithUpdates(item) is not { } itemId)
                     continue;
 
-                var itemId = builder.GetOrCreateId(item);
                 updates ??= [];
                 updates.Add(new SubjectPropertyItemUpdate
                 {

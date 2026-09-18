@@ -439,8 +439,7 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal("Parent", target.Name);
         Assert.NotNull(target.Child);
         Assert.Equal("Child", target.Child.Name);
-        // Note: The circular reference back to parent won't be restored since
-        // we create new instances. This is expected behavior.
+        Assert.Same(target, target.Child.Parent);
     }
 
     [Fact]
@@ -460,7 +459,47 @@ public partial class SubjectUpdateExtensionsTests
 
         // Assert
         Assert.Equal("SelfRef", target.Name);
-        // Self-reference won't be restored to point to target itself
+        Assert.Same(target, target.Self);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAnUpdateNamesOneSubjectFromTwoPositions_ThenBothPositionsHoldOneInstance(bool collection)
+    {
+        // Arrange
+        var target = new Person(InterceptorSubjectContext.Create().WithRegistry());
+        var firstPosition = collection
+            ? new SubjectPropertyUpdate
+            {
+                Kind = SubjectPropertyUpdateKind.Collection,
+                Count = 1,
+                Items = [new SubjectPropertyItemUpdate { Index = 0, Id = "2" }]
+            }
+            : new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "2" };
+        var update = new SubjectUpdate
+        {
+            Root = "1",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["1"] = new()
+                {
+                    [collection ? nameof(Person.Children) : nameof(Person.Father)] = firstPosition,
+                    [nameof(Person.Mother)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "2" }
+                },
+                ["2"] = new()
+                {
+                    [nameof(Person.FirstName)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Shared" }
+                }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal("Shared", target.Mother!.FirstName);
+        Assert.Same(target.Mother, collection ? Assert.Single(target.Children) : target.Father);
     }
 
     [Fact]
@@ -825,11 +864,12 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingUpdateWithMissingSubjectId_ThenItIsIgnored()
+    public void WhenApplyingUpdateWithMissingSubjectId_ThenItReportsFailureAndPreservesTheExistingSubject()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new Person(context) { FirstName = "Original" };
+        var father = new Person { FirstName = "Existing" };
+        var target = new Person(context) { FirstName = "Original", Father = father };
 
         var update = new SubjectUpdate
         {
@@ -847,11 +887,14 @@ public partial class SubjectUpdateExtensionsTests
             }
         };
 
-        // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
 
-        // Assert - Father should remain null (not set to anything)
-        Assert.Null(target.Father);
+        // Assert
+        Assert.Contains("nonexistent", exception.Message);
+        Assert.Same(father, target.Father);
+        Assert.Equal("Existing", father.FirstName);
     }
 
     [Fact]
