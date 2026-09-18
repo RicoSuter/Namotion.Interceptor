@@ -37,7 +37,7 @@ public class OpcUaClientDiagnosticsTests
         NodeId? sessionId = diagnostics.SessionId;
 
         // Assert
-        Assert.False(diagnostics.IsOperational);
+        Assert.Null(diagnostics.IsOperational);
         Assert.Null(diagnostics.OperationalChangeTime);
         Assert.Null(diagnostics.LastError);
         Assert.Null(diagnostics.StartTime);
@@ -381,8 +381,11 @@ public class OpcUaClientDiagnosticsTests
         using var gettersStarted = new CountdownEvent(cases.Length);
         using var gettersCompleted = new CountdownEvent(cases.Length);
 
+        // Every holder blocks while holding a lock and every getter then blocks on one of those
+        // locks, so up to twice the case count is parked at once. The pool cannot promise that many
+        // threads on a low core agent, and a holder that is never scheduled hangs locksAcquired.
         var lockHolders = cases
-            .Select(testCase => Task.Run(() =>
+            .Select(testCase => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
             {
                 lock (GetFirstConcurrentDictionaryLock(testCase.Owner, testCase.FieldName))
                 {
@@ -401,7 +404,7 @@ public class OpcUaClientDiagnosticsTests
         {
             Assert.True(locksAcquired.Wait(TimeSpan.FromSeconds(5)), "The dictionary locks were not acquired.");
             getterTasks = cases
-                .Select(testCase => Task.Run(() =>
+                .Select(testCase => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
                 {
                     gettersStarted.Signal();
                     try

@@ -366,6 +366,47 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
+    public void WhenApplyingDictionaryValueReplacedAtSameKey_ThenEntryIsReplacedNotDeleted()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var originalItem = new CycleTestNode(context) { Name = "Item1" };
+        var source = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = originalItem }
+        };
+        var target = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new(context) { Name = "Item1" }
+            }
+        };
+
+        // Make a change - replace the value at an existing key with a different subject
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new(context) { Name = "Replacement" }
+            };
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.True(target.Lookup.ContainsKey("key1"), "The replaced entry must survive the round trip.");
+        Assert.Equal("Replacement", target.Lookup["key1"].Name);
+        Assert.Single(target.Lookup);
+    }
+
+    [Fact]
     public async Task WhenApplyingCircularReference_ThenItWorks()
     {
         // Arrange
@@ -735,11 +776,12 @@ public partial class SubjectUpdateExtensionsTests
 
 
     [Fact]
-    public void WhenApplyingUpdateWithMissingSubjectId_ThenSubjectIsCreatedForLaterPropertyUpdates()
+    public void WhenApplyingUpdateWithMissingSubjectId_ThenItReportsFailureAndPreservesTheExistingSubject()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new Person(context) { FirstName = "Original" };
+        var father = new Person { FirstName = "Existing" };
+        var target = new Person(context) { FirstName = "Original", Father = father };
 
         var update = new SubjectUpdate
         {
@@ -748,23 +790,30 @@ public partial class SubjectUpdateExtensionsTests
             {
                 ["1"] = new()
                 {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Updated"
+                    },
                     ["Father"] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Object,
-                        Id = "new-father" // References a subject whose properties may arrive in a later batch
+                        Id = "nonexistent" // complete, as the update lists no complete IDs, but without a payload
                     }
                 }
             }
         };
 
-        // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        // Act
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
 
-        // Assert - Father should be created so future value updates can find it by ID
-        Assert.NotNull(target.Father);
-        Assert.Equal("new-father", ((IInterceptorSubject)target.Father).TryGetSubjectId());
+        // Assert
+        Assert.Contains("nonexistent", exception.Message);
+        Assert.Same(father, target.Father);
+        Assert.Equal("Existing", father.FirstName);
+        Assert.Equal("Updated", target.FirstName);
     }
-
 
     [Fact]
     public void WhenApplyingCompleteCollectionWithNewItem_ThenItemIsAppended()
@@ -1078,117 +1127,44 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal("NewItem", target.IntLookup[2].Name);
     }
 
-    [Fact]
-    public void WhenObjectRefPropertiesArriveInLaterBatch_ThenSubjectIsCreatedAndLaterUpdateApplied()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var target = new Person(context) { FirstName = "Parent" };
-
-        // Batch 1: Structural update - ObjectRef points to new subject, but NO properties for it
-        var batch1 = new SubjectUpdate
-        {
-            Root = "root",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                ["root"] = new()
-                {
-                    ["Father"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Object,
-                        Id = "father-1"
-                    }
-                }
-                // Note: no entry for "father-1" - properties arrive in next batch
-            }
-        };
-
-        target.ApplySubjectUpdate(batch1, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
-
-        // Assert: Father created with default values, ID registered
-        Assert.NotNull(target.Father);
-        Assert.Equal("father-1", ((IInterceptorSubject)target.Father).TryGetSubjectId());
-        Assert.Null(target.Father.FirstName); // defaults
-
-        // Batch 2: Value-only update for the same subject
-        var batch2 = new SubjectUpdate
-        {
-            Root = "root",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                ["father-1"] = new()
-                {
-                    ["FirstName"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Value,
-                        Value = "John"
-                    }
-                }
-            }
-        };
-
-        target.ApplySubjectUpdate(batch2, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
-
-        // Assert: Value update applied to the same subject
-        Assert.NotNull(target.Father);
-        Assert.Equal("John", target.Father.FirstName);
-        Assert.Equal("father-1", ((IInterceptorSubject)target.Father).TryGetSubjectId());
-    }
-
-    [Fact]
-    public void WhenCollectionItemPropertiesArriveInLaterBatch_ThenItemIsCreatedAndLaterUpdateApplied()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAStructuralReferenceArrivesWithoutItsPayload_ThenNoSubjectIsCreatedUntilAnUpdateCarriesIt(bool collection)
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var target = new Person(context) { FirstName = "Parent", Children = [] };
-
-        // Batch 1: Collection update with new item, but NO properties for it
-        var batch1 = new SubjectUpdate
+        var reference = collection
+            ? new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Collection, Items = [new SubjectPropertyItemUpdate { Id = "child-1" }] }
+            : new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "child-1" };
+        var propertyName = collection ? nameof(Person.Children) : nameof(Person.Father);
+        var withoutPayload = new SubjectUpdate
         {
             Root = "root",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            Subjects = new() { ["root"] = new() { [propertyName] = reference } }
+        };
+        var withPayload = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
             {
-                ["root"] = new()
-                {
-                    ["Children"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Items = [new SubjectPropertyItemUpdate { Id = "child-1" }]
-                    }
-                }
-                // Note: no entry for "child-1"
+                ["root"] = new() { [propertyName] = reference },
+                ["child-1"] = new() { ["FirstName"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Alice" } }
             }
         };
 
-        target.ApplySubjectUpdate(batch1, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        // Act
+        Assert.Throws<InvalidOperationException>(() =>
+            target.ApplySubjectUpdate(withoutPayload, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+        var createdWithoutPayload = collection ? target.Children.Count : target.Father is null ? 0 : 1;
+        target.ApplySubjectUpdate(withPayload, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
-        // Assert: Child created with defaults, ID registered
-        Assert.Single(target.Children);
-        Assert.Equal("child-1", ((IInterceptorSubject)target.Children[0]).TryGetSubjectId());
-
-        // Batch 2: Value update for the child
-        var batch2 = new SubjectUpdate
-        {
-            Root = "root",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                ["child-1"] = new()
-                {
-                    ["FirstName"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Value,
-                        Value = "Alice"
-                    }
-                }
-            }
-        };
-
-        target.ApplySubjectUpdate(batch2, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
-
-        // Assert: Value applied to same child
-        Assert.Single(target.Children);
-        Assert.Equal("Alice", target.Children[0].FirstName);
-        Assert.Equal("child-1", ((IInterceptorSubject)target.Children[0]).TryGetSubjectId());
+        // Assert
+        Assert.Equal(0, createdWithoutPayload);
+        var child = collection ? Assert.Single(target.Children) : target.Father!;
+        Assert.Equal("Alice", child.FirstName);
+        Assert.Equal("child-1", ((IInterceptorSubject)child).TryGetSubjectId());
     }
 
     [Fact]
@@ -1303,7 +1279,7 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenObjectRefNotFoundAndCompleteSubjectIdsNull_ThenCreatesSubject()
+    public void WhenObjectRefNotFoundAndCompleteSubjectIdsNull_ThenCreatesSubjectFromItsPayload()
     {
         // Arrange: null CompleteSubjectIds means "all subjects are complete" (e.g., complete update)
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -1321,7 +1297,8 @@ public partial class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Object,
                         Id = "new-father"
                     }
-                }
+                },
+                ["new-father"] = new()
             },
             CompleteSubjectIds = null // null = all complete (backward compatible)
         };
@@ -1331,6 +1308,7 @@ public partial class SubjectUpdateExtensionsTests
 
         // Assert: Father created (null means all complete)
         Assert.NotNull(target.Father);
+        Assert.Equal("new-father", ((IInterceptorSubject)target.Father).TryGetSubjectId());
     }
 
     [Fact]

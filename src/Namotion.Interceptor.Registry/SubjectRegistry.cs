@@ -28,7 +28,10 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     /// </summary>
     internal static long DuplicateSubjectIdAttachCount;
 
-    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
+        ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
+
+    private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
 
@@ -51,7 +54,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             if (snapshot is not null)
                 return snapshot;
 
-            snapshot = _knownSubjects.ToImmutableDictionary();
+            snapshot = EmptyKnownSubjects.AddRange(_knownSubjects);
             Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
             return snapshot;
         }
@@ -114,6 +117,34 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
             // Only populate reverse index for attached subjects; the lifecycle
             // attach handler will register IDs from Data for unattached subjects.
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    void ISubjectIdRegistryWriter.ReplaceSubjectId(IInterceptorSubject subject, string id)
+    {
+        lock (_knownSubjects)
+        {
+            if (_subjectIdToSubject.TryGetValue(id, out var existing) && !ReferenceEquals(existing, subject))
+            {
+                throw new InvalidOperationException(
+                    $"Subject ID '{id}' is already in use by a different subject.");
+            }
+
+            var oldId = subject.TryGetSubjectId();
+            if (oldId is not null &&
+                _subjectIdToSubject.TryGetValue(oldId, out var holder) && ReferenceEquals(holder, subject))
+            {
+                _subjectIdToSubject.Remove(oldId);
+            }
+
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+
             if (_knownSubjects.ContainsKey(subject))
             {
                 _subjectIdToSubject[id] = subject;

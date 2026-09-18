@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -11,30 +12,46 @@ internal sealed class SubjectUpdateBuilder
 {
     private Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> _subjects = new();
 
-    private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();
+    private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<
-        SubjectPropertyUpdate, (RegisteredSubjectProperty Property, 
+        SubjectPropertyUpdate, (RegisteredSubjectProperty Property,
         IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
+
+    private readonly HashSet<IInterceptorSubject> _completeSubjects = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<RegisteredSubject> _rootedSubjects = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<RegisteredSubject> _unrootedSubjects = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<RegisteredSubject> _reachableSubjects = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<RegisteredSubject> _unreachableSubjects = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<RegisteredSubject> _visitedSubjects = new(ReferenceEqualityComparer.Instance);
+    private readonly Stack<RegisteredSubject> _pendingSubjects = new();
+
+    private readonly HashSet<PropertyReference> _changedProperties = new(PropertyReference.Comparer);
+    private ChangeMerger? _changeMerger;
+    private HashSet<string>? _completeSubjectIds;
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
 
-    public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
+    public IInterceptorSubject RootSubject { get; private set; } = null!;
+
+    public bool IsPartialUpdate { get; private set; }
 
     /// <summary>
-    /// Tracks subjects whose IDs were first created by a value change (ProcessPropertyChange),
-    /// not by a structural reference (BuildObjectReference/ProcessSubjectComplete).
-    /// When a structural reference later encounters such a subject, ProcessSubjectComplete
-    /// must still be called to populate the remaining properties that weren't in the change.
+    /// The value changes of a partial update, held back until its structural changes are built, with the
+    /// index of each change and its registered property.
     /// </summary>
-    public HashSet<IInterceptorSubject> SubjectsWithPartialChanges { get; } = [];
+    public List<(int Index, RegisteredSubjectProperty Property)> ValueChanges { get; } = [];
 
-    private bool _isPartialUpdate;
-    private HashSet<string>? _completeSubjectIds;
+    /// <summary>
+    /// The members of the previous value of the collection change being built. Only a change diffs against
+    /// a previous value, and the builds it nests to complete new members never do, so one set serves all.
+    /// </summary>
+    public HashSet<IInterceptorSubject> PreviousItems { get; } = new(ReferenceEqualityComparer.Instance);
 
-    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors, bool isPartialUpdate = false)
+    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors, bool isPartialUpdate)
     {
         Processors = processors;
-        _isPartialUpdate = isPartialUpdate;
+        RootSubject = rootSubject;
+        IsPartialUpdate = isPartialUpdate;
         if (isPartialUpdate)
         {
             // A partial update always carries the set, even when it stays empty. An absent set means
@@ -42,37 +59,216 @@ internal sealed class SubjectUpdateBuilder
             // default-valued subjects for ids a reorder or a removal only references.
             _completeSubjectIds = [];
         }
+
         GetOrCreateId(rootSubject);
     }
 
     /// <summary>
-    /// Marks a subject ID as having complete state in this update.
-    /// Only tracked for partial updates (complete updates are implicitly all-complete).
+    /// Collapses repeated changes of one property to a single change from its oldest previous value to its
+    /// newest value, so that neither an intermediate value nor the arrival order reaches the update.
     /// </summary>
-    public void MarkSubjectComplete(string subjectId)
+    public ReadOnlySpan<SubjectPropertyChange> MergeChanges(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        if (_isPartialUpdate)
+        // A batch from a change queue is merged already, so only the check for a repeat is paid then.
+        try
         {
-            _completeSubjectIds ??= [];
-            _completeSubjectIds.Add(subjectId);
+            for (var i = 0; i < changes.Length; i++)
+            {
+                if (!_changedProperties.Add(changes[i].Property))
+                    return (_changeMerger ??= new ChangeMerger()).Merge(changes).Span;
+            }
+
+            return changes;
+        }
+        finally
+        {
+            _changedProperties.Clear();
         }
     }
 
-    public string GetOrCreateId(IInterceptorSubject subject)
-        => GetOrCreateIdWithStatus(subject).Id;
+    public bool IsIncluded(RegisteredSubjectProperty property)
+    {
+        for (var i = 0; i < Processors.Length; i++)
+        {
+            if (!Processors[i].IsIncluded(property))
+                return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
-    /// Gets an existing ID for a subject, or creates a new one.
-    /// Returns true if a new ID was created, false if the subject already had an ID.
+    /// Whether an update can carry <paramref name="property"/>: it is no computed projection, and the processors
+    /// include it and, for an attribute, the property it is attached to, whose update the attribute is part of.
     /// </summary>
-    public (string Id, bool IsNew) GetOrCreateIdWithStatus(IInterceptorSubject subject)
-    {
-        if (_subjectToId.TryGetValue(subject, out var id))
-            return (id, false);
+    public bool IsPublished(RegisteredSubjectProperty property)
+        => !SubjectUpdateFactory.IsComputedSubjectProjection(property) && IsIncludedWithAttributedProperties(property);
 
-        id = subject.GetOrAddSubjectId();
-        _subjectToId[subject] = id;
-        return (id, true);
+    /// <summary>
+    /// Whether the processors include <paramref name="property"/> and, for an attribute, every property it is
+    /// attached to. A property a subject is attached through is never a computed projection.
+    /// </summary>
+    private bool IsIncludedWithAttributedProperties(RegisteredSubjectProperty property)
+    {
+        while (IsIncluded(property))
+        {
+            if (!property.IsAttribute)
+                return true;
+
+            property = property.GetAttributedProperty();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="subject"/> is reachable from the root through published properties, which a
+    /// subject can fail to be while it is attached: behind an excluded property, outside the root's subtree,
+    /// or in a cycle of references that nothing else references.
+    /// </summary>
+    public bool IsReachable(RegisteredSubject subject)
+    {
+        if (ReferenceEquals(subject.Subject, RootSubject) || _rootedSubjects.Contains(subject) ||
+            _reachableSubjects.Contains(subject) || IsRooted(subject))
+        {
+            return true;
+        }
+
+        return !_unreachableSubjects.Contains(subject) && IsReachableThroughAnyParents(subject);
+    }
+
+    /// <summary>
+    /// Whether a complete payload stating <paramref name="item"/> at a position of <paramref name="property"/>
+    /// has to complete it. In a partial update it does only where the item is placed canonically: at its first
+    /// published parent, or anywhere when following first published parents from it does not lead to the root.
+    /// A canonically placed item is known to the receiver, or is completed along that way wherever this batch
+    /// added an edge of it.
+    /// </summary>
+    public bool IsExpandedThrough(IInterceptorSubject item, RegisteredSubjectProperty? property)
+    {
+        if (!IsPartialUpdate || item.TryGetRegisteredSubject() is not { } registeredItem)
+            return true;
+
+        var firstParent = GetFirstPublishedParent(registeredItem);
+        return firstParent is null || ReferenceEquals(firstParent, property) || !IsRooted(registeredItem);
+    }
+
+    private RegisteredSubjectProperty? GetFirstPublishedParent(RegisteredSubject subject)
+    {
+        foreach (var parent in subject.Parents)
+        {
+            if (IsIncludedWithAttributedProperties(parent.Property))
+                return parent.Property;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether following the first published parent of every subject from <paramref name="subject"/> upwards
+    /// leads to the root, which is how a tree reaches its root. Every subject on the way shares the answer.
+    /// </summary>
+    private bool IsRooted(RegisteredSubject subject)
+    {
+        try
+        {
+            var current = subject;
+            while (true)
+            {
+                if (ReferenceEquals(current.Subject, RootSubject) || _rootedSubjects.Contains(current))
+                {
+                    AddVisitedSubjects(_rootedSubjects);
+                    return true;
+                }
+
+                if (_unrootedSubjects.Contains(current) || !_visitedSubjects.Add(current) ||
+                    GetFirstPublishedParent(current) is not { } parent)
+                {
+                    AddVisitedSubjects(_unrootedSubjects);
+                    return false;
+                }
+
+                current = parent.Parent;
+            }
+        }
+        finally
+        {
+            _visitedSubjects.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Searches every published parent upwards. A search that finds no way proves every subject it visited
+    /// unreachable, while a way it finds is only proven for the subject asked about.
+    /// </summary>
+    private bool IsReachableThroughAnyParents(RegisteredSubject subject)
+    {
+        try
+        {
+            _visitedSubjects.Add(subject);
+            _pendingSubjects.Push(subject);
+            while (_pendingSubjects.TryPop(out var current))
+            {
+                foreach (var parent in current.Parents)
+                {
+                    if (!IsIncludedWithAttributedProperties(parent.Property))
+                        continue;
+
+                    var parentSubject = parent.Property.Parent;
+                    if (ReferenceEquals(parentSubject.Subject, RootSubject) ||
+                        _rootedSubjects.Contains(parentSubject) || _reachableSubjects.Contains(parentSubject))
+                    {
+                        _reachableSubjects.Add(subject);
+                        return true;
+                    }
+
+                    if (!_unreachableSubjects.Contains(parentSubject) && _visitedSubjects.Add(parentSubject))
+                        _pendingSubjects.Push(parentSubject);
+                }
+            }
+
+            AddVisitedSubjects(_unreachableSubjects);
+            return false;
+        }
+        finally
+        {
+            _pendingSubjects.Clear();
+            _visitedSubjects.Clear();
+        }
+    }
+
+    private void AddVisitedSubjects(HashSet<RegisteredSubject> subjects)
+    {
+        foreach (var subject in _visitedSubjects)
+        {
+            subjects.Add(subject);
+        }
+    }
+
+    public bool IsComplete(IInterceptorSubject subject) => _completeSubjects.Contains(subject);
+
+    /// <summary>
+    /// Records that the update carries the complete state of <paramref name="subject"/> and returns its
+    /// property updates, which the caller fills.
+    /// </summary>
+    public Dictionary<string, SubjectPropertyUpdate> MarkComplete(IInterceptorSubject subject)
+    {
+        _completeSubjects.Add(subject);
+
+        var subjectId = GetOrCreateId(subject);
+        _completeSubjectIds?.Add(subjectId);
+        return GetOrCreateProperties(subjectId);
+    }
+
+    public string GetOrCreateId(IInterceptorSubject subject)
+    {
+        if (!_subjectToId.TryGetValue(subject, out var id))
+        {
+            id = subject.GetOrAddSubjectId();
+            _subjectToId[subject] = id;
+        }
+
+        return id;
     }
 
     public Dictionary<string, SubjectPropertyUpdate> GetOrCreateProperties(string subjectId)
@@ -82,6 +278,7 @@ internal sealed class SubjectUpdateBuilder
             properties = new Dictionary<string, SubjectPropertyUpdate>();
             _subjects[subjectId] = properties;
         }
+
         return properties;
     }
 
@@ -145,11 +342,18 @@ internal sealed class SubjectUpdateBuilder
         _subjects = new(); // create a fresh dictionary, old one transferred to result
         _subjectToId.Clear();
         _propertyUpdates.Clear();
-
-        ProcessedSubjects.Clear();
-        SubjectsWithPartialChanges.Clear();
+        _completeSubjects.Clear();
+        _rootedSubjects.Clear();
+        _unrootedSubjects.Clear();
+        _reachableSubjects.Clear();
+        _unreachableSubjects.Clear();
+        _changeMerger?.Reset();
+        _changedProperties.Clear();
+        ValueChanges.Clear();
+        PreviousItems.Clear();
         Processors = [];
-        _isPartialUpdate = false;
+        RootSubject = null!;
+        IsPartialUpdate = false;
         _completeSubjectIds = null;
     }
 
@@ -160,16 +364,19 @@ internal sealed class SubjectUpdateBuilder
 
         foreach (var (update, info) in _propertyUpdates)
         {
+            // Key the update is stored under; a complete payload may have replaced a change's update since.
+            var key = info.Property.IsAttribute
+                ? info.Property.AttributeMetadata.AttributeName
+                : info.Property.Name;
+
+            if (!info.Parent.TryGetValue(key, out var current) || !ReferenceEquals(current, update))
+                continue;
+
             for (var i = 0; i < Processors.Length; i++)
             {
                 var transformed = Processors[i].TransformSubjectPropertyUpdate(info.Property, update);
                 if (transformed != update)
                 {
-                    // Use AttributeName for attributes, Name for regular properties
-                    var key = info.Property.IsAttribute
-                        ? info.Property.AttributeMetadata.AttributeName
-                        : info.Property.Name;
-
                     info.Parent[key] = transformed;
                 }
             }

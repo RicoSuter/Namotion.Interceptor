@@ -1,223 +1,219 @@
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
+using System.Collections;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
-/// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
+/// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances. The items state the
+/// complete membership: a listed subject is resolved or created, and a member that is not listed is removed.
 /// </summary>
 internal static class SubjectItemsUpdateApplier
 {
-    /// <summary>
-    /// Applies a collection update to a property using complete-state items.
-    /// </summary>
     internal static void ApplyCollectionUpdate(
         PropertyReference property,
+        in SubjectPropertyMetadata metadata,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var metadata = property.Metadata;
-
-        if (propertyUpdate.Items is null)
+        var itemType = metadata.Type.GetCollectionElementType();
+        if (metadata.SetValue is null)
         {
-            // Null items mean the collection itself is null
+            ApplyToHeldMembers(property, propertyUpdate, IndexMembers(metadata.GetValue?.Invoke(property.Subject)),
+                keyType: null, itemType, context);
+            return;
+        }
+
+        if (propertyUpdate.Items is not { } items)
+        {
             context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
             return;
         }
 
-        var idRegistry = context.SubjectIdRegistry;
-
-        // Phase 1: Resolve or create subjects, set IDs on new subjects.
-        // For NEW subjects (no context, no interceptors): apply properties immediately.
-        // This builds the full subgraph before it enters the graph, so concurrent
-        // mutations that read the backing store after Phase 2 get fully-populated instances.
-        // For EXISTING subjects (have context + interceptors): defer to Phase 3 (after rooting).
-        var newItems = new List<(IInterceptorSubject Subject, string Id, bool IsNew)>(propertyUpdate.Items.Count);
-        foreach (var itemUpdate in propertyUpdate.Items)
+        var members = new (IInterceptorSubject Subject, string Id, bool IsCreated)[items.Count];
+        var memberCount = 0;
+        foreach (var itemUpdate in items)
         {
-            var (item, isNew) = ResolveOrCreateSubject(
-                property, newItems.Count, itemUpdate.Id, idRegistry, context);
-
-            if (item is null)
-                continue; // Subject not found and not complete, skip and self-heal on the next update
-
-            if (isNew)
+            if (TryResolveOrCreateMember(itemUpdate.Id, itemType, context, out var member))
             {
-                item.SetSubjectId(itemUpdate.Id);
-                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context, deferAttributes: true);
+                members[memberCount++] = member;
             }
-
-            newItems.Add((item, itemUpdate.Id, isNew));
         }
 
-        // Phase 2: Assign collection to graph (roots all items via lifecycle attach,
-        // which discovers the fully-populated subgraph from backing store values)
-        var subjects = new IInterceptorSubject[newItems.Count];
-        for (var i = 0; i < newItems.Count; i++)
-            subjects[i] = newItems[i].Subject;
-
-        var collection = context.SubjectFactory.CreateSubjectCollection(metadata.Type, subjects);
-        context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
-
-        // Note: eager discovery of pre-populated children was investigated and abandoned because
-        // AttachSubjectToContext already provides eager seeding via FindSubjectsInProperties.
-
-        // Phase 3: Apply properties for EXISTING subjects (now rooted, lifecycle works correctly).
-        // New subjects were already applied in Phase 1.
-        foreach (var (item, id, _) in newItems)
+        var subjects = new IInterceptorSubject[memberCount];
+        for (var i = 0; i < memberCount; i++)
         {
-            ApplyPropertiesIfAvailable(item, id, context);
+            subjects[i] = members[i].Subject;
         }
+
+        context.SetPropertyValue(property, propertyUpdate.Timestamp,
+            context.SubjectFactory.CreateSubjectCollection(metadata.Type, subjects));
+
+        ApplyMemberPayloads(members, memberCount, context);
     }
 
-    /// <summary>
-    /// Applies a dictionary update to a property using complete-state items.
-    /// </summary>
     internal static void ApplyDictionaryUpdate(
         PropertyReference property,
+        in SubjectPropertyMetadata metadata,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var metadata = property.Metadata;
-
-        if (propertyUpdate.Items is null)
+        var (keyType, itemType) = metadata.Type.GetDictionaryKeyAndValueTypes();
+        if (metadata.SetValue is null)
         {
-            // Null items mean the dictionary itself is null
+            var heldValue = metadata.GetValue?.Invoke(property.Subject);
+            var heldMembers = heldValue is null ? null : SubjectValueConvert.ToSubjectDictionary(heldValue);
+            ApplyToHeldMembers(property, propertyUpdate, heldMembers, keyType, itemType, context);
+            return;
+        }
+
+        if (propertyUpdate.Items is not { } items)
+        {
             context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
             return;
         }
 
-        var idRegistry = context.SubjectIdRegistry;
-        var targetKeyType = metadata.Type.GenericTypeArguments[0];
-
-        // Phase 1: Resolve or create subjects, set IDs on new subjects.
-        // For NEW subjects (no context, no interceptors): apply properties immediately.
-        // This builds the full subgraph before it enters the graph, so concurrent
-        // mutations that read the backing store after Phase 2 get fully-populated instances.
-        // For EXISTING subjects (have context + interceptors): defer to Phase 3 (after rooting).
-        // Does NOT read the backing store, which avoids a race with concurrent structural mutations
-        // whose next() wrote a different dictionary before acquiring the lifecycle lock.
-        var newItems = new List<(object Key, IInterceptorSubject Subject, string Id, bool IsNew)>(propertyUpdate.Items.Count);
-        foreach (var itemUpdate in propertyUpdate.Items)
+        var entries = new Dictionary<object, IInterceptorSubject>(items.Count);
+        var members = new (IInterceptorSubject Subject, string Id, bool IsCreated)[items.Count];
+        var memberCount = 0;
+        foreach (var itemUpdate in items)
         {
             if (itemUpdate.Key is null)
             {
-                // A dictionary entry without a key cannot be placed, so the entry is lost until the
-                // next update carrying complete state for this dictionary.
-                Interlocked.Increment(ref SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
+                // An entry without a key cannot be placed, so it is lost until the next update carrying
+                // complete state for this dictionary.
                 context.RecordDroppedSubject(itemUpdate.Id);
                 continue;
             }
 
-            var key = DictionaryKeyConverter.Convert(itemUpdate.Key, targetKeyType);
-            var (item, isNew) = ResolveOrCreateSubject(
-                property, key, itemUpdate.Id, idRegistry, context);
-
-            if (item is null)
-                continue; // Subject not found and not complete, skip and self-heal on the next update
-
-            if (isNew)
+            var key = DictionaryKeyConverter.Convert(itemUpdate.Key, keyType);
+            if (entries.ContainsKey(key))
             {
-                item.SetSubjectId(itemUpdate.Id);
-                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context, deferAttributes: true);
+                throw new InvalidOperationException(
+                    $"The update lists the key '{itemUpdate.Key}' of dictionary property '{property.Name}' more than once.");
             }
 
-            newItems.Add((key, item, itemUpdate.Id, isNew));
+            if (TryResolveOrCreateMember(itemUpdate.Id, itemType, context, out var member))
+            {
+                entries.Add(key, member.Subject);
+                members[memberCount++] = member;
+            }
         }
 
-        // Phase 2: Build dictionary and assign to graph (roots all items via lifecycle attach,
-        // which discovers the fully-populated subgraph from backing store values)
-        var workingDictionary = new Dictionary<object, IInterceptorSubject>(newItems.Count);
-        foreach (var (key, subject, _, _) in newItems)
-            workingDictionary[key] = subject;
+        context.SetPropertyValue(property, propertyUpdate.Timestamp,
+            context.SubjectFactory.CreateSubjectDictionary(metadata.Type, entries));
 
-        var dictionary = context.SubjectFactory.CreateSubjectDictionary(metadata.Type, workingDictionary);
-        context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
-
-        // Note: eager discovery of pre-populated children was investigated and abandoned because
-        // AttachSubjectToContext already provides eager seeding via FindSubjectsInProperties.
-
-        // Phase 3: Apply properties for EXISTING subjects (now rooted, lifecycle works correctly).
-        // New subjects were already applied in Phase 1.
-        foreach (var (_, subject, id, _) in newItems)
-        {
-            ApplyPropertiesIfAvailable(subject, id, context);
-        }
+        ApplyMemberPayloads(members, memberCount, context);
     }
 
     /// <summary>
-    /// Resolves a subject already bound by this apply or an existing subject by ID, or creates a new
-    /// one when the update carries its complete state. Returns <c>null</c> when the ID is neither
-    /// resolvable nor creatable; that reference is dropped and counted. The created instance is bare:
-    /// the caller sets its ID and applies its properties before assigning the collection or dictionary
-    /// to the graph, so the subgraph is complete by the time it enters the graph.
+    /// Resolves the subject an item names, or creates it populated, without entering it into the graph yet.
+    /// Returns <c>false</c> when it is unknown here and the update does not carry its complete state.
     /// </summary>
-    private static (IInterceptorSubject? Subject, bool IsNew) ResolveOrCreateSubject(
-        PropertyReference property,
-        object indexOrKey,
+    private static bool TryResolveOrCreateMember(
         string subjectId,
-        ISubjectIdRegistry idRegistry,
+        Type itemType,
+        SubjectUpdateApplyContext context,
+        out (IInterceptorSubject Subject, string Id, bool IsCreated) member)
+    {
+        if (SubjectUpdateApplier.ResolveSubject(subjectId, itemType, context) is { } existingSubject)
+        {
+            member = (existingSubject, subjectId, false);
+            return true;
+        }
+
+        var createdSubject = context.TryCreateSubject(subjectId, itemType);
+        member = (createdSubject!, subjectId, true);
+        return createdSubject is not null;
+    }
+
+    /// <summary>
+    /// Applies the payloads of the members that already existed, which are only rooted once the container
+    /// holding them is written. Created members were populated before.
+    /// </summary>
+    private static void ApplyMemberPayloads(
+        (IInterceptorSubject Subject, string Id, bool IsCreated)[] members,
+        int memberCount,
         SubjectUpdateApplyContext context)
     {
-        if (context.TryGetBoundSubject(subjectId, out var bound))
+        for (var i = 0; i < memberCount; i++)
         {
-            // A subject this apply already bound to the ID: one it created earlier, which the
-            // registry cannot resolve until its subtree is rooted, or the local root mapped from the
-            // update's root hint. The same ID twice in one items array, or shared between two items,
-            // therefore yields the same instance instead of a second, never populated one.
-            return (bound, false);
-        }
-
-        if (idRegistry.TryGetSubjectById(subjectId, out var existing))
-        {
-            return (existing, false);
-        }
-
-        if (!context.IsSubjectComplete(subjectId))
-        {
-            // Reference to a subject that should exist but doesn't (concurrent structural
-            // mutation removed it from the ID registry). Skip, it self-heals on the next update
-            // that includes complete state for this subject. Until then the applied collection or
-            // dictionary is one item short, so count the drop.
-            Interlocked.Increment(ref SubjectUpdateApplier.DroppedInboundSubjectUpdateCount);
-            context.RecordDroppedSubject(subjectId);
-            return (null, false);
-        }
-
-        var newItem = CreateSubjectItem(property, indexOrKey, context);
-
-        // Bind before the caller populates the item: a property inside its subtree can reference the
-        // same ID again (a self reference, a cycle, or a second parent), and every such reference has
-        // to resolve to this instance.
-        context.BindSubject(subjectId, newItem);
-
-        return (newItem, true);
-    }
-
-    /// <summary>
-    /// Applies property updates to a subject if properties are available and not yet processed.
-    /// Set <paramref name="deferAttributes"/> for a subject that is not yet part of the graph.
-    /// </summary>
-    private static void ApplyPropertiesIfAvailable(
-        IInterceptorSubject subject, string subjectId, SubjectUpdateApplyContext context, bool deferAttributes = false)
-    {
-        if (context.Subjects.TryGetValue(subjectId, out var properties) &&
-            context.TryMarkAsProcessed(subjectId))
-        {
-            SubjectUpdateApplier.ApplyPropertyUpdates(subject, properties, context, deferAttributes);
+            if (!members[i].IsCreated)
+            {
+                context.ApplySubjectPayload(members[i].Subject, members[i].Id);
+            }
         }
     }
 
     /// <summary>
-    /// Creates a new subject item. Does not assign ID, fallback context, or apply properties.
-    /// Fallback context is added automatically by ContextInheritanceHandler when the subject
-    /// enters the graph via SetValue. The caller must assign the item to the graph first.
+    /// Applies an update to a container this model cannot write: the subjects it holds take the payloads of
+    /// the members the update names at their position, adopting their IDs unless an ID names another subject
+    /// here. A membership that differs from the held one cannot be stored and is reported as dropped structure.
     /// </summary>
-    private static IInterceptorSubject CreateSubjectItem(
+    private static void ApplyToHeldMembers(
         PropertyReference property,
-        object indexOrKey,
+        SubjectPropertyUpdate propertyUpdate,
+        IDictionary? heldMembers,
+        Type? keyType,
+        Type itemType,
         SubjectUpdateApplyContext context)
     {
-        return context.SubjectFactory.CreateCollectionSubject(property.Metadata.Type, indexOrKey, context.ServiceProvider);
+        if (propertyUpdate.Items is not { } items)
+        {
+            return;
+        }
+
+        var isHeld = (heldMembers?.Count ?? 0) == items.Count;
+        for (var i = 0; i < items.Count; i++)
+        {
+            var itemUpdate = items[i];
+            if (keyType is not null && itemUpdate.Key is null)
+            {
+                // An entry without a key cannot be placed.
+                context.RecordDroppedSubject(itemUpdate.Id);
+                isHeld = false;
+                continue;
+            }
+
+            var key = keyType is null ? i : DictionaryKeyConverter.Convert(itemUpdate.Key!, keyType);
+            var heldMember = heldMembers?.Contains(key) == true ? heldMembers[key] as IInterceptorSubject : null;
+
+            if (!context.TryResolveSubject(itemUpdate.Id, out var subject) &&
+                heldMember is not null &&
+                context.TryAdoptSubject(itemUpdate.Id, heldMember))
+            {
+                subject = heldMember;
+            }
+
+            if (subject is null || !ReferenceEquals(subject, heldMember) || !itemType.IsInstanceOfType(subject))
+            {
+                isHeld = false;
+            }
+
+            if (subject is not null)
+            {
+                context.ApplySubjectPayload(subject, itemUpdate.Id);
+            }
+        }
+
+        if (!isHeld)
+        {
+            context.RecordDroppedStructure(property);
+        }
+    }
+
+    private static IDictionary? IndexMembers(object? collection)
+    {
+        if (collection is null)
+        {
+            return null;
+        }
+
+        var members = SubjectValueConvert.ToSubjectList(collection);
+        var indexedMembers = new Dictionary<object, IInterceptorSubject>(members.Count);
+        for (var i = 0; i < members.Count; i++)
+        {
+            indexedMembers.Add(i, members[i]);
+        }
+
+        return indexedMembers;
     }
 }

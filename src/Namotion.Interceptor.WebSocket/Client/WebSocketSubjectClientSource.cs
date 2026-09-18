@@ -103,8 +103,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             logger ?? throw new ArgumentNullException(nameof(logger)),
             (configuration ?? throw new ArgumentNullException(nameof(configuration))).BufferTime,
             configuration.RetryTime,
-            configuration.WriteRetryQueueSize,
-            configuration.TeardownFlushTimeout)
+            configuration.WriteRetryQueueSize)
     {
         _subject = subject;
         _configuration = configuration;
@@ -615,8 +614,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             }
 
             // A batch that predates a connection replacement is not rejected here: the retry-queue path
-            // parks it under a gate that is now level-triggered on WriteRetryQueue.FlushAsync's own
-            // batch loop (see WriteRetryQueue.FlushAsync and SubjectSourceBase.BeginResume), and a
+            // parks it under a gate that is now level-triggered on the retry queue's own batch loop
+            // (see WriteRetryQueue.FlushAsync and SubjectSourceBase.BeginResume), and a
             // transactional commit, which bypasses that path, is meant to land on whatever connection is
             // current once it gets the lock.
             var webSocket = _webSocket;
@@ -1032,7 +1031,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
         // Carries the epoch across loop iterations the same way forceReconnect does: BeginResume runs
         // in one iteration (drop detection or a force-kill catch) and the matching CompleteResumeAsync
-        // or AbortResume runs in the ReconnectAndResumeAsync call that follows, possibly on a later one.
+        // or TryEndResume runs in the ReconnectAndResumeAsync call that follows, possibly on a later one.
         var resumeEpoch = 0;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -1165,7 +1164,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             // loop running, before this cancellation was observed. Cleared here too, not only in the
             // catch below, so a cancellation that lands on this arm cannot leave the gate held for the
             // life of that connection the way an unguarded rethrow would.
-            AbortResume(resumeEpoch);
+            TryEndResume(resumeEpoch);
             throw;
         }
         catch (Exception ex)
@@ -1177,7 +1176,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             // never reconciled against a loaded state: an unreconciled flush on a later successful write
             // beats a gate stuck for good. Cleared ahead of the rethrow below, which cancellation
             // surfacing as a transport exception would otherwise skip past.
-            AbortResume(resumeEpoch);
+            TryEndResume(resumeEpoch);
 
             // Cancellation may surface as a transport exception rather than an OperationCanceledException.
             cancellationToken.ThrowIfCancellationRequested();

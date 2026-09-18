@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -305,7 +306,10 @@ public class PerPropertySubscriptionLifecycleTests
         });
 
         start.Set();
-        await Task.WhenAll(writers, disposer);
+        var exception = await Record.ExceptionAsync(() => Task.WhenAll(writers, disposer));
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -517,7 +521,9 @@ public class PerPropertySubscriptionLifecycleTests
         var hits = 0;
 
         // Act: start the write, install both consumers while it is parked, then release it.
-        var writer = Task.Run(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocking.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         using var listener = new PropertyReference(person, nameof(Person.FirstName))

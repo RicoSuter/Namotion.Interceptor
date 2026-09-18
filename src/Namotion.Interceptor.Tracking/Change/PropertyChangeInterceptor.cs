@@ -191,6 +191,15 @@ public sealed class PropertyChangeInterceptor : IObservable<SubjectPropertyChang
             context.GetFinalValue(),
             context.Revision);
 
+        DispatchChange(subscriptions, syncSubject, listeners, in change);
+    }
+
+    private static void DispatchChange(
+        PropertyChangeQueueSubscription[] subscriptions,
+        ISubject<SubjectPropertyChange>? syncSubject,
+        PropertyChangeSubscription[]? listeners,
+        in SubjectPropertyChange change)
+    {
         for (var i = 0; i < subscriptions.Length; i++)
         {
             subscriptions[i].Enqueue(in change);

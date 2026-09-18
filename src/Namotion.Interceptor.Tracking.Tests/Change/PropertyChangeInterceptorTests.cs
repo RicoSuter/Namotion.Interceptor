@@ -142,24 +142,30 @@ public class PropertyChangeInterceptorTests
         var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
         var person = new Person(context);
 
-        // Act & Assert (enqueue-vs-dispose race fix): repeatedly race a producing write (which fans
+        // Act: repeatedly race a producing write (which fans
         // out to subscription.Enqueue -> _signal.Set()) against Dispose. Because Dispose no longer
         // disposes _signal, Set() must never hit a disposed signal. Awaiting the writer rethrows any
         // ObjectDisposedException, failing the test.
-        for (var i = 0; i < 1000; i++)
+        var exception = await Record.ExceptionAsync(async () =>
         {
-            var subscription = context.CreatePropertyChangeQueueSubscription();
-            using var start = new ManualResetEventSlim(false);
-            var writer = Task.Run(() =>
+            for (var i = 0; i < 1000; i++)
             {
-                start.Wait();
-                person.FirstName = "John";
-            });
+                var subscription = context.CreatePropertyChangeQueueSubscription();
+                using var start = new ManualResetEventSlim(false);
+                var writer = Task.Run(() =>
+                {
+                    start.Wait();
+                    person.FirstName = "John";
+                });
 
-            start.Set();
-            subscription.Dispose();
-            await writer;
-        }
+                start.Set();
+                subscription.Dispose();
+                await writer;
+            }
+        });
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]
@@ -173,7 +179,9 @@ public class PropertyChangeInterceptorTests
         var person = new Person(context);
         using var existing = context.CreatePropertyChangeQueueSubscription();
 
-        var writer = Task.Run(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         // Act: subscribe while the write is in flight, then release the commit.
@@ -203,7 +211,9 @@ public class PropertyChangeInterceptorTests
         using var existing = observable
             .Subscribe(change => first = change);
 
-        var writer = Task.Run(() => person.FirstName = "John");
+        // The write parks in the interceptor chain, so it must not wait for a pool thread.
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => { person.FirstName = "John"; });
         Assert.True(blocker.EnteredInnerChain.Wait(TimeSpan.FromSeconds(10)));
 
         // Act: a second observer joins the same observable mid-write. Its subscription must reach
@@ -266,8 +276,7 @@ public class PropertyChangeInterceptorTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        // Act & Assert: cancellation takes priority over buffered items (documented contract);
-        // the item remains available to a non-cancelled call.
+        // Act & Assert: cancellation takes priority over buffered items, which remain available afterward.
         Assert.False(subscription.TryDequeue(out _, cancellation.Token));
         Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
         Assert.Equal("John", change.GetNewValue<string?>());

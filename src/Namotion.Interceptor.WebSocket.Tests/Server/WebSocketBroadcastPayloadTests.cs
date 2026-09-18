@@ -159,6 +159,48 @@ public class WebSocketBroadcastPayloadTests
         await clientTask;
     }
 
+    [Fact]
+    public async Task WhenABroadcastIsSlicedBeforeTheChangeAttachingANewSubject_ThenTheFirstSliceCompletesTheSubject()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var existingItem = new TestItem(serverContext) { Label = "Existing", Value = 1 };
+        var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [existingItem] };
+
+        var handler = new WebSocketSubjectHandler(serverRoot, new WebSocketServerConfiguration { WriteBatchSize = 1 }, NullLogger.Instance);
+        var socket = new CapturingWebSocket();
+        socket.EnqueueIncoming(_serializer.SerializeMessage(MessageType.Hello, new HelloPayload()));
+
+        using var cancellation = new CancellationTokenSource();
+        var clientTask = handler.HandleClientAsync(socket, cancellation.Token);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => socket.TryGetMessage(MessageType.Welcome, _serializer, out _),
+            message: "Server should send the Welcome message");
+
+        // Act: the new item carries the context, so its value change is captured before the change attaching it
+        var newItem = new TestItem(serverContext) { Label = "New", Value = 2 };
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add))
+        {
+            newItem.Label = "Renamed";
+            serverRoot.Items = [existingItem, newItem];
+        }
+
+        await handler.BroadcastChangesAsync(changes.ToArray(), CancellationToken.None);
+
+        // Assert
+        var firstUpdate = DeserializePayload<UpdatePayload>(socket.GetMessages(MessageType.Update, _serializer).First());
+        Assert.Contains(newItem.TryGetSubjectId()!, firstUpdate.CompleteSubjectIds!);
+
+        await cancellation.CancelAsync();
+        await clientTask;
+    }
+
     private T DeserializePayload<T>(byte[] message)
     {
         var (_, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(message);
@@ -176,6 +218,9 @@ internal sealed class CapturingWebSocket : System.Net.WebSockets.WebSocket
     private readonly ConcurrentQueue<byte[]> _sent = new();
 
     public void EnqueueIncoming(byte[] message) => _incoming.Enqueue(message);
+
+    public IEnumerable<byte[]> GetMessages(MessageType messageType, IWebSocketSerializer serializer)
+        => _sent.ToArray().Where(sent => serializer.DeserializeMessageEnvelope(sent).Type == messageType);
 
     public bool TryGetMessage(MessageType messageType, IWebSocketSerializer serializer, out byte[] message)
     {

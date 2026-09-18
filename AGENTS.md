@@ -101,6 +101,11 @@ The library uses a fluent configuration API:
 - **Target Frameworks**: .NET Standard 2.0 (core), .NET 9.0 (extensions)
 - **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
+- **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
+
+## Analyzer Policy
+
+Sonar diagnostics (`S`-prefixed IDs) may appear as build errors under warnings-as-errors. Preserve correctness, performance, and intentional test scenarios over analyzer suggestions. Do not add complexity, allocations, or CPU overhead merely to satisfy a rule; propose a narrow, documented exception instead. Compiler errors and correctness defects still require fixes. Get user approval before adding or broadening exceptions; prior approval remains valid. Document shared exceptions and reuse guidance in [src/.editorconfig](src/.editorconfig), and findings or deferred work in the main rollout issue.
 
 ## Key Dependencies
 
@@ -132,6 +137,9 @@ The library has specialized support for:
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
 - **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
 - **No hard wrapping** in markdown. Keep a paragraph on one line instead of breaking at a column.
+- **Inline comments: the why a reader cannot derive.** Length is earned by preventing a plausible wrong edit, such as a lock discipline, a pooled buffer that must not be read after release, or an ordering constraint. It is not earned by defending a decision against alternatives, which belongs in the pull request or `docs/design/`. Never restate the line below.
+- **XML docs state the contract**, not the reasoning. `<remarks>` is for a caveat a caller must act on.
+- **One canonical location per concept**, cross-referenced. Three copies drift.
 
 ## Git Rules
 

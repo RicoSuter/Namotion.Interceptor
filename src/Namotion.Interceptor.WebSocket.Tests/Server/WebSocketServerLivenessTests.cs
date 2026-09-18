@@ -32,7 +32,7 @@ public class WebSocketServerLivenessTests
         // Act
         await server.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => server.Diagnostics.IsOperational,
+            () => server.Diagnostics.IsOperational == true,
             message: "The server should report operational once the listener is accepting connections.");
 
         // Assert
@@ -62,7 +62,7 @@ public class WebSocketServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational,
+                () => server.Diagnostics.IsOperational == true,
                 message: "The server should report operational once the listener is accepting connections.");
 
             // Act
@@ -96,7 +96,7 @@ public class WebSocketServerLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational,
+                () => server.Diagnostics.IsOperational == true,
                 message: "The server should report operational once the listener is accepting connections.");
 
             var firstOperationalTime = server.Diagnostics.OperationalChangeTime;
@@ -106,7 +106,7 @@ public class WebSocketServerLivenessTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.IsOperational &&
+                () => server.Diagnostics.IsOperational == true &&
                       server.Diagnostics.OperationalChangeTime != firstOperationalTime,
                 message: "The server should report operational again after restarting.");
 

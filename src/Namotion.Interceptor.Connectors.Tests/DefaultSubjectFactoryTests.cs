@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -8,6 +9,84 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class DefaultSubjectFactoryTests
 {
+    [Theory]
+    [InlineData(typeof(IEnumerable))]
+    [InlineData(typeof(ICollection))]
+    [InlineData(typeof(ArrayList))]
+    [InlineData(typeof(AmbiguousSequence))]
+    [InlineData(typeof(TaggedAmbiguousSequence<int>))]
+    public void WhenACollectionHasNoKnownElementType_ThenFactoryReportsTheUnsupportedDeclaration(Type propertyType)
+    {
+        // Arrange
+        var property = new RegisteredSubjectProperty(new RegisteredSubject(new Person()), "Children", propertyType, []);
+        var factory = DefaultSubjectFactory.Instance;
+
+        // Act & Assert
+        Assert.Throws<NotSupportedException>(() => factory.CreateCollectionSubject(property, 0));
+        Assert.Throws<NotSupportedException>(() => factory.CreateSubjectCollection(propertyType, new Person()));
+    }
+
+    [Theory]
+    [InlineData(typeof(Person[]))]
+    [InlineData(typeof(IEnumerable<Person>))]
+    [InlineData(typeof(PersonList))]
+    [InlineData(typeof(TaggedCollection<Person, int>))]
+    [InlineData(typeof(LegacyCollection<Person>))]
+    [InlineData(typeof(SubjectAndTextSequence))]
+    [InlineData(typeof(TaggedPersonList<int>))]
+    [InlineData(typeof(Dictionary<string, Person>))]
+    [InlineData(typeof(PersonMap))]
+    [InlineData(typeof(TaggedPersonMap<int, int>))]
+    public void WhenACollectionHasAKnownElementType_ThenFactoryCreatesTheSubject(Type propertyType)
+    {
+        // Arrange
+        var property = new RegisteredSubjectProperty(new RegisteredSubject(new Person()), "Children", propertyType, []);
+
+        // Act
+        var child = DefaultSubjectFactory.Instance.CreateCollectionSubject(property, 0);
+
+        // Assert
+        Assert.IsType<Person>(child);
+    }
+
+    [Fact]
+    public void WhenACollectionFactoryWrapsTheDefaultCollection_ThenItPreservesTheChildren()
+    {
+        // Arrange
+        var child = new Person();
+
+        // Act
+        var items = DefaultSubjectFactory.Instance.CreateSubjectCollection(typeof(ObservableCollection<Person>), child);
+        var collection = new ObservableCollection<Person>(items.Cast<Person>());
+
+        // Assert
+        Assert.Same(child, Assert.Single(collection));
+    }
+
+    private sealed class PersonList : List<Person>;
+    private sealed class PersonMap : Dictionary<string, Person>;
+    private sealed class TaggedCollection<TItem, TTag> : List<TItem>;
+    private sealed class TaggedPersonList<TTag> : List<Person>;
+    private sealed class TaggedPersonMap<TFirstTag, TSecondTag> : Dictionary<string, Person>;
+    private sealed class LegacyCollection<TItem> : CollectionBase;
+    private sealed class TaggedAmbiguousSequence<TTag> : AmbiguousSequence;
+
+    /// <summary>
+    /// Enumerates its subjects and, separately, text. Only one of the two item types can hold a
+    /// subject, which is what the collection classifier keys on, so the declaration is not ambiguous.
+    /// </summary>
+    private sealed class SubjectAndTextSequence : List<Person>, IEnumerable<string>
+    {
+        IEnumerator<string> IEnumerable<string>.GetEnumerator() => Enumerable.Empty<string>().GetEnumerator();
+    }
+
+    private class AmbiguousSequence : IEnumerable<Person>, IEnumerable<MyClass>
+    {
+        IEnumerator<Person> IEnumerable<Person>.GetEnumerator() => Enumerable.Empty<Person>().GetEnumerator();
+        IEnumerator<MyClass> IEnumerable<MyClass>.GetEnumerator() => Enumerable.Empty<MyClass>().GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => Enumerable.Empty<Person>().GetEnumerator();
+    }
+
     public class MyClass : IInterceptorSubject
     {
         public object Injected { get; }
@@ -77,30 +156,6 @@ public class DefaultSubjectFactoryTests
         // Assert
         Assert.NotNull(myClassCollection);
         Assert.Equal(2, myClassCollection.Count());
-    }
-
-    [Fact]
-    public void WhenCollectionTypeCannotBeBuiltFromItems_ThenCreatingItThrows()
-    {
-        // Arrange - a collection type that is neither assignable from List<T> nor buildable from a
-        // sequence: no static empty instance to append to and no constructor taking the items.
-        var subjectFactory = new DefaultSubjectFactory();
-
-        // Act & Assert
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => subjectFactory.CreateSubjectCollection(typeof(UnbuildableCollection<MyClass>), new MyClass(1)));
-
-        Assert.Contains(nameof(UnbuildableCollection<MyClass>), exception.Message);
-    }
-
-    /// <summary>
-    /// A subject collection type that offers no way to materialize it from the applier's working list.
-    /// </summary>
-    private sealed class UnbuildableCollection<T> : IEnumerable<T>
-    {
-        public IEnumerator<T> GetEnumerator() => Enumerable.Empty<T>().GetEnumerator();
-
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     [Fact]

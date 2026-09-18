@@ -16,6 +16,9 @@ namespace Namotion.Interceptor.Connectors.Tests.Diagnostics;
 public class OutboundDropCountingTests
 {
     private const int OverflowChangeCount = 4;
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan TeardownWaitTimeout =
+        ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(5);
 
     [Fact]
     public void WhenTheRetryQueueOverflows_ThenTheDroppedWritesAreCounted()
@@ -44,7 +47,7 @@ public class OutboundDropCountingTests
         // Pins the no-setter branch, so the drop below cannot come from the catch beside it.
         Assert.Null(new PropertyReference(person, nameof(Person.FullName)).Metadata.SetValue);
 
-        source.WriteRetryQueue!.Enqueue(new[]
+        source.WriteRetryQueue.Enqueue(new[]
         {
             CreateChange(person, nameof(Person.FullName), oldValue: "old", newValue: "never-current")
         });
@@ -72,7 +75,7 @@ public class OutboundDropCountingTests
         // Pins that a setter exists, so the drop below comes from the catch and not the no-setter branch.
         Assert.NotNull(new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).Metadata.SetValue);
 
-        source.WriteRetryQueue!.Enqueue(new[]
+        source.WriteRetryQueue.Enqueue(new[]
         {
             CreateChange(device, nameof(ThrowingDevice.PropertyA), oldValue: false, newValue: true)
         });
@@ -85,7 +88,7 @@ public class OutboundDropCountingTests
     }
 
     [Fact]
-    public async Task WhenThereIsNoRetryQueueAndADirectWriteFails_ThenTheChangesAreCountedAsDropped()
+    public async Task WhenRetryCapacityIsZeroAndACurrentWriteFails_ThenTheChangeIsCountedAsDropped()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
@@ -138,6 +141,7 @@ public class OutboundDropCountingTests
                     return receivedWrites.Contains(nameof(Person.LastName));
                 }
             }, message: "The pump did not reach the connected phase.");
+            var droppedBeforeFailure = source.Diagnostics.OutboundRetries.TotalDropped;
 
             // Act
             lock (gate)
@@ -147,11 +151,11 @@ public class OutboundDropCountingTests
 
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                () => source.Diagnostics.OutboundRetries.TotalDropped > droppedBeforeFailure,
                 message: "The discarded direct write was not counted.");
 
             // Assert
-            Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
+            Assert.Equal(droppedBeforeFailure + 1, source.Diagnostics.OutboundRetries.TotalDropped);
             Assert.Equal(0, source.Diagnostics.OutboundRetries.Capacity);
             Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
         }
@@ -161,56 +165,84 @@ public class OutboundDropCountingTests
         }
     }
 
-    /// <summary>
-    /// A graceful stop that catches a write in flight is not a loss an operator can act on, and
-    /// <c>WriteChangesInBatchesAsync</c> reports that cancellation as a failed result rather than
-    /// throwing it.
-    /// </summary>
     [Fact]
-    public async Task WhenAWriteIsCancelledByTheStop_ThenItIsNotCountedAsDropped()
+    public async Task WhenAWriteRemainsUnconfirmedAtTheStopDeadline_ThenItIsCountedAsDropped()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
         var person = new Person(context);
 
-        using var writeStarted = new ManualResetEventSlim(false);
+        var warmupWritten = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var blockWrite = false;
         using var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8), writeRetryQueueSize: 0)
         {
-            WriteChangesOverride = async (_, cancellationToken) =>
+            WriteChangesOverride = async (changes, _) =>
             {
-                writeStarted.Set();
+                if (Volatile.Read(ref blockWrite) &&
+                    changes.Span[0].Property.Name == nameof(Person.FirstName))
+                {
+                    writeStarted.TrySetResult();
+                    await releaseWrite.Task.ConfigureAwait(false);
+                    writeFinished.TrySetResult();
+                }
+                else
+                {
+                    warmupWritten.TrySetResult();
+                }
 
-                // Held until the stop cancels the token, so the write is in flight when it lands.
-                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
                 return WriteResult.Success;
             }
         };
 
         new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
 
+        using var watchdog = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var watchdogRegistration = watchdog.Token.Register(() => releaseWrite.TrySetResult());
         await source.StartAsync(CancellationToken.None);
-
-        // Re-written on each poll because writes captured before the connected phase are drained
-        // rather than written.
         var probeValue = 0;
         await AsyncTestHelpers.WaitUntilAsync(() =>
         {
-            person.FirstName = "v" + probeValue++;
-            return writeStarted.IsSet;
-        }, message: "The pump never reached a write.");
+            person.LastName = "probe" + probeValue++;
+            return source.Diagnostics.OutboundChanges.Depth > 0;
+        }, message: "The connected processor did not start buffering the warmup write.");
+        await warmupWritten.Task.WaitAsync(TestTimeout);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => source.Diagnostics.OutboundChanges.Depth == 0,
+            message: "The warmup write did not leave the processor queue.");
+        var droppedBeforeDeadline = source.Diagnostics.OutboundRetries.TotalDropped;
 
-        // Act
-        await source.StopAsync(CancellationToken.None);
+        Volatile.Write(ref blockWrite, true);
+        person.FirstName = "unconfirmed";
+        await writeStarted.Task.WaitAsync(TestTimeout);
+
+        try
+        {
+            // Act
+            await source.StopAsync(CancellationToken.None).WaitAsync(TeardownWaitTimeout);
+        }
+        finally
+        {
+            releaseWrite.TrySetResult();
+        }
+
+        await writeFinished.Task.WaitAsync(TestTimeout);
+        await source.WriteRetryQueue.FlushAsync(source, CancellationToken.None).AsTask().WaitAsync(TestTimeout);
 
         // Assert
-        Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+        Assert.Equal(droppedBeforeDeadline + 1, source.Diagnostics.OutboundRetries.TotalDropped);
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.Capacity);
+        Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
     }
 
     [Fact]
-    public void WhenTheDisabledQueueDrainRuns_ThenNothingIsCounted()
+    public void WhenTheDisabledQueueDrainRuns_ThenAnUnownedChangeIsNotCounted()
     {
-        // Arrange: no retry queue, and a change on a property this source does not own.
+        // Arrange: retry capacity is zero, and the source does not own the changed property.
         var context = InterceptorSubjectContext.Create().WithRegistry().WithPropertyChangeSubscriptions();
         var person = new Person(context);
         using var source = new TestSubjectSource(person, context, NullLogger.Instance, writeRetryQueueSize: 0);

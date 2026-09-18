@@ -51,7 +51,7 @@ public class WebSocketClientLivenessTests
         // Act
         await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational,
+            () => source.Diagnostics.IsOperational == true,
             message: "The client should report operational once the handshake is accepted.");
 
         // Assert
@@ -78,7 +78,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational once the handshake is accepted.");
 
             var connectedAt = source.Diagnostics.OperationalChangeTime;
@@ -89,11 +89,11 @@ public class WebSocketClientLivenessTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == false,
                 message: "A client whose receive loop has exited should stop reporting that it is serving.");
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 message: "The client should report operational again once it has reconnected.");
 
             // The rise is a second transition rather than the first one never having been dropped.
@@ -116,7 +116,7 @@ public class WebSocketClientLivenessTests
 
         try
         {
-            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == true);
             var connectedAt = source.Diagnostics.OperationalChangeTime;
 
             // Act
@@ -126,7 +126,7 @@ public class WebSocketClientLivenessTests
             // operational client with a newer timestamp proves the liveness fell and rose again even
             // when both transitions happen between two polls.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && source.Diagnostics.OperationalChangeTime > connectedAt,
+                () => source.Diagnostics.IsOperational == true && source.Diagnostics.OperationalChangeTime > connectedAt,
                 message: "The kill should drop liveness and a replacement attempt should raise it again.");
         }
         finally
@@ -148,13 +148,13 @@ public class WebSocketClientLivenessTests
             portLease.Port, reconnectDelay: TimeSpan.FromSeconds(2), writeInterceptor: reloadGate);
         await source.StartAsync(CancellationToken.None);
         var clientRoot = (TestRoot)source.RootSubject;
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == true);
 
         try
         {
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => !source.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == false);
             reloadGate.Arm();
             server.Root!.Name = "Reload";
             await reloadGate.ReloadStarted.WaitAsync(TimeSpan.FromSeconds(10));
@@ -188,7 +188,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         var oldLoopCompletion = GetReceiveLoopCompletion(source);
         source.BeforeUpdateCommitAdmission = admissionGate.Wait;
@@ -233,7 +233,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         try
         {
@@ -298,7 +298,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         var oldLoopCompletion = GetReceiveLoopCompletion(source);
         source.BeforeUpdateCommitAdmission = admissionGate.Wait;
@@ -342,7 +342,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         server.Root!.Name = "Old";
         await commitGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
@@ -400,7 +400,7 @@ public class WebSocketClientLivenessTests
         await server.StartAsync(portLease.Port);
         await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(20));
         await source.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == true);
 
         try
         {
@@ -428,7 +428,7 @@ public class WebSocketClientLivenessTests
         await using var server = await StartServerAsync(portLease.Port);
         await using var source = CreateClientSource(portLease.Port);
         await source.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == true);
 
         var oldCompletion = GetReceiveLoopCompletion(source);
         var receiveCts = GetReceiveCancellation(source);
@@ -464,18 +464,18 @@ public class WebSocketClientLivenessTests
             circuitBreakerFailureThreshold: 0);
 
         await source.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == true);
 
         try
         {
             // Act - stopping the server fails every reconnect attempt for real until it returns.
             await server.StopAsync();
-            await AsyncTestHelpers.WaitUntilAsync(() => !source.Diagnostics.IsOperational);
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == false);
             await server.RestartAsync();
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational,
+                () => source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(15),
                 message: "The monitor should keep retrying failed replacement attempts until one succeeds.");
         }
@@ -493,7 +493,7 @@ public class WebSocketClientLivenessTests
         await using var server = await StartServerAsync(portLease.Port);
         await using var source = CreateClientSource(portLease.Port);
         await source.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.IsOperational == true);
 
         var oldCompletion = GetReceiveLoopCompletion(source);
         var receiveCts = GetReceiveCancellation(source);
@@ -549,7 +549,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         var loadGate = new ReconnectLoadGate();
         source.BeforeReconnectInitialStateLoad = loadGate.Wait;
@@ -600,7 +600,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         var loadGate = new ReconnectLoadGate();
         source.BeforeReconnectInitialStateLoad = loadGate.Wait;
@@ -653,7 +653,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         try
         {
@@ -701,7 +701,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
             clientRoot.Name = "InFlight";
             await AsyncTestHelpers.WaitUntilAsync(() => source.InFlightCount > 0);
@@ -738,7 +738,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         // Act
         clientRoot.Name = "StillInFlightAtStop";
@@ -778,7 +778,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
             var oldSocket = GetWebSocket(source);
 
@@ -795,7 +795,7 @@ public class WebSocketClientLivenessTests
             server.Root!.Name = "MovedOnWhileClientWasAway";
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(15),
                 message: "The client should reconnect to the still-running server.");
 
@@ -845,7 +845,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
             var oldSocket = GetWebSocket(source);
 
@@ -860,7 +860,7 @@ public class WebSocketClientLivenessTests
             server.Root!.Name = "MovedOnWhileClientWasAway";
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(15),
                 message: "The client should reconnect to the still-running server.");
 
@@ -908,7 +908,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
             var oldSocket = GetWebSocket(source);
 
@@ -922,7 +922,7 @@ public class WebSocketClientLivenessTests
             server.Root!.Name = "MovedOnWhileClientWasAway";
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "The client should reconnect once its own receive timeout fires.");
 
@@ -949,9 +949,9 @@ public class WebSocketClientLivenessTests
     [Fact]
     public async Task WhenTheGateGoesUpBetweenBatchesOfAMultiBatchFlush_ThenTheUnsentBatchesAreRequeuedRatherThanSent()
     {
-        // Arrange - design document case D4's residual: WriteRetryQueue.FlushAsync's scratch buffer
-        // grows to 128 entries on the first non-empty flush, so parking more than that spans two
-        // batches within one flush call, which is what makes a reconnect landing between them
+        // Arrange - design document case D4's residual: WriteRetryQueue's scratch buffer grows to 128
+        // entries on the first non-empty flush, so parking more than that spans two batches within
+        // one flush call, which is what makes a reconnect landing between them
         // genuinely reachable rather than only a single edge-triggered check before the whole flush.
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = await StartServerAsync(portLease.Port);
@@ -960,7 +960,7 @@ public class WebSocketClientLivenessTests
 
         var clientRoot = (TestRoot)source.RootSubject;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
         const int parkedCount = 200;
         var parked = new SubjectPropertyChange[parkedCount];
@@ -1034,7 +1034,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
             var oldSocket = GetWebSocket(source);
 
@@ -1058,7 +1058,7 @@ public class WebSocketClientLivenessTests
             // This is the only route to a reconnect here, since the test never touched the socket
             // itself: it proves the production catch's own abort ran.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational,
+                () => !ReferenceEquals(GetWebSocket(source), oldSocket) && source.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(15),
                 message: "The failed reserved send should force a reconnect rather than leaving the " +
                          "ordinal gap on a connection that keeps running.");
@@ -1104,7 +1104,7 @@ public class WebSocketClientLivenessTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.IsOperational && clientRoot.Name == "Initial");
+                () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
 
             var socketBeforeCancellation = GetWebSocket(source);
 

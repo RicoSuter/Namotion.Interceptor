@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -265,13 +267,44 @@ public sealed class WebSocketSubjectHandler
         }
         else
         {
-            // Multiple batches
-            for (var i = 0; i < changes.Length; i += batchSize)
+            // A subject is completed by the change that attaches it, which a receiver needs before any change
+            // naming the subject, so subject-holding changes go first. A property is only ever one or the
+            // other, so the changes of each property keep their order.
+            var orderedChanges = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length);
+            try
             {
-                var currentBatchSize = Math.Min(batchSize, changes.Length - i);
-                var batch = changes.Slice(i, currentBatchSize);
-                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
-                await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+                OrderSubjectHoldingChangesFirst(changes.Span, orderedChanges);
+                for (var i = 0; i < changes.Length; i += batchSize)
+                {
+                    var currentBatchSize = Math.Min(batchSize, changes.Length - i);
+                    var update = SubjectUpdate.CreatePartialUpdateFromChanges(
+                        _subject, orderedChanges.AsSpan(i, currentBatchSize), _processors);
+                    await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                ArrayPool<SubjectPropertyChange>.Shared.Return(orderedChanges, clearArray: true);
+            }
+        }
+    }
+
+    private static void OrderSubjectHoldingChangesFirst(ReadOnlySpan<SubjectPropertyChange> changes, SubjectPropertyChange[] orderedChanges)
+    {
+        var count = 0;
+        foreach (var change in changes)
+        {
+            if (change.Property.Metadata.Type.CanContainSubjects())
+            {
+                orderedChanges[count++] = change;
+            }
+        }
+
+        foreach (var change in changes)
+        {
+            if (!change.Property.Metadata.Type.CanContainSubjects())
+            {
+                orderedChanges[count++] = change;
             }
         }
     }
@@ -439,7 +472,7 @@ public sealed class WebSocketSubjectHandler
             // this handler, so none of them is skipped here as our own echo and every superseding value
             // is broadcast on. Applying them under this handler would break it.
             ChangeDeliveryRule.SourceValuesAreSettled,
-            BufferTime, null, logger, dropHandler, _configuration.TeardownFlushTimeout);
+            BufferTime, null, logger, dropHandler);
 
     public async ValueTask CloseAllConnectionsAsync()
     {

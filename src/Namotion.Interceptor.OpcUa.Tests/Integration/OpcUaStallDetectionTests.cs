@@ -74,7 +74,7 @@ public class OpcUaStallDetectionTests
 
             // Verify initial connection
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should be connected after startup");
             logger.Log("Initial connection established");
@@ -88,7 +88,7 @@ public class OpcUaStallDetectionTests
 
             // Wait for client to detect disconnection (longer timeout for parallel test execution)
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == false,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
@@ -212,7 +212,7 @@ public class OpcUaStallDetectionTests
 
             // Wait for connection status to stabilize
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
             logger.Log("Test passed - client recovered after stall");
@@ -292,7 +292,7 @@ public class OpcUaStallDetectionTests
 
             // Wait for client to detect disconnection (longer timeout for slow CI runners)
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Source!.Diagnostics.IsOperational || client.Source!.Diagnostics.IsReconnecting,
+                () => client.Source!.Diagnostics.IsOperational == false || client.Source!.Diagnostics.IsReconnecting,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should detect disconnection or start reconnecting");
             logger.Log($"Client state after stop - Connected: {client.Source!.Diagnostics.IsOperational}, Reconnecting: {client.Source!.Diagnostics.IsReconnecting}");
@@ -311,7 +311,7 @@ public class OpcUaStallDetectionTests
 
             // Verify client is connected
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Source!.Diagnostics.IsOperational,
+                () => client.Source!.Diagnostics.IsOperational == true,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
 

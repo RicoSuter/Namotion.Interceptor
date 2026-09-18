@@ -108,7 +108,7 @@ Property writes to sources follow a **local-first** model: the local property is
 | Write during connect, initial state overwrites the property | Local write restored | Receives the local write | In sync (local write wins) |
 | Queued write superseded by a later local write | Later write kept | Receives only the later write | In sync |
 
-In all cases the local model and the source converge. Once a write is parked and its property is owned by the source, it is never discarded in favour of an inbound value, so in the reconnect rows the source ends up with the local write rather than the value it held during the outage. [Known Limitations](#known-limitations) lists the cases that fall outside that: the retry queue disabled, a property the source has not claimed yet, and a property with no setter. A write is only dropped when a *later local* write supersedes it, and that later write is delivered in its place. Source-wins still applies wherever no local write is pending: an inbound value is accepted and produces no outbound write.
+In all cases the local model and the source converge. Once a write is parked and its property is owned by the source, it is never discarded in favour of an inbound value, so in the reconnect rows the source ends up with the local write rather than the value it held during the outage. [Known Limitations](#known-limitations) lists the remaining exceptions, including properties the source has not claimed yet and properties with no setter. A write is only dropped when a *later local* write supersedes it, and that later write is delivered in its place. Source-wins still applies wherever no local write is pending: an inbound value is accepted and produces no outbound write.
 
 The table describes a connector talking to a remote source. A server also drops a write superseded by a client's write, since that write is the newer one; see [Why the source does not always win](#why-the-source-does-not-always-win). Convergence is unaffected, because the superseding value is the one the clients already have.
 
@@ -187,10 +187,11 @@ If a transaction repair write fails, the source keeps the older value and the su
 
 ### Write Retry Queue
 
-`SubjectSourceBase` provides a write retry queue that buffers writes during disconnection. Each connector exposes the queue size through its own configuration (for example, `OpcUaClientConfiguration.WriteRetryQueueSize`); when implementing a custom source, pass `writeRetryQueueSize` to the `SubjectSourceBase` constructor (default: 1000, pass 0 to disable).
+`SubjectSourceBase` provides a write retry queue that buffers writes during disconnection. Each connector exposes the queue size through its own configuration (for example, `OpcUaClientConfiguration.WriteRetryQueueSize`); when implementing a custom source, pass `writeRetryQueueSize` to the `SubjectSourceBase` constructor (default: 1000, pass 0 to disable retention). A capacity of 0 keeps the queue as the ownership and diagnostics boundary but retains no writes: failed and owned connect-window writes are warned about and counted as dropped instead.
 
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
+- Complete accounting at capacity 0: owned writes that cannot be retained are counted by `Diagnostics.OutboundRetries.TotalDropped`; writes made before the source claims their property remain unattributable and are listed under [Known Limitations](#known-limitations)
 - Memory while disconnected is bounded per connection attempt: the change subscription is drained into this queue before each attempt and again after the initial state is applied, so repeated failed attempts do not compound. Within one attempt the initial-state load is drained on a timer as well, so what accumulates without a bound is the retry delay and `StartListeningAsync`, and peak memory follows the write rate times the length of those two legs
 - Automatic retry when `WriteChangesAsync` fails during normal operation
 - Re-apply on reconnection by commit order: after loading initial state, each queued change is kept unless a later *local* write superseded it, in which case that later write is delivered instead. A kept change is sent as a fresh write, restored locally first if the load moved the model off it. Values the load brought in do not supersede a write that already committed, because the load cannot be ranked against it.
@@ -198,11 +199,11 @@ If a transaction repair write fails, the source keeps the older value and the su
 
 ### Flushing On Stop
 
-When a connector stops, the change processor writes whatever it had buffered but not yet flushed, instead of discarding it. A source writes it through the retry queue above, so a live transport takes the batch and a dead one parks it; a server broadcasts it to the clients still connected. Without this the batch is unrecoverable rather than merely late, because it has already left the change subscription that the retry queue is fed from.
+When a connector attempt ends, the change processor hands whatever it had buffered but not yet flushed to the normal delivery owner. A source gives the batch to the retry queue above, while a server broadcasts it to the clients still connected. A failed reconnect attempt can leave the source batch parked for the next attempt. On final connector stop the retry owner is retired instead: pending and still-unconfirmed writes are cleared and counted in `Diagnostics.OutboundRetries.TotalDropped`. Without this handoff the batch would be lost silently because it has already left the change subscription that feeds the retry queue.
 
-The cost is that a stop can block on an unreachable endpoint, so the wait is bounded by `TeardownFlushTimeout`, which each connector exposes on its own configuration (for example `OpcUaClientConfiguration.TeardownFlushTimeout`) and which defaults to `ChangeQueueProcessor.DefaultTeardownFlushTimeout`, 5 seconds. That bound is per connector and the connectors stop one after another, under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so a host running several connectors that can hang wants a shorter bound than one running a single local connector. Set it to zero to skip the flush and discard the batch, which is the fastest stop and the only one that loses data. When implementing a custom source, pass `teardownFlushTimeout` to the `SubjectSourceBase` constructor, which rejects a negative value there rather than when the source next connects.
+The cost is that a stop can block on an unreachable endpoint. Final delivery and the source retry handoff share one internal five-second safety bound, which cannot be configured per connector. Connectors stop one after another under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so the host timeout must leave enough time for every connector to complete or reach its internal bound.
 
-The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own, in which case the batch is parked for the next attempt rather than written.
+The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own. At final stop, every write still owned when that happens is counted as locally unconfirmed; the remote side may already have accepted it or may still accept it, so teardown delivery is at least once.
 
 ### Monitoring Synchronization State
 
@@ -220,12 +221,11 @@ See [Source Monitoring](connectors-monitoring.md) for waiting on synchronization
 
 ### Inbound Update Error Handling
 
-When applying inbound updates (writing data from the external system to the local subject model), if an individual update fails (the action throws an exception), the error is logged and **the update is dropped**. There is no retry mechanism for inbound updates.
+When an inbound update fails to apply, the failure is logged and the update is dropped. There is no retry: writes to the local model are deterministic, so they either succeed or fail consistently and retrying would not help. This includes custom validation failures.
 
-This is by design:
-- Individual update failures don't block other updates from being applied
-- Monitor logs for `Failed to apply subject update` errors to detect issues
-- Write failures to internal models are treated as non-transient because property writes are deterministic: they either succeed or fail consistently, so retrying would not help (this includes custom validation failures)
+`SubjectPropertyWriter` logs `Failed to apply subject update` once per update, not once per failed property. Beyond that each connector decides: the WebSocket server also answers the client with an error frame, and a source's initial state load lets the exception propagate so its reconnect and reload retry the whole snapshot.
+
+Connectors applying a `SubjectUpdate` get per-property containment within one update, described in [When a Property Fails to Apply](connectors-subject-updates.md#when-a-property-fails-to-apply). One writing values property by property sets its own granularity instead, as the OPC UA and MQTT clients do by catching around each write.
 
 This differs from outbound changes (writing from local model to external system), which use a retry queue to handle transient failures.
 
@@ -299,9 +299,9 @@ public MySource() => Diagnostics = new SourceDiagnostics(_metrics);
 
 The `SourceMetrics` instance is the writable side and stays private to the source: it is what the source calls `MarkStarted()`, `MarkOperational()`, `ReportError()` and the queue registrations on, and nothing outside the source can reach it through the returned view. See [Connector Diagnostics](#connector-diagnostics).
 
-A direct source must register `ClaimedPropertyCount` and all queue gauges: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
+A direct source may register `ClaimedPropertyCount`; registering it is required only when the source must expose a non-null ownership count. A registered gauge can measure zero, while an unregistered gauge remains `null`. A direct source must register all queue gauges it owns: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
 
-Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the drop of liveness on the way out. **Raising liveness is the derived class's job**: the base never calls `MarkOperational()`, because each protocol becomes usable at a different point and that point is what `IsOperational` means for that connector. A source that never calls it reports not operational for its entire life while its `State` reaches `Synchronized`. The three in-tree clients show where to put the call: the MQTT client raises it once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each drops it again from the path that detects the loss.
+Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the terminal handling of any liveness the derived source has published. **Publishing liveness is the derived class's job**: the base never calls `MarkOperational()` or `MarkNotOperational()`, because each protocol becomes usable or unavailable at different points and those points are what `IsOperational` means for that connector. Calling either method opts the source into liveness reporting. A simple source that calls neither exposes `IsOperational == null` for as long as it runs, while its `State` can still reach `Synchronized`, and `false` once it stops. The three in-tree clients show where to put the calls: the MQTT client reports serving once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each reports the explicit down value from the path that detects the loss.
 
 `StateChangeTime` and `LastSynchronizedAt` are both required, and neither can answer the other's question. `StateChangeTime` moves on every transition, so read with `State` it says how long the current state has lasted: `Synchronizing` plus T reads as stale since T. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it says whether a good period ever began, and it cannot say when synchronization was lost.
 
@@ -647,8 +647,8 @@ Every connector reports what its transport is doing through `ISubjectConnector.D
 
 ```
 ConnectorDiagnostics
-  IsOperational          bool               the transport is up and serving
-  OperationalChangeTime  DateTimeOffset?    when IsOperational last changed, null until it first does
+  IsOperational          bool?              null = running and not measured, true = serving, false = down
+  OperationalChangeTime  DateTimeOffset?    when IsOperational last changed, null until it first does in this run
   LastError              Exception?         the most recent error in either direction, null if there has been none
   StartTime              DateTimeOffset?    when the current run began, the epoch for every Total below
   Throughput
@@ -660,12 +660,12 @@ ConnectorDiagnostics
     TotalDropped         long               items thrown away since StartTime
 
 SourceDiagnostics : ConnectorDiagnostics
-  ClaimedPropertyCount   int                properties this source currently owns
+  ClaimedPropertyCount   int?               null = not measured, otherwise properties currently owned
   OutboundRetries        writes parked for retry, same three members
   InboundBuffer          inbound updates held while the initial state loads, same three members
 ```
 
-`IsOperational` is the one liveness spelling every connector uses. What it means is decided per connector and documented on that connector's own diagnostics type: for a client it is roughly "connected and usable", for a server "listening and accepting connections". It is not a claim about the model being in sync, which is a separate question answered by `ISubjectSource.State`; see [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
+`IsOperational` is the one optional liveness spelling every connector uses. `true` means the connector reports serving and `false` means it reports down. `null` means the connector is running and has not reported liveness, so it appears only between a start and the connector's first report, and never on a connector that has stopped: the base publishes `false` on the way out whether or not the connector measures liveness itself. What the explicit values mean is decided per connector and documented on that connector's own diagnostics type: for a client it is roughly "connected and usable", for a server "listening and accepting connections". It is not a claim about the model being in sync, which is a separate question answered by `ISubjectSource.State`; see [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
 
 Direction is stated once, from the subject tree's point of view, and means the same for clients and servers: incoming is changes flowing into the tree, outgoing is changes flowing out of it. Both rates are averaged over a 60-second sliding window. A `null` rate means the connector does not measure that direction at all, decided at construction and never changing, which is different from a measured `0.0`.
 
@@ -921,11 +921,11 @@ What the base provides around that call:
 
 | Behaviour | Where |
 |---|---|
-| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
+| Stamps the start epoch that every `Total` counter and `StartTime` are measured from, clears `LastError`, returns liveness to `null` so the new run carries nothing from the previous one, and resets the registered metrics | `MarkStarted()`, once per `ExecuteAsync` entry |
 | Records a fault that escapes `RunAsync` into `LastError` | the catch around the `RunAsync` call |
 | Leaves an expected shutdown unrecorded, so a graceful stop does not overwrite the genuine error that made the connector fail | the `OperationCanceledException` filter on the stopping token |
-| Forces liveness false when `RunAsync` exits, on every path | `MarkStopped()` in the `finally` |
-| Forces liveness false on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
+| Publishes liveness `false` when `RunAsync` exits, on every path, and rejects late reports until the next `MarkStarted()` | `MarkStopped()` in the `finally` |
+| Publishes liveness `false` on disposal, because `BackgroundService.Dispose` cancels the token without awaiting `ExecuteAsync` | the `Dispose` override |
 | Runs one restart-loop iteration under its own `ConnectorRunAttempt`, publishing it while the body runs and clearing it before disposal, so an injected kill cancels exactly the iteration that is running and one arriving between iterations finds nothing to cancel | `RunAttemptAsync()`, paired with `ForceKillCurrentAttemptAsync()` |
 
 What a server author must implement:
@@ -953,7 +953,7 @@ using var registration = Metrics.OutboundChanges.Register(
 await processor.ProcessAsync(stoppingToken);
 ```
 
-`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A bounded buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` only on that drop path. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path, never fills that queue and therefore neither reads the bound nor validates it.
+`Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` for bounded-queue overflow, ordinary write failure, and terminally unconfirmed delivery. Built-in connectors use `CreateDropReporter()` so a late report from an abandoned run cannot enter the next diagnostics epoch. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path and normally leaves that queue empty except for a cancelled delivery being handed to terminal accounting.
 
 ## Known Limitations
 
@@ -962,8 +962,6 @@ Cases where the local model and the external system can end up disagreeing, or w
 **A failed write leaves the two ends diverged until the property is written again.** The [write retry queue](#write-retry-queue) retries it, but it is a bounded ring buffer that drops its oldest entries when full, and with it disabled the change is logged and dropped immediately. Nothing actively reconciles the difference. Tracked as [#342](https://github.com/RicoSuter/Namotion.Interceptor/issues/342).
 
 **A property with an `OnChanging` hook loses a connect-window write to the initial-state load.** A hook that rewrites the incoming value, which the generated `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` can do, means the stored value is not the value the source sent, so the change publishes as `Local`. The drain then treats the load's own value as an ordinary local write and it wins the per-property collapse, discarding a write the user made moments earlier. Without the hook the load's apply is skipped as an echo and the user's write is restored and sent, which is what [Write Consistency Guarantees](#write-consistency-guarantees) promises. Both ends still converge, on the loaded value; what is lost is the user's write. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
-
-**Disabling the retry queue discards connect-window writes silently.** With `writeRetryQueueSize: 0` there is no queue to park them in, so the drain empties the subscription and returns, and the queue's own "buffering is disabled" warning never fires because there is no queue to emit it. `Diagnostics.OutboundRetries.TotalDropped` does not cover this path either, so in that configuration the number is a floor rather than the whole loss: it counts the failed writes discarded directly, but not the drain, which is left uncounted because attributing its discards means an ownership check per change on a path that only runs when the queue is disabled, and the configuration already says those writes are being thrown away.
 
 **Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 

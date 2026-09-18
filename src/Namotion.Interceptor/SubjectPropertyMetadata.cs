@@ -94,6 +94,7 @@ public readonly record struct SubjectPropertyMetadata
     {
     }
     
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S107", Justification = "The private constructor combines the existing public metadata shapes without an intermediate allocation.")]
     private SubjectPropertyMetadata(
         string name, 
         Type type, 

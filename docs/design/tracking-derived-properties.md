@@ -4,7 +4,7 @@ This document describes the internal architecture of the derived property tracki
 
 ## Overview
 
-Derived properties are computed properties marked with `[Derived]`. They are not intercepted (no partial backing field), but their dependencies on intercepted properties are automatically tracked. When any dependency changes, the derived property is recalculated and a change notification is fired.
+Derived properties are computed properties marked with `[Derived]`. They are not intercepted (no partial backing field), but their dependencies on intercepted properties are automatically tracked. When any dependency changes, the derived property is recalculated and a change notification is fired. Because such a property stores nothing, it also owns nothing: `LifecycleInterceptor.WriteProperty` ignores it, so a subject it returns is attached only through the intercepted properties that hold it. Properties added through `RegisteredSubject.AddDerivedProperty` are intercepted and keep attaching their values.
 
 ```csharp
 [InterceptorSubject]
@@ -518,7 +518,7 @@ With `IsRecalculating` serialization, guards 2 and 3 are technically redundant (
 
 The `finally` block includes a re-trigger check: if `RecalculationNeeded` was set in the narrow gap between the outer loop's `return` (which releases its lock) and the `finally` (which clears `IsRecalculating`), the `finally` detects this and re-enters `RecalculateDerivedProperty` to process the missed signal. This ensures no write is lost even in this edge case.
 
-Additionally, `LifecycleInterceptor.WriteProperty` uses `context.Property.Metadata.Type.CanContainSubjects<TProperty>()` (the declared metadata type) rather than just `CanContainSubjects<TProperty>()` (the generic parameter). `TProperty` is a hint that may be widened to `object` through non-generic paths like `SetPropertyValueWithInterception`, which would cause `CanContainSubjects<object>()` to return `true` for value-type properties (e.g., `decimal`). The metadata type check ensures value-type properties never enter the lifecycle lock.
+Additionally, `LifecycleInterceptor.WriteProperty` uses `context.Property.Metadata.Type.CanContainSubjects<TProperty>()` (the declared metadata type) rather than just `CanContainSubjects<TProperty>()` (the generic parameter). `TProperty` is a hint that may be widened to `object` through non-generic paths like `SetPropertyValueWithInterception`, which would cause `CanContainSubjects<object>()` to return `true` for value-type properties (e.g., `decimal`). The metadata type check ensures value-type properties never enter the lifecycle lock. The guard also tests `metadata.IsIntercepted` first, so a property that is not intercepted, such as a non-partial `[Derived]` getter, never enters the lifecycle lock: only intercepted properties attach subjects.
 
 ### Concurrent write detection via `_writeGeneration`
 

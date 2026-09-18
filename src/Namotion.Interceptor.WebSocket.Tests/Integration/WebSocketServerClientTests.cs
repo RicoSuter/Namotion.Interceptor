@@ -269,10 +269,9 @@ public class WebSocketServerClientTests
         // Assert: the reconcile restores the parked write over the value the load delivered and the
         // connected phase sends it, so the write survives on both sides. The client half matters even
         // though the server broadcasts every update back to its own originator: the local model must not
-        // depend on that echo landing, because both the server's apply of the client's write and the
-        // client's apply of its own echo are documented unhandled loss cases (B3 and C7 in
-        // docs/design/websocket-sync.md). Without the local restore, either one failing silently would
-        // leave the client sitting on the loaded value forever.
+        // depend on that echo landing, because neither the server's apply of the client's write nor the
+        // client's apply of its own echo is acknowledged, so either can fail with nothing to notice it.
+        // Without the local restore, that would leave the client sitting on the loaded value forever.
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "WrittenWhileDown" && server.Root!.Name == "WrittenWhileDown",
             timeout: TimeSpan.FromSeconds(30),

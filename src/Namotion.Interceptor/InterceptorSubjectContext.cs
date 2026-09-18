@@ -8,6 +8,7 @@ using Namotion.Interceptor.Ordering;
 
 namespace Namotion.Interceptor;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Explicit use of the allocation-free HashSet struct enumerator raises the counted dependencies from 30 to 31; it does not add a runtime dependency beyond the previous foreach.")]
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
     // All topology (services, fallback contexts) and everything derived from it (delegation
@@ -181,6 +182,23 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
         InvalidateUsingContexts();
         return true;
+    }
+
+    /// <summary>
+    /// Gets the first fallback context that belongs to a subject, which is the one a subject attached
+    /// through a property inherits from, or <c>null</c> when there is none.
+    /// </summary>
+    internal InterceptorSubjectContext? TryGetSubjectFallbackContext()
+    {
+        foreach (var fallbackContext in Volatile.Read(ref _state).FallbackContexts)
+        {
+            if (fallbackContext is IInterceptorExecutor)
+            {
+                return fallbackContext;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -360,10 +378,8 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     }
 
     /// <summary>
-    /// Walks the chain and records where it ends on every state it passed, which is what makes
-    /// building a graph of depth N cost one walk instead of one per level. Iterative because the
-    /// chain is as deep as the subject graph, so recursion overflows the stack and no fixed hop
-    /// limit is correct.
+    /// Resolves the delegation chain using reusable traversal buffers and clears or releases
+    /// them before returning or throwing.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private InterceptorSubjectContext ResolveDelegationChain(ref ContextState state)
@@ -371,71 +387,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         var visited = _delegationCycleVisited ??= [];
         var path = _delegationCyclePath ??= [];
 
-        var backoff = new SpinWait();
-
         try
         {
-            while (true)
-            {
-                visited.Clear();
-                path.Clear();
-
-                // Re-pinned every pass, never reused from the caller: a stale first hop would make
-                // every pass reach the same repeat and fail the same confirmation, spinning here
-                // for good after one mutation.
-                var current = this;
-                var currentState = Volatile.Read(ref current._state);
-
-                // Only the entry's own record may be trusted. Everything below is read for topology
-                // alone, the one thing an installed state always describes correctly. A record is a
-                // claim about contexts further down, and because R4 keeps a using set a superset an
-                // invalidation can arrive out of chain order; trusting such a record would cache a
-                // resolution of a context the graph no longer reaches, on a state nothing
-                // invalidates again.
-                if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationMarker))
-                {
-                    throw CreateDelegationCycleException();
-                }
-
-                while (true)
-                {
-                    var next = currentState.DelegationTarget;
-                    if (next is null)
-                    {
-                        CacheResolvedTerminal(path, current, 0);
-                        state = currentState;
-                        return current;
-                    }
-
-                    if (!visited.Add(current))
-                    {
-                        break;
-                    }
-
-                    path.Add(new DelegationHop(current, currentState));
-                    current = next;
-                    currentState = Volatile.Read(ref current._state);
-                }
-
-                if (DelegationLoopStillClosed(path, current, out var loopStart))
-                {
-                    // Every hop that entered visited also entered path, and the break above fires
-                    // only on a context already in visited, so the repeat is always on the path.
-                    Debug.Assert(loopStart < path.Count, "The repeated context was not found on the walked path.");
-
-                    // Only from the loop, never from the acyclic run leading into it: the
-                    // confirmation re-reads the loop's states and nothing else, so a context ahead
-                    // of it reaches the loop by an edge read earlier and possibly rewired since.
-                    CacheResolvedTerminal(path, CyclicDelegationMarker, loopStart);
-                    throw CreateDelegationCycleException();
-                }
-
-                // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
-                // cycle has no state to lose and confirms on the next pass. Backing off because
-                // reaching here means a mutator is rewiring right now and nothing else bounds this
-                // loop; only retries pay it.
-                backoff.SpinOnce();
-            }
+            return WalkDelegationChain(ref state, visited, path);
         }
         finally
         {
@@ -451,6 +405,80 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 visited.Clear();
                 path.Clear();
             }
+        }
+    }
+
+    /// <summary>
+    /// Resolves and caches the delegation chain using caller-owned scratch buffers.
+    /// The caller must clear or release retained buffers on completion, including exceptions.
+    /// </summary>
+    // Encourages the JIT to optimize the walk within its buffer-owning wrapper; inlining remains runtime-dependent.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private InterceptorSubjectContext WalkDelegationChain(ref ContextState state, HashSet<InterceptorSubjectContext> visited, List<DelegationHop> path)
+    {
+        var backoff = new SpinWait();
+
+        while (true)
+        {
+            visited.Clear();
+            path.Clear();
+
+            // Re-pinned every pass, never reused from the caller: a stale first hop would make
+            // every pass reach the same repeat and fail the same confirmation, spinning here
+            // for good after one mutation.
+            var current = this;
+            var currentState = Volatile.Read(ref current._state);
+
+            // Only the entry's own record may be trusted. Everything below is read for topology
+            // alone, the one thing an installed state always describes correctly. A record is a
+            // claim about contexts further down, and because R4 keeps a using set a superset an
+            // invalidation can arrive out of chain order; trusting such a record would cache a
+            // resolution of a context the graph no longer reaches, on a state nothing
+            // invalidates again.
+            if (ReferenceEquals(currentState.ResolvedTerminal, CyclicDelegationMarker))
+            {
+                throw CreateDelegationCycleException();
+            }
+
+            // The chain is as deep as the subject graph: iteration avoids stack overflow without a fixed hop limit.
+            while (true)
+            {
+                var next = currentState.DelegationTarget;
+                if (next is null)
+                {
+                    CacheResolvedTerminal(path, current, 0);
+                    state = currentState;
+                    return current;
+                }
+
+                if (!visited.Add(current))
+                {
+                    break;
+                }
+
+                path.Add(new DelegationHop(current, currentState));
+                current = next;
+                currentState = Volatile.Read(ref current._state);
+            }
+
+            if (DelegationLoopStillClosed(path, current, out var loopStart))
+            {
+                // Every hop that entered visited also entered path, and the break above fires
+                // only on a context already in visited, so the repeat is always on the path.
+                Debug.Assert(loopStart < path.Count, "The repeated context was not found on the walked path.");
+
+                // Only from the loop, never from the acyclic run leading into it: the
+                // confirmation re-reads the loop's states and nothing else, so a context ahead
+                // of it reaches the loop by an edge read earlier and possibly rewired since.
+                CacheResolvedTerminal(path, CyclicDelegationMarker, loopStart);
+                throw CreateDelegationCycleException();
+            }
+
+            // The loop came apart under the walk, so it was a rewiring and not a cycle. A real
+            // cycle has no state to lose and confirms on the next pass. Backing off because
+            // reaching here means a mutator is rewiring right now and nothing else bounds this
+            // loop; only retries pay it.
+            backoff.SpinOnce();
         }
     }
 
@@ -622,7 +650,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private ImmutableArray<TInterface> ComputeServices<TInterface>(ContextState state)
     {
-        var visited = _serviceQueryVisited ??= [];
+        var visited = _serviceQueryVisited ?? [];
+        // Service equality callbacks can reenter lookup, so an active walk must own its set.
+        _serviceQueryVisited = null;
         try
         {
             return CollectServices(typeof(TInterface), this, state, visited)
@@ -631,13 +661,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            if (visited.Count > MaximumRetainedTraversalSize)
-            {
-                _serviceQueryVisited = null;
-            }
-            else
+            if (visited.Count <= MaximumRetainedTraversalSize)
             {
                 visited.Clear();
+                _serviceQueryVisited = visited;
             }
         }
     }
@@ -960,12 +987,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (usedByContexts.Count == 1)
             {
-                // foreach binds the HashSet struct enumerator, First() would box it.
-                foreach (var usingContext in usedByContexts)
-                {
-                    singleUsingContext = usingContext;
-                    break;
-                }
+                using var enumerator = usedByContexts.GetEnumerator();
+                enumerator.MoveNext(); // Count == 1 under the lock guarantees success; Single() would box the enumerator.
+                singleUsingContext = enumerator.Current;
             }
             else if (usedByContexts.Count != 0)
             {

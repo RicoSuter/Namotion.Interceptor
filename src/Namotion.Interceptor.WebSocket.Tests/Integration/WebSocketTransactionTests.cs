@@ -45,7 +45,7 @@ public class WebSocketTransactionTests
             () => client.Root!.Name == "Initial",
             message: "Client should receive initial state");
 
-        AssertSourceOwns(client.Root!, nameof(TestRoot.Name));
+        await AssertSourceOwnsAsync(client.Root!, nameof(TestRoot.Name));
 
         // Act
         using (var transaction = await client.Context!.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -82,7 +82,7 @@ public class WebSocketTransactionTests
             () => client.Root!.Name == "Initial",
             message: "Client should receive initial state");
 
-        AssertSourceOwns(client.Root!, nameof(TestRoot.Number));
+        await AssertSourceOwnsAsync(client.Root!, nameof(TestRoot.Number));
 
         // Act
         using (var transaction = await client.Context!.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -127,7 +127,7 @@ public class WebSocketTransactionTests
             () => client.Root!.Child?.Label == "ServerChild",
             message: "Client should receive the initial child state");
 
-        AssertSourceOwns(client.Root!.Child!, nameof(TestItem.Label));
+        await AssertSourceOwnsAsync(client.Root!.Child!, nameof(TestItem.Label));
 
         // Act
         using (var transaction = await client.Context!.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -147,10 +147,14 @@ public class WebSocketTransactionTests
     /// The commit only writes to sources that own the changed property, so an ownership regression
     /// would silently downgrade these tests to covering plain non-transactional propagation.
     /// </summary>
-    private static void AssertSourceOwns(IInterceptorSubject subject, string propertyName)
-    {
-        Assert.True(
-            new PropertyReference(subject, propertyName).TryGetSource(out _),
-            $"The WebSocket client source must own {propertyName} for the commit to write through it");
-    }
+    /// <remarks>
+    /// Settled rather than sampled. The waits above only establish that a value arrived, and ownership
+    /// is registered on its own schedule as the subject is attached, so sampling it the instant a value
+    /// lands fails on timing rather than on ownership. A real regression still fails here, on the
+    /// timeout, with the same message.
+    /// </remarks>
+    private static Task AssertSourceOwnsAsync(IInterceptorSubject subject, string propertyName) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => new PropertyReference(subject, propertyName).TryGetSource(out _),
+            message: $"The WebSocket client source must own {propertyName} for the commit to write through it");
 }

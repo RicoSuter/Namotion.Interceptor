@@ -13,15 +13,10 @@ public static class SubjectUpdateExtensions
     /// Applies update to a subject.
     /// </summary>
     /// <remarks>
-    /// Subjects the update creates are populated before they enter the graph, so that the subgraph is
-    /// complete by the time a concurrent reader can observe it. A subject only inherits the graph's
-    /// context once it is assigned, so those initial writes run against an empty interceptor chain:
-    /// they perform no validation, no equality check, no derived-property recalculation, and raise no
-    /// change events, and <paramref name="transformValueBeforeApply"/> does not run for them either
-    /// because its registered property cannot be resolved yet. Values written to subjects that already
-    /// exist locally take the normal intercepted path. Lifecycle correctness is unaffected: attaching
-    /// the subject seeds change tracking from the backing store, so the first later write to one of
-    /// these properties is compared against the applied value, not against the type default.
+    /// Subjects the update creates are populated before they enter the graph, against an empty interceptor
+    /// chain: their initial values run no validation, equality check or derived-property recalculation, raise
+    /// no change events, and skip <paramref name="transformValueBeforeApply"/>. Values written to subjects
+    /// that already exist locally take the normal intercepted path.
     /// </remarks>
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
@@ -32,7 +27,8 @@ public static class SubjectUpdateExtensions
     /// source so echo suppression skips that source's own outbound path.</param>
     /// <param name="transformValueBeforeApply">The function to transform the update before applying it.
     /// Not invoked for subjects this update creates, see the remarks.</param>
-    /// <param name="logger">Logs unresolvable-subject drops with the origin; omit to keep the drops
+    /// <param name="logger">Reports the warnings of this apply, such as unresolvable-subject drops with the
+    /// origin; omit to use the subject context's <see cref="ILoggerFactory"/>, and without one the drops are
     /// counter-only.</param>
     /// <returns>
     /// <c>true</c> if every part of the update that referenced a resolvable subject, collection item or
@@ -41,8 +37,9 @@ public static class SubjectUpdateExtensions
     /// for a property the receiving subject does not declare is dropped too, but is a permanent schema
     /// mismatch rather than a transient resolution failure, so it is excluded from this flag rather than
     /// stalling a connection that could never recover from it; it is counted separately, see
-    /// <see cref="SubjectUpdateDiagnostics.UnknownInboundProperties"/>. A caller that treats its own
-    /// apply as an acknowledgement, such as a server advancing what it has applied for a connection,
+    /// <see cref="SubjectUpdateDiagnostics.UnknownInboundProperties"/>. Structure that a property without a
+    /// setter cannot store is excluded for the same reason and reported as a warning. A caller that treats
+    /// its own apply as an acknowledgement, such as a server advancing what it has applied for a connection,
     /// must not do so when this returns <c>false</c>.
     /// </returns>
     public static bool ApplySubjectUpdate(

@@ -59,8 +59,10 @@ public class BatchScopeTests
         Assert.Same(child, found);
     }
 
-    [Fact]
-    public void WhenSubjectMovesBetweenParentsInsideBatchScope_ThenItInheritsTheSameContextsAsWithoutTheScope()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenSubjectMovesBetweenParentsInsideBatchScope_ThenItInheritsTheSameContextsAsWithoutTheScope(bool attachOnAnotherThread)
     {
         // Arrange: two identical graphs whose parents each carry their own context
         var scoped = CreateCrossParentGraph();
@@ -71,7 +73,16 @@ public class BatchScopeTests
         using (lifecycle.CreateBatchScope(scoped.RootContext))
         {
             scoped.FirstParent.Mother = null;
-            scoped.SecondParent.Mother = scoped.Child;
+            if (attachOnAnotherThread)
+            {
+                var thread = new Thread(() => scoped.SecondParent.Mother = scoped.Child);
+                thread.Start();
+                thread.Join();
+            }
+            else
+            {
+                scoped.SecondParent.Mother = scoped.Child;
+            }
         }
 
         unscoped.FirstParent.Mother = null;
@@ -110,7 +121,6 @@ public class BatchScopeTests
         graph.Child.SetSubjectId("childId");
         Assert.True(idRegistry.TryGetSubjectById("childId", out var found));
         Assert.Same(graph.Child, found);
-        AssertNoBatchScopeStateOnCurrentThread();
     }
 
     [Fact]
@@ -192,7 +202,7 @@ public class BatchScopeTests
     }
 
     [Fact]
-    public void WhenDetachRunsOnAnotherThreadDuringBatchScope_ThenThatThreadIsNotAffected()
+    public void WhenDetachRunsOnAnotherThreadDuringBatchScope_ThenThatThreadDetachesImmediately()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -205,24 +215,151 @@ public class BatchScopeTests
         childA.SetSubjectId("childAId");
         childB.SetSubjectId("childBId");
 
-        // Act: scope on current thread, detach childB on separate thread
+        // Act
         using (lifecycle.CreateBatchScope(context))
         {
-            // Detach childA on this thread (scoped: deferred)
             parent.Mother = null;
 
-            // Detach childB on another thread (no scope: immediate)
             var thread = new Thread(() => parent.Father = null);
             thread.Start();
             thread.Join();
 
-            // Assert: childA still in registry (deferred), childB gone (immediate)
+            // Assert: only the thread holding the scope defers its detaches
             Assert.True(idRegistry.TryGetSubjectById("childAId", out _));
             Assert.False(idRegistry.TryGetSubjectById("childBId", out _));
         }
 
-        // Assert: after scope dispose, childA is also removed
+        // Assert
         Assert.False(idRegistry.TryGetSubjectById("childAId", out _));
+    }
+
+    [Fact]
+    public void WhenAnotherThreadHoldsAScopeOnTheSameGraph_ThenClosingThisThreadsScopeStillDetaches()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Person { FirstName = "Chi" };
+        var parent = new Person(context) { FirstName = "Par", Mother = child };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+        child.SetSubjectId("childId");
+
+        using var otherScopeOpened = new ManualResetEventSlim();
+        using var releaseOtherScope = new ManualResetEventSlim();
+        var otherThread = new Thread(() =>
+        {
+            using (lifecycle.CreateBatchScope(context))
+            {
+                otherScopeOpened.Set();
+                releaseOtherScope.Wait();
+            }
+        });
+        otherThread.Start();
+        otherScopeOpened.Wait();
+
+        try
+        {
+            // Act
+            using (lifecycle.CreateBatchScope(context))
+            {
+                parent.Mother = null;
+            }
+
+            // Assert: the scope still open on the other thread does not keep this thread's detach deferred
+            Assert.False(idRegistry.TryGetSubjectById("childId", out _));
+        }
+        finally
+        {
+            releaseOtherScope.Set();
+            otherThread.Join();
+        }
+    }
+
+    [Fact]
+    public void WhenAnotherThreadDefersTheSameSubjectLater_ThenClosingThisThreadsScopeLeavesItForThatScope()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Person { FirstName = "Chi" };
+        var parent = new Person(context) { FirstName = "Par", Mother = child };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+        child.SetSubjectId("childId");
+
+        using var otherThreadDeferred = new ManualResetEventSlim();
+        using var releaseOtherScope = new ManualResetEventSlim();
+        var otherThread = new Thread(() =>
+        {
+            using (lifecycle.CreateBatchScope(context))
+            {
+                parent.Father = child;
+                parent.Father = null;
+                otherThreadDeferred.Set();
+                releaseOtherScope.Wait();
+            }
+        });
+
+        try
+        {
+            // Act: this thread defers the child first, then the other thread holds it and defers it again
+            using (lifecycle.CreateBatchScope(context))
+            {
+                parent.Mother = null;
+                otherThread.Start();
+                otherThreadDeferred.Wait();
+            }
+
+            // Assert: the scope that removed the last reference most recently is still open
+            Assert.True(idRegistry.TryGetSubjectById("childId", out _));
+        }
+        finally
+        {
+            releaseOtherScope.Set();
+            otherThread.Join();
+        }
+
+        Assert.False(idRegistry.TryGetSubjectById("childId", out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenASubjectMovesToAnotherGraphWhileAScopeIsOpen_ThenItResolvesTheOtherGraph(bool onScopeThread)
+    {
+        // Arrange
+        var contextA = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var contextB = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Person { FirstName = "Chi" };
+        var rootA = new Person(contextA) { FirstName = "RootA", Mother = child };
+        var rootB = new Person(contextB) { FirstName = "RootB" };
+        var lifecycleA = contextA.TryGetLifecycleInterceptor()!;
+
+        void Move()
+        {
+            rootA.Mother = null;
+            rootB.Mother = child;
+        }
+
+        // Act
+        using (lifecycleA.CreateBatchScope(contextA))
+        {
+            if (onScopeThread)
+            {
+                Move();
+            }
+            else
+            {
+                var thread = new Thread(Move);
+                thread.Start();
+                thread.Join();
+            }
+        }
+
+        // Assert
+        var registeredChild = child.TryGetRegisteredSubject();
+        Assert.NotNull(registeredChild);
+        Assert.Same(contextB.GetService<ISubjectRegistry>().TryGetRegisteredSubject(child), registeredChild);
+        Assert.Same(rootB, registeredChild.Parents.Single().Property.Parent.Subject);
     }
 
     [Fact]
@@ -239,7 +376,6 @@ public class BatchScopeTests
 
         // Assert: the closed scope pins neither the root context nor the graph and interceptor it reaches
         Assert.False(weakContext.IsAlive);
-        Assert.Equal(0, GetBatchScopeCountOnCurrentThread());
     }
 
     // NoInlining so the context local cannot be kept alive by the caller's frame.
@@ -284,16 +420,13 @@ public class BatchScopeTests
         // Act & Assert: the handler throws out of the scope close
         Assert.Throws<InvalidOperationException>(() => scope.Dispose());
 
-        // Assert: the failed close left nothing behind on this thread
-        AssertNoBatchScopeStateOnCurrentThread();
-
-        // Arrange: a second, unrelated graph on the same thread
+        // Arrange: a second, unrelated graph
         throwingHandler.IsEnabled = false;
         var secondChild = new Person { FirstName = "Ch2" };
         var secondParent = new Person(context) { FirstName = "Pa2", Mother = secondChild };
         secondChild.SetSubjectId("secondChildId");
 
-        // Act: a subsequent scope on the same thread
+        // Act: a subsequent scope
         using (lifecycle.CreateBatchScope(context))
         {
             secondParent.Mother = null;
@@ -304,7 +437,6 @@ public class BatchScopeTests
 
         // Assert: and it is processed normally on dispose
         Assert.False(idRegistry.TryGetSubjectById("secondChildId", out _));
-        AssertNoBatchScopeStateOnCurrentThread();
     }
 
     [Fact]
@@ -342,7 +474,6 @@ public class BatchScopeTests
 
         // Assert: the other deferred subject was still detached and deregistered
         Assert.False(idRegistry.TryGetSubjectById("survivingChildId", out _));
-        AssertNoBatchScopeStateOnCurrentThread();
 
         // Act: re-attach the subject whose deferred detach ran after the failing one
         parent.Father = survivingChild;
@@ -354,7 +485,7 @@ public class BatchScopeTests
     }
 
     [Fact]
-    public void WhenTwoInterceptorsHaveOverlappingBatchScopes_ThenTheNonOwningDetachIsNotLost()
+    public void WhenTwoInterceptorsHaveOverlappingBatchScopes_ThenEachDefersOnlyItsOwnGraph()
     {
         // Arrange: two independent graphs, so two LifecycleInterceptor instances
         var contextA = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -373,7 +504,7 @@ public class BatchScopeTests
         var idRegistryA = contextA.GetService<ISubjectIdRegistry>();
         var idRegistryB = contextB.GetService<ISubjectIdRegistry>();
 
-        // Act: B's scope overlaps A's, so A owns the batch and B must not defer
+        // Act
         using (lifecycleA.CreateBatchScope(contextA))
         {
             parentA.Mother = null;
@@ -381,23 +512,19 @@ public class BatchScopeTests
             using (lifecycleB.CreateBatchScope(contextB))
             {
                 parentB.Mother = null;
-
-                // Assert: B detaches immediately because it does not own the batch
-                Assert.False(idRegistryB.TryGetSubjectById("childBId", out _));
             }
 
-            // Assert: closing B's scope neither processes nor drops A's deferred detach
+            // Assert: closing B's scope detaches B's subject and leaves A's deferred
+            Assert.False(idRegistryB.TryGetSubjectById("childBId", out _));
             Assert.True(idRegistryA.TryGetSubjectById("childAId", out _));
         }
 
-        // Assert: A's deferred detach is processed, B's stayed detached
+        // Assert
         Assert.False(idRegistryA.TryGetSubjectById("childAId", out _));
-        Assert.False(idRegistryB.TryGetSubjectById("childBId", out _));
-        AssertNoBatchScopeStateOnCurrentThread();
     }
 
     [Fact]
-    public void WhenBatchScopeIsDisposedOnAnotherThread_ThenItThrowsAndNeitherThreadIsCorrupted()
+    public void WhenBatchScopeIsDisposedOnAnotherThread_ThenItCloses()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
@@ -409,41 +536,43 @@ public class BatchScopeTests
         child.SetSubjectId("childId");
 
         var scope = lifecycle.CreateBatchScope(context);
-        try
+        parent.Mother = null;
+
+        // Act
+        var thread = new Thread(scope.Dispose);
+        thread.Start();
+        thread.Join();
+
+        // Assert
+        Assert.False(idRegistry.TryGetSubjectById("childId", out _));
+    }
+
+    [Fact]
+    public void WhenBatchScopeIsDisposedTwice_ThenAnEnclosingScopeStaysOpen()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Person { FirstName = "Chi" };
+        var parent = new Person(context) { FirstName = "Par", Mother = child };
+        var lifecycle = context.TryGetLifecycleInterceptor()!;
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        child.SetSubjectId("childId");
+
+        using (lifecycle.CreateBatchScope(context))
         {
+            var inner = lifecycle.CreateBatchScope(context);
             parent.Mother = null;
 
-            // Act: dispose the scope from a foreign thread
-            Exception? capturedException = null;
-            var countOnOtherThreadBefore = -1;
-            var countOnOtherThreadAfter = -1;
-            var thread = new Thread(() =>
-            {
-                countOnOtherThreadBefore = GetBatchScopeCountOnCurrentThread();
-                capturedException = Record.Exception(() => scope.Dispose());
-                countOnOtherThreadAfter = GetBatchScopeCountOnCurrentThread();
-            });
+            // Act
+            inner.Dispose();
+            inner.Dispose();
 
-            thread.Start();
-            thread.Join();
-
-            // Assert: it throws and leaves the foreign thread untouched
-            Assert.IsType<InvalidOperationException>(capturedException);
-            Assert.Equal(0, countOnOtherThreadBefore);
-            Assert.Equal(0, countOnOtherThreadAfter);
-
-            // Assert: the owning thread still holds its open scope and its deferred detach
-            Assert.Equal(1, GetBatchScopeCountOnCurrentThread());
+            // Assert
             Assert.True(idRegistry.TryGetSubjectById("childId", out _));
         }
-        finally
-        {
-            scope.Dispose();
-        }
 
-        // Assert: disposing on the owning thread still works
         Assert.False(idRegistry.TryGetSubjectById("childId", out _));
-        AssertNoBatchScopeStateOnCurrentThread();
     }
 
     /// <summary>
@@ -524,28 +653,6 @@ public class BatchScopeTests
 
             return "Unknown";
         }
-    }
-
-    private static void AssertNoBatchScopeStateOnCurrentThread()
-    {
-        Assert.Equal(0, GetBatchScopeCountOnCurrentThread());
-        Assert.Null(GetBatchScopeThreadStatic("s_batchScopeRootContext"));
-        Assert.Null(GetBatchScopeThreadStatic("s_batchScopeOwner"));
-
-        var deferred = (IDictionary?)GetBatchScopeThreadStatic("s_deferredLastDetaches");
-        Assert.True(deferred is null or { Count: 0 }, "Deferred detaches are stranded on this thread.");
-    }
-
-    private static int GetBatchScopeCountOnCurrentThread()
-    {
-        return (int)GetBatchScopeThreadStatic("s_batchScopeCount")!;
-    }
-
-    private static object? GetBatchScopeThreadStatic(string fieldName)
-    {
-        var field = typeof(LifecycleInterceptor).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(field);
-        return field.GetValue(null);
     }
 
     private class ThrowingOnDetachLifecycleHandler : ILifecycleHandler

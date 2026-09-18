@@ -96,6 +96,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S134", Justification = "The cached pending-count nesting preserves the hot loop; flattening it added three executed ARM64 instructions in the measured path.")]
     private void Drain()
     {
         var processed = 0;
@@ -194,6 +195,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
             }
             catch
             {
+                // Preserve the original delivery failure when cleanup also fails.
             }
 
             ReportError(onError, exception);
@@ -228,6 +230,7 @@ public sealed class ScheduledPropertySubscription : IDisposable
         }
         catch
         {
+            // Observer error callbacks cannot safely propagate into the scheduler.
         }
     }
 
