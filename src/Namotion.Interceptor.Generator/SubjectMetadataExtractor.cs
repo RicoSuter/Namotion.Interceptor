@@ -92,7 +92,8 @@ internal static class SubjectMetadataExtractor
                 parameterlessConstructorSetsRequiredMembers,
                 baseClass,
                 properties,
-                methods),
+                methods,
+                SubjectReplayContract.CanGenerate(typeSymbol, semanticModel.Compilation, cancellationToken)),
             diagnostics);
     }
 }

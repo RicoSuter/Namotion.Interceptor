@@ -14,4 +14,5 @@ internal sealed record SubjectMetadata(
     bool ParameterlessConstructorSetsRequiredMembers,
     SubjectBaseClass BaseClass,
     IReadOnlyList<PropertyMetadata> Properties,
-    IReadOnlyList<MethodMetadata> Methods);
+    IReadOnlyList<MethodMetadata> Methods,
+    bool EmitsPropertyReplay = false);

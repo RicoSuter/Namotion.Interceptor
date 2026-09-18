@@ -20,7 +20,7 @@ using System.Text.Json.Serialization;
 #pragma warning disable CS0067
 #pragma warning disable CS9193
 
-    public partial class BaseClass : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class BaseClass : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged, global::Namotion.Interceptor.ISubjectPropertyReplay
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -99,6 +99,47 @@ using System.Text.Json.Serialization;
         partial void OnVirtualPropChanging(ref string newValue, ref bool cancel);
 
         partial void OnVirtualPropChanged(string newValue);
+
+        protected global::Namotion.Interceptor.Interceptors.InterceptorExecutor GetPropertyReplayExecutor() => (global::Namotion.Interceptor.Interceptors.InterceptorExecutor)InterceptorExecutor.GetOrCreate(ref _context, this);
+
+        [global::System.Runtime.CompilerServices.CompilerGenerated]
+        bool global::Namotion.Interceptor.ISubjectPropertyReplay.CanReplayProperty(string propertyName) => CanReplayGeneratedProperty(propertyName);
+
+        [global::System.Runtime.CompilerServices.CompilerGenerated]
+        void global::Namotion.Interceptor.ISubjectPropertyReplay.ReplayProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome) => ReplayGeneratedProperty(propertyName, value, ref outcome);
+
+        protected bool CanReplayGeneratedProperty(string propertyName)
+        {
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                return false;
+            }
+            return propertyName switch
+            {
+                _ => false
+            };
+        }
+
+        protected void ReplayGeneratedProperty(string propertyName, object? value, ref global::Namotion.Interceptor.PropertyReplayOutcome outcome)
+        {
+            outcome = default;
+            var activeProperties = ((IInterceptorSubject)this).Properties;
+            if (!global::System.Object.ReferenceEquals(activeProperties, DefaultProperties) &&
+                (!activeProperties.TryGetValue(propertyName, out var actual) ||
+                 !DefaultProperties.TryGetValue(propertyName, out var declared) ||
+                 !global::System.Object.ReferenceEquals(actual.SetValue, declared.SetValue)))
+            {
+                throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+            switch (propertyName)
+            {
+                default: throw new global::System.NotSupportedException($"Property '{propertyName}' does not support exact transaction replay outcomes.");
+            }
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
