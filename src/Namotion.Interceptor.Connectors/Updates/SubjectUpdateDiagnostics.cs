@@ -22,10 +22,10 @@ public static class SubjectUpdateDiagnostics
 
     /// <summary>
     /// Complete-state serializations produced from a subject's own property metadata instead of its registry
-    /// entry, for a subject whose attach was still in progress or that left the graph after a change naming it
-    /// was captured. A context configured without a registry has no registry entry for any subject, so every
-    /// subject of every complete update takes this path: a steady count proportional to update volume is a
-    /// configuration signal, not a churn signal. Processors cannot filter the properties serialized this way.
+    /// entry, for a subject a property holds while its attach is still in progress or one written into a
+    /// property in place. A context configured without a registry has no registry entry for any subject, so
+    /// every subject of every complete update takes this path: a steady count proportional to update volume is
+    /// a configuration signal, not a churn signal. Processors cannot filter the properties serialized this way.
     /// </summary>
     public static long MetadataFallbackSerializations => Volatile.Read(ref _metadataFallbackSerializations);
 

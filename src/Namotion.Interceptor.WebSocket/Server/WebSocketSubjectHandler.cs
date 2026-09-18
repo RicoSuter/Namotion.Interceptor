@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -247,44 +245,14 @@ public sealed class WebSocketSubjectHandler
         }
         else
         {
-            // A subject is completed by the change that attaches it, which a receiver needs before any change
-            // naming the subject, so subject-holding changes go first. A property is only ever one or the
-            // other, so the changes of each property keep their order.
-            var orderedChanges = ArrayPool<SubjectPropertyChange>.Shared.Rent(changes.Length);
-            try
+            using var slices = SubjectChangeSlices.Create(changes, batchSize);
+            var sliceStart = 0;
+            while (sliceStart < slices.Changes.Length)
             {
-                OrderSubjectHoldingChangesFirst(changes.Span, orderedChanges);
-                for (var i = 0; i < changes.Length; i += batchSize)
-                {
-                    var currentBatchSize = Math.Min(batchSize, changes.Length - i);
-                    var update = SubjectUpdate.CreatePartialUpdateFromChanges(
-                        _subject, orderedChanges.AsSpan(i, currentBatchSize), _processors);
-                    await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
-                }
-            }
-            finally
-            {
-                ArrayPool<SubjectPropertyChange>.Shared.Return(orderedChanges, clearArray: true);
-            }
-        }
-    }
-
-    private static void OrderSubjectHoldingChangesFirst(ReadOnlySpan<SubjectPropertyChange> changes, SubjectPropertyChange[] orderedChanges)
-    {
-        var count = 0;
-        foreach (var change in changes)
-        {
-            if (change.Property.Metadata.Type.CanContainSubjects())
-            {
-                orderedChanges[count++] = change;
-            }
-        }
-
-        foreach (var change in changes)
-        {
-            if (!change.Property.Metadata.Type.CanContainSubjects())
-            {
-                orderedChanges[count++] = change;
+                var slice = slices.GetSlice(sliceStart);
+                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, slice.Span, _processors);
+                await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+                sliceStart += slice.Length;
             }
         }
     }

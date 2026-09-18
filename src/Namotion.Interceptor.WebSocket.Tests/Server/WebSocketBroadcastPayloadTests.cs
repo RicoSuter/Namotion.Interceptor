@@ -7,6 +7,7 @@ using System.Reactive.Concurrency;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -201,6 +202,131 @@ public class WebSocketBroadcastPayloadTests
         await clientTask;
     }
 
+    [Fact]
+    public async Task WhenABroadcastIsSlicedAndANewSubjectHoldsANewChild_ThenTheFirstUpdateCarriesBoth()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var serverRoot = new BroadcastNode(serverContext) { Name = "Root" };
+        await using var session = await BroadcastSession.StartAsync(serverRoot, _serializer);
+
+        // Act: the new subject carries the context, so its child's assignment is captured before its own attach
+        var parent = new BroadcastNode(serverContext) { Name = "Parent" };
+        var changes = CaptureChanges(serverContext, () =>
+        {
+            parent.Child = new BroadcastNode { Name = "Child" };
+            serverRoot.Child = parent;
+        });
+        await session.Handler.BroadcastChangesAsync(changes, CancellationToken.None);
+
+        // Assert
+        session.ApplyUpdates(count: 1);
+        Assert.Equal("Child", session.ClientRoot.Child?.Child?.Name);
+    }
+
+    [Fact]
+    public async Task WhenABroadcastIsSlicedAndASubjectMovesBetweenParents_ThenTheClientKeepsItsInstance()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var moved = new BroadcastNode { Name = "Moved" };
+        var firstParent = new BroadcastNode { Name = "First", Items = [moved] };
+        var secondParent = new BroadcastNode { Name = "Second" };
+        var serverRoot = new BroadcastNode(serverContext) { Name = "Root", Items = [firstParent, secondParent] };
+        await using var session = await BroadcastSession.StartAsync(serverRoot, _serializer);
+        var clientMoved = Assert.Single(session.ClientRoot.Items[0].Items);
+
+        // Act
+        var changes = CaptureChanges(serverContext, () =>
+        {
+            firstParent.Items = [];
+            secondParent.Items = [moved];
+        });
+        await session.Handler.BroadcastChangesAsync(changes, CancellationToken.None);
+
+        // Assert
+        session.ApplyUpdates(count: null);
+        Assert.Empty(session.ClientRoot.Items[0].Items);
+        Assert.Same(clientMoved, Assert.Single(session.ClientRoot.Items[1].Items));
+    }
+
+    private static SubjectPropertyChange[] CaptureChanges(IInterceptorSubjectContext context, Action change)
+    {
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add))
+        {
+            change();
+        }
+
+        return changes.ToArray();
+    }
+
+    /// <summary>
+    /// A server handler broadcasting one change per update to a connected client whose graph starts from the
+    /// Welcome snapshot and applies received updates on request.
+    /// </summary>
+    private sealed class BroadcastSession : IAsyncDisposable
+    {
+        private readonly CapturingWebSocket _socket;
+        private readonly JsonWebSocketSerializer _serializer;
+        private readonly CancellationTokenSource _cancellation = new();
+        private Task _clientTask = Task.CompletedTask;
+        private int _appliedUpdateCount;
+
+        private BroadcastSession(WebSocketSubjectHandler handler, CapturingWebSocket socket, JsonWebSocketSerializer serializer)
+        {
+            Handler = handler;
+            _socket = socket;
+            _serializer = serializer;
+        }
+
+        public WebSocketSubjectHandler Handler { get; }
+
+        public BroadcastNode ClientRoot { get; } = new(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry());
+
+        public static async Task<BroadcastSession> StartAsync(BroadcastNode serverRoot, JsonWebSocketSerializer serializer)
+        {
+            var socket = new CapturingWebSocket();
+            socket.EnqueueIncoming(serializer.SerializeMessage(MessageType.Hello, new HelloPayload()));
+            var session = new BroadcastSession(
+                new WebSocketSubjectHandler(serverRoot, new WebSocketServerConfiguration { WriteBatchSize = 1 }, NullLogger.Instance),
+                socket,
+                serializer);
+            session._clientTask = session.Handler.HandleClientAsync(socket, session._cancellation.Token);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => socket.TryGetMessage(MessageType.Welcome, serializer, out _),
+                message: "Server should send the Welcome message");
+            socket.TryGetMessage(MessageType.Welcome, serializer, out var welcome);
+            session.ClientRoot.ApplySubjectUpdate(session.Deserialize<WelcomePayload>(welcome).State!, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+            return session;
+        }
+
+        /// <summary>Applies the next <paramref name="count"/> received updates, or all of them.</summary>
+        public void ApplyUpdates(int? count)
+        {
+            var updates = _socket.GetMessages(MessageType.Update, _serializer).Skip(_appliedUpdateCount).ToArray();
+            foreach (var update in updates.Take(count ?? updates.Length))
+            {
+                ClientRoot.ApplySubjectUpdate(Deserialize<UpdatePayload>(update), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+                _appliedUpdateCount++;
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _cancellation.CancelAsync();
+            await _clientTask;
+            _cancellation.Dispose();
+        }
+
+        private T Deserialize<T>(byte[] message)
+        {
+            var (_, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(message);
+            return _serializer.Deserialize<T>(message.AsSpan(payloadStart, payloadLength));
+        }
+    }
+
     private T DeserializePayload<T>(byte[] message)
     {
         var (_, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(message);
@@ -275,4 +401,21 @@ public class WebSocketBroadcastPayloadTests
         {
         }
     }
+}
+
+/// <summary>A subject that nests subjects of its own type, for broadcasts that attach or move a subtree.</summary>
+[InterceptorSubject]
+public partial class BroadcastNode
+{
+    public BroadcastNode()
+    {
+        Name = "";
+        Items = [];
+    }
+
+    public partial string Name { get; set; }
+
+    public partial BroadcastNode? Child { get; set; }
+
+    public partial List<BroadcastNode> Items { get; set; }
 }

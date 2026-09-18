@@ -487,7 +487,7 @@ The library includes optimizations:
 - Batched outbound updates with configurable `BufferTime` to reduce per-message overhead
 - `RecyclableMemoryStream` and `ArrayPool<byte>` pooling for read/write buffers
 - Per-connection queuing during Welcome handshake to avoid blocking broadcasts
-- Configurable `WriteBatchSize` to cap message size and control serialization latency
+- Configurable `WriteBatchSize` to cap message size and control serialization latency; every subject-holding change of a flush goes into its first message, see [Connectors](connectors.md#isubjectsource-interface)
 
 ## Benchmark Results
 

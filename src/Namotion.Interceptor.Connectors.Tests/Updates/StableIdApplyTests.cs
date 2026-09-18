@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Connectors.Updates.Internal;
@@ -1220,6 +1221,128 @@ public class StableIdApplyTests
             Name = "Root",
             Child = new CycleTestNode { Name = name }
         };
+    }
+
+    [Theory]
+    [InlineData("reference", false)]
+    [InlineData("reference", true)]
+    [InlineData("item", true)]
+    [InlineData("attribute", true)]
+    public void WhenAnotherPositionOfTheUpdateNamesTheHeldSubjectByItsId_ThenItKeepsThatId(string namedAs, bool heldPositionFirst)
+    {
+        // Arrange: the update names the held subject by its current ID elsewhere, while the position that
+        // cannot be written names another ID
+        var logger = new RecordingLogger();
+        var held = new InitOnlyOwnerNode { Name = "Held" };
+        var root = new InitOnlyOwnerNode(InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithService<ILoggerFactory>(() => new RecordingLoggerFactory(logger)))
+        {
+            Owner = held,
+            Child = held
+        };
+        held.SetSubjectId("y");
+        var owner = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" };
+        var (namingProperty, naming) = namedAs switch
+        {
+            "item" => ("Undeclared", new SubjectPropertyUpdate
+            {
+                Kind = SubjectPropertyUpdateKind.Collection,
+                Items = [new SubjectPropertyItemUpdate { Id = "y" }]
+            }),
+            "attribute" => (nameof(InitOnlyOwnerNode.Name), new SubjectPropertyUpdate
+            {
+                Kind = SubjectPropertyUpdateKind.Value,
+                Value = "Root",
+                Attributes = new() { ["Reference"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "y" } }
+            }),
+            _ => (nameof(InitOnlyOwnerNode.Child), new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "y" })
+        };
+        var update = new SubjectUpdate
+        {
+            Root = "r",
+            Subjects = new()
+            {
+                ["r"] = heldPositionFirst
+                    ? new() { [nameof(InitOnlyOwnerNode.Owner)] = owner, [namingProperty] = naming }
+                    : new() { [namingProperty] = naming, [nameof(InitOnlyOwnerNode.Owner)] = owner },
+                ["x"] = new() { [nameof(InitOnlyOwnerNode.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "X" } }
+            },
+            CompleteSubjectIds = ["x"]
+        };
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        root.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        var nextUpdate = new SubjectUpdate
+        {
+            Root = "r",
+            Subjects = new() { ["y"] = new() { [nameof(InitOnlyOwnerNode.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "Y" } } },
+            CompleteSubjectIds = []
+        };
+        root.ApplySubjectUpdate(nextUpdate, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert: the refused adoption is dropped structure, not a dropped subject
+        Assert.Same(held, root.Child);
+        Assert.Equal("y", ((IInterceptorSubject)held).TryGetSubjectId());
+        Assert.Equal("Y", held.Name);
+        Assert.Contains($"{nameof(InitOnlyOwnerNode)}.{nameof(InitOnlyOwnerNode.Owner)}", Assert.Single(logger.Warnings));
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenAPropertyWithoutASetterCannotStoreTheSubjectsItNames_ThenTheirEntriesAreNoDrop(bool collection)
+    {
+        // Arrange: nothing is held where the update names a subject the receiver does not know
+        var target = new InitOnlyTypesTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = collection
+                    ? new() { [nameof(InitOnlyTypesTestNode.Items)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Collection, Items = [new SubjectPropertyItemUpdate { Id = "x" }] } }
+                    : new() { [nameof(InitOnlyTypesTestNode.Child)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" } },
+                ["x"] = new() { [nameof(InitOnlyTypesTestNode.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "X" } }
+            },
+            CompleteSubjectIds = []
+        };
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Null(target.Child);
+        Assert.Empty(target.Items);
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
+    }
+
+    [Fact]
+    public void WhenAnUpdateNamesSubjectsThroughAComputedProjection_ThenTheirEntriesAreNoDrop()
+    {
+        // Arrange
+        var target = new MintingProjectionNode(InterceptorSubjectContext.Create().WithRegistry());
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new()
+            {
+                ["root"] = new() { [nameof(MintingProjectionNode.Projection)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Object, Id = "x" } },
+                ["x"] = new() { [nameof(MintingProjectionNode.Name)] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = "X" } }
+            },
+            CompleteSubjectIds = []
+        };
+        var droppedBefore = SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates;
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        Assert.Equal(droppedBefore, SubjectUpdateDiagnostics.DroppedInboundSubjectUpdates);
     }
 
     private sealed class ThrowingDetachHandler(IInterceptorSubject subject) : Namotion.Interceptor.Tracking.Lifecycle.ILifecycleHandler
