@@ -1029,9 +1029,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         var maxDelay = _configuration.MaxReconnectDelay;
         var forceReconnect = false;
 
-        // Carries the epoch across loop iterations the same way forceReconnect does: BeginResume runs
-        // in one iteration (drop detection or a force-kill catch) and the matching CompleteResumeAsync
-        // or TryEndResume runs in the ReconnectAndResumeAsync call that follows, possibly on a later one.
+        // Outlives an iteration like forceReconnect: a force-kill takes the gate in one iteration and
+        // resumes in the next.
         var resumeEpoch = 0;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -1141,8 +1140,6 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             _circuitBreaker?.RecordSuccess();
             _logger.LogInformation(successMessage);
 
-            // The socket is writable and the receive loop is already running at this point, but the
-            // model still holds the pre-reconnect view: this is the window D4 is about.
             BeforeReconnectInitialStateLoad?.Invoke();
 
             if (_propertyWriter is not null)
@@ -1151,33 +1148,16 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            // After the load, never before: the parked writes are judged against the state the server
-            // just sent rather than replayed over it, and a write a later local commit supersedes is
-            // dropped instead of being sent after the newer one.
             await CompleteResumeAsync(resumeEpoch, cancellationToken).ConfigureAwait(false);
 
             return _configuration.ReconnectDelay;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // ConnectAsync or the load can have already succeeded, with the socket open and the receive
-            // loop running, before this cancellation was observed. Cleared here too, not only in the
-            // catch below, so a cancellation that lands on this arm cannot leave the gate held for the
-            // life of that connection the way an unguarded rethrow would.
-            TryEndResume(resumeEpoch);
             throw;
         }
         catch (Exception ex)
         {
-            // ConnectAsync can have already succeeded, with the socket open and the receive loop running,
-            // when the load that follows it throws. Nothing else clears this gate for that connection: the
-            // attempt loop does not iterate on a transport reconnect, so leaving it set would park every
-            // write for the life of the connection. The cost is that whatever this epoch had parked is
-            // never reconciled against a loaded state: an unreconciled flush on a later successful write
-            // beats a gate stuck for good. Cleared ahead of the rethrow below, which cancellation
-            // surfacing as a transport exception would otherwise skip past.
-            TryEndResume(resumeEpoch);
-
             // Cancellation may surface as a transport exception rather than an OperationCanceledException.
             cancellationToken.ThrowIfCancellationRequested();
             Metrics.ReportError(ex);
@@ -1197,6 +1177,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
             var jitter = Random.Shared.NextDouble() * 0.5 + 0.5;
             return TimeSpan.FromMilliseconds(
                 Math.Min(reconnectDelay.TotalMilliseconds * 2 * jitter, maxDelay.TotalMilliseconds));
+        }
+        finally
+        {
+            // Releases the gate on every failure path, because nothing else ends this resume: after a
+            // connect whose load failed, a held gate would park every write for the connection's life, so
+            // those parked writes go out unreconciled instead. A no-op once CompleteResumeAsync released it.
+            TryEndResume(resumeEpoch);
         }
     }
 

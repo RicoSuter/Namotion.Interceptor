@@ -37,9 +37,6 @@ public sealed class TestSubjectSource : SubjectSourceBase
     /// <summary>Exposes the protected TryEndResume seam for tests, returning whether it cleared the gate.</summary>
     public bool TryEndResumeForTest(int resumeEpoch) => TryEndResume(resumeEpoch);
 
-    /// <summary>Exposes the resume gate's state for tests.</summary>
-    public bool IsResumeGateHeldForTest => IsResumeGateHeld;
-
     /// <summary>Exposes the protected ParkChangesForRetry seam for tests.</summary>
     public void ParkChangesForRetryForTest(ReadOnlySpan<SubjectPropertyChange> changes) =>
         ParkChangesForRetry(changes);
