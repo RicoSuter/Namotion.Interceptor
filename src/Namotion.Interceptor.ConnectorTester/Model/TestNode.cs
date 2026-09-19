@@ -52,6 +52,44 @@ public partial class TestNode
         Items = new Dictionary<string, TestNode>();
     }
 
+    /// <summary>The number of value properties that <see cref="WriteValueProperty"/> and <see cref="ReadValueProperty"/> select by index.</summary>
+    public const int ValuePropertyCount = 4;
+
+    /// <summary>Writes a value derived from <paramref name="counter"/> to the value property at <paramref name="property"/>.</summary>
+    public static void WriteValueProperty(TestNode node, int property, long counter)
+    {
+        switch (property)
+        {
+            case 0:
+                node.StringValue = ToStringValue(counter);
+                break;
+            case 1:
+                node.DecimalValue = ToDecimalValue(counter);
+                break;
+            case 2:
+                node.IntValue = ToIntValue(counter);
+                break;
+            case 3:
+                node.LongValue = counter;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(property));
+        }
+    }
+
+    /// <summary>
+    /// Returns the name of the value property at <paramref name="property"/>, the value
+    /// <see cref="WriteValueProperty"/> writes to it for <paramref name="counter"/>, and the value it holds.
+    /// </summary>
+    public static (string Name, object Written, object Held) ReadValueProperty(TestNode node, int property, long counter) => property switch
+    {
+        0 => (nameof(StringValue), ToStringValue(counter), node.StringValue),
+        1 => (nameof(DecimalValue), ToDecimalValue(counter), node.DecimalValue),
+        2 => (nameof(IntValue), ToIntValue(counter), node.IntValue),
+        3 => (nameof(LongValue), counter, node.LongValue),
+        _ => throw new ArgumentOutOfRangeException(nameof(property))
+    };
+
     /// <summary>
     /// Creates a TestNode root with a configurable number of children.
     /// </summary>
@@ -69,4 +107,10 @@ public partial class TestNode
                 .ToDictionary(i => $"item-{i}", _ => new TestNode())
         };
     }
+
+    private static string ToStringValue(long counter) => counter.ToString("x8");
+
+    private static decimal ToDecimalValue(long counter) => counter / 100m;
+
+    private static int ToIntValue(long counter) => (int)(counter % int.MaxValue);
 }
