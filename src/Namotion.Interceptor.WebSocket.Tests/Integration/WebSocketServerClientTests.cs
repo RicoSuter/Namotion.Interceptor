@@ -1,8 +1,6 @@
 using System;
 using System.Threading.Tasks;
 using Namotion.Interceptor.Connectors.Monitoring;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -255,10 +253,8 @@ public class WebSocketServerClientTests
             () => client.Root!.Name == "Initial",
             message: "Initial sync should complete");
 
-        // Act: the client writes while the server is down, so the write parks. The server does not write,
-        // so its value has not moved on and there is exactly one writer for this property. Waits for the
-        // client to notice the drop first: otherwise the socket can still read as open, the write can
-        // succeed into a closing connection, and nothing parks.
+        // Act - written only after the client noticed the drop, because a write into a closing socket can
+        // succeed and then nothing parks.
         await server.StopAsync();
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Source!.State != SourceState.Synchronized,
@@ -266,12 +262,7 @@ public class WebSocketServerClientTests
         client.Root!.Name = "WrittenWhileDown";
         await server.RestartAsync();
 
-        // Assert: the reconcile restores the parked write over the value the load delivered and the
-        // connected phase sends it, so the write survives on both sides. The client half matters even
-        // though the server broadcasts every update back to its own originator: the local model must not
-        // depend on that echo landing, because neither the server's apply of the client's write nor the
-        // client's apply of its own echo is acknowledged, so either can fail with nothing to notice it.
-        // Without the local restore, that would leave the client sitting on the loaded value forever.
+        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "WrittenWhileDown" && server.Root!.Name == "WrittenWhileDown",
             timeout: TimeSpan.FromSeconds(30),
