@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
-/// On convergence failure, exits the process with non-zero exit code.
+/// On a failed cycle, exits the process with non-zero exit code.
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
@@ -37,7 +37,7 @@ public class VerificationEngine : BackgroundService
     private bool _failed;
 
     /// <summary>
-    /// Whether the last cycle failed to converge. Used to set the process exit code.
+    /// Whether the last cycle failed, by not converging or by losing a write. Used to set the process exit code.
     /// </summary>
     public bool Failed => _failed;
 
@@ -104,7 +104,10 @@ public class VerificationEngine : BackgroundService
             _coordinator.SetCycle(_cycleNumber);
 
             foreach (var engine in _mutationEngines)
+            {
                 engine.ResetCounters();
+                engine.ResetDurabilityLedger();
+            }
             foreach (var engine in _chaosEngines)
                 engine.ResetCounters();
 
@@ -136,7 +139,11 @@ public class VerificationEngine : BackgroundService
             var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
             cycleStopwatch.Stop();
 
-            if (outcome.Converged)
+            var durabilityViolations = outcome.Converged
+                ? _mutationEngines.SelectMany(engine => engine.VerifyWriteDurability()).ToList()
+                : [];
+
+            if (outcome.Converged && durabilityViolations.Count == 0)
             {
                 _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
@@ -150,8 +157,20 @@ public class VerificationEngine : BackgroundService
                 continue;
             }
 
-            _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
-                _cycleNumber, _configuration.ConvergenceTimeout);
+            if (outcome.Converged)
+            {
+                _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} write-durability violation(s)) ===",
+                    _cycleNumber, durabilityViolations.Count);
+                foreach (var violation in durabilityViolations)
+                {
+                    _logger.LogError("  {Violation}", violation);
+                }
+            }
+            else
+            {
+                _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
+                    _cycleNumber, _configuration.ConvergenceTimeout);
+            }
 
             await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
 
@@ -182,6 +201,11 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
                 engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
+        }
+
+        if (_configuration.DisjointProperties)
+        {
+            _logger.LogInformation("  Write-durability oracle: enabled");
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
