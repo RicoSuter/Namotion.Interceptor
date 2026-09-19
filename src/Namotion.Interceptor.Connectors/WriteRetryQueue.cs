@@ -223,11 +223,8 @@ internal sealed class WriteRetryQueue : IDisposable
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                // Checked per batch, not only on entry: this loop drains until the queue is empty, and an
-                // abandoned drain would otherwise keep sending onto a connection the source has already
-                // replaced. Retire covers the same ground only while the source is stopping. Whatever is
-                // still queued stays queued, and reporting failure keeps the caller from sending its own
-                // batch ahead of it.
+                // Checked per batch, so an abandoned drain stops sending onto a connection the source has
+                // replaced. Reporting failure keeps the caller from sending its own batch ahead of the rest.
                 return false;
             }
 
@@ -302,17 +299,14 @@ internal sealed class WriteRetryQueue : IDisposable
     /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
     /// </summary>
     /// <remarks>
-    /// Takes the same flush gate as <see cref="FlushAsync"/> so the two cannot interleave: without it,
-    /// this drain can run while a flush is holding a batch in its scratch buffer, and if that flush then
-    /// fails, its requeue puts those stale values back at the front of the queue after the reconcile has
-    /// already judged them, moving a property backwards. That is also why it does not skip an empty
-    /// queue: empty here does not mean nothing is in flight.
+    /// Takes the flush gate, because a flush that fails after this drain would requeue its batch unjudged
+    /// and move a property backwards. An empty queue is not skipped for the same reason: a batch can be
+    /// in flight.
     /// </remarks>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<SubjectPropertyChange[]> DrainForLocalReapplyAsync(CancellationToken cancellationToken)
     {
-        // Cancellation and disposal both leave nothing to reapply, which is the empty result the caller
-        // already handles.
+        // Cancelled: nothing to reapply.
         if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
         {
             return [];
