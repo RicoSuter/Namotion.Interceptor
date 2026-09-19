@@ -55,6 +55,7 @@ namespace Namotion.Interceptor.WebSocket.Protocol
     public class HeartbeatPayload
     {
         public HeartbeatPayload() { }
+        public long? AppliedThrough { get; set; }
         public long Sequence { get; set; }
     }
     public class HelloPayload
@@ -99,6 +100,7 @@ namespace Namotion.Interceptor.WebSocket.Protocol
     public class WelcomePayload
     {
         public WelcomePayload() { }
+        public bool AcknowledgesAppliedUpdates { get; set; }
         public Namotion.Interceptor.WebSocket.Protocol.WebSocketFormat Format { get; set; }
         public long Sequence { get; set; }
         public Namotion.Interceptor.Connectors.Updates.SubjectUpdate? State { get; set; }

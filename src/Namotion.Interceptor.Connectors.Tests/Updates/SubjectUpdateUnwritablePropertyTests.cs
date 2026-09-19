@@ -218,7 +218,7 @@ public class SubjectUpdateUnwritablePropertyTests
         Assert.Equal("existing", entry.Key);
         Assert.Same(existingChild, entry.Value);
         Assert.Equal("Updated", existingChild.Name);
-        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Lookup)}", Assert.Single(logger.Warnings));
+        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Lookup)}", Assert.Single(logger.Warnings, IsDroppedStructureWarning));
     }
 
     [Fact]
@@ -388,7 +388,7 @@ public class SubjectUpdateUnwritablePropertyTests
         Assert.Same(heldChild, node.Child);
         Assert.Equal("held", ((IInterceptorSubject)heldChild).TryGetSubjectId());
         Assert.Equal("Held", heldChild.Name);
-        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Child)}", Assert.Single(logger.Warnings));
+        Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Child)}", Assert.Single(logger.Warnings, IsDroppedStructureWarning));
     }
 
     [Fact]
@@ -520,7 +520,7 @@ public class SubjectUpdateUnwritablePropertyTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        var warning = Assert.Single(logger.Warnings);
+        var warning = Assert.Single(logger.Warnings, IsDroppedStructureWarning);
         Assert.Contains(nameof(InitOnlyTypesTestNode.Child), warning);
         Assert.Contains(nameof(InitOnlyTypesTestNode.Items), warning);
         Assert.DoesNotContain(nameof(InitOnlyTypesTestNode.Label), warning);
@@ -583,7 +583,7 @@ public class SubjectUpdateUnwritablePropertyTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        var warning = Assert.Single(logger.Warnings);
+        var warning = Assert.Single(logger.Warnings, IsDroppedStructureWarning);
         var droppedChild = $"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Child)}";
         Assert.Single(Regex.Matches(warning, Regex.Escape(droppedChild)));
         Assert.Contains($"{nameof(InitOnlyTypesTestNode)}.{nameof(InitOnlyTypesTestNode.Lookup)}", warning);
@@ -593,6 +593,10 @@ public class SubjectUpdateUnwritablePropertyTests
         Assert.All(node.Items, item => Assert.Null(item.Child));
         Assert.Empty(node.Lookup);
     }
+
+    // The subjects the dropped structure named are also reported, in a warning of their own.
+    private static bool IsDroppedStructureWarning(string warning)
+        => warning.StartsWith("Dropped the incoming structure", StringComparison.Ordinal);
 }
 
 /// <summary>
