@@ -249,7 +249,6 @@ public class WebSocketClientLivenessTests
                 .Invoke(source,
                 [
                     "WebSocket reconnected during test",
-                    0, // an epoch that owns no gate
                     TimeSpan.FromMilliseconds(200),
                     TimeSpan.FromSeconds(10),
                     CancellationToken.None
@@ -528,101 +527,6 @@ public class WebSocketClientLivenessTests
             source.BeforeReceiveLoopLivenessTransition = null;
             source.BeforeReceiveLoopPublication = null;
             replacementCompletion.TrySetResult();
-        }
-    }
-
-    [Theory]
-    [InlineData(FaultType.Disconnect)]
-    [InlineData(FaultType.Kill)]
-    public async Task WhenAWriteHappensAfterReconnectButBeforeLoad_ThenItParksUntilTheLoadAndReconcileComplete(FaultType fault)
-    {
-        // Arrange - a write in the window where the reconnect's socket is writable and its receive loop is
-        // already running, but the load has not applied the Welcome and the reconcile has not judged the
-        // retry queue against it yet. A disconnect begins the resume at drop detection, a kill in the
-        // force-kill catch arm.
-        using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
-        using var loadGate = new UpdateAdmissionGate();
-        await using var source = CreateClientSource(portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
-        await source.StartAsync(CancellationToken.None);
-
-        var clientRoot = (TestRoot)source.RootSubject;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
-
-        source.BeforeReconnectInitialStateLoad = loadGate.Wait;
-        loadGate.Arm();
-
-        try
-        {
-            // Act
-            await ((IFaultInjectable)source).InjectFaultAsync(fault, CancellationToken.None);
-            await loadGate.Entered.WaitAsync(TimeSpan.FromSeconds(10));
-
-            clientRoot.Name = "WrittenBeforeLoad";
-
-            // Assert - a parked write is never sent before the reconcile judges it.
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => source.Diagnostics.OutboundRetries.Depth > 0,
-                message: "The write should have parked while the reconnect had not yet loaded and reconciled.");
-            Assert.Equal("Initial", server.Root!.Name);
-
-            loadGate.Release();
-
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Root!.Name == "WrittenBeforeLoad",
-                timeout: TimeSpan.FromSeconds(10),
-                message: "The write should reach the server once the load and reconcile complete.");
-        }
-        finally
-        {
-            loadGate.Release();
-            source.BeforeReconnectInitialStateLoad = null;
-            await source.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact]
-    public async Task WhenReconnectConnectsButLoadingFails_ThenTheGateIsClearedRatherThanStuck()
-    {
-        // Arrange - the reconnect connects but its load throws before the reconcile. The receive loop
-        // already runs on the new socket, so the monitor loop waits on it instead of retrying, and nothing
-        // else would clear the gate this attempt took.
-        using var portLease = await WebSocketTestPortPool.AcquireAsync();
-        await using var server = await StartServerAsync(portLease.Port);
-        var loadFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var source = CreateClientSource(
-            portLease.Port, reconnectDelay: TimeSpan.FromMilliseconds(50));
-        await source.StartAsync(CancellationToken.None);
-
-        var clientRoot = (TestRoot)source.RootSubject;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.Diagnostics.IsOperational == true && clientRoot.Name == "Initial");
-
-        try
-        {
-            // Act - the load fails once, after the connect succeeded.
-            source.BeforeReconnectInitialStateLoad = () =>
-            {
-                source.BeforeReconnectInitialStateLoad = null;
-                loadFailed.TrySetResult();
-                throw new InvalidOperationException("Injected load failure.");
-            };
-
-            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-            await loadFailed.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-            clientRoot.Name = "AfterFailedLoad";
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Root!.Name == "AfterFailedLoad",
-                timeout: TimeSpan.FromSeconds(10),
-                message: "A write after the failed reconnect should reach the server once the gate is cleared.");
-        }
-        finally
-        {
-            await source.StopAsync(CancellationToken.None);
         }
     }
 

@@ -36,7 +36,8 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Func<TRoot, bool>? isConnected = null,
         int port = 18080,
-        Action<IInterceptorSubjectContext>? configureContext = null)
+        Action<IInterceptorSubjectContext>? configureContext = null,
+        Action<WebSocketClientConfiguration>? configureClient = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -61,6 +62,7 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
         builder.Services.AddWebSocketSubjectClientSource<TRoot>(configuration =>
         {
             configuration.ServerUri = new Uri($"ws://localhost:{port}/ws");
+            configureClient?.Invoke(configuration);
         });
 
         _host = builder.Build();
