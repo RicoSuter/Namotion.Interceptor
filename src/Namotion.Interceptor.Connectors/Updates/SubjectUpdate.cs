@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates;
@@ -13,10 +12,16 @@ namespace Namotion.Interceptor.Connectors.Updates;
 public class SubjectUpdate
 {
     /// <summary>
-    /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
+    /// The ID the sender gave the root subject of this update.
     /// </summary>
+    /// <remarks>
+    /// Set on every update this library builds, and a mapping hint rather than an identity assignment: the
+    /// receiver resolves it to its own root subject for one apply, and the local root keeps its own ID. It
+    /// can name an ID that has no entry in <see cref="Subjects"/>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("root")]
-    public string Root { get; init; } = string.Empty;
+    public string? Root { get; init; }
 
     /// <summary>
     /// Dictionary of all subjects keyed by their string ID.
@@ -24,6 +29,47 @@ public class SubjectUpdate
     /// </summary>
     [JsonPropertyName("subjects")]
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; init; } = new();
+
+    /// <summary>
+    /// Set of subject IDs whose complete state this update carries. The applier creates no subject for an
+    /// ID outside this set.
+    /// </summary>
+    /// <remarks>
+    /// <c>null</c> means all subjects in the update are complete, which only a complete update states. A
+    /// partial update always carries the set, also when it is empty.
+    /// </remarks>
+    [JsonPropertyName("completeSubjectIds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HashSet<string>? CompleteSubjectIds { get; init; }
+
+    /// <summary>
+    /// Creates an empty update.
+    /// </summary>
+    public SubjectUpdate()
+    {
+    }
+
+    /// <summary>
+    /// Copies every field of <paramref name="source"/>, so that a derived type carrying additional
+    /// transport fields, such as the WebSocket update payload, can be built from an update without
+    /// restating its fields at the call site.
+    /// </summary>
+    /// <remarks>
+    /// Every field declared above must be copied here. A field left out disappears from every message
+    /// a derived type sends, on the primary data path and without any error, so add new fields to this
+    /// constructor in the same edit that declares them. The dictionaries and sets are shared with
+    /// <paramref name="source"/> rather than cloned: an update is built, sent and discarded, and no
+    /// receiver of a copy mutates them.
+    /// </remarks>
+    /// <param name="source">The update to copy.</param>
+    protected SubjectUpdate(SubjectUpdate source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        Root = source.Root;
+        Subjects = source.Subjects;
+        CompleteSubjectIds = source.CompleteSubjectIds;
+    }
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.

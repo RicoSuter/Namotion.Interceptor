@@ -245,13 +245,14 @@ public sealed class WebSocketSubjectHandler
         }
         else
         {
-            // Multiple batches
-            for (var i = 0; i < changes.Length; i += batchSize)
+            using var slices = SubjectChangeSlices.Create(changes, batchSize);
+            var sliceStart = 0;
+            while (sliceStart < slices.Changes.Length)
             {
-                var currentBatchSize = Math.Min(batchSize, changes.Length - i);
-                var batch = changes.Slice(i, currentBatchSize);
-                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
+                var slice = slices.GetSlice(sliceStart);
+                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, slice.Span, _processors);
                 await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+                sliceStart += slice.Length;
             }
         }
     }
@@ -273,10 +274,10 @@ public sealed class WebSocketSubjectHandler
             sequence = Interlocked.Increment(ref _sequence);
         }
 
-        var updatePayload = new UpdatePayload
+        // Copy through the constructor, never field by field: the payload derives from SubjectUpdate,
+        // and a field of the base left out here is absent from every update the server sends.
+        var updatePayload = new UpdatePayload(update)
         {
-            Root = update.Root,
-            Subjects = update.Subjects,
             Sequence = sequence
         };
 

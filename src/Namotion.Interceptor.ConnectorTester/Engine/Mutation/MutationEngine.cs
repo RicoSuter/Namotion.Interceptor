@@ -41,7 +41,7 @@ public sealed class MutationEngine : BackgroundService
     {
         _root = root;
         _graph = graph;
-        _structuralMutator = new StructuralMutator(_graph);
+        _structuralMutator = new StructuralMutator(_graph, ((IInterceptorSubject)root).Context);
         _valueStrategy = valueStrategy;
         _coordinator = coordinator;
         _counters = counters;
@@ -110,7 +110,7 @@ public sealed class MutationEngine : BackgroundService
 
                 for (var i = 0; i < batchSize; i++)
                 {
-                    _structuralMutator.PerformMutation();
+                    await _structuralMutator.PerformMutationAsync(cancellationToken);
                     _counters.IncrementStructural();
                 }
 

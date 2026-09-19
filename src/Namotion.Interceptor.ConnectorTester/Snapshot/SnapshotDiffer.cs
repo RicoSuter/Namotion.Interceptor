@@ -185,7 +185,7 @@ public static class SnapshotDiffer
             "Value" => FormatValueSummary(property),
             "Object" => $"Object id={property[SnapshotComparer.IdKey]?.ToJsonString() ?? "null"}",
             "Collection" or "Dictionary" =>
-                $"{kind} count={property[SnapshotComparer.CountKey]?.ToJsonString() ?? "?"} " +
+                $"{kind} count={(property[SnapshotComparer.ItemsKey] as JsonArray)?.Count.ToString() ?? "?"} " +
                 $"items={property[SnapshotComparer.ItemsKey]?.ToJsonString() ?? "[]"}",
             _ => property.ToJsonString()
         };

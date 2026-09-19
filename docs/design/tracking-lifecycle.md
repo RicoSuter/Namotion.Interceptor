@@ -14,7 +14,7 @@ The fundamental challenge is **concurrency**: multiple threads can write structu
 _attachedSubjects: Dictionary<IInterceptorSubject, HashSet<PropertyReference>>
 ```
 
-Tracks which subjects are currently in the graph and via which property references they are attached. A subject can be referenced by multiple parents (e.g., the same child in two collections). The `HashSet<PropertyReference>` tracks all references; when the last reference is removed (`isLastDetach`), the subject's children are recursively detached.
+Tracks which subjects are currently in the graph and via which property references they are attached. A subject can be referenced by multiple parents (e.g., the same child in two collections). The `HashSet<PropertyReference>` tracks all references; when the last reference is removed, the subject's children are recursively detached.
 
 ```
 _lastProcessedValues: Dictionary<PropertyReference, object?>
@@ -91,7 +91,7 @@ The fallback to `null` handles the rare case where no entry exists (e.g., a writ
 When detaching a subject, we need to find its children to recursively detach them. `DetachSubjectFromContext` and `DetachFromProperty` read from `_lastProcessedValues` instead of the backing store:
 
 ```csharp
-// DetachFromProperty (isLastDetach path)
+// DetachSubjectProperties, on the last detach
 if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
 {
     FindSubjectsInProperty(subjectProperty, lastProcessed, ...);
@@ -102,11 +102,12 @@ This is critical because a concurrent `next()` may have written an unattached ch
 
 ### 5. Removed on detach
 
-Entries are cleaned up in three places:
+Entries are cleaned up in four places:
 
 | Location | When |
 |----------|------|
-| `DetachFromProperty` (isLastDetach) | Last reference to subject removed: all structural property entries cleaned |
+| `DetachFromProperty` (last reference removed) | Last reference to subject removed: all structural property entries cleaned |
+| `ProcessDeferredDetach` | A last detach deferred by a batch scope is confirmed when its thread's outermost scope closes: all structural property entries cleaned |
 | `DetachFromContext` | Root subject removed: all structural property entries cleaned |
 | Parent-dead check in `WriteProperty` | Undo after attaching to a dead parent: single entry cleaned |
 
@@ -131,6 +132,10 @@ This catches the following race:
 5. Thread B: **parent-dead check** finds the parent is not in `_attachedSubjects` → undo
 
 Without this check, the child would be attached to a dead parent and never cleaned up, which is a memory leak.
+
+### The check is suspended inside a batch scope
+
+A last detach that a batch scope defers leaves the parent in `_attachedSubjects` as a present-but-empty entry, so `ContainsKey` still returns true and the parent-dead check does not fire for that parent while the scope is open. That is intended: the deferral exists precisely because the parent may come back, and a subject that is re-attached before the scope closes was never dead. It self-heals at scope close. If the entry is still empty then, `ProcessDeferredDetach` runs the full detach for the parent, which walks its `_lastProcessedValues` entries and recursively detaches every child, including any child attached to it while the check was suspended.
 
 ## Concurrency Scenarios
 
@@ -229,12 +234,16 @@ Detach is not the mirror of attach. Below the root of the detached subtree, each
 
 Pinned by `RegistryHandlerOrderTests`, and for the derived-getter path by `RegistryAncestorResolutionTests`. The initializer phase boundary above is measured but not pinned by a test.
 
+## Which Parent a Subject Inherits From
+
+`ContextInheritanceHandler` gives a subject attached through properties the context of one subject referencing it as its fallback context, the one that first attached it. A subject can be referenced from several properties, and the one it inherits from can stop referencing it while others still do. The handler then moves the fallback, with a single swap that reports no detach, to another subject still referencing it whose own inheritance does not lead back to it. When every remaining reference comes from its own descendants, as in a cycle of references that nothing else holds, or while a batch scope defers its detach, it inherits from the root of the chain it inherited from instead. Without the move, the subject would keep the context of a subject that left the graph and stop resolving any service, and a later attach of that former parent below it would close a delegation cycle that makes every service lookup on the way throw. A subject attached to several graphs keeps inheriting from the graph it was attached to first until it leaves that graph, which removes what it inherits from there even while another graph still references it.
+
 ## Invariants
 
 After all concurrent `WriteProperty` / `DetachFromProperty` / `AttachSubjectToContext` / `DetachSubjectFromContext` operations complete:
 
 1. **Reachable → Registered**: Every subject reachable from the root through intercepted properties is in `_attachedSubjects`. Properties that are not intercepted, such as non-partial `[Derived]` getters, never attach the subjects they return, so they do not make a subject reachable.
-2. **Not reachable → Not registered**: Every subject NOT reachable from the root through intercepted properties is NOT in `_attachedSubjects`
+2. **Not reachable → Not registered**: Every subject NOT reachable from the root through intercepted properties is NOT in `_attachedSubjects`. A batch scope suspends this invariant for the last detaches performed on the thread that opened it, for as long as it is open: a subject whose last reference such a detach removes stays in `_attachedSubjects` as a present-but-empty entry, so that moving it between structural properties within one update does not transiently detach and deregister it. Disposing that thread's outermost scope, on any thread, restores the invariant by running the full detach for every entry it deferred that is still empty.
 3. **`_lastProcessedValues` matches attachment state**: For every attached subject, `_lastProcessedValues` entries exist for all structural properties that have been written or seeded
 4. **No dangling entries**: No `_lastProcessedValues` entries exist for detached subjects
 

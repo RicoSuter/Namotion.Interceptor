@@ -1,25 +1,7 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Children: {
-        Kind: Collection,
-        Timestamp: DateTimeOffset_1,
-        Items: [
-          {
-            Index: 0,
-            Id: 2
-          },
-          {
-            Index: 1,
-            Id: 3
-          }
-        ],
-        Count: 2
-      },
-      Father: {
-        Kind: Object
-      },
+    SubjectId_1: {
       FirstName: {
         Kind: Value,
         Value: Parent,
@@ -37,33 +19,40 @@
           }
         }
       },
-      FullName: {
-        Kind: Value,
-        Value: Parent ,
-        Timestamp: DateTimeOffset_1
-      },
       LastName: {
         Kind: Value
       },
-      Mother: {
-        Kind: Object
-      },
-      Relationships: {
-        Kind: Value
-      }
-    },
-    2: {
-      Children: {
-        Kind: Collection,
-        Count: 0
+      FullName: {
+        Kind: Value,
+        Value: Parent 
       },
       Father: {
         Kind: Object
       },
+      Mother: {
+        Kind: Object
+      },
+      Children: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_2,
+        Items: [
+          {
+            Id: SubjectId_2
+          },
+          {
+            Id: SubjectId_3
+          }
+        ]
+      },
+      Relationships: {
+        Kind: Dictionary
+      }
+    },
+    SubjectId_2: {
       FirstName: {
         Kind: Value,
         Value: Child1,
-        Timestamp: DateTimeOffset_1,
+        Timestamp: DateTimeOffset_3,
         Attributes: {
           MaxLength: {
             Kind: Value,
@@ -77,33 +66,31 @@
           }
         }
       },
-      FullName: {
-        Kind: Value,
-        Value: Child1 ,
-        Timestamp: DateTimeOffset_1
-      },
       LastName: {
         Kind: Value
       },
-      Mother: {
-        Kind: Object
-      },
-      Relationships: {
-        Kind: Value
-      }
-    },
-    3: {
-      Children: {
-        Kind: Collection,
-        Count: 0
+      FullName: {
+        Kind: Value,
+        Value: Child1 
       },
       Father: {
         Kind: Object
       },
+      Mother: {
+        Kind: Object
+      },
+      Children: {
+        Kind: Collection
+      },
+      Relationships: {
+        Kind: Dictionary
+      }
+    },
+    SubjectId_3: {
       FirstName: {
         Kind: Value,
         Value: Child2,
-        Timestamp: DateTimeOffset_1,
+        Timestamp: DateTimeOffset_4,
         Attributes: {
           MaxLength: {
             Kind: Value,
@@ -117,19 +104,24 @@
           }
         }
       },
-      FullName: {
-        Kind: Value,
-        Value: Child2 ,
-        Timestamp: DateTimeOffset_1
-      },
       LastName: {
         Kind: Value
+      },
+      FullName: {
+        Kind: Value,
+        Value: Child2 
+      },
+      Father: {
+        Kind: Object
       },
       Mother: {
         Kind: Object
       },
+      Children: {
+        Kind: Collection
+      },
       Relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }

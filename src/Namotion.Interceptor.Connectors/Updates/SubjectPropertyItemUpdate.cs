@@ -3,22 +3,24 @@ using System.Text.Json.Serialization;
 namespace Namotion.Interceptor.Connectors.Updates;
 
 /// <summary>
-/// Represents a sparse property update for an item at a specific index/key.
+/// Represents an item reference in a collection or dictionary property update.
+/// For collections: array order defines collection ordering, only id is required.
+/// For dictionaries: id + key identifies the entry.
 /// </summary>
 public readonly struct SubjectPropertyItemUpdate
 {
     /// <summary>
-    /// The target index (int for arrays) or key (string for dictionaries).
-    /// This is the FINAL index after structural operations are applied.
-    /// </summary>
-    [JsonPropertyName("index")]
-    public required object Index { get; init; }
-
-    /// <summary>
-    /// The subject ID for this item.
+    /// The stable subject ID for this item.
     /// References a subject in the Subjects dictionary.
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("id")]
-    public string? Id { get; init; }
+    public required string Id { get; init; }
+
+    /// <summary>
+    /// The dictionary key (only for Dictionary kind properties).
+    /// Null for Collection kind items where ordering comes from array position.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("key")]
+    public string? Key { get; init; }
 }

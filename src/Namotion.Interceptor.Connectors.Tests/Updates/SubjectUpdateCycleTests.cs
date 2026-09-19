@@ -4,6 +4,7 @@ using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -151,6 +152,7 @@ public class SubjectUpdateCycleTests
         child2.Father = person;
         child1.Mother = child2; // siblings point to each other
         child2.Mother = child1;
+        person.Children = [child1, child2];
 
         var changes = new[]
         {
@@ -170,6 +172,14 @@ public class SubjectUpdateCycleTests
         // Assert
         var json = JsonSerializer.Serialize(partialSubjectUpdate);
         Assert.NotNull(json);
+        var items = partialSubjectUpdate.Subjects[partialSubjectUpdate.Root!]["children"].Items;
+        Assert.NotNull(items);
+        Assert.Equal(2, items.Count);
+        Assert.All(items, item =>
+        {
+            Assert.True(partialSubjectUpdate.Subjects.ContainsKey(item.Id));
+            Assert.Contains(item.Id, partialSubjectUpdate.CompleteSubjectIds!);
+        });
     }
 
     [Fact]
@@ -407,7 +417,8 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
 
         // Verify "last wins" for root.Name
-        var rootProperties = partialUpdate.Subjects[partialUpdate.Root];
+        var rootId = root.GetOrAddSubjectId();
+        var rootProperties = partialUpdate.Subjects[rootId];
         Assert.True(rootProperties.ContainsKey("name"));
         Assert.Equal("Root_Final", rootProperties["name"].Value);
 
@@ -453,10 +464,11 @@ public class SubjectUpdateCycleTests
         var json = JsonSerializer.Serialize(partialUpdate);
         Assert.NotNull(json);
 
-        // Verify we have Operations with Inserts
-        var rootProperties = partialUpdate.Subjects[partialUpdate.Root];
-        Assert.NotNull(rootProperties["items"].Operations);
-        Assert.Equal(2, rootProperties["items"].Operations!.Count);
+        // Verify we have complete state with both items
+        var rootId = root.GetOrAddSubjectId();
+        var rootProperties = partialUpdate.Subjects[rootId];
+        Assert.NotNull(rootProperties["items"].Items);
+        Assert.Equal(2, rootProperties["items"].Items!.Count);
     }
 
     [Fact]
@@ -493,23 +505,23 @@ public class SubjectUpdateCycleTests
         var json = JsonSerializer.Serialize(partialUpdate);
         Assert.NotNull(json);
 
-        // With flat structure, the insert operation has an Id that references
-        // the subject in the Subjects dictionary
-        var rootProperties = partialUpdate.Subjects[partialUpdate.Root];
-        var operations = rootProperties["items"].Operations;
-        Assert.NotNull(operations);
-        Assert.Single(operations);
+        // With complete state, the items list has the child's ID
+        var rootId = root.GetOrAddSubjectId();
+        var rootProperties = partialUpdate.Subjects[rootId];
+        var items = rootProperties["items"].Items;
+        Assert.NotNull(items);
+        Assert.Single(items);
 
-        var insertOp = operations[0];
-        Assert.NotNull(insertOp.Id);
+        var childItemId = items[0].Id;
+        Assert.NotNull(childItemId);
 
         // The child subject should exist in the dictionary
-        Assert.True(partialUpdate.Subjects.ContainsKey(insertOp.Id));
+        Assert.True(partialUpdate.Subjects.ContainsKey(childItemId));
 
         // The child's parent property should reference the root by Id
-        var childProperties = partialUpdate.Subjects[insertOp.Id];
+        var childProperties = partialUpdate.Subjects[childItemId];
         Assert.True(childProperties.ContainsKey("parent"));
-        Assert.Equal(partialUpdate.Root, childProperties["parent"].Id);
+        Assert.Equal(rootId, childProperties["parent"].Id);
     }
 
     [Fact]
@@ -605,6 +617,198 @@ public class SubjectUpdateCycleTests
         var json = JsonSerializer.Serialize(partialUpdate);
         Assert.NotNull(json);
         await Verify(partialUpdate).DisableDateCounting();
+    }
+
+    [Fact]
+    public void WhenTheRootIsAssignedToABackReference_ThenOnlyItsIdIsSent()
+    {
+        // Arrange
+        var child = new Person { FirstName = "Child" };
+        var root = new Person(InterceptorSubjectContext.Create().WithRegistry()) { FirstName = "Root", Mother = child };
+        child.Father = root;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<Person?>(new PropertyReference(child, nameof(Person.Father)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, root)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert
+        var childProperties = Assert.Single(update.Subjects).Value;
+        Assert.Equal(new[] { nameof(Person.Father) }, childProperties.Keys);
+        Assert.Equal(update.Root, childProperties[nameof(Person.Father)].Id);
+        Assert.Empty(update.CompleteSubjectIds!);
+    }
+
+    [Fact]
+    public void WhenASubjectIsAssignedToItsOwnReference_ThenOnlyItsIdIsSent()
+    {
+        // Arrange
+        var node = new CycleTestNode { Name = "Node" };
+        var root = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry()) { Name = "Root", Child = node };
+        node.Self = node;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<CycleTestNode?>(new PropertyReference(node, nameof(CycleTestNode.Self)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, node)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert
+        var nodeId = ((IInterceptorSubject)node).TryGetSubjectId()!;
+        Assert.Equal(new[] { nameof(CycleTestNode.Self) }, update.Subjects[nodeId].Keys);
+        Assert.Equal(nodeId, update.Subjects[nodeId][nameof(CycleTestNode.Self)].Id);
+    }
+
+    [Fact]
+    public void WhenABackReferenceToANonRootAncestorIsSet_ThenTheMirrorReceivesIt()
+    {
+        // Arrange
+        var child = new CycleTestNode { Name = "Child" };
+        var parent = new CycleTestNode { Name = "Parent", Child = child };
+        var root = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry()) { Name = "Root", Child = parent };
+        var target = CreateMirror(root);
+        child.Parent = parent;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<CycleTestNode?>(new PropertyReference(child, nameof(CycleTestNode.Parent)),
+                ChangeOrigin.Local, DateTimeOffset.UtcNow, null, null, parent)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var childProperties = update.Subjects[((IInterceptorSubject)child).TryGetSubjectId()!];
+        Assert.Equal(((IInterceptorSubject)parent).TryGetSubjectId(), childProperties[nameof(CycleTestNode.Parent)].Id);
+        Assert.Equal("Child", target.Child!.Child!.Name);
+        Assert.Same(target.Child, target.Child.Child.Parent);
+    }
+
+    [Fact]
+    public void WhenABackReferenceArrivesBeforeTheAttachInOneBatch_ThenTheNewSubjectArrivesComplete()
+    {
+        // Arrange
+        var parent = new CycleTestNode { Name = "Parent" };
+        var root = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry()) { Name = "Root", Child = parent };
+        var target = CreateMirror(root);
+        var child = new CycleTestNode { Name = "Child", Items = [new CycleTestNode { Name = "Grandchild" }] };
+        parent.Child = child;
+        child.Parent = parent;
+        var timestamp = DateTimeOffset.UtcNow;
+        SubjectPropertyChange[] changes =
+        [
+            SubjectPropertyChange.Create<CycleTestNode?>(new PropertyReference(child, nameof(CycleTestNode.Parent)),
+                ChangeOrigin.Local, timestamp, null, null, parent),
+            SubjectPropertyChange.Create<CycleTestNode?>(new PropertyReference(parent, nameof(CycleTestNode.Child)),
+                ChangeOrigin.Local, timestamp, null, null, child)
+        ];
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes, []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var receivedChild = target.Child!.Child!;
+        Assert.Equal("Child", receivedChild.Name);
+        Assert.Equal("Grandchild", Assert.Single(receivedChild.Items).Name);
+        Assert.Same(target.Child, receivedChild.Parent);
+    }
+
+    [Fact]
+    public void WhenAnInitializerSetsABackReferenceWhileAChildAttaches_ThenTheNewSubjectArrivesComplete()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithService(() => new ParentReferenceInitializer());
+        var parent = new CycleTestNode { Name = "Parent" };
+        var root = new CycleTestNode(context) { Name = "Root", Child = parent };
+        var target = CreateMirror(root);
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var child = new CycleTestNode { Name = "Child", Items = [new CycleTestNode { Name = "Grandchild" }] };
+
+        // Act
+        parent.Child = child;
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes.ToArray(), []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var backReferenceIndex = changes.FindIndex(change =>
+            ReferenceEquals(change.Property.Subject, child) && change.Property.Name == nameof(CycleTestNode.Parent));
+        var attachIndex = changes.FindIndex(change =>
+            ReferenceEquals(change.Property.Subject, parent) && change.Property.Name == nameof(CycleTestNode.Child));
+        Assert.True(backReferenceIndex >= 0 && backReferenceIndex < attachIndex,
+            "the back reference must be published before the change which attaches the child");
+
+        var receivedChild = target.Child!.Child!;
+        Assert.Equal("Child", receivedChild.Name);
+        Assert.Equal("Grandchild", Assert.Single(receivedChild.Items).Name);
+        Assert.Same(target.Child, receivedChild.Parent);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenANewSubjectReferencesAnAncestorTheReceiverHolds_ThenTheAncestorIsSentByIdOnly(bool collection)
+    {
+        // Arrange
+        var ancestor = new CycleTestNode { Name = "Ancestor", Items = [new CycleTestNode { Name = "Sibling" }] };
+        var root = new CycleTestNode(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry()) { Name = "Root", Child = ancestor };
+        var target = CreateMirror(root);
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = ((IInterceptorSubject)root).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Add);
+        var added = new CycleTestNode { Name = "Added", Parent = ancestor };
+
+        // Act
+        if (collection)
+            ancestor.Items = [.. ancestor.Items, added];
+        else
+            ancestor.Child = added;
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes.ToArray(), []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+
+        // Assert
+        var ancestorId = ((IInterceptorSubject)ancestor).TryGetSubjectId()!;
+        Assert.DoesNotContain(ancestorId, update.CompleteSubjectIds!);
+        Assert.Equal(collection ? nameof(CycleTestNode.Items) : nameof(CycleTestNode.Child), Assert.Single(update.Subjects[ancestorId]).Key);
+        var receivedAdded = collection ? target.Child!.Items[1] : target.Child!.Child!;
+        Assert.Equal("Added", receivedAdded.Name);
+        Assert.Same(target.Child, receivedAdded.Parent);
+    }
+
+    private static CycleTestNode CreateMirror(CycleTestNode source)
+    {
+        var target = new CycleTestNode(InterceptorSubjectContext.Create().WithRegistry());
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        return target;
+    }
+
+    /// <summary>
+    /// Points a node's <see cref="CycleTestNode.Parent"/> at the node holding it while it attaches, so the back
+    /// reference is published before the change which attaches the node.
+    /// </summary>
+    private sealed class ParentReferenceInitializer : ISubjectPropertyInitializer
+    {
+        public void InitializeProperty(RegisteredSubjectProperty property)
+        {
+            if (property.IsAttribute || property.Name != nameof(CycleTestNode.Name))
+                return;
+
+            var node = (CycleTestNode)property.Subject;
+            if (node.Parent is null && property.Parent.Parents is [var firstParent, ..])
+                node.Parent = (CycleTestNode)firstParent.Property.Parent.Subject;
+        }
     }
 
     /// <summary>

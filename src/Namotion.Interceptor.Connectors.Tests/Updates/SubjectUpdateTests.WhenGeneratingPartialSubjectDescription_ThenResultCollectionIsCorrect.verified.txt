@@ -1,45 +1,31 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      children: {
-        Kind: Collection,
-        Timestamp: {Scrubbed},
-        Operations: [
-          {
-            Index: 1
-          },
-          {
-            Index: 0
-          }
-        ],
-        Items: [
-          {
-            Index: 1,
-            Id: 3
-          }
-        ],
-        Count: 2
-      },
-      father: {
-        Kind: Object,
-        Timestamp: {Scrubbed},
-        Id: 4
-      },
+    SubjectId_1: {
       mother: {
         Kind: Object,
         Timestamp: {Scrubbed},
-        Id: 2
-      }
-    },
-    2: {
-      children: {
-        Kind: Collection,
-        Count: 0
+        Id: SubjectId_2
       },
       father: {
-        Kind: Object
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: SubjectId_3
       },
+      children: {
+        Kind: Collection,
+        Timestamp: {Scrubbed},
+        Items: [
+          {
+            Id: SubjectId_4
+          },
+          {
+            Id: SubjectId_5
+          }
+        ]
+      }
+    },
+    SubjectId_2: {
       firstName: {
         Kind: Value,
         Value: Jane,
@@ -57,28 +43,64 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: Jane 
       },
-      lastName: {
-        Kind: Value
+      father: {
+        Kind: Object
       },
       mother: {
         Kind: Object
       },
+      children: {
+        Kind: Collection
+      },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
-    3: {
-      children: {
-        Kind: Collection,
-        Count: 0
+    SubjectId_3: {
+      firstName: {
+        Kind: Value,
+        Value: MyFather,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      lastName: {
+        Kind: Value
+      },
+      fullName: {
+        Kind: Value,
+        Value: MyFather 
       },
       father: {
         Kind: Object
       },
+      mother: {
+        Kind: Object
+      },
+      children: {
+        Kind: Collection
+      },
+      relationships: {
+        Kind: Dictionary
+      }
+    },
+    SubjectId_5: {
       firstName: {
         Kind: Value,
         Value: John,
@@ -96,57 +118,30 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: John 
       },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Object
-      },
-      relationships: {
-        Kind: Value
-      }
-    },
-    4: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
       father: {
         Kind: Object
       },
-      firstName: {
-        Kind: Value,
-        Value: MyFather,
-        Attributes: {
-          maxLength: {
-            Kind: Value,
-            Value: 123,
-            Attributes: {
-              unit: {
-                Kind: Value,
-                Value: Count
-              }
-            }
-          }
-        }
-      },
-      fullName: {
-        Kind: Value,
-        Value: MyFather 
-      },
-      lastName: {
-        Kind: Value
-      },
       mother: {
         Kind: Object
       },
+      children: {
+        Kind: Collection
+      },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
-  }
+  },
+  CompleteSubjectIds: [
+    SubjectId_2,
+    SubjectId_3,
+    SubjectId_5
+  ]
 }

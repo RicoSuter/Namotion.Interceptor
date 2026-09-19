@@ -83,7 +83,7 @@ public class ProtocolHandshakeTests
         using var rawClient = new ClientWebSocket();
         await rawClient.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
 
-        var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
+        var hello = new HelloPayload { Version = WebSocketProtocol.Version, Format = WebSocketFormat.Json };
         var sendBuffer = new ArrayBufferWriter<byte>(256);
         _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
 
@@ -100,7 +100,7 @@ public class ProtocolHandshakeTests
 
         var welcome = _serializer.Deserialize<WelcomePayload>(
             new ReadOnlySpan<byte>(receiveBuffer, payloadStart, payloadLength));
-        Assert.Equal(1, welcome.Version);
+        Assert.Equal(WebSocketProtocol.Version, welcome.Version);
         Assert.NotNull(welcome.State);
 
         // Gracefully close -- server may have already started shutting down

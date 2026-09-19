@@ -17,7 +17,6 @@ public static class SnapshotComparer
     internal const string KindKey = "kind";
     internal const string ValueKey = "value";
     internal const string IdKey = "id";
-    internal const string CountKey = "count";
     internal const string ItemsKey = "items";
 
     private static readonly JsonSerializerOptions CompactJsonOptions = new()
@@ -32,8 +31,8 @@ public static class SnapshotComparer
     /// (Object/Collection/Dictionary) properties are stripped: those reflect local graph
     /// creation moments, not synced wire events. Timestamps on Value properties are
     /// preserved: those propagate via source timestamps and must converge.
-    /// Dictionary items are sorted by their index field (the dictionary key); Collection
-    /// items keep their source order because order is part of equality.
+    /// Dictionary items are sorted by their key; Collection items keep their source order
+    /// because order is part of equality.
     /// </summary>
     public static string Capture(TestNode root)
     {
@@ -173,8 +172,6 @@ public static class SnapshotComparer
                     Value = property.Value,
                     Timestamp = property.Kind == SubjectPropertyUpdateKind.Value ? property.Timestamp : null,
                     Id = property.Id is not null ? RemapId(property.Id) : null,
-                    Count = property.Count,
-                    Operations = property.Operations,
                     Attributes = property.Attributes,
                     ExtensionData = property.ExtensionData,
                 };
@@ -184,15 +181,18 @@ public static class SnapshotComparer
                     var normalizedItems = items
                         .Select(item => new SubjectPropertyItemUpdate
                         {
-                            Index = item.Index,
-                            Id = item.Id is not null ? RemapId(item.Id) : null,
+                            Id = RemapId(item.Id),
+                            Key = item.Key,
                         })
                         .ToList();
 
                     if (property.Kind == SubjectPropertyUpdateKind.Dictionary)
                     {
+                        // Dictionary ordering is keyed (not positional), so sort by key for a
+                        // deterministic, order-independent comparison. Collections keep source
+                        // order because array position is part of equality.
                         normalizedItems.Sort((a, b) =>
-                            string.Compare(a.Index?.ToString(), b.Index?.ToString(), StringComparison.Ordinal));
+                            string.Compare(a.Key, b.Key, StringComparison.Ordinal));
                     }
 
                     normalized.Items = normalizedItems;

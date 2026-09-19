@@ -253,6 +253,9 @@ public class SubjectIdTests
         child.SetSubjectId("duplicateId");
         var idRegistry = context.GetService<ISubjectIdRegistry>();
 
+        // The counter is process-wide, so assert a floor on it rather than an exact delta.
+        var duplicatesBefore = SubjectRegistryDiagnostics.DuplicateSubjectIdAttaches;
+
         // Act - attaching a child with a conflicting ID skips reverse index
         // registration but does not throw, so the lifecycle completes normally
         parent.Mother = child;
@@ -261,6 +264,10 @@ public class SubjectIdTests
         Assert.Same(child, parent.Mother);
         Assert.True(idRegistry.TryGetSubjectById("duplicateId", out var found));
         Assert.Same(parent, found);
+
+        // The skip is the only trace the duplicate leaves, so it has to be counted
+        Assert.True(SubjectRegistryDiagnostics.DuplicateSubjectIdAttaches >= duplicatesBefore + 1,
+            "Attaching a subject under an ID another subject holds should be counted");
     }
 
     [Fact]

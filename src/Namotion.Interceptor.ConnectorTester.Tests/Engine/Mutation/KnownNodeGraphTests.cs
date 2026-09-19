@@ -91,4 +91,77 @@ public class KnownNodeGraphTests
         Assert.DoesNotContain(d3, graph.StructuralTargets);
         Assert.DoesNotContain(d4, graph.StructuralTargets);
     }
+
+    [Fact]
+    public void WhenNodeIsReachableFromTwoParents_ThenItIsListedOnce()
+    {
+        // Arrange: shared hangs off holder's collection and off the root's object reference.
+        var context = CreateContext();
+        var shared = new TestNode(context);
+        var holder = new TestNode(context) { Collection = [shared] };
+        var root = new TestNode(context)
+        {
+            Collection = [holder],
+            ObjectRef = shared
+        };
+        var graph = new KnownNodeGraph();
+
+        // Act
+        graph.Rebuild(root);
+
+        // Assert: root, holder and shared, with no duplicate entry for the shared node.
+        Assert.Equal(3, graph.KnownNodes.Count);
+        Assert.Single(graph.KnownNodes, node => ReferenceEquals(node, shared));
+        Assert.Single(graph.StructuralTargets, node => ReferenceEquals(node, shared));
+    }
+
+    [Fact]
+    public void WhenSharedNodeLosesOneParent_ThenRebuildStillListsItOnce()
+    {
+        // Arrange
+        var context = CreateContext();
+        var shared = new TestNode(context);
+        var holder = new TestNode(context) { Collection = [shared] };
+        var root = new TestNode(context)
+        {
+            Collection = [holder],
+            ObjectRef = shared
+        };
+        var graph = new KnownNodeGraph();
+        graph.Rebuild(root);
+
+        // Act: drop the collection edge, leaving only the object reference.
+        holder.Collection = [];
+        graph.Rebuild(root);
+
+        // Assert: the node is still reachable and still counted exactly once.
+        Assert.Equal(3, graph.KnownNodes.Count);
+        Assert.Single(graph.KnownNodes, node => ReferenceEquals(node, shared));
+    }
+
+    [Fact]
+    public void WhenSharedNodeLosesBothParents_ThenRebuildDropsIt()
+    {
+        // Arrange
+        var context = CreateContext();
+        var shared = new TestNode(context);
+        var holder = new TestNode(context) { Collection = [shared] };
+        var root = new TestNode(context)
+        {
+            Collection = [holder],
+            ObjectRef = shared
+        };
+        var graph = new KnownNodeGraph();
+        graph.Rebuild(root);
+
+        // Act
+        holder.Collection = [];
+        root.ObjectRef = null;
+        graph.Rebuild(root);
+
+        // Assert: no leaked bookkeeping entry for the detached node.
+        Assert.Equal(2, graph.KnownNodes.Count);
+        Assert.DoesNotContain(graph.KnownNodes, node => ReferenceEquals(node, shared));
+        Assert.DoesNotContain(graph.StructuralTargets, node => ReferenceEquals(node, shared));
+    }
 }

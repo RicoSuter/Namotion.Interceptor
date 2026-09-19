@@ -222,6 +222,8 @@ public class SubjectUpdateTests
             FirstName = "Child",
             Children = [child1, child2, child3]
         };
+        var target = new Person(InterceptorSubjectContext.Create().WithRegistry());
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(person, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Act
         var changes = new List<SubjectPropertyChange>();
@@ -238,8 +240,13 @@ public class SubjectUpdateTests
 
         var partialSubjectUpdate = SubjectUpdate
             .CreatePartialUpdateFromChanges(person, changes.ToArray().AsSpan(), [JsonCamelCasePathProcessor.Instance]);
+        target.ApplySubjectUpdate(SubjectUpdate.CreatePartialUpdateFromChanges(person, changes.ToArray(), []),
+            DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
+        Assert.Equal(["Child3", "John"], target.Children.Select(child => child.FirstName));
+        Assert.Equal("Jane", target.Mother!.FirstName);
+        Assert.Equal("MyFather", target.Father!.FirstName);
         await Verify(partialSubjectUpdate).DisableDateCounting();
     }
 
@@ -590,7 +597,8 @@ public class SubjectUpdateTests
         var update = SubjectUpdate.CreateCompleteUpdate(person, [processor]);
 
         // Assert
-        var firstNameUpdate = update.Subjects!["1"]["FirstName"];
+        var subjectId = person.GetOrAddSubjectId();
+        var firstNameUpdate = update.Subjects![subjectId]["FirstName"];
         Assert.NotNull(firstNameUpdate.Attributes);
         Assert.Contains("Included", firstNameUpdate.Attributes.Keys);
         Assert.DoesNotContain("Excluded", firstNameUpdate.Attributes.Keys);
@@ -627,7 +635,8 @@ public class SubjectUpdateTests
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(person, changes, [processor]);
 
         // Assert
-        var firstNameUpdate = update.Subjects!["1"]["FirstName"];
+        var subjectId = person.GetOrAddSubjectId();
+        var firstNameUpdate = update.Subjects![subjectId]["FirstName"];
         Assert.NotNull(firstNameUpdate.Attributes);
         Assert.Contains("Included", firstNameUpdate.Attributes.Keys);
         Assert.DoesNotContain("Excluded", firstNameUpdate.Attributes.Keys);

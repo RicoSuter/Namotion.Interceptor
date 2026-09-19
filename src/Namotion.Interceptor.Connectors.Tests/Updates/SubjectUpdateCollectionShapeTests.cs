@@ -30,9 +30,9 @@ public class SubjectUpdateCollectionShapeTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        var propertyUpdate = update.Subjects[update.Root]["RuntimeChildren"];
+        var propertyUpdate = update.Subjects[update.Root!]["RuntimeChildren"];
         Assert.Equal(SubjectPropertyUpdateKind.Collection, propertyUpdate.Kind);
-        Assert.Equal(0, Assert.Single(propertyUpdate.Items!).Index);
+        Assert.Equal(sourceChildren.Cast<Person>().Single().GetOrAddSubjectId(), Assert.Single(propertyUpdate.Items!).Id);
         // The element type is inferred, the declared container type is not: the default factory
         // rebuilds the members into a List<T> rather than into another LegacyCollection<Person>.
         var child = Assert.Single(Assert.IsType<List<Person>>(targetChildren));
