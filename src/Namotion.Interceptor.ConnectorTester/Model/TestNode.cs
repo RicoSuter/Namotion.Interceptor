@@ -52,6 +52,44 @@ public partial class TestNode
         Items = new Dictionary<string, TestNode>();
     }
 
+    /// <summary>The number of value properties that <see cref="WriteValueProperty"/> and <see cref="ReadValueProperty"/> select by index.</summary>
+    public const int ValuePropertyCount = 4;
+
+    /// <summary>Writes a value derived from <paramref name="counter"/> to the value property at <paramref name="property"/> and returns it.</summary>
+    public static object WriteValueProperty(TestNode node, int property, long counter)
+    {
+        switch (property)
+        {
+            case 0:
+                var stringValue = counter.ToString("x8");
+                node.StringValue = stringValue;
+                return stringValue;
+            case 1:
+                var decimalValue = counter / 100m;
+                node.DecimalValue = decimalValue;
+                return decimalValue;
+            case 2:
+                var intValue = (int)(counter % int.MaxValue);
+                node.IntValue = intValue;
+                return intValue;
+            case 3:
+                node.LongValue = counter;
+                return counter;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(property));
+        }
+    }
+
+    /// <summary>Returns the name and current value of the value property at <paramref name="property"/>.</summary>
+    public static (string Name, object Value) ReadValueProperty(TestNode node, int property) => property switch
+    {
+        0 => (nameof(StringValue), node.StringValue),
+        1 => (nameof(DecimalValue), node.DecimalValue),
+        2 => (nameof(IntValue), node.IntValue),
+        3 => (nameof(LongValue), node.LongValue),
+        _ => throw new ArgumentOutOfRangeException(nameof(property))
+    };
+
     /// <summary>
     /// Creates a TestNode root with a configurable number of children.
     /// </summary>
