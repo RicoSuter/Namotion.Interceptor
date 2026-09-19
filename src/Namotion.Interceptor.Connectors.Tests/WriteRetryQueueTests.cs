@@ -860,15 +860,15 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public async Task WhenAWriteArrivesWhileTheIdleDrainIsSending_ThenItIsSentAfterTheDrainedBatch()
+    public async Task WhenAWriteArrivesWhileTheIdleFlushIsSending_ThenItIsSentAfterTheDrainedBatch()
     {
-        // Arrange - the idle drain has taken the parked write and blocks inside the send
+        // Arrange - the idle flush has taken the parked write and blocks inside the send
         var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
         var (source, firstWriteStarted, releaseFirstWrite, written) = CreateSourceBlockingItsFirstWrite();
         var property = new PropertyReference(new Mock<IInterceptorSubject>().Object, "Property");
         queue.Enqueue(new[] { SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 0, 1) });
 
-        var idleDrain = queue.FlushAsync(source.Object, CancellationToken.None);
+        var idleFlush = queue.FlushAsync(source.Object, CancellationToken.None);
         await firstWriteStarted.Task;
 
         // Act
@@ -883,7 +883,7 @@ public class WriteRetryQueueTests
         Assert.Empty(written);
 
         releaseFirstWrite.SetResult();
-        Assert.True(await idleDrain);
+        Assert.True(await idleFlush);
         await handlerWrite;
         Assert.Equal(new[] { 1, 2 }, written.Select(change => change.GetNewValue<int>()));
     }

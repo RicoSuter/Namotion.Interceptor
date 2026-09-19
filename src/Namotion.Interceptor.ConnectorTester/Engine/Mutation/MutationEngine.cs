@@ -1,5 +1,4 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
-using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
@@ -20,39 +19,16 @@ public sealed class MutationEngine : BackgroundService
     private readonly IValueMutationStrategy _valueStrategy;
     private readonly TestCycleCoordinator _coordinator;
     private readonly MutationCounters _counters;
-    private readonly WriteDurabilityLedger _ledger;
     private readonly ILogger _logger;
     private readonly int _structuralMutationRate;
 
     public string Name { get; }
     public int ValueMutationRate { get; }
-    public bool UseTransactions { get; }
     public int StructuralMutationRate => _structuralMutationRate;
     public long ValueMutationCount => _counters.ValueMutationCount;
     public long StructuralMutationCount => _counters.StructuralMutationCount;
-    public long FailedCommitCount => _counters.FailedCommitCount;
 
     public void ResetCounters() => _counters.Reset();
-
-    /// <summary>Clears the write-durability ledger. Called at the start of every cycle.</summary>
-    public void ResetDurabilityLedger() => _ledger.Reset();
-
-    /// <summary>
-    /// Checks the write-durability ledger against this participant's own live node set and
-    /// returns one prefixed line per violation. Empty when nothing was lost.
-    /// </summary>
-    public IReadOnlyList<string> VerifyWriteDurability()
-    {
-        List<TestNode> reachableNodes;
-        lock (_graph.NodeLock)
-        {
-            reachableNodes = _graph.KnownNodes;
-        }
-
-        return _ledger.Verify(reachableNodes)
-            .Select(violation => $"{Name}: {violation}")
-            .ToList();
-    }
 
     public MutationEngine(
         TestNode root,
@@ -61,7 +37,6 @@ public sealed class MutationEngine : BackgroundService
         IValueMutationStrategy valueStrategy,
         KnownNodeGraph graph,
         MutationCounters counters,
-        WriteDurabilityLedger ledger,
         ILogger logger)
     {
         _root = root;
@@ -70,11 +45,9 @@ public sealed class MutationEngine : BackgroundService
         _valueStrategy = valueStrategy;
         _coordinator = coordinator;
         _counters = counters;
-        _ledger = ledger;
         _logger = logger;
         Name = participantConfiguration.Name;
         ValueMutationRate = participantConfiguration.ValueMutationRate;
-        UseTransactions = participantConfiguration.UseTransactions;
         _structuralMutationRate = participantConfiguration.StructuralMutationRate;
     }
 
@@ -82,17 +55,13 @@ public sealed class MutationEngine : BackgroundService
         TestNode root,
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
-        ILogger logger,
-        bool disjointProperties)
+        ILogger logger)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = new WriteDurabilityLedger();
         var context = ((IInterceptorSubject)root).Context;
-        var strategy = new RandomValueMutationStrategy(
-            graph, coordinator, context, counters, participantConfiguration,
-            participantConfiguration.Index, disjointProperties, ledger);
-        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, ledger, logger);
+        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
     }
 
     public static MutationEngine CreateBatch(
@@ -105,11 +74,9 @@ public sealed class MutationEngine : BackgroundService
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = new WriteDurabilityLedger();
         var context = ((IInterceptorSubject)root).Context;
-        var strategy = new BatchValueMutationStrategy(
-            graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, ledger);
-        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, ledger, logger);
+        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

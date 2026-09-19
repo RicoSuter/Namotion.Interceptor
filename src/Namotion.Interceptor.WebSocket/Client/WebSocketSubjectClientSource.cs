@@ -1182,7 +1182,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         {
             // Releases the gate on every failure path, because nothing else ends this resume: after a
             // connect whose load failed, a held gate would park every write for the connection's life, so
-            // those parked writes go out unreconciled instead. A no-op once CompleteResumeAsync released it.
+            // those parked writes go out unreconciled with the next local write instead, since the source
+            // stays Synchronizing and the idle flush does not run. A no-op once CompleteResumeAsync released it.
             TryEndResume(resumeEpoch);
         }
     }

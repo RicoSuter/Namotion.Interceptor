@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
-using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -11,28 +10,17 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 /// Used for load profiles (NumberOfBatches > 0).
 /// Mutates ValueMutationRate nodes per second, spread across NumberOfBatches
 /// batches with even distribution via a PeriodicTimer at 110% tick rate.
-/// Each participant mutates a single fixed property (participantIndex % MutablePropertyCount)
+/// Each participant mutates a single fixed property (participantIndex % 4)
 /// to avoid OPC UA subscription coalescing.
 /// When UseTransactions is enabled, each batch is wrapped in a transaction
 /// (sequential, since transactions are not thread-safe with Parallel.For).
 /// </summary>
-/// <remarks>
-/// This fixed-property-per-participant assignment is unconditional: unlike
-/// <see cref="RandomValueMutationStrategy"/>, this strategy does not take
-/// <see cref="ConnectorTesterConfiguration.DisjointProperties"/> and cannot pick properties any other
-/// way. It happens to satisfy that option's requirement whenever it is combined with it, since every
-/// participant still writes only its own property, but that is a side effect of the OPC UA reasoning
-/// above, not a deliberate implementation of the option. If this strategy is ever changed to pick
-/// properties less predictably, the write-durability oracle silently stops being sound for it, since
-/// nothing here checks or enforces that outcome.
-/// </remarks>
 public sealed class BatchValueMutationStrategy : IValueMutationStrategy
 {
     private readonly KnownNodeGraph _graph;
     private readonly TestCycleCoordinator _coordinator;
     private readonly IInterceptorSubjectContext _context;
     private readonly MutationCounters _counters;
-    private readonly WriteDurabilityLedger _ledger;
     private readonly bool _useTransactions;
     private readonly int _valueMutationRate;
     private readonly int _numberOfBatches;
@@ -45,14 +33,12 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         MutationCounters counters,
         ParticipantConfiguration participantConfiguration,
         int numberOfBatches,
-        int participantIndex,
-        WriteDurabilityLedger ledger)
+        int participantIndex)
     {
         _graph = graph;
         _coordinator = coordinator;
         _context = context;
         _counters = counters;
-        _ledger = ledger;
         _useTransactions = participantConfiguration.UseTransactions;
         _valueMutationRate = participantConfiguration.ValueMutationRate;
         _numberOfBatches = numberOfBatches;
@@ -79,7 +65,7 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         var nodeIndex = 0;
         var mutationsThisSecond = 0;
         var cycleStart = Stopwatch.GetTimestamp();
-        var property = _participantIndex % ConnectorTesterConfiguration.MutablePropertyCount;
+        var property = _participantIndex % 4;
 
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
@@ -141,35 +127,15 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         using var transaction = await _context.BeginTransactionAsync(
             TransactionFailureHandling.BestEffort);
 
-        var batch = new List<(TestNode Node, object? Value)>(count);
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {
             for (var j = 0; j < count; j++)
             {
-                var node = nodes[(nodeIndex + j) % nodeCount];
-                var value = MutateNode(node, property);
-                batch.Add((node, value));
+                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
             }
         }
 
-        try
-        {
-            await transaction.CommitAsync(cancellationToken);
-            foreach (var (node, value) in batch)
-            {
-                _ledger.Record(node, property, value);
-            }
-        }
-        catch (SubjectTransactionException)
-        {
-            // A commit failure is legitimate under BestEffort with a dying transport: the
-            // failed properties never applied locally either, so model and peer still agree.
-            _counters.IncrementFailedCommit();
-            foreach (var (node, _) in batch)
-            {
-                _ledger.Forget(node, property);
-            }
-        }
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private void MutateBatchParallel(
@@ -183,42 +149,31 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
         {
             using (SubjectChangeContext.WithChangedTimestamp(batchTimestamp))
             {
-                var node = nodes[(nodeIndex + j) % nodeCount];
-                var value = MutateNode(node, property);
-                _ledger.Record(node, property, value);
+                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
             }
         });
     }
 
-    private object MutateNode(TestNode node, int property)
+    private void MutateNode(TestNode node, int property)
     {
         var counter = GlobalMutationCounter.Next();
-        object value;
 
         switch (property)
         {
             case 0:
-                var stringValue = counter.ToString("x8");
-                node.StringValue = stringValue;
-                value = stringValue;
+                node.StringValue = counter.ToString("x8");
                 break;
             case 1:
-                var decimalValue = counter / 100m;
-                node.DecimalValue = decimalValue;
-                value = decimalValue;
+                node.DecimalValue = counter / 100m;
                 break;
             case 2:
-                var intValue = (int)(counter % int.MaxValue);
-                node.IntValue = intValue;
-                value = intValue;
+                node.IntValue = (int)(counter % int.MaxValue);
                 break;
-            default:
+            case 3:
                 node.LongValue = counter;
-                value = counter;
                 break;
         }
 
         _counters.IncrementValue();
-        return value;
     }
 }

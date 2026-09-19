@@ -53,22 +53,21 @@ public sealed class CycleStatistics
     {
         var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
         var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
-        var totalFailedCommits = _mutationEngines.Sum(engine => engine.FailedCommitCount);
 
         _logger.LogInformation("""
             --- Cycle {Cycle} Statistics ---
             Duration: {CycleDuration:F0}s (converged in {ConvergeDuration:F1}s)
             Chaos profile: {Profile}
-            Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos} | Total failed commits: {TotalFailedCommits:N0}
+            Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos}
             Result: {Result}
             """,
             cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
-            profileName ?? "(none)", totalMutations, totalChaos, totalFailedCommits, result);
+            profileName ?? "(none)", totalMutations, totalChaos, result);
 
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations, {FailedCommits:N0} failed commits",
-                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount, engine.FailedCommitCount);
+            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
         }
 
         foreach (var engine in _chaosEngines)

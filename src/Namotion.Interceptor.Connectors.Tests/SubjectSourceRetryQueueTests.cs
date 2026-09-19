@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
@@ -13,80 +14,29 @@ public class SubjectSourceRetryQueueTests
     [Fact]
     public async Task WhenWriteFailsWithoutEnumeratedFailedChanges_ThenChangesAreQueuedAndRetried()
     {
-        // Arrange: real context with a running SubjectSourceBase pump; the source fails FirstName
-        // writes wholesale (error without enumerated failed changes) while the flag is set.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-
-        var gate = new object();
+        // Arrange: a running SubjectSourceBase pump whose source fails FirstName writes wholesale (error
+        // without enumerated failed changes) while the flag is set. The long default retry time leaves the
+        // retry to the next write rather than the idle flush.
         var failWholesale = false;
-        var receivedWrites = new List<string>();
-
-        var source = new TestSubjectSource(person, context, NullLogger.Instance,
-            bufferTime: TimeSpan.FromMilliseconds(8))
-        {
-            WriteChangesOverride = (changes, _) =>
-            {
-                lock (gate)
-                {
-                    var batch = changes.ToArray();
-                    if (failWholesale && batch.Any(change => change.Property.Name == nameof(Person.FirstName)))
-                    {
-                        return ValueTask.FromResult(WriteResult.Failure(
-                            ReadOnlyMemory<SubjectPropertyChange>.Empty,
-                            new InvalidOperationException("Wholesale boom")));
-                    }
-
-                    foreach (var change in batch)
-                    {
-                        receivedWrites.Add($"{change.Property.Name}={change.GetNewValue<object?>()}");
-                    }
-                    return ValueTask.FromResult(WriteResult.Success);
-                }
-            },
-        };
-
-        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
-        new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
-
-        await source.StartAsync(CancellationToken.None);
+        var (source, person, writes) = await StartPumpAsync(
+            failBatch: batch => Volatile.Read(ref failWholesale) &&
+                batch.Any(change => change.Property.Name == nameof(Person.FirstName)));
         try
         {
-            // Wait until the pump processes outbound changes. The probe is re-written on each
-            // poll because writes enqueued before the pump's subscription exists are not seen.
-            var probeValue = 0;
-            await AsyncTestHelpers.WaitUntilAsync(() =>
-            {
-                person.LastName = "Probe" + probeValue++;
-                return CountWrites(gate, receivedWrites, nameof(Person.LastName)) >= 1;
-            }, message: "Pump did not start processing changes.");
-
             // Act: fail the FirstName write wholesale; the change must land in the retry queue.
-            lock (gate)
-            {
-                failWholesale = true;
-            }
+            Volatile.Write(ref failWholesale, true);
             person.FirstName = "John";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => source.Diagnostics.OutboundRetries.Depth > 0,
                 message: "Wholesale-failed write was not queued for retry.");
 
             // Recover the source; subsequent outbound writes flush the retry queue first.
-            lock (gate)
-            {
-                failWholesale = false;
-            }
+            Volatile.Write(ref failWholesale, false);
+            var probeValue = 0;
             await AsyncTestHelpers.WaitUntilAsync(() =>
             {
-                person.LastName = "Probe" + probeValue++;
-                lock (gate)
-                {
-                    return receivedWrites.Contains("FirstName=John");
-                }
+                person.LastName = "Retry" + probeValue++;
+                return writes.Contains("FirstName=John");
             }, message: "Queued write was not retried after recovery.");
         }
         finally
@@ -95,15 +45,23 @@ public class SubjectSourceRetryQueueTests
         }
     }
 
-    [Fact]
-    public async Task WhenTheSourceIsIdleWithParkedWrites_ThenTheyAreFlushedWithoutAFurtherChange()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheSourceIsIdleWithAParkedWrite_ThenItIsSentWithoutAFurtherChange(bool reloadInsideConnector)
     {
-        // Arrange: a short retryTime so the idle tick fires inside the test.
+        // Arrange: without the reload only the interval can send it in time, with it only the Synchronized wake.
         var failFirstName = false;
+        SubjectPropertyWriter? propertyWriter = null;
         var (source, person, writes) = await StartPumpAsync(
-            retryTime: TimeSpan.FromMilliseconds(200),
+            retryTime: reloadInsideConnector ? TimeSpan.FromMinutes(1) : TimeSpan.FromMilliseconds(200),
             failBatch: batch => Volatile.Read(ref failFirstName) &&
-                batch.Any(change => change.Property.Name == nameof(Person.FirstName)));
+                batch.Any(change => change.Property.Name == nameof(Person.FirstName)),
+            startListening: (writer, _) =>
+            {
+                propertyWriter = writer;
+                return Task.FromResult<IAsyncDisposable?>(null);
+            });
         try
         {
             Volatile.Write(ref failFirstName, true);
@@ -112,13 +70,42 @@ public class SubjectSourceRetryQueueTests
                 () => source.Diagnostics.OutboundRetries.Depth > 0,
                 message: "The failed write was not parked.");
 
-            // Act: let writes succeed again and then make no further change to any property.
+            // Act: let writes succeed again and make no further change to any property.
             Volatile.Write(ref failFirstName, false);
+
+            if (reloadInsideConnector)
+            {
+                // A reload inside the connector, as on a transport reconnect, which ends in Synchronized.
+                propertyWriter!.StartBuffering();
+                await propertyWriter.LoadInitialStateAndResumeAsync(CancellationToken.None);
+            }
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => writes.Contains("FirstName=John"),
-                message: "The parked write was never drained while the model was idle.");
+                message: "The parked write was not sent while the model was idle.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenRetryTimeIsBelowOneMillisecond_ThenWritesAreStillDelivered()
+    {
+        // Arrange: the reconcile before the pump can deliver the helper's probe too, so only the write below
+        // proves the pump runs.
+        var (source, person, writes) = await StartPumpAsync(retryTime: TimeSpan.FromMicroseconds(500));
+        try
+        {
+            // Act
+            person.FirstName = "John";
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => writes.Contains("FirstName=John"),
+                message: "The write was not delivered.");
         }
         finally
         {
@@ -166,6 +153,35 @@ public class SubjectSourceRetryQueueTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => writes.Contains("LastName=AfterResume"),
                 message: "A write made after the resume completed should reach the source, proving the gate was cleared.");
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheResumeGateIsHeld_ThenTheIdleFlushDoesNotSendTheParkedWrite()
+    {
+        // Arrange: nothing changes the state, so only the gate can keep the idle flush from sending.
+        var (source, person, writes) = await StartPumpAsync();
+        try
+        {
+            Assert.Equal(SourceState.Synchronized, source.State);
+            var resumeEpoch = await BeginResumeAndParkAsync(source, person);
+
+            // Act: two wakes, because the loop takes the second only after the first iteration has finished.
+            source.WakeIdleFlush();
+            source.WakeIdleFlush();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.PendingIdleFlushWakes == 0,
+                message: "The idle flush did not take both wakes.");
+
+            // Assert
+            Assert.False(writes.Contains("FirstName=Parked"), "The idle flush sent a write while the resume gate was held.");
+
+            await source.CompleteResumeForTestAsync(resumeEpoch, CancellationToken.None);
+            Assert.True(writes.Contains("FirstName=Parked"), "The parked write was not sent once the resume completed.");
         }
         finally
         {
@@ -222,7 +238,7 @@ public class SubjectSourceRetryQueueTests
             // Act
             await source.CompleteResumeForTestAsync(attemptEpoch, CancellationToken.None);
 
-            // Assert: the reconcile sends inline, so the idle drain cannot be what delivered it.
+            // Assert: the reconcile sends inline, so the idle flush cannot be what delivered it.
             Assert.True(writes.Contains("FirstName=Parked"), "The completing resume did not judge the parked write.");
             Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
         }
@@ -479,7 +495,8 @@ public class SubjectSourceRetryQueueTests
     private static async Task<(TestSubjectSource Source, Person Person, WriteRecorder Writes)> StartPumpAsync(
         TimeSpan? retryTime = null,
         Func<SubjectPropertyChange[], bool>? failBatch = null,
-        Action<IInterceptorSubjectContext>? configureContext = null)
+        Action<IInterceptorSubjectContext>? configureContext = null,
+        Func<SubjectPropertyWriter, CancellationToken, Task<IAsyncDisposable?>>? startListening = null)
     {
         var context = InterceptorSubjectContext.Create();
 
@@ -491,12 +508,13 @@ public class SubjectSourceRetryQueueTests
         var person = new Person(context);
         var writes = new WriteRecorder();
 
-        // The default outlasts every wait here, so the idle drain cannot deliver a write a test expects
+        // The default outlasts every wait here, so the idle flush cannot deliver a write a test expects
         // only the gate logic to deliver.
         var source = new TestSubjectSource(person, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(8),
             retryTime: retryTime ?? TimeSpan.FromMinutes(1))
         {
+            StartListeningOverride = startListening,
             WriteChangesOverride = (changes, _) =>
             {
                 var batch = changes.ToArray();

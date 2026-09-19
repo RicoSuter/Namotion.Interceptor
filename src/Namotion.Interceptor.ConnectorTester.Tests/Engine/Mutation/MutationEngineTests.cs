@@ -4,17 +4,27 @@ using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
 public class MutationEngineTests
 {
+    private static IInterceptorSubjectContext CreateContext()
+        => InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithParents()
+            .WithLifecycle();
+
     [Fact]
     public async Task WhenStructuralMutationRateIsZero_ThenOnlyValueMutationsRun()
     {
         // Arrange
-        var context = EngineTestContextFactory.Create();
+        var context = CreateContext();
         var root = new TestNode(context);
         var coordinator = new TestCycleCoordinator();
         var configuration = new ParticipantConfiguration
@@ -23,7 +33,7 @@ public class MutationEngineTests
             ValueMutationRate = 100,
             StructuralMutationRate = 0
         };
-        var engine = MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance, disjointProperties: false);
+        var engine = MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
 
         // Act
         await engine.StartAsync(CancellationToken.None);
@@ -41,11 +51,11 @@ public class MutationEngineTests
     public void WhenResetCountersCalled_ThenBothCountersZero()
     {
         // Arrange
-        var context = EngineTestContextFactory.Create();
+        var context = CreateContext();
         var root = new TestNode(context);
         var coordinator = new TestCycleCoordinator();
         var configuration = new ParticipantConfiguration { Name = "test", ValueMutationRate = 50 };
-        var engine = MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance, disjointProperties: false);
+        var engine = MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
 
         // Act
         engine.ResetCounters();
