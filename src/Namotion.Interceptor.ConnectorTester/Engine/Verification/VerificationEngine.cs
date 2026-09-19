@@ -10,7 +10,8 @@ namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
-/// When a cycle fails to converge or has an unexpected commit failure, exits the process with non-zero exit code.
+/// When a cycle fails to converge, has an unexpected commit failure or loses a write, exits the process with non-zero
+/// exit code.
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
@@ -104,7 +105,10 @@ public class VerificationEngine : BackgroundService
             _coordinator.SetCycle(_cycleNumber);
 
             foreach (var engine in _mutationEngines)
+            {
                 engine.ResetCounters();
+                engine.ResetDurabilityLedger();
+            }
             foreach (var engine in _chaosEngines)
                 engine.ResetCounters();
 
@@ -136,7 +140,11 @@ public class VerificationEngine : BackgroundService
             var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
             cycleStopwatch.Stop();
 
-            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines) == CycleResult.Pass)
+            var durabilityViolations = outcome.Converged
+                ? _mutationEngines.SelectMany(engine => engine.VerifyWriteDurability()).ToList()
+                : [];
+
+            if (CycleVerdict.Decide(outcome.Converged, _mutationEngines, durabilityViolations.Count) == CycleResult.Pass)
             {
                 _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
@@ -152,8 +160,22 @@ public class VerificationEngine : BackgroundService
 
             if (outcome.Converged)
             {
-                _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} unexpected commit failures, see the logged errors) ===",
-                    _cycleNumber, _mutationEngines.Sum(engine => engine.UnexpectedFailedCommitCount));
+                var unexpectedFailedCommitCount = _mutationEngines.Sum(engine => engine.UnexpectedFailedCommitCount);
+                if (unexpectedFailedCommitCount > 0)
+                {
+                    _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} unexpected commit failures, see the logged errors) ===",
+                        _cycleNumber, unexpectedFailedCommitCount);
+                }
+
+                if (durabilityViolations.Count > 0)
+                {
+                    _logger.LogError("=== Cycle {Cycle}: FAIL ({Count} write-durability violation(s)) ===",
+                        _cycleNumber, durabilityViolations.Count);
+                    foreach (var violation in durabilityViolations)
+                    {
+                        _logger.LogError("  {Violation}", violation);
+                    }
+                }
             }
             else
             {
@@ -190,6 +212,11 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
                 engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
+        }
+
+        if (_configuration.DisjointProperties)
+        {
+            _logger.LogInformation("  Write-durability oracle: enabled");
         }
 
         if (_configuration.ChaosProfiles.Count > 0)

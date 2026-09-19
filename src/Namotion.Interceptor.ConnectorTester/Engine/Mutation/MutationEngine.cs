@@ -1,4 +1,5 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine.Mutation;
@@ -19,6 +20,7 @@ public sealed class MutationEngine : BackgroundService
     private readonly IValueMutationStrategy _valueStrategy;
     private readonly TestCycleCoordinator _coordinator;
     private readonly MutationCounters _counters;
+    private readonly WriteDurabilityLedger? _ledger;
     private readonly ILogger _logger;
     private readonly int _structuralMutationRate;
 
@@ -34,6 +36,33 @@ public sealed class MutationEngine : BackgroundService
 
     public void ResetCounters() => _counters.Reset();
 
+    /// <summary>Clears the write-durability ledger, if any.</summary>
+    public void ResetDurabilityLedger() => _ledger?.Reset();
+
+    /// <summary>
+    /// Returns one line per write the ledger recorded that this participant's model no longer holds, prefixed
+    /// with the participant name. Empty when the engine has no ledger.
+    /// </summary>
+    public IReadOnlyList<string> VerifyWriteDurability()
+    {
+        if (_ledger is null)
+        {
+            return [];
+        }
+
+        // The known nodes lag structural changes, local and remote, until the next rebuild.
+        _graph.Rebuild(_root);
+        List<TestNode> knownNodes;
+        lock (_graph.NodeLock)
+        {
+            knownNodes = _graph.KnownNodes;
+        }
+
+        return _ledger.Verify(knownNodes)
+            .Select(violation => $"{Name}: {violation}")
+            .ToList();
+    }
+
     public MutationEngine(
         TestNode root,
         ParticipantConfiguration participantConfiguration,
@@ -41,7 +70,8 @@ public sealed class MutationEngine : BackgroundService
         IValueMutationStrategy valueStrategy,
         KnownNodeGraph graph,
         MutationCounters counters,
-        ILogger logger)
+        ILogger logger,
+        WriteDurabilityLedger? ledger = null)
     {
         _root = root;
         _graph = graph;
@@ -49,6 +79,7 @@ public sealed class MutationEngine : BackgroundService
         _valueStrategy = valueStrategy;
         _coordinator = coordinator;
         _counters = counters;
+        _ledger = ledger;
         _logger = logger;
         Name = participantConfiguration.Name;
         ValueMutationRate = participantConfiguration.ValueMutationRate;
@@ -59,13 +90,15 @@ public sealed class MutationEngine : BackgroundService
         TestNode root,
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
-        ILogger logger)
+        ILogger logger,
+        bool disjointProperties = false)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
+        var ledger = disjointProperties ? new WriteDurabilityLedger() : null;
         var context = ((IInterceptorSubject)root).Context;
-        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger);
-        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
+        var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, logger, ledger);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
     }
 
     public static MutationEngine CreateBatch(

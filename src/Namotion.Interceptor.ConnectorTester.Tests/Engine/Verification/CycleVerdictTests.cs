@@ -20,7 +20,7 @@ public class CycleVerdictTests
         unexpectedCounters.IncrementFailedCommit(CommitFailureKind.Unexpected);
 
         // Act
-        var result = CycleVerdict.Decide(converged: true, [expectedOnly, withUnexpected]);
+        var result = CycleVerdict.Decide(converged: true, [expectedOnly, withUnexpected], writeDurabilityViolationCount: 0);
 
         // Assert
         Assert.Equal(CycleResult.Fail, result);
@@ -35,10 +35,23 @@ public class CycleVerdictTests
         counters.IncrementFailedCommit(CommitFailureKind.SourceWriteFailure);
 
         // Act
-        var result = CycleVerdict.Decide(converged: true, [engine]);
+        var result = CycleVerdict.Decide(converged: true, [engine], writeDurabilityViolationCount: 0);
 
         // Assert
         Assert.Equal(CycleResult.Pass, result);
+    }
+
+    [Fact]
+    public void WhenConvergedCycleLostAWrite_ThenCycleFails()
+    {
+        // Arrange
+        var (engine, _) = CreateEngine("client");
+
+        // Act
+        var result = CycleVerdict.Decide(converged: true, [engine], writeDurabilityViolationCount: 1);
+
+        // Assert
+        Assert.Equal(CycleResult.Fail, result);
     }
 
     [Fact]
@@ -48,7 +61,7 @@ public class CycleVerdictTests
         var (engine, _) = CreateEngine("client");
 
         // Act
-        var result = CycleVerdict.Decide(converged: false, [engine]);
+        var result = CycleVerdict.Decide(converged: false, [engine], writeDurabilityViolationCount: 0);
 
         // Assert
         Assert.Equal(CycleResult.Fail, result);
