@@ -221,13 +221,6 @@ internal sealed class WriteRetryQueue : IDisposable
         var totalFlushed = 0;
         while (true)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                // Checked per batch, so an abandoned drain stops sending onto a connection the source has
-                // replaced. Reporting failure keeps the caller from sending its own batch ahead of the rest.
-                return false;
-            }
-
             int count;
             lock (_lock)
             {
@@ -298,34 +291,15 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Used on reconnection: instead of flushing stale changes to the server, the caller compares
     /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
     /// </summary>
-    /// <remarks>
-    /// Takes the flush gate, because a flush that fails after this drain would requeue its batch unjudged
-    /// and move a property backwards. An empty queue is not skipped for the same reason: a batch can be
-    /// in flight.
-    /// </remarks>
-    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    public async ValueTask<SubjectPropertyChange[]> DrainForLocalReapplyAsync(CancellationToken cancellationToken)
+    public SubjectPropertyChange[] DrainForLocalReapply()
     {
-        // Cancelled: nothing to reapply.
-        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
+        lock (_lock)
         {
-            return [];
-        }
-
-        try
-        {
-            lock (_lock)
-            {
-                var changes = _pendingWrites.ToArray();
-                _pendingWrites.Clear();
-                _ownedWriteCount -= changes.Length;
-                Volatile.Write(ref _count, 0);
-                return changes;
-            }
-        }
-        finally
-        {
-            _flushSemaphore.Release();
+            var changes = _pendingWrites.ToArray();
+            _pendingWrites.Clear();
+            _ownedWriteCount -= changes.Length;
+            Volatile.Write(ref _count, 0);
+            return changes;
         }
     }
 

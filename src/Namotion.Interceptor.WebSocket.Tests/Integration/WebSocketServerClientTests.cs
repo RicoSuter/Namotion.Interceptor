@@ -249,7 +249,12 @@ public class WebSocketServerClientTests
             context => new TestRoot(context),
             (_, root) => root.Name = "Initial",
             port: portLease.Port);
-        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // A long retry time leaves the delivery to the wake on Synchronized rather than the interval.
+        await client.StartAsync(
+            context => new TestRoot(context),
+            port: portLease.Port,
+            configureClient: configuration => configuration.RetryTime = TimeSpan.FromMinutes(1));
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "Initial",
@@ -262,6 +267,9 @@ public class WebSocketServerClientTests
             () => client.Source!.State != SourceState.Synchronized,
             message: "Client should notice the server is down before the write below.");
         client.Root!.Name = "WrittenWhileDown";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.Diagnostics.OutboundRetries.Depth > 0,
+            message: "The write should be parked while the server is down.");
         await server.RestartAsync();
 
         // Assert
