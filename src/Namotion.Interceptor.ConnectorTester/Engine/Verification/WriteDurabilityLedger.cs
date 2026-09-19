@@ -6,24 +6,25 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
-/// Records the last value a participant wrote to each <c>TestNode</c> value property and checks, once the run
-/// has quiesced, that the participant's own model still holds it.
+/// Records the property and mutation counter of the last value a participant wrote to each <c>TestNode</c> and checks,
+/// once the run has quiesced, that the participant's own model still holds the value
+/// <see cref="TestNode.WriteValueProperty"/> writes for that counter.
 /// </summary>
 /// <remarks>
-/// Sound only when the recording participant is the sole writer of each recorded property
-/// (<see cref="ConnectorTesterConfiguration.DisjointProperties"/>); otherwise another participant's later write
+/// Sound only when the recording participant writes a single property per node and is its sole writer
+/// (<see cref="ConnectorTesterConfiguration.VerifyWriteDurability"/>); otherwise another participant's later write
 /// is reported as a loss.
 /// </remarks>
 public sealed class WriteDurabilityLedger
 {
-    private readonly Dictionary<(TestNode Node, int Property), object> _lastWrites = new();
+    private readonly Dictionary<TestNode, (int Property, long Counter)> _lastWrites = new();
     private readonly Lock _lock = new();
 
-    public void Record(TestNode node, int property, object value)
+    public void Record(TestNode node, int property, long counter)
     {
         lock (_lock)
         {
-            _lastWrites[(node, property)] = value;
+            _lastWrites[node] = (property, counter);
         }
     }
 
@@ -46,7 +47,7 @@ public sealed class WriteDurabilityLedger
 
         lock (_lock)
         {
-            foreach (var ((node, property), expected) in _lastWrites)
+            foreach (var (node, (property, counter)) in _lastWrites)
             {
                 // A node no longer in the graph, removed locally or by another participant, carries no durability claim.
                 if (!reachable.Contains(node))
@@ -54,11 +55,11 @@ public sealed class WriteDurabilityLedger
                     continue;
                 }
 
-                var (name, actual) = TestNode.ReadValueProperty(node, property);
-                if (!Equals(expected, actual))
+                var (name, written, held) = TestNode.ReadValueProperty(node, property, counter);
+                if (!Equals(written, held))
                 {
                     var path = node.TryGetRegisteredProperty(name)?.TryGetPath() ?? name;
-                    violations.Add($"{path}: wrote '{expected}', model holds '{actual}'");
+                    violations.Add($"{path}: wrote '{written}', model holds '{held}'");
                 }
             }
         }

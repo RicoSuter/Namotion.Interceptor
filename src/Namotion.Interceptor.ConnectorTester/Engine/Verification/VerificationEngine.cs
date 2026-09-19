@@ -203,7 +203,7 @@ public class VerificationEngine : BackgroundService
                 engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
-        if (_configuration.DisjointProperties)
+        if (_configuration.VerifyWriteDurability)
         {
             _logger.LogInformation("  Write-durability oracle: enabled");
         }

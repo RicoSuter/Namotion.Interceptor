@@ -87,11 +87,11 @@ public sealed class MutationEngine : BackgroundService
         ParticipantConfiguration participantConfiguration,
         TestCycleCoordinator coordinator,
         ILogger logger,
-        bool disjointProperties = false)
+        bool verifyWriteDurability = false)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
-        var ledger = disjointProperties ? new WriteDurabilityLedger() : null;
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger() : null;
         var context = ((IInterceptorSubject)root).Context;
         var strategy = new RandomValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, ledger);
         return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
@@ -103,13 +103,15 @@ public sealed class MutationEngine : BackgroundService
         TestCycleCoordinator coordinator,
         ILogger logger,
         int numberOfBatches,
-        int participantIndex)
+        int participantIndex,
+        bool verifyWriteDurability = false)
     {
         var graph = new KnownNodeGraph();
         var counters = new MutationCounters();
+        var ledger = verifyWriteDurability ? new WriteDurabilityLedger() : null;
         var context = ((IInterceptorSubject)root).Context;
-        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex);
-        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger);
+        var strategy = new BatchValueMutationStrategy(graph, coordinator, context, counters, participantConfiguration, numberOfBatches, participantIndex, ledger);
+        return new MutationEngine(root, participantConfiguration, coordinator, strategy, graph, counters, logger, ledger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

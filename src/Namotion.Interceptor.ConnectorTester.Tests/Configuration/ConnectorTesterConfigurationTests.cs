@@ -37,37 +37,39 @@ public class ConnectorTesterConfigurationTests
     }
 
     [Theory]
-    [InlineData(4, 0)] // five participants for four value properties
-    [InlineData(1, 10)] // batch mutation
-    public void WhenDisjointPropertiesIsCombinedWithAnUnsupportedSetting_ThenValidateThrows(int clientCount, int numberOfBatches)
+    [InlineData(0)] // random mutation
+    [InlineData(10)] // batch mutation
+    public void WhenVerifyWriteDurabilityHasMoreParticipantsThanValueProperties_ThenValidateThrows(int numberOfBatches)
     {
         // Arrange
-        var configuration = CreateConfiguration(disjointProperties: true, clientCount, numberOfBatches);
+        var configuration = CreateConfiguration(verifyWriteDurability: true, clientCount: 4, numberOfBatches);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(configuration.ValidateDisjointProperties);
+        Assert.Throws<InvalidOperationException>(configuration.ValidateVerifyWriteDurability);
     }
 
     [Theory]
-    [InlineData(false, 4, 10)] // disabled, so batch mutation and five participants are fine
+    [InlineData(false, 4, 0)] // disabled, so five participants are fine
+    [InlineData(false, 4, 10)]
     [InlineData(true, 3, 0)] // four participants for four value properties
-    public void WhenDisjointPropertiesIsDisabledOrWithinLimits_ThenValidateDoesNotThrow(
-        bool disjointProperties, int clientCount, int numberOfBatches)
+    [InlineData(true, 3, 10)]
+    public void WhenVerifyWriteDurabilityIsDisabledOrWithinLimits_ThenValidateDoesNotThrow(
+        bool verifyWriteDurability, int clientCount, int numberOfBatches)
     {
         // Arrange
-        var configuration = CreateConfiguration(disjointProperties, clientCount, numberOfBatches);
+        var configuration = CreateConfiguration(verifyWriteDurability, clientCount, numberOfBatches);
 
         // Act
-        var exception = Record.Exception(configuration.ValidateDisjointProperties);
+        var exception = Record.Exception(configuration.ValidateVerifyWriteDurability);
 
         // Assert
         Assert.Null(exception);
     }
 
     private static ConnectorTesterConfiguration CreateConfiguration(
-        bool disjointProperties, int clientCount, int numberOfBatches) => new()
+        bool verifyWriteDurability, int clientCount, int numberOfBatches) => new()
     {
-        DisjointProperties = disjointProperties,
+        VerifyWriteDurability = verifyWriteDurability,
         NumberOfBatches = numberOfBatches,
         Clients = Enumerable.Range(0, clientCount)
             .Select(index => new ParticipantConfiguration { Name = $"client-{index}" })

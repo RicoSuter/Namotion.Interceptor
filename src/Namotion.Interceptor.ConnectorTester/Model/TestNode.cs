@@ -55,38 +55,38 @@ public partial class TestNode
     /// <summary>The number of value properties that <see cref="WriteValueProperty"/> and <see cref="ReadValueProperty"/> select by index.</summary>
     public const int ValuePropertyCount = 4;
 
-    /// <summary>Writes a value derived from <paramref name="counter"/> to the value property at <paramref name="property"/> and returns it.</summary>
-    public static object WriteValueProperty(TestNode node, int property, long counter)
+    /// <summary>Writes a value derived from <paramref name="counter"/> to the value property at <paramref name="property"/>.</summary>
+    public static void WriteValueProperty(TestNode node, int property, long counter)
     {
         switch (property)
         {
             case 0:
-                var stringValue = counter.ToString("x8");
-                node.StringValue = stringValue;
-                return stringValue;
+                node.StringValue = ToStringValue(counter);
+                break;
             case 1:
-                var decimalValue = counter / 100m;
-                node.DecimalValue = decimalValue;
-                return decimalValue;
+                node.DecimalValue = ToDecimalValue(counter);
+                break;
             case 2:
-                var intValue = (int)(counter % int.MaxValue);
-                node.IntValue = intValue;
-                return intValue;
+                node.IntValue = ToIntValue(counter);
+                break;
             case 3:
                 node.LongValue = counter;
-                return counter;
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(property));
         }
     }
 
-    /// <summary>Returns the name and current value of the value property at <paramref name="property"/>.</summary>
-    public static (string Name, object Value) ReadValueProperty(TestNode node, int property) => property switch
+    /// <summary>
+    /// Returns the name of the value property at <paramref name="property"/>, the value
+    /// <see cref="WriteValueProperty"/> writes to it for <paramref name="counter"/>, and the value it holds.
+    /// </summary>
+    public static (string Name, object Written, object Held) ReadValueProperty(TestNode node, int property, long counter) => property switch
     {
-        0 => (nameof(StringValue), node.StringValue),
-        1 => (nameof(DecimalValue), node.DecimalValue),
-        2 => (nameof(IntValue), node.IntValue),
-        3 => (nameof(LongValue), node.LongValue),
+        0 => (nameof(StringValue), ToStringValue(counter), node.StringValue),
+        1 => (nameof(DecimalValue), ToDecimalValue(counter), node.DecimalValue),
+        2 => (nameof(IntValue), ToIntValue(counter), node.IntValue),
+        3 => (nameof(LongValue), counter, node.LongValue),
         _ => throw new ArgumentOutOfRangeException(nameof(property))
     };
 
@@ -107,4 +107,10 @@ public partial class TestNode
                 .ToDictionary(i => $"item-{i}", _ => new TestNode())
         };
     }
+
+    private static string ToStringValue(long counter) => counter.ToString("x8");
+
+    private static decimal ToDecimalValue(long counter) => counter / 100m;
+
+    private static int ToIntValue(long counter) => (int)(counter % int.MaxValue);
 }

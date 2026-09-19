@@ -38,10 +38,9 @@ public class ConnectorTesterConfiguration
     /// <summary>
     /// Whether each participant writes only the <c>TestNode</c> value property at its own index and, after each
     /// converged cycle, the write-durability oracle checks that every participant's model still holds its own last
-    /// write. Requires <see cref="NumberOfBatches"/> 0 and at most <see cref="TestNode.ValuePropertyCount"/>
-    /// participants.
+    /// write. Requires at most <see cref="TestNode.ValuePropertyCount"/> participants.
     /// </summary>
-    public bool DisjointProperties { get; set; }
+    public bool VerifyWriteDurability { get; set; }
 
     public ParticipantConfiguration Server { get; set; } = new()
     {
@@ -53,25 +52,19 @@ public class ConnectorTesterConfiguration
 
     public List<ChaosProfileConfiguration> ChaosProfiles { get; set; } = [];
 
-    /// <summary>Throws when <see cref="DisjointProperties"/> is set with batch mutation or too many participants.</summary>
-    public void ValidateDisjointProperties()
+    /// <summary>Throws when <see cref="VerifyWriteDurability"/> is set with more participants than value properties.</summary>
+    public void ValidateVerifyWriteDurability()
     {
-        if (!DisjointProperties)
+        if (!VerifyWriteDurability)
         {
             return;
-        }
-
-        if (NumberOfBatches > 0)
-        {
-            throw new InvalidOperationException(
-                "DisjointProperties requires NumberOfBatches 0, because the write-durability oracle only runs with the random mutation strategy.");
         }
 
         var participantCount = Clients.Count + 1;
         if (participantCount > TestNode.ValuePropertyCount)
         {
             throw new InvalidOperationException(
-                $"DisjointProperties allows at most {TestNode.ValuePropertyCount} participants, one per TestNode value property, but {participantCount} are configured.");
+                $"VerifyWriteDurability allows at most {TestNode.ValuePropertyCount} participants, one per TestNode value property, but {participantCount} are configured.");
         }
     }
 }

@@ -86,7 +86,7 @@ public sealed class ConnectorTesterHost
             configuration.Clients[i].Index = i + 1;
         }
 
-        configuration.ValidateDisjointProperties();
+        configuration.ValidateVerifyWriteDurability();
 
         configuration.Server.Chaos?.Validate();
         foreach (var client in configuration.Clients)
@@ -103,6 +103,7 @@ public sealed class ConnectorTesterHost
         var participantBundles = new List<ParticipantHostBundle>();
 
         var participantConfigurations = EnumerateActiveParticipants(configuration, runModeSelection).ToList();
+        var verifyWriteDurability = configuration.VerifyWriteDurability && runModeSelection.Mode == RunMode.Verify;
 
         foreach (var (participantConfiguration, isServer) in participantConfigurations)
         {
@@ -153,9 +154,9 @@ public sealed class ConnectorTesterHost
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngine.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
-                    configuration.NumberOfBatches, participantConfiguration.Index)
+                    configuration.NumberOfBatches, participantConfiguration.Index, verifyWriteDurability)
                 : MutationEngine.CreateRandom(root, participantConfiguration, coordinator, mutationLogger,
-                    configuration.DisjointProperties);
+                    verifyWriteDurability);
             mutationEngines.Add(mutationEngine);
             builder.Services.AddSingleton<IHostedService>(mutationEngine);
         }

@@ -20,7 +20,7 @@ public class WriteDurabilityLedgerTests
         // Arrange
         var node = CreateCollectionChild();
         var ledger = new WriteDurabilityLedger();
-        ledger.Record(node, property: 0, "written-value");
+        ledger.Record(node, property: 0, counter: 42);
         node.StringValue = "server-value";
 
         // Act
@@ -28,7 +28,7 @@ public class WriteDurabilityLedgerTests
 
         // Assert
         var violation = Assert.Single(violations);
-        Assert.Equal("Collection[0].StringValue: wrote 'written-value', model holds 'server-value'", violation);
+        Assert.Equal("Collection[0].StringValue: wrote '0000002a', model holds 'server-value'", violation);
     }
 
     [Theory]
@@ -41,7 +41,8 @@ public class WriteDurabilityLedgerTests
         // Arrange
         var node = CreateCollectionChild();
         var ledger = new WriteDurabilityLedger();
-        ledger.Record(node, property, TestNode.WriteValueProperty(node, property, counter: 42));
+        TestNode.WriteValueProperty(node, property, counter: 42);
+        ledger.Record(node, property, counter: 42);
 
         // Act
         var violations = ledger.Verify([node]);
@@ -60,7 +61,8 @@ public class WriteDurabilityLedgerTests
         // Arrange
         var node = CreateCollectionChild();
         var ledger = new WriteDurabilityLedger();
-        ledger.Record(node, property, TestNode.WriteValueProperty(node, property, counter: 42));
+        TestNode.WriteValueProperty(node, property, counter: 42);
+        ledger.Record(node, property, counter: 42);
         node.StringValue = "lost";
         node.DecimalValue = -1;
         node.IntValue = -1;
@@ -80,7 +82,7 @@ public class WriteDurabilityLedgerTests
         // Arrange
         var node = CreateCollectionChild();
         var ledger = new WriteDurabilityLedger();
-        ledger.Record(node, property: 0, "written-value");
+        ledger.Record(node, property: 0, counter: 42);
         node.StringValue = "server-value";
 
         // Act

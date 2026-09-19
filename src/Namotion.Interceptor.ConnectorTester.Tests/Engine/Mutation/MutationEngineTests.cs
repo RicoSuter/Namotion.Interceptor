@@ -7,6 +7,8 @@ using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
 
@@ -65,12 +67,15 @@ public class MutationEngineTests
         Assert.Equal(0, engine.StructuralMutationCount);
     }
 
-    [Fact]
-    public async Task WhenPropertiesAreNotDisjoint_ThenWriteDurabilityIsNotVerified()
+    [Theory]
+    [InlineData(0)] // random mutation
+    [InlineData(10)] // batch mutation
+    public async Task WhenVerifyWriteDurabilityIsOff_ThenNoLossIsReported(int numberOfBatches)
     {
         // Arrange
         var root = new TestNode(CreateContext());
-        var engine = await RunTwoValueMutationTicksAsync(root, disjointProperties: false, useTransactions: false);
+        var engine = await RunTwoValueMutationTicksAsync(
+            root, numberOfBatches, verifyWriteDurability: false, useTransactions: false);
         OverwriteValueProperties(root);
 
         // Act
@@ -80,12 +85,15 @@ public class MutationEngineTests
         Assert.Empty(violations);
     }
 
-    [Fact]
-    public async Task WhenDisjointWritesSurvive_ThenVerifyWriteDurabilityReportsNothing()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    public async Task WhenWritesSurvive_ThenVerifyWriteDurabilityReportsNothing(int numberOfBatches)
     {
         // Arrange
         var root = new TestNode(CreateContext());
-        var engine = await RunTwoValueMutationTicksAsync(root, disjointProperties: true, useTransactions: false);
+        var engine = await RunTwoValueMutationTicksAsync(
+            root, numberOfBatches, verifyWriteDurability: true, useTransactions: false);
 
         // Act
         var violations = engine.VerifyWriteDurability();
@@ -95,13 +103,17 @@ public class MutationEngineTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenADisjointWriteIsLost_ThenVerifyWriteDurabilityNamesTheParticipantAndProperty(bool useTransactions)
+    [InlineData(0, false)]
+    [InlineData(0, true)]
+    [InlineData(10, false)]
+    [InlineData(10, true)]
+    public async Task WhenAWriteIsLost_ThenVerifyWriteDurabilityNamesTheParticipantAndProperty(
+        int numberOfBatches, bool useTransactions)
     {
         // Arrange
         var root = new TestNode(CreateContext().WithTransactions());
-        var engine = await RunTwoValueMutationTicksAsync(root, disjointProperties: true, useTransactions);
+        var engine = await RunTwoValueMutationTicksAsync(
+            root, numberOfBatches, verifyWriteDurability: true, useTransactions);
         OverwriteValueProperties(root);
 
         // Act
@@ -112,8 +124,32 @@ public class MutationEngineTests
         Assert.StartsWith("test: StringValue: wrote ", violation);
     }
 
-    private static async Task<MutationEngine> RunTwoValueMutationTicksAsync(
-        TestNode root, bool disjointProperties, bool useTransactions)
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    public async Task WhenATransactionFailsToCommit_ThenItsWritesAreNotRecorded(int numberOfBatches)
+    {
+        // Arrange
+        var context = CreateContext().WithTransactions();
+        context.AddService<ITransactionWriter>(new FailingTransactionWriter());
+        var root = new TestNode(context);
+        var engine = CreateEngine(root, numberOfBatches, verifyWriteDurability: true, useTransactions: true);
+        await Assert.ThrowsAsync<SubjectTransactionException>(async () =>
+        {
+            await engine.StartAsync(CancellationToken.None);
+            await engine.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(30));
+        });
+        OverwriteValueProperties(root);
+
+        // Act
+        var violations = engine.VerifyWriteDurability();
+
+        // Assert
+        Assert.Empty(violations);
+    }
+
+    private static MutationEngine CreateEngine(
+        TestNode root, int numberOfBatches, bool verifyWriteDurability, bool useTransactions)
     {
         var configuration = new ParticipantConfiguration
         {
@@ -121,9 +157,17 @@ public class MutationEngineTests
             ValueMutationRate = 100,
             UseTransactions = useTransactions
         };
-        var engine = MutationEngine.CreateRandom(
-            root, configuration, new TestCycleCoordinator(), NullLogger.Instance, disjointProperties);
+        var coordinator = new TestCycleCoordinator();
+        return numberOfBatches > 0
+            ? MutationEngine.CreateBatch(root, configuration, coordinator, NullLogger.Instance,
+                numberOfBatches, configuration.Index, verifyWriteDurability)
+            : MutationEngine.CreateRandom(root, configuration, coordinator, NullLogger.Instance, verifyWriteDurability);
+    }
 
+    private static async Task<MutationEngine> RunTwoValueMutationTicksAsync(
+        TestNode root, int numberOfBatches, bool verifyWriteDurability, bool useTransactions)
+    {
+        var engine = CreateEngine(root, numberOfBatches, verifyWriteDurability, useTransactions);
         await engine.StartAsync(CancellationToken.None);
         // The first tick has committed once the second has mutated.
         await AsyncTestHelpers.WaitUntilAsync(() => engine.ValueMutationCount >= 2);
@@ -137,5 +181,16 @@ public class MutationEngineTests
         node.DecimalValue = -1;
         node.IntValue = -1;
         node.LongValue = -1;
+    }
+
+    private sealed class FailingTransactionWriter : ITransactionWriter
+    {
+        public ValueTask<SourceWriteResult> WriteToSourcesAsync(
+            Memory<SubjectPropertyChange> changes, TransactionRequirement requirement, CancellationToken cancellationToken)
+            => new(new SourceWriteResult([], changes.ToArray(), [new InvalidOperationException("Write failed.")], null));
+
+        public ValueTask<SourceRevertResult> RevertSourceWritesAsync(
+            IReadOnlyList<SubjectPropertyChange> written, object? revertState, CancellationToken cancellationToken)
+            => new(new SourceRevertResult([], []));
     }
 }

@@ -58,25 +58,31 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
                     using var transaction = await _context.BeginTransactionAsync(
                         TransactionFailureHandling.BestEffort);
 
-                    var writes = new List<(TestNode Node, int Property, object Value)>(batchSize);
+                    var uncommittedWrites = _ledger is null
+                        ? null
+                        : new List<(TestNode Node, int Property, long Counter)>(batchSize);
                     for (var i = 0; i < batchSize; i++)
                     {
-                        writes.Add(PerformValueMutation());
+                        var write = PerformValueMutation();
+                        uncommittedWrites?.Add(write);
                         _counters.IncrementValue();
                     }
 
                     await transaction.CommitAsync(cancellationToken);
-                    foreach (var (node, property, value) in writes)
+                    if (_ledger is not null && uncommittedWrites is not null)
                     {
-                        _ledger?.Record(node, property, value);
+                        foreach (var (node, property, counter) in uncommittedWrites)
+                        {
+                            _ledger.Record(node, property, counter);
+                        }
                     }
                 }
                 else
                 {
                     for (var i = 0; i < batchSize; i++)
                     {
-                        var (node, property, value) = PerformValueMutation();
-                        _ledger?.Record(node, property, value);
+                        var (node, property, counter) = PerformValueMutation();
+                        _ledger?.Record(node, property, counter);
                         _counters.IncrementValue();
                     }
                 }
@@ -90,7 +96,7 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
         }
     }
 
-    private (TestNode Node, int Property, object Value) PerformValueMutation()
+    private (TestNode Node, int Property, long Counter) PerformValueMutation()
     {
         TestNode node;
         lock (_graph.NodeLock)
@@ -103,7 +109,9 @@ public sealed class RandomValueMutationStrategy : IValueMutationStrategy
 
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {
-            return (node, property, TestNode.WriteValueProperty(node, property, counter));
+            TestNode.WriteValueProperty(node, property, counter);
         }
+
+        return (node, property, counter);
     }
 }
