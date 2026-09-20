@@ -8,9 +8,11 @@ Companion to `2026-09-20-architecture-dossier-design.md`. Copy the skeleton belo
 2. **Describe what the code does, not what it should do.** Opinions belong in section 7 and are labelled as recommendations.
 3. **Harvest before you write.** Existing XML documentation and inline comments in this repository already state many invariants. Quote and cite them rather than paraphrasing, and note where two of them disagree.
 4. **Compact.** One canonical location per concept. Do not restate code in prose. If a reader would be better served by reading the code, cite it instead.
-5. **No em dashes.**
-6. **Unverified is a valid answer.** An invariant nobody can find a test for is marked Unverified, not quietly assumed.
-7. **The dossier recommends, the maintainer rules.** Never write a ruling the maintainer has not given.
+5. **Default to a table, a list or a diagram.** Use prose only for a why that cannot be tabulated. A paragraph that is really a comparison should be a table, and a paragraph that is really a sequence should be a list. Shorter is the goal, not more markup: two sentences of genuine reasoning stay two sentences.
+6. **Diagrams are additive, never substitutive.** A diagram cannot carry a `file:line`, and the verification pass works on citations. Put the picture beside the cited table so a reader grasps the shape fast and checks the detail in the rows. Never replace a cited row with a picture. Keep a diagram to the mechanism: twenty-four nodes is a hairball and is worse than the table next to it. No custom colours, so both GitHub themes render.
+7. **No em dashes.**
+8. **Unverified is a valid answer.** An invariant nobody can find a test for is marked Unverified, not quietly assumed.
+9. **The dossier recommends, the maintainer rules.** Never write a ruling the maintainer has not given.
 
 ## Skeleton
 
@@ -21,6 +23,22 @@ Area: <projects and namespaces covered>
 Boundary: <what is explicitly out of scope, and which dossier owns it>
 Written against: `<commit sha>`
 Verified: <date, by whom, or "pending">
+
+Citation convention: a bare `:123` refers to the file named in the enclosing subsection's canonical implementation. A full path is given whenever the file changes.
+
+## Summary
+
+One screen. A reader must be able to answer "what does this tell me" without reading the rest. Written last, derived only from what is below, never from memory.
+
+| | |
+|---|---|
+| Area | <files, lines> |
+| Invariants | <N>, of which <M> covered by a test |
+| Concepts | <N>, of which <M> have more than one implementation |
+| Contradictions | <N> |
+| Candidates | <N>, of which <M> ruled |
+
+Then the findings that matter most, as a list, each linking down to its section. Then what is still missing, so nobody mistakes an unwritten section for an empty result.
 
 ## 1. Supported use cases
 
@@ -112,4 +130,6 @@ Ranked by expected reduction. The output of the whole document.
 
 ## Producing one
 
-Follow the nine steps in the design document. Step 5, independent verification, is mandatory and runs before the maintainer sees the document: a reader who did not write it checks every `file:line` claim in sections 2, 3 and 5 against the code and returns confirm or refute per claim, with no fixing. Refuted claims are corrected or dropped.
+Follow the nine steps in the design document. Step 5, independent verification, is mandatory and runs before the maintainer sees the document: one reader per evidence-bearing section, sections 2, 3, 4 and 5, each checking every `file:line` claim against the code and returning confirm or refute per claim, with no fixing. Refuted claims are corrected or dropped before the maintainer sees anything.
+
+The Summary block is written last, after the rulings, and derived only from the sections below it. Writing it early guarantees it drifts.

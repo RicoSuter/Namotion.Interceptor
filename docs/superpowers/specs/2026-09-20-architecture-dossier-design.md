@@ -56,6 +56,10 @@ Eight fixed sections, of which the first seven are the analysis and the eighth i
 7. **Candidates.** Ranked, each tagged `duplicate-concept`, `unreachable`, `expensive-use-case`, or `accidental-complexity`, with a size estimate, a recommendation, and the specific decision it needs.
 8. **Backlog disposition.** Every open issue and pull request in the area, and what happened to it.
 
+Above all eight sits a **Summary** block: one screen answering "what does this tell me", written last and derived only from the sections below it.
+
+Presentation is part of the method, not decoration. Default to a table, a list or a diagram; use prose only for a why that cannot be tabulated. Diagrams are additive and never substitutive, because a diagram cannot carry a `file:line` and the verification pass works on citations.
+
 For core, section 2 is largely harvesting rather than discovery. The invariants are already written down and merely scattered: `InterceptorSubjectContext.cs:18` states rule R1 and `:22` states the lock order, both as prose, and `PropertyWriteState.cs` explains why `Confirmed` advances the revision while `FromSource` does not, and instructs the reader not to "fix" the asymmetry in either direction. Nobody can see those as a set today.
 
 The full section-by-section template, with authoring rules, is in `2026-09-20-architecture-dossier-template.md` next to this file.
