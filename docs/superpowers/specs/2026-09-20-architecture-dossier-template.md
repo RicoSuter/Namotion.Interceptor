@@ -13,6 +13,7 @@ Companion to `2026-09-20-architecture-dossier-design.md`. Copy the skeleton belo
 7. **No em dashes.**
 8. **Unverified is a valid answer.** An invariant nobody can find a test for is marked Unverified, not quietly assumed.
 9. **The dossier recommends, the maintainer rules.** Never write a ruling the maintainer has not given.
+10. **Separate an API change from a regression.** A breaking change to the shape of the API is ordinary and needs no special pleading: a consumer inside the solution is a cost to pay, not a blocker, and an external consumer migrating is acceptable when the result is a better API. A regression in behaviour, capability or contract is different in kind and must be stated plainly in the candidate's **What is lost** field, naming the use case and the invariants that stop holding. Never let a capability removal reach the maintainer disguised as a refactor.
 
 ## Skeleton
 
@@ -117,6 +118,8 @@ Ranked by expected reduction. The output of the whole document.
 - **What exists:** the mechanism, with `file:line`.
 - **Size:** production lines involved.
 - **Why it exists:** the use case or bug it was built for, with the issue or pull request if known.
+- **What is lost:** the capability, behaviour or contract that stops holding, naming the use case row and the invariants that stop applying. Write `None, API shape only` when nothing stops being possible. This field is required and is never left implicit.
+- **Reach:** every consumer of the mechanism, with `file:line`, inside the solution and out. A consumer inside the solution is a cost, not a blocker.
 - **Recommendation:** what to do, and what it costs.
 - **Decision needed:** the precise question for the maintainer.
 - **Ruling:** <date + decision, or blank>
