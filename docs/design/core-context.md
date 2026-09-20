@@ -943,6 +943,295 @@ Three results that are not gap rows, recorded so they are not re-derived:
 
 ## 7. Candidates
 
+Ranked by expected reduction. Every size is a counted line range in the tree this document is written against (`b36ec531f`), never an estimate: each entry names the ranges it counted, and a whole-file figure means the file goes. Where an entry's lines are already claimed by a larger entry the size column says so, and the totals below count each line once.
+
+Every `Ruling` line is blank. This section recommends, it does not decide.
+
+| # | Candidate | Tag | Size | Recommendation |
+|---|---|---|---|---|
+| [C1](#c1-multi-context-topology) | Multi-context topology | expensive-use-case | 763 | Rule on U2 |
+| [C2](#c2-method-interception) | Method interception | unreachable | 400 | Remove, breaking change |
+| [C3](#c3-the-first-and-last-ordering-groups) | The First and Last ordering groups | expensive-use-case | 165 | Remove after migration |
+| [C4](#c4-the-per-subject-executor-as-a-context-subclass) | The per-subject executor as a context subclass | duplicate-concept | 32, plus 142 that move | Defer past C1 |
+| [C5](#c5-the-write-terminal-written-twice) | The write terminal, written twice | duplicate-concept | 45, about 17 removable | Extract, measure first |
+| [C6](#c6-three-chain-cache-get-then-create-pairs) | Three chain-cache get-then-create pairs | duplicate-concept | 65, about 10 removable | Merge each pair |
+| [C7](#c7-two-implementations-of-the-three-way-timestamp-decision) | Two implementations of the timestamp decision | duplicate-concept | 46, about 12 removable | Share one resolver |
+| [C8](#c8-the-state-pin-prologue-four-times) | The state-pin prologue, four times | duplicate-concept | 24, about 12 removable | Defer to C1 |
+| [C9](#c9-propertyreferencegetorsetpropertydata-has-no-callers) | `PropertyReference.GetOrSetPropertyData` | unreachable | 11 | Remove, breaking change |
+| [C10](#c10-two-save-and-restore-ambient-scope-ref-structs) | Two ambient scope ref structs | duplicate-concept | 21, about 10 removable | Keep, netstandard blocks it |
+| [C11](#c11-the-retain-or-drop-policy-written-three-times) | The retain-or-drop policy, three times | duplicate-concept | about 30, about 10 removable | Defer to C1 |
+| [C12](#c12-the-both-attributes-conflict-check-written-twice) | The both-attributes conflict check, twice | duplicate-concept | 6 | Defer to C3 |
+| [C13](#c13-methodinvocationchains-type-parameter) | `MethodInvocationChain`'s type parameter | duplicate-concept | 6 | Remove, finishes #166 |
+| [C14](#c14-the-origin-kind-read-three-times-under-the-lock) | The origin kind, read three times | accidental-complexity | 0 | Keep, premise refuted |
+| [C15](#c15-subject-datas-two-accessor-families) | Subject data's two accessor families | duplicate-concept | 0 | Keep, nothing to share |
+| [C16](#c16-the-queried-type-filtered-twice) | The queried type, filtered twice | accidental-complexity | 0 | Drop the second pass |
+| [C17](#c17-the-invoke-terminals-two-identical-lambdas) | The invoke terminal's twin lambdas | duplicate-concept | 1 | Defer to C2 |
+| [C18](#c18-x1-the-read-terminal-pair) | X1, the read terminal pair | conditional | 1 or much more | Classify X1 first |
+| [C19](#c19-x3-the-unattached-subject) | X3, the unattached subject | conditional | not sizeable yet | Classify X3 first |
+| [C20](#c20-x2-the-finalization-wording) | X2, the finalization wording | accidental-complexity | 1 | Reword the contract |
+
+Totals, counting each line once: **1,410 production lines** if every recommendation above is accepted, of which **C1 is 763, or 54 percent**. 1,203 of that is in `src/Namotion.Interceptor/`, which is 34 percent of the area's 3,544 lines; the remaining 207 is in `src/Namotion.Interceptor.Generator/` and belongs to C2. The other entries contribute nothing to the total for one of three reasons: a larger entry already claims their lines (C8, C11, C12, C13 and C17), the recommendation is to keep the code (C10, C14, C15), or the change is not a reduction (C16, C18, C19, C20).
+
+### C1. Multi-context topology
+
+- **Tag:** expensive-use-case
+- **What exists:** fallback contexts, the reverse used-by index, the one-hop delegation edge, the memoized chain end, the cyclic marker, the upward invalidation walk and the five thread-static traversal buffers that serve the three graph walks. Section 3, [fallback context](#fallback-context) and [delegation target](#delegation-target).
+- **Size:** 763 lines, counted as follows.
+
+  | Part | Range | Lines |
+  |---|---|---|
+  | Fallback management | `InterceptorSubjectContext.cs:119-185` | 67 |
+  | Delegation resolution | `:277-481` | 205 |
+  | Service walk | `:549-777` | 229 |
+  | Publish and invalidation | `:779-943` | 165 |
+  | Cyclic marker and its factory | `:34-40`, `:99-104` | 13 |
+  | Retained-size threshold and the five buffers | `:28`, `:54-67` | 15 |
+  | The used-by field | `:77-80` | 4 |
+  | `ContextState` delegation members | `:953`, `:955-957`, `:969-973`, `:979`, `:984-993` | 19 |
+  | The executor's two lifecycle overrides | `Interceptors/InterceptorExecutor.cs:111-142` | 32 |
+  | The two fallback members of the public contract | `IInterceptorSubjectContext.cs:62-75` | 14 |
+  | | | **763** |
+
+  The first four rows are the 666 lines section 3 reports. `HasFallbackContext` (`:151-155`) sits inside the first range and is not counted twice.
+- **Why it exists:** established, in two layers. `AddFallbackContext` is original design, present in the first commit of this repository (`5dcd9eb88`, #1), so no bug motivated the feature. Its current form is a rebuild: PR #400 (`e616c7697`) replaced the mutable-fields-and-locks design with the copy-on-write snapshot to close eight concurrency defects and two process crashes, every one of them a consequence of composing contexts. The 763 lines are therefore the price of making multi-context resolution safe, not the price of the feature working at all.
+- **Recommendation:** rule U2 unsupported and collapse to one context per subject. The cost is a breaking public API change (`AddFallbackContext` and `RemoveFallbackContext` leave `IInterceptorSubjectContext`) and a migration for every caller that composes contexts today, which PR #494 puts at a large diff (19,789 additions, 6,736 deletions across the whole repository). What it buys beyond the 763 lines is the reason to prefer it over any other entry here: it deletes the mechanism that six of the ten Known broken gaps live on, [G9](#6-gaps-and-limitations), G11, G12, G13, G16 and G17, which is issues #402, #403, #410, #411 and part of #406. That is the bug class that keeps regenerating, and no fix to any one of those issues removes the next one.
+- **Decision needed:** is U2, a subject graph resolving services through more than one context, supported or unsupported? PRs #494 ("Simplify lifecycle ownership to one context") and #501 ("finalize race-safe single-context lifecycle protocol") are both blocked on that answer and both remove fallback contexts, so a ruling here also decides their fate.
+- **Ruling:**
+
+### C2. Method interception
+
+- **Tag:** unreachable
+- **What exists:** the `IMethodInterceptor` contract, its per-call context and continuation delegate, the compiled invocation chain, the single-slot chain cache on the state, the executor entry point, and the generator support that emits a wrapper for every opted-in method. Section 3, [interceptor](#interceptor); section 4, [method invocation](#method-invocation).
+- **Size:** 400 lines, 193 in core and 207 in the generator.
+
+  | Part | Location | Lines |
+  |---|---|---|
+  | The contract, the delegate and the context | `Interceptors/IMethodInterceptor.cs` (whole file) | 36 |
+  | The chain | `Cache/MethodInvocationChain.cs` (whole file) | 76 |
+  | The factory | `Cache/MethodInvocationFactory.cs` (whole file) | 21 |
+  | The compiled-chain delegate | `Cache/Delegates.cs:7` | 1 |
+  | Dispatch and the single-slot cache | `InterceptorSubjectContext.cs:263-275`, `:526-547`, `:964`, `:995-999`, `:1090-1093` | 45 |
+  | The executor entry point | `Interceptors/InterceptorExecutor.cs:104-109`, `Interceptors/IInterceptorExecutor.cs:25-32` | 14 |
+  | Method discovery and its model | `Generator/SubjectMethodMetadataExtractor.cs` (whole file), `Generator/Models/MethodMetadata.cs` (whole file) | 162 |
+  | Wrapper emission and the helper | `Generator/SubjectCodeGenerator.cs:26`, `:464-496`, `:532-536` | 39 |
+  | The member table and the metadata field | `Generator/GeneratedMemberTable.cs:15`, `:85-87`, `Generator/SubjectMetadataExtractor.cs:77`, `Generator/Models/SubjectMetadata.cs:17` | 6 |
+  | | | **400** |
+- **Why it exists:** established. Added by PR #6 (`805b034a5`, "feature: Add method interceptor") in the first month of the project. The commit names no consumer and fixes no bug, and none has appeared since.
+- **Recommendation:** remove it. Two independent facts make it unreachable rather than merely unused. `IMethodInterceptor` has no implementation outside test assemblies, the only three being `src/Namotion.Interceptor.Tests/Context/ContextConcurrencyFuzzTests.cs:862`, `src/Namotion.Interceptor.Generator.Tests/InterceptorSubjectTests.cs:23` and `src/Namotion.Interceptor.Generator.Tests/RecordingInterceptors.cs:37`. And no shipping subject declares an interceptable method: the generator only emits a wrapper for a method whose name ends in the opt-in postfix `WithoutInterceptor` (`src/Namotion.Interceptor.Generator/SubjectMethodMetadataExtractor.cs:14`, `:53`), and every occurrence of that postfix outside the generator's own source is in a test project. The cost is a breaking public API change: `IMethodInterceptor`, `InvokeMethodInterceptionDelegate`, `MethodInvocationContext` and `IInterceptorExecutor.InvokeMethod` all appear in the snapshot (`src/Namotion.Interceptor.Tests/VerifyChecksTests.PublicApi.verified.txt:179`, `:187`, `:209`, `:210`), and the generator change is not core-local. C13 and C17 fold into this entry.
+- **Decision needed:** correcting the framing this exercise started with, the generator does **not** route every subject method through the plumbing, only names ending in `WithoutInterceptor`, of which there are zero outside tests. Given that, is method interception a capability to keep for a future consumer, or is it to be removed now and reintroduced if one appears?
+- **Ruling:**
+
+### C3. The First and Last ordering groups
+
+- **Tag:** expensive-use-case
+- **What exists:** the three-group partitioning that `[RunsFirst]` and `[RunsLast]` require, on top of the topological sort that `[RunsBefore]` and `[RunsAfter]` need anyway. Section 3, [service ordering](#service-ordering).
+- **Size:** 165 lines, of which 149 are in `Ordering/ServiceOrderResolver.cs` and would take it from 310 lines to 161.
+
+  | Part | Range | Lines |
+  |---|---|---|
+  | Partitioning: `OrderWithPartitioning`, `ValidateAndCountGroups`, `PartitionGroups` | `ServiceOrderResolver.cs:43-112` | 70 |
+  | Cross-group validation, and the type-set helper only it uses | `:244-299` | 56 |
+  | The fast-path scan that decides whether to partition | `:28-40` | 13 |
+  | `ValidateService` and its call site | `:23-24`, `:237-242` | 8 |
+  | The two group flags on the cached order info, plus the two declarations that narrow | `:306-307`, and `:14`, `:301` | 2 |
+  | The two attribute types | `Attributes/RunsFirstAttribute.cs`, `Attributes/RunsLastAttribute.cs` (whole files) | 16 |
+  | | | **165** |
+- **Why it exists:** established. PR #116 (`f2ce3e33b`, "feature: Service ordering for handlers and interceptors") introduced all four attributes and the resolver in one commit, to fix non-deterministic handler order caused by `HashSet<object>` storage. Its own description names one consumer for `[RunsFirst]`, `PropertyValueEqualityCheckHandler`, and names no consumer for `[RunsLast]`. The shipping picture has not moved since: `[RunsLast]` has zero uses and `[RunsFirst]` exactly one, `src/Namotion.Interceptor.Tracking/PropertyValueEqualityCheckHandler.cs:10`, against 7 `[RunsBefore]` and 3 `[RunsAfter]`.
+- **Recommendation:** remove both attributes and the partitioning, after migrating the one user. The migration is the cost, and it is not free: `[RunsFirst]` means "before all services without this attribute" (`Attributes/RunsFirstAttribute.cs:4`), so replacing it needs one explicit `[RunsBefore]` edge per write interceptor it must precede. In shipping code that is five edges, against `LifecycleInterceptor`, `ValidationInterceptor`, `SubjectTransactionInterceptor`, `DerivedPropertyChangeHandler` and `PropertyChangeInterceptor`. The open-ended half cannot be migrated at all: a third-party write interceptor is ordered after the equality check today and would not be afterwards. Step 10 of the service resolution flow also disappears, a scan over every service on every cache miss that finds nothing in almost every shipping configuration.
+- **Decision needed:** is "runs before everything I do not know about" a capability core keeps, or does ordering become edges between named types only? If it is kept, the 126 lines of partitioning and cross-group validation stay for one consumer.
+- **Ruling:**
+
+### C4. The per-subject executor as a context subclass
+
+- **Tag:** duplicate-concept
+- **What exists:** `InterceptorExecutor` (`Interceptors/InterceptorExecutor.cs:5`), a context subclass bound to one subject, and its interface `IInterceptorExecutor` (`Interceptors/IInterceptorExecutor.cs:6`). Section 3, [context](#context), counts the plain context and the executor as two implementations of one concept.
+- **Size:** `Interceptors/IInterceptorExecutor.cs` is 32 lines and `Interceptors/InterceptorExecutor.cs` is 142. Only the interface is a pure deletion. Of the class, 32 lines are the fallback overrides that C1 already claims (`:111-142`), and the rest, the three entry points, the revision counter and the compare-and-swap publisher, move rather than disappear.
+- **Why it exists:** established for the intent, not for the split. The executor is original design, present in the first commit (`5dcd9eb88`, #1). The standing removal note was added by PR #383 (`765ad6475`): "TODO: Get rid of the executor (IInterceptorExecutor/InterceptorExecutor) completely" (`Interceptors/IInterceptorExecutor.cs:3`).
+- **Recommendation:** defer until C1 is ruled. Removal is not core-local and the reach is wider than section 3 records: besides `src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubject.cs:336` and `src/Namotion.Interceptor.Dynamic/DynamicSubject.cs:10`, the generator types every subject's backing field as the interface (`src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:190`), so every generated subject in existence depends on it. Core itself casts to both the interface and the concrete class (`PropertyReferenceExtensions.cs:15`, `:28`). If C1 is accepted the executor loses its two fallback overrides and the distinction between a context and an executor narrows to the subject binding, which is when this becomes cheap. Doing it first means reworking the generator twice.
+- **Decision needed:** does the standing TODO still reflect intent, and is it to be scheduled after C1 rather than as its own piece of work?
+- **Ruling:**
+
+### C5. The write terminal, written twice
+
+- **Tag:** duplicate-concept
+- **What exists:** the zero-interceptor write terminal (`Cache/WriteInterceptorFactory.cs:13-41`) and the chained one (`:46-70`), the same commit sequence twice: lock, write, mark written, stamp the revision, read the unfinalized origin kind, finalize, record the write state. The only difference is the `return context.NewValue;` at `:69`. Section 3, [terminal operation](#terminal-operation).
+- **Size:** 45 duplicated lines, `:15-39` and `:48-67`. Extracting the shared commit body into one static method leaves both lambdas one line each, removing about 17.
+- **Why it exists:** established. The zero-interceptor fast path arrived with PR #109 (`ada2c86d3`, a performance commit), which is what created a second terminal to duplicate. The duplication is a consequence of the fast path and not its purpose, and the code acknowledges it rather than justifying it, at `:54`: "See the zero-interceptor terminal above for why the property is hoisted".
+- **Recommendation:** extract, but measure before keeping it. The shared body is about 23 lines of intermediate language, well over the default inlining budget, so both terminals gain a call on the write hot path where today the body is inlined into a static lambda. The repository's own standard for a change of this shape is a machine-code diff rather than a second benchmark run, and this is the one entry in the list whose correctness argument and performance argument point in opposite directions. Note that the duplication is exactly where invariants I22, I24, I25 and I50 live, all of which name both sites, so a single body is worth real money in review cost.
+- **Decision needed:** is a call on the write path acceptable in exchange for one copy of the commit sequence, subject to a disassembly check showing nothing else moved?
+- **Ruling:**
+
+### C6. Three chain-cache get-then-create pairs
+
+- **Tag:** duplicate-concept
+- **What exists:** `GetReadInterceptorFunction` with `CreateReadInterceptorFunction` (`InterceptorSubjectContext.cs:484`, `:495`), `GetWriteInterceptorFunction` with `CreateWriteInterceptorFunction` (`:507`, `:518`), and `GetMethodInvocationFunction` with `CreateMethodInvocationFunction` (`:527`, `:538`). Section 3, [chain cache](#chain-cache).
+- **Size:** 65 lines, `:483-547`. Merging each pair into one method removes three signatures, three brace pairs and three forwarding returns, about 15 lines, of which about 10 survive if C2 removes the third pair.
+- **Why it exists:** established. All six methods came in with PR #400 (`e616c7697`). The same duplication one layer down was collapsed in that same commit: `ContextState` shares `TryGetFunction` (`:1048`) and `SetFunction` (`:1064`) between the read and write arrays. The context-level wrappers were simply not given the same treatment.
+- **Recommendation:** merge each pair. The split has no stated reason, and the state class in the same file is the precedent for merging. The only caveat is that the `Get` half carries `[MethodImpl(MethodImplOptions.AggressiveInlining)]` and the `Create` half deliberately does not, which is a hot-path and cold-path split rather than an accident; a merged method must keep the cold half in a separate non-inlined callee or the hot path grows.
+- **Decision needed:** is the hot-path and cold-path split the reason for the six methods? If it is, the reason belongs in a comment rather than in a shape, and the pairs still merge as long as the cold half stays a separate callee.
+- **Ruling:**
+
+### C7. Two implementations of the three-way timestamp decision
+
+- **Tag:** duplicate-concept
+- **What exists:** `SubjectChangeContext.ResolveChangedTimestamp` (`SubjectChangeContext.cs:78-87`) and `PropertyWriteContext.ResolveAndCacheWriteTimestamp` (`Interceptors/IWriteInterceptor.cs:207-231`) both decide the same three cases: no scope active, positive ticks from a scope, and the explicit-null sentinel. Section 3, [timestamp](#timestamp).
+- **Size:** 46 lines including documentation, `SubjectChangeContext.cs:68-87` and `Interceptors/IWriteInterceptor.cs:206-231`. A shared static resolver returning the encoded value leaves each caller two lines, removing about 12.
+- **Why it exists:** established. Both arrived in one commit, PR #303 (`016661520`, "fix: Ensure property write timestamp matches published change event"), which fixed a real drift defect found by the connector tester: storage and the change queue each called the clock separately and got different values. The write-context resolver exists to cache per write; the scope resolver serves callers with no write context, reached from `src/Namotion.Interceptor.Tracking/Change/DerivedPropertyChangeHandler.cs:79`.
+- **Recommendation:** share one resolver. The verification pass moved this from "justified" back to a finding, and it is right to: `SubjectChangeContext.cs:72` is a usage steer, "Within a write chain, prefer `PropertyWriteContext.WriteTimestamp` for stability across reads", and `:74` to `:75` records the divergence without arguing for it. The divergence itself is genuine and must survive the merge: `SubjectChangeContext.cs:81` returns 0 for the explicit-null case while `Interceptors/IWriteInterceptor.cs:227` returns the negated captured clock so both readings stay derivable. That is one line at each call site over a shared body, not a reason for two bodies. The risk is that neither I37 nor I38 has a test, so the encoding has no net under it.
+- **Decision needed:** merge the two resolvers onto the encoded form, with the scope caller decoding to 0? And separately, should I37 and I38 get a test before the merge rather than after?
+- **Ruling:**
+
+### C8. The state-pin prologue, four times
+
+- **Tag:** duplicate-concept
+- **What exists:** six physical lines, byte identical at `InterceptorSubjectContext.cs:109-114` (`GetServices`), `:238-243` (read), `:252-257` (write) and `:266-271` (invoke): pin the state with a volatile read, default the resolved context to `this`, and replace both when the pinned state has a delegation target. Section 3, [delegation target](#delegation-target).
+- **Size:** 24 lines. A shared helper taking the state by `out` leaves one line per site, removing about 12.
+- **Why it exists:** established. All four sites came in with PR #400 (`e616c7697`), which introduced both the pinned state and the one-hop delegation edge.
+- **Recommendation:** defer to C1 and do nothing on its own. If U2 is ruled unsupported there is no delegation target, the prologue collapses to a single volatile read at each site and this entry disappears with it. If U2 is kept, extract the helper, with the same caveat as C6: all four sites are `[MethodImpl(MethodImplOptions.AggressiveInlining)]` and the shape exists so the no-delegation case stays a predictable branch, so the helper must inline or the change is a regression on every intercepted access.
+- **Decision needed:** none of its own. This is a consequence of C1.
+- **Ruling:**
+
+### C9. `PropertyReference.GetOrSetPropertyData` has no callers
+
+- **Tag:** unreachable
+- **What exists:** `PropertyReference.cs:54`, a one-line wrapper over `Subject.Data.GetOrAdd`. Zero callers anywhere in the repository, tests included; its only other mention is the cross-reference at `:63`.
+- **Size:** 11 lines, `:47-57`, documentation included. It is also a public API removal, `src/Namotion.Interceptor.Tests/VerifyChecksTests.PublicApi.verified.txt` carries it.
+- **Why it exists:** established, with the clearest history in this list. PR #114 (`e9b487286`, "feature: Add subject and source transactions") added the method together with its single caller, `property.GetOrSetPropertyData(SourceKey, source)`. PR #354 (`7b5780234`, "Add source monitoring") removed that caller and replaced it with `TryAddPropertyData`, whose documentation states the reason in the same commit: use it "when the caller must distinguish a first write from a subsequent one, which `GetOrSetPropertyData` cannot express" (`PropertyReference.cs:63`). The method has been dead since.
+- **Recommendation:** remove it. It is a published NuGet API so removal is breaking, and the argument for removing it anyway is that the replacement it lost its caller to is public, documented, and strictly more expressive for the one use it ever had.
+- **Decision needed:** remove now, or keep as published surface until the next deliberate breaking release?
+- **Ruling:**
+
+### C10. Two save-and-restore ambient scope ref structs
+
+- **Tag:** duplicate-concept
+- **What exists:** `SubjectChangeContextScope` (`SubjectChangeContext.cs:139-148`) and `PendingOriginScope` (`PendingOrigin.cs:69-79`), the same shape twice: capture the previous thread-static value, restore it on dispose. Section 3, [ambient scope](#ambient-scope).
+- **Size:** 21 lines. A single generic scope would remove about 10.
+- **Why it exists:** established as accretion rather than design. `SubjectChangeContextScope` traces to the timestamp fixes, PR #190 (`fc9db7863`) and PR #198 (`cf9171725`); `PendingOriginScope` arrived months later with PR #366 (`f7fc9bf7c`, "Typed ChangeOrigin with one-shot source stamping"), whose author noticed the resemblance without acting on it: "a zero-allocation stack through nested ref structs, like SubjectChangeContextScope" (`PendingOrigin.cs:14`).
+- **Recommendation:** keep both. This is the one entry here that checking turned from a candidate into a non-candidate. Restoring a value means writing back one specific thread-static field, and a generic ref struct cannot name that field. The two mechanisms that would let it, a static abstract interface member or a delegate, are respectively unavailable and unacceptable: core targets `netstandard2.0` (`src/Namotion.Interceptor/Namotion.Interceptor.csproj:4`), which has no static abstract interface members, and a delegate adds an indirect call to the dispose of every write scope. The comment at `PendingOrigin.cs:14` is the honest state of it: the same pattern, not the same code.
+- **Decision needed:** confirm the split is accepted so the next reader does not re-derive this, ideally by promoting the observation at `PendingOrigin.cs:14` into a stated reason.
+- **Ruling:**
+
+### C11. The retain-or-drop policy, written three times
+
+- **Tag:** duplicate-concept
+- **What exists:** the rule that a thread-static traversal buffer past `MaximumRetainedTraversalSize` is dropped rather than cleared, written out three times against one threshold (`InterceptorSubjectContext.cs:28`): at `:324-333`, `:590-594` and `:871-880`. Section 3, [thread-static channel](#thread-static-channel).
+- **Size:** about 30 lines across the three sites, of which about 10 are removable. The reasoning is stated once, at `:322`.
+- **Why it exists:** established. All three arrived with PR #400 (`e616c7697`), the commit that introduced all five buffers. PR #586 (`997a7890e`) later reworked the middle one to isolate visited sets during reentrant lookup.
+- **Recommendation:** defer to C1. The three copies are not literally identical and section 3's table records that the code explains two of the three divergences: `:590` inverts the test to retain rather than drop because a service equality callback can re-enter (`:580`, invariant I18), and `:871` keys on the visited set rather than the worklist (`:869`). Only `:324` measuring a list's `Capacity` where the other two measure a `Count` is unexplained. If U2 is ruled unsupported the delegation walk and the invalidation walk both disappear and two of the three sites go with them, leaving nothing to unify.
+- **Decision needed:** none of its own, beyond C1. If U2 is kept, the `Capacity` against `Count` divergence at `:324` is worth one sentence in the code either way.
+- **Ruling:**
+
+### C12. The both-attributes conflict check, written twice
+
+- **Tag:** duplicate-concept
+- **What exists:** "cannot have both `[RunsFirst]` and `[RunsLast]`" thrown with identical message text at `Ordering/ServiceOrderResolver.cs:81` (the multi-service path, inside `ValidateAndCountGroups`) and `:241` (the single-service path, inside `ValidateService`, reached from `:24`). Section 3, [service ordering](#service-ordering).
+- **Size:** 6 lines, `:237-242`.
+- **Why it exists:** established. Both sites came in with PR #116 (`f2ce3e33b`), the commit that introduced the resolver. The single-service path exists because `OrderByDependencies` returns early for an input of length at most one (`:21-25`) and would otherwise skip validation entirely.
+- **Recommendation:** defer to C3. If the First and Last groups go, both checks go and `ValidateService` goes with them. If C3 is rejected, merge the two onto one private helper. Whoever does it should note that invariant I53 cites both sites and both tests that cover them, `RunsFirstAndRunsLast_ThrowsException` for `:241` and `WhenConflictingGroupAttributesAppearAmongMultipleServices_ThenPartitioningRejectsThem` (`src/Namotion.Interceptor.Tests/Ordering/ServiceOrderResolverTests.cs:23`) for `:81`, so a merge that routes both paths through one site must keep both tests green rather than deleting one as redundant.
+- **Decision needed:** none of its own, beyond C3.
+- **Ruling:**
+
+### C13. `MethodInvocationChain`'s type parameter
+
+- **Tag:** duplicate-concept
+- **What exists:** `MethodInvocationChain<TInterceptor>` (`Cache/MethodInvocationChain.cs:7`) with an unconstrained type parameter, which forces a third constructor delegate because the chain cannot call `InvokeMethod` on a type it knows nothing about (`:9`, `:14`, `:20`, `:24`, `:54`), injected as `static (interceptor, context, next) => interceptor.InvokeMethod(context, next)` at `Cache/MethodInvocationFactory.cs:17`. It has exactly one instantiation in the repository, `MethodInvocationChain<IMethodInterceptor>` at `Cache/MethodInvocationFactory.cs:15`. Section 3, [interceptor chain](#interceptor-chain).
+- **Size:** 6 lines, plus the type parameter at four declaration sites. The type is `internal`, so no public API changes.
+- **Why it exists:** established, and this is the strongest pruning evidence in the exercise. PR #166 (`015f7e9dd`, "performance: Simplify interceptor chain by removing generic interceptor type") removed exactly this parameter from the read and write chains and measured the result: writes about 7 percent faster, 201.9 nanoseconds to 188.1, and reads about 6 percent faster, 279.2 to 261.4, with no behavioural or memory change. The commit touched `ReadInterceptorChain.cs`, `ReadInterceptorFactory.cs`, `WriteInterceptorChain.cs`, `WriteInterceptorFactory.cs` and `InterceptorSubjectContext.cs`, and did not touch `MethodInvocationChain.cs`. The type parameter is the unfinished third of a completed, measured refactor.
+- **Recommendation:** remove it if C2 is rejected; if C2 is accepted, the whole file goes and this is moot. The measured precedent means the direction of the performance effect is known rather than guessed, which is rare in this list.
+- **Decision needed:** none of its own. This is the cheapest of the three chain-collapse moves and it is entirely contained in C2.
+- **Ruling:**
+
+### C14. The origin kind, read three times under the lock
+
+- **Tag:** accidental-complexity
+- **What exists:** inside the terminal's locked region the origin kind is read at `Cache/WriteInterceptorFactory.cs:35` to compute `isFromSource`, then at `Interceptors/IWriteInterceptor.cs:262` inside `GetFinalOrigin`, then at `:298` inside `FinalizeOrigin` against the value `GetFinalOrigin` just returned. Section 4, [property write](#property-write).
+- **Size:** 7 lines, `Interceptors/IWriteInterceptor.cs:296-302`, of which 0 are removable. See the recommendation.
+- **Why it exists:** established. The three-stage machine came in with PR #366 (`f7fc9bf7c`), and was hardened by PR #374 (`86037e36f`) and PR #420 (`f561d1964`). `GetFinalOrigin` returns an origin rather than a verdict because a consumer outside core needs the value: `src/Namotion.Interceptor.Tracking/Transactions/SubjectTransactionInterceptor.cs:115` binds the whole `ChangeOrigin` it returns.
+- **Recommendation:** keep it as it is. This entry was going to propose collapsing `GetFinalOrigin` to the boolean its in-core caller reduces it to, and checking the callers refutes that: besides `FinalizeOrigin` (`:298`), it has a shipping consumer outside core that binds the whole returned origin (`src/Namotion.Interceptor.Tracking/Transactions/SubjectTransactionInterceptor.cs:115`), plus a test at `src/Namotion.Interceptor.Tests/OriginWriteContextTests.cs:46`. Giving `FinalizeOrigin` a private predicate of its own adds a method rather than removing one. The residual observation, section 4's "the assignment at `:300` overwrites a default value with a default value", also needs an unestablished fact first: it holds only if a Local `_attempted` can never carry a non-null `SentValue` (`AttemptedOrigin.cs:14`). The payoff would be one store on the write path.
+- **Decision needed:** none, unless the no-op store at `:300` is worth establishing whether a Local `_attempted` can carry a non-null `SentValue`. Note that invariant I28, the rule living in `GetFinalOrigin` at `:270`, is one of the eight load-bearing untested ones listed in [G5](#6-gaps-and-limitations), so this code has less cover than its position on the write path deserves.
+- **Ruling:**
+
+### C15. Subject data's two accessor families
+
+- **Tag:** duplicate-concept
+- **What exists:** three subject-scoped accessors passing a null property name (`InterceptorSubjectExtensions.cs:5`, `:10`, `:21`) and six property-scoped ones passing the name (`PropertyReference.cs:31`, `:36`, `:42`, `:54`, `:68`, `:80`), over one `ConcurrentDictionary<(string?, string), object?>` (`IInterceptorSubject.cs:20`). Section 3, [subject data](#subject-data).
+- **Size:** 0 removable lines. `InterceptorSubjectExtensions.cs` is 25 lines and the property-scoped family spans `PropertyReference.cs:31-85`, but every body is a single dictionary call and there is no shared logic to extract. The two families also hang off different receivers, an `IInterceptorSubject` and a `PropertyReference`, so neither can be expressed as the other without changing the call sites.
+- **Why it exists:** not established. Both families are original-era: `InterceptorSubjectExtensions.cs` traces to PR #4 (`d1af06467`) and the property-scoped accessors predate the rename. No commit states why the split exists, and neither does the code.
+- **Recommendation:** downgrade this from the finding section 3 records. The real observation is not duplicated logic but an asymmetric API: the property family has three operations the subject family lacks, `RemovePropertyData`, `TryRemovePropertyData` and `GetOrSetPropertyData`, the last of which is C9. Closing the asymmetry adds lines rather than removing them.
+- **Decision needed:** should the subject-scoped family gain the missing operations, stay as it is, or be documented as deliberately minimal? None of the three is a reduction.
+- **Ruling:**
+
+### C16. The queried type, filtered twice
+
+- **Tag:** accidental-complexity
+- **What exists:** the service walk tests `type.IsInstanceOfType(service)` per service (`InterceptorSubjectContext.cs:712`), then `ComputeServices` runs `.OfType<TInterface>()` over the collected list (`:585`) with the same type. Section 4, [service resolution](#service-resolution), step 13.
+- **Size:** 0 net lines. The `OfType` pass would be replaced by a builder loop of the same length, so this is an allocation and a second type test per service on every cache miss, not a size reduction.
+- **Why it exists:** established. The `OfType` pass is original, present before the rename (`5dcd9eb88`) and reshaped by PR #31 (`6a423ebbc`). The walk-side filter is newer: PR #400 moved dedup from registration into the walk, and the state class records the consequence in the same commit at `InterceptorSubjectContext.cs:947-951`, "the walk filters by the queried type first". The redundancy is the older filter left in place after the newer one was added.
+- **Recommendation:** drop the second pass and build the immutable array directly, on the next occasion that file is open for another reason. It is correct today and the win is small: it runs only on a service-cache miss, which section 4 records as the path everything from step 5 to step 15 shares.
+- **Decision needed:** is a per-cache-miss allocation worth a change to a walk covered by `WhenRandomContextGraphIsResolved_ThenServiceOrderMatchesTheRecursiveWalk` and little else? If C1 is accepted the walk is rewritten anyway and this should be folded into that work.
+- **Ruling:**
+
+### C17. The invoke terminal's two identical lambdas
+
+- **Tag:** duplicate-concept
+- **What exists:** `Cache/MethodInvocationFactory.cs:12` and `:18`, byte-identical bodies, `static (ref context, innerInvokeMethod) => innerInvokeMethod(context.Subject, context.Parameters)`. Neither takes the subject's `SyncRoot`, which is why the invoke row of the [lock coverage matrix](#lock-coverage) is empty in every column. Section 3, [terminal operation](#terminal-operation).
+- **Size:** 1 line.
+- **Why it exists:** established. Both took their current shape in PR #383 (`765ad6475`), which threaded the terminals through the per-call context to remove thread statics.
+- **Recommendation:** defer to C2, which deletes the file. On its own it is a one-line change with no argument against it and no argument for spending a review on it.
+- **Decision needed:** none of its own.
+- **Ruling:**
+
+### C18. X1, the read terminal pair
+
+- **Tag:** conditional, pending a classification
+- **What exists:** two read terminals that genuinely differ. The zero-interceptor one reads the backing field with no lock (`Cache/ReadInterceptorFactory.cs:12`); the chained one reads it under the subject's `SyncRoot` (`:19`). `IInterceptorSubject.SyncRoot` documents the lock unconditionally as "the sync root used to synchronize read/writes of property fields" (`IInterceptorSubject.cs:8`). Contradiction [X1](#contradictions), gap [G1](#6-gaps-and-limitations).
+- **Size:** depends entirely on the classification. Making the zero-interceptor terminal lock turns its one-line lambda at `:12` into the four-line locking form already at `:17-22`. Narrowing the contract instead is one sentence. Neither is a reduction.
+- **Why it exists:** not established. The two-terminal split traces to PR #109 (`ada2c86d3`), a performance commit, and to PR #92 (`01c448727`) which added the read and write lock in the first place, but no commit message or comment states that the missing lock on the fast path is deliberate. Section 3's earlier assessment that the difference is "deliberate" was overstated: only the difference is established, not the intent.
+- **Recommendation:** conditional, and the condition is his to set.
+
+  | If X1 is classified as | Then the work is |
+  |---|---|
+  | Stale documentation | Narrow `IInterceptorSubject.cs:8` to say a read is synchronized only when a read interceptor is registered, and record the two-regime behaviour as a supported use case. One sentence, no code. |
+  | A defect | Collapse the pair onto the locking terminal (`Cache/ReadInterceptorFactory.cs:12` gains the lock). One line of code, and a measurable cost on every uninstrumented read, which is the case the fast path was built for. |
+
+  Section 3 already says the collapse "is a candidate fix for X1 rather than something the split rules out". What this document cannot do is pick, because the two answers have opposite signs: one makes the library slower to keep a promise, the other keeps the speed and retracts the promise.
+- **Decision needed:** is a property read on a context with no read interceptor guaranteed to be synchronized against a concurrent write? Yes makes it a defect, no makes it a documentation fix.
+- **Ruling:**
+
+### C19. X3, the unattached subject
+
+- **Tag:** conditional, pending a classification
+- **What exists:** while a subject's generated `_context` field is null, every write takes no lock, consumes no revision, records no write state and runs no interceptor (`src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:521` to `:524`), and still reports the write as performed. Reads (`:515`) and invocations (`:535`) have the same hole. Invariants I22, I25 and I50 are silently inapplicable there, and the switch between the two regimes is itself unsynchronized. Contradiction [X3](#contradictions), gap [G3](#6-gaps-and-limitations), use case U23.
+- **Size:** not sizeable until classified. As a documentation fix it is one paragraph on `IInterceptorSubject.SyncRoot` and one row in section 1. As a defect it is a change to the generated read, write and invoke helpers in a source generator whose output every consumer recompiles, which is the widest blast radius of anything in this list.
+- **Why it exists:** established as a consequence rather than a decision. The bypass serves U23, constructing a subject with no context and attaching it later, which nothing in core implements: the parameterless constructor and the null-context bypass are both generated. No commit records a decision that writes before attachment are unsynchronized; it falls out of the field being null.
+- **Recommendation:** conditional, and this one should be classified before C1 rather than after, because a single-context model changes what "attached" means and PR #494 already replaces `IInterceptorSubject.Context` with an executor and removes `SyncRoot` from the public contract entirely.
+
+  | If X3 is classified as | Then the work is |
+  |---|---|
+  | Intended behaviour | Say so: a subject is not intercepted until something touches `.Context`, writes before that point are unsynchronized and unranked, and U23 is Best effort rather than Supported. Documentation only. |
+  | A defect | Publish the executor eagerly, or make the bypass path take the subject's lock. Both are generator changes, and the second pays a lock on every write to an unattached subject, which is the case the bypass exists to make free. |
+- **Decision needed:** is a subject that nothing has attached expected to behave like an attached one, or is it explicitly outside the contract until first attachment?
+- **Ruling:**
+
+### C20. X2, the finalization wording
+
+- **Tag:** accidental-complexity
+- **What exists:** `PropertyWriteContext.Origin` states that the origin is finalized "when the terminal write lands (the same point `IsWritten` becomes true)" (`Interceptors/IWriteInterceptor.cs:105`). In both terminals `IsWritten` is set (`Cache/WriteInterceptorFactory.cs:22`, `:53`), the still-unfinalized origin is then read to compute `isFromSource` (`:35`, `:63`), and only then is `FinalizeOrigin` called (`:37`, `:65`). Contradiction [X2](#contradictions), gap [G2](#6-gaps-and-limitations).
+- **Size:** 1 line of documentation.
+- **Why it exists:** established. The window is deliberate and load-bearing, stated at `Cache/WriteInterceptorFactory.cs:31`: reading the kind after finalization "would count a source write whose value a hook changed as local, letting it discard a local write that had already committed". That is invariant I24, and it has a test. The documentation simply describes a simpler ordering than the code implements.
+- **Recommendation:** reword `Interceptors/IWriteInterceptor.cs:105` to say the origin is finalized inside the terminal write, after `IsFromSource` routing has been decided, and cross-reference `Cache/WriteInterceptorFactory.cs:31`. This is the only contradiction of the three that already carries a verdict, so it needs no classification, only the edit.
+- **Decision needed:** confirm the reword rather than a code change, given that I24 pins the current ordering.
+- **Ruling:**
+
+### Explicitly rejected
+
+Two things that look like candidates and are not, recorded so nobody re-derives them.
+
+| Rejected | Why |
+|---|---|
+| Delegation resolved twice on the service path, `InterceptorSubjectContext.cs:111` and `:113` then again at `:687` | Section 4 prices it at near zero. The second site is a single null check that performs zero hops in the documented normal case, and it runs only on a cache miss. The code states the duplication as deliberate at `:550` to `:554`: the walk "re-follows delegation from whatever state it is handed", which is what makes the handed state an expectation rather than a precondition. Removing it would buy nothing and would turn a tolerated input into an unchecked one. |
+| Merging the four origin types into fewer | The width of the published struct is the answer, and it is unfavourable. `ChangeOriginKind` is byte-backed under an explicit instruction not to widen it (`ChangeOrigin.cs:4` to `:6`), and `SubjectPropertyChange` is a readonly struct embedding `ChangeOrigin` by value (`src/Namotion.Interceptor.Tracking/Change/SubjectPropertyChange.cs:39`). Folding `AttemptedOrigin.SentValue` (`AttemptedOrigin.cs:14`), which is write-time-only evidence, into `ChangeOrigin` adds an object reference to every published change, on the type every connector's delivery path carries. `PendingOrigin` is a transfer mechanism rather than a representation, and `PropertyWriteState` is durable state that consumes the finalized origin as one bit. The four types have four lifetimes; only the naming makes them look like one thing four times. C14 records what checking the one remaining redundancy in this area turned up. |
+
 ## 8. Backlog disposition
 
 | Issue / PR | Disposition | Rationale |
