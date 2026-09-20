@@ -12,12 +12,15 @@ Citation convention: a bare `:123` refers to the file named in the enclosing sub
 | | |
 |---|---|
 | Area | `src/Namotion.Interceptor/`, 36 files, 3544 lines. One file, `InterceptorSubjectContext.cs`, is 1095 of them |
+| Use cases | 25, every one of them Undecided. No maintainer has ruled on any, so nothing here may be read as defended. [Section 1](#1-supported-use-cases) |
 | Invariants | 65, of which 42 are covered by a test and 23 are unverified. [Section 2](#2-contracts-and-invariants) |
 | Concepts | 24, of which 13 have more than one implementation. Three of the 13 are justified in writing, one of those three only in part. [Section 3](#3-concept-census) |
 | Contradictions | 3. X1 and X3 are the same shape twice, an access that does not take the lock the contract promises. X2 is imprecise documentation over deliberate code. [Contradictions](#contradictions) |
 | Flows | 4, and all four open with the same byte-identical six-line prologue. [Section 4](#4-flows) |
 | Locks | 2 kinds core owns, 1 it does not own, 2 it enters without naming. Ten `lock (` sites in total, and no other synchronization primitive anywhere in core. [Lock order](#lock-order) |
-| Candidates | None ranked and none ruled: [section 7](#7-candidates) is unwritten |
+| Gaps | 22: 10 Known broken, 7 Unspecified, 5 Best effort. Ten come from the analysis in sections 2 to 5, twelve from open issues. [Section 6](#6-gaps-and-limitations) |
+| Candidates | 20, none ruled. 1,410 production lines if every recommendation is accepted, of which C1 alone is 763. [Section 7](#7-candidates) |
+| Backlog | 34 items dispositioned: 14 issues and 20 of the 63 open pull requests. [Section 8](#8-backlog-disposition) |
 
 The findings that matter most:
 
@@ -25,15 +28,19 @@ The findings that matter most:
 2. **Whether a read is synchronized is decided by the registered service set, not by the contract.** A read takes `SyncRoot` only when at least one read interceptor is registered. Contradiction [X1](#contradictions), with all nine cells in the [lock coverage matrix](#lock-coverage).
 3. **A detach lifecycle callback that removes the same fallback again does not terminate.** The membership test it passes is unlocked, and the registration it would clear is only cleared after the callbacks have run. [Reentrancy](#reentrancy).
 4. **User code runs under the subject's `SyncRoot` in three places and none of them is documented**: the caller-supplied timestamp function, the property type's own equality comparer, and chain compilation on a write nested inside the terminal. [Reentrancy](#reentrancy).
-5. **Fallback, delegation and invalidation together are 666 of `InterceptorSubjectContext.cs`'s 1095 lines**, and the prologue that pins the state and resolves the delegation target is byte identical at four call sites. [Fallback context](#fallback-context), [delegation target](#delegation-target).
-6. **`IMethodInterceptor` has no implementation in any shipping library**, so the compiled chain the method invocation flow caches is always the identity terminal. [Interceptor](#interceptor), [method invocation](#method-invocation).
-7. **23 of the 65 invariants have no test**, among them the timestamp encoding (I37, I38), four consecutive write state rules (I39 to I42) and the pending origin's non-inheritance by nested writes (I36). [Section 2](#2-contracts-and-invariants).
+5. **The multi-context topology is both the biggest mechanism here and the bug class that keeps regenerating.** Fallback, delegation and invalidation are 666 of `InterceptorSubjectContext.cs`'s 1095 lines, and the prologue that pins the state and resolves the delegation target is byte identical at four call sites. Removing it is [C1](#c1-multi-context-topology), 763 lines and 54 percent of everything this document proposes, and it deletes the mechanism six of the ten Known broken gaps live on.
+6. **Two competing rewrites already agree on that removal, byte for byte.** #494 and #501 make the identical +193/-753 change to `InterceptorSubjectContext.cs`, and disagree almost entirely inside the executor, so ruling C1 and choosing between the two pull requests are separate decisions. [Section 8](#8-backlog-disposition).
+7. **`IMethodInterceptor` has no implementation in any shipping library**, so the compiled chain the method invocation flow caches is always the identity terminal. That is [C2](#c2-method-interception), 400 lines across core and the generator. [Interceptor](#interceptor), [method invocation](#method-invocation).
+8. **23 of the 65 invariants have no test**, among them the timestamp encoding (I37, I38), four consecutive write state rules (I39 to I42) and the pending origin's non-inheritance by nested writes (I36). [Section 2](#2-contracts-and-invariants).
 
-What is still missing, so nobody mistakes an unwritten section for an empty result:
+What is still missing, so nobody mistakes a recorded fact for a decided one:
 
-- [Section 1](#1-supported-use-cases) (supported use cases), [6](#6-gaps-and-limitations) (gaps and limitations), [7](#7-candidates) (candidates) and [8](#8-backlog-disposition) (backlog disposition) are empty and belong to a later pass.
-- Every ruling is pending. Section 1's Ruling column and section 8's Disposition column are both blank, so nothing here is decided, only recorded.
-- X2 is the only contradiction this document classifies. Whether X1 and X3 are code defects or stale documentation is not established anywhere below.
+- **Every ruling.** Section 1's Ruling column is blank on all 25 rows, section 7's `Ruling` line is blank on all 20 candidates, and section 8's dispositions are recommendations that nothing has executed. Nothing here is decided, only recorded.
+- **X1 and X3 are unclassified.** X2 is the only contradiction carrying a verdict, so two of the three sharpest findings above cannot be acted on until the maintainer says whether the code or the documentation is wrong. That is gap [G4](#6-gaps-and-limitations), and candidates [C18](#c18-x1-the-read-terminal-pair) and [C19](#c19-x3-the-unattached-subject) are both blocked behind it with opposite-signed answers: one makes the library slower to keep a promise, the other keeps the speed and retracts the promise.
+- **Test cover is thinner than the "42 covered" headline.** 23 invariants have no test and 8 of those are load bearing (G5), 9 of the 42 covered rows pin only part of their claim (G6), and 2 tests cannot fail on what their names claim (G7).
+- **Two numbers this document does not have.** G18's two memory characteristics of the copy-on-write state are unmeasured, and C5's extract-the-write-terminal recommendation needs a machine-code diff before it can be accepted, because its correctness argument and its performance argument point in opposite directions.
+- **The choice between #494 and #501 is out of scope here.** Section 8 shows that the two agree on C1 and disagree on lifecycle ownership inside the executor, which this dossier does not analyse.
+- **Sections 1, 6, 7 and 8 have not had the independent verification pass** that sections 2 to 5 had, per the header above. One defect is already recorded rather than fixed: [G10](#6-gaps-and-limitations), where section 3's totals sentence mis-sums its own evidence.
 
 ## 1. Supported use cases
 
@@ -1234,6 +1241,120 @@ Two things that look like candidates and are not, recorded so nobody re-derives 
 
 ## 8. Backlog disposition
 
-| Issue / PR | Disposition | Rationale |
+Every open issue and pull request that reaches this area, with what this document recommends doing about it. **Nothing below is executed.** A disposition carries exactly the standing of a section 7 recommendation: the maintainer rules, and the repository rule is that an issue is not closed before the pull request that resolves it merges.
+
+Two method notes, because both halves of this are easy to get wrong.
+
+- **Issues.** Fourteen open issues carry `area: core`. Section 6 dispositioned them: twelve became gaps G7 and G11 to G22, and two name no file in this area at all. Four of the twelve (#402, #403, #404, #406) carried no `area: core` label until this pass added it, so anyone who filtered the backlog by area before 2026-09-20 was missing exactly the issues that describe the largest mechanism in the area.
+- **Pull requests.** 20 of the 63 open pull requests touch `src/Namotion.Interceptor/`. `gh pr view <n> --json files` caps at 100 files and silently reports zero core files for anything larger, which is why #489, #494, #501 and #538 all read as not touching core at all. `gh api repos/RicoSuter/Namotion.Interceptor/pulls/<n>/files --paginate` is the only form that reports them, and every core file count below comes from it. Anyone redoing this must paginate.
+
+### Issues
+
+| Issue | Disposition | Rationale |
 |---|---|---|
-| | | |
+| #219 | Not core, relabel | Names `RefreshCollectionIndices`, `RemoveChild` and path resolution, all in Registry and Tracking ([section 6](#6-gaps-and-limitations)). It already carries `area: registry` and `area: tracking`, so the relabel is to drop `area: core` and keep those two. |
+| #222 | Gap G20 | Replace the per-property `ConcurrentDictionary` on the subject contract (`src/Namotion.Interceptor/IInterceptorSubject.cs:20`) with slot arrays. Breaking: it changes the type of `Data`, which core's own write state uses (`src/Namotion.Interceptor/PropertyReference.cs:87`). |
+| #224 | Gap G19 | `TProperty` is a hint rather than the declared property type because the public entry point enters the chain as `object` (`src/Namotion.Interceptor/PropertyReferenceExtensions.cs:12`). Typed dispatch is a public API change to `SetPropertyValueWithInterception`, which use case U20 records. |
+| #402 | Gaps G9, G11 | The executor's two fallback overrides are byte for byte what the issue quotes (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:111` to `:141`). [Section 5](#reentrancy) found that the detach path does not terminate, which the issue records only as a duplicate fire, so #402 understates its own defect 2. Its fix #412 is superseded, see below. |
+| #403 | Gap G13 | `TryAddService` checks existence against the calling context's pinned state alone (`src/Namotion.Interceptor/InterceptorSubjectContext.cs:195`), so it is atomic per context and not per chain. Blocked on the C1 ruling: with one context per subject there is no chain for it to be non-atomic across. |
+| #404 | Gap G14 | Both caller-supplied delegates run while `_mutationLock` is held (`:195`, `:200`), which I3 forbids in writing (`src/Namotion.Interceptor/IInterceptorSubjectContext.cs:24`) and nothing enforces. Moving the factory out of the lock changes the meaning of "the factory ran", which is why it is still open. |
+| #406 | Gaps G15, G16, one claim refuted | Duplicate retention (`:218` against the dedup at `:735`) and service equality running under `_mutationLock` (`:735`) both hold. The cache-poisoning reproduction does not, see the note below the table. |
+| #409 | Gap G18 | Two deliberate memory characteristics of the copy-on-write state with no number attached: chain arrays sized by a process-wide counter that never resets (`:48`, grown at `:1083`) and the always-allocating `WithoutCaches` (I7, `:1002`). A measurement, not a defect. |
+| #410 | Gap G17 | The deciding code, `ContextInheritanceHandler`, is in Tracking and outside this dossier's boundary; the stranded edge it leaves behind is inside it. PR #322 is the open fix. |
+| #411 | Gap G12 | On this baseline the window is wider than the issue describes: it spans the detach callbacks, between the unlocked membership test (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:129`) and the commit (`:138`). The narrower two-phase form the issue is written against arrives only with #402's unmerged fix, so the issue and the code disagree about what is being fixed. |
+| #443 | Gap G21 | Core defines `IInterceptorSubject` and implements none of it ([section 3](#subject)), so a hand-written base pays roughly 70 lines plus three behavioural rules the compiler cannot check, one of whose failure modes is silent. |
+| #464 | Gap G20 | The cheaper half of #222: shorten the `Data` keys instead of replacing the table. Core's own `ni.wstate` (`src/Namotion.Interceptor/PropertyReference.cs:87`) is the precedent, so unlike #222 this needs no breaking change. |
+| #539 | Gaps G7, G22 | `SubjectPropertyMetadata.Attributes` carries no declaration provenance, and the one resolution rule core does implement (`src/Namotion.Interceptor/PropertyInfoExtensions.cs:25` to `:26`) has an ordering half that no test can fail (G7). The issue wants to redefine exactly that rule, so fixing G7 is a prerequisite rather than a separate cleanup. |
+| #552 | Not core, relabel | Names four project files, all Dynamic and Validation, none of them core's ([section 6](#6-gaps-and-limitations)). Its Sonar rollout siblings each carry the area of the projects they cover (#549 `area: registry`, #557 `area: opcua`, #559 `area: build`), and there is no `area: dynamic` or `area: validation` label, so the relabel needs one created or `area: build` following #559. |
+
+**What survives of #406.** Its first concern, a reentrant service equality callback poisoning the service cache with a partial result, does not hold against this baseline. `ComputeServices` detaches the thread-static visited set for the duration of the walk precisely so a nested query gets one of its own (`src/Namotion.Interceptor/InterceptorSubjectContext.cs:579`, `:581`, invariant I18), covered by `WhenServiceComparisonReentersLookup_ThenNestedAndCachedResultsContainRegisteredServices`. The reproduction is written against the pre-copy-on-write implementation the issue calls master, which PR #400 (`e616c7697`) replaced. Its other two concerns are untouched by that and are G15 and G16. The disposition is therefore to amend the issue, not to close it: a partly stale issue is a disposition like any other.
+
+### Pull requests
+
+| PR | Core files | Disposition | Rationale |
+|---|---|---|---|
+| #592 | 5 | Keep, depends on I24 | Records `Mutated` inside the terminal's lock, before origin finalization and write-state stamping, which is the window invariant I24 pins and `src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:31` states. Adds `PropertyWriteOutcome.cs` (+76) riding the thread-static frame `PendingOrigin` already consumes. |
+| #587 | 4 | Close, superseded | #592's description states that it supersedes #587 and why: #587 generated a per-class replay path keyed by property name, which dropped runtime-added and virtual partial properties and required every consumer to regenerate. Close when #592 merges, not before. |
+| #578 | 4 | Candidate C1 | Third in the #494, #538, #578 stack and targets #538, so it inherits the C1 ruling. Its own core diff grows the executor C4 would dissolve: +35 to `Interceptors/InterceptorExecutor.cs` and a new `Interceptors/InterceptorExecutorExtensions.cs` (+48). |
+| #538 | 10 | Candidate C1 | Targets #494's branch `rewrite/single-context-lifecycle`, so it inherits the C1 ruling. Replaces #527, cutting the production delta from +522 to +91 lines. |
+| #535 | 5 | Candidate C5 | Rewrites the write terminal (`Cache/WriteInterceptorFactory.cs` +46/-34) and adds `IPropertyWriteGuard` to core, which is the file and the commit sequence C5 wants written once. Its own description calls it an experimental draft that does not resolve #373. |
+| #501 | 21 | Candidate C1 | Agrees with #494 on C1 byte for byte and disagrees on the executor. See below. |
+| #498 | 2 | Keep, depends on I31 | Exempts only `Confirmed` from revalidation (`ChangeOrigin.cs` +2/-1, `Interceptors/IWriteInterceptor.cs` +21/-4), so it rests on I31, "only transaction commit replay may stamp `Confirmed`" (`src/Namotion.Interceptor/ChangeOrigin.cs:54`). I31 is documented, not enforced by the type, and is one of the eight load-bearing untested invariants [G5](#6-gaps-and-limitations) lists. |
+| #494 | 17 | Candidate C1 | See below. |
+| #489 | 1 | Candidate C1 | Its entire core diff is two new internal fallback operations, `TryGetSubjectFallbackContext` and `ReplaceFallbackContext` (+74 to `InterceptorSubjectContext.cs`), built on the mechanism C1 deletes. |
+| #474 | 1 | Candidate C1 | +245/-59 to `InterceptorSubjectContext.cs`, an internal ownership route integrated into "service traversal, delegation, cycle handling, and cache-free state replacement" in its own words, all inside ranges C1 counts. It is the base of #419. |
+| #472 | 6 | Gap G13 | Validates unique authorities across a resolved context cone, which is the chain-wide uniqueness G13 says `TryAddService` does not give, though at resolution time rather than at registration. It adds 118 lines plus `IUniqueContextService` and `UniqueContextServiceMetadata` to the mechanism C1 deletes, and its own description records that no performance conclusion exists yet. |
+| #412 | 5 | Close, superseded | See below. |
+| #372 | 2 | Close, superseded | Superseded by the value assertion design, which states it and says why: synthesizing a `Correction` outside the write pipeline loses the ordering guarantees an ordinary change gets for free, and the branch re-earned them by hand (`docs/superpowers/specs/2026-07-16-value-assertion-design.md:3`, `:13`, `:144`, on branch `feature/value-assertions`). That design plans to cherry-pick #372's behavioural tests, so the branch is harvested rather than discarded. |
+| #358 | 1 | Passes through core | Adds one diagnostics file, `Diagnostics/ModelTrace.cs` (+40). The rest is the TLA+ model of the OPC UA client lifecycle and describes nothing in this area. |
+| #322 | 2 | Gap G17 | The open fix for #410: it snapshots the parent's ancestor chain at first property attach and removes those ancestors on last detach. It adds `GetFallbackContexts()` to the public `IInterceptorSubjectContext` (+6), a member C1 deletes. |
+| #268 | 1 | Passes through core | Its entire core diff removes a two-line `TODO(perf)` comment from `IInterceptorSubject.cs` (+0/-2). The work is the Registry member hierarchy. |
+| #264 | 3 | Candidate C2 | Adds `[SubjectMethod]` metadata to core (`SubjectMethodMetadata.cs` +127, `Attributes/SubjectMethodAttribute.cs` +9, `IInterceptorSubject.cs` +11) and merges it into the same generator model C2 counts as a whole-file removal: `Generator/Models/MethodMetadata.cs` gains `IsIntercepted` and `IsSubjectMethod` side by side. Stacked on #268. |
+| #186 | 3 | Close, speculative | Moves property metadata construction from the generator to runtime reflection cached per type (`SubjectPropertyMetadataCache.cs` +199, `Attributes/InterceptedAttribute.cs` +10). That reverses the promise use case U1 records and `AGENTS.md:51` states, "zero runtime reflection through compile-time code generation", and its one performance claim, "Same performance", carries no measurement. Open since 2026-02-03. |
+| #87 | 2 | Close, speculative | Skips write interception for registered interceptors that currently have no consumer (`Cache/WriteInterceptorFactory.cs` +11/-1, `Interceptors/IWriteInterceptor.cs` +12/-1). Its own description neither measures the win nor defends the approach: "Might degrade performance when they are used" and "Maybe better to not register them at all". Open since 2025-10-31. The idea survives inside C5 if the terminal is ever unified. |
+| #54 | 5 | Candidate C4 | See below. |
+
+#### #494 and #501: one candidate already agreed, one question still open
+
+They make a **byte-identical** change to `InterceptorSubjectContext.cs`, +193/-753, verified by md5 over the patch text the API returns for that file in each pull request: `8a0053947c9b39c002a1569226914623` on both, 1144 patch lines each. Six further core files carry byte-identical patches too, `IInterceptorSubject.cs` (+23/-10), `IInterceptorSubjectContext.cs` (+21/-29), the new `ISingletonContextService.cs` (+12), `InterceptorSubjectExtensions.cs` (+182), `Ordering/ServiceOrderResolver.cs` (+1/-1) and the new `SubjectAttachmentAnchorKind.cs` (+27). #494's 17 core files are a strict subset of #501's 21.
+
+That deletion is within a hundred lines of the 666 that [section 3](#fallback-context) measures as the multi-context topology and that [C1](#c1-multi-context-topology) counts as its first four rows. So C1, the largest entry in section 7, is neither hypothetical nor contested between the two competing rewrites. **They already agree on it.**
+
+Their disagreement is almost entirely in the executor:
+
+| Core file | #494 | #501 |
+|---|---|---|
+| `Interceptors/InterceptorExecutor.cs` | +335/-40 | +1290/-69 |
+| `Interceptors/SubjectPropertyRegistration.cs` | +130/-0 | +208/-0 |
+| `Interceptors/OwnershipReservation.cs` | absent | +109/-0 |
+| `Interceptors/StructuralWriteLease.cs` | absent | +98/-0 |
+| `Interceptors/IWriteInterceptor.cs` | +14/-6 | +103/-73 |
+| `Cache/WriteInterceptorFactory.cs` | +10/-9 | +24/-57 |
+| `Cache/ReadInterceptorFactory.cs` | +5/-2 | +17/-3 |
+
+**These are two decisions, not one.** The C1 ruling asks whether U2, a subject graph resolving services through more than one context, is supported. Both pull requests answer no, identically, and [C1](#c1-multi-context-topology) recommends that answer. Choosing between #494 and #501 asks how lifecycle ownership works inside the executor, a different question with a different blast radius, and this document does not answer it: section 3 counts the executor as one of two implementations of the context concept and [C4](#c4-the-per-subject-executor-as-a-context-subclass) defers it. The maintainer can therefore rule C1 without choosing a pull request, and the ruling narrows what the choice is then about.
+
+#### #54: the only attempt on record at C4
+
+`refactor: Remove/inline executor code` (#54), opened 2025-09-30, still open, not a draft, +138/-86 across 14 files of which 5 are core. It is the same direction as [C4](#c4-the-per-subject-executor-as-a-context-subclass) and as the standing removal note at `src/Namotion.Interceptor/Interceptors/IInterceptorExecutor.cs:3`.
+
+What it does is C4's "move rather than disappear" half exactly. It deletes `Interceptors/IInterceptorExecutor.cs` (+0/-10), strips the three entry points out of `InterceptorExecutor` (+1/-25), leaving the class with its subject field and its fallback overrides, retypes the generated backing field from `IInterceptorExecutor` to `IInterceptorSubjectContext`, and moves the construction of `PropertyReadContext`, `PropertyWriteContext<TProperty>` and `MethodInvocationContext` into the generated members, which then call `ExecuteInterceptedRead`, `ExecuteInterceptedWrite` and `ExecuteInterceptedInvoke` directly. `PropertyReferenceExtensions` loses its cast to the interface the same way (+2/-2).
+
+**What it shows.** It carries no comments and no reviews, so nothing states why it stalled. Its entire description is a benchmark comparison, and that comparison is a regression. The four `RegistryBenchmark` rows that isolate a single intercepted operation are 1.9 to 3.8 times slower on the branch: `Write` 1,108.20 ns against 289.35, `Read` 1,190.77 against 310.02, `DerivedAverage` 744.31 against 209.36, `IncrementDerivedAverage` 12,289.67 against 6,389.59. Rows that do not isolate one intercepted operation move by a few percent in both directions, which is what makes those four a signal rather than a bad run.
+
+**What it means for C4.** It confirms C4's "defer past C1" recommendation and adds a reason section 7 does not give. C4 defers because removal is not core-local and doing it first means reworking the generator twice. #54 adds that the naive form was tried and measured, and that the measurement was bad enough that a C1 ruling alone will not unblock it: C4 needs a gate on the intercepted read and write path, to the repository's disassembly standard, exactly as C5 does. Two caveats stop this from being decisive. The numbers are the branch's own and were taken against a master that predates both PR #400 (`e616c7697`, the copy-on-write rewrite) and PR #383 (`765ad6475`, which moved the terminals onto the per-call context), so they do not transfer to `b36ec531f` unchanged. And the branch is stale in a way that has to be redone rather than rebased: it patches `InterceptorSubjectGenerator.cs` at lines 116 and 276, and that emission has since moved to `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:190` and `:194`, leaving the file it patches at 153 lines with no `_context` in it at all.
+
+#### #412: superseded by #419
+
+#412, `[superseded] Own each fallback edge by the interceptors its attach resolved`, closes #402 by giving every edge added through the executor a record of the interceptors its attach resolved and using that record as the edge's ownership token. Its title says superseded and its body does not say by what.
+
+**#419 superseded it.** `Redesign subject ownership around explicit roots` (#419) carries a follow-up comment from the maintainer whose issue-update table reads "#412: Close unmerged, referencing this work" (comment of 2026-08-05 on #419). The same table keeps #402 open on its defect 1 alone and closes defects 2 to 5, so closing #412 does not close #402.
+
+**One caveat before closing it.** #419 currently contains three files, two specifications and one plan under `docs/superpowers/`, and zero files under `src/`. What supersedes #412 today is therefore a design and a plan, not an implementation. #419 is also stacked on #474, which this table puts on C1. Closing #412 now leaves #402's defects with no open pull request that touches core.
+
+### Sequencing constraints
+
+Section 7 ranks candidates by reduction and says nothing about merge order. These are the four places where a ruling and an open pull request collide, and each is order-sensitive in one direction only: ruling is cheap now and expensive after the merge.
+
+| If the maintainer rules | Then |
+|---|---|
+| C1 remove, U2 unsupported | #472 (+118 plus two new types into the resolution cone), #489 (+74, two new fallback operations), #474 (+245/-59, an ownership route woven into delegation and invalidation) and #322 (a new public `GetFallbackContexts()`) are each written against the mechanism that then goes away, so each is rewritten or rebased onto nothing. #494, #501, #538 and #578 perform the removal themselves, so the ruling unblocks them rather than blocking them. |
+| C2 remove, method interception | #264 has to be ruled on first. It puts `IsIntercepted` and `IsSubjectMethod` side by side in `Generator/Models/MethodMetadata.cs`, a file C2's size table counts as a whole-file deletion. After #264 merges, C2 stops being a delete and becomes a split, and the 162-line discovery row of that table stops being accurate. |
+| C4 remove, the executor subclass | Every line added to `Interceptors/InterceptorExecutor.cs` before the ruling is a line C4 has to move afterwards. #501 adds 1,290, #494 adds 335, #578 adds 35 plus a new extensions file. |
+| C5 extract, one write terminal | #535 (+46/-34), #87 (+11/-1), #592 (+2) and #501 (+24/-57) all edit `Cache/WriteInterceptorFactory.cs`. Extracting the shared commit body after any of them lands means redoing the extraction against a terminal that has grown another conditional. |
+
+### Counts
+
+34 backlog items: 14 issues and 20 pull requests.
+
+| Disposition | Issues | Pull requests | Total |
+|---|---|---|---|
+| Gap G`<n>` | 12 | 2 | 14 |
+| Candidate C`<n>` | 0 | 9 | 9 |
+| Close, superseded | 0 | 3 | 3 |
+| Close, speculative | 0 | 2 | 2 |
+| Keep, depends on I`<n>` | 0 | 2 | 2 |
+| Not core, relabel | 2 | 0 | 2 |
+| Passes through core | 0 | 2 | 2 |
+
+Nine of the twenty pull requests map onto a candidate, and six of those nine onto C1 alone. That is the same concentration [section 7](#7-candidates)'s totals report from the other side, where C1 is 54 percent of the available reduction.
