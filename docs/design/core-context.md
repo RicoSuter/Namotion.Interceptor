@@ -7,6 +7,34 @@ Verified: 2026-09-20, four independent readers over sections 2, 3, 4 and 5. 181 
 
 Citation convention: a bare `:123` refers to the file named in the enclosing subsection's canonical implementation. A full path is given whenever the file changes.
 
+## Summary
+
+| | |
+|---|---|
+| Area | `src/Namotion.Interceptor/`, 36 files, 3544 lines. One file, `InterceptorSubjectContext.cs`, is 1095 of them |
+| Invariants | 65, of which 42 are covered by a test and 23 are unverified. [Section 2](#2-contracts-and-invariants) |
+| Concepts | 24, of which 13 have more than one implementation. Three of the 13 are justified in writing, one of those three only in part. [Section 3](#3-concept-census) |
+| Contradictions | 3. X1 and X3 are the same shape twice, an access that does not take the lock the contract promises. X2 is imprecise documentation over deliberate code. [Contradictions](#contradictions) |
+| Flows | 4, and all four open with the same byte-identical six-line prologue. [Section 4](#4-flows) |
+| Locks | 2 kinds core owns, 1 it does not own, 2 it enters without naming. Ten `lock (` sites in total, and no other synchronization primitive anywhere in core. [Lock order](#lock-order) |
+| Candidates | None ranked and none ruled: [section 7](#7-candidates) is unwritten |
+
+The findings that matter most:
+
+1. **A subject nothing has attached is not intercepted at all.** Until something touches `.Context`, every write to it takes no lock, consumes no revision, records no write state and runs no interceptor, which makes invariants I22, I25 and I50 silently inapplicable. Contradiction [X3](#contradictions).
+2. **Whether a read is synchronized is decided by the registered service set, not by the contract.** A read takes `SyncRoot` only when at least one read interceptor is registered. Contradiction [X1](#contradictions), with all nine cells in the [lock coverage matrix](#lock-coverage).
+3. **A detach lifecycle callback that removes the same fallback again does not terminate.** The membership test it passes is unlocked, and the registration it would clear is only cleared after the callbacks have run. [Reentrancy](#reentrancy).
+4. **User code runs under the subject's `SyncRoot` in three places and none of them is documented**: the caller-supplied timestamp function, the property type's own equality comparer, and chain compilation on a write nested inside the terminal. [Reentrancy](#reentrancy).
+5. **Fallback, delegation and invalidation together are 666 of `InterceptorSubjectContext.cs`'s 1095 lines**, and the prologue that pins the state and resolves the delegation target is byte identical at four call sites. [Fallback context](#fallback-context), [delegation target](#delegation-target).
+6. **`IMethodInterceptor` has no implementation in any shipping library**, so the compiled chain the method invocation flow caches is always the identity terminal. [Interceptor](#interceptor), [method invocation](#method-invocation).
+7. **23 of the 65 invariants have no test**, among them the timestamp encoding (I37, I38), four consecutive write state rules (I39 to I42) and the pending origin's non-inheritance by nested writes (I36). [Section 2](#2-contracts-and-invariants).
+
+What is still missing, so nobody mistakes an unwritten section for an empty result:
+
+- [Section 1](#1-supported-use-cases) (supported use cases), [6](#6-gaps-and-limitations) (gaps and limitations), [7](#7-candidates) (candidates) and [8](#8-backlog-disposition) (backlog disposition) are empty and belong to a later pass.
+- Every ruling is pending. Section 1's Ruling column and section 8's Disposition column are both blank, so nothing here is decided, only recorded.
+- X2 is the only contradiction this document classifies. Whether X1 and X3 are code defects or stale documentation is not established anywhere below.
+
 ## 1. Supported use cases
 
 | # | Use case | Status | Cost | Ruling |
@@ -91,6 +119,28 @@ Assertions that hold, each stated so it could be tested. Harvested from the inli
 
 ### Contradictions
 
+| # | Statement | Kind | Anchor |
+|---|---|---|---|
+| X1 | A read takes the subject's `SyncRoot` only when at least one read interceptor is registered, while the contract documents it unconditionally | Not established. The divergence is recorded and section 3 calls collapsing the read pair onto the locking terminal a candidate fix, but nothing rules which side is wrong | Contract `src/Namotion.Interceptor/IInterceptorSubject.cs:8` against the zero-interceptor terminal `src/Namotion.Interceptor/Cache/ReadInterceptorFactory.cs:12` |
+| X2 | The origin is documented as finalized at the point `IsWritten` becomes true, and both terminals depend on it not being | Imprecise documentation over deliberate code, stated at `src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:31` | Contract `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:105` against the terminals `src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:35`, `:37` |
+| X3 | A write lands with no lock, no revision and no interception at all while the subject's generated `_context` field is still null | Not established. The consequence is recorded, the verdict is not | Contract `src/Namotion.Interceptor/IInterceptorSubject.cs:8` against the generated setter `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:521` to `:524` |
+
+#### Lock coverage
+
+Where the subject's `SyncRoot` is actually taken, by operation and by registered service set. Every cell restates a fact established elsewhere in this document, and the contradiction ids sit in the cells they explain.
+
+| Operation | `_context` still null | Context, zero interceptors of that kind | Context, one or more |
+|---|---|---|---|
+| Read | **Not taken.** The generated getter bypasses interception entirely (`src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:515`). **X3** | **Not taken.** The zero-interceptor terminal reads the backing field with no lock (`src/Namotion.Interceptor/Cache/ReadInterceptorFactory.cs:12`). **X1** | Taken (`src/Namotion.Interceptor/Cache/ReadInterceptorFactory.cs:19`) |
+| Write | **Not taken.** The generated setter writes the field through the raw accessor and reports the write as performed (`src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:521` to `:524`). **X3** | Taken (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:19`) | Taken (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:50`) |
+| Invoke | **Not taken** (`src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:535`). **X3** | Not taken. Both terminal branches have identical bodies and neither locks (`src/Namotion.Interceptor/Cache/MethodInvocationFactory.cs:12`) | Not taken (`src/Namotion.Interceptor/Cache/MethodInvocationFactory.cs:18`) |
+
+Reading the grid:
+
+- The documented contract covers the six read and write cells, "the sync root used to synchronize read/writes of property fields" (`src/Namotion.Interceptor/IInterceptorSubject.cs:8`). Three of those six do not take the lock.
+- X1 and X3 are one shape seen twice, which is why the two paragraphs below read as unrelated oddities on their own. X1 leaves an unsynchronized read racing a synchronized write. X3 removes the lock from both sides of the same column, and the switch between the two regimes is itself unsynchronized.
+- The invoke row takes the lock in no column. Section 4 records that as a property of the path rather than as a contradiction.
+
 **X1. `SyncRoot` is documented as covering reads, but a read only takes it when at least one read interceptor is registered.** `IInterceptorSubject.SyncRoot` is documented unconditionally as "the sync root used to synchronize read/writes of property fields" (`src/Namotion.Interceptor/IInterceptorSubject.cs:8`). Both write terminals take it (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:19`, `:50`), and so does the read terminal built when read interceptors exist (`src/Namotion.Interceptor/Cache/ReadInterceptorFactory.cs:19`), but the zero-interceptor read terminal reads the backing field with no lock at all (`src/Namotion.Interceptor/Cache/ReadInterceptorFactory.cs:12`). Whether a read is synchronized against a concurrent write therefore depends on the registered service set, which the documented contract does not mention. X3 below is the write-side counterpart, where neither side takes the lock.
 
 **X2. The origin is documented as finalized at the point `IsWritten` becomes true, and the terminal depends on it not being.** `PropertyWriteContext.Origin` states that the origin is finalized "when the terminal write lands (the same point `IsWritten` becomes true)" (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:105`). In both terminals `IsWritten` is set (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:22`, `:53`), then the still-unfinalized origin is read to compute `isFromSource` (`:35`, `:63`), and only then is `FinalizeOrigin` called (`:37`, `:65`). That window is deliberate and load-bearing, per the comment at `:31`, so it is the documentation that is imprecise rather than the code.
@@ -100,6 +150,37 @@ Assertions that hold, each stated so it could be tested. Harvested from the inli
 ## 3. Concept census
 
 Each noun this area implements, and every place the same idea appears. Counts of "shipping uses" exclude `*.Tests`, `Namotion.Interceptor.Benchmark` and `Namotion.Interceptor.ConnectorTester`.
+
+The 24 concepts at a glance. The subsections below are the evidence behind this table, and each row links to its own.
+
+| Concept | Implementations | Split justified in code | Candidate |
+|---|---|---|---|
+| [Context](#context) | 2 | No. The code states the intent to remove one of them | Yes |
+| [Service](#service) | 1 | Not applicable | No |
+| [Service ordering](#service-ordering) | 2 | No | Yes |
+| [Fallback context](#fallback-context) | 1 | Not applicable | No |
+| [Delegation target](#delegation-target) | 4 | In part. The memoized chain end only | Yes |
+| [Context state snapshot](#context-state-snapshot) | 1 | Not applicable | No |
+| [Cache invalidation](#cache-invalidation) | 1 | Not applicable | No |
+| [Interceptor](#interceptor) | 1, in four kinds | Not applicable | No |
+| [Interceptor chain](#interceptor-chain) | 3 | No | Yes |
+| [Terminal operation](#terminal-operation) | 2 write, 2 invoke | No | Yes |
+| [Chain cache](#chain-cache) | 3 | No | Yes |
+| [Process-wide memoization](#process-wide-memoization) | 1, in five instances | Not applicable | No |
+| [Subject](#subject) | 1 | Not applicable | No |
+| [Subject data](#subject-data) | 2 | No, and stated nowhere | Yes |
+| [Property reference](#property-reference) | 1 | Not applicable | No |
+| [Property metadata](#property-metadata) | 3 | Yes, `SubjectPropertyMetadata.cs:97` | No |
+| [Change origin](#change-origin) | 4 types plus a thread static | No. The stages are named, one type per stage is not justified | Yes, constrained by the published struct's width |
+| [Write state](#write-state) | 1 | Not applicable | No |
+| [Commit revision](#commit-revision) | 3 carriers | Yes, `PropertyWriteState.cs:45` | No |
+| [Timestamp](#timestamp) | 2 | No | Yes |
+| [Ambient scope](#ambient-scope) | 2 | No | Yes |
+| [Thread-static channel](#thread-static-channel) | 3 | In part. Two of the three divergences | Yes |
+| [Lifecycle callback](#lifecycle-callback) | 1 | Not applicable | No |
+| [Property changed notification](#property-changed-notification) | 1 | Not applicable | No |
+
+Reading the table: Implementations is the count the subsection's own assessment states, so a row above 1 is one of the 13 the totals at the end of this section name. Split justified means the code states a reason for the duplication. Candidate means the assessment calls it something that should be one, which is a reading of the evidence and not a ruling: section 7, where candidates are ranked and ruled, is not yet written.
 
 ### Context
 
@@ -130,7 +211,16 @@ Each noun this area implements, and every place the same idea appears. Counts of
   - Four attributes express it: `src/Namotion.Interceptor/Attributes/RunsBeforeAttribute.cs:8`, `src/Namotion.Interceptor/Attributes/RunsAfterAttribute.cs:8`, `src/Namotion.Interceptor/Attributes/RunsFirstAttribute.cs:7`, `src/Namotion.Interceptor/Attributes/RunsLastAttribute.cs:7`.
   - The "cannot have both `[RunsFirst]` and `[RunsLast]`" check exists twice with the same message text: `src/Namotion.Interceptor/Ordering/ServiceOrderResolver.cs:80` for the multi-service path, `:240` for the single-service path reached from `:24`.
   - `TopologicalSort` (`:114`) is a three-line wrapper over `TopologicalSortInto` (`:121`).
-- **Assessment:** two implementations that should be one, for the both-attributes validation at `:80` and `:240`. The rest is one implementation. Shipping use of the four attributes is lopsided: `[RunsLast]` has zero shipping uses, `[RunsFirst]` exactly one (`src/Namotion.Interceptor.Tracking/PropertyValueEqualityCheckHandler.cs:10`), `[RunsAfter]` three (`src/Namotion.Interceptor.Tracking/Change/PropertyChangeInterceptor.cs:22`, `src/Namotion.Interceptor.Connectors/Monitoring/SourceMonitor.cs:19`, `src/Namotion.Interceptor.Hosting/HostedServiceHandler.cs:10`), `[RunsBefore]` seven on six types. The two groups the First and Last attributes exist for cost 126 of the 310 lines: partitioning at `:43-112` and cross-group validation at `:244-299`.
+- **Assessment:** two implementations that should be one, for the both-attributes validation at `:80` and `:240`. The rest is one implementation.
+
+Shipping use of the four attributes is lopsided, and the two groups the First and Last attributes exist for cost 126 of the 310 lines: partitioning at `:43-112` and cross-group validation at `:244-299`.
+
+| Attribute | Shipping uses | Where |
+|---|---|---|
+| `[RunsBefore]` | 7, on six types | not enumerated in this document |
+| `[RunsAfter]` | 3 | `src/Namotion.Interceptor.Tracking/Change/PropertyChangeInterceptor.cs:22`, `src/Namotion.Interceptor.Connectors/Monitoring/SourceMonitor.cs:19`, `src/Namotion.Interceptor.Hosting/HostedServiceHandler.cs:10` |
+| `[RunsFirst]` | 1 | `src/Namotion.Interceptor.Tracking/PropertyValueEqualityCheckHandler.cs:10` |
+| `[RunsLast]` | 0 | nowhere |
 
 ### Fallback context
 
@@ -140,6 +230,31 @@ Each noun this area implements, and every place the same idea appears. Counts of
   - `src/Namotion.Interceptor/InterceptorSubjectContext.cs:80`, the reverse index: the set of contexts that resolve through this one, kept as a superset of the true set (`:131`, `:170`) and used only to drive invalidation upward (`:888`).
   - `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:111` and `:127` override the two mutators to fire lifecycle callbacks around them.
 - **Assessment:** one implementation, with a forward edge and a reverse index that are not interchangeable. Together with delegation and invalidation this is the largest mechanism in core: fallback management `:119-185` (67 lines), delegation resolution `:277-481` (205), the service walk `:549-777` (229), publish and invalidation `:779-943` (165), that is 666 of the file's 1095 lines before counting the state class.
+
+The topology those 666 lines maintain. The forward fallback edge, the reverse used-by edge, the one-hop delegation memo and the cyclic marker, all cited in the rows above and in invariants I6 to I13.
+
+```mermaid
+flowchart TD
+    subgraph acyclic["Delegation chain. A and B have no own service and exactly one fallback each"]
+        A["Context A"]
+        B["Context B"]
+        C["Context C, holds the services"]
+        A -->|fallback| B
+        B -->|fallback| C
+    end
+    C -->|"used by, the edge invalidation walks upward"| B
+    B -->|"used by"| A
+    A -.->|"DelegationTarget memo on A's own state, one hop"| C
+    subgraph cyclic["Pure delegation cycle. Every context on the loop delegates"]
+        D["Context D"]
+        E["Context E"]
+        D -->|fallback| E
+        E -->|fallback| D
+    end
+    D -.->|"chain end"| Marker["CyclicDelegationMarker, a context used only as a sentinel identity"]
+    E -.->|"chain end"| Marker
+    Marker --> Throw["Read, write, invoke and GetServices all raise InvalidOperationException. TryAddService still works and breaks the cycle"]
+```
 
 ### Delegation target
 
@@ -256,7 +371,48 @@ Each noun this area implements, and every place the same idea appears. Counts of
   - `src/Namotion.Interceptor/PendingOrigin.cs:21` holds the "pending" stage, in a thread-static frame struct (`:28`, `:35`) keyed by target property, consumed once (`:50`) and restored by a scope (`:69`).
   - `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:101` is where the attempted stage is carried through the write, consumed as a side effect of constructing any write context (`:120`, `:142`), and finalized at `:296` against the verdict computed at `:260`.
   - `src/Namotion.Interceptor/PropertyWriteState.cs:39` and `:55` record the finalized outcome as two disjoint revision slots, the selection made from a single boolean read off the origin at `src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:35` and `:63`.
-- **Assessment:** one three-stage state machine implemented across four types plus a thread static. The three stages are named in one place, `src/Namotion.Interceptor/PendingOrigin.cs:6`: "An origin moves through three stages: pending (set in the slot, waiting for its write), then attempted (consumed into the write context, carried unverified), then finalized (verified or demoted to Local at the terminal write)." That names the machine, it does not justify one type per stage. The three stages are one state machine spread over four types, and the types are not straightforwardly collapsible: `ChangeOriginKind` is byte-backed under an explicit instruction not to widen it (`src/Namotion.Interceptor/ChangeOrigin.cs:4` to `:6`: "Byte-backed deliberately: inside `SubjectPropertyChange` the runtime can fold a byte into padding where a wider enum could grow the struct. Do not widen."), and `SubjectPropertyChange` is a readonly struct (`src/Namotion.Interceptor.Tracking/Change/SubjectPropertyChange.cs:6`) embedding `ChangeOrigin` by value (`:39`). Folding `AttemptedOrigin.SentValue` (`src/Namotion.Interceptor/AttemptedOrigin.cs:14`), which is write-time-only evidence, into `ChangeOrigin` would therefore widen every published change, and `PendingOrigin` is a transfer mechanism rather than a representation. Any merge proposal has to say what happens to the published struct's width. `src/Namotion.Interceptor/PropertyWriteState.cs:39` is not a fifth type in the machine: it is durable write state that consumes the finalized origin as a one-bit routing decision.
+- **Assessment:** one three-stage state machine implemented across four types plus a thread static. The three stages are named in one place, `src/Namotion.Interceptor/PendingOrigin.cs:6`: "An origin moves through three stages: pending (set in the slot, waiting for its write), then attempted (consumed into the write context, carried unverified), then finalized (verified or demoted to Local at the terminal write)." That names the machine, it does not justify one type per stage.
+
+The machine, and the constraint that stops the four types collapsing into one. The rows above carry the citations.
+
+```mermaid
+flowchart TD
+    Scope["PendingOriginScope, a ref struct that restores the previous frame on dispose"]
+    Pending["Stage 1, PENDING. A PendingOrigin frame in a thread static, keyed by the target property"]
+    Attempted["Stage 2, ATTEMPTED. AttemptedOrigin, a ChangeOrigin plus the value the source sent"]
+    Local["Local, the default ChangeOrigin. No source"]
+    Terminal["Write terminal, holding the subject SyncRoot"]
+    Routing["isFromSource, read while the origin is still unfinalized. Contradiction X2"]
+    Verdict{"Stored value is exactly the value the source sent, and the property is not derived"}
+    Kept["Stage 3, FINALIZED. ChangeOrigin keeps the kind it was stamped with"]
+    Demoted["Stage 3, FINALIZED. ChangeOrigin demoted to Local"]
+    State["PropertyWriteState. Durable, one of two disjoint revision slots. Not a stage of the machine"]
+    Published["SubjectPropertyChange, a readonly struct embedding ChangeOrigin by value"]
+    Constraint["The constraint on any merge. Widening ChangeOriginKind, or folding SentValue into ChangeOrigin, widens every published change"]
+
+    Scope --> Pending
+    Pending -->|"TryConsume, on construction of any PropertyWriteContext"| Attempted
+    Pending -->|"slot empty, already consumed, or another property"| Local
+    Attempted --> Terminal
+    Local --> Terminal
+    Terminal -->|"first, read Kind"| Routing
+    Routing --> State
+    Terminal -->|"then FinalizeOrigin"| Verdict
+    Verdict -->|yes| Kept
+    Verdict -->|no| Demoted
+    Kept --> Published
+    Demoted --> Published
+    Published -.-> Constraint
+```
+
+Why the four types do not collapse straightforwardly:
+
+- `ChangeOriginKind` is byte-backed under an explicit instruction not to widen it (`src/Namotion.Interceptor/ChangeOrigin.cs:4` to `:6`: "Byte-backed deliberately: inside `SubjectPropertyChange` the runtime can fold a byte into padding where a wider enum could grow the struct. Do not widen.").
+- `SubjectPropertyChange` is a readonly struct (`src/Namotion.Interceptor.Tracking/Change/SubjectPropertyChange.cs:6`) embedding `ChangeOrigin` by value (`:39`). Folding `AttemptedOrigin.SentValue` (`src/Namotion.Interceptor/AttemptedOrigin.cs:14`), which is write-time-only evidence, into `ChangeOrigin` would therefore widen every published change.
+- `PendingOrigin` is a transfer mechanism rather than a representation.
+- `src/Namotion.Interceptor/PropertyWriteState.cs:39` is not a fifth type in the machine: it is durable write state that consumes the finalized origin as a one-bit routing decision.
+
+Any merge proposal has to say what happens to the published struct's width.
 
 ### Write state
 
@@ -296,7 +452,15 @@ Each noun this area implements, and every place the same idea appears. Counts of
 - **What it means:** state parked on the calling thread rather than passed as an argument.
 - **Canonical implementation:** `src/Namotion.Interceptor/InterceptorSubjectContext.cs:55`, a reusable traversal buffer.
 - **Other implementations of the same idea:** seven slots in total across three purposes. Five are reusable traversal buffers for the three graph walks (`src/Namotion.Interceptor/InterceptorSubjectContext.cs:55`, `:58`, `:61`, `:64`, `:67`); one carries the pending origin handoff (`src/Namotion.Interceptor/PendingOrigin.cs:35`); one carries the ambient change context (`src/Namotion.Interceptor/SubjectChangeContext.cs:11`). The retain-or-drop policy guarding buffer growth is written out three times against the same threshold (`src/Namotion.Interceptor/InterceptorSubjectContext.cs:28`): at `:324`, `:590` and `:871`.
-- **Assessment:** three implementations that should be one, for the retain-or-drop policy. The threshold and its reasoning are stated once, at `:322`: "Dropped rather than cleared past the threshold: Clear() keeps the capacity, so one deep walk would hold an entry per level on this thread for the rest of the process." The three are not literally identical, and two of the three divergences are explained in the code: `:871` keys on the visited set rather than on the worklist because "a deep chain queues one context per pop, so the worklist stays short while visited takes an entry per level" (`:869` to `:870`), and `:590` acquires and releases differently, inverting the test to retain rather than to drop, because "Service equality callbacks can reenter lookup, so an active walk must own its set" (`:580`). What is left unexplained is that `:324` measures a list's `Capacity` while `:590` and `:871` measure a `HashSet`'s `Count`. The three purposes are distinct and not collapsible into each other.
+- **Assessment:** three implementations that should be one, for the retain-or-drop policy. The threshold and its reasoning are stated once, at `:322`: "Dropped rather than cleared past the threshold: Clear() keeps the capacity, so one deep walk would hold an entry per level on this thread for the rest of the process." The three are not literally identical, and the code explains two of the three divergences:
+
+| Site | Measures | How it diverges | Explained in the code |
+|---|---|---|---|
+| `:324` | a list's `Capacity` | measures a capacity where the other two measure a count | No |
+| `:590` | a `HashSet`'s `Count` | acquires and releases differently, inverting the test to retain rather than to drop | Yes: "Service equality callbacks can reenter lookup, so an active walk must own its set" (`:580`) |
+| `:871` | a `HashSet`'s `Count` | keys on the visited set rather than on the worklist | Yes: "a deep chain queues one context per pop, so the worklist stays short while visited takes an entry per level" (`:869` to `:870`) |
+
+The three purposes are distinct and not collapsible into each other.
 
 ### Lifecycle callback
 
@@ -595,7 +759,16 @@ Every piece of mutable state core owns, and what holds it together. Bare citatio
 | `PropertyInfoExtensions.Cache`, `PropertyInfoExtensions.AllowMultipleCache`, `PropertyChangedEventArgsCache._cache` | process wide (`src/Namotion.Interceptor/PropertyInfoExtensions.cs:14`, `:92`, `src/Namotion.Interceptor/PropertyChangedEventArgsCache.cs:12`) | `GetOrAdd` on a `ConcurrentDictionary` (`src/Namotion.Interceptor/PropertyInfoExtensions.cs:40` for `Cache`, `:96` for `AllowMultipleCache`, `src/Namotion.Interceptor/PropertyChangedEventArgsCache.cs:21`) | none needed | Yes |
 | The seven thread-static slots | the calling thread | nothing, because nothing is shared | see Ambient channels below | not applicable |
 
-Five cache fields on `ContextState` (`:961`, `:962`, `:966`, `:967`, `:973`) are filled by four protocols: `GetOrAdd` for the service cache (`:574`), compare-and-swap-grow for the two chain arrays, which share `TryGetFunction` (`:1048`) and `SetFunction` (`:1064`, with the element swap at `:1071` and the array swap at `:1083`), compare and swap on a single slot for the invoke chain (`:1092`), and compare and swap if absent for the chain end (`:992`). The reason the two chain arrays are indexed rather than hashed is stated at `:43`. Nothing states why the remaining three need three protocols.
+Five cache fields on `ContextState` are filled by four protocols:
+
+| Protocol | Field | Filled at |
+|---|---|---|
+| `GetOrAdd` | the service cache (`:961`) | `:574` |
+| Compare and swap, growing the array | the read and write chain arrays (`:966`, `:967`), which share `TryGetFunction` (`:1048`) and `SetFunction` (`:1064`) | element swap `:1071`, array swap `:1083` |
+| Compare and swap on a single slot | the method invocation chain (`:962`) | `:1092` |
+| Compare and swap if absent | the resolved chain end (`:973`) | `:992` |
+
+The reason the two chain arrays are indexed rather than hashed is stated at `:43`. Nothing states why the remaining three need three protocols.
 
 ### Lock order
 
@@ -607,13 +780,39 @@ Core takes exactly two kinds of lock of its own, plus one it does not own and tw
 4. `ConcurrentDictionary` bucket locks, entered under both outer locks: `src/Namotion.Interceptor/Ordering/ServiceOrderResolver.cs:303` under `_mutationLock` and `src/Namotion.Interceptor/PropertyReference.cs:222` under `SyncRoot`. Leaves, so they do not affect the order conclusion.
 5. The CLR type-initializer lock, which nests inside-out in two places. `CreateCyclicDelegationMarker` (`:99` to `:104`) takes a `_mutationLock` and a set lock **inside** the `InterceptorSubjectContext` type initializer (`:40`), and `PropertyTypeIndex<T>`'s initializer (`:51`) can be triggered under `SyncRoot`, on a nested write started from inside a write terminal (`:486`, `:509`). Both are safe here because each initializer touches only fresh or interlocked state, but they are locks and the inventory is not two plus one.
 
+An arrow means the lock at the tail may be held while the lock at the head is acquired. The dotted path is the recursion the verification pass found, which the rows under the diagram carry the citations for.
+
+```mermaid
+flowchart TD
+    TypeInitContext["CLR type initializer for InterceptorSubjectContext"]
+    Mutation["_mutationLock, one per context, reentrant because Monitor is"]
+    SetLock["_usedByContexts set instance, leaf"]
+    SyncRoot["Subject SyncRoot, not owned by core"]
+    TypeInitIndex["CLR type initializer for PropertyTypeIndex of T"]
+    Dictionary["ConcurrentDictionary bucket locks, leaves"]
+    Recursion["A TryAddService factory re-enters the same context. The nested AddService lock block releases one recursion level only, so its InvalidateUsingContexts runs with _mutationLock still held"]
+
+    TypeInitContext --> Mutation
+    Mutation --> SetLock
+    Mutation --> Dictionary
+    SyncRoot --> TypeInitIndex
+    SyncRoot --> Dictionary
+    Mutation -.-> Recursion
+    Recursion -.-> SetLock
+    SyncRoot ---|"no core path takes both, so nothing in the library establishes an order between them"| Mutation
+```
+
 The stated order is `_mutationLock` then a set lock, never the reverse (`:22`), with no path taking a second `_mutationLock` (`:24`). Both hold for core's own code, verified against every lock site rather than taken from the comment:
 
 - `_mutationLock` is entered at `:123`, `:159`, `:189` and `:215`. A set lock is entered at `:137` (inside the first), `:176` (inside the second) and `:912`. The `:912` site is reached from `InvalidateUsingContexts`, which every mutator calls only after its own lock block has closed (`:145`, `:183`, `:209`, `:221`). That is true lexically and not at runtime: `TryAddService` holds `_mutationLock` across `factory()` (`:189` to `:207`, the call at `:200`), and a factory that re-enters the same context, which the contract expressly permits (`src/Namotion.Interceptor/IInterceptorSubjectContext.cs:23` to `:24`) and which `:202` to `:204` anticipates, reaches `AddService`, whose own `lock` block at `:215` to `:219` releases only one recursion level. Its `InvalidateUsingContexts()` at `:221` therefore runs with `_mutationLock` still held, and `:912` takes a set lock underneath it. The same applies to `:145` and `:183` through a reentrant `AddFallbackContext` or `RemoveFallbackContext`. The conclusion is unaffected: the acquisition order is still `_mutationLock` then a set lock, and the set lock is still a leaf, so there is no cycle.
 - No set-lock body calls out. They add (`:139`), remove (`:178`) or copy the set (`:914` to `:923`), and the snapshot is deliberately queued only after the lock is released (`:907`, `:912`, `:926`).
 - No core path nests `_mutationLock`. `AddFallbackContext` reaches into the fallback context only to create or take its set (`:136`), `RemoveFallbackContext` reads its field directly (`:173`), and `PublishState` takes nothing (`:797`).
 
-The inventory is exhaustive, which is worth having in writing because a later change can be checked against it. `src/Namotion.Interceptor/` contains exactly ten `lock (` sites: `:123`, `:137`, `:159`, `:176`, `:189`, `:215` and `:912` in `InterceptorSubjectContext.cs`, plus `Cache/WriteInterceptorFactory.cs:19` and `:50` and `Cache/ReadInterceptorFactory.cs:19`. There is no `Monitor.Enter`, `SemaphoreSlim`, `ReaderWriterLock` or `SpinLock` anywhere in core. No violation of the stated order was found after checking the four `_mutationLock` bodies, the three set-lock bodies, the three `SyncRoot` bodies, the reentrant-mutator path, the executor's lifecycle overrides and the cyclic marker's self-registration at `:102`.
+The inventory is exhaustive, which is worth having in writing because a later change can be checked against it.
+
+- `src/Namotion.Interceptor/` contains exactly ten `lock (` sites: `:123`, `:137`, `:159`, `:176`, `:189`, `:215` and `:912` in `InterceptorSubjectContext.cs`, plus `Cache/WriteInterceptorFactory.cs:19` and `:50` and `Cache/ReadInterceptorFactory.cs:19`.
+- There is no `Monitor.Enter`, `SemaphoreSlim`, `ReaderWriterLock` or `SpinLock` anywhere in core.
+- No violation of the stated order was found after checking the four `_mutationLock` bodies, the three set-lock bodies, the three `SyncRoot` bodies, the reentrant-mutator path, the executor's lifecycle overrides and the cyclic marker's self-registration at `:102`.
 
 If the order were violated, two contexts registering each other as a fallback concurrently would deadlock: each thread would hold its own `_mutationLock` and wait for the other's set lock while the other waits for its. That is exactly what the leaf property of the set lock prevents, and the invariant table records the test that pins it (invariant I2).
 
@@ -644,23 +843,30 @@ Three observations about the set as a whole:
 
 ### Reentrancy
 
-Documented in the code:
+Every path on which user code can re-enter core, what runs there, and under which lock. The detail that does not fit a cell follows the table.
 
-- A `TryAddService` factory or existence predicate may re-enter the same context and publish, because `Monitor` is reentrant. The outer call re-reads the state afterwards so the nested publish is not lost (`:202` to `:206`). Re-entering a different context's mutator is forbidden, with the deadlock spelt out (`src/Namotion.Interceptor/IInterceptorSubjectContext.cs:23` to `:27`).
-- A registered service's `Equals` or `GetHashCode`, invoked by the per-context dedup (`:735`), may re-enter service lookup. `ComputeServices` detaches the visited set for exactly this reason so the nested walk gets one of its own (`:579` to `:581`, invariant I18).
-- Reads, writes and invocations may re-enter each other freely, because each call's terminal rides on the per-call context rather than on the shared chain instance (`src/Namotion.Interceptor/Interceptors/IReadInterceptor.cs:33` to `:35`, `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:44` to `:46`, `src/Namotion.Interceptor/Interceptors/IMethodInterceptor.cs:24` to `:27`, invariant I48).
-- Same-property re-entry from the changing hook is unsupported: the inner invocation consumes the pending stamp (`src/Namotion.Interceptor/PendingOrigin.cs:16`, `:17`).
-- Nested writes, whether from hooks, property changed handlers or derived recalculations, never inherit a pending stamp, because the slot is either already consumed or targets a different property (`src/Namotion.Interceptor/PendingOrigin.cs:11` to `:13`).
-- A derived property's getter must not run under `SyncRoot`, which is why origin finalization demotes a derived write without invoking it (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:267` to `:270`).
+| Path | What user code runs | Under which lock | Documented in the code |
+|---|---|---|---|
+| A `TryAddService` factory or existence predicate re-enters the same context and publishes | the `factory` and `exists` delegates (`:195`, `:200`) | `_mutationLock` of that context, held across both. `Monitor` is reentrant, and the outer call re-reads the state afterwards so the nested publish is not lost (`:202` to `:206`) | Yes. Re-entering a **different** context's mutator is forbidden, with the deadlock spelt out (`src/Namotion.Interceptor/IInterceptorSubjectContext.cs:23` to `:27`) |
+| The per-context dedup calls a registered service's `Equals` or `GetHashCode` (`:735`), which may re-enter service lookup | the service's own equality members | none on a plain query path, which takes no context lock (invariant I1). `_mutationLock` when the walk is driven from a `TryAddService` factory, and `SyncRoot` on the nested-write row below | Yes. `ComputeServices` detaches the visited set for exactly this reason, so the nested walk gets one of its own (`:579` to `:581`, invariant I18) |
+| Reads, writes and invocations re-enter each other freely | any interceptor or hook on the inner call | not a lock question. Each call's terminal rides on the per-call context rather than on the shared chain instance | Yes (`src/Namotion.Interceptor/Interceptors/IReadInterceptor.cs:33` to `:35`, `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:44` to `:46`, `src/Namotion.Interceptor/Interceptors/IMethodInterceptor.cs:24` to `:27`, invariant I48) |
+| Same-property re-entry from the changing hook | the generated changing hook body | none. It runs ahead of interception (section 4, write step 1) | Yes, and unsupported: the inner invocation consumes the pending stamp (`src/Namotion.Interceptor/PendingOrigin.cs:16`, `:17`) |
+| Nested writes from hooks, property changed handlers or derived recalculations | the hook or handler body | none for the changed hook and the notification, which run after `SyncRoot` is released (section 4, write step 15) | Yes. They never inherit a pending stamp, because the slot is either already consumed or targets a different property (`src/Namotion.Interceptor/PendingOrigin.cs:11` to `:13`) |
+| Origin finalization would invoke a derived property's getter | the derived getter, which is deliberately not invoked | `SyncRoot`, which is exactly why it is not invoked | Yes (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:267` to `:270`) |
+| The write terminal resolves the write timestamp | whatever `SubjectChangeContext.GetTimestampFunction` was set to (`src/Namotion.Interceptor/SubjectChangeContext.cs:36`, `:52`) | the subject's `SyncRoot` (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:38`, `:66`, resolving through `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:201`, `:216`, and the explicit-null-scope branch at `:227`) | **No** |
+| A write nested inside the terminal compiles a chain | the registered services' own `Equals` and `GetHashCode` (`:735`) | the subject's `SyncRoot` | **No** |
+| Origin finalization compares the stored value against the value the source sent | `EqualityComparer<TProperty>.Default.Equals` for the property type (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:282`, `:328`) | the subject's `SyncRoot` (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:37`, `:65`) | **No** |
+| `GetFinalValue` reads a derived property's final value and re-enters the read path | the public property getter, so the whole read flow including its `SyncRoot` terminal (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:255`, `src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:306`) | none. Interceptors call it after `next` returns, by which point the terminal has released `SyncRoot` | **No.** The documentation calls it "user code at publish time" (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:66`) without naming the re-entry |
+| A detach lifecycle callback calls `RemoveFallbackContext` again for the same pair | the lifecycle callback (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:135`) | none. The membership test it passes is unlocked (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:129`, reading `InterceptorSubjectContext.cs:152`) | **No, and it does not terminate** |
+| Two threads remove the same fallback concurrently | the detach callbacks, on both threads | none. The same unlocked membership test | **No.** Nothing in the contract says a detach callback fires at most once (`src/Namotion.Interceptor/Interceptors/ILifecycleInterceptor.cs:11` to `:15`) |
 
-Reachable and not documented anywhere:
+Detail that does not fit a cell:
 
-- The caller-supplied timestamp function runs under the subject's `SyncRoot`. The terminal reads the raw write timestamp inside the lock (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:38`, `:66`), which lazily resolves it (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:201`, `:216`, and the explicit-null-scope branch at `:227`, which calls the same function) and calls whatever `SubjectChangeContext.GetTimestampFunction` was set to (`src/Namotion.Interceptor/SubjectChangeContext.cs:36`, `:52`). This is not confined to the zero-write-interceptor case: the standard tracking interceptor reads the timestamp only after `next` (`src/Namotion.Interceptor.Tracking/Change/PropertyChangeInterceptor.cs:158` and `:163` against `:188` and `:242`), so resolution still lands inside the terminal's lock with tracking enabled. A function that writes a property of the same subject re-enters the write path under the already-held lock, takes a revision of its own, and resolves the timestamp again for the inner write, because the inner context's cache starts at zero (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:127`).
-- On a nested write started from inside the terminal, for instance from that timestamp function, chain compilation itself runs under `SyncRoot`: `ExecuteInterceptedWrite` (`:259`) to `CreateWriteInterceptorFunction` (`:518`) to `ComputeServices` to `ReduceFrame` to `distinctServices.Add` (`:735`), all in `InterceptorSubjectContext.cs`. So the registered services' own `Equals` and `GetHashCode` also run under the subject's lock on that path.
-- The property type's own equality comparer runs under the same lock. Finalization (`src/Namotion.Interceptor/Cache/WriteInterceptorFactory.cs:37`, `:65`) reaches `EqualityComparer<TProperty>.Default.Equals` at `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:282` and `:328`. It is reached only for a write that is both stamped and non-derived: a Local origin is tested at `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:262` and returns at `:264`, and a derived property is tested at `:270` and returns at `:272`.
-- Reading the final value of a derived property re-enters the read path. `GetFinalValue` invokes the metadata getter (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:255`), whose delegate is the public property (`src/Namotion.Interceptor.Generator/SubjectCodeGenerator.cs:306`), so it runs the whole read flow including its `SyncRoot` terminal. The documentation calls this "user code at publish time" (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:66`) without naming the re-entry. It is safe against the write lock only because interceptors call it after `next` returns, by which point the terminal has released `SyncRoot`.
-- A lifecycle callback may re-enter the mutator that invoked it. Attach callbacks run after the base mutator returned and its lock was released (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:113`, `:120`); detach callbacks run before the base mutator is called at all (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:131`, `:135`, `:138`). Attach is idempotent, because the base mutator returns false for a fallback already present (`:126`, `:128`, both in `InterceptorSubjectContext.cs`). Detach is not, and it does not merely fire twice: it does not terminate. The membership test at `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:129` reads the state with no lock (`InterceptorSubjectContext.cs:152`), and the base mutator that would clear the registration is only reached at `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:138`, after the callbacks. So a detach callback that calls `RemoveFallbackContext` again for the same pair still sees the fallback registered, runs the callbacks again, and recurses until the stack is gone.
-- Separately from that recursion, the same unlocked membership test is a second gate on a check the base mutator makes again under the lock (`InterceptorSubjectContext.cs:162`). Two threads removing the same fallback concurrently can both pass `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:129`, both run the detach callbacks, and only one then passes `InterceptorSubjectContext.cs:162`. That is a duplicate fire rather than a non-terminating one. Nothing in the contract says a detach callback fires at most once (`src/Namotion.Interceptor/Interceptors/ILifecycleInterceptor.cs:11` to `:15`).
+- **The timestamp function is not confined to the zero-write-interceptor case.** The standard tracking interceptor reads the timestamp only after `next` (`src/Namotion.Interceptor.Tracking/Change/PropertyChangeInterceptor.cs:158` and `:163` against `:188` and `:242`), so resolution still lands inside the terminal's lock with tracking enabled. A function that writes a property of the same subject re-enters the write path under the already-held lock, takes a revision of its own, and resolves the timestamp again for the inner write, because the inner context's cache starts at zero (`src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:127`).
+- **The nested-write compilation path in full**: `ExecuteInterceptedWrite` (`:259`) to `CreateWriteInterceptorFunction` (`:518`) to `ComputeServices` to `ReduceFrame` to `distinctServices.Add` (`:735`), all in `InterceptorSubjectContext.cs`.
+- **The equality comparer is reached only for a write that is both stamped and non-derived.** A Local origin is tested at `src/Namotion.Interceptor/Interceptors/IWriteInterceptor.cs:262` and returns at `:264`, and a derived property is tested at `:270` and returns at `:272`.
+- **Why the detach recursion does not terminate.** Attach callbacks run after the base mutator returned and its lock was released (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:113`, `:120`); detach callbacks run before the base mutator is called at all (`src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:131`, `:135`, `:138`). Attach is idempotent, because the base mutator returns false for a fallback already present (`InterceptorSubjectContext.cs:126`, `:128`). Detach is not, and it does not merely fire twice. The base mutator that would clear the registration is only reached at `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:138`, after the callbacks, so a callback that removes the same pair again still sees the fallback registered, runs the callbacks again, and recurses until the stack is gone.
+- **The duplicate fire is a separate consequence of the same unlocked test**, which is a second gate on a check the base mutator makes again under the lock (`InterceptorSubjectContext.cs:162`). Two threads can both pass `src/Namotion.Interceptor/Interceptors/InterceptorExecutor.cs:129`, both run the detach callbacks, and only one then passes `InterceptorSubjectContext.cs:162`. That is a duplicate fire rather than a non-terminating one.
 
 Forbidden by construction rather than by contract: the invalidation walk runs no user code whatsoever, so it cannot be re-entered (`InterceptorSubjectContext.cs:840`), and the `_usedByContexts` set lock is a leaf because its element type carries no user-supplied equality.
 
