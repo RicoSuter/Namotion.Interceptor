@@ -23,7 +23,7 @@
 | `docs/superpowers/specs/2026-09-20-architecture-dossier-template.md` | Read only. The skeleton to copy. |
 | `docs/superpowers/specs/2026-09-20-architecture-dossier-design.md` | Read only. The method and the nine steps. |
 
-The area under analysis, 36 files and 3491 lines, all of `src/Namotion.Interceptor/`:
+The area under analysis, 36 files and 3544 lines, all of `src/Namotion.Interceptor/`:
 
 | Group | Files |
 |---|---|
@@ -39,7 +39,7 @@ Known inputs that already exist and must be used rather than re-derived:
 
 - `src/Namotion.Interceptor.Tests/VerifyChecksTests.PublicApi.verified.txt`, 231 lines. The exact public surface of core. Primary input for section 1.
 - `src/Namotion.Interceptor.Tests/`, 25 files, 145 `[Fact]`/`[Theory]` tests. The Covered/Unverified mapping for section 2.
-- The core library is unusually well commented, with invariants already stated inline (for example `InterceptorSubjectContext.cs:16` states rule R1 and the lock order). Section 2 is mostly harvesting.
+- The core library is unusually well commented, with invariants already stated inline (for example `InterceptorSubjectContext.cs:18` states rule R1 and `:22` the lock order). Section 2 is mostly harvesting.
 
 ---
 
@@ -67,7 +67,7 @@ find src/Namotion.Interceptor -name '*.cs' -not -path '*/obj/*' -not -path '*/bi
 find src/Namotion.Interceptor -name '*.cs' -not -path '*/obj/*' -not -path '*/bin/*' -exec cat {} + | wc -l
 ```
 
-Expected: a sha, `36`, and `3491`. If the counts differ, master moved. Record the new numbers and use them, do not use the numbers in this plan.
+Expected: a sha, `36`, and `3544` (measured on master; the `feature/value-assertions` branch differs). If the counts differ, master moved. Record the new numbers and use them, do not use the numbers in this plan.
 
 - [ ] **Step 3: Churn ranking for the area**
 
@@ -84,7 +84,7 @@ Copy the skeleton fenced block out of `docs/superpowers/specs/2026-09-20-archite
 ```markdown
 # Core Context: Architecture Dossier
 
-Area: `src/Namotion.Interceptor/` (the core library, .NET Standard 2.0). 36 files, 3491 lines.
+Area: `src/Namotion.Interceptor/` (the core library, .NET Standard 2.0). 36 files, 3544 lines.
 Boundary: Tracking, Registry, Connectors and the source generator are out of scope and get their own dossiers. Where core defines a contract those libraries depend on, the contract is in scope and the consumer's use of it is not.
 Written against: `<sha from Step 2>`
 Verified: pending
@@ -110,7 +110,7 @@ The core library already states most of its invariants inline. This task harvest
 
 - [ ] **Step 1: Read all 36 files**
 
-Read every file in `src/Namotion.Interceptor/`. At 3491 lines this is cheap and it is the only way to find invariants stated in comments rather than in code. Do not sample.
+Read every file in `src/Namotion.Interceptor/`. At 3544 lines this is cheap and it is the only way to find invariants stated in comments rather than in code. Do not sample.
 
 - [ ] **Step 2: Extract the explicitly stated rules**
 
@@ -127,8 +127,8 @@ One row per invariant. Example rows showing the required shape, using two real o
 ```markdown
 | # | Invariant | Evidence | Covered |
 |---|---|---|---|
-| I1 | A service query takes no context lock. It pins one snapshot with a single volatile read and walks other contexts' snapshots the same way, so the downward service walk and the upward invalidation walk cannot form a lock cycle, including in cyclic fallback graphs. | `src/Namotion.Interceptor/InterceptorSubjectContext.cs:16` | Unverified |
-| I2 | Lock order is `_mutationLock` then a `_usedByContexts` set lock, never the reverse. No path takes a second `_mutationLock`. | `src/Namotion.Interceptor/InterceptorSubjectContext.cs:21` | Unverified |
+| I1 | A service query takes no context lock. It pins one snapshot with a single volatile read and walks other contexts' snapshots the same way, so the downward service walk and the upward invalidation walk cannot form a lock cycle, including in cyclic fallback graphs. | `src/Namotion.Interceptor/InterceptorSubjectContext.cs:18` | Unverified |
+| I2 | Lock order is `_mutationLock` then a `_usedByContexts` set lock, never the reverse. No path takes a second `_mutationLock`. | `src/Namotion.Interceptor/InterceptorSubjectContext.cs:22` | Unverified |
 | I3 | `LastNonSourceCommitRevision` excludes `FromSource` commits but includes `Confirmed` commits. The asymmetry is load-bearing and must not be "fixed" in either direction. | `src/Namotion.Interceptor/PropertyWriteState.cs` (the `LastNonSourceCommitRevision` remarks block) | Unverified |
 ```
 
@@ -255,7 +255,7 @@ Save to the evidence directory. Expect at least seven `[ThreadStatic]` slots: fi
 
 Fill the state table, then the three required subsections:
 
-- **Lock order.** The total order and what happens if it is violated. `InterceptorSubjectContext.cs:21` already states it.
+- **Lock order.** The total order and what happens if it is violated. `InterceptorSubjectContext.cs:22` already states it.
 - **Ambient channels.** One row per thread-static or async-local slot: what it carries, who sets it, who consumes it, its lifetime, and whether it survives an `await`. `PendingOrigin.cs:22` documents that it is synchronous by design and never crosses an await. Record that for each slot, because a slot that must not cross an await is a constraint the dossier has to state.
 - **Reentrancy.** Which callbacks can re-enter which paths. `PendingOrigin.cs` documents that same-property re-entry from `OnChanging` is unsupported. Find the rest.
 
