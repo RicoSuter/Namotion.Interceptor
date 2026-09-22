@@ -71,6 +71,9 @@ public interface IInterceptorSubjectContext
     /// Removes a previously added fallback context.
     /// </summary>
     /// <param name="context">The fallback context to remove.</param>
-    /// <returns>True if the fallback context was removed, false if it was not present.</returns>
+    /// <returns>
+    /// True if this call removed the fallback context. False if it did not: the context was either
+    /// not present or already being removed, so false does not imply it is now absent.
+    /// </returns>
     bool RemoveFallbackContext(IInterceptorSubjectContext context);
 }
