@@ -9,18 +9,21 @@ internal static class ReadInterceptorFactory<TProperty>
     {
         if (interceptors.Length == 0)
         {
-            return static (ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> innerReadValue) => innerReadValue(context.Property.Subject);
+            return ReadUnderLock;
         }
 
-        var chain = new ReadInterceptorChain<TProperty>(
-            interceptors,
-            static (ref context, innerReadValue) =>
-            {
-                lock (context.Property.Subject.SyncRoot)
-                {
-                    return innerReadValue(context.Property.Subject);
-                }
-            });
+        var chain = new ReadInterceptorChain<TProperty>(interceptors, ReadUnderLock);
         return chain.Execute;
+    }
+
+    // The write terminal commits under SyncRoot. A value wider than the runtime's atomic access can
+    // be observed half written unless it is read under the same lock, whether or not interceptors
+    // sit in front of the read.
+    private static TProperty ReadUnderLock(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> innerReadValue)
+    {
+        lock (context.Property.Subject.SyncRoot)
+        {
+            return innerReadValue(context.Property.Subject);
+        }
     }
 }
