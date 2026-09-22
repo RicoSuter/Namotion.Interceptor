@@ -496,7 +496,8 @@ Root
 ```
 
 Removing A reduces Shared's refs to 1 - it stays attached via B.
-Removing B after A detaches Shared (refs: 0).
+Removing B after A detaches Shared (refs: 0). The removal order does not matter: whichever parent
+lets go last, a detached subject stops resolving the graph's services.
 
 **Cycles (Limitation)**
 
