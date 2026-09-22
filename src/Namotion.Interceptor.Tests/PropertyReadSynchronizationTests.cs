@@ -27,6 +27,106 @@ public class PropertyReadSynchronizationTests
         Assert.Single(context.GetServices<IWriteInterceptor>());
 
         var subject = new WideValueSubject(context);
+
+        // Act
+        var observation = await ReadWhileWritingAsync(subject);
+
+        // Assert
+        AssertNoTornReads(observation);
+    }
+
+    /// <summary>
+    /// The chain terminal skips the lock for types the runtime reads atomically, so this pins that
+    /// a wide struct still takes it when read interceptors sit in front of the read.
+    /// </summary>
+    [Fact]
+    public async Task WhenWideStructIsReadWhileWrittenThroughReadInterceptor_ThenNoReadIsTorn()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => new PassThroughReadInterceptor(), _ => false)
+            .WithService(() => new PassThroughWriteInterceptor(), _ => false);
+
+        Assert.Single(context.GetServices<IReadInterceptor>());
+        Assert.Single(context.GetServices<IWriteInterceptor>());
+
+        var subject = new WideValueSubject(context);
+
+        // Act
+        var observation = await ReadWhileWritingAsync(subject);
+
+        // Assert
+        AssertNoTornReads(observation);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public void WhenPropertyIsRead_ThenSyncRootIsHeldExactlyForNonAtomicTypes(bool withReadInterceptor, bool isWideStruct, bool expectSyncRootHeld)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        if (withReadInterceptor)
+        {
+            context.WithService(() => new PassThroughReadInterceptor(), _ => false);
+        }
+
+        var subject = new WideValueSubject(context);
+        var executor = (IInterceptorExecutor)((IInterceptorSubject)subject).Context;
+
+        // Act
+        var syncRootHeld = isWideStruct
+            ? ObserveSyncRootDuringRead<WideValue>(executor, nameof(WideValueSubject.Value))
+            : ObserveSyncRootDuringRead<int>(executor, nameof(WideValueSubject.Number));
+
+        // Assert
+        Assert.Equal(expectSyncRootHeld, syncRootHeld);
+    }
+
+    /// <summary>
+    /// Dynamic registry properties and the dynamic proxy dispatch the read with the property type
+    /// widened to object, and their terminal reads the declared type and boxes it. The declared type
+    /// behind an object read can therefore be a wide struct, so that dispatch keeps the lock.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenReadIsDispatchedWithErasedPropertyType_ThenSyncRootIsHeld(bool withReadInterceptor)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        if (withReadInterceptor)
+        {
+            context.WithService(() => new PassThroughReadInterceptor(), _ => false);
+        }
+
+        var subject = new WideValueSubject(context);
+        var executor = (IInterceptorExecutor)((IInterceptorSubject)subject).Context;
+
+        // Act
+        var syncRootHeld = ObserveSyncRootDuringRead<object>(executor, nameof(WideValueSubject.Value));
+
+        // Assert
+        Assert.True(syncRootHeld);
+    }
+
+    private static bool ObserveSyncRootDuringRead<TProperty>(IInterceptorExecutor executor, string propertyName)
+    {
+        var syncRootHeld = false;
+        executor.GetPropertyValue<TProperty>(propertyName, subject =>
+        {
+            syncRootHeld = Monitor.IsEntered(subject.SyncRoot);
+            return default!;
+        });
+
+        return syncRootHeld;
+    }
+
+    private static async Task<TornReadObservation> ReadWhileWritingAsync(WideValueSubject subject)
+    {
         using var start = new ManualResetEventSlim(false);
 
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
@@ -59,26 +159,37 @@ public class PropertyReadSynchronizationTests
                 }
             }
 
-            return (reads, tornReads, firstTornValue);
+            return new TornReadObservation(reads, tornReads, firstTornValue);
         }, "reader");
 
-        // Act
         start.Set();
         await writer;
-        var (reads, tornReads, firstTornValue) = await reader;
+        return await reader;
+    }
 
-        // Assert
-        Assert.True(reads > 0, "The reader never observed the property while the writer was running.");
-        Assert.True(tornReads == 0,
-            $"{tornReads} of {reads} reads were torn, the first one observed was {firstTornValue}: " +
+    private static void AssertNoTornReads(TornReadObservation observation)
+    {
+        Assert.True(observation.Reads > 0, "The reader never observed the property while the writer was running.");
+        Assert.True(observation.TornReads == 0,
+            $"{observation.TornReads} of {observation.Reads} reads were torn, the first one observed was {observation.FirstTornValue}: " +
             "the read terminal did not synchronize on the subject's SyncRoot while the write terminal did.");
     }
+
+    private sealed record TornReadObservation(long Reads, long TornReads, WideValue FirstTornValue);
 
     private sealed class PassThroughWriteInterceptor : IWriteInterceptor
     {
         public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
         {
             next(ref context);
+        }
+    }
+
+    private sealed class PassThroughReadInterceptor : IReadInterceptor
+    {
+        public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
+        {
+            return next(ref context);
         }
     }
 }
@@ -105,4 +216,6 @@ public readonly record struct WideValueLane(long A, long B, long C, long D)
 public partial class WideValueSubject
 {
     public partial WideValue Value { get; set; }
+
+    public partial int Number { get; set; }
 }
