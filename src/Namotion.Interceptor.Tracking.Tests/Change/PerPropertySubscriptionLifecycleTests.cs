@@ -306,7 +306,10 @@ public class PerPropertySubscriptionLifecycleTests
         });
 
         start.Set();
-        await Task.WhenAll(writers, disposer);
+        var exception = await Record.ExceptionAsync(() => Task.WhenAll(writers, disposer));
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]

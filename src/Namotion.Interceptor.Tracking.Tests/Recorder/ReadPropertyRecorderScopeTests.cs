@@ -55,10 +55,16 @@ public class ReadPropertyRecorderScopeTests
 
         _ = new Person(context);
 
-        // Act & Assert
+        // Act
         var scope = ReadPropertyRecorder.Start();
-        scope.Dispose();
-        scope.Dispose();
+        var exception = Record.Exception(() =>
+        {
+            scope.Dispose();
+            scope.Dispose();
+        });
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]

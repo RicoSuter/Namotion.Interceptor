@@ -576,7 +576,9 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
 
     private ImmutableArray<TInterface> ComputeServices<TInterface>(ContextState state)
     {
-        var visited = _serviceQueryVisited ??= [];
+        var visited = _serviceQueryVisited ?? [];
+        // Service equality callbacks can reenter lookup, so an active walk must own its set.
+        _serviceQueryVisited = null;
         try
         {
             return CollectServices(typeof(TInterface), this, state, visited)
@@ -585,13 +587,10 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         }
         finally
         {
-            if (visited.Count > MaximumRetainedTraversalSize)
-            {
-                _serviceQueryVisited = null;
-            }
-            else
+            if (visited.Count <= MaximumRetainedTraversalSize)
             {
                 visited.Clear();
+                _serviceQueryVisited = visited;
             }
         }
     }

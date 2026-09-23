@@ -233,8 +233,8 @@ Pinned by `RegistryHandlerOrderTests`, and for the derived-getter path by `Regis
 
 After all concurrent `WriteProperty` / `DetachFromProperty` / `AttachSubjectToContext` / `DetachSubjectFromContext` operations complete:
 
-1. **Reachable → Registered**: Every subject reachable from the root via the object graph is in `_attachedSubjects`
-2. **Not reachable → Not registered**: Every subject NOT reachable from the root is NOT in `_attachedSubjects`
+1. **Reachable → Registered**: Every subject reachable from the root through intercepted properties is in `_attachedSubjects`. Properties that are not intercepted, such as non-partial `[Derived]` getters, never attach the subjects they return, so they do not make a subject reachable.
+2. **Not reachable → Not registered**: Every subject NOT reachable from the root through intercepted properties is NOT in `_attachedSubjects`
 3. **`_lastProcessedValues` matches attachment state**: For every attached subject, `_lastProcessedValues` entries exist for all structural properties that have been written or seeded
 4. **No dangling entries**: No `_lastProcessedValues` entries exist for detached subjects
 
