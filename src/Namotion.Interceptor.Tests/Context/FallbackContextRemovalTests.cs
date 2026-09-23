@@ -4,12 +4,8 @@ using Namotion.Interceptor.Testing;
 namespace Namotion.Interceptor.Tests.Context;
 
 /// <summary>
-/// The executor runs the detach callbacks while the fallback edge is still registered, because they
-/// resolve their handlers through the subject's own context and would find nothing once the edge is
-/// gone. That leaves a window in which the edge is present but its removal is already under way, and
-/// a removal of the same pair arriving inside that window has to be a no-op rather than a second run
-/// of the callbacks: from a callback it would otherwise recurse until the stack is exhausted, and
-/// from another thread it would fire the callbacks twice.
+/// Removals of a fallback context pair that arrive while the same pair's removal is already under
+/// way. The rationale is documented on <see cref="InterceptorExecutor"/>.
 /// </summary>
 public class FallbackContextRemovalTests
 {
@@ -74,6 +70,30 @@ public class FallbackContextRemovalTests
         // Assert
         Assert.Equal(1, interceptor.DetachCount);
         Assert.Single(results, result => result);
+        Assert.Empty(subjectContext.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public void WhenDetachCallbackThrows_ThenTheSamePairCanBeRemovedAgain()
+    {
+        // Arrange
+        var fallbackContext = InterceptorSubjectContext.Create();
+        var interceptor = new ThrowingLifecycleInterceptor { ThrowOnDetach = true };
+        fallbackContext.AddService<ILifecycleInterceptor>(interceptor);
+
+        var car = new Car(fallbackContext);
+        var subjectContext = ((IInterceptorSubject)car).Context;
+
+        Assert.Throws<InvalidOperationException>(() => subjectContext.RemoveFallbackContext(fallbackContext));
+        Assert.Single(subjectContext.GetServices<ILifecycleInterceptor>());
+        interceptor.ThrowOnDetach = false;
+
+        // Act
+        var removed = subjectContext.RemoveFallbackContext(fallbackContext);
+
+        // Assert
+        Assert.True(removed);
+        Assert.Equal(2, interceptor.DetachCount);
         Assert.Empty(subjectContext.GetServices<ILifecycleInterceptor>());
     }
 
@@ -149,6 +169,26 @@ public class FallbackContextRemovalTests
             {
                 _reentries++;
                 NestedRemovalResults.Add(subject.Context.RemoveFallbackContext(contextToRemove));
+            }
+        }
+    }
+
+    private sealed class ThrowingLifecycleInterceptor : ILifecycleInterceptor
+    {
+        public bool ThrowOnDetach { get; set; }
+
+        public int DetachCount { get; private set; }
+
+        public void AttachSubjectToContext(IInterceptorSubject subject)
+        {
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
+        {
+            DetachCount++;
+            if (ThrowOnDetach)
+            {
+                throw new InvalidOperationException("Detach failed.");
             }
         }
     }
