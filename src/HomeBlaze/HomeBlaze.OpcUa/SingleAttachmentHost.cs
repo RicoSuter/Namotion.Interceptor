@@ -41,9 +41,13 @@ internal interface IAttachmentOwner<TService> : IInterceptorSubject
 
     /// <summary>
     /// Waits for whatever has to be in place before the attach, and returns false when the start must
-    /// abandon, in which case the implementation has reported that outcome itself. Parking here cannot
-    /// sit inside the handler's stop transition: the start path is never reached through StopAsync.
+    /// abandon, which the start then reports as Stopped. Parking here cannot sit inside the handler's
+    /// stop transition: the start path is never reached through StopAsync.
     /// </summary>
+    /// <remarks>
+    /// Runs with the attachment gate held, so the wait has to be bounded: a stop cannot run until it
+    /// returns.
+    /// </remarks>
     ValueTask<bool> WaitUntilStartableAsync(CancellationToken cancellationToken) => new(true);
 
     /// <summary>
@@ -189,19 +193,20 @@ internal sealed class SingleAttachmentHost<TService>
 
         try
         {
-            if (!TryCommitActive(generation, ServiceStatus.Starting, message: null))
+            if (!TryCommitStatus(generation, ServiceStatus.Starting, message: null))
             {
                 return;
             }
 
             if (_owner.GetConfigurationError() is { } configurationError)
             {
-                TryCommitActive(generation, ServiceStatus.Error, configurationError);
+                TryCommitStatus(generation, ServiceStatus.Error, configurationError);
                 return;
             }
 
             if (!await _owner.WaitUntilStartableAsync(cancellationToken))
             {
+                TryCommitStatus(generation, ServiceStatus.Stopped, message: null);
                 return;
             }
 
@@ -225,7 +230,7 @@ internal sealed class SingleAttachmentHost<TService>
                     // Dropped rather than kept, which would report Starting forever.
                     _owner.DetachHostedService(attachment);
 
-                    TryCommitActive(generation, ServiceStatus.Error, NotAttachedMessage);
+                    TryCommitStatus(generation, ServiceStatus.Error, NotAttachedMessage);
                     _logger.LogWarning(
                         "{Service} for {Target} was not started: the subject is not attached to a running host.",
                         _owner.LogName, _owner.LogTarget);
@@ -241,9 +246,9 @@ internal sealed class SingleAttachmentHost<TService>
         catch (Exception exception)
         {
             // No OperationCanceledException filter: the only wait on the caller's token in this try is
-            // the startable wait, which reports its own cancellation and returns instead of throwing,
-            // so a filter could only swallow a genuine start failure and report it as a clean stop.
-            TryCommitActive(generation, ServiceStatus.Error, exception.Message);
+            // the startable wait, which returns false on cancellation rather than throwing, so a filter
+            // could only swallow a genuine start failure and report it as a clean stop.
+            TryCommitStatus(generation, ServiceStatus.Error, exception.Message);
             _logger.LogError(exception, "Failed to start {Service} for {Target}", _owner.LogName, _owner.LogTarget);
         }
         finally
@@ -378,7 +383,7 @@ internal sealed class SingleAttachmentHost<TService>
             // Re-checked inside the lock rather than trusting the guard this round read on entry: the
             // two are many statements apart, several of them full interceptor chain passes, and a stop
             // landing between them would otherwise be overwritten for good.
-            if (!TryCommitActive(generation, ServiceStatus.Error, fault.Message, _owner.ResetDiagnostics))
+            if (!TryCommitStatus(generation, ServiceStatus.Error, fault.Message, _owner.ResetDiagnostics))
             {
                 return;
             }
@@ -408,11 +413,11 @@ internal sealed class SingleAttachmentHost<TService>
                 _owner.DropInstanceState();
             }
 
-            TryCommitActive(generation, ServiceStatus.Starting, message: null);
+            TryCommitStatus(generation, ServiceStatus.Starting, message: null);
             return;
         }
 
-        TryCommitActive(generation, ServiceStatus.Running, message: null, () => _owner.ApplyDiagnostics(instance));
+        TryCommitStatus(generation, ServiceStatus.Running, message: null, () => _owner.ApplyDiagnostics(instance));
     }
 
     /// <summary>Reads the stop generation an operation must commit against.</summary>
@@ -425,7 +430,7 @@ internal sealed class SingleAttachmentHost<TService>
     }
 
     /// <summary>
-    /// Writes a status that claims the wrapper is doing something, unless a stop has landed since
+    /// Writes the status an operation reached, unless a stop has landed since
     /// <paramref name="generation"/> was captured, and reports whether it wrote.
     /// </summary>
     /// <remarks>
@@ -434,7 +439,7 @@ internal sealed class SingleAttachmentHost<TService>
     /// check reads, rather than the status itself: any writer can move the status off Stopped, and one
     /// that did would make a later reading of it say the wrapper is running again.
     /// </remarks>
-    private bool TryCommitActive(int generation, ServiceStatus status, string? message, Action? afterCommit = null)
+    private bool TryCommitStatus(int generation, ServiceStatus status, string? message, Action? afterCommit = null)
     {
         lock (_statusLock)
         {

@@ -782,6 +782,64 @@ public class OpcUaClientTests
         Assert.Null(client.Root);
     }
 
+    [Fact]
+    public async Task WhenTheSubjectLeavesTheGraphWhileAStartAttaches_ThenTheStartDoesNotOverwriteTheStop()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+
+        // Disabled, so the run loop starts nothing itself and the start below comes from another caller.
+        var client = testHost.CreateClient(isEnabled: false);
+        testHost.Container.Client = client;
+
+        // Leaving the graph before the handler has started the run loop would leave nothing to unwind.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.ExecuteTask is not null,
+            message: "The handler did not start the client's run loop.");
+
+        // The factory runs on the attachment's chain and the unwind on the subject's, so holding the
+        // factory keeps the start inside its attach, with the gate held, while the unwind reports
+        // Stopped. Failing it on release makes the attach rethrow into the start's catch.
+        using var rootWritten = new ManualResetEventSlim();
+        using var releaseFactory = new ManualResetEventSlim();
+        var held = 0;
+        testHost.WriteSeam.ArmAfterWrite((property, value) =>
+        {
+            if (!ReferenceEquals(property.Subject, client) ||
+                property.Name != nameof(OpcUaClient.Root) ||
+                value is null ||
+                Interlocked.Exchange(ref held, 1) == 1)
+            {
+                return;
+            }
+
+            rootWritten.Set();
+            releaseFactory.Wait(HoldTimeout);
+            throw new InvalidOperationException(FactoryFailureMessage);
+        });
+
+        Task start;
+        try
+        {
+            start = client.StartAsync();
+            Assert.True(rootWritten.Wait(HoldTimeout), "The start never reached the factory.");
+
+            // Act
+            testHost.Container.Client = null;
+            await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Stopped);
+        }
+        finally
+        {
+            releaseFactory.Set();
+        }
+
+        await start.WaitAsync(HoldTimeout);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, client.Status);
+        Assert.Null(client.StatusMessage);
+    }
+
     /// <summary>
     /// Reports a stop the poll did not perform, and answers whether the previous attempt survived.
     /// </summary>

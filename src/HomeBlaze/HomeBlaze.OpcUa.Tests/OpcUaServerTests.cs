@@ -13,6 +13,9 @@ public class OpcUaServerTests
     /// </summary>
     private static readonly TimeSpan UnloadedRootObservation = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>How long a start or stop that must complete is given before the test fails rather than hangs.</summary>
+    private static readonly TimeSpan CompletionTimeout = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task WhenTheConfiguredPathDoesNotResolve_ThenTheStartFailsAndKeepsNoAttachment()
     {
@@ -183,7 +186,7 @@ public class OpcUaServerTests
         // The subject is out of the graph, so the attach this releases hands back no instance and the
         // start commits its not attached error.
         await testHost.LoadRootAsync();
-        await start.WaitAsync(TimeSpan.FromSeconds(30));
+        await start.WaitAsync(CompletionTimeout);
 
         // Assert
         Assert.Equal(ServiceStatus.Stopped, server.Status);
@@ -202,9 +205,71 @@ public class OpcUaServerTests
         // The wait rethrows the load failure, so the start commits from its catch rather than from the
         // attach path the test above drives.
         await testHost.FailRootLoadAsync();
-        await start.WaitAsync(TimeSpan.FromSeconds(30));
+        await start.WaitAsync(CompletionTimeout);
 
         // Assert
+        Assert.Equal(ServiceStatus.Stopped, server.Status);
+        Assert.Null(server.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenAStartWaitsForARootThatNeverLoads_ThenItFailsAndAStopCanRun()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+        var server = testHost.CreateServer(
+            "/NotInTheGraph", isEnabled: false, rootLoadWaitTimeout: TimeSpan.FromMilliseconds(200));
+        testHost.Container.Server = server;
+
+        // Enabling it before the run loop has read the flag would let the loop start a second time.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.ExecuteTask is not null,
+            message: "The handler did not start the server's run loop.");
+
+        // Act
+        // The Start operation passes no token, and the start holds the attachment gate the stop needs
+        // across this wait, so only the wait's own bound ends it.
+        await server.StartAsync().WaitAsync(CompletionTimeout);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Error, server.Status);
+        Assert.StartsWith("The root manager did not load", server.StatusMessage);
+
+        // Act
+        await server.StopAsync().WaitAsync(CompletionTimeout);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, server.Status);
+        Assert.Null(server.StatusMessage);
+        Assert.Empty(server.GetHostedServiceAttachments());
+    }
+
+    [Fact]
+    public async Task WhenAReconfigurationIsCancelledWhileItsStartWaitsForTheRoot_ThenTheServerReportsStopped()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+        var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
+        testHost.Container.Server = server;
+
+        // Enabled only once the run loop is past its own start, so the reconfiguration below is the one
+        // start that runs.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.ExecuteTask is not null,
+            message: "The handler did not start the server's run loop.");
+        server.IsEnabled = true;
+
+        using var cancellation = new CancellationTokenSource();
+        var reconfiguration = server.ApplyConfigurationAsync(cancellation.Token);
+        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Starting);
+
+        // Act
+        await cancellation.CancelAsync();
+        await reconfiguration.WaitAsync(CompletionTimeout);
+
+        // Assert
+        // The cancelled wait abandons the start without anything having stopped, so nothing but the
+        // start itself can take the status off Starting.
         Assert.Equal(ServiceStatus.Stopped, server.Status);
         Assert.Null(server.StatusMessage);
     }

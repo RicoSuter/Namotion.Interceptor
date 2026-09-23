@@ -150,9 +150,11 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     /// OPC UA integration suite hardcodes: a stray listener there fails that suite in a way that looks
     /// like everything except a port conflict.
     /// </summary>
-    public OpcUaServer CreateServer(string path, bool isEnabled = true, TimeSpan? diagnosticsPollInterval = null)
+    public OpcUaServer CreateServer(
+        string path, bool isEnabled = true, TimeSpan? diagnosticsPollInterval = null, TimeSpan? rootLoadWaitTimeout = null)
     {
-        return new OpcUaServer(RootManager, PathResolver, NullLogger<OpcUaServer>.Instance, diagnosticsPollInterval)
+        return new OpcUaServer(
+            RootManager, PathResolver, NullLogger<OpcUaServer>.Instance, diagnosticsPollInterval, rootLoadWaitTimeout)
         {
             Name = "Test server",
             Path = path,

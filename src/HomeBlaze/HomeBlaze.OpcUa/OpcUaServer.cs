@@ -23,11 +23,12 @@ public partial class OpcUaServer
     : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IServerSubject,
       IAttachmentOwner<IOpcUaSubjectServer>
 {
-    private static readonly TimeSpan RootLoadWaitTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan DefaultRootLoadWaitTimeout = TimeSpan.FromSeconds(10);
 
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
     private readonly ILogger<OpcUaServer> _logger;
+    private readonly TimeSpan _rootLoadWaitTimeout;
 
     /// <summary>The attachment this wrapper owns and every path that maintains it.</summary>
     private readonly SingleAttachmentHost<IOpcUaSubjectServer> _attachmentHost;
@@ -166,17 +167,20 @@ public partial class OpcUaServer
 
     /// <remarks>
     /// <paramref name="diagnosticsPollInterval"/> is how often the running server is reconciled with its
-    /// attachment, and null takes the default.
+    /// attachment, and <paramref name="rootLoadWaitTimeout"/> how long a start waits for the root before
+    /// it fails. Null takes the default for either.
     /// </remarks>
     public OpcUaServer(
         RootManager rootManager,
         SubjectPathResolver pathResolver,
         ILogger<OpcUaServer> logger,
-        TimeSpan? diagnosticsPollInterval = null)
+        TimeSpan? diagnosticsPollInterval = null,
+        TimeSpan? rootLoadWaitTimeout = null)
     {
         _rootManager = rootManager;
         _pathResolver = pathResolver;
         _logger = logger;
+        _rootLoadWaitTimeout = rootLoadWaitTimeout ?? DefaultRootLoadWaitTimeout;
         _attachmentHost = new SingleAttachmentHost<IOpcUaSubjectServer>(this, logger, diagnosticsPollInterval);
 
         Name = string.Empty;
@@ -213,13 +217,20 @@ public partial class OpcUaServer
             // WaitAsync does not observe the token when the task is already complete, so the caller's
             // cancellation has to be checked in its own right.
             cancellationToken.ThrowIfCancellationRequested();
-            await _rootManager.RootLoaded.WaitAsync(cancellationToken);
+
+            // Bounded because the start holds the attachment gate across this wait and the Start
+            // operation passes no token, so an unbounded wait on a root that never loads keeps Stop out.
+            await _rootManager.RootLoaded.WaitAsync(_rootLoadWaitTimeout, cancellationToken);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _rootManager.RootLoaded.IsCanceled)
         {
-            Status = ServiceStatus.Stopped;
             return false;
+        }
+        catch (TimeoutException) when (!_rootManager.RootLoaded.IsFaulted)
+        {
+            // The root can finish loading between the timeout firing and this filter running.
+            return _rootManager.RootLoaded.IsCompletedSuccessfully ? true : throw CreateRootNotLoadedException();
         }
     }
 
@@ -231,10 +242,9 @@ public partial class OpcUaServer
         // attaches the graph this subject belongs to, so no attach of this subject can precede the load.
         // Bounded anyway, so a case that is somehow not satisfied fails the start rather than pinning a
         // thread.
-        if (!SpinWait.SpinUntil(() => _rootManager.IsLoaded, RootLoadWaitTimeout))
+        if (!SpinWait.SpinUntil(() => _rootManager.IsLoaded, _rootLoadWaitTimeout))
         {
-            throw new InvalidOperationException(
-                $"The root manager did not load within {RootLoadWaitTimeout.TotalSeconds:F0} seconds, so the path could not be resolved: {Path}");
+            throw CreateRootNotLoadedException();
         }
 
         // A synchronous factory can only signal a failed lookup by throwing, which
@@ -263,6 +273,12 @@ public partial class OpcUaServer
         };
 
         return targetSubject.CreateOpcUaServer(configuration, _logger);
+    }
+
+    private InvalidOperationException CreateRootNotLoadedException()
+    {
+        return new InvalidOperationException(
+            $"The root manager did not load within {_rootLoadWaitTimeout.TotalSeconds:F0} seconds, so the path could not be resolved: {Path}");
     }
 
     void IAttachmentOwner<IOpcUaSubjectServer>.ApplyDiagnostics(IOpcUaSubjectServer server)
