@@ -106,6 +106,29 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     }
 
     /// <summary>
+    /// Faults <see cref="RootManager.RootLoaded"/> the way the application can: by running the manager
+    /// over a configuration file that is not there.
+    /// </summary>
+    public async Task FailRootLoadAsync()
+    {
+        File.Delete(_rootConfigurationPath);
+
+        // Whether the manager's own start surfaces the failure depends on the runtime, so either await
+        // may be the one that throws.
+        try
+        {
+            await RootManager.StartAsync(CancellationToken.None);
+            await RootManager.RootLoaded;
+        }
+        catch (FileNotFoundException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("The root load did not fault on the missing configuration file.");
+    }
+
+    /// <summary>
     /// A client whose diagnostics poll can be made fast enough to observe. The production interval is
     /// ten seconds, so the reconciliation the poll performs is unreachable from a suite that runs in
     /// seconds unless a test asks for a shorter one.

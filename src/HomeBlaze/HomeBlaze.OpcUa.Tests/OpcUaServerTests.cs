@@ -171,4 +171,68 @@ public class OpcUaServerTests
         // unwind's own reset deleted. Pinning that needs a server that binds a port.
 
     }
+
+    [Fact]
+    public async Task WhenTheSubjectLeavesTheGraphWhileAStartWaitsForTheRoot_ThenTheStartDoesNotOverwriteTheStop()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+        var (server, start) = await StartServerThatLeavesTheGraphWhileWaitingAsync(testHost);
+
+        // Act
+        // The subject is out of the graph, so the attach this releases hands back no instance and the
+        // start commits its not attached error.
+        await testHost.LoadRootAsync();
+        await start.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, server.Status);
+        Assert.Null(server.StatusMessage);
+        Assert.Empty(server.GetHostedServiceAttachments());
+    }
+
+    [Fact]
+    public async Task WhenTheSubjectLeavesTheGraphWhileAStartWaitsForARootThatFails_ThenTheStartDoesNotOverwriteTheStop()
+    {
+        // Arrange
+        await using var testHost = await OpcUaTestHost.StartAsync();
+        var (server, start) = await StartServerThatLeavesTheGraphWhileWaitingAsync(testHost);
+
+        // Act
+        // The wait rethrows the load failure, so the start commits from its catch rather than from the
+        // attach path the test above drives.
+        await testHost.FailRootLoadAsync();
+        await start.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, server.Status);
+        Assert.Null(server.StatusMessage);
+    }
+
+    /// <summary>
+    /// Parks a start from the Start operation on the unloaded root, with the attachment gate held, and
+    /// lets the unwind report Stopped underneath it. The unwind takes no gate, so only the stop
+    /// generation can order the start's later commit against it.
+    /// </summary>
+    private static async Task<(OpcUaServer Server, Task Start)> StartServerThatLeavesTheGraphWhileWaitingAsync(
+        OpcUaTestHost testHost)
+    {
+        // Disabled, so the run loop starts nothing itself and the start below comes from another caller.
+        var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
+        testHost.Container.Server = server;
+
+        // Leaving the graph before the handler has started the run loop would leave nothing to unwind.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.ExecuteTask is not null,
+            message: "The handler did not start the server's run loop.");
+
+        var start = server.StartAsync();
+        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Starting);
+
+        testHost.Container.Server = null;
+        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Stopped);
+
+        Assert.False(start.IsCompleted);
+        return (server, start);
+    }
 }
