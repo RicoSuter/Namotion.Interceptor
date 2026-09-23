@@ -87,8 +87,8 @@ public class PropertyReadSynchronizationTests
     }
 
     /// <summary>
-    /// Dynamic registry properties and the dynamic proxy dispatch the read with the property type
-    /// widened to object, and their terminal reads the declared type and boxes it. The declared type
+    /// Dynamic registry properties dispatch the read with the property type widened to object, and
+    /// their getter is arbitrary code that can read a field of any declared type and box it. The value
     /// behind an object read can therefore be a wide struct, so that dispatch keeps the lock.
     /// </summary>
     [Theory]
