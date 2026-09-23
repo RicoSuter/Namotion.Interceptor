@@ -26,9 +26,9 @@ public class ContextInheritanceHandler : ILifecycleHandler
             }
             else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
             {
-                // Composing a context by hand attaches the subject, so a subject composed onto its
-                // parent before being referenced (as connectors do) has no record and relies on the
-                // parent it is detached from being decomposed.
+                // Composing an attached parent's context by hand attaches the subject, so a subject
+                // composed that way before being referenced (as connectors do) has no record and
+                // relies on the parent it is detached from being decomposed.
                 change.Subject.Data.TryRemove((null, InheritedContextKey), out var recordedContext);
                 change.Subject.Context.RemoveFallbackContext(
                     recordedContext as IInterceptorSubjectContext ?? change.Property.Value.Subject.Context);
