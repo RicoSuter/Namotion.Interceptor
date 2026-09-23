@@ -7,13 +7,8 @@ internal static class ReadInterceptorFactory<TProperty>
 {
     public static ReadFunc<TProperty> Create(ImmutableArray<IReadInterceptor> interceptors)
     {
-        // The write terminal commits under SyncRoot. A value wider than the runtime's atomic access can
-        // be observed half written unless it is read under the same lock, whether or not interceptors
-        // sit in front of the read.
-        //
-        // The terminals are static lambdas with the lock body duplicated on purpose: a delegate over a
-        // static method is invoked through an argument shuffle thunk, and a shared body holding a lock
-        // is not inlined into the lambdas.
+        // Reads lock like writes, so a value wider than atomic access cannot tear. Static lambdas, not
+        // method groups: a delegate over a static method is invoked through a shuffle thunk.
         if (interceptors.Length == 0)
         {
             return static (ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> innerReadValue) =>
