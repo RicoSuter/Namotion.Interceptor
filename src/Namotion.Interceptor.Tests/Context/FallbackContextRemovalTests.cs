@@ -98,6 +98,172 @@ public class FallbackContextRemovalTests
     }
 
     /// <summary>
+    /// The window between a removal being published and its invalidation walk finishing. The walk
+    /// is parked on a using set the test holds while the pair is added back, so a removal issued
+    /// after that add has to own the new edge, and the parked removal finishing late must not drop
+    /// that ownership.
+    /// </summary>
+    [Fact]
+    public async Task WhenPairIsAddedBackWhileItsRemovalIsStillInvalidating_ThenTheNextRemovalOwnsTheNewEdge()
+    {
+        // Arrange: the using chain subject <- first <- second <- third makes the removal's walk lock
+        // second's using set, and the set exists only because third resolves through second.
+        var fallbackContext = InterceptorSubjectContext.Create();
+        using var insideCallback = new ManualResetEventSlim(false);
+        using var releaseCallback = new ManualResetEventSlim(false);
+        var interceptor = new BlockingLifecycleInterceptor(insideCallback, releaseCallback, blockOnDetach: 2);
+        fallbackContext.AddService<ILifecycleInterceptor>(interceptor);
+
+        var car = new Car(fallbackContext);
+        var subjectContext = (InterceptorSubjectContext)((IInterceptorSubject)car).Context;
+
+        var firstUser = InterceptorSubjectContext.Create();
+        firstUser.AddFallbackContext(subjectContext);
+        var secondUser = InterceptorSubjectContext.Create();
+        secondUser.AddFallbackContext(firstUser);
+        var thirdUser = InterceptorSubjectContext.Create();
+        thirdUser.AddFallbackContext(secondUser);
+
+        var firstUsersSet = ContextStateReflection.GetUsedByContexts(firstUser);
+        var secondUsersSet = ContextStateReflection.GetUsedByContexts(secondUser);
+        var secondUsersState = ContextStateReflection.GetState(secondUser);
+
+        using var lockHeld = new ManualResetEventSlim(false);
+        using var releaseLock = new ManualResetEventSlim(false);
+        var lockHolder = new Thread(() =>
+        {
+            lock (secondUsersSet)
+            {
+                lockHeld.Set();
+                releaseLock.Wait();
+            }
+        }) { IsBackground = true };
+        lockHolder.Start();
+        Assert.True(lockHeld.Wait(WaitBudget), "The lock holder never took the using set.");
+
+        var parkedRemoval = Task.FromResult(false);
+        var detachSecondUser = Task.FromResult(false);
+        var nextRemoval = Task.FromResult(false);
+        bool laterRemoved;
+        try
+        {
+            // The walk invalidates second right before it locks second's using set.
+            parkedRemoval = Task.Factory.StartNew(
+                () => subjectContext.RemoveFallbackContext(fallbackContext),
+                TaskCreationOptions.LongRunning);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !ReferenceEquals(ContextStateReflection.GetState(secondUser), secondUsersState),
+                WaitBudget);
+
+            // Dropping second from first's using set keeps the add's own walk off the held lock.
+            // This removal's walk parks on the same lock, after it has unregistered.
+            detachSecondUser = Task.Factory.StartNew(
+                () => secondUser.RemoveFallbackContext(firstUser),
+                TaskCreationOptions.LongRunning);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    lock (firstUsersSet)
+                    {
+                        return !firstUsersSet.Contains(secondUser);
+                    }
+                },
+                WaitBudget);
+
+            Assert.True(subjectContext.AddFallbackContext(fallbackContext));
+
+            // Act: the next removal parks in its detach callback, then the first one finishes.
+            nextRemoval = Task.Factory.StartNew(
+                () => subjectContext.RemoveFallbackContext(fallbackContext),
+                TaskCreationOptions.LongRunning);
+            await AsyncTestHelpers.WaitUntilAsync(() => nextRemoval.IsCompleted || insideCallback.IsSet, WaitBudget);
+            Assert.False(nextRemoval.IsCompleted, "The removal issued after the add returned was refused.");
+
+            releaseLock.Set();
+            await Task.WhenAll(parkedRemoval, detachSecondUser).WaitAsync(WaitBudget);
+
+            laterRemoved = subjectContext.RemoveFallbackContext(fallbackContext);
+        }
+        finally
+        {
+            releaseLock.Set();
+            releaseCallback.Set();
+            await Task.WhenAll(parkedRemoval, detachSecondUser, nextRemoval).WaitAsync(WaitBudget);
+        }
+
+        // Assert
+        Assert.True(await parkedRemoval);
+        Assert.True(await nextRemoval);
+        Assert.False(laterRemoved);
+        Assert.Equal(2, interceptor.DetachCount);
+        Assert.Empty(subjectContext.GetServices<ILifecycleInterceptor>());
+    }
+
+    [Fact]
+    public async Task WhenRemovalIsInterruptedBeforeItCommits_ThenTheSamePairCanBeRemovedAgain()
+    {
+        // Arrange: a blocking service factory holds the subject context's mutation lock, so the
+        // removal runs its callbacks and then waits for that lock, where it is interrupted.
+        var fallbackContext = InterceptorSubjectContext.Create();
+        var interceptor = new CountingLifecycleInterceptor();
+        fallbackContext.AddService<ILifecycleInterceptor>(interceptor);
+
+        var car = new Car(fallbackContext);
+        var subjectContext = ((IInterceptorSubject)car).Context;
+
+        using var lockHeld = new ManualResetEventSlim(false);
+        using var releaseLock = new ManualResetEventSlim(false);
+        var lockHolder = Task.Factory.StartNew(
+            () => subjectContext.TryAddService(
+                () =>
+                {
+                    lockHeld.Set();
+                    releaseLock.Wait();
+                    return new MarkerService();
+                },
+                _ => false),
+            TaskCreationOptions.LongRunning);
+        Assert.True(lockHeld.Wait(WaitBudget), "The service factory never took the mutation lock.");
+
+        Exception? removalException = null;
+        var removal = new Thread(() =>
+        {
+            try
+            {
+                subjectContext.RemoveFallbackContext(fallbackContext);
+            }
+            catch (ThreadInterruptedException exception)
+            {
+                removalException = exception;
+            }
+        }) { IsBackground = true };
+
+        try
+        {
+            removal.Start();
+            await AsyncTestHelpers.WaitUntilAsync(() => interceptor.DetachCount == 1, WaitBudget);
+            removal.Interrupt();
+            Assert.True(removal.Join(WaitBudget), "The interrupted removal never returned.");
+        }
+        finally
+        {
+            releaseLock.Set();
+            await lockHolder.WaitAsync(WaitBudget);
+        }
+
+        Assert.IsType<ThreadInterruptedException>(removalException);
+        Assert.Single(subjectContext.GetServices<ILifecycleInterceptor>());
+
+        // Act
+        var removed = subjectContext.RemoveFallbackContext(fallbackContext);
+
+        // Assert
+        Assert.True(removed);
+        Assert.Equal(2, interceptor.DetachCount);
+        Assert.Empty(subjectContext.GetServices<ILifecycleInterceptor>());
+    }
+
+    /// <summary>
     /// The guard is per pair, not per executor: a detach callback that removes a different fallback
     /// context of the same subject is a legitimate nested removal and has to go through.
     /// </summary>
@@ -193,8 +359,7 @@ public class FallbackContextRemovalTests
         }
     }
 
-    private sealed class BlockingLifecycleInterceptor(ManualResetEventSlim insideCallback, ManualResetEventSlim release)
-        : ILifecycleInterceptor
+    private sealed class CountingLifecycleInterceptor : ILifecycleInterceptor
     {
         private int _detachCount;
 
@@ -207,8 +372,30 @@ public class FallbackContextRemovalTests
         public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
             Interlocked.Increment(ref _detachCount);
-            insideCallback.Set();
-            release.Wait();
+        }
+    }
+
+    /// <summary>Parks the detach callback with the given number, or every one when it is zero.</summary>
+    private sealed class BlockingLifecycleInterceptor(
+        ManualResetEventSlim insideCallback, ManualResetEventSlim release, int blockOnDetach = 0)
+        : ILifecycleInterceptor
+    {
+        private int _detachCount;
+
+        public int DetachCount => Volatile.Read(ref _detachCount);
+
+        public void AttachSubjectToContext(IInterceptorSubject subject)
+        {
+        }
+
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
+        {
+            var detachNumber = Interlocked.Increment(ref _detachCount);
+            if (blockOnDetach == 0 || detachNumber == blockOnDetach)
+            {
+                insideCallback.Set();
+                release.Wait();
+            }
         }
     }
 

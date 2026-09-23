@@ -135,6 +135,12 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
     /// </summary>
     private ImmutableArray<IInterceptorSubjectContext> _fallbackContextsBeingRemoved = ImmutableArray<IInterceptorSubjectContext>.Empty;
 
+    // Tells a removal's finally that OnFallbackContextRemoved already released its claim, because
+    // by then another thread may hold a new claim on the same pair that a second release would drop.
+    // Sound only while base runs no user code after the hook, where a nested removal could reset it.
+    [ThreadStatic]
+    private static bool _removalReleasedOnCommit;
+
     public override bool RemoveFallbackContext(IInterceptorSubjectContext context)
     {
         if (!HasFallbackContext(context) || !TryClaimFallbackContextRemoval(context))
@@ -142,6 +148,7 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
             return false;
         }
 
+        var committing = false;
         try
         {
             // A removal that completed between the check above and the claim has already run the
@@ -158,12 +165,26 @@ public sealed class InterceptorExecutor : InterceptorSubjectContext, IIntercepto
                 interceptor.DetachSubjectFromContext(_subject);
             }
 
+            committing = true;
+            _removalReleasedOnCommit = false;
             return base.RemoveFallbackContext(context);
         }
         finally
         {
-            ReleaseFallbackContextRemoval(context);
+            if (!committing || !_removalReleasedOnCommit)
+            {
+                ReleaseFallbackContextRemoval(context);
+            }
         }
+    }
+
+    private protected override void OnFallbackContextRemoved(InterceptorSubjectContext context)
+    {
+        // Released together with the removal: released after it, an add of the same pair could
+        // complete in between, and a removal issued after that add would be refused and leave the
+        // new edge registered.
+        ReleaseFallbackContextRemoval(context);
+        _removalReleasedOnCommit = true;
     }
 
     private bool TryClaimFallbackContextRemoval(IInterceptorSubjectContext context)
