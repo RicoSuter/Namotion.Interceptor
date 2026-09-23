@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -29,11 +30,34 @@ public class ContextInheritanceHandler : ILifecycleHandler
                 // Composing an attached parent's context by hand attaches the subject, so a subject
                 // composed that way before being referenced (as connectors do) has no record and
                 // relies on the parent it is detached from being decomposed.
-                change.Subject.Data.TryRemove((null, InheritedContextKey), out var recordedContext);
-                change.Subject.Context.RemoveFallbackContext(
-                    recordedContext as IInterceptorSubjectContext ?? change.Property.Value.Subject.Context);
+                var removedContext = change.Property.Value.Subject.Context;
+                if (change.Subject.Data.TryRemove((null, InheritedContextKey), out var recorded) &&
+                    recorded is IInterceptorSubjectContext recordedContext &&
+                    !ReferenceEquals(recordedContext, removedContext) &&
+                    IsGovernedOnlyByHeldLocks(recordedContext))
+                {
+                    removedContext = recordedContext;
+                }
+
+                change.Subject.Context.RemoveFallbackContext(removedContext);
             }
         }
+    }
+
+    // Decomposing detaches the subject from every lifecycle interceptor the context resolves. A
+    // context recorded in another graph resolves that graph's interceptor, and taking its lock from
+    // under this one deadlocks against a detach running the other way, so that composition stays.
+    private static bool IsGovernedOnlyByHeldLocks(IInterceptorSubjectContext context)
+    {
+        foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
+        {
+            if (interceptor is not LifecycleInterceptor { IsLockHeldByCurrentThread: true })
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public override bool Equals(object? obj)
