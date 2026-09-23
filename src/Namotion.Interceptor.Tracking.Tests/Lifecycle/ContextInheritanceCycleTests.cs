@@ -8,8 +8,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 /// <summary>
 /// A subject with more than one parent is composed onto the parent it attached through, and must be
 /// decomposed from that same context at its last detach, whichever parent lets go last, unless that
-/// context belongs to another graph. A leaked composition can close a resolution loop between two
-/// contexts.
+/// context resolves a lifecycle other than the one detaching it. A leaked composition can close a
+/// resolution loop between two contexts.
 /// </summary>
 public class ContextInheritanceCycleTests
 {

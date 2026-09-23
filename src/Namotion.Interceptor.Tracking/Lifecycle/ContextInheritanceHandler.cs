@@ -44,9 +44,9 @@ public class ContextInheritanceHandler : ILifecycleHandler
         }
     }
 
-    // Decomposing detaches the subject from every lifecycle interceptor the context resolves. A
-    // context recorded in another graph resolves that graph's interceptor, and taking its lock from
-    // under this one deadlocks against a detach running the other way, so that composition stays.
+    // Decomposing detaches the subject from every lifecycle interceptor the context resolves. Taking
+    // the lock of one this detach does not already hold, such as another graph's, can deadlock
+    // against a detach running the other way, so that composition stays.
     private static bool IsGovernedOnlyByHeldLocks(IInterceptorSubjectContext context)
     {
         foreach (var interceptor in context.GetServices<ILifecycleInterceptor>())
