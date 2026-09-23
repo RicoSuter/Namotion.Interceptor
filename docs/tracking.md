@@ -496,8 +496,7 @@ Root
 ```
 
 Removing A reduces Shared's refs to 1 - it stays attached via B.
-Removing B after A detaches Shared (refs: 0). The removal order does not matter: whichever parent
-lets go last, a detached subject stops resolving the graph's services.
+Removing B after A detaches Shared (refs: 0). The removal order does not matter: whichever parent lets go last, the context that `WithContextInheritance()` composed onto Shared when it attached is removed again.
 
 **Cycles (Limitation)**
 

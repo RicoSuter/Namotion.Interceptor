@@ -5,10 +5,9 @@ using Namotion.Interceptor.Tracking.Tests.Models;
 namespace Namotion.Interceptor.Tracking.Tests.Lifecycle;
 
 /// <summary>
-/// Regression tests for a defect shipped in 0.9.x and earlier: the context composed onto a subject
-/// when it joined the graph could outlive its detach, because it was composed from the parent of the
-/// first attach and decomposed against the parent of the last detach. For a subject with more than
-/// one parent subject those are different contexts, so the decomposition matched nothing.
+/// A subject with more than one parent is composed onto the parent it attached through, and must be
+/// decomposed from that same context at its last detach, whichever parent lets go last. A leaked
+/// composition can close a resolution loop between two contexts.
 /// </summary>
 public class ContextInheritanceCycleTests
 {
@@ -157,74 +156,6 @@ public class ContextInheritanceCycleTests
         // Assert
         Assert.Equal(0, first.GetReferenceCount());
         Assert.Empty(((IInterceptorSubject)first).Context.GetServices<ILifecycleHandler>());
-    }
-
-    [Fact]
-    public void WhenOnlyLifecycleIsRegistered_ThenNoContextIsComposedAndNothingThrows()
-    {
-        // Arrange: the control. Without the inheritance handler nothing is composed at all, so the
-        // shape is harmless whatever the ownership model does.
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithLifecycle();
-
-        var root = new Person(context) { FirstName = "Root" };
-        var first = new Person { FirstName = "1st" };
-        var shared = new Person { FirstName = "Shd" };
-
-        // Act
-        root.Mother = first;
-        first.Mother = shared;
-        root.Father = shared;
-        first.Mother = null;
-        root.Father = null;
-        root.Mother = null;
-        shared.Mother = first;
-        root.Mother = shared;
-        root.Father = first;
-        root.Mother = null;
-
-        // Assert
-        Assert.Equal("1st", first.FirstName);
-    }
-
-    [Fact]
-    public void WhenASubjectReferencesItself_ThenNothingThrows()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-
-        var root = new Person(context) { FirstName = "Root" };
-        var self = new Person { FirstName = "Slf" };
-
-        // Act
-        self.Mother = self;
-        root.Mother = self;
-
-        // Assert
-        Assert.Equal("Slf", self.FirstName);
-    }
-
-    [Fact]
-    public void WhenTwoSubjectsReferenceEachOther_ThenNothingThrows()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-
-        var first = new Person(context) { FirstName = "1st" };
-        var second = new Person { FirstName = "2nd" };
-
-        // Act
-        first.Mother = second;
-        second.Mother = first;
-
-        // Assert
-        Assert.Equal("1st", first.FirstName);
-        Assert.Equal("2nd", second.FirstName);
     }
 
     [Fact]

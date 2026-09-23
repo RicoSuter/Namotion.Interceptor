@@ -7,10 +7,8 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 /// </summary>
 public class ContextInheritanceHandler : ILifecycleHandler
 {
-    // Remembered per subject because the parent that pulls a subject into the graph is not
-    // necessarily the parent whose removal takes it out again: a subject with more than one parent
-    // leaves through whichever edge goes last, and decomposing that last parent's context would
-    // match nothing, leaving the subject resolving the graph's services after its detach.
+    // A subject with several parents detaches through whichever parent lets go last, which need not
+    // be the one it attached through, so the composed context is recorded instead of re-derived.
     private const string InheritedContextKey = "Namotion.Interceptor.Tracking.InheritedContext";
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -28,9 +26,9 @@ public class ContextInheritanceHandler : ILifecycleHandler
             }
             else if (change is { ReferenceCount: 0, IsPropertyReferenceRemoved: true })
             {
-                // Composing a context by hand attaches the subject to it, so a subject composed onto
-                // its parent before it was referenced never takes the branch above and has no record.
-                // Connector code does exactly that and relies on the parent being decomposed here.
+                // Composing a context by hand attaches the subject, so a subject composed onto its
+                // parent before being referenced (as connectors do) has no record and relies on the
+                // parent it is detached from being decomposed.
                 change.Subject.Data.TryRemove((null, InheritedContextKey), out var recordedContext);
                 change.Subject.Context.RemoveFallbackContext(
                     recordedContext as IInterceptorSubjectContext ?? change.Property.Value.Subject.Context);
