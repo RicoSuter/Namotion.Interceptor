@@ -24,7 +24,7 @@ The script checks the base branch out **in your working tree**, so:
 
 ## Pin the CPU first
 
-A CPU that changes frequency mid-run makes the arms incomparable by more than anything you are measuring. Pin it, and keep the machine quiet: no builds, no test runs, no leftover MSBuild nodes. BenchmarkDotNet's header cannot confirm the pin, having reported two different maxima for the two arms of one pinned run, so check the operating system instead (`scaling_governor`, `scaling_min_freq`, `scaling_max_freq`, `intel_pstate/no_turbo`).
+A CPU that changes frequency mid-run makes the arms incomparable by more than anything you are measuring. Pin it, and keep the machine quiet: no builds, no test runs, no leftover MSBuild nodes. An idle node is not harmless because it uses no CPU: it exits on its own after roughly 15 minutes, which can land between the two arms and change the machine under one of them. Build your setup with `MSBUILDDISABLENODEREUSE=1` so it leaves no nodes behind, and run `dotnet build-server shutdown` before starting to clear any that exist. BenchmarkDotNet's header cannot confirm the pin, having reported two different maxima for the two arms of one pinned run, so check the operating system instead (`scaling_governor`, `scaling_min_freq`, `scaling_max_freq`, `intel_pstate/no_turbo`).
 
 Allocation columns survive all of this far better than timings and are usually the whole answer for allocation work. Not immune, though: accounting is process-wide, so a benchmark with a background thread such as `PropertyChangeSubscriptionsBenchmark` or `SubjectSourceBenchmark` absorbs that thread's allocations, and `Gen0`/`Gen1`/`Gen2` shift with heap randomization.
 
