@@ -60,6 +60,17 @@ internal sealed class DerivedPropertyData
     internal bool RecalculationNeeded;
 
     /// <summary>
+    /// Storage and raw write timestamps of the latest dependency write that triggered the running
+    /// recalculation: the owner's own when it takes ownership, replaced by each write that hands off
+    /// through <see cref="RecalculationNeeded"/>. Attach and detach leave them unchanged.
+    /// Only read/written inside lock(this).
+    /// </summary>
+    internal long TriggerStorageTimestamp;
+
+    /// <inheritdoc cref="TriggerStorageTimestamp"/>
+    internal long TriggerRawTimestamp;
+
+    /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
     /// Set by AttachProperty to support re-attachment.

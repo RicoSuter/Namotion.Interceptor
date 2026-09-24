@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -882,6 +883,159 @@ public class DerivedPropertyConcurrencyTests
 
             Assert.Equal($"Hello, {person.Name}", person.Greeting);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenAWriteHandsOffToARunningRecalculation_ThenTheCommittedAndPublishedTimestampIsTheHandOffWrite(bool ownerEvaluationThrows)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        using var subject = new SwitchableDerivedSubject(context);
+        var selected = new PropertyReference(subject, nameof(SwitchableDerivedSubject.Selected));
+        var changes = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property == selected)
+            .Subscribe(changes.Enqueue);
+
+        var ownerTimestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 2, TimeSpan.Zero);
+        var handOffTimestamp = ownerTimestamp.AddSeconds(1);
+
+        // A throwing owner evaluation leaves the hand-off to the re-trigger in the finally,
+        // a successful one to the stale-result retry before commit.
+        subject.BlockNextEvaluation(thenThrow: ownerEvaluationThrows);
+
+        // Act
+        // The owner parks in the derived getter, so it must not wait for a pool thread.
+        var owner = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(ownerTimestamp))
+            {
+                subject.First = 2;
+            }
+        });
+        try
+        {
+            Assert.True(
+                subject.EvaluationEntered.Wait(TimeSpan.FromSeconds(10)),
+                "derived getter did not start");
+
+            using (SubjectChangeContext.WithChangedTimestamp(handOffTimestamp))
+            {
+                subject.First = 3;
+            }
+        }
+        finally
+        {
+            subject.ContinueEvaluation.Set();
+            await owner.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        Assert.Equal(handOffTimestamp, selected.TryGetWriteTimestamp());
+        var change = Assert.Single(changes);
+        Assert.Equal(3, change.GetNewValue<int>());
+        Assert.Equal(handOffTimestamp, change.ChangedTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenAManualRecalculationUnderANullScopeHandsOff_ThenTheOwnersScopeDoesNotStampIt()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        using var subject = new SwitchableDerivedSubject(context) { Second = 5 };
+        var selected = new PropertyReference(subject, nameof(SwitchableDerivedSubject.Selected));
+        var changes = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property == selected)
+            .Subscribe(changes.Enqueue);
+
+        var ownerTimestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 2, TimeSpan.Zero);
+        subject.BlockNextEvaluation();
+
+        // Act
+        // The owner parks in the derived getter, so it must not wait for a pool thread.
+        var owner = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(ownerTimestamp))
+            {
+                subject.First = 2;
+            }
+        });
+        try
+        {
+            Assert.True(
+                subject.EvaluationEntered.Wait(TimeSpan.FromSeconds(10)),
+                "derived getter did not start");
+
+            subject.UseSecond = true;
+            using (SubjectChangeContext.WithChangedTimestamp(null))
+            {
+                selected.RecalculateDerivedProperty();
+            }
+        }
+        finally
+        {
+            subject.ContinueEvaluation.Set();
+            await owner.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Assert
+        Assert.Null(selected.TryGetWriteTimestamp());
+        var change = Assert.Single(changes);
+        Assert.Equal(5, change.GetNewValue<int>());
+        Assert.NotEqual(ownerTimestamp, change.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenAWriteHandsOffDuringNotificationDelivery_ThenEachPublishedValueCarriesItsTriggersTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        using var subject = new SwitchableDerivedSubject(context);
+        var selected = new PropertyReference(subject, nameof(SwitchableDerivedSubject.Selected));
+        var ownerTimestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 2, TimeSpan.Zero);
+        var handOffTimestamp = ownerTimestamp.AddSeconds(1);
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property == selected)
+            .Subscribe(change =>
+            {
+                changes.Add(change);
+                if (change.GetNewValue<int>() == 2)
+                {
+                    // Delivery runs on the owner's thread while it still owns the recalculation.
+                    using (SubjectChangeContext.WithChangedTimestamp(handOffTimestamp))
+                    {
+                        subject.First = 3;
+                    }
+                }
+            });
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(ownerTimestamp))
+        {
+            subject.First = 2;
+        }
+
+        // Assert
+        Assert.Collection(
+            changes,
+            change =>
+            {
+                Assert.Equal(2, change.GetNewValue<int>());
+                Assert.Equal(ownerTimestamp, change.ChangedTimestamp);
+            },
+            change =>
+            {
+                Assert.Equal(3, change.GetNewValue<int>());
+                Assert.Equal(handOffTimestamp, change.ChangedTimestamp);
+            });
+        Assert.Equal(handOffTimestamp, selected.TryGetWriteTimestamp());
     }
 
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
