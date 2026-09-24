@@ -144,11 +144,11 @@ public class PropertyValueWithWriteTimestampTests
     /// <summary>
     /// A derived getter recomputes from its dependencies as soon as they are stored, while the derived
     /// property's timestamp is stamped by the recalculation that follows. Parking the trigger write
-    /// between the two leaves the getter ahead of the timestamp; the paired read returns what the last
-    /// recalculation committed instead, which is the pair its change notification carries.
+    /// between the two leaves the getter ahead of the committed value; the paired read returns the
+    /// getter's value, which differs from the committed one, so it falls back to the write timestamp.
     /// </summary>
     [Fact]
-    public async Task WhenDerivedPropertyIsReadWhileItsRecalculationIsPending_ThenValueAndTimestampAreTheLastCommitted()
+    public async Task WhenDerivedPropertyIsReadWhileItsRecalculationIsPending_ThenGetterValueComesWithTheWriteTimestamp()
     {
         // Arrange
         var parking = new ParkingWriteInterceptor(nameof(Person.FirstName));
@@ -175,30 +175,29 @@ public class PropertyValueWithWriteTimestampTests
         Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
 
         // Act
-        var separateValue = person.FullName;
         var separateTimestamp = fullName.TryGetWriteTimestamp();
         var pairedValue = fullName.GetValue(out var pairedMetadata);
 
         parking.Release.Set();
-        await writer;
+        await writer.WaitAsync(WaitBudget);
 
         var settledValue = fullName.GetValue(out var settledMetadata);
 
         // Assert
-        Assert.Equal("Jane", separateValue);
         Assert.Equal(FirstTimestamp, separateTimestamp);
-        Assert.Equal("John", pairedValue);
-        Assert.Equal(FirstTimestamp, pairedMetadata.WriteTimestamp);
+        Assert.Equal("Jane", pairedValue);
+        Assert.Equal(separateTimestamp, pairedMetadata.WriteTimestamp);
         Assert.Equal("Jane", settledValue);
         Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
     }
 
     /// <summary>
     /// The terminal of a derived-with-setter write stamps the property's write state before the recalculation
-    /// that follows commits the value that write produces, so the paired read must not take its timestamp from there.
+    /// that follows commits the value that write produces. While that recalculation is pending the getter
+    /// already returns the new value, which differs from the committed one, so the write timestamp is paired with it.
     /// </summary>
     [Fact]
-    public async Task WhenDerivedPropertyWithSetterIsReadWhileItsRecalculationIsPending_ThenValueAndTimestampAreTheLastCommitted()
+    public async Task WhenDerivedPropertyWithSetterIsReadWhileItsRecalculationIsPending_ThenGetterValueComesWithTheWriteTimestamp()
     {
         // Arrange
         var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
@@ -229,7 +228,56 @@ public class PropertyValueWithWriteTimestampTests
         var pairedValue = nickname.GetValue(out var pairedMetadata);
 
         parking.Release.Set();
-        await writer;
+        await writer.WaitAsync(WaitBudget);
+
+        var settledValue = nickname.GetValue(out var settledMetadata);
+
+        // Assert
+        Assert.Equal(SecondTimestamp, separateTimestamp);
+        Assert.Equal("Jane", pairedValue);
+        Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
+        Assert.Equal("Jane", settledValue);
+        Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
+    }
+
+    /// <summary>
+    /// Without an equality check, rewriting a derived-with-setter property's value stamps its write state
+    /// before the recalculation commits the equal value that write produces. The getter's value equals the
+    /// committed one, so the paired read returns the timestamp committed with it rather than the write state's.
+    /// </summary>
+    [Fact]
+    public async Task WhenDerivedPropertyWithSetterIsRewrittenWithAnEqualValue_ThenValueComesWithTheCommittedTimestamp()
+    {
+        // Arrange
+        var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
+        var context = InterceptorSubjectContext.Create().WithDerivedPropertyChangeDetection();
+        context.AddService<IWriteInterceptor>(parking);
+
+        var person = new DerivedSetterPerson(context);
+        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
+
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            person.Nickname = "John";
+        }
+
+        parking.Armed = true;
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
+            {
+                person.Nickname = "John";
+            }
+        }, "writer");
+
+        Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
+
+        // Act
+        var separateTimestamp = nickname.TryGetWriteTimestamp();
+        var pairedValue = nickname.GetValue(out var pairedMetadata);
+
+        parking.Release.Set();
+        await writer.WaitAsync(WaitBudget);
 
         var settledValue = nickname.GetValue(out var settledMetadata);
 
@@ -237,8 +285,35 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal(SecondTimestamp, separateTimestamp);
         Assert.Equal("John", pairedValue);
         Assert.Equal(FirstTimestamp, pairedMetadata.WriteTimestamp);
-        Assert.Equal("Jane", settledValue);
+        Assert.Equal("John", settledValue);
         Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
+    }
+
+    /// <summary>
+    /// A derived property over a field the interceptor cannot see is never recalculated, so its committed
+    /// value is the one from attach. The paired read still returns what the getter computes now.
+    /// </summary>
+    [Fact]
+    public void WhenDerivedPropertyReadsAPlainFieldSetAfterAttach_ThenCurrentGetterValueIsReturned()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        PlainFieldDevice device;
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            device = new PlainFieldDevice(context);
+        }
+
+        var softwareVersion = device.GetPropertyReference(nameof(PlainFieldDevice.SoftwareVersion));
+        device.SetVersion("1.2.3");
+
+        // Act
+        var value = softwareVersion.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal("1.2.3", value);
+        Assert.Equal(softwareVersion.TryGetWriteTimestamp(), metadata.WriteTimestamp);
+        Assert.Equal(FirstTimestamp, metadata.WriteTimestamp);
     }
 
     [Fact]
@@ -425,4 +500,15 @@ public partial class Divider
 
     [Derived]
     public int Quotient => Numerator / Denominator;
+}
+
+[InterceptorSubject]
+public partial class PlainFieldDevice
+{
+    private string? _version;
+
+    [Derived]
+    public string? SoftwareVersion => _version;
+
+    public void SetVersion(string version) => _version = version;
 }
