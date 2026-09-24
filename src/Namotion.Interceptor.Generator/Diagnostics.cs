@@ -143,7 +143,7 @@ internal static class Diagnostics
         title: "Base class interception members cannot be shared",
         // The missing members are interpolated at {2}: five different base defects reach this rule,
         // and naming none of them made every one of them produce the same text.
-        messageFormat: "Base class '{0}' is missing {2}, so '{1}' emits its own interception members and the base class's own properties stay unintercepted. Add the missing members to the base class, or rebuild the base assembly against the current package version if it predates the shared interception members.",
+        messageFormat: "Base class '{0}' is missing {2}, so '{1}' emits its own interception members and the base class's own properties stay unintercepted. Add the missing members to the base class, or rebuild the base assembly against the current package version if an older version of the generator built it.",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,

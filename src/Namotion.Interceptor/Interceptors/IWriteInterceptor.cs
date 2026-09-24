@@ -88,7 +88,8 @@ public struct PropertyWriteContext<TProperty>
     /// Gets the current property value. Before the terminal write it is the value read from the
     /// property on first access, outside the subject lock, so a concurrent writer can supersede it
     /// before this write commits. Once <see cref="IsWritten"/> is true it is the value the property
-    /// held immediately before this write, read under the subject lock.
+    /// held immediately before this write, read under the subject lock, unless the writer supplied the
+    /// current value itself, as a derived property's recalculation does.
     /// </summary>
     public TProperty CurrentValue
     {
