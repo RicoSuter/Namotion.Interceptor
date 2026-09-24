@@ -334,7 +334,11 @@ public class RegisteredSubject
             type,
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
-            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue) : null,
+            setValue is not null
+                ? getValue is not null
+                    ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue)
+                    : (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, (object?)null, setValue)
+                : null,
             isIntercepted: true,
             isDynamic: true));
 

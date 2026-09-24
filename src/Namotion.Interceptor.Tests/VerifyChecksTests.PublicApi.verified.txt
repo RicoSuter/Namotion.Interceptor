@@ -177,6 +177,7 @@ namespace Namotion.Interceptor.Interceptors
     {
         TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue);
         object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod);
+        bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue);
         bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue);
     }
     public interface ILifecycleInterceptor
@@ -203,6 +204,7 @@ namespace Namotion.Interceptor.Interceptors
         public TProperty GetPropertyValue<TProperty>(string propertyName, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue) { }
         public object? InvokeMethod(string methodName, object?[] parameters, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod) { }
         public override bool RemoveFallbackContext(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> writeValue) { }
         public static Namotion.Interceptor.Interceptors.IInterceptorExecutor GetOrCreate(ref Namotion.Interceptor.Interceptors.IInterceptorExecutor? context, Namotion.Interceptor.IInterceptorSubject subject) { }
     }

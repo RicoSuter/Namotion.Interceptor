@@ -104,7 +104,7 @@ public class SubjectBaseInterceptionTests
                     public string Own
                     {
                         get => GetPropertyValue(nameof(Own), static o => ((HandDerived)o)._own);
-                        set => SetPropertyValue(nameof(Own), value, _own, static (o, v) => ((HandDerived)o)._own = v);
+                        set => SetPropertyValue(nameof(Own), value, static o => ((HandDerived)o)._own, static (o, v) => ((HandDerived)o)._own = v);
                     }
 
                     // The other two of the four members the design promises a hand-written subclass
@@ -167,7 +167,7 @@ public class SubjectBaseInterceptionTests
                     public string Own
                     {
                         get => GetPropertyValue(nameof(Own), static o => ((HandDerived)o)._own);
-                        set => SetPropertyValue(nameof(Own), value, _own, static (o, v) => ((HandDerived)o)._own = v);
+                        set => SetPropertyValue(nameof(Own), value, static o => ((HandDerived)o)._own, static (o, v) => ((HandDerived)o)._own = v);
                     }
                 }
             }
@@ -279,7 +279,7 @@ public class SubjectBaseInterceptionTests
                     private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
                         => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-                    private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                    private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
                     {
                         if (_context is null)
                         {
@@ -287,7 +287,7 @@ public class SubjectBaseInterceptionTests
                             return true;
                         }
 
-                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                        return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
                     }
 
                     private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -373,7 +373,7 @@ public class SubjectBaseInterceptionTests
                     protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
                         => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-                    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
                     {
                         if (_context is null)
                         {
@@ -381,7 +381,7 @@ public class SubjectBaseInterceptionTests
                             return true;
                         }
 
-                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                        return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
                     }
 
                     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)

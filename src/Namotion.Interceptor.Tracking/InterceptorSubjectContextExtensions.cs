@@ -97,8 +97,9 @@ public static class InterceptorSubjectContextExtensions
     /// Provided the downstream interceptor chain returns normally after the commit, a write that commits
     /// after Subscribe returns is always delivered while the subscription stays live and no earlier
     /// synchronous observer of the same write throws. A write that committed before may not be, and reading
-    /// the property after subscribing observes that earlier state. OldValue is the value the setter observed
-    /// when it started, including when the subscription raced the write. For a scheduler-based observer,
+    /// the property after subscribing observes that earlier state. OldValue is the value the property held
+    /// immediately before the write committed, read under the subject lock, including when the subscription
+    /// raced the write. For a scheduler-based observer,
     /// delivered means accepted by the channel, not that the callback has already run.
     /// A dispatch already in flight may still invoke the observer after its subscription's Dispose returns.
     /// </summary>

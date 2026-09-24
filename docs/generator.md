@@ -741,7 +741,7 @@ A class can host generated subclasses when it exposes all of the following. A ge
 | implements `IInterceptorSubject` | everything else |
 | implements `IRaisePropertyChanged`, on the base class or on the subject | the subject not re-declaring `PropertyChanged` and `RaisePropertyChanged` |
 | `protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)` | generated getters |
-| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters |
+| `protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)` | generated setters |
 | `protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)` | generated method wrappers |
 | `protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()` | the subject's own `IInterceptorSubject.Properties` |
 | `public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties` | merging the subject's properties with the base class ones |
@@ -802,8 +802,8 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
     protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
         => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue,
-        Action<IInterceptorSubject, TProperty> setValue)
+    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue,
+        Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
     {
         if (_context is null)
         {
@@ -811,7 +811,7 @@ public class TrackedEntityBase : IInterceptorSubject, INotifyPropertyChanged, IR
             return true;
         }
 
-        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+        return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
     }
 
     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod,
@@ -875,7 +875,8 @@ public class CustomDevice : Device
     public string Location
     {
         get => GetPropertyValue(nameof(Location), static subject => ((CustomDevice)subject)._location);
-        set => SetPropertyValue(nameof(Location), value, _location,
+        set => SetPropertyValue(nameof(Location), value,
+            static subject => ((CustomDevice)subject)._location,
             static (subject, newValue) => ((CustomDevice)subject)._location = newValue);
     }
 }

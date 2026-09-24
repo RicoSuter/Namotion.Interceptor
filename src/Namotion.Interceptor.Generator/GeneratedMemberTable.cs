@@ -40,7 +40,7 @@ internal enum AccessorHelperReturnKind
 
 /// <summary>
 /// The shape of one helper method root mode emits, read by both the contract check and the hiding
-/// check. Parameter types are approximated by count plus the two positions a typo really lands on,
+/// check. Parameter types are approximated by count plus the few positions a typo really lands on,
 /// which is enough to separate the emitted signature from an unrelated overload of the same name.
 /// </summary>
 /// <param name="Name">The emitted member name, from <see cref="MemberNames"/>.</param>
@@ -55,6 +55,11 @@ internal enum AccessorHelperReturnKind
 /// Contract check only, never the hiding check: C# hides by signature, which excludes the return type.
 /// </param>
 /// <param name="RequiresLeadingString">Whether the first parameter must be a string.</param>
+/// <param name="RequiresDelegateAt">
+/// Index of a parameter that must be a delegate, or -1. Separates the setter helper from its earlier
+/// shape, which took the current value in that position: the counts agree, and the emitted lambda
+/// would then fail in generated code instead of in a diagnostic.
+/// </param>
 /// <param name="Declaration">How the member is named in the NI0007 message.</param>
 internal sealed record AccessorHelperShape(
     string Name,
@@ -63,7 +68,30 @@ internal sealed record AccessorHelperShape(
     bool RequiresParameterArray,
     AccessorHelperReturnKind ReturnKind,
     bool RequiresLeadingString,
-    string Declaration);
+    int RequiresDelegateAt,
+    string Declaration)
+{
+    /// <summary>
+    /// Whether a method has the emitted signature, as far as the approximation goes: arity, count, and
+    /// the checked parameter positions. Deliberately excludes the 'params' modifier and the return type,
+    /// which C# hiding ignores, so the hiding check can use it as is and the contract check adds them.
+    /// </summary>
+    public bool MatchesSignature(IMethodSymbol method)
+    {
+        if (method.TypeParameters.Length != TypeParameterCount ||
+            method.Parameters.Length != ParameterCount)
+        {
+            return false;
+        }
+
+        if (RequiresLeadingString && method.Parameters[0].Type.SpecialType != SpecialType.System_String)
+        {
+            return false;
+        }
+
+        return RequiresDelegateAt < 0 || method.Parameters[RequiresDelegateAt].Type.TypeKind == TypeKind.Delegate;
+    }
+}
 
 /// <summary>
 /// What the generator emits into a subject's generated half, read from this table rather than from
@@ -75,19 +103,19 @@ internal static class GeneratedMemberTable
     [
         new AccessorHelperShape(
             MemberNames.GetPropertyValue, TypeParameterCount: 1, ParameterCount: 2, RequiresParameterArray: false,
-            AccessorHelperReturnKind.OwnTypeParameter, RequiresLeadingString: true,
+            AccessorHelperReturnKind.OwnTypeParameter, RequiresLeadingString: true, RequiresDelegateAt: -1,
             "protected TProperty GetPropertyValue<TProperty>(string, Func<IInterceptorSubject, TProperty>)"),
         new AccessorHelperShape(
             MemberNames.SetPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
-            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true,
-            "protected bool SetPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)"),
+            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true, RequiresDelegateAt: 2,
+            "protected bool SetPropertyValue<TProperty>(string, TProperty, Func<IInterceptorSubject, TProperty>, Action<IInterceptorSubject, TProperty>)"),
         new AccessorHelperShape(
             MemberNames.InvokeMethod, TypeParameterCount: 0, ParameterCount: 3, RequiresParameterArray: true,
-            AccessorHelperReturnKind.Object, RequiresLeadingString: true,
+            AccessorHelperReturnKind.Object, RequiresLeadingString: true, RequiresDelegateAt: -1,
             "protected object? InvokeMethod(string, Func<IInterceptorSubject, object?[], object?>, params object?[])"),
         new AccessorHelperShape(
             MemberNames.GetInstanceProperties, TypeParameterCount: 0, ParameterCount: 0, RequiresParameterArray: false,
-            AccessorHelperReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false,
+            AccessorHelperReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false, RequiresDelegateAt: -1,
             "protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()")
     ];
 

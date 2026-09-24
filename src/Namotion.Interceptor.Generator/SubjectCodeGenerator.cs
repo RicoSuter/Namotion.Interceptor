@@ -436,7 +436,7 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("                var newValue = value;");
             builder.AppendLine("                var cancel = false;");
             builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
-            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, _{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
+            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, static (o) => (({metadata.ClassName})o)._{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
             builder.AppendLine("                {");
             builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
             builder.AppendLine($"                    {raisePropertyChangedCall};");
@@ -516,7 +516,7 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("        }");
         builder.AppendLine();
         builder.AppendLine("        [MethodImpl(MethodImplOptions.AggressiveInlining)]");
-        builder.AppendLine($"        {HidingModifier(metadata, MemberNames.SetPropertyValue)}{modifier} bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)");
+        builder.AppendLine($"        {HidingModifier(metadata, MemberNames.SetPropertyValue)}{modifier} bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)");
         builder.AppendLine("        {");
         builder.AppendLine("            if (_context is null)");
         builder.AppendLine("            {");
@@ -525,7 +525,7 @@ internal static class SubjectCodeGenerator
         builder.AppendLine("            }");
         builder.AppendLine("            else");
         builder.AppendLine("            {");
-        builder.AppendLine("                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);");
+        builder.AppendLine("                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);");
         builder.AppendLine("            }");
         builder.AppendLine("        }");
         builder.AppendLine();

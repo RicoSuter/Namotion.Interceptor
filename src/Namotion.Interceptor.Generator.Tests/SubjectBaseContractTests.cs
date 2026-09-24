@@ -306,6 +306,26 @@ public class SubjectBaseContractTests
     }
 
     [Fact]
+    public void WhenBaseDeclaresTheSetterHelperWithACurrentValueParameter_ThenTheContractRejectsIt()
+    {
+        // Arrange: the setter helper takes the current value in the position where the generated
+        // setter now passes a delegate that reads it. Every count matches, so without a check on that
+        // position the contract would accept the base and the emitted lambda would be CS1503 inside a
+        // generated file.
+        var source = CurrentValueSetterBase + GeneratedDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert: rejected by the contract, so the subject falls back to its own interception members,
+        // and the message names the shape the base has to declare instead.
+        var diagnostic = Assert.Single(result.GeneratorDiagnostics, d => d.Id == "NI0062");
+        Assert.Contains("Func<IInterceptorSubject, TProperty>, Action<IInterceptorSubject, TProperty>", diagnostic.GetMessage());
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
     public void WhenBaseGetInstancePropertiesReturnsAnImplementingType_ThenTheContractAcceptsIt()
     {
         // Arrange: the base returns FrozenDictionary<string, SubjectPropertyMetadata>?, which the
@@ -617,7 +637,7 @@ public class SubjectBaseContractTests
                 protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
                     => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-                protected void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                protected void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
                 {
                     if (_context is null)
                     {
@@ -625,7 +645,69 @@ public class SubjectBaseContractTests
                         return;
                     }
 
-                    _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                }
+
+                protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                    => _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+            }
+        }
+        """;
+
+    /// <summary>
+    /// A base that satisfies every clause of the contract except that SetPropertyValue takes the current
+    /// value where the generated setter passes the delegate that reads it: the shape the helper had before
+    /// the terminal write started reading the value it overwrites under the subject lock.
+    /// </summary>
+    private const string CurrentValueSetterBase = """
+        using System;
+        using System.Collections.Concurrent;
+        using System.Collections.Generic;
+        using System.Collections.Frozen;
+        using System.ComponentModel;
+        using System.Linq;
+        using Namotion.Interceptor;
+        using Namotion.Interceptor.Interceptors;
+
+        namespace Repro
+        {
+            public class HandBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+            {
+                private IInterceptorExecutor? _context;
+                private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName)
+                    => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                object IInterceptorSubject.SyncRoot { get; } = new object();
+                IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
+
+                void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                    => _properties = ((IInterceptorSubject)this).Properties
+                        .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                        .ToFrozenDictionary();
+
+                public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                    = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+                protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                    => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+
+                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+
+                    return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -680,7 +762,7 @@ public class SubjectBaseContractTests
                 protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
                     => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
                 {
                     if (_context is null)
                     {
@@ -688,7 +770,7 @@ public class SubjectBaseContractTests
                         return true;
                     }
 
-                    return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
@@ -764,7 +846,7 @@ public class SubjectBaseContractTests
                 protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
                     => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
                 {
                     if (_context is null)
                     {
@@ -772,7 +854,7 @@ public class SubjectBaseContractTests
                         return true;
                     }
 
-                    return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
                 }
 
                 protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)

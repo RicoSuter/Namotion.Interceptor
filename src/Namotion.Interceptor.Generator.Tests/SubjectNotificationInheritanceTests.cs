@@ -183,7 +183,7 @@ public class SubjectNotificationInheritanceTests
                     protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
                         => _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
 
-                    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                    protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
                     {
                         if (_context is null)
                         {
@@ -191,7 +191,7 @@ public class SubjectNotificationInheritanceTests
                             return true;
                         }
 
-                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                        return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
                     }
 
                     protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)

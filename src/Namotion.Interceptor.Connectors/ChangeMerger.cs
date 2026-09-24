@@ -6,12 +6,10 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Collapses a flush batch to a single change per property, keeping the oldest commit's old value and
-/// the newest commit's new value. Note that the old value is only as good as what the write pipeline
-/// captured: the generated setter reads it outside the subject lock, so picking by revision decides
-/// WHICH change's old value survives, not that it is the value committed at the preceding revision.
-/// Both ends are picked by <see cref="SubjectPropertyChange.Revision"/> (commit
-/// order) rather than by arrival position, because a change is enqueued after its commit and outside the
-/// subject lock, so concurrent writers to one property can enqueue in the opposite order they committed.
+/// the newest commit's new value, which is the transition across the whole batch. Both ends are picked
+/// by <see cref="SubjectPropertyChange.Revision"/> (commit order) rather than by arrival position,
+/// because a change is enqueued after its commit and outside the subject lock, so concurrent writers to
+/// one property can enqueue in the opposite order they committed.
 /// Owns the pooled scratch buffers so that a flush allocates nothing per batch.
 /// Not thread-safe: the caller must serialize all calls, which <see cref="ChangeQueueProcessor"/> does
 /// by holding its flush gate for the whole merge, write and reset cycle.

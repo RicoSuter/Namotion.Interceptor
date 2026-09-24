@@ -23,6 +23,19 @@ public interface IInterceptorExecutor : IInterceptorSubjectContext
     bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue);
 
     /// <summary>
+    /// Sets a property value through the interceptor chain, reading the current value from the backing
+    /// field itself. The terminal write reads it under the subject lock immediately before storing, so the
+    /// old value of the resulting change is the value this write overwrote, which the overload taking the
+    /// current value cannot promise under concurrent writers.
+    /// </summary>
+    /// <param name="propertyName">The name of the property to write.</param>
+    /// <param name="newValue">The new value to set.</param>
+    /// <param name="readValue">A delegate that reads the backing field value from the subject. Runs under the subject lock, so it must not run interceptors or user code.</param>
+    /// <param name="writeValue">A delegate that writes the new value to the backing field.</param>
+    /// <returns>True if the value was written; false if the write was suppressed by an interceptor.</returns>
+    bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> writeValue);
+
+    /// <summary>
     /// Invokes a method through the interceptor chain.
     /// </summary>
     /// <param name="methodName">The name of the method to invoke.</param>

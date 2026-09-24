@@ -203,7 +203,7 @@ public class ContextFunctionCacheTests
         executor.SetPropertyValue<TProperty>(
             nameof(ContextProbeSubject.Value),
             default!,
-            default!,
+            static _ => default!,
             static (_, _) => { });
     }
 

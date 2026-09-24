@@ -106,7 +106,7 @@ using System.Text.Json.Serialization;
                 var newValue = value;
                 var cancel = false;
                 OnTemperatureChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Temperature), newValue, _Temperature, static (o, v) => ((WeatherStation)o)._Temperature = v))
+                if (!cancel && SetPropertyValue(nameof(Temperature), newValue, static (o) => ((WeatherStation)o)._Temperature, static (o, v) => ((WeatherStation)o)._Temperature = v))
                 {
                     OnTemperatureChanged(_Temperature);
                     RaisePropertyChanged(nameof(Temperature));
@@ -131,7 +131,7 @@ using System.Text.Json.Serialization;
                 var newValue = value;
                 var cancel = false;
                 OnHumidityChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Humidity), newValue, _Humidity, static (o, v) => ((WeatherStation)o)._Humidity = v))
+                if (!cancel && SetPropertyValue(nameof(Humidity), newValue, static (o) => ((WeatherStation)o)._Humidity, static (o, v) => ((WeatherStation)o)._Humidity = v))
                 {
                     OnHumidityChanged(_Humidity);
                     RaisePropertyChanged(nameof(Humidity));
@@ -153,7 +153,7 @@ using System.Text.Json.Serialization;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -162,7 +162,7 @@ using System.Text.Json.Serialization;
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }
         }
 

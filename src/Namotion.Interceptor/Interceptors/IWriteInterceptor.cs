@@ -72,15 +72,53 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     internal bool FinalValueIsNewValue;
 
+    // Null when the caller supplied the current value itself (derived recalculation, hand-written
+    // callers); the value it supplied is then never refreshed. Reads the backing store directly, never
+    // the intercepted getter: the terminal invokes it while holding the subject's SyncRoot.
+    private readonly Func<IInterceptorSubject, TProperty>? _readValue;
+    private TProperty _currentValue;
+    private bool _isCurrentValueResolved;
+
     /// <summary>
     /// Gets the property to write a value to.
     /// </summary>
     public PropertyReference Property { get; }
 
     /// <summary>
-    /// Gets the current property value.
+    /// Gets the current property value. Before the terminal write it is the value read from the
+    /// property on first access, outside the subject lock, so a concurrent writer can supersede it
+    /// before this write commits. Once <see cref="IsWritten"/> is true it is the value the property
+    /// held immediately before this write, read under the subject lock.
     /// </summary>
-    public TProperty CurrentValue { get; }
+    public TProperty CurrentValue
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (!_isCurrentValueResolved)
+            {
+                _currentValue = _readValue!(Property.Subject);
+                _isCurrentValueResolved = true;
+            }
+
+            return _currentValue;
+        }
+    }
+
+    /// <summary>
+    /// Replaces <see cref="CurrentValue"/> with the value the property holds right now. The terminal
+    /// write calls it while holding the subject's SyncRoot, immediately before the store, so the value
+    /// is the one this write overwrites. A no-op when the caller supplied the current value itself.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void CapturePreviousValue(IInterceptorSubject subject)
+    {
+        if (_readValue is not null)
+        {
+            _currentValue = _readValue(subject);
+            _isCurrentValueResolved = true;
+        }
+    }
 
     /// <summary>
     /// Gets the new value to write (might be different than the value returned by calling the
@@ -121,7 +159,26 @@ public struct PropertyWriteContext<TProperty>
     {
         Executor = executor;
         Property = property;
-        CurrentValue = currentValue;
+        _currentValue = currentValue;
+        _isCurrentValueResolved = true;
+        NewValue = newValue;
+        IsWritten = false;
+        _writeTimestamp = 0;
+        PendingOrigin.TryConsume(in property, out _attempted);
+    }
+
+    /// <summary>
+    /// Constructs a write context that reads the current value itself, through <paramref name="readValue"/>:
+    /// lazily on the first <see cref="CurrentValue"/> access, and again under the subject lock at the
+    /// terminal write, so the committed change carries the value it really overwrote. Consumes the
+    /// pending origin stamp like the other constructors.
+    /// </summary>
+    internal PropertyWriteContext(InterceptorExecutor executor, PropertyReference property, Func<IInterceptorSubject, TProperty> readValue, TProperty newValue)
+    {
+        Executor = executor;
+        Property = property;
+        _readValue = readValue;
+        _currentValue = default!;
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
@@ -143,7 +200,8 @@ public struct PropertyWriteContext<TProperty>
     {
         Executor = executor;
         Property = property;
-        CurrentValue = currentValue;
+        _currentValue = currentValue;
+        _isCurrentValueResolved = true;
         NewValue = newValue;
         IsWritten = false;
         FinalValueIsNewValue = true;

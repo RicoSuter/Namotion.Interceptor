@@ -62,18 +62,10 @@ internal static class SubjectMemberConflicts
     }
 
     /// <summary>
-    /// Checks helper method arity and parameter count; other member kinds hide by name.
+    /// Checks the helper method signature; other member kinds hide by name.
     /// </summary>
     private static bool IsHiddenByEmittedMember(ISymbol member, AccessorHelperShape accessorHelper)
-    {
-        if (member is not IMethodSymbol method)
-        {
-            return true;
-        }
-
-        return method.TypeParameters.Length == accessorHelper.TypeParameterCount &&
-               method.Parameters.Length == accessorHelper.ParameterCount;
-    }
+        => member is not IMethodSymbol method || accessorHelper.MatchesSignature(method);
 
     /// <summary>
     /// Finds same-name members below the contract provider, including statics and overloads.

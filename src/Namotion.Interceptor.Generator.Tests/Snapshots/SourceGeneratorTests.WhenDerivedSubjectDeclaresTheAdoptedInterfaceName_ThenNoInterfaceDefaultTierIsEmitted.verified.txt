@@ -94,7 +94,7 @@ using System.Text.Json.Serialization;
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((StatusMachine)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((StatusMachine)o)._Name, static (o, v) => ((StatusMachine)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -116,7 +116,7 @@ using System.Text.Json.Serialization;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -125,7 +125,7 @@ using System.Text.Json.Serialization;
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }
         }
 
@@ -201,7 +201,7 @@ using System.Text.Json.Serialization;
                 var newValue = value;
                 var cancel = false;
                 OnStatusChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Status), newValue, _Status, static (o, v) => ((StatusPump)o)._Status = v))
+                if (!cancel && SetPropertyValue(nameof(Status), newValue, static (o) => ((StatusPump)o)._Status, static (o, v) => ((StatusPump)o)._Status = v))
                 {
                     OnStatusChanged(_Status);
                     RaisePropertyChanged(nameof(Status));

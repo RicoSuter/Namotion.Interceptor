@@ -75,6 +75,6 @@ namespace HomeBlaze.History.InMemory
         protected object? InvokeMethod(string methodName, System.Func<Namotion.Interceptor.IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters) { }
         public System.Threading.Tasks.Task<HomeBlaze.History.Abstractions.HistorySeries> QueryAsync(HomeBlaze.History.Abstractions.HistoryQuery query, System.Threading.CancellationToken cancellationToken) { }
         protected void RaisePropertyChanged(string propertyName) { }
-        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
+        protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readValue, System.Action<Namotion.Interceptor.IInterceptorSubject, TProperty> setValue) { }
     }
 }

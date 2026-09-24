@@ -212,18 +212,12 @@ internal static class SubjectBaseContract
     private static bool HasAccessibleMethodShape(
         IMethodSymbol method, AccessorHelperShape accessorHelper, Compilation compilation)
     {
-        if (method.TypeParameters.Length != accessorHelper.TypeParameterCount ||
-            method.Parameters.Length != accessorHelper.ParameterCount)
+        if (!accessorHelper.MatchesSignature(method))
         {
             return false;
         }
 
         if (accessorHelper.RequiresParameterArray && !method.Parameters[method.Parameters.Length - 1].IsParams)
-        {
-            return false;
-        }
-
-        if (accessorHelper.RequiresLeadingString && method.Parameters[0].Type.SpecialType != SpecialType.System_String)
         {
             return false;
         }
