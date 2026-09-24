@@ -496,7 +496,7 @@ Root
 ```
 
 Removing A reduces Shared's refs to 1 - it stays attached via B.
-Removing B after A detaches Shared (refs: 0).
+Removing B after A detaches Shared (refs: 0). Whichever parent lets go last, the context that `WithContextInheritance()` composed onto Shared when it attached is removed again, as long as that context resolves no lifecycle other than the one removing Shared. When it does, as for a subject shared between two graphs or one inside a subtree grafted from another context, Shared can keep that context if its last parent is not the one it attached through.
 
 **Cycles (Limitation)**
 
