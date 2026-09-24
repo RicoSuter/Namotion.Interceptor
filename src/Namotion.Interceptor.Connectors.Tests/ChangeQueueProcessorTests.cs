@@ -1929,7 +1929,7 @@ public class ChangeQueueProcessorTests
         await processing.WaitAsync(TeardownWaitTimeout);
 
         // Assert
-        Assert.True(await completionCancellation.Task.WaitAsync(TeardownWaitTimeout));
+        Assert.True(await completionCancellation.Task.WaitAsync(TestTimeout));
         Assert.Equal(1, processor.DropCount);
     }
 
@@ -2178,8 +2178,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await dropCallbackEntered.Task.WaitAsync(TestTimeout);
             await processing.WaitAsync(TeardownWaitTimeout);
+            await dropCallbackEntered.Task.WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseDropCallback.Task.IsCompleted);
@@ -2359,8 +2359,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await loggerEntered.Task.WaitAsync(TestTimeout);
             await processing.WaitAsync(TeardownWaitTimeout);
+            await loggerEntered.Task.WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseLogger.Task.IsCompleted);
