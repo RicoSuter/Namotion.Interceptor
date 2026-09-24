@@ -172,6 +172,10 @@ var name = person.Name
   "John"
 ```
 
+### Concurrent Reads and Writes
+
+A read never observes a half-written value, whatever the property's type. Each read is a separate observation, though: two property reads, or a value and its write timestamp read one after the other, can come from different writes, in either order. When you need a value together with its timestamp, take both from a change notification, which carries them for one write, or call `property.GetValue(out var metadata)` from `Namotion.Interceptor.Tracking`, which returns the value together with the metadata of the write that produced it, such as `metadata.WriteTimestamp`. For a derived property that overload returns what the last recalculation committed, the pair its notification carries, and does not invoke the getter. No read returns several properties from one consistent state.
+
 ### Implementing an Interceptor
 
 Each interceptor can:

@@ -89,6 +89,11 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <summary>
     /// Gets the write timestamp, or null if no timestamp has been set.
     /// </summary>
+    /// <remarks>
+    /// A value read separately may come from a different write than this timestamp. For the value together with
+    /// the metadata of the write that produced it, use the <c>GetValue(out PropertyValueMetadata)</c> extension
+    /// method from Namotion.Interceptor.Tracking.
+    /// </remarks>
     public DateTimeOffset? TryGetWriteTimestamp()
     {
         if (TryGetWriteState(out var state))
