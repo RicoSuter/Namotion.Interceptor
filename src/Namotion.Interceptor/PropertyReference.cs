@@ -180,8 +180,12 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// Under constant concurrent writes the metadata may then describe a later write than the one that
     /// produced the value, never an earlier one.
     /// <para>
-    /// A derived property, and a property that is not intercepted, is read without synchronization, so the
-    /// metadata may describe a write later than the value's inputs, never an earlier one. Without recorded
+    /// A derived property, and a property that is not intercepted, is read without synchronization. For a
+    /// property that is not intercepted, the value and metadata may come from different writes, in either order.
+    /// For a derived property the metadata may describe a write later than the value's inputs, never an earlier
+    /// one, as long as the getter reads only the dependencies its last recalculation recorded. A property the
+    /// getter reads that is not recorded yet, for example after a write changed which branch the getter takes
+    /// and before the recalculation that write triggers commits, is not covered. Without recorded
     /// dependencies, for example a getter over plain fields or a context without derived property change
     /// detection, the metadata carries the property's own write timestamp alone. Inside a transaction, a
     /// pending value is returned with the metadata of the last committed write.
@@ -199,8 +203,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         var timestampTicks = GetWriteTimestampTicks();
 
         // A dependency's terminal stores its value and timestamp under one lock, so a getter that saw a
-        // value finds its timestamp stored: read after the getter, the dependencies' timestamps can be
-        // newer than the value's inputs, never older.
+        // value finds its timestamp stored: read after the getter, a recorded dependency's timestamp can be
+        // newer than the value the getter read from it, never older.
         if (propertyMetadata.IsDerived
             && TryGetPropertyData(DerivedDependenciesKey, out var data)
             && data is IDerivedPropertyDependencies dependencies)
