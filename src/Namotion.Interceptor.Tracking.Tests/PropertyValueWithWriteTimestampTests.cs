@@ -262,6 +262,25 @@ public class PropertyValueWithWriteTimestampTests
     }
 
     [Fact]
+    public void WhenDerivedPropertyIsDetached_ThenGetterIsInvoked()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var parent = new Person(context);
+        var child = new Person();
+        parent.Father = child;
+        child.FirstName = "John";
+        parent.Father = null;
+        var fullName = child.GetPropertyReference(nameof(Person.FullName));
+
+        // Act
+        var value = fullName.GetValue(out _);
+
+        // Assert
+        Assert.Equal("John", value);
+    }
+
+    [Fact]
     public void WhenDerivedPropertyIsReadWithoutDerivedPropertyChangeDetection_ThenGetterIsInvoked()
     {
         // Arrange
