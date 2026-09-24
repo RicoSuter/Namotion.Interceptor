@@ -156,6 +156,34 @@ public class WriteTimestampTests
         Assert.True(changes.All(c => c.ChangedTimestamp == first));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenADependencyWriteRecalculatesADerivedProperty_ThenTheCommitStoresTheStorageTimestamp(bool nullScope)
+    {
+        // Arrange
+        var probe = new StoredTimestampProbeInterceptor(nameof(Person.FullName));
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService<IWriteInterceptor>(() => probe, _ => false);
+
+        var person = new Person(context);
+        var scopeTimestamp = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(nullScope ? null : scopeTimestamp))
+        {
+            person.FirstName = "John";
+        }
+
+        // Assert: the probe reads ahead of the notification write's terminal, which restamps the property,
+        // so it observes what the recalculation's commit stored.
+        Assert.True(probe.Observed);
+        Assert.Null(probe.ReadException);
+        Assert.Equal(nullScope ? null : scopeTimestamp, probe.StoredTimestamp);
+    }
+
     [Fact]
     public void WriteTimestamp_ConcurrentWrites_ValueAndTimestampAreConsistent()
     {
@@ -430,6 +458,31 @@ public class WriteTimestampTests
         Assert.NotNull(sideEffectTs);
         Assert.NotEqual(triggerTs, sideEffectTs);
         Assert.True(sideEffectTs > triggerTs, "side-effect capture must occur after the trigger capture");
+    }
+
+    private sealed class StoredTimestampProbeInterceptor(string propertyName) : IWriteInterceptor
+    {
+        public bool Observed { get; private set; }
+        public DateTimeOffset? StoredTimestamp { get; private set; }
+        public Exception? ReadException { get; private set; }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.Property.Name == propertyName)
+            {
+                Observed = true;
+                try
+                {
+                    StoredTimestamp = context.Property.TryGetWriteTimestamp();
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    ReadException = exception;
+                }
+            }
+
+            next(ref context);
+        }
     }
 
     private sealed class ContextTimestampCapturingInterceptor : IWriteInterceptor
