@@ -66,7 +66,10 @@ public class SubjectSourceReconcileRaceTests
             if (context.Property.Name == propertyName && Interlocked.Exchange(ref _write, null) is { } write)
             {
                 Fired = true;
-                Task.Run(write).Wait(TestTimeout);
+                if (!Task.Run(write).Wait(TestTimeout))
+                {
+                    throw new TimeoutException("The racing write did not commit within the test timeout.");
+                }
             }
 
             return value;
