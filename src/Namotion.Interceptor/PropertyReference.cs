@@ -167,22 +167,16 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// Takes the subject's lock briefly: the terminal stores the timestamp and the revision one after the
     /// other, so a lock-free reader could pair one commit's timestamp with the previous commit's revisions.
     /// </remarks>
-    internal void GetWriteStateSnapshot(out long timestampTicks, out long nonSourceCommitRevision, out long sourceCommitRevision)
+    internal (long TimestampTicks, long NonSourceCommitRevision, long SourceCommitRevision) GetWriteStateSnapshot()
     {
         lock (Subject.SyncRoot)
         {
-            if (TryGetWriteState(out var state))
-            {
-                timestampTicks = Interlocked.Read(ref state.TimestampTicks);
-                nonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
-                sourceCommitRevision = Interlocked.Read(ref state.LastSourceCommitRevision);
-                return;
-            }
+            return TryGetWriteState(out var state)
+                ? (Interlocked.Read(ref state.TimestampTicks),
+                    Interlocked.Read(ref state.LastNonSourceCommitRevision),
+                    Interlocked.Read(ref state.LastSourceCommitRevision))
+                : default;
         }
-
-        timestampTicks = 0;
-        nonSourceCommitRevision = 0;
-        sourceCommitRevision = 0;
     }
 
     /// <summary>
