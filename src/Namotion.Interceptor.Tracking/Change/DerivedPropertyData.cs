@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
 /// </summary>
-internal sealed class DerivedPropertyData
+internal sealed class DerivedPropertyData : IDerivedPropertyDependencies
 {
     /// <summary>
     /// Dependencies: Which properties this derived property depends on.
@@ -104,6 +104,31 @@ internal sealed class DerivedPropertyData
             }
 
             return array.AsSpan(0, Math.Min(_requiredPropertyCount, array.Length));
+        }
+    }
+
+    /// <inheritdoc />
+    public long GetLatestDependencyWriteTimestampTicks()
+    {
+        // The dependency buffer is rewritten in place under the lock the handler takes on this instance,
+        // so the read holds the same lock. Nothing under it runs user code or takes another lock. A
+        // dependency that is derived itself is not followed: the stored properties its getter read were
+        // recorded into this list directly.
+#pragma warning disable S2551 // The handler locks the instance itself by design; see the field docs above.
+        lock (this)
+#pragma warning restore S2551
+        {
+            var latest = 0L;
+            foreach (ref readonly var dependency in RequiredPropertiesSpan)
+            {
+                var ticks = dependency.GetWriteTimestampTicks();
+                if (ticks > latest)
+                {
+                    latest = ticks;
+                }
+            }
+
+            return latest;
         }
     }
 

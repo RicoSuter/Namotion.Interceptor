@@ -143,12 +143,17 @@ public class PropertyValueWithWriteTimestampTests
 
     /// <summary>
     /// A derived getter recomputes from its dependencies as soon as they are stored, while the derived
-    /// property's timestamp is stamped by the recalculation that follows. Parking the trigger write
-    /// between the two leaves the getter ahead of the timestamp; the paired read returns the getter's
-    /// value with the write timestamp as it stands, as reading them one after the other does.
+    /// property's own timestamp is stamped by the recalculation that follows. Parking the trigger write
+    /// between the two leaves the getter ahead of that timestamp; the paired read returns the getter's
+    /// value with the dependency's timestamp, which the property's own timestamp read separately lacks.
+    /// A derived property over another derived property records the stored properties that getter reads
+    /// as its own dependencies, so it needs no deeper lookup.
     /// </summary>
-    [Fact]
-    public async Task WhenDerivedPropertyIsReadWhileItsRecalculationIsPending_ThenGetterValueComesWithTheWriteTimestamp()
+    [Theory]
+    [InlineData(nameof(Person.FullName), "Jane")]
+    [InlineData(nameof(Person.FullNameWithPrefix), "Mr. Jane")]
+    public async Task WhenDerivedPropertyIsReadWhileItsRecalculationIsPending_ThenGetterValueComesWithTheDependencyWriteTimestamp(
+        string propertyName, string expectedValue)
     {
         // Arrange
         var parking = new ParkingWriteInterceptor(nameof(Person.FirstName));
@@ -156,7 +161,7 @@ public class PropertyValueWithWriteTimestampTests
         context.AddService<IWriteInterceptor>(parking);
 
         var person = new Person(context);
-        var fullName = person.GetPropertyReference(nameof(Person.FullName));
+        var property = person.GetPropertyReference(propertyName);
 
         using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
         {
@@ -175,20 +180,98 @@ public class PropertyValueWithWriteTimestampTests
         Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
 
         // Act
-        var separateTimestamp = fullName.TryGetWriteTimestamp();
-        var pairedValue = fullName.GetValue(out var pairedMetadata);
+        var separateTimestamp = property.TryGetWriteTimestamp();
+        var pairedValue = property.GetValue(out var pairedMetadata);
 
         parking.Release.Set();
         await writer.WaitAsync(WaitBudget);
 
-        var settledValue = fullName.GetValue(out var settledMetadata);
+        var settledValue = property.GetValue(out var settledMetadata);
 
         // Assert
         Assert.Equal(FirstTimestamp, separateTimestamp);
-        Assert.Equal("Jane", pairedValue);
-        Assert.Equal(separateTimestamp, pairedMetadata.WriteTimestamp);
-        Assert.Equal("Jane", settledValue);
+        Assert.Equal(expectedValue, pairedValue);
+        Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
+        Assert.Equal(expectedValue, settledValue);
         Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
+    }
+
+    /// <summary>
+    /// A dependency on another subject is recorded like any other, so the paired read reaches that
+    /// subject's write state for the timestamp while the recalculation is still pending.
+    /// </summary>
+    [Fact]
+    public async Task WhenDerivedPropertyDependsOnAnotherSubject_ThenPairedReadCarriesThatSubjectsWriteTimestamp()
+    {
+        // Arrange
+        var parking = new ParkingWriteInterceptor(nameof(Tire.Pressure));
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(parking);
+
+        var car = new Car(context);
+        var averagePressure = car.GetPropertyReference(nameof(Car.AveragePressure));
+
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            foreach (var tire in car.Tires)
+            {
+                tire.Pressure = 2m;
+            }
+        }
+
+        parking.Armed = true;
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
+            {
+                car.Tires[0].Pressure = 6m;
+            }
+        }, "writer");
+
+        Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
+
+        // Act
+        var separateTimestamp = averagePressure.TryGetWriteTimestamp();
+        var pairedValue = averagePressure.GetValue(out var pairedMetadata);
+
+        parking.Release.Set();
+        await writer.WaitAsync(WaitBudget);
+
+        // Assert
+        Assert.Equal(FirstTimestamp, separateTimestamp);
+        Assert.Equal(3m, pairedValue);
+        Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
+    }
+
+    /// <summary>
+    /// A recalculation requested after the dependency writes stamps the derived property later than any
+    /// of them, and that own timestamp is the one the paired read carries.
+    /// </summary>
+    [Fact]
+    public void WhenDerivedPropertyIsRecalculatedAfterItsDependencyWrites_ThenPairedReadCarriesItsOwnNewerTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        var fullName = person.GetPropertyReference(nameof(Person.FullName));
+
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            person.FirstName = "John";
+        }
+
+        using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
+        {
+            fullName.RecalculateDerivedProperty();
+        }
+
+        // Act
+        var value = fullName.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal("John", value);
+        Assert.Equal(SecondTimestamp, fullName.TryGetWriteTimestamp());
+        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
     }
 
     /// <summary>
