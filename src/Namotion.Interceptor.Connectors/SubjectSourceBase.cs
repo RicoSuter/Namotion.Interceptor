@@ -465,7 +465,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             {
                 var property = change.Property;
 
-                if (!ChangeDeliveryFilter.IsCurrent(in change, DeliveryRule))
+                if (!ChangeDeliveryFilter.IsCurrent(in change, DeliveryRule, out var commitRevision))
                 {
                     // A later local commit supersedes it, and that commit's change is delivered in its
                     // place.
@@ -488,12 +488,20 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     (toSend ??= []).Add(change);
                     sent++;
                 }
-                else if (property.Metadata.SetValue is { } setValue)
+                else if (property.Metadata.SetValue is not null)
                 {
                     // The load moved the model off it: restore locally so the connected phase captures
-                    // and sends the re-applied write.
-                    setValue(property.Subject, change.GetNewValue<object?>());
-                    restored++;
+                    // and sends the re-applied write. Conditional on the revision the check above read,
+                    // because a local write can commit between that check and this restore, and an
+                    // unconditional restore would overwrite it with the older parked value.
+                    if (ChangeDeliveryFilter.TryReapplyIfStillCurrent(in change, DeliveryRule, commitRevision))
+                    {
+                        restored++;
+                    }
+                    else
+                    {
+                        superseded++;
+                    }
                 }
                 else
                 {

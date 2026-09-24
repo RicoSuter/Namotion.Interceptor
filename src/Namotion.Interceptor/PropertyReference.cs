@@ -194,6 +194,29 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
+    /// Writes <paramref name="value"/> through the intercepted setter only if the property's commit revision,
+    /// read by the terminal under the subject lock, is still <paramref name="expectedCommitRevision"/>.
+    /// Returns false when a commit landed in between, in which case nothing was stored, no write state
+    /// advanced and no change was published. Requires a setter.
+    /// </summary>
+    /// <param name="value">The value to write.</param>
+    /// <param name="expectedCommitRevision">The commit revision the caller observed.</param>
+    /// <param name="includeSourceCommits">Which commits the revision counts; the same choice as
+    /// <see cref="TryGetWriteState(bool, out long, out bool)"/>, and it must match the read that produced
+    /// <paramref name="expectedCommitRevision"/>.</param>
+    internal bool TrySetValueIfCommitRevisionIs(object? value, long expectedCommitRevision, bool includeSourceCommits)
+    {
+        var setValue = Metadata.SetValue
+                       ?? throw new InvalidOperationException($"Property '{Name}' has no setter.");
+
+        using (PendingOrigin.SetCommitPrecondition(this, expectedCommitRevision, includeSourceCommits))
+        {
+            setValue(Subject, value);
+            return !PendingOrigin.PreconditionFailed;
+        }
+    }
+
+    /// <summary>
     /// Sets the write timestamp alone, for the paths that produce a change without committing a write
     /// through a terminal and therefore have no revision to stamp.
     /// </summary>

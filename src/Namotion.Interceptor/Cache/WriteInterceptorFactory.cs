@@ -18,6 +18,15 @@ internal static class WriteInterceptorFactory<TProperty>
                 var subject = property.Subject;
                 lock (subject.SyncRoot)
                 {
+                    if (context.Precondition.IsSet && !context.Precondition.HoldsFor(in property))
+                    {
+                        // A commit landed since the caller read the revision, so this write is stale.
+                        // Nothing is stored and nothing advances: IsWritten stays false and the chain
+                        // unwinds as after a veto.
+                        PendingOrigin.MarkPreconditionFailed();
+                        return;
+                    }
+
                     innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
                     // Plain increment, no Interlocked: the enclosing lock is the subject's SyncRoot and the
@@ -49,6 +58,12 @@ internal static class WriteInterceptorFactory<TProperty>
                 var subject = property.Subject;
                 lock (subject.SyncRoot)
                 {
+                    if (context.Precondition.IsSet && !context.Precondition.HoldsFor(in property))
+                    {
+                        PendingOrigin.MarkPreconditionFailed();
+                        return context.NewValue;
+                    }
+
                     innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
                     // See the zero-interceptor terminal above for why the property is hoisted, why the
