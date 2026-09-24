@@ -95,10 +95,49 @@ public struct PropertyWriteContext<TProperty>
     public bool IsWritten { get; set; }
 
     /// <summary>
+    /// Gets whether a caller armed a <see cref="PropertyWriteOutcome"/> for this write. False for every
+    /// ordinary write, so observation costs unobserved writes one predictable branch.
+    /// </summary>
+    internal bool IsObserved => _outcome is not null;
+
+    /// <summary>
+    /// Records that the terminal assignment completed. Called inside the terminal's lock, so the fact is
+    /// recorded before any hook or observer can throw over it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ReportMutated()
+    {
+        if (_outcome is not null)
+        {
+            _outcome.Mutated = true;
+            _outcome.Accepted = true;
+        }
+    }
+
+    /// <summary>
+    /// Records that the write stopped short of assignment because the value it was given already equalled
+    /// the current one, which is a successful no-op rather than a rejection.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ReportEqualityAccepted()
+    {
+        if (_outcome is not null)
+        {
+            _outcome.Accepted = true;
+        }
+    }
+
+    /// <summary>
     /// The attempted origin paired with the value the source sent (valid when the origin is
     /// stamped). Finalized at the terminal write; see <see cref="Origin"/> and <see cref="FinalizeOrigin"/>.
     /// </summary>
     private AttemptedOrigin _attempted;
+
+    /// <summary>
+    /// The outcome a caller armed for this write, consumed from the same pending frame as
+    /// <see cref="_attempted"/>; null for every ordinary write.
+    /// </summary>
+    private readonly PropertyWriteOutcome? _outcome;
 
     /// <summary>
     /// The origin of this write. Before the terminal write executes this is the attempted
@@ -111,8 +150,9 @@ public struct PropertyWriteContext<TProperty>
 
     /// <summary>
     /// Constructs a write context and, as a side effect, consumes the thread-static pending
-    /// origin stamp for this property (see <see cref="PendingOrigin"/>). Any direct construction
-    /// (tests, benchmarks, not just the interceptor chain) drains the pending stamp for the
+    /// frame for this property (see <see cref="PendingOrigin"/>): the origin stamp and, when a
+    /// caller armed one, the <see cref="PropertyWriteOutcome"/> this write reports into. Any direct
+    /// construction (tests, benchmarks, not just the interceptor chain) drains the pending frame for the
     /// matching property; a caller newing up a context by hand takes on that consumption.
     /// Internal so every meaningfully constructed context comes from the library's execution
     /// entry points, which always thread the per-call chain state (such as the terminal) through it.
@@ -125,7 +165,7 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
-        PendingOrigin.TryConsume(in property, out _attempted);
+        PendingOrigin.TryConsume(in property, out _attempted, out _outcome);
     }
 
     /// <summary>
@@ -148,7 +188,7 @@ public struct PropertyWriteContext<TProperty>
         IsWritten = false;
         FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
-        PendingOrigin.TryConsume(in property, out _attempted);
+        PendingOrigin.TryConsume(in property, out _attempted, out _outcome);
     }
 
     /// <summary>

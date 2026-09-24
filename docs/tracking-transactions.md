@@ -131,8 +131,8 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 
 | Value | Description |
 |-------|-------------|
-| `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. |
-| `Rollback` | All-or-nothing across all properties - any failure reverts everything. |
+| `BestEffort` | Apply successful changes, restore the mutations of failed ones to keep each property in sync with its source. |
+| `Rollback` | All-or-nothing across all properties: any failure restores every mutation and reverts every source write. |
 
 **Behavior comparison:**
 
@@ -140,7 +140,7 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 |----------|------------|----------|
 | All succeed | All changes applied | All changes applied |
 | Source write fails | Successful applied, failed not applied | All reverted |
-| Local apply fails | Successful applied, failed sources rolled back | All reverted |
+| Local apply fails | Successful applied, failed property restored and its source reverted | All restored and reverted |
 | Consistency | Per-property (each stays in sync) | All-or-nothing |
 | Use when | Partial progress acceptable | Full atomicity required |
 
@@ -251,11 +251,11 @@ Stage 1 is performed by an `ITransactionWriter`; the built-in `SourceTransaction
 | Failure Stage | BestEffort | Rollback |
 |---------------|------------|----------|
 | Source write fails | Successful sources written and applied | All sources reverted, nothing applied |
-| Local apply fails (source-bound or local) | Successful kept, failed sources reverted | All reverted |
+| Local apply fails (source-bound or local) | Successful kept, the failed property's mutation restored and its source reverted | All mutations restored, all sources reverted |
 
-Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
+Both modes ensure **per-property consistency**: if a property's local apply fails, whatever part of it reached the model is restored and its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also restored (Rollback).
 
-Revert operations call setters with old values, which also trigger `OnChanging/OnChanged` methods.
+Revert and restore operations call setters with old values, which also trigger `OnChanging/OnChanged` methods. See [Failure Flows and Consistency](#failure-flows-and-consistency) for what compensation restores and what it cannot undo.
 
 ### Source Association
 
@@ -331,6 +331,10 @@ A commit attempt ends in one of three states:
 
 Note that "terminal" describes the transaction, not the result: a successful commit is also terminal. Transactions are one-shot once anything has moved.
 
+Compensation is driven by what each replayed write actually did, not by what it was asked to do. `Rollback` restores every change that mutated the model, in the reverse of the order it was applied. `BestEffort` restores only the mutations whose write then failed, leaving accepted writes standing. A write whose value, after the subject's own changing hook ran, already equalled the current one is a success that mutated nothing, so there is nothing to restore.
+
+Compensation is not an undo. It leaves behind everything the forward write already caused, including delivered change notifications and the side effects of `OnChanging/OnChanged` methods, validators and observers, and being an ordinary write it can fail. A restore failure is reported as an additional exception in `Errors`; the property appears in `FailedChanges` only if its own write failed or its source revert failed.
+
 The tables below list every flow and its end state per property. "Old" means the pre-transaction value, "new" means the transaction's value.
 
 **Local-only commits** (no `WithSourceTransactions()`). There is only the local model, so nothing can diverge; the only question is which properties end old and which end new:
@@ -338,9 +342,9 @@ The tables below list every flow and its end state per property. "Old" means the
 | Scenario | Mode | Local model ends as | Outcome |
 |----------|------|---------------------|---------|
 | All applies succeed | any | new | committed |
-| Some applies fail | BestEffort | applied keep new, failed keep old | terminal failure, reported per change |
-| Some applies fail, reverts succeed | Rollback | all old | terminal failure |
-| Some applies fail, a revert also fails | Rollback | mixed, despite Rollback | terminal failure, stuck properties are in `FailedChanges` |
+| Some applies fail | BestEffort | applied keep new, failed restored to old | terminal failure, reported per change |
+| Some applies fail, restores succeed | Rollback | all old | terminal failure |
+| Some applies fail, a restore also fails | any | mixed, the stuck property keeps its new value | terminal failure, the restore error is in `Errors` |
 
 Commits with source writes (`WithSourceTransactions()` or a custom `ITransactionWriter`) involve two models that must agree: the external source and the local model. The next two tables split these flows by how they end.
 
@@ -352,23 +356,23 @@ Commits with source writes (`WithSourceTransactions()` or a custom `ITransaction
 | Conflict detected or optimistic lock not acquired (nothing written yet) | any | old | old | retryable failure |
 | A source write fails or times out, reverts succeed | Rollback | all old | all old | terminal failure |
 | A source write fails or times out | BestEffort | succeeded new, failed old | matches source | terminal failure |
-| A local apply fails, all reverts succeed | Rollback | all old | all old | terminal failure |
-| A local apply fails, its source revert succeeds | BestEffort | applied new, failed-apply old | matches source | terminal failure |
+| A local apply fails, all restores and reverts succeed | Rollback | all old | all old | terminal failure |
+| A local apply fails, its restore and source revert succeed | BestEffort | applied new, failed-apply old | matches source | terminal failure |
 | Writer reports an error without failed changes (custom writers only), reverts succeed | Rollback | all old | all old | terminal failure |
 | Writer reports an error without failed changes (custom writers only) | BestEffort | new | new | terminal failure, error surfaced in `Errors` |
 
-**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are always reported in `FailedChanges` and `Errors`, except for a throwing writer where the transaction cannot know which sources were touched:
+**Source writes, diverged end state.** A revert failed, was interrupted, or never ran, so a property can end with different values at the source and in the local model. The end state depends only on which revert got stuck, not on which stage triggered it, so each row covers every path that reaches it. Diverged properties are reported in `FailedChanges` and `Errors`, with two exceptions: a failed local restore of a property whose own write succeeded is reported through `Errors` alone, and a throwing writer, where the transaction cannot know which sources were touched:
 
 | Scenario | Mode | Source ends | Local ends | Outcome | Divergence |
 |----------|------|-------------|------------|---------|------------|
 | Commit timeout during source revert | Rollback | partially reverted | old | retryable failure | transient, a successful retry re-pushes everything |
 | A source revert fails or throws | any | new on the stuck source | old | terminal failure | source ahead of local |
-| A local revert fails after a failed apply | Rollback | old | new | terminal failure | local ahead of source |
+| A local restore fails | any | old | new | terminal failure | local ahead of source |
 | Custom writer throws from `WriteToSourcesAsync` | any | unknown, never reverted | old | terminal failure | unknown and unreported |
 
 Three root causes account for every divergence:
 
-1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `FailedChanges` and `Errors`, so the caller knows exactly which properties are stuck.
+1. **A compensating write failed.** Reverts are inverse writes, not an undo. A source that just failed or timed out is asked to accept another write, so this is the most likely divergence in practice. It is always terminal and always reported through `Errors`, and through `FailedChanges` as well unless the stuck property is one whose own write succeeded.
 2. **The writer threw instead of reporting.** Only a custom `ITransactionWriter` can cause this (the built-in writer always reports). The transaction has no written set and no revert state, so it cannot compensate and cannot tell which sources were touched. See [SubjectTransactionException](#subjecttransactionexception).
 3. **The inherent in-flight window.** Sources are written before the local model is applied, so even a fully successful commit has a moment where a source holds the new value and the local model does not, and during Rollback compensation a source briefly holds a value that is then taken back. Transactions provide quiescent consistency (both sides agree once the commit settles), not isolation from external observers of the source.
 
@@ -392,7 +396,9 @@ public partial class GpioDevice
 
 When `OnChanging/OnChanged` throws:
 - **BestEffort mode**: Other successful changes are applied, failure reported
-- **Rollback mode**: All previous stages are reverted (sources + successful local changes)
+- **Rollback mode**: Sources are reverted and every local mutation is restored
+
+A change also fails if its property has no usable setter when the commit replays it, for example a getter-only or `init`-only property, because the write never reaches the model.
 
 ### Derived Properties
 
@@ -563,7 +569,7 @@ TransactionAwaitable BeginTransactionAsync(
 ### Enums
 
 **TransactionFailureHandling:**
-- `BestEffort` - Apply successful changes, rollback failed ones (per-property consistency)
+- `BestEffort` - Apply successful changes, restore the mutations of failed ones (per-property consistency)
 - `Rollback` - All-or-nothing across all properties
 
 **TransactionLocking:**
