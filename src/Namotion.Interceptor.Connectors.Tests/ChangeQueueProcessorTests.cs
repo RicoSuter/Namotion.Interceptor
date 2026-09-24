@@ -12,6 +12,8 @@ namespace Namotion.Interceptor.Connectors.Tests;
 public class ChangeQueueProcessorTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    // For the stop bound under test only. Waiting for a callback to be reached takes several thread
+    // pool dispatches that stall on a loaded runner, so those waits use TestTimeout.
     private static readonly TimeSpan TeardownWaitTimeout = TimeSpan.FromSeconds(10);
 
     [Fact]
@@ -1623,7 +1625,7 @@ public class ChangeQueueProcessorTests
         subject.FirstName = "blocked";
         await writeEntered.Task.WaitAsync(TestTimeout);
         await cancellation.CancelAsync();
-        await terminalEntered.Task.WaitAsync(TeardownWaitTimeout);
+        await terminalEntered.Task.WaitAsync(TestTimeout);
 
         var disposing = Task.Run(processor.Dispose);
         await AsyncTestHelpers.WaitUntilAsync(
@@ -1927,7 +1929,7 @@ public class ChangeQueueProcessorTests
         await processing.WaitAsync(TeardownWaitTimeout);
 
         // Assert
-        Assert.True(await completionCancellation.Task.WaitAsync(TeardownWaitTimeout));
+        Assert.True(await completionCancellation.Task.WaitAsync(TestTimeout));
         Assert.Equal(1, processor.DropCount);
     }
 
@@ -2115,7 +2117,7 @@ public class ChangeQueueProcessorTests
 
         // Act
         await cancellation.CancelAsync();
-        await cancellationObserved.Task.WaitAsync(TeardownWaitTimeout);
+        await cancellationObserved.Task.WaitAsync(TestTimeout);
         await processing.WaitAsync(TeardownWaitTimeout);
         await completionReached.Task.WaitAsync(TestTimeout);
         processor.Dispose();
@@ -2176,8 +2178,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await dropCallbackEntered.Task.WaitAsync(TeardownWaitTimeout);
             await processing.WaitAsync(TeardownWaitTimeout);
+            await dropCallbackEntered.Task.WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseDropCallback.Task.IsCompleted);
@@ -2237,7 +2239,7 @@ public class ChangeQueueProcessorTests
         {
             // Act
             var cancelling = cancellation.CancelAsync();
-            await cancellationCallbackEntered.Task.WaitAsync(TeardownWaitTimeout);
+            await cancellationCallbackEntered.Task.WaitAsync(TestTimeout);
             await Task.WhenAll(cancelling, processing).WaitAsync(TeardownWaitTimeout);
 
             // Assert
@@ -2357,8 +2359,8 @@ public class ChangeQueueProcessorTests
         {
             // Act
             await cancellation.CancelAsync();
-            await loggerEntered.Task.WaitAsync(TeardownWaitTimeout);
             await processing.WaitAsync(TeardownWaitTimeout);
+            await loggerEntered.Task.WaitAsync(TestTimeout);
 
             // Assert
             Assert.False(releaseLogger.Task.IsCompleted);
