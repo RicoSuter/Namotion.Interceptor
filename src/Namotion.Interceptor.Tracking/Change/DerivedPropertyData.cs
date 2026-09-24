@@ -36,19 +36,6 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
-    /// Write timestamp committed together with <see cref="LastKnownValue"/>, as raw UTC ticks (0 for none).
-    /// Kept apart from the property's write state, which the terminal of a derived-with-setter write stamps
-    /// before the recalculation commits the value that write produces. Only read/written inside lock(this).
-    /// </summary>
-    internal long LastKnownWriteTimestamp;
-
-    /// <summary>
-    /// Whether <see cref="LastKnownValue"/> holds a committed evaluation. False until an evaluation after attach
-    /// succeeds, so a getter that threw at attach is not reported as a null value. Only read/written inside lock(this).
-    /// </summary>
-    internal bool HasLastKnownValue;
-
-    /// <summary>
     /// Reentrancy guard for RecalculateDerivedProperty.
     /// Prevents infinite recursion when a derived-with-setter property's
     /// SetPropertyValueWithInterception re-enters WriteProperty.
@@ -158,7 +145,6 @@ internal sealed class DerivedPropertyData
 
             ClearRequiredProperties();
             LastKnownValue = null;
-            HasLastKnownValue = false;
         }
 
         // Case 2: snapshot used-by properties, then clear. Snapshot is stable (copy-on-write).

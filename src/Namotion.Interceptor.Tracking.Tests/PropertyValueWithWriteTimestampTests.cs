@@ -144,8 +144,8 @@ public class PropertyValueWithWriteTimestampTests
     /// <summary>
     /// A derived getter recomputes from its dependencies as soon as they are stored, while the derived
     /// property's timestamp is stamped by the recalculation that follows. Parking the trigger write
-    /// between the two leaves the getter ahead of the committed value; the paired read returns the
-    /// getter's value, which differs from the committed one, so it falls back to the write timestamp.
+    /// between the two leaves the getter ahead of the timestamp; the paired read returns the getter's
+    /// value with the write timestamp as it stands, as reading them one after the other does.
     /// </summary>
     [Fact]
     public async Task WhenDerivedPropertyIsReadWhileItsRecalculationIsPending_ThenGetterValueComesWithTheWriteTimestamp()
@@ -194,7 +194,7 @@ public class PropertyValueWithWriteTimestampTests
     /// <summary>
     /// The terminal of a derived-with-setter write stamps the property's write state before the recalculation
     /// that follows commits the value that write produces. While that recalculation is pending the getter
-    /// already returns the new value, which differs from the committed one, so the write timestamp is paired with it.
+    /// already returns the new value, and the write timestamp paired with it is the one that write stamped.
     /// </summary>
     [Fact]
     public async Task WhenDerivedPropertyWithSetterIsReadWhileItsRecalculationIsPending_ThenGetterValueComesWithTheWriteTimestamp()
@@ -242,11 +242,11 @@ public class PropertyValueWithWriteTimestampTests
 
     /// <summary>
     /// Without an equality check, rewriting a derived-with-setter property's value stamps its write state
-    /// before the recalculation commits the equal value that write produces. The getter's value equals the
-    /// committed one, so the paired read returns the timestamp committed with it rather than the write state's.
+    /// before the recalculation commits the equal value that write produces. The paired read returns the
+    /// timestamp of that rewrite, not the older one the previous recalculation committed with an equal value.
     /// </summary>
     [Fact]
-    public async Task WhenDerivedPropertyWithSetterIsRewrittenWithAnEqualValue_ThenValueComesWithTheCommittedTimestamp()
+    public async Task WhenDerivedPropertyWithSetterIsRewrittenWithAnEqualValue_ThenValueComesWithTheRewriteTimestamp()
     {
         // Arrange
         var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
@@ -284,14 +284,14 @@ public class PropertyValueWithWriteTimestampTests
         // Assert
         Assert.Equal(SecondTimestamp, separateTimestamp);
         Assert.Equal("John", pairedValue);
-        Assert.Equal(FirstTimestamp, pairedMetadata.WriteTimestamp);
+        Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
         Assert.Equal("John", settledValue);
         Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
     }
 
     /// <summary>
-    /// A derived property over a field the interceptor cannot see is never recalculated, so its committed
-    /// value is the one from attach. The paired read still returns what the getter computes now.
+    /// A derived property over a field the interceptor cannot see is never recalculated, so its timestamp
+    /// is the one from attach. The paired read still returns what the getter computes now.
     /// </summary>
     [Fact]
     public void WhenDerivedPropertyReadsAPlainFieldSetAfterAttach_ThenCurrentGetterValueIsReturned()
