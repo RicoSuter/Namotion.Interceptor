@@ -138,7 +138,6 @@ namespace Namotion.Interceptor.Tracking
     }
     public readonly struct PropertyValueMetadata : System.IEquatable<Namotion.Interceptor.Tracking.PropertyValueMetadata>
     {
-        public PropertyValueMetadata(System.DateTimeOffset? writeTimestamp) { }
         public System.DateTimeOffset? WriteTimestamp { get; }
     }
     public static class SubjectLookup

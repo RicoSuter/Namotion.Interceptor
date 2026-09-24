@@ -5,9 +5,17 @@ namespace Namotion.Interceptor.Tracking;
 /// </summary>
 public readonly record struct PropertyValueMetadata
 {
-    public PropertyValueMetadata(DateTimeOffset? writeTimestamp)
+    internal PropertyValueMetadata(DateTimeOffset? writeTimestamp)
     {
         WriteTimestamp = writeTimestamp;
+    }
+
+    /// <summary>
+    /// Creates the metadata from raw UTC ticks, where 0 means the property has never been written.
+    /// </summary>
+    internal PropertyValueMetadata(long writeTimestampTicks)
+        : this(writeTimestampTicks == 0 ? null : new DateTimeOffset(writeTimestampTicks, TimeSpan.Zero))
+    {
     }
 
     /// <summary>
