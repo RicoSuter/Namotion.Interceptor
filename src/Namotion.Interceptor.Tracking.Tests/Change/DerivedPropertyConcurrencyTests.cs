@@ -1038,5 +1038,59 @@ public class DerivedPropertyConcurrencyTests
         Assert.Equal(handOffTimestamp, selected.TryGetWriteTimestamp());
     }
 
+    [Fact]
+    public void WhenAChangeHandlerHandsOffAndThenThrows_ThenTheReTriggerCommitsTheHandOffAndReleasesOwnership()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        using var subject = new SwitchableDerivedSubject(context);
+        var selected = new PropertyReference(subject, nameof(SwitchableDerivedSubject.Selected));
+        var ownerTimestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 2, TimeSpan.Zero);
+        var handOffTimestamp = ownerTimestamp.AddSeconds(1);
+        var releaseTimestamp = ownerTimestamp.AddSeconds(2);
+        var changes = new List<(int Value, DateTimeOffset Timestamp)>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => change.Property == selected)
+            .Subscribe(change => changes.Add((change.GetNewValue<int>(), change.ChangedTimestamp)));
+
+        var raisedCount = 0;
+        subject.PropertyChanged += (_, eventArgs) =>
+        {
+            if (eventArgs.PropertyName == nameof(SwitchableDerivedSubject.Selected) && ++raisedCount == 1)
+            {
+                // Raised on the owner's thread, so this write hands off before the exception unwinds it.
+                using (SubjectChangeContext.WithChangedTimestamp(handOffTimestamp))
+                {
+                    subject.First = 3;
+                }
+
+                throw new InvalidOperationException("The test made the handler throw.");
+            }
+        };
+
+        // Act
+        var exception = Record.Exception(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(ownerTimestamp))
+            {
+                subject.First = 2;
+            }
+        });
+
+        // A recalculation that kept ownership after the exception would turn this write into a hand-off.
+        using (SubjectChangeContext.WithChangedTimestamp(releaseTimestamp))
+        {
+            subject.First = 4;
+        }
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.Equal(
+            [(2, ownerTimestamp), (3, handOffTimestamp), (4, releaseTimestamp)],
+            changes);
+        Assert.Equal(releaseTimestamp, selected.TryGetWriteTimestamp());
+    }
+
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
 }
