@@ -155,6 +155,74 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
     }
 
+    /// <summary>
+    /// The terminal of a derived-with-setter write stamps the property's write state before the recalculation
+    /// that follows commits the value that write produces, so the paired read must not take its timestamp from there.
+    /// </summary>
+    [Fact]
+    public async Task WhenDerivedPropertyWithSetterIsReadWhileItsRecalculationIsPending_ThenValueAndTimestampAreTheLastCommitted()
+    {
+        // Arrange
+        var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(parking);
+
+        var person = new DerivedSetterPerson(context);
+        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
+
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            person.Nickname = "John";
+        }
+
+        parking.Armed = true;
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
+            {
+                person.Nickname = "Jane";
+            }
+        }, "writer");
+
+        Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
+
+        // Act
+        var separateTimestamp = nickname.TryGetWriteTimestamp();
+        var pairedValue = nickname.GetValue(out var pairedMetadata);
+
+        parking.Release.Set();
+        await writer;
+
+        var settledValue = nickname.GetValue(out var settledMetadata);
+
+        // Assert
+        Assert.Equal(SecondTimestamp, separateTimestamp);
+        Assert.Equal("John", pairedValue);
+        Assert.Equal(FirstTimestamp, pairedMetadata.WriteTimestamp);
+        Assert.Equal("Jane", settledValue);
+        Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
+    }
+
+    [Fact]
+    public void WhenDerivedGetterThrewAtAttach_ThenGetterIsInvoked()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+
+        // The denominator is zero when the subject attaches, so the getter throws there and no recalculation follows.
+        var divider = new Divider(context);
+        divider.Numerator = 10;
+        divider.Denominator = 2;
+        var quotient = divider.GetPropertyReference(nameof(Divider.Quotient));
+
+        // Act
+        var value = quotient.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal(5, value);
+        Assert.Null(metadata.WriteTimestamp);
+    }
+
     [Fact]
     public void WhenDerivedPropertyIsReadWithoutDerivedPropertyChangeDetection_ThenGetterIsInvoked()
     {
@@ -238,4 +306,15 @@ public class PropertyValueWithWriteTimestampTests
 public partial class TimestampedCounter
 {
     public partial int Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Divider
+{
+    public partial int Numerator { get; set; }
+
+    public partial int Denominator { get; set; }
+
+    [Derived]
+    public int Quotient => Numerator / Denominator;
 }

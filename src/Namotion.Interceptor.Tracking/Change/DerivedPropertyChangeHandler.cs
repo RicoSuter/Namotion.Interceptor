@@ -76,7 +76,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
+                    var timestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+                    change.Property.SetWriteTimestamp(timestamp);
+                    data.LastKnownWriteTimestamp = timestamp;
+                    data.HasLastKnownValue = true;
                 }
                 catch (Exception)
                 {
@@ -340,6 +343,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 }
 
                 data.LastKnownValue = newValue;
+                data.LastKnownWriteTimestamp = storageTimestamp;
+                data.HasLastKnownValue = true;
                 sequence = ++data.RecalculationSequence;
                 derivedProperty.SetWriteTimestamp(storageTimestamp);
                 return true;

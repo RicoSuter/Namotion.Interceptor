@@ -7,14 +7,16 @@ public static class PropertyReferenceValueExtensions
     /// <summary>
     /// Gets the value of the property together with the metadata of the write that produced it. For a stored
     /// property both come from one write. For a derived property both are what its last recalculation
-    /// committed, which is the pair its change notification carries; the getter is not invoked.
+    /// committed, and the getter is not invoked.
     /// </summary>
     /// <param name="property">The property.</param>
     /// <param name="metadata">The metadata of the write that produced the returned value.</param>
     /// <returns>The value.</returns>
     /// <remarks>
-    /// A derived property without derived property change detection, and a property that is not intercepted,
-    /// is read without synchronization, so its value and metadata may come from different writes.
+    /// A derived property is read by invoking its getter, without synchronization, when it has no derived
+    /// property change detection or its getter has not evaluated successfully since it was attached. So is a
+    /// property that is not intercepted. Its value and metadata may then come from different writes. Inside a transaction, a
+    /// pending value is returned with the metadata of the last committed write.
     /// </remarks>
     public static object? GetValue(this PropertyReference property, out PropertyValueMetadata metadata)
     {
@@ -26,9 +28,10 @@ public static class PropertyReferenceValueExtensions
             {
                 lock (data)
                 {
-                    if (data.IsDerived && data.IsAttached)
+                    if (data.HasLastKnownValue)
                     {
-                        metadata = new PropertyValueMetadata(property.TryGetWriteTimestamp());
+                        var ticks = data.LastKnownWriteTimestamp;
+                        metadata = new PropertyValueMetadata(ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero));
                         return data.LastKnownValue;
                     }
                 }
