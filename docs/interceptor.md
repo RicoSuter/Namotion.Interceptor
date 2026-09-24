@@ -172,6 +172,10 @@ var name = person.Name
   "John"
 ```
 
+### Concurrent Reads and Writes
+
+A read never observes a half-written value, whatever the property's type. Each read is a separate observation, though: two property reads, or a value and its write timestamp read one after the other, can come from different writes, in either order. When you need a value together with its timestamp, or several properties from one consistent state, take them from a change notification, which carries one write's value and timestamp, or use a [transaction](tracking-transactions.md).
+
 ### Implementing an Interceptor
 
 Each interceptor can:
