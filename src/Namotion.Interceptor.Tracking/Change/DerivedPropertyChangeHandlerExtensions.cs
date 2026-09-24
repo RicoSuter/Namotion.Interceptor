@@ -46,13 +46,12 @@ public static class DerivedPropertyChangeHandlerExtensions
             return;
         }
 
-        // Under a null scope storage is 0, and the raw timestamp carries a captured publishing time
-        // encoded negative, as a write's lazy resolve would. It is resolved here rather than left 0 for
-        // the publishing write to resolve, because a recalculation handed off to another thread publishes
-        // under that thread's scope. Every change event from this recalculation shares the raw value.
-        var storageTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
-        var rawTimestamp = storageTimestamp > 0 ? storageTimestamp : -SubjectChangeContext.CaptureTimestamp();
-        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+        // Resolved into the raw encoding as a write's lazy resolve would, the negated capture time under a
+        // null scope included. It is resolved here rather than left 0 for the publishing write to resolve,
+        // because a recalculation handed off to another thread publishes under that thread's scope.
+        var changedTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        var rawTimestamp = changedTimestamp > 0 ? changedTimestamp : -SubjectChangeContext.CaptureTimestamp();
+        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, rawTimestamp);
     }
 
     /// <summary>

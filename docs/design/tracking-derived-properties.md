@@ -261,11 +261,11 @@ RecalculateDerivedProperty(FullName, timestamp)
   lock(data)
     if data.IsRecalculating:
       data.RecalculationNeeded = true            // signal the in-progress recalculation
-      data.TriggerTimestamp = timestamp          // the owner commits the last hand-off's timestamp
+      data.TriggerRawTimestamp = timestamp       // the owner commits the last hand-off's timestamp
       return
     if !data.IsAttached → return
     data.IsRecalculating = true
-    data.TriggerTimestamp = timestamp
+    data.TriggerRawTimestamp = timestamp
     oldValue = data.LastKnownValue
 
   // Outer loop: handles post-notification RecalculationNeeded without recursion.
@@ -290,7 +290,7 @@ RecalculateDerivedProperty(FullName, timestamp)
             continue                             // discard stale result, re-evaluate
           data.LastKnownValue = newValue
           sequence = ++data.RecalculationSequence
-          SetWriteTimestamp(data.TriggerTimestamp)  // also published by the notification
+          SetWriteTimestamp(max(data.TriggerRawTimestamp, 0))  // the notification publishes the raw value
           break
 
       // Deliver notification while IsRecalculating is still true.

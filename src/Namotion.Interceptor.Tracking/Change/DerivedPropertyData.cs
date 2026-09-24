@@ -60,14 +60,15 @@ internal sealed class DerivedPropertyData
     internal bool RecalculationNeeded;
 
     /// <summary>
-    /// Storage and raw write timestamps of the latest dependency write that triggered the running
-    /// recalculation: the owner's own when it takes ownership, replaced by each write that hands off
-    /// through <see cref="RecalculationNeeded"/>. Attach and detach leave them unchanged.
+    /// Timestamp of the latest trigger of the running recalculation, usually a dependency write, in the
+    /// <see cref="Interceptors.PropertyWriteContext{TProperty}.WriteTimestampRaw"/> encoding: positive UTC ticks, or the
+    /// negated capture time under a null timestamp scope. The owner sets it when it takes ownership, each trigger
+    /// that hands off through <see cref="RecalculationNeeded"/> overwrites it, and attach and detach leave it.
+    /// The commit stamps <c>raw &gt; 0 ? raw : 0</c> on the property, as the write terminal does, and the change
+    /// notification publishes the raw value. The last hand-off wins, not the largest value, because the owner's
+    /// next evaluation reads the state that trigger left and timestamps need not be monotonic.
     /// Only read/written inside lock(this).
     /// </summary>
-    internal long TriggerStorageTimestamp;
-
-    /// <inheritdoc cref="TriggerStorageTimestamp"/>
     internal long TriggerRawTimestamp;
 
     /// <summary>

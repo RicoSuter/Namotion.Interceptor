@@ -165,25 +165,20 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var rawTimestamp = context.WriteTimestampRaw;
-            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+            RecalculateDerivedProperty(ref property, context.WriteTimestampRaw);
         }
 
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Thread the trigger's resolved timestamp into each dependent's context, skipping a
-            // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
-            var rawTimestamp = context.WriteTimestampRaw;
-            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
-            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
+            // Thread the trigger's resolved timestamp into each dependent's context, skipping a scope push.
+            RecalculateDependents(usedByProperties, context.Property, context.WriteTimestampRaw);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long rawTimestamp)
     {
         for (var i = 0; i < usedByProperties.Length; i++)
         {
@@ -195,7 +190,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 continue;
             }
 
-            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
+            RecalculateDerivedProperty(ref dependent, rawTimestamp);
         }
     }
 
@@ -206,7 +201,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long rawTimestamp)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -218,10 +213,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             if (data.IsRecalculating)
             {
-                // The owner's next evaluation reads the state this write left, so the last hand-off's
-                // timestamps are the ones to commit, not the largest: timestamps need not be monotonic.
+                // Overwrite, never keep the larger value: see TriggerRawTimestamp.
                 data.RecalculationNeeded = true;
-                data.TriggerStorageTimestamp = storageTimestamp;
                 data.TriggerRawTimestamp = rawTimestamp;
                 return;
             }
@@ -232,7 +225,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             data.IsRecalculating = true;
-            data.TriggerStorageTimestamp = storageTimestamp;
             data.TriggerRawTimestamp = rawTimestamp;
             oldValue = data.LastKnownValue;
         }
@@ -362,8 +354,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 data.LastKnownValue = newValue;
                 sequence = ++data.RecalculationSequence;
-                derivedProperty.SetWriteTimestamp(data.TriggerStorageTimestamp);
                 rawTimestamp = data.TriggerRawTimestamp;
+                derivedProperty.SetWriteTimestamp(rawTimestamp > 0 ? rawTimestamp : 0);
                 return true;
             }
         }
