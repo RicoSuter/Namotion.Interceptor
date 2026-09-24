@@ -159,6 +159,33 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
+    /// Reads the write timestamp ticks and both commit revision slots as one snapshot of the last completed
+    /// commit, all zero when no write state has been recorded. Two snapshots with equal revisions bracket
+    /// no commit, because every commit advances exactly one slot to a value never used before.
+    /// </summary>
+    /// <remarks>
+    /// Takes the subject's lock briefly: the terminal stores the timestamp and the revision one after the
+    /// other, so a lock-free reader could pair one commit's timestamp with the previous commit's revisions.
+    /// </remarks>
+    internal void GetWriteStateSnapshot(out long timestampTicks, out long nonSourceCommitRevision, out long sourceCommitRevision)
+    {
+        lock (Subject.SyncRoot)
+        {
+            if (TryGetWriteState(out var state))
+            {
+                timestampTicks = Interlocked.Read(ref state.TimestampTicks);
+                nonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
+                sourceCommitRevision = Interlocked.Read(ref state.LastSourceCommitRevision);
+                return;
+            }
+        }
+
+        timestampTicks = 0;
+        nonSourceCommitRevision = 0;
+        sourceCommitRevision = 0;
+    }
+
+    /// <summary>
     /// Records that the calling sink has published this property's value to its source. One-way: the flag
     /// is never cleared, so calling this again on the same property has no effect.
     /// </summary>

@@ -3,6 +3,7 @@ using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Tests;
 
@@ -13,77 +14,95 @@ public class PropertyValueWithWriteTimestampTests
     private static readonly TimeSpan WaitBudget = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// A value read takes the subject's SyncRoot only for the read itself, and a timestamp read takes no
-    /// lock, so a write can commit between the two. Parking the paired read after its value read and
-    /// committing a write there shows the difference: the paired read holds SyncRoot across both reads,
-    /// so the write waits and the pair stays (1, first), whereas two separate reads straddle the write.
+    /// Read interceptors run outside the subject's lock, so a write can commit between the state snapshot
+    /// taken before the value read and the one taken after it, on either side of the read terminal. The
+    /// snapshots then differ and the read runs again, returning the pair that commit produced.
     /// </summary>
-    [Fact]
-    public async Task WhenWriteCommitsBetweenValueAndTimestampRead_ThenPairedReadStillComesFromOneWrite()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WhenWriteCommitsWhileReadInterceptorsRun_ThenReadRetriesAndReturnsTheCommittedPair(bool beforeValueRead)
     {
         // Arrange
-        var parking = new ParkingReadInterceptor(nameof(TimestampedCounter.Value));
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithService(() => parking, _ => false);
-
-        var subject = new TimestampedCounter(context);
+        var subject = CreateCounter(out var interceptor);
         var property = subject.GetPropertyReference(nameof(TimestampedCounter.Value));
+        Write(subject, 1, FirstTimestamp);
 
-        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        Action<int> write = _ => Write(subject, 2, SecondTimestamp);
+        if (beforeValueRead)
         {
-            subject.Value = 1;
+            interceptor.BeforeValueRead = write;
+        }
+        else
+        {
+            interceptor.AfterValueRead = write;
         }
 
+        interceptor.Armed = true;
+
         // Act
-        var separateValue = subject.Value;
-
-        parking.Armed = true;
-        object? pairedValue = null;
-        var pairedMetadata = default(PropertyValueMetadata);
-        var reader = new Thread(() => pairedValue = property.GetValue(out pairedMetadata))
-        {
-            IsBackground = true,
-            Name = "reader"
-        };
-        reader.Start();
-        Assert.True(parking.ValueRead.Wait(WaitBudget), "The paired read did not reach its parked value read.");
-
-        var writer = new Thread(() =>
-        {
-            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
-            {
-                subject.Value = 2;
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "writer"
-        };
-        writer.Start();
-
-        // The writer either blocks on SyncRoot held by the paired read, which is the behavior under
-        // test, or has already committed past it, which the assertion below then reports as the wrong pair.
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => (writer.ThreadState & ThreadState.WaitSleepJoin) != 0 || !writer.IsAlive,
-            message: "The writer neither blocked on the subject's SyncRoot nor completed.");
-
-        parking.Release.Set();
-        Assert.True(reader.Join(WaitBudget), "The paired read did not complete after it was released.");
-        Assert.True(writer.Join(WaitBudget), "The writer did not complete after the paired read finished.");
-
-        var separateTimestamp = property.TryGetWriteTimestamp();
+        var value = property.GetValue(out var metadata);
 
         // Assert
-        Assert.Equal(1, separateValue);
-        Assert.Equal(SecondTimestamp, separateTimestamp);
-        Assert.Equal(1, pairedValue);
-        Assert.Equal(FirstTimestamp, pairedMetadata.WriteTimestamp);
+        Assert.Equal(2, value);
+        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
+        Assert.Equal(2, interceptor.Passes);
+    }
+
+    /// <summary>
+    /// A write with the timestamp the state had before the read commits after the value read, so both
+    /// snapshots carry that timestamp although the value came from a write with another one. Only the
+    /// commit revision tells the snapshots apart.
+    /// </summary>
+    [Fact]
+    public void WhenWritesAroundTheValueReadShareTheTimestampBefore_ThenRevisionForcesTheRetry()
+    {
+        // Arrange
+        var subject = CreateCounter(out var interceptor);
+        var property = subject.GetPropertyReference(nameof(TimestampedCounter.Value));
+        Write(subject, 1, FirstTimestamp);
+
+        interceptor.BeforeValueRead = _ => Write(subject, 2, SecondTimestamp);
+        interceptor.AfterValueRead = _ => Write(subject, 3, FirstTimestamp);
+        interceptor.Armed = true;
+
+        // Act
+        var value = property.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal(3, value);
+        Assert.Equal(FirstTimestamp, metadata.WriteTimestamp);
+        Assert.Equal(2, interceptor.Passes);
+    }
+
+    /// <summary>
+    /// When a write commits after every value read, the retries run out and the read returns its last
+    /// value with the state taken after it, which then describes the write that followed that value.
+    /// </summary>
+    [Fact]
+    public void WhenWriteCommitsAfterEveryValueRead_ThenLastValueIsReturnedWithTheNewerTimestamp()
+    {
+        // Arrange
+        var subject = CreateCounter(out var interceptor);
+        var property = subject.GetPropertyReference(nameof(TimestampedCounter.Value));
+        Write(subject, 0, FirstTimestamp);
+
+        interceptor.AfterValueRead = pass => Write(subject, pass, FirstTimestamp.AddMinutes(pass));
+        interceptor.RepeatsOnEveryPass = true;
+        interceptor.Armed = true;
+
+        // Act
+        var value = property.GetValue(out var metadata);
+
+        // Assert
+        var passes = PropertyReferenceValueExtensions.MaxReadRetries + 1;
+        Assert.Equal(passes, interceptor.Passes);
+        Assert.Equal(passes - 1, value);
+        Assert.Equal(FirstTimestamp.AddMinutes(passes), metadata.WriteTimestamp);
     }
 
     [Fact]
-    public void WhenStoredPropertyIsReadWithMetadata_ThenGetterRunsUnderSyncRoot()
+    public void WhenStoredPropertyIsReadWithMetadata_ThenNoReadInterceptorRunsUnderSyncRoot()
     {
         // Arrange
         var observer = new SyncRootObservingReadInterceptor();
@@ -100,7 +119,26 @@ public class PropertyValueWithWriteTimestampTests
 
         // Assert
         Assert.False(syncRootHeldForPlainRead);
-        Assert.True(syncRootHeldForPairedRead);
+        Assert.False(syncRootHeldForPairedRead);
+    }
+
+    [Fact]
+    public async Task WhenStoredPropertyIsReadInsideTransaction_ThenPendingValueComesWithTheCommittedTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithTransactions();
+        var subject = new TimestampedCounter(context);
+        var property = subject.GetPropertyReference(nameof(TimestampedCounter.Value));
+        Write(subject, 1, FirstTimestamp);
+
+        // Act
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        Write(subject, 2, SecondTimestamp);
+        var value = property.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal(2, value);
+        Assert.Equal(FirstTimestamp, metadata.WriteTimestamp);
     }
 
     /// <summary>
@@ -250,29 +288,80 @@ public class PropertyValueWithWriteTimestampTests
         }
     }
 
-    // Once armed, parks the reader after the read terminal has returned the value and released its lock.
-    private sealed class ParkingReadInterceptor(string propertyName) : IReadInterceptor
+    private static TimestampedCounter CreateCounter(out ConcurrentlyWritingReadInterceptor interceptor)
     {
+        var writing = new ConcurrentlyWritingReadInterceptor(nameof(TimestampedCounter.Value));
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writing, _ => false);
+
+        interceptor = writing;
+        return new TimestampedCounter(context);
+    }
+
+    private static void Write(TimestampedCounter subject, int value, DateTimeOffset timestamp)
+    {
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            subject.Value = value;
+        }
+    }
+
+    // Once armed, commits the configured writes on another thread around the value read of the named
+    // property, on the first pass only unless told to repeat, so a retried read can settle. The writes
+    // are joined with a bound: a read that held the subject's lock across this interceptor would block
+    // them forever.
+    private sealed class ConcurrentlyWritingReadInterceptor(string propertyName) : IReadInterceptor
+    {
+        private int _passes;
+
         public volatile bool Armed;
 
-        public ManualResetEventSlim ValueRead { get; } = new(false);
+        public bool RepeatsOnEveryPass { get; set; }
 
-        public ManualResetEventSlim Release { get; } = new(false);
+        public Action<int>? BeforeValueRead { get; set; }
+
+        public Action<int>? AfterValueRead { get; set; }
+
+        public int Passes => Volatile.Read(ref _passes);
 
         public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
         {
+            if (!Armed || context.Property.Name != propertyName)
+            {
+                return next(ref context);
+            }
+
+            var pass = Interlocked.Increment(ref _passes);
+            var writes = RepeatsOnEveryPass || pass == 1;
+            if (writes)
+            {
+                WriteOnOtherThread(BeforeValueRead, pass);
+            }
+
             var value = next(ref context);
 
-            if (Armed && context.Property.Name == propertyName)
+            if (writes)
             {
-                ValueRead.Set();
-                if (!Release.Wait(WaitBudget))
-                {
-                    throw new TimeoutException("The test did not release the parked read.");
-                }
+                WriteOnOtherThread(AfterValueRead, pass);
             }
 
             return value;
+        }
+
+        private static void WriteOnOtherThread(Action<int>? write, int pass)
+        {
+            if (write is null)
+            {
+                return;
+            }
+
+            var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() => write(pass), "writer");
+            if (!writer.Wait(WaitBudget))
+            {
+                throw new TimeoutException("The concurrent write did not commit while the read interceptor ran.");
+            }
         }
     }
 
