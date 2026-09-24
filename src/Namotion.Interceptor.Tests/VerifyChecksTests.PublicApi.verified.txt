@@ -3,6 +3,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
 namespace Namotion.Interceptor.Attributes
 {
@@ -121,6 +122,7 @@ namespace Namotion.Interceptor
         public override bool Equals(object? obj) { }
         public override int GetHashCode() { }
         public object? GetOrSetPropertyData(string key, object? value) { }
+        public object? GetValue(out Namotion.Interceptor.PropertyValueMetadata metadata) { }
         public void MarkAsPublishedToSource() { }
         public void RemovePropertyData(string key) { }
         public void SetPropertyData(string key, object? value) { }
@@ -142,6 +144,10 @@ namespace Namotion.Interceptor
     {
         public static Namotion.Interceptor.PropertyReference GetPropertyReference(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
         public static void SetPropertyValueWithInterception(this Namotion.Interceptor.PropertyReference property, object? newValue, object? currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?> writeValue) { }
+    }
+    public readonly struct PropertyValueMetadata : System.IEquatable<Namotion.Interceptor.PropertyValueMetadata>
+    {
+        public System.DateTimeOffset? WriteTimestamp { get; }
     }
     public readonly struct SubjectChangeContext
     {

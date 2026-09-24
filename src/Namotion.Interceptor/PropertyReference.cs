@@ -91,8 +91,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// </summary>
     /// <remarks>
     /// A value read separately may come from a different write than this timestamp. For the value together with
-    /// the metadata of the write that produced it, use the <c>GetValue(out PropertyValueMetadata)</c> extension
-    /// method from Namotion.Interceptor.Tracking.
+    /// the metadata of the write that produced it, use <see cref="GetValue(out PropertyValueMetadata)"/>.
     /// </remarks>
     public DateTimeOffset? TryGetWriteTimestamp()
     {
@@ -158,6 +157,59 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         return false;
     }
 
+    // Bounds the retries of a stored-property read under constant concurrent writes; see the remarks.
+    internal const int MaxReadRetries = 4;
+
+    /// <summary>
+    /// Gets the value of the property together with the metadata of the write that produced it. For a stored
+    /// property both come from one write. For a derived property the value is its getter's current value, and
+    /// the metadata carries the property's write timestamp as read after the getter. No lock is held while read
+    /// interceptors or getters run.
+    /// </summary>
+    /// <param name="metadata">The metadata of the write that produced the returned value.</param>
+    /// <returns>The value.</returns>
+    /// <remarks>
+    /// A stored property's read is retried when a write commits while it runs, a bounded number of times.
+    /// Under constant concurrent writes the metadata may then describe a later write than the one that
+    /// produced the value, never an earlier one.
+    /// <para>
+    /// A derived property, and a property that is not intercepted, is read without synchronization, so its
+    /// value and metadata may come from different writes, for example while its recalculation is pending.
+    /// Inside a transaction, a pending value is returned with the metadata of the last committed write.
+    /// </para>
+    /// </remarks>
+    public object? GetValue(out PropertyValueMetadata metadata)
+    {
+        var propertyMetadata = Metadata;
+        if (!propertyMetadata.IsDerived && propertyMetadata.IsIntercepted)
+        {
+            return GetStoredValue(propertyMetadata, out metadata);
+        }
+
+        var value = propertyMetadata.GetValue?.Invoke(Subject);
+        metadata = new PropertyValueMetadata(TryGetWriteTimestamp());
+        return value;
+    }
+
+    private object? GetStoredValue(SubjectPropertyMetadata propertyMetadata, out PropertyValueMetadata metadata)
+    {
+        // The read terminal takes the subject's lock only around the field read, so a write can commit
+        // anywhere between the two snapshots; equal snapshots prove that none did.
+        var before = GetWriteStateSnapshot();
+        var value = propertyMetadata.GetValue?.Invoke(Subject);
+        var after = GetWriteStateSnapshot();
+
+        for (var retry = 0; retry < MaxReadRetries && after != before; retry++)
+        {
+            before = after;
+            value = propertyMetadata.GetValue?.Invoke(Subject);
+            after = GetWriteStateSnapshot();
+        }
+
+        metadata = new PropertyValueMetadata(after.TimestampTicks);
+        return value;
+    }
+
     /// <summary>
     /// Reads the write timestamp ticks and both commit revision slots as one snapshot of the last completed
     /// commit, all zero when no write state has been recorded. Two snapshots with equal revisions bracket
@@ -167,7 +219,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// Takes the subject's lock briefly: the terminal stores the timestamp and the revision one after the
     /// other, so a lock-free reader could pair one commit's timestamp with the previous commit's revisions.
     /// </remarks>
-    internal (long TimestampTicks, long NonSourceCommitRevision, long SourceCommitRevision) GetWriteStateSnapshot()
+    private (long TimestampTicks, long NonSourceCommitRevision, long SourceCommitRevision) GetWriteStateSnapshot()
     {
         lock (Subject.SyncRoot)
         {

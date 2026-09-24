@@ -95,7 +95,7 @@ public class PropertyValueWithWriteTimestampTests
         var value = property.GetValue(out var metadata);
 
         // Assert
-        var passes = PropertyReferenceValueExtensions.MaxReadRetries + 1;
+        var passes = PropertyReference.MaxReadRetries + 1;
         Assert.Equal(passes, interceptor.Passes);
         Assert.Equal(passes - 1, value);
         Assert.Equal(FirstTimestamp.AddMinutes(passes), metadata.WriteTimestamp);

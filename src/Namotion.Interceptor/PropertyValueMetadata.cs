@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Tracking;
+namespace Namotion.Interceptor;
 
 /// <summary>
 /// Describes the write that produced a value returned next to it. Fields may be added later.

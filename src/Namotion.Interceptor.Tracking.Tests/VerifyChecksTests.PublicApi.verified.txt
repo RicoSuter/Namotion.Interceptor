@@ -126,19 +126,11 @@ namespace Namotion.Interceptor.Tracking
             where T : new() { }
         public static T GetOrAddPropertyData<T>(this Namotion.Interceptor.PropertyReference property, string key, System.Func<T> valueFactory) { }
     }
-    public static class PropertyReferenceValueExtensions
-    {
-        public static object? GetValue(this Namotion.Interceptor.PropertyReference property, out Namotion.Interceptor.Tracking.PropertyValueMetadata metadata) { }
-    }
     [Namotion.Interceptor.Attributes.RunsFirst]
     public class PropertyValueEqualityCheckHandler : Namotion.Interceptor.Interceptors.IWriteInterceptor
     {
         public PropertyValueEqualityCheckHandler() { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
-    }
-    public readonly struct PropertyValueMetadata : System.IEquatable<Namotion.Interceptor.Tracking.PropertyValueMetadata>
-    {
-        public System.DateTimeOffset? WriteTimestamp { get; }
     }
     public static class SubjectLookup
     {
