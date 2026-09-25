@@ -108,18 +108,18 @@ internal sealed class DerivedPropertyData : IDerivedPropertyDependencies
     }
 
     /// <inheritdoc />
-    public long GetLatestDependencyWriteTimestampTicks()
+    public long GetLatestDependencyWriteTimestampTicks() => ReadLatestDependencyWriteTimestampTicks(this);
+
+    private static long ReadLatestDependencyWriteTimestampTicks(DerivedPropertyData data)
     {
-        // The dependency buffer is rewritten in place under the lock the handler takes on this instance,
+        // The dependency buffer is rewritten in place under the lock the handler takes on each instance,
         // so the read holds the same lock. Nothing under it runs user code or takes another lock. A
         // dependency that is derived itself is not followed: the stored properties its getter read were
         // recorded into this list directly.
-#pragma warning disable S2551 // The handler locks the instance itself by design; see the field docs above.
-        lock (this)
-#pragma warning restore S2551
+        lock (data)
         {
             var latest = 0L;
-            foreach (ref readonly var dependency in RequiredPropertiesSpan)
+            foreach (ref readonly var dependency in data.RequiredPropertiesSpan)
             {
                 var ticks = dependency.GetWriteTimestampTicks();
                 if (ticks > latest)
