@@ -62,7 +62,7 @@ using System.Text.Json.Serialization;
                         (o) => ((TemperatureSensor)o).Celsius,
                         (o, v) => ((TemperatureSensor)o).Celsius = (double)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<double>(static (o) => ((TemperatureSensor)o)._Celsius),
                     ["Fahrenheit"] = new SubjectPropertyMetadata(
                         typeof(global::ITemperatureSensor).GetProperty(nameof(global::ITemperatureSensor.Fahrenheit), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::ITemperatureSensor)o).Fahrenheit,

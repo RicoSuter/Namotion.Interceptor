@@ -297,7 +297,11 @@ internal static class SubjectCodeGenerator
         builder.AppendLine($"{extraIndent}                        {getterLambda},");
         builder.AppendLine($"{extraIndent}                        {setterLambda},");
         builder.AppendLine($"{extraIndent}                        isIntercepted: {(isIntercepted ? "true" : "false")},");
-        builder.AppendLine($"{extraIndent}                        isDynamic: false),");
+        // The reader must read the field this declaration's setter stores into. An override without a setter
+        // stores through the base setter into the base field, so its own field is not the value replaced.
+        builder.AppendLine(isIntercepted && (property.HasSetter || property.HasInit)
+            ?$"{extraIndent}                        isDynamic: false).WithStoredValueReader<{property.FullTypeName}>(static (o) => (({metadata.ClassName})o)._{property.Name}),"
+            : $"{extraIndent}                        isDynamic: false),");
     }
 
     private static string GetGetterLambda(PropertyMetadata property, string castTypeName)

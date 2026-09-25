@@ -169,6 +169,7 @@ namespace Namotion.Interceptor
         public System.Reflection.PropertyInfo? PropertyInfo { get; }
         public System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? SetValue { get; }
         public System.Type Type { get; }
+        public Namotion.Interceptor.SubjectPropertyMetadata WithStoredValueReader<TProperty>(System.Func<Namotion.Interceptor.IInterceptorSubject, TProperty> readStoredValue) { }
     }
 }
 namespace Namotion.Interceptor.Interceptors
