@@ -56,9 +56,13 @@ internal enum AccessorHelperReturnKind
 /// </param>
 /// <param name="RequiresLeadingString">Whether the first parameter must be a string.</param>
 /// <param name="RequiresDelegateAt">
-/// Index of a parameter that must be a delegate, or -1. Separates the setter helper from its earlier
-/// shape, which took the current value in that position: the counts agree, and the emitted lambda
-/// would then fail in generated code instead of in a diagnostic.
+/// Index of a parameter that must be a delegate, or -1. Separates the setter helper from
+/// <see cref="GeneratedMemberTable.CurrentValueSetterHelper"/>: the counts agree, and the emitted
+/// lambda would otherwise fail in generated code instead of selecting the other call form.
+/// </param>
+/// <param name="RequiresOwnTypeParameterAt">
+/// Index of a parameter that must be the method's own type parameter, or -1. The converse of
+/// <paramref name="RequiresDelegateAt"/>, for the shape that takes the current value there.
 /// </param>
 /// <param name="Declaration">How the member is named in the NI0007 message.</param>
 internal sealed record AccessorHelperShape(
@@ -69,6 +73,7 @@ internal sealed record AccessorHelperShape(
     AccessorHelperReturnKind ReturnKind,
     bool RequiresLeadingString,
     int RequiresDelegateAt,
+    int RequiresOwnTypeParameterAt,
     string Declaration)
 {
     /// <summary>
@@ -89,7 +94,13 @@ internal sealed record AccessorHelperShape(
             return false;
         }
 
-        return RequiresDelegateAt < 0 || method.Parameters[RequiresDelegateAt].Type.TypeKind == TypeKind.Delegate;
+        if (RequiresDelegateAt >= 0 && method.Parameters[RequiresDelegateAt].Type.TypeKind != TypeKind.Delegate)
+        {
+            return false;
+        }
+
+        return RequiresOwnTypeParameterAt < 0 ||
+               SymbolEqualityComparer.Default.Equals(method.Parameters[RequiresOwnTypeParameterAt].Type, method.TypeParameters[0]);
     }
 }
 
@@ -103,21 +114,33 @@ internal static class GeneratedMemberTable
     [
         new AccessorHelperShape(
             MemberNames.GetPropertyValue, TypeParameterCount: 1, ParameterCount: 2, RequiresParameterArray: false,
-            AccessorHelperReturnKind.OwnTypeParameter, RequiresLeadingString: true, RequiresDelegateAt: -1,
+            AccessorHelperReturnKind.OwnTypeParameter, RequiresLeadingString: true, RequiresDelegateAt: -1, RequiresOwnTypeParameterAt: -1,
             "protected TProperty GetPropertyValue<TProperty>(string, Func<IInterceptorSubject, TProperty>)"),
         new AccessorHelperShape(
             MemberNames.SetPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
-            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true, RequiresDelegateAt: 2,
+            AccessorHelperReturnKind.Boolean, RequiresLeadingString: true, RequiresDelegateAt: 2, RequiresOwnTypeParameterAt: -1,
             "protected bool SetPropertyValue<TProperty>(string, TProperty, Func<IInterceptorSubject, TProperty>, Action<IInterceptorSubject, TProperty>)"),
         new AccessorHelperShape(
             MemberNames.InvokeMethod, TypeParameterCount: 0, ParameterCount: 3, RequiresParameterArray: true,
-            AccessorHelperReturnKind.Object, RequiresLeadingString: true, RequiresDelegateAt: -1,
+            AccessorHelperReturnKind.Object, RequiresLeadingString: true, RequiresDelegateAt: -1, RequiresOwnTypeParameterAt: -1,
             "protected object? InvokeMethod(string, Func<IInterceptorSubject, object?[], object?>, params object?[])"),
         new AccessorHelperShape(
             MemberNames.GetInstanceProperties, TypeParameterCount: 0, ParameterCount: 0, RequiresParameterArray: false,
-            AccessorHelperReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false, RequiresDelegateAt: -1,
+            AccessorHelperReturnKind.PropertyMetadataDictionary, RequiresLeadingString: false, RequiresDelegateAt: -1, RequiresOwnTypeParameterAt: -1,
             "protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties()")
     ];
+
+    /// <summary>
+    /// The setter helper as earlier generator versions emitted it, taking the current value where
+    /// <see cref="AccessorHelpers"/> takes the delegate that reads it. Accepted by the contract so a base
+    /// those versions built keeps hosting subjects, whose setters then pass the field. Never emitted, and
+    /// deliberately absent from the hiding check: the two are distinct signatures, so the emitted one does
+    /// not hide it and a 'new' modifier would be CS0109.
+    /// </summary>
+    public static readonly AccessorHelperShape CurrentValueSetterHelper = new(
+        MemberNames.SetPropertyValue, TypeParameterCount: 1, ParameterCount: 4, RequiresParameterArray: false,
+        AccessorHelperReturnKind.Boolean, RequiresLeadingString: true, RequiresDelegateAt: -1, RequiresOwnTypeParameterAt: 2,
+        "protected bool SetPropertyValue<TProperty>(string, TProperty, TProperty, Action<IInterceptorSubject, TProperty>)");
 
     // The four fields below each read the ones above them, and a static field initializer runs in
     // textual order, so reordering them leaves one null and takes the generator down with a

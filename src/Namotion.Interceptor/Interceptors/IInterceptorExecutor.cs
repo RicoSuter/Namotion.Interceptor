@@ -30,7 +30,7 @@ public interface IInterceptorExecutor : IInterceptorSubjectContext
     /// </summary>
     /// <param name="propertyName">The name of the property to write.</param>
     /// <param name="newValue">The new value to set.</param>
-    /// <param name="readValue">A delegate that reads the backing field value from the subject. Runs under the subject lock, so it must not run interceptors or user code.</param>
+    /// <param name="readValue">A plain read of the property's backing store. The terminal write invokes it while holding the subject's SyncRoot, immediately before it stores the new value.</param>
     /// <param name="writeValue">A delegate that writes the new value to the backing field.</param>
     /// <returns>True if the value was written; false if the write was suppressed by an interceptor.</returns>
     bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> writeValue);

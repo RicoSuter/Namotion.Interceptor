@@ -12,6 +12,7 @@ namespace Namotion.Interceptor.Generator.Models;
 /// <param name="HasInpc">Whether the INotifyPropertyChanged members are already inherited.</param>
 /// <param name="HasCallableRaisePropertyChanged">Whether an unqualified RaisePropertyChanged(name) call from the subject binds to an inherited member. False for a chain that only implements IRaisePropertyChanged explicitly, where the interface form is the only one that compiles.</param>
 /// <param name="EmitsInterceptionMembers">True in root mode, where the subject itself, not the base class, emits the whole IInterceptorSubject block.</param>
+/// <param name="SetterHelperTakesCurrentValue">Derived mode only: whether the inherited SetPropertyValue takes the current value in place of the delegate that reads it, so the generated setters pass the field. Such a base predates the terminal write reading the old value under the subject lock, and its properties keep that version's old value semantics.</param>
 /// <param name="HiddenMemberNames">Root mode members that need a 'new' modifier because the ancestor already exposes that name.</param>
 internal sealed record SubjectBaseClass(
     string? TypeName,
@@ -19,4 +20,5 @@ internal sealed record SubjectBaseClass(
     bool HasInpc,
     bool HasCallableRaisePropertyChanged,
     bool EmitsInterceptionMembers,
+    bool SetterHelperTakesCurrentValue,
     IReadOnlyList<string> HiddenMemberNames);

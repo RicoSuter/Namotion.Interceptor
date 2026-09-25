@@ -32,19 +32,19 @@ internal static class SubjectBaseContract
 
         // Only the nearest subject ancestor can supply the shared interception members.
         var emitsInterceptionMembers = true;
+        var setterHelperTakesCurrentValue = false;
         IReadOnlyList<string> hiddenMembers = [];
 
         if (subjectAncestor is not null)
         {
             // Members generated in this compilation are not yet visible on the ancestor's symbol.
-            var ancestorIsGeneratedHere =
-                baseClassHasInterceptorSubject &&
-                SubjectAncestry.WillBeGeneratedInThisCompilation(subjectAncestor, cancellationToken);
+            var ancestorIsGeneratedHere = IsGeneratedHere(subjectAncestor, cancellationToken);
 
             if (ancestorIsGeneratedHere ||
                 SatisfiesContract(subjectAncestor, typeSymbol, compilation, out var missingMembers))
             {
                 emitsInterceptionMembers = false;
+                setterHelperTakesCurrentValue = UsesCurrentValueSetterHelper(subjectAncestor, typeSymbol, compilation, cancellationToken);
 
                 foreach (var (declarer, memberName) in SubjectMemberConflicts.FindHidingMembers(typeSymbol, subjectAncestor, compilation))
                 {
@@ -95,8 +95,61 @@ internal static class SubjectBaseContract
             baseClassHasInpc,
             hasCallableRaisePropertyChanged,
             emitsInterceptionMembers,
+            setterHelperTakesCurrentValue,
             hiddenMembers);
     }
+
+    /// <summary>
+    /// Whether the SetPropertyValue the subject's generated setters bind to is
+    /// <see cref="GeneratedMemberTable.CurrentValueSetterHelper"/>. Walks past ancestors generated in
+    /// this compilation that share their base's members, because the helper they call has no symbol
+    /// yet and is the one further up; an ancestor in root mode emits the delegate form itself. Below
+    /// that, the nearest declaring class decides, as overload resolution would for the emitted call.
+    /// </summary>
+    private static bool UsesCurrentValueSetterHelper(
+        INamedTypeSymbol subjectAncestor,
+        INamedTypeSymbol subject,
+        Compilation compilation,
+        CancellationToken cancellationToken)
+    {
+        var provider = subjectAncestor;
+        while (IsGeneratedHere(provider, cancellationToken))
+        {
+            var next = SubjectAncestry.FindNearestSubjectAncestor(provider);
+            if (next is null ||
+                (!IsGeneratedHere(next, cancellationToken) && !SatisfiesContract(next, provider, compilation, out _)))
+            {
+                return false;
+            }
+
+            provider = next;
+        }
+
+        var setterHelper = GeneratedMemberTable.AccessorHelpers.Single(helper => helper.Name == MemberNames.SetPropertyValue);
+        foreach (var type in SymbolExtensions.EnumerateChain(provider))
+        {
+            var helpers = type.GetMembers(MemberNames.SetPropertyValue)
+                .OfType<IMethodSymbol>()
+                .Where(method => !method.IsStatic && compilation.IsSymbolAccessibleWithin(method, subject))
+                .ToList();
+
+            if (helpers.Any(method => HasAccessibleMethodShape(method, setterHelper, compilation)))
+            {
+                return false;
+            }
+
+            if (helpers.Any(method => HasAccessibleMethodShape(method, GeneratedMemberTable.CurrentValueSetterHelper, compilation)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsGeneratedHere(INamedTypeSymbol type, CancellationToken cancellationToken)
+        => SubjectAncestry.HasInterceptorSubjectAttribute(type) &&
+           SubjectAncestry.WillBeGeneratedInThisCompilation(type, cancellationToken);
 
     /// <summary>
     /// Checks the shared-member contract defined in docs/generator.md.
@@ -125,7 +178,9 @@ internal static class SubjectBaseContract
 
         foreach (var accessorHelper in GeneratedMemberTable.AccessorHelpers)
         {
-            if (!HasAccessibleMethod(ancestor, subject, compilation, accessorHelper))
+            if (!HasAccessibleMethod(ancestor, subject, compilation, accessorHelper) &&
+                !(accessorHelper.Name == MemberNames.SetPropertyValue &&
+                  HasAccessibleMethod(ancestor, subject, compilation, GeneratedMemberTable.CurrentValueSetterHelper)))
             {
                 missing.Add(accessorHelper.Declaration);
             }

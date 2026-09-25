@@ -431,12 +431,17 @@ internal static class SubjectCodeGenerator
 
             var raisePropertyChangedCall = GetRaisePropertyChangedCall(property, metadata);
 
+            // An inherited helper built by an earlier generator takes the value itself and reads nothing.
+            var currentValueArgument = metadata.BaseClass.SetterHelperTakesCurrentValue
+                ? $"_{property.Name}"
+                : $"static (o) => (({metadata.ClassName})o)._{property.Name}";
+
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");
             builder.AppendLine("                var newValue = value;");
             builder.AppendLine("                var cancel = false;");
             builder.AppendLine($"                On{property.Name}Changing(ref newValue, ref cancel);");
-            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, static (o) => (({metadata.ClassName})o)._{property.Name}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
+            builder.AppendLine($"                if (!cancel && SetPropertyValue(nameof({property.Name}), newValue, {currentValueArgument}, static (o, v) => (({metadata.ClassName})o)._{property.Name} = v))");
             builder.AppendLine("                {");
             builder.AppendLine($"                    On{property.Name}Changed(_{property.Name});");
             builder.AppendLine($"                    {raisePropertyChangedCall};");

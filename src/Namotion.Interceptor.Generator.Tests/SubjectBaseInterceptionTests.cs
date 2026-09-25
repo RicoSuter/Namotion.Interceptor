@@ -1,5 +1,7 @@
+using System.Reactive.Concurrency;
 using System.Reflection;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Xunit;
 
 namespace Namotion.Interceptor.Generator.Tests;
@@ -323,6 +325,104 @@ public class SubjectBaseInterceptionTests
     }
 
     [Fact]
+    public void WhenReferencedBaseWasBuiltWithTheCurrentValueSetterHelper_ThenTheSubjectSharesItsMembersAndIsIntercepted()
+    {
+        // Arrange: a base as the generator emitted it before the setter helper took a delegate,
+        // compiled into its own assembly. The current generator never runs over it, because it is
+        // not partial, which is also what keeps its members exactly as that version emitted them.
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppLeaf : Library.LegacyBase
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        var writeInterceptor = new RecordingWriteInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService(() => writeInterceptor);
+
+        var changes = new List<SubjectPropertyChange>();
+        using var subscription = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var result = GeneratorTestHost.RunWithLibraryReferenceForExecution(CurrentValueSetterGeneratedBase, mainSource);
+        var leafType = result.LoadAssembly().GetType("App.AppLeaf");
+        Assert.NotNull(leafType);
+        var leaf = (IInterceptorSubject)Activator.CreateInstance(leafType, context)!;
+        var leafNameProperty = leafType.GetProperty("LeafName")!;
+        var baseNameProperty = leafType.GetProperty("BaseName")!;
+
+        // Act
+        leafNameProperty.SetValue(leaf, "leaf-first");
+        leafNameProperty.SetValue(leaf, "leaf-second");
+        baseNameProperty.SetValue(leaf, "base-written");
+
+        // Assert: derived mode with no diagnostic, the setter passes the field the way that helper
+        // expects, and both classes' writes reach the one executor the base owns. The old value is
+        // the one the setter read before the write, which for sequential writes is the previous value.
+        Assert.DoesNotContain(result.GeneratorDiagnostics, diagnostic => diagnostic.Id is "NI0007" or "NI0062");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+        Assert.Contains("SetPropertyValue(nameof(LeafName), newValue, _LeafName, static (o, v) =>", result.SingleSource());
+        Assert.Equal(1, CountExecutorFields(leafType));
+        Assert.Contains("LeafName", leaf.Properties.Keys);
+        Assert.Contains("BaseName", leaf.Properties.Keys);
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "LeafName" && Equals(write.Value, "leaf-second"));
+        Assert.Contains(writeInterceptor.Writes, write => write.PropertyName == "BaseName" && Equals(write.Value, "base-written"));
+        var secondLeafChange = Assert.Single(changes, change => change.GetNewValue<object?>() is "leaf-second");
+        Assert.Equal("leaf-first", secondLeafChange.GetOldValue<object?>());
+        var baseChange = Assert.Single(changes, change => change.Property.Name == "BaseName");
+        Assert.Equal("base-written", baseChange.GetNewValue<object?>());
+    }
+
+    [Fact]
+    public void WhenAGeneratedSubjectSitsBetweenTheLeafAndAReferencedCurrentValueSetterBase_ThenTheLeafPassesTheFieldToo()
+    {
+        // Arrange: the middle subject shares the referenced base's members, so the leaf's simple-name
+        // call binds to that same helper although nothing in this compilation declares it.
+        const string mainSource = """
+            using Namotion.Interceptor;
+            using Namotion.Interceptor.Attributes;
+
+            namespace App
+            {
+                [InterceptorSubject]
+                public partial class AppMiddle : Library.LegacyBase
+                {
+                    public partial string MiddleName { get; set; }
+                }
+
+                [InterceptorSubject]
+                public partial class AppLeaf : AppMiddle
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.RunWithLibraryReference(CurrentValueSetterGeneratedBase, mainSource);
+
+        // Assert
+        Assert.DoesNotContain(result.GeneratorDiagnostics, diagnostic => diagnostic.Id is "NI0007" or "NI0062");
+        Assert.Contains("SetPropertyValue(nameof(MiddleName), newValue, _MiddleName, static (o, v) =>", result.AllSources());
+        Assert.Contains("SetPropertyValue(nameof(LeafName), newValue, _LeafName, static (o, v) =>", result.AllSources());
+        Assert.DoesNotContain("private IInterceptorExecutor? _context;", result.AllSources());
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
     public void WhenHandWrittenBaseIsGeneric_ThenTheContractIsCheckedWithTypeArgumentsSubstituted()
     {
         // Arrange: DefaultProperties matches the contract only after substituting SubjectPropertyMetadata for T.
@@ -403,6 +503,128 @@ public class SubjectBaseInterceptionTests
         Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id == "NI0007" || d.Id == "NI0062");
         Assert.DoesNotContain("private IInterceptorExecutor? _context;", result.SingleSource());
     }
+
+    /// <summary>
+    /// A root subject as the 0.9.2 generator emitted it, verbatim apart from the class and property
+    /// names and the partial modifiers: the setter helper takes the current value, and every setter
+    /// passes the field. Attributed and not partial, so the current generator leaves it alone.
+    /// </summary>
+    private const string CurrentValueSetterGeneratedBase = """
+        using Namotion.Interceptor;
+        using Namotion.Interceptor.Attributes;
+        using Namotion.Interceptor.Interceptors;
+
+        using System;
+        using System.Collections.Concurrent;
+        using System.Collections.Generic;
+        using System.Collections.Frozen;
+        using System.ComponentModel;
+        using System.Linq;
+        using System.Reflection;
+        using System.Runtime.CompilerServices;
+
+        namespace Library
+        {
+            [InterceptorSubject]
+            public class LegacyBase : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+            {
+                public event PropertyChangedEventHandler? PropertyChanged;
+
+                protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+
+                void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+
+                private IInterceptorExecutor? _context;
+                private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+
+                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+
+                ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+
+                IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
+
+                object IInterceptorSubject.SyncRoot { get; } = new object();
+
+                void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                {
+                    lock (((IInterceptorSubject)this).SyncRoot)
+                    {
+                        _properties = ((IInterceptorSubject)this).Properties
+                            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                            .ToFrozenDictionary();
+                    }
+                }
+
+                public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
+                    new Dictionary<string, SubjectPropertyMetadata>
+                    {
+                            ["BaseName"] = new SubjectPropertyMetadata(
+                                typeof(LegacyBase).GetProperty(nameof(BaseName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                                (o) => ((LegacyBase)o).BaseName,
+                                (o, v) => ((LegacyBase)o).BaseName = (string)v,
+                                isIntercepted: true,
+                                isDynamic: false),
+                    }
+                    .ToFrozenDictionary();
+
+                public LegacyBase()
+                {
+                }
+
+                public LegacyBase(IInterceptorSubjectContext context) : this()
+                {
+                    ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+                }
+
+                private string _BaseName;
+
+                public string BaseName
+                {
+                    get
+                    {
+                        return GetPropertyValue<string>(nameof(BaseName), static (o) => ((LegacyBase)o)._BaseName);
+                    }
+                    set
+                    {
+                        var newValue = value;
+                        if (SetPropertyValue(nameof(BaseName), newValue, _BaseName, static (o, v) => ((LegacyBase)o)._BaseName = v))
+                        {
+                            RaisePropertyChanged(nameof(BaseName));
+                        }
+                    }
+                }
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                protected IReadOnlyDictionary<string, SubjectPropertyMetadata>? GetInstanceProperties() => _properties;
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                protected TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
+                {
+                    return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
+                }
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    if (_context is null)
+                    {
+                        setValue(this, newValue);
+                        return true;
+                    }
+                    else
+                    {
+                        return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
+                    }
+                }
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                protected object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
+                {
+                    return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
+                }
+            }
+        }
+        """;
 
     /// <summary>
     /// The single fenced code block in docs/generator.md that holds the base class

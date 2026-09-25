@@ -306,21 +306,38 @@ public class SubjectBaseContractTests
     }
 
     [Fact]
-    public void WhenBaseDeclaresTheSetterHelperWithACurrentValueParameter_ThenTheContractRejectsIt()
+    public void WhenBaseDeclaresTheSetterHelperWithACurrentValueParameter_ThenTheGeneratedSettersPassTheField()
     {
         // Arrange: the setter helper takes the current value in the position where the generated
-        // setter now passes a delegate that reads it. Every count matches, so without a check on that
-        // position the contract would accept the base and the emitted lambda would be CS1503 inside a
-        // generated file.
+        // setter otherwise passes a delegate that reads it, which is the shape earlier generator
+        // versions emitted into every base.
         var source = CurrentValueSetterBase + GeneratedDerived;
 
         // Act
         var result = GeneratorTestHost.Run(source);
 
-        // Assert: rejected by the contract, so the subject falls back to its own interception members,
-        // and the message names the shape the base has to declare instead.
-        var diagnostic = Assert.Single(result.GeneratorDiagnostics, d => d.Id == "NI0062");
-        Assert.Contains("Func<IInterceptorSubject, TProperty>, Action<IInterceptorSubject, TProperty>", diagnostic.GetMessage());
+        // Assert: accepted, so the subject shares the base's members and its setters call the helper
+        // the way that shape expects, with no diagnostic that would fail a warnings-as-errors build.
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id is "NI0007" or "NI0062");
+        Assert.Contains("SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) =>", result.SingleSource());
+        Assert.DoesNotContain("private IInterceptorExecutor? _context;", result.SingleSource());
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenARootModeBaseDeclaresTheSetterHelperWithACurrentValueParameter_ThenNoStrayNewModifierIsEmitted()
+    {
+        // Arrange: the base fails the contract on every other helper, so the subject emits its own
+        // members, and the delegate-taking setter it emits is an overload of the base's, not a hiding.
+        var source = CurrentValueSetterOnlyBase + GeneratedDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert: CS0109 for a stray 'new' and CS0108 for a missing one are both warnings.
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0062");
+        Assert.Contains("SetPropertyValue(nameof(Name), newValue, static (o) => ((GenDerived)o)._Name, static (o, v) =>", result.SingleSource());
         Assert.Empty(result.CompilationErrors);
         Assert.Empty(result.CompilationWarnings);
     }
@@ -655,9 +672,54 @@ public class SubjectBaseContractTests
         """;
 
     /// <summary>
-    /// A base that satisfies every clause of the contract except that SetPropertyValue takes the current
-    /// value where the generated setter passes the delegate that reads it: the shape the helper had before
-    /// the terminal write started reading the value it overwrites under the subject lock.
+    /// Same as <see cref="DefaultPropertiesOnlyBase"/> plus the setter helper in the shape earlier
+    /// generator versions emitted, so the subject falls back to root mode next to that overload.
+    /// </summary>
+    private const string CurrentValueSetterOnlyBase = """
+        using System;
+        using System.Collections.Concurrent;
+        using System.Collections.Generic;
+        using System.Collections.Frozen;
+        using System.Linq;
+        using Namotion.Interceptor;
+        using Namotion.Interceptor.Interceptors;
+
+        namespace Repro
+        {
+            public class HandBase : IInterceptorSubject
+            {
+                private IInterceptorExecutor? _context;
+                private IReadOnlyDictionary<string, SubjectPropertyMetadata> _properties
+                    = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; }
+                    = FrozenDictionary<string, SubjectPropertyMetadata>.Empty;
+
+                IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
+                ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
+                object IInterceptorSubject.SyncRoot { get; } = new object();
+                IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties;
+
+                public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                {
+                    _properties = _properties
+                        .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                        .ToFrozenDictionary();
+                }
+
+                protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
+                {
+                    setValue(this, newValue);
+                    return true;
+                }
+            }
+        }
+        """;
+
+    /// <summary>
+    /// A base that satisfies the contract with SetPropertyValue taking the current value where the
+    /// delegate that reads it now goes: the shape the helper had before the terminal write started
+    /// reading the value it overwrites under the subject lock.
     /// </summary>
     private const string CurrentValueSetterBase = """
         using System;

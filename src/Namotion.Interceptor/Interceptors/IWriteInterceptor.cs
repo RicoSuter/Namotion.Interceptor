@@ -73,8 +73,8 @@ public struct PropertyWriteContext<TProperty>
     internal bool FinalValueIsNewValue;
 
     // Null when the caller supplied the current value itself (derived recalculation, hand-written
-    // callers); the value it supplied is then never refreshed. Reads the backing store directly, never
-    // the intercepted getter: the terminal invokes it while holding the subject's SyncRoot.
+    // callers); the value it supplied is then never refreshed. A plain backing-store read: the
+    // terminal invokes it while holding the subject's SyncRoot.
     private readonly Func<IInterceptorSubject, TProperty>? _readValue;
     private TProperty _currentValue;
     private bool _isCurrentValueResolved;
