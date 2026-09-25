@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
@@ -107,6 +108,56 @@ public class PropertyWriteOldValueTests
         Assert.Equal(99, recorder.OldValueOf(6));
     }
 
+    [Fact]
+    public void WhenAnOverrideOmitsTheSetter_ThenTheOldValueIsTheValueTheInheritedSetterReplaced()
+    {
+        // Arrange: the inherited setter stores into the base field, not the override's own field.
+        var recorder = new OldValueRecorder();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithService(() => recorder, _ => false);
+
+        var subject = new OldValueGetterOnlyOverrideSubject(context);
+
+        // Act
+        subject.Text = "first";
+        subject.Text = "second";
+
+        // Assert
+        Assert.Null(recorder.OldValueOf("first"));
+        Assert.Equal("first", recorder.OldValueOf("second"));
+    }
+
+    [Fact]
+    public void WhenAStoredValueReaderIsAdded_ThenEveryOtherMetadataFieldIsCopied()
+    {
+        // Arrange: every field is set to a non-default value, so a field the copy drops cannot pass.
+        var propertyInfo = typeof(OldValueMetadataSource).GetProperty(nameof(OldValueMetadataSource.Value))!;
+        var original = new SubjectPropertyMetadata(
+            propertyInfo,
+            static _ => null,
+            static (_, _) => { },
+            isIntercepted: true,
+            isDynamic: true);
+
+        Func<IInterceptorSubject, string?> reader = static _ => null;
+
+        // Act
+        var copy = original.WithStoredValueReader(reader);
+
+        // Assert
+        Assert.Same(reader, copy.ReadStoredValue);
+        var fields = typeof(SubjectPropertyMetadata).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        Assert.NotEmpty(fields);
+        foreach (var field in fields.Where(field => !field.Name.Contains(nameof(SubjectPropertyMetadata.ReadStoredValue))))
+        {
+            var originalValue = field.GetValue(original);
+            Assert.False(originalValue is null || originalValue.Equals(field.FieldType.IsValueType ? Activator.CreateInstance(field.FieldType) : null),
+                $"Set '{field.Name}' to a non-default value in this test, or the copy check cannot see it dropped.");
+            Assert.Equal(originalValue, field.GetValue(copy));
+        }
+    }
+
     private sealed class OldValueRecorder : IWriteInterceptor
     {
         private readonly List<(object? OldValue, object? NewValue)> _commits = [];
@@ -151,4 +202,22 @@ public partial class OldValueProbeSubject
     public partial string? Text { get; set; }
 
     public partial int Number { get; set; }
+}
+
+[InterceptorSubject]
+public partial class OldValueVirtualSubject
+{
+    public virtual partial string? Text { get; set; }
+}
+
+[InterceptorSubject]
+public partial class OldValueGetterOnlyOverrideSubject : OldValueVirtualSubject
+{
+    public override partial string? Text { get; }
+}
+
+public class OldValueMetadataSource
+{
+    [Derived]
+    public string? Value { get; set; }
 }

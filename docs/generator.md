@@ -314,7 +314,7 @@ public partial class Dog : Animal
 
 An override keeps the overriding declaration’s `PropertyInfo` and attributes. If it omits a getter or setter, the metadata retains that inherited accessor when it is callable from the subject’s generated code. This includes protected accessors, but excludes inaccessible ancestor accessors and init-only setters. A partial override still generates only the accessors written in its declaration.
 
-Each partial override has its own backing field, and the subject's metadata for the name, including the stored-value reader that supplies a change's old value, targets the most derived one. Calling the base accessor from the override (`base.Name = value`) stores into the base field, which the property no longer exposes, so the change it publishes carries the override's stored value as its old value.
+Each partial override has its own backing field, and the subject's metadata for the name, including the stored-value reader that supplies a change's old value, targets the most derived one. An override that omits the setter has no reader, because the inherited setter stores into the base field, so its changes carry the old value that setter passed. Calling the base accessor from the overriding class (`base.Name = value`) stores into the base field, which the property no longer exposes, so the change it publishes carries the override's stored value as its old value.
 
 ### New and Sealed Properties
 
