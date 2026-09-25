@@ -47,8 +47,32 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool IsCurrent(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
-        return !change.Property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out _)
+        return IsCurrent(in change, rule, out _);
+    }
+
+    /// <summary>
+    /// <see cref="IsCurrent(in SubjectPropertyChange, ChangeDeliveryRule)"/>, also returning the commit
+    /// revision it compared against, for a caller that goes on to
+    /// <see cref="TryReapplyIfStillCurrent"/>.
+    /// </summary>
+    public static bool IsCurrent(in SubjectPropertyChange change, ChangeDeliveryRule rule, out long commitRevision)
+    {
+        return !change.Property.TryGetWriteState(CountsSourceCommits(rule), out commitRevision, out _)
                || !IsSupersededBy(in change, commitRevision);
+    }
+
+    /// <summary>
+    /// Re-applies the change's new value as a local write, but only if the property has not committed
+    /// anything since <paramref name="observedCommitRevision"/> was read by
+    /// <see cref="IsCurrent(in SubjectPropertyChange, ChangeDeliveryRule, out long)"/>. Decided under the
+    /// subject lock, because a commit between that read and this write would otherwise be overwritten by
+    /// the older value and then delivered as the newest local intent. Returns false when the write was
+    /// skipped for that reason, with nothing stored or published.
+    /// </summary>
+    public static bool TryReapplyIfStillCurrent(in SubjectPropertyChange change, ChangeDeliveryRule rule, long observedCommitRevision)
+    {
+        return change.Property.TrySetValueIfCommitRevisionIs(
+            change.GetNewValue<object?>(), observedCommitRevision, CountsSourceCommits(rule));
     }
 
     /// <summary>

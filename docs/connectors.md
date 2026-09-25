@@ -77,7 +77,7 @@ Writes made while the source is connecting are captured, not lost. The outbound 
 **What happens when draining starts.** Each parked write is decided by commit order, the same rule as [Change Batching and Merging](#change-batching-and-merging):
 
 - Superseded by a later local write: dropped, because that later write is delivered in its place.
-- Otherwise: sent, restored locally first if the initial-state load moved the model off it.
+- Otherwise: sent, restored locally first if the initial-state load moved the model off it. The restore is skipped, and the parked write dropped as superseded, when a local write commits while the reconcile is deciding, so that newer write is never overwritten by the older parked value.
 
 **A local write that has already committed wins over the value the load brought in.**
 

@@ -61,6 +61,12 @@ public struct PropertyWriteContext<TProperty>
     internal long Revision;
 
     /// <summary>
+    /// The commit precondition consumed from the pending slot, unset for an ordinary write. Checked by the
+    /// terminal under the subject lock; see <see cref="CommitPrecondition"/>.
+    /// </summary>
+    internal CommitPrecondition Precondition;
+
+    /// <summary>
     /// Set by the cascade re-entry constructor, where <see cref="NewValue"/> is already the
     /// stabilized getter output. Stops <see cref="GetFinalValue"/> from re-invoking the getter,
     /// which would run user code at publish time and could return a value that never paired
@@ -125,7 +131,7 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
-        PendingOrigin.TryConsume(in property, out _attempted);
+        PendingOrigin.TryConsume(in property, out _attempted, ref Precondition);
     }
 
     /// <summary>
@@ -148,7 +154,7 @@ public struct PropertyWriteContext<TProperty>
         IsWritten = false;
         FinalValueIsNewValue = true;
         _writeTimestamp = rawTimestamp;
-        PendingOrigin.TryConsume(in property, out _attempted);
+        PendingOrigin.TryConsume(in property, out _attempted, ref Precondition);
     }
 
     /// <summary>
