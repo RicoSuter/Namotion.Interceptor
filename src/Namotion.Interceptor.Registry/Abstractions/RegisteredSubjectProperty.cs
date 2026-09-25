@@ -159,18 +159,7 @@ public class RegisteredSubjectProperty
     {
         return Reference.Metadata.GetValue?.Invoke(Subject);
     }
-
-    /// <summary>
-    /// Gets the current value of the property together with the metadata of the write that produced it;
-    /// see <see cref="PropertyReference.GetValue(out PropertyValueMetadata)"/> for what the pair guarantees per property kind.
-    /// </summary>
-    /// <param name="metadata">The metadata of the write that produced the returned value.</param>
-    /// <returns>The value.</returns>
-    public object? GetValue(out PropertyValueMetadata metadata)
-    {
-        return Reference.GetValue(out metadata);
-    }
-
+    
     /// <summary>
     /// Sets the value of the property.
     /// </summary>

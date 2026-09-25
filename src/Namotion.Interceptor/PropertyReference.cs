@@ -161,50 +161,35 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         return false;
     }
 
-    // Bounds the retries of a stored-property read under constant concurrent writes; see the remarks.
-    internal const int MaxReadRetries = 4;
-
     // Short deliberately, like WriteStateKey: the tracker looks its data up on every write of a tracked property.
     internal const string DerivedDependenciesKey = "ni.dpd";
 
     /// <summary>
-    /// Gets the value of the property together with the metadata of the write that produced it. For a stored
-    /// property both come from one write. For a derived property the value is its getter's current value, and
-    /// the metadata carries the latest write timestamp among the property's own and its recorded
-    /// dependencies', all read after the getter. No lock is held while read interceptors or getters run.
+    /// Gets the value of the property together with the metadata of the write that produced it, or of a
+    /// later write. For a derived property the metadata carries the latest write timestamp among the
+    /// property's own and its recorded dependencies'. No lock is held while read interceptors or getters run.
     /// </summary>
-    /// <param name="metadata">The metadata of the write that produced the returned value.</param>
+    /// <param name="metadata">The metadata of the write that produced the returned value, or of a later one.</param>
     /// <returns>The value.</returns>
     /// <remarks>
-    /// A stored property's read is retried when a write commits while it runs, a bounded number of times.
-    /// Under constant concurrent writes the metadata may then describe a later write than the one that
-    /// produced the value, never an earlier one.
-    /// <para>
-    /// A derived property, and a property that is not intercepted, is read without synchronization. For a
-    /// property that is not intercepted, the value and metadata may come from different writes, in either order.
-    /// For a derived property the metadata may describe a write later than the value's inputs, never an earlier
-    /// one, as long as the getter reads only the dependencies its last recalculation recorded. A property the
-    /// getter reads that is not recorded yet, for example after a write changed which branch the getter takes
-    /// and before the recalculation that write triggers commits, is not covered. Without recorded
-    /// dependencies, for example a getter over plain fields or a context without derived property change
-    /// detection, the metadata carries the property's own write timestamp alone. Inside a transaction, a
-    /// pending value is returned with the metadata of the last committed write.
-    /// </para>
+    /// Under concurrent writes the metadata may describe a later write than the one that produced the value,
+    /// never an earlier one. For a derived property that holds for the dependencies its last recalculation
+    /// recorded; a property the getter reads that is not recorded yet, for example after a write changed which
+    /// branch the getter takes and before the recalculation that write triggers commits, is not covered.
+    /// Without recorded dependencies, for example a getter over plain fields or a context without derived
+    /// property change detection, the metadata carries the property's own write timestamp alone. For a
+    /// property that is not intercepted, the value and metadata may come from different writes, in either
+    /// order. Inside a transaction, a pending value is returned with the metadata of the last committed write.
     /// </remarks>
     public object? GetValue(out PropertyValueMetadata metadata)
     {
         var propertyMetadata = Metadata;
-        if (!propertyMetadata.IsDerived && propertyMetadata.IsIntercepted)
-        {
-            return GetStoredValue(propertyMetadata, out metadata);
-        }
-
         var value = propertyMetadata.GetValue?.Invoke(Subject);
-        var timestampTicks = GetWriteTimestampTicks();
 
-        // A dependency's terminal stores its value and timestamp under one lock, so a getter that saw a
-        // value finds its timestamp stored: read after the getter, a recorded dependency's timestamp can be
-        // newer than the value the getter read from it, never older.
+        // Read after the value: a terminal stores a value and its timestamp under the subject's lock, and
+        // the read terminal reads the value under it, so this finds that write's timestamp or a later one's.
+        // A derived getter reads its dependencies the same way, hence their timestamps count too.
+        var timestampTicks = GetWriteTimestampTicks();
         if (propertyMetadata.IsDerived
             && TryGetPropertyData(DerivedDependenciesKey, out var data)
             && data is IDerivedPropertyDependencies dependencies)
@@ -214,46 +199,6 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
 
         metadata = new PropertyValueMetadata(timestampTicks);
         return value;
-    }
-
-    private object? GetStoredValue(SubjectPropertyMetadata propertyMetadata, out PropertyValueMetadata metadata)
-    {
-        // The read terminal takes the subject's lock only around the field read, so a write can commit
-        // anywhere between the two snapshots; equal snapshots prove that none did.
-        var before = GetWriteStateSnapshot();
-        var value = propertyMetadata.GetValue?.Invoke(Subject);
-        var after = GetWriteStateSnapshot();
-
-        for (var retry = 0; retry < MaxReadRetries && after != before; retry++)
-        {
-            before = after;
-            value = propertyMetadata.GetValue?.Invoke(Subject);
-            after = GetWriteStateSnapshot();
-        }
-
-        metadata = new PropertyValueMetadata(after.TimestampTicks);
-        return value;
-    }
-
-    /// <summary>
-    /// Reads the write timestamp ticks and both commit revision slots as one snapshot of the last completed
-    /// commit, all zero when no write state has been recorded. Two snapshots with equal revisions bracket
-    /// no commit, because every commit advances exactly one slot to a value never used before.
-    /// </summary>
-    /// <remarks>
-    /// Takes the subject's lock briefly: the terminal stores the timestamp and the revision one after the
-    /// other, so a lock-free reader could pair one commit's timestamp with the previous commit's revisions.
-    /// </remarks>
-    private (long TimestampTicks, long NonSourceCommitRevision, long SourceCommitRevision) GetWriteStateSnapshot()
-    {
-        lock (Subject.SyncRoot)
-        {
-            return TryGetWriteState(out var state)
-                ? (Interlocked.Read(ref state.TimestampTicks),
-                    Interlocked.Read(ref state.LastNonSourceCommitRevision),
-                    Interlocked.Read(ref state.LastSourceCommitRevision))
-                : default;
-        }
     }
 
     /// <summary>

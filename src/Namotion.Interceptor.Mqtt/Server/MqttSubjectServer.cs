@@ -612,7 +612,7 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                     DateTimeOffset? writeTimestamp;
                     try
                     {
-                        var value = property.GetValue(out var metadata);
+                        var value = property.Reference.GetValue(out var metadata);
                         writeTimestamp = metadata.WriteTimestamp;
                         payload = _configuration.ValueConverter.Serialize(value, property.Type);
                     }

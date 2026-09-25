@@ -364,7 +364,7 @@ internal class CustomNodeManager : CustomNodeManager2
         NodeId? dataTypeOverride,
         OpcUaPropertyMapping? mapping)
     {
-        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(out var metadata), property);
+        var value = _configuration.ValueConverter.ConvertToNodeValue(property.Reference.GetValue(out var metadata), property);
         var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
 
         var variableNode = _nodeFactory.CreateVariableNode(this, parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, mapping);

@@ -59,7 +59,6 @@ namespace Namotion.Interceptor.Registry.Abstractions
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty AddDerivedAttribute(string name, System.Type type, System.Func<Namotion.Interceptor.IInterceptorSubject, object?>? getValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?>? setValue, params System.Attribute[] attributes) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty GetAttributedProperty() { }
         public object? GetValue() { }
-        public object? GetValue(out Namotion.Interceptor.PropertyValueMetadata metadata) { }
         public void SetValue(object? value) { }
         public Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? TryGetAttribute(string attributeName) { }
         public static Namotion.Interceptor.PropertyReference op_Implicit(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }

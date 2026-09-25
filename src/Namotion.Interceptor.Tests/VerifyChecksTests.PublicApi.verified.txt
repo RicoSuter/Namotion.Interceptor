@@ -3,7 +3,6 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking")]
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
 namespace Namotion.Interceptor.Attributes
 {

@@ -19,7 +19,8 @@ public readonly record struct PropertyValueMetadata
     }
 
     /// <summary>
-    /// Gets the timestamp of the write that produced the value, or null if the property has never been written.
+    /// Gets the timestamp of the write that produced the value, or of a later write, or null if the property has
+    /// never been written; see <see cref="PropertyReference.GetValue(out PropertyValueMetadata)"/>.
     /// </summary>
     public DateTimeOffset? WriteTimestamp { get; }
 }
