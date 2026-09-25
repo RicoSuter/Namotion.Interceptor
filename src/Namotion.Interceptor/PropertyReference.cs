@@ -89,15 +89,23 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <summary>
     /// Gets the write timestamp, or null if no timestamp has been set.
     /// </summary>
+    /// <remarks>
+    /// A value read separately may come from a different write than this timestamp. For the value together with
+    /// the metadata of the write that produced it, use <see cref="GetValue(out PropertyValueMetadata)"/>.
+    /// </remarks>
     public DateTimeOffset? TryGetWriteTimestamp()
     {
-        if (TryGetWriteState(out var state))
-        {
-            var ticks = Interlocked.Read(ref state.TimestampTicks);
-            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
-        }
+        var ticks = GetWriteTimestampTicks();
+        return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+    }
 
-        return null;
+    /// <summary>
+    /// Gets the write timestamp as raw UTC ticks, or 0 if no timestamp has been set.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal long GetWriteTimestampTicks()
+    {
+        return TryGetWriteState(out var state) ? Interlocked.Read(ref state.TimestampTicks) : 0;
     }
 
     /// <summary>
@@ -151,6 +159,46 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         commitRevision = 0;
         publishedToAnySource = false;
         return false;
+    }
+
+    // Short deliberately, like WriteStateKey: the tracker looks its data up on every write of a tracked property.
+    internal const string DerivedDependenciesKey = "ni.dpd";
+
+    /// <summary>
+    /// Gets the value of the property together with the metadata of the write that produced it, or of a
+    /// later write. For a derived property the metadata carries the latest write timestamp among the
+    /// property's own and its recorded dependencies'. No lock is held while read interceptors or getters run.
+    /// </summary>
+    /// <param name="metadata">The metadata of the write that produced the returned value, or of a later one.</param>
+    /// <returns>The value.</returns>
+    /// <remarks>
+    /// Under concurrent writes the metadata may describe a later write than the one that produced the value,
+    /// never an earlier one. For a derived property that holds for the dependencies its last recalculation
+    /// recorded; a property the getter reads that is not recorded yet, for example after a write changed which
+    /// branch the getter takes and before the recalculation that write triggers commits, is not covered.
+    /// Without recorded dependencies, for example a getter over plain fields or a context without derived
+    /// property change detection, the metadata carries the property's own write timestamp alone. For a
+    /// property that is not intercepted, the value and metadata may come from different writes, in either
+    /// order. Inside a transaction, a pending value is returned with the metadata of the last committed write.
+    /// </remarks>
+    public object? GetValue(out PropertyValueMetadata metadata)
+    {
+        var propertyMetadata = Metadata;
+        var value = propertyMetadata.GetValue?.Invoke(Subject);
+
+        // Read after the value: a terminal stores a value and its timestamp under the subject's lock, and
+        // the read terminal reads the value under it, so this finds that write's timestamp or a later one's.
+        // A derived getter reads its dependencies the same way, hence their timestamps count too.
+        var timestampTicks = GetWriteTimestampTicks();
+        if (propertyMetadata.IsDerived
+            && TryGetPropertyData(DerivedDependenciesKey, out var data)
+            && data is IDerivedPropertyDependencies dependencies)
+        {
+            timestampTicks = Math.Max(timestampTicks, dependencies.GetLatestDependencyWriteTimestampTicks());
+        }
+
+        metadata = new PropertyValueMetadata(timestampTicks);
+        return value;
     }
 
     /// <summary>

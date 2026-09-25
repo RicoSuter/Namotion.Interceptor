@@ -364,7 +364,7 @@ internal class CustomNodeManager : CustomNodeManager2
         NodeId? dataTypeOverride,
         OpcUaPropertyMapping? mapping)
     {
-        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property);
+        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(out var metadata), property);
         var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
 
         var variableNode = _nodeFactory.CreateVariableNode(this, parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, mapping);
@@ -394,10 +394,9 @@ internal class CustomNodeManager : CustomNodeManager2
 
         variableNode.Value = value;
 
-        var writeTimestamp = property.Reference.TryGetWriteTimestamp();
-        if (writeTimestamp.HasValue)
+        if (metadata.WriteTimestamp.HasValue)
         {
-            variableNode.Timestamp = writeTimestamp.Value.UtcDateTime;
+            variableNode.Timestamp = metadata.WriteTimestamp.Value.UtcDateTime;
         }
 
         // Assigning the value above leaves a pending change mask that nothing else clears, so the next

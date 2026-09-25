@@ -609,11 +609,12 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                     var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
                     byte[] payload;
+                    DateTimeOffset? writeTimestamp;
                     try
                     {
-                        payload = _configuration.ValueConverter.Serialize(
-                            property.GetValue(),
-                            property.Type);
+                        var value = property.GetValue(out var metadata);
+                        writeTimestamp = metadata.WriteTimestamp;
+                        payload = _configuration.ValueConverter.Serialize(value, property.Type);
                     }
                     catch (Exception ex)
                     {
@@ -629,18 +630,14 @@ public class MqttSubjectServer : SubjectConnectorBase, IFaultInjectable, IAsyncD
                         Retain = mapping.Retain ?? _configuration.UseRetainedMessages
                     };
 
-                    if (timestampPropertyName is not null)
+                    if (timestampPropertyName is not null && writeTimestamp.HasValue)
                     {
-                        var writeTimestamp = property.Reference.TryGetWriteTimestamp();
-                        if (writeTimestamp.HasValue)
-                        {
-                            message.UserProperties =
-                            [
-                                new MqttUserProperty(
-                                    timestampPropertyName,
-                                    _configuration.SourceTimestampSerializer(writeTimestamp.Value))
-                            ];
-                        }
+                        message.UserProperties =
+                        [
+                            new MqttUserProperty(
+                                timestampPropertyName,
+                                _configuration.SourceTimestampSerializer(writeTimestamp.Value))
+                        ];
                     }
 
                     await server.InjectApplicationMessage(
