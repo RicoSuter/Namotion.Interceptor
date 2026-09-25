@@ -343,6 +343,22 @@ public class SubjectBaseContractTests
     }
 
     [Fact]
+    public void WhenBaseSetterHelperTakesTheCurrentValueByReference_ThenTheContractRejectsIt()
+    {
+        // Arrange: every position has the right type, but the emitted call passes the field without
+        // 'ref', which would be CS1620 inside a generated file.
+        var source = CurrentValueSetterBase.Replace("TProperty currentValue,", "ref TProperty currentValue,") + GeneratedDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert
+        Assert.Contains(result.GeneratorDiagnostics, d => d.Id == "NI0062");
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
     public void WhenBaseGetInstancePropertiesReturnsAnImplementingType_ThenTheContractAcceptsIt()
     {
         // Arrange: the base returns FrozenDictionary<string, SubjectPropertyMetadata>?, which the

@@ -77,14 +77,16 @@ internal sealed record AccessorHelperShape(
     string Declaration)
 {
     /// <summary>
-    /// Whether a method has the emitted signature, as far as the approximation goes: arity, count, and
-    /// the checked parameter positions. Deliberately excludes the 'params' modifier and the return type,
-    /// which C# hiding ignores, so the hiding check can use it as is and the contract check adds them.
+    /// Whether a method has the emitted signature, as far as the approximation goes: arity, count, no
+    /// parameter that a plain argument cannot bind to, and the checked parameter positions. Deliberately
+    /// excludes the 'params' modifier and the return type, which C# hiding ignores, so the hiding check
+    /// can use it as is and the contract check adds them.
     /// </summary>
     public bool MatchesSignature(IMethodSymbol method)
     {
         if (method.TypeParameters.Length != TypeParameterCount ||
-            method.Parameters.Length != ParameterCount)
+            method.Parameters.Length != ParameterCount ||
+            method.Parameters.Any(parameter => parameter.RefKind is not (RefKind.None or RefKind.In)))
         {
             return false;
         }
