@@ -62,13 +62,13 @@ using System.Text.Json.Serialization;
                         (o) => ((Person)o).FirstName,
                         (o, v) => ((Person)o).FirstName = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((Person)o)._FirstName),
                     ["LastName"] = new SubjectPropertyMetadata(
                         typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)!,
                         (o) => ((Person)o).LastName,
                         (o, v) => ((Person)o).LastName = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((Person)o)._LastName),
             }
             .ToFrozenDictionary();
 
@@ -197,7 +197,7 @@ using System.Text.Json.Serialization;
                         (o) => ((Teacher)o).MainCourse,
                         (o, v) => ((Teacher)o).MainCourse = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((Teacher)o)._MainCourse),
             }
             .Concat(global::Person.DefaultProperties)
             .GroupBy(pair => pair.Key)

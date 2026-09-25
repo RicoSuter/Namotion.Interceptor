@@ -297,7 +297,9 @@ internal static class SubjectCodeGenerator
         builder.AppendLine($"{extraIndent}                        {getterLambda},");
         builder.AppendLine($"{extraIndent}                        {setterLambda},");
         builder.AppendLine($"{extraIndent}                        isIntercepted: {(isIntercepted ? "true" : "false")},");
-        builder.AppendLine($"{extraIndent}                        isDynamic: false),");
+        builder.AppendLine(isIntercepted
+            ? $"{extraIndent}                        isDynamic: false).WithStoredValueReader<{property.FullTypeName}>(static (o) => (({metadata.ClassName})o)._{property.Name}),"
+            : $"{extraIndent}                        isDynamic: false),");
     }
 
     private static string GetGetterLambda(PropertyMetadata property, string castTypeName)

@@ -78,9 +78,37 @@ public struct PropertyWriteContext<TProperty>
     public PropertyReference Property { get; }
 
     /// <summary>
-    /// Gets the current property value.
+    /// Gets the current property value. Before the terminal write it is the value the caller passed, which
+    /// the generated setter read outside the subject lock. Once <see cref="IsWritten"/> is true it is the
+    /// value the store replaced, read under the lock immediately before the store, when the property's
+    /// metadata carries a stored-value reader (see <see cref="SubjectPropertyMetadata.WithStoredValueReader{TProperty}"/>)
+    /// assignable to <c>Func&lt;IInterceptorSubject, TProperty&gt;</c>. It stays the value the caller
+    /// passed on a derived recalculation and when the property has no such reader.
     /// </summary>
-    public TProperty CurrentValue { get; }
+    public TProperty CurrentValue { get; private set; }
+
+    /// <summary>
+    /// Replaces <see cref="CurrentValue"/> with the stored value. Called by the terminal write while it holds
+    /// the subject's SyncRoot, immediately before the store.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ReadCurrentValueUnderLock(IInterceptorSubject subject)
+    {
+        // A derived recalculation supplies the value the previous recalculation settled on, which no store
+        // holds: a settable derived property's field already is the new value by the time it recalculates.
+        if (FinalValueIsNewValue)
+        {
+            return;
+        }
+
+        // Delegate variance makes a reference-type reader match a boxed (object) write too, so such a
+        // write also gets the stored value; a boxed write of a value type keeps the caller's value.
+        if (subject.Properties.TryGetValue(Property.Name, out var metadata) &&
+            metadata.ReadStoredValue is Func<IInterceptorSubject, TProperty> readStoredValue)
+        {
+            CurrentValue = readStoredValue(subject);
+        }
+    }
 
     /// <summary>
     /// Gets the new value to write (might be different than the value returned by calling the
