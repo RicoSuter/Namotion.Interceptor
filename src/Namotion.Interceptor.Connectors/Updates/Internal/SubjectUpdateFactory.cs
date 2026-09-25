@@ -135,7 +135,7 @@ internal static class SubjectUpdateFactory
         RegisteredSubjectProperty property,
         SubjectUpdateBuilder builder)
     {
-        var value = property.Reference.GetValue(out var metadata);
+        var value = property.GetValue(out var metadata);
 
         var update = new SubjectPropertyUpdate { Timestamp = metadata.WriteTimestamp };
 
