@@ -343,6 +343,54 @@ public class SubjectBaseContractTests
     }
 
     [Fact]
+    public void WhenARootModeSubjectSitsBetweenTheLeafAndACurrentValueSetterBase_ThenTheLeafPassesTheDelegate()
+    {
+        // Arrange: the field form would bind to the base's helper, whose executor the middle's
+        // re-implemented Context never initializes, so the leaf's writes would go unintercepted.
+        var source = CurrentValueSetterOnlyBase + GeneratedDerived + """
+            namespace Repro
+            {
+                [Namotion.Interceptor.Attributes.InterceptorSubject]
+                public partial class GenLeaf : GenDerived
+                {
+                    public partial string LeafName { get; set; }
+                }
+            }
+            """;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert: only the delegate form binds to the helper the middle emits.
+        Assert.Contains("SetPropertyValue(nameof(LeafName), newValue, static (o) => ((GenLeaf)o)._LeafName, static (o, v) =>", result.AllSources());
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
+    public void WhenBaseDeclaresBothSetterHelperShapes_ThenTheGeneratedSettersPassTheDelegate()
+    {
+        // Arrange
+        var source = CurrentValueSetterBase.Replace(
+            "protected object? InvokeMethod(",
+            """
+            protected bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+                => SetPropertyValue(propertyName, newValue, readValue(this), setValue);
+
+            protected object? InvokeMethod(
+            """) + GeneratedDerived;
+
+        // Act
+        var result = GeneratorTestHost.Run(source);
+
+        // Assert: the form that lets the terminal write read the old value under the subject lock wins.
+        Assert.DoesNotContain(result.GeneratorDiagnostics, d => d.Id is "NI0007" or "NI0062");
+        Assert.Contains("SetPropertyValue(nameof(Name), newValue, static (o) => ((GenDerived)o)._Name, static (o, v) =>", result.SingleSource());
+        Assert.Empty(result.CompilationErrors);
+        Assert.Empty(result.CompilationWarnings);
+    }
+
+    [Fact]
     public void WhenBaseSetterHelperTakesTheCurrentValueByReference_ThenTheContractRejectsIt()
     {
         // Arrange: every position has the right type, but the emitted call passes the field without

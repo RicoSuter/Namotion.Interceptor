@@ -506,8 +506,10 @@ public class SubjectBaseInterceptionTests
 
     /// <summary>
     /// A root subject as the 0.9.2 generator emitted it, verbatim apart from the class and property
-    /// names and the partial modifiers: the setter helper takes the current value, and every setter
-    /// passes the field. Attributed and not partial, so the current generator leaves it alone.
+    /// names, the user's half folded in, and what only a partial class can declare: the partial
+    /// modifiers and the bodiless OnChanging/OnChanged hooks, which compile to nothing. The setter
+    /// helper takes the current value, and every setter passes the field. Attributed and not partial,
+    /// so the current generator leaves it alone.
     /// </summary>
     private const string CurrentValueSetterGeneratedBase = """
         using Namotion.Interceptor;
@@ -522,6 +524,12 @@ public class SubjectBaseInterceptionTests
         using System.Linq;
         using System.Reflection;
         using System.Runtime.CompilerServices;
+        using System.Text.Json.Serialization;
+
+        #pragma warning disable CS8669
+        #pragma warning disable CS0649
+        #pragma warning disable CS0067
+        #pragma warning disable CS9193
 
         namespace Library
         {
@@ -530,6 +538,7 @@ public class SubjectBaseInterceptionTests
             {
                 public event PropertyChangedEventHandler? PropertyChanged;
 
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
 
                 void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
@@ -537,12 +546,16 @@ public class SubjectBaseInterceptionTests
                 private IInterceptorExecutor? _context;
                 private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
+                [JsonIgnore]
                 IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _context, this);
 
+                [JsonIgnore]
                 ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
+                [JsonIgnore]
                 IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => GetInstanceProperties() ?? DefaultProperties;
 
+                [JsonIgnore]
                 object IInterceptorSubject.SyncRoot { get; } = new object();
 
                 void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -587,7 +600,8 @@ public class SubjectBaseInterceptionTests
                     set
                     {
                         var newValue = value;
-                        if (SetPropertyValue(nameof(BaseName), newValue, _BaseName, static (o, v) => ((LegacyBase)o)._BaseName = v))
+                        var cancel = false;
+                        if (!cancel && SetPropertyValue(nameof(BaseName), newValue, _BaseName, static (o, v) => ((LegacyBase)o)._BaseName = v))
                         {
                             RaisePropertyChanged(nameof(BaseName));
                         }
