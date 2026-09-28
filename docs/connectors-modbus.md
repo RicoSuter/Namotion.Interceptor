@@ -10,7 +10,7 @@ The `Namotion.Interceptor.Modbus` package polls Modbus TCP devices into C# objec
 - Conversion to integer and floating point types, `decimal`, `bool`, `string`, enums, flags enums and their nullable forms
 - "Not available" raw patterns mapped to `null`
 - Per-subject base addresses and unit IDs for reusable model classes
-- Contiguous read batching with a configurable gap, split for good when the device rejects a request
+- Contiguous read batching with a configurable gap, split until the next connect when the device rejects a request
 - Discovery hook for firmware gating and runtime discovery
 - Automatic reconnection and diagnostics
 
@@ -39,7 +39,7 @@ builder.Services.AddSingleton(new HeatMeter(context));
 builder.Services.AddModbusSubjectClientSource<HeatMeter>("192.168.1.50");
 ```
 
-The context needs `WithRegistry()`, because the connector walks the subject tree when it connects, and `WithLifecycle()`, because the source claims the properties it reads. Without lifecycle tracking, resolving or creating the source throws `InvalidOperationException`. The configuration is validated when the source is resolved or created and throws `ArgumentException` for a value out of range.
+The context needs `WithRegistry()`, because the connector walks the subject tree when it connects, and `WithLifecycle()`, because the source claims the properties it reads. Without lifecycle tracking, resolving or creating the source throws `InvalidOperationException`; without the registry, every connect attempt fails with `InvalidOperationException`. The configuration is validated when the source is resolved or created and throws `ArgumentException` for a value out of range.
 
 Register a source with its own configuration through the `AddModbusSubjectClientSource(subjectSelector, configurationProvider)` overload, and several sources with `AddKeyedModbusSubjectClientSource`, which makes each one resolvable as a keyed `ModbusSubjectClientSource`. Only one unnamed source can be registered.
 
@@ -54,7 +54,7 @@ To create a source for a subject at runtime, for example in a HomeBlaze device, 
 | `Space` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
 | `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit values |
 | `Scale` | `1.0` | Static factor, requires a `float`, `double` or `decimal` property |
-| `ScaleFactorProperty` | none | Name of a U16 or S16 register property on the same subject holding a power-of-ten exponent |
+| `ScaleFactorProperty` | none | Name of a U16 or S16 register property on the same subject holding a power-of-ten exponent. Mutually exclusive with `Scale`, and the named property must not be excluded |
 | `Length` | 0 | Register count of `String` values, 1 to 125 |
 | `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF or 0x7FFFFFFF), `SignedMinimum` (0x8000 or 0x80000000) or `UnsignedMaximum` (0xFFFF or 0xFFFFFFFF) |
 | `Access` | `ReadWrite` | Declares writability for a later write stage, not enforced yet |
@@ -63,7 +63,7 @@ Addresses are raw protocol addresses, without the `3xxxx`/`4xxxx` documentation 
 
 Values convert as follows:
 
-- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `bool` (non-zero is `true`) and to enums, including flags enums. Undefined enum values pass through.
+- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums, including flags enums. Undefined enum values pass through.
 - Scaled values require a `float`, `double` or `decimal` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
 - F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
 - String reads two ASCII characters per register and trims trailing NUL and space characters.
@@ -78,7 +78,7 @@ Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non
 
 ## Discovery
 
-A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces (`ReadHoldingRegistersAsync(address, count, unitId, cancellationToken)` and its siblings, from the configured unit ID unless one is given), `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Exclusions are reset on every connect.
+A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces (`ReadHoldingRegistersAsync(address, count, unitId, cancellationToken)` and its siblings, from the configured unit ID unless one is given), `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Exclusions are reset on every connect. Excluding a property that another mapping names as its `ScaleFactorProperty` makes every connect fail with `ModbusConfigurationException`.
 
 Await every context call before the next one and before `DiscoverAsync` returns: the context is not thread-safe, and once `DiscoverAsync` returns it throws `ObjectDisposedException` because polling then uses the connection. A rejected read throws `ModbusResponseException` with the Modbus exception code, and the connection stays usable. Throwing from `DiscoverAsync` fails the connect attempt, which is retried after `RetryTime`.
 
@@ -95,7 +95,7 @@ Await every context call before the next one and before `DiscoverAsync` returns:
 | `BufferTime` | 8 ms | Change queue buffer time |
 | `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbours, 0 to 124 |
 
-The time spans must be positive (`BufferTime` may be zero).
+The time spans must be positive (`BufferTime` may be zero) and at most `int.MaxValue` milliseconds.
 
 ## Batching and Polling
 
@@ -124,7 +124,7 @@ Mapped properties are owned by the source, so local changes reach it but are not
 | Member | Meaning |
 |---|---|
 | `TotalPolls` | Completed poll cycles |
-| `FailedBatches` | Read requests answered with a Modbus exception response |
+| `FailedBatches` | Planned read requests answered with a Modbus exception response; one-by-one re-reads and discovery reads are not counted |
 | `BatchCount` | Read requests per poll cycle |
 | `UnavailableProperties` | Mappings the device rejected, not read until the next connect |
 | `LastPollDuration` | Duration of the last poll cycle, `null` before the first one |
@@ -136,7 +136,7 @@ One connection per source, used by one request at a time: discovery, the initial
 
 ## Lifecycle
 
-Properties of subjects attached after the source connected are picked up on the next reconnect. Detached subjects release their properties automatically. A property already owned by another source is logged and not read.
+Properties of subjects attached after the source connected are picked up on the next reconnect. Detached subjects release the ownership of their properties automatically, but stay in the read plan until the next connect. A property already owned by another source is logged and not read.
 
 ## Limitations
 

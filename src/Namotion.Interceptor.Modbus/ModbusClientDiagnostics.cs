@@ -38,7 +38,8 @@ public sealed class ModbusPollingDiagnostics
     public long TotalPolls => _metrics.TotalPolls;
 
     /// <summary>
-    /// Gets the number of read requests answered with a Modbus exception response since the source started or the diagnostics were last reset.
+    /// Gets the number of planned read requests answered with a Modbus exception response since the source started or the
+    /// diagnostics were last reset. One-by-one re-reads of a rejected request and discovery reads are not counted.
     /// </summary>
     public long FailedBatches => _metrics.FailedBatches;
 
