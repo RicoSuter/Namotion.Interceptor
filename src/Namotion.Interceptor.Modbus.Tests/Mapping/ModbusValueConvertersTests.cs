@@ -83,7 +83,7 @@ public class ModbusValueConvertersTests
         var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(bool?), [0x00, 0x02]);
 
         // Assert
-        Assert.Equal(true, value);
+        Assert.True(Assert.IsType<bool>(value));
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class ModbusValueConvertersTests
         var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.Boolean) { Space = ModbusAddressSpace.Coil }, typeof(bool), [1]);
 
         // Assert
-        Assert.Equal(true, value);
+        Assert.True(Assert.IsType<bool>(value));
     }
 
     [Fact]

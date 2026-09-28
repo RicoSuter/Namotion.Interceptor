@@ -57,12 +57,12 @@ public sealed class ModbusClientConfiguration
     {
         if (string.IsNullOrWhiteSpace(Host))
         {
-            throw new ArgumentException("Host must be specified.", nameof(Host));
+            throw new ArgumentException("Host must be specified.");
         }
 
         if (Port is < 1 or > 65535)
         {
-            throw new ArgumentException($"Port must be between 1 and 65535, got: {Port}", nameof(Port));
+            throw new ArgumentException($"Port must be between 1 and 65535, got: {Port}");
         }
 
         ValidateDelay(PollingInterval, allowZero: false, nameof(PollingInterval));
@@ -72,7 +72,7 @@ public sealed class ModbusClientConfiguration
 
         if (MaximumRegisterGap is < 0 or > 124)
         {
-            throw new ArgumentException($"MaximumRegisterGap must be between 0 and 124, got: {MaximumRegisterGap}", nameof(MaximumRegisterGap));
+            throw new ArgumentException($"MaximumRegisterGap must be between 0 and 124, got: {MaximumRegisterGap}");
         }
     }
 

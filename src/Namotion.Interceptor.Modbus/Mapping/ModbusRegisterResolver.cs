@@ -85,11 +85,27 @@ internal static class ModbusRegisterResolver
         RegisteredSubjectProperty property, IInterceptorSubject root, ModbusRegisterAttribute attribute, byte unitId, int baseAddress)
     {
         var path = GetPath(property, root);
-        var dataType = attribute.DataType;
+        ValidateEnums(path, attribute);
+        ValidateDataType(path, attribute);
+        ValidateScale(path, attribute);
 
-        if (!Enum.IsDefined(dataType))
+        // Summed in 64 bits so a large base address cannot overflow into the valid range.
+        var address = (long)baseAddress + attribute.Address;
+        var count = ModbusRegisterCodec.GetRegisterCount(attribute.DataType, attribute.Length);
+        if (attribute.Address < 0 || address < 0 || address > 65536 - count)
         {
-            throw Error(path, $"Data type {dataType} is not defined.");
+            throw Error(path, $"Address {address} with {count} register(s) is outside 0 to 65535.");
+        }
+
+        var reader = ModbusValueConverters.Create(attribute, property.Type, path);
+        return new ModbusRegisterBinding(property.Reference, path, unitId, (int)address, attribute, reader);
+    }
+
+    private static void ValidateEnums(string path, ModbusRegisterAttribute attribute)
+    {
+        if (!Enum.IsDefined(attribute.DataType))
+        {
+            throw Error(path, $"Data type {attribute.DataType} is not defined.");
         }
 
         if (!Enum.IsDefined(attribute.Space))
@@ -106,7 +122,11 @@ internal static class ModbusRegisterResolver
         {
             throw Error(path, $"Not-available value {attribute.NotAvailableValue} is not defined.");
         }
+    }
 
+    private static void ValidateDataType(string path, ModbusRegisterAttribute attribute)
+    {
+        var dataType = attribute.DataType;
         var isBitSpace = attribute.Space is ModbusAddressSpace.Coil or ModbusAddressSpace.DiscreteInput;
         if (isBitSpace && dataType != ModbusDataType.Boolean)
         {
@@ -129,8 +149,11 @@ internal static class ModbusRegisterResolver
         {
             throw Error(path, "Length is only valid for String.");
         }
+    }
 
-        if (attribute.ScaleFactorProperty is not null && attribute.Scale != 1.0)
+    private static void ValidateScale(string path, ModbusRegisterAttribute attribute)
+    {
+        if (attribute.ScaleFactorProperty is not null && attribute.Scale is not 1.0)
         {
             throw Error(path, "Scale and ScaleFactorProperty are mutually exclusive.");
         }
@@ -139,17 +162,6 @@ internal static class ModbusRegisterResolver
         {
             throw Error(path, "Scale must be a finite, non-zero number.");
         }
-
-        // Summed in 64 bits so a large base address cannot overflow into the valid range.
-        var address = (long)baseAddress + attribute.Address;
-        var count = ModbusRegisterCodec.GetRegisterCount(dataType, attribute.Length);
-        if (attribute.Address < 0 || address < 0 || address > 65536 - count)
-        {
-            throw Error(path, $"Address {address} with {count} register(s) is outside 0 to 65535.");
-        }
-
-        var reader = ModbusValueConverters.Create(attribute, property.Type, path);
-        return new ModbusRegisterBinding(property.Reference, path, unitId, (int)address, attribute, reader);
     }
 
     private static void LinkScaleFactors(List<ModbusRegisterBinding> bindings)

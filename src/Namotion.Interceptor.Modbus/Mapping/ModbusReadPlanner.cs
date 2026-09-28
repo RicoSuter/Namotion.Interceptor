@@ -34,10 +34,7 @@ internal static class ModbusReadPlanner
             var bindingEnd = binding.Address + binding.Count;
             var mergedEnd = Math.Max(end, bindingEnd);
 
-            if (binding.UnitId == previous.UnitId &&
-                binding.Space == previous.Space &&
-                !binding.IsIsolated &&
-                !previous.IsIsolated &&
+            if (CanShareRequest(previous, binding) &&
                 binding.Address - end <= maximumGap &&
                 mergedEnd - start <= GetLimit(binding.Space))
             {
@@ -54,6 +51,12 @@ internal static class ModbusReadPlanner
         batches.Add(CreateBatch(sorted, batchStartIndex, sorted.Length, start, end));
         return batches.ToArray();
     }
+
+    private static bool CanShareRequest(ModbusRegisterBinding previous, ModbusRegisterBinding binding)
+        => binding.UnitId == previous.UnitId &&
+           binding.Space == previous.Space &&
+           !binding.IsIsolated &&
+           !previous.IsIsolated;
 
     private static int GetLimit(ModbusAddressSpace space)
         => space is ModbusAddressSpace.Coil or ModbusAddressSpace.DiscreteInput

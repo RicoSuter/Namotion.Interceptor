@@ -27,23 +27,10 @@ internal static class ModbusValueConverters
         var isNullable = underlyingType is not null || !propertyType.IsValueType;
 
         var dataType = attribute.DataType;
-        var wordOrder = attribute.WordOrder;
-        var notAvailableValue = attribute.NotAvailableValue;
         var hasDynamicScale = attribute.ScaleFactorProperty is not null;
-        var isScaled = hasDynamicScale || attribute.Scale != 1.0;
+        var isScaled = hasDynamicScale || attribute.Scale is not 1.0;
 
-        if (notAvailableValue != ModbusNotAvailableValue.None)
-        {
-            if (!isNullable)
-            {
-                throw Error(propertyPath, "NotAvailableValue requires a nullable property type.");
-            }
-
-            if (dataType is ModbusDataType.Boolean or ModbusDataType.F32 or ModbusDataType.String)
-            {
-                throw Error(propertyPath, $"NotAvailableValue is not supported for {dataType}.");
-            }
-        }
+        ValidateNotAvailableValue(attribute, isNullable, propertyPath);
 
         switch (dataType)
         {
@@ -58,12 +45,35 @@ internal static class ModbusValueConverters
                 return static (raw, _) => raw[0] != 0 ? True : False;
 
             case ModbusDataType.F32:
-                return CreateFloatReader(attribute, targetType, propertyPath, wordOrder, isNullable, hasDynamicScale, isScaled);
+                return CreateFloatReader(attribute, targetType, propertyPath, attribute.WordOrder, isNullable, hasDynamicScale, isScaled);
 
             default:
-                return CreateIntegerReader(attribute, targetType, propertyPath, dataType, wordOrder, notAvailableValue, hasDynamicScale, isScaled);
+                return IsScalableTarget(targetType)
+                    ? CreateScaledIntegerReader(attribute, targetType, propertyPath, hasDynamicScale)
+                    : CreateUnscaledIntegerReader(attribute, targetType, propertyPath, isScaled);
         }
     }
+
+    private static void ValidateNotAvailableValue(ModbusRegisterAttribute attribute, bool isNullable, string propertyPath)
+    {
+        if (attribute.NotAvailableValue == ModbusNotAvailableValue.None)
+        {
+            return;
+        }
+
+        if (!isNullable)
+        {
+            throw Error(propertyPath, "NotAvailableValue requires a nullable property type.");
+        }
+
+        if (attribute.DataType is ModbusDataType.Boolean or ModbusDataType.F32 or ModbusDataType.String)
+        {
+            throw Error(propertyPath, $"NotAvailableValue is not supported for {attribute.DataType}.");
+        }
+    }
+
+    private static bool IsScalableTarget(Type targetType)
+        => targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float);
 
     private static ModbusValueReader CreateFloatReader(
         ModbusRegisterAttribute attribute, Type targetType, string propertyPath,
@@ -103,59 +113,69 @@ internal static class ModbusValueConverters
         throw Error(propertyPath, $"F32 requires a float, double or decimal property, not {targetType.Name}.");
     }
 
-    private static ModbusValueReader CreateIntegerReader(
-        ModbusRegisterAttribute attribute, Type targetType, string propertyPath, ModbusDataType dataType,
-        ModbusWordOrder wordOrder, ModbusNotAvailableValue notAvailableValue, bool hasDynamicScale, bool isScaled)
+    private static ModbusValueReader CreateScaledIntegerReader(
+        ModbusRegisterAttribute attribute, Type targetType, string propertyPath, bool hasDynamicScale)
     {
+        var dataType = attribute.DataType;
+        var wordOrder = attribute.WordOrder;
+        var notAvailableValue = attribute.NotAvailableValue;
         var staticScale = attribute.Scale;
 
         if (targetType == typeof(decimal))
         {
             var decimalScale = ToDecimalScale(propertyPath, staticScale);
-            return (raw, exponent) => IsNotAvailable(raw)
+            return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
                 : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
         }
 
         if (targetType == typeof(double))
         {
-            return (raw, exponent) => IsNotAvailable(raw)
+            return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
                 : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDoubleScale(hasDynamicScale, staticScale, exponent);
         }
 
-        if (targetType == typeof(float))
-        {
-            return (raw, exponent) => IsNotAvailable(raw)
-                ? null
-                : (float)(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDoubleScale(hasDynamicScale, staticScale, exponent));
-        }
+        return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
+            ? null
+            : (float)(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDoubleScale(hasDynamicScale, staticScale, exponent));
+    }
+
+    private static ModbusValueReader CreateUnscaledIntegerReader(
+        ModbusRegisterAttribute attribute, Type targetType, string propertyPath, bool isScaled)
+    {
+        var dataType = attribute.DataType;
+        var wordOrder = attribute.WordOrder;
+        var notAvailableValue = attribute.NotAvailableValue;
 
         RequireUnscaled(propertyPath, isScaled, targetType);
 
         if (targetType == typeof(bool))
         {
-            return (raw, _) => IsNotAvailable(raw)
-                ? null
-                : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) != 0 ? True : False;
+            return (raw, _) =>
+            {
+                if (ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue))
+                {
+                    return null;
+                }
+
+                return ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) != 0 ? True : False;
+            };
         }
 
         if (targetType.IsEnum)
         {
             RequireIntegralRange(propertyPath, dataType, Enum.GetUnderlyingType(targetType));
-            return (raw, _) => IsNotAvailable(raw)
+            return (raw, _) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
                 : Enum.ToObject(targetType, ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder));
         }
 
         var typeCode = Type.GetTypeCode(targetType);
         RequireIntegralRange(propertyPath, dataType, targetType);
-        return (raw, _) => IsNotAvailable(raw)
+        return (raw, _) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
             ? null
             : BoxIntegral(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), typeCode);
-
-        bool IsNotAvailable(ReadOnlySpan<byte> raw)
-            => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue);
     }
 
     private static object BoxIntegral(long value, TypeCode typeCode) => typeCode switch
@@ -173,33 +193,39 @@ internal static class ModbusValueConverters
 
     private static void RequireIntegralRange(string propertyPath, ModbusDataType dataType, Type targetType)
     {
-        var (dataMinimum, dataMaximum) = dataType switch
+        if (GetDataTypeRange(dataType) is not { } dataRange ||
+            GetIntegralTypeRange(targetType) is not { } targetRange)
         {
-            ModbusDataType.U16 => (0m, (decimal)ushort.MaxValue),
-            ModbusDataType.S16 => ((decimal)short.MinValue, (decimal)short.MaxValue),
-            ModbusDataType.U32 => (0m, (decimal)uint.MaxValue),
-            ModbusDataType.S32 => ((decimal)int.MinValue, (decimal)int.MaxValue),
-            _ => throw Error(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.")
-        };
+            throw Error(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.");
+        }
 
-        var (targetMinimum, targetMaximum) = Type.GetTypeCode(targetType) switch
-        {
-            TypeCode.Byte => ((decimal)byte.MinValue, (decimal)byte.MaxValue),
-            TypeCode.SByte => ((decimal)sbyte.MinValue, (decimal)sbyte.MaxValue),
-            TypeCode.Int16 => ((decimal)short.MinValue, (decimal)short.MaxValue),
-            TypeCode.UInt16 => ((decimal)ushort.MinValue, (decimal)ushort.MaxValue),
-            TypeCode.Int32 => ((decimal)int.MinValue, (decimal)int.MaxValue),
-            TypeCode.UInt32 => ((decimal)uint.MinValue, (decimal)uint.MaxValue),
-            TypeCode.Int64 => ((decimal)long.MinValue, (decimal)long.MaxValue),
-            TypeCode.UInt64 => ((decimal)ulong.MinValue, (decimal)ulong.MaxValue),
-            _ => throw Error(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.")
-        };
-
-        if (dataMinimum < targetMinimum || dataMaximum > targetMaximum)
+        if (dataRange.Minimum < targetRange.Minimum || dataRange.Maximum > targetRange.Maximum)
         {
             throw Error(propertyPath, $"{targetType.Name} cannot hold every {dataType} value.");
         }
     }
+
+    private static (decimal Minimum, decimal Maximum)? GetDataTypeRange(ModbusDataType dataType) => dataType switch
+    {
+        ModbusDataType.U16 => (0m, ushort.MaxValue),
+        ModbusDataType.S16 => (short.MinValue, short.MaxValue),
+        ModbusDataType.U32 => (0m, uint.MaxValue),
+        ModbusDataType.S32 => (int.MinValue, int.MaxValue),
+        _ => null
+    };
+
+    private static (decimal Minimum, decimal Maximum)? GetIntegralTypeRange(Type type) => Type.GetTypeCode(type) switch
+    {
+        TypeCode.Byte => (byte.MinValue, byte.MaxValue),
+        TypeCode.SByte => (sbyte.MinValue, sbyte.MaxValue),
+        TypeCode.Int16 => (short.MinValue, short.MaxValue),
+        TypeCode.UInt16 => (ushort.MinValue, ushort.MaxValue),
+        TypeCode.Int32 => (int.MinValue, int.MaxValue),
+        TypeCode.UInt32 => (uint.MinValue, uint.MaxValue),
+        TypeCode.Int64 => (long.MinValue, long.MaxValue),
+        TypeCode.UInt64 => (ulong.MinValue, ulong.MaxValue),
+        _ => null
+    };
 
     private static double GetDoubleScale(bool hasDynamicScale, double staticScale, int exponent)
         => hasDynamicScale ? Math.Pow(10, exponent) : staticScale;

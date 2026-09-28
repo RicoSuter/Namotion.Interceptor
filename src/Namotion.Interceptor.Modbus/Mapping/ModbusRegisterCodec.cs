@@ -63,32 +63,27 @@ internal static class ModbusRegisterCodec
             return false;
         }
 
-        switch (dataType)
+        return dataType switch
         {
-            case ModbusDataType.U16 or ModbusDataType.S16:
-            {
-                var value = ReadU16(raw);
-                return notAvailableValue switch
-                {
-                    ModbusNotAvailableValue.SignedMaximum => value == 0x7FFF,
-                    ModbusNotAvailableValue.SignedMinimum => value == 0x8000,
-                    ModbusNotAvailableValue.UnsignedMaximum => value == 0xFFFF,
-                    _ => false
-                };
-            }
-            case ModbusDataType.U32 or ModbusDataType.S32:
-            {
-                var value = ReadU32(raw, wordOrder);
-                return notAvailableValue switch
-                {
-                    ModbusNotAvailableValue.SignedMaximum => value == 0x7FFFFFFFu,
-                    ModbusNotAvailableValue.SignedMinimum => value == 0x80000000u,
-                    ModbusNotAvailableValue.UnsignedMaximum => value == 0xFFFFFFFFu,
-                    _ => false
-                };
-            }
-            default:
-                return false;
-        }
+            ModbusDataType.U16 or ModbusDataType.S16 => IsNotAvailable16(ReadU16(raw), notAvailableValue),
+            ModbusDataType.U32 or ModbusDataType.S32 => IsNotAvailable32(ReadU32(raw, wordOrder), notAvailableValue),
+            _ => false
+        };
     }
+
+    private static bool IsNotAvailable16(ushort value, ModbusNotAvailableValue notAvailableValue) => notAvailableValue switch
+    {
+        ModbusNotAvailableValue.SignedMaximum => value == 0x7FFF,
+        ModbusNotAvailableValue.SignedMinimum => value == 0x8000,
+        ModbusNotAvailableValue.UnsignedMaximum => value == 0xFFFF,
+        _ => false
+    };
+
+    private static bool IsNotAvailable32(uint value, ModbusNotAvailableValue notAvailableValue) => notAvailableValue switch
+    {
+        ModbusNotAvailableValue.SignedMaximum => value == 0x7FFFFFFFu,
+        ModbusNotAvailableValue.SignedMinimum => value == 0x80000000u,
+        ModbusNotAvailableValue.UnsignedMaximum => value == 0xFFFFFFFFu,
+        _ => false
+    };
 }

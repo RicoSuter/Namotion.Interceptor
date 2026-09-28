@@ -89,7 +89,7 @@ public partial class ModbusPollerTests
         Assert.Equal(21.5m, applied["Second"]);
         Assert.Equal(12.3m, applied["Scaled"]);
         Assert.Equal((short)-1, applied["Factor"]);
-        Assert.Equal(true, applied["Pump"]);
+        Assert.True(Assert.IsType<bool>(applied["Pump"]));
     }
 
     [Fact]

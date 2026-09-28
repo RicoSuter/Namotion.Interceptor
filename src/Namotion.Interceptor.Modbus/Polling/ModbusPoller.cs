@@ -89,7 +89,7 @@ internal sealed class ModbusPoller
                 _metrics.RecordFailedBatch();
                 if (_failingBatches.Add(GetKey(batch)))
                 {
-                    _logger.LogWarning(
+                    _logger.LogWarning(exception,
                         "Modbus read of {Path} ({Space} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode}.",
                         batch.Bindings[0].Path, batch.Space, batch.StartAddress, batch.UnitId, exception.ExceptionCode);
                 }
@@ -122,43 +122,9 @@ internal sealed class ModbusPoller
         var appliedCount = 0;
         foreach (var binding in _bindings)
         {
-            var scaleFactor = binding.ScaleFactor;
-            if (!binding.HasCurrent)
-            {
-                if (scaleFactor is { ChangedThisCycle: true })
-                {
-                    // The applied value still uses the old scale factor, so the next read must apply even unchanged words.
-                    binding.HasLast = false;
-                }
-
-                continue;
-            }
-
-            var isReapplyRequested = binding.ConsumeReapplyRequest();
-            if (!binding.ChangedThisCycle && !isReapplyRequested && scaleFactor is not { ChangedThisCycle: true })
+            if (!IsApplyRequired(binding) || !TryGetScaleFactorExponent(binding.ScaleFactor, out var exponent))
             {
                 continue;
-            }
-
-            var exponent = 0;
-            if (scaleFactor is not null)
-            {
-                ReadOnlySpan<byte> scaleFactorRaw;
-                if (scaleFactor.HasCurrent)
-                {
-                    scaleFactorRaw = scaleFactor.CurrentRaw;
-                }
-                else if (scaleFactor.HasLast)
-                {
-                    scaleFactorRaw = scaleFactor.LastRaw;
-                }
-                else
-                {
-                    // Not known yet; the scale factor's first successful read marks it changed and reapplies this.
-                    continue;
-                }
-
-                exponent = (int)ModbusRegisterCodec.ReadInteger(scaleFactorRaw, scaleFactor.Attribute.DataType, ModbusWordOrder.HighWordFirst);
             }
 
             object? value;
@@ -188,6 +154,51 @@ internal sealed class ModbusPoller
         return appliedCount;
     }
 
+    private static bool IsApplyRequired(ModbusRegisterBinding binding)
+    {
+        var isScaleFactorChanged = binding.ScaleFactor is { ChangedThisCycle: true };
+        if (!binding.HasCurrent)
+        {
+            if (isScaleFactorChanged)
+            {
+                // The applied value still uses the old scale factor, so the next read must apply even unchanged words.
+                binding.HasLast = false;
+            }
+
+            return false;
+        }
+
+        var isReapplyRequested = binding.ConsumeReapplyRequest();
+        return binding.ChangedThisCycle || isReapplyRequested || isScaleFactorChanged;
+    }
+
+    private static bool TryGetScaleFactorExponent(ModbusRegisterBinding? scaleFactor, out int exponent)
+    {
+        exponent = 0;
+        if (scaleFactor is null)
+        {
+            return true;
+        }
+
+        ReadOnlySpan<byte> scaleFactorRaw;
+        if (scaleFactor.HasCurrent)
+        {
+            scaleFactorRaw = scaleFactor.CurrentRaw;
+        }
+        else if (scaleFactor.HasLast)
+        {
+            scaleFactorRaw = scaleFactor.LastRaw;
+        }
+        else
+        {
+            // Not known yet; the scale factor's first successful read marks it changed and reapplies this.
+            return false;
+        }
+
+        exponent = (int)ModbusRegisterCodec.ReadInteger(scaleFactorRaw, scaleFactor.Attribute.DataType, ModbusWordOrder.HighWordFirst);
+        return true;
+    }
+
     /// <summary>
     /// Reads the bindings of a rejected batch one by one and isolates them until the next connect.
     /// </summary>
@@ -214,7 +225,7 @@ internal sealed class ModbusPoller
             catch (ModbusResponseException exception)
             {
                 binding.IsUnavailable = true;
-                _logger.LogWarning(
+                _logger.LogWarning(exception,
                     "Modbus mapping {Path} ({Space} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
                     binding.Path, binding.Space, binding.Address, binding.UnitId, exception.ExceptionCode);
             }

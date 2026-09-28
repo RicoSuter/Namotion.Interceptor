@@ -113,6 +113,7 @@ public partial class ModbusRegisterResolverTests
         public partial int? Value { get; set; }
     }
 
+    [AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
     public sealed class PresetRegisterAttribute : ModbusRegisterAttribute
     {
         public PresetRegisterAttribute(int address)

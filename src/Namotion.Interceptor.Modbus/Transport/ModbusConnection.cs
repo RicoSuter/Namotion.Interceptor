@@ -82,7 +82,7 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
         }
         finally
         {
-            registration.Dispose();
+            await registration.DisposeAsync().ConfigureAwait(false);
             if (!timeoutSource.TryReset())
             {
                 _timeoutSource = new CancellationTokenSource();
