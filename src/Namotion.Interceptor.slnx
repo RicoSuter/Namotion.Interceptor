@@ -17,6 +17,7 @@
   </Folder>
   <Folder Name="/Connectors/">
     <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />
+    <Project Path="Namotion.Interceptor.Modbus/Namotion.Interceptor.Modbus.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleClient/Namotion.Interceptor.Mqtt.SampleClient.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleServer/Namotion.Interceptor.Mqtt.SampleServer.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt/Namotion.Interceptor.Mqtt.csproj" />
@@ -121,6 +122,7 @@
     <Project Path="Namotion.Interceptor.Dynamic.Tests/Namotion.Interceptor.Dynamic.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Generator.Tests/Namotion.Interceptor.Generator.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Hosting.Tests/Namotion.Interceptor.Hosting.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Modbus.Tests/Namotion.Interceptor.Modbus.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.Tests/Namotion.Interceptor.Mqtt.Tests.csproj" />
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
