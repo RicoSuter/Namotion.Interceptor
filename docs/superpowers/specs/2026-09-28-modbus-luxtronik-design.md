@@ -1,7 +1,7 @@
 # Modbus connector and Luxtronik SHI design
 
 Date: 2026-09-28
-Status: design (pre-implementation)
+Status: Part A implemented (sections 3 and 4 describe the implementation), Part B design
 Replaces: `2026-05-04-modbus-design.md` (the SunSpec part moved to [2026-09-28-sunspec-design.md](2026-09-28-sunspec-design.md))
 
 ## 1. Goals and scope
@@ -66,7 +66,7 @@ Project locations:
 Namespaces: attributes in `Namotion.Interceptor.Modbus.Attributes`, everything else in `Namotion.Interceptor.Modbus`, DI extensions in `Microsoft.Extensions.DependencyInjection`.
 
 ```csharp
-[AttributeUsage(AttributeTargets.Property)]
+[AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
 public class ModbusRegisterAttribute(int address, ModbusDataType dataType) : Attribute   // not sealed: device libraries derive presets
 {
     public int Address { get; } = address;                  // relative to the subject's BaseAddress
@@ -90,7 +90,7 @@ public enum ModbusNotAvailableValue { None, SignedMaximum, SignedMinimum, Unsign
 //   SignedMinimum   0x8000 / 0x80000000  (SunSpec int16/int32)
 //   UnsignedMaximum 0xFFFF / 0xFFFFFFFF  (SunSpec uint16/uint32)
 
-[AttributeUsage(AttributeTargets.Class)]
+[AttributeUsage(AttributeTargets.Class, Inherited = true, AllowMultiple = false)]
 public sealed class ModbusUnitIdAttribute(byte unitId) : Attribute { public byte UnitId { get; } = unitId; }
 
 public interface IModbusUnitIdProvider      { byte UnitId { get; } }
@@ -122,8 +122,11 @@ public sealed class ModbusClientConfiguration
     public TimeSpan RetryTime { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
     public int MaximumRegisterGap { get; init; } = 0;
-    public void Validate();
+    public void Validate();   // ArgumentException: empty Host, Port outside 1..65535, non-positive time span
+                              // (BufferTime may be 0), time span above int.MaxValue ms, gap outside 0..124
 }
+
+public sealed class ModbusConfigurationException(string message) : Exception;   // invalid mapping, message names the property path
 
 public sealed class ModbusResponseException : Exception   // Modbus exception response (e.g. 2, illegal data address); connection stays usable
 {
@@ -176,7 +179,7 @@ public static class ModbusSubjectExtensions
 Notes:
 
 - There is no `IModbusSubjectClientSource` interface. The source is a public sealed class with an internal constructor, created only through `CreateModbusClientSource` and the DI extensions. A HomeBlaze device needs to attach it as a hosted service, dispose it and read its diagnostics, which the class covers.
-- DI follows `OpcUaSubjectExtensions`: the unkeyed overloads generate a Guid key internally (with the duplicate-unkeyed guard), `AddKeyedModbusSubjectClientSource` uses the given name, and each registers keyed configuration, subject and source singletons plus `AddSingleton<IHostedService>` resolving the keyed source. The configuration provider is invoked once.
+- DI follows `OpcUaSubjectExtensions`: every overload registers keyed configuration, subject and source singletons under an internal Guid key plus `AddSingleton<IHostedService>` resolving the keyed source; the unkeyed overloads add an unkeyed alias (at most one, else `InvalidOperationException`) and `AddKeyedModbusSubjectClientSource` a keyed alias under the given name (unique, else `InvalidOperationException`). Arguments are null-checked before the duplicate guard. The configuration provider is invoked once, and the configuration is validated and lifecycle tracking required (`WithLifecycle()`, else `InvalidOperationException`) when the source is resolved.
 - `SourceDiagnostics` already provides operational state, last error, throughput, retry queue and inbound buffer. The claimed property count is only populated when the source calls `Metrics.RegisterClaimedProperties(() => ownership.Count)`, which it does in its constructor. `ModbusClientDiagnostics` adds only the polling counters, kept in an internal metrics class using `Interlocked` and registered via `Metrics.RegisterResettable`.
 
 ## 4. Part A: connector behavior
@@ -184,30 +187,36 @@ Notes:
 ### 4.1 Address and unit ID resolution
 
 - Absolute address = `BaseAddress` of the subject declaring the property (0 if it does not implement `IModbusBaseAddressProvider`) + `ModbusRegisterAttribute.Address`. Base addresses are not inherited from parents.
-- Unit ID = first match of: the declaring subject's `IModbusUnitIdProvider`, its `[ModbusUnitId]`, the same two checks on the nearest ancestor, then `ModbusClientConfiguration.UnitId`.
-- Base addresses and unit IDs are read once when the read plan is built, so they must be set before the subject is attached.
+- Unit ID = first match of: the declaring subject's `IModbusUnitIdProvider`, its `[ModbusUnitId]`, the same two checks on the nearest ancestor, then `ModbusClientConfiguration.UnitId`. A subject reachable through several paths is resolved once, through the first path walked.
+- Base addresses and unit IDs are read on every connect when the read plan is built, so a change takes effect on the next reconnect.
 - Register count per data type: Boolean 1 bit, U16/S16 1, U32/S32/F32 2, String `Length`.
 
 ### 4.2 Validation
 
 Resolution throws `ModbusConfigurationException` naming the property path when:
 
-- `Scale` and `ScaleFactorProperty` are both set, or `ScaleFactorProperty` does not name an integer register property on the same subject
-- `Length` is set on a non-string type, or missing on String
+- a property carries more than one `ModbusRegisterAttribute` (a derived preset next to the base attribute counts)
+- an enum value of the attribute (`DataType`, `Space`, `WordOrder`, `NotAvailableValue`) is not defined
+- `Scale` and `ScaleFactorProperty` are both set, `Scale` is zero or not finite (or outside the `decimal` range for a `decimal` target), or `ScaleFactorProperty` does not name a U16 or S16 register property on the same subject that is resolved (not excluded)
+- `Length` is set on a non-string type, or outside 1..125 on String
 - `Boolean` is used in a register space, or a non-Boolean type in `Coil`/`DiscreteInput`
-- a scaled value targets an integral or enum CLR type, or the CLR type cannot hold the data type (for example String into `int`)
-- the absolute address is outside 0..65535
+- a scaled value targets a CLR type other than `float`, `double` or `decimal`, F32 targets any other type, or an integral or enum CLR type cannot hold every value of the data type (for example U16 into `short`, or String into `int`)
+- the attribute address is negative, or the absolute address range is outside 0..65535
 - `NotAvailableValue` is set on a non-nullable CLR type, or on `Boolean`, `F32` or `String`
+
+A root subject whose context has no registry fails the connect attempt with `InvalidOperationException`.
 
 ### 4.3 Value conversion
 
-At resolution time each property gets a converter delegate chosen by a switch on (data type, CLR type), so the poll loop does no reflection. Attributes are read from `RegisteredSubjectProperty.ReflectionAttributes` (precomputed metadata), not via `GetCustomAttribute`. This keeps the connector AOT friendly.
+At resolution time each property gets a converter delegate chosen by a switch on (data type, CLR type), so the poll loop does no reflection. Register attributes are read from `RegisteredSubjectProperty.ReflectionAttributes` (precomputed metadata), not via `GetCustomAttribute`; only the class-level `[ModbusUnitId]` is read with `GetCustomAttribute`, once per subject and connect. This keeps the connector AOT friendly.
 
-- Numeric targets: `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, and their nullable forms.
+- Numeric targets: `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, and their nullable forms. Integral targets must hold every value of the data type (4.2).
+- F32: converts to `float`, `double` or `decimal`. On a `decimal?` target, NaN, infinities and magnitudes beyond the `decimal` range become `null`; on a non-nullable `decimal` the conversion fails (see below).
+- A conversion that throws (for example a dynamic exponent outside ±28 for a `decimal` target) is logged as a warning and the property keeps its value; the raw words are still remembered, so it is retried only when they change.
 - Scaling: `decimal` targets scale in decimal arithmetic (`Scale` converted once via `(decimal)double`), so `234 * 0.1` is exactly `23.4`. `float`/`double` targets scale in double.
-- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the scale-factor property. If the scale factor was never successfully read, the scaled property is not updated in that cycle; otherwise the last successfully read scale factor is used.
+- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the scale-factor property. If the scale factor was never successfully read, the scaled property is not updated in that cycle; otherwise the last successfully read scale factor is used. A changed scale factor reapplies its dependents even when their raw words did not change.
 - Enums: the raw integer is converted with `Enum.ToObject` (AOT safe). Flags enums pass through unchanged. Undefined enum values are passed through, not rejected.
-- `bool`: non-zero is `true`. Works for coils, discrete inputs and U16 registers.
+- `bool`: non-zero is `true`. Works for coils, discrete inputs and unscaled integer registers.
 - `string`: ASCII, trailing `0x00` and `0x20` trimmed on the byte span before decoding (one allocation).
 - Not-available values: when `NotAvailableValue` is set and the raw register words match its bit pattern for the data type's width, the property is set to `null` instead of converted. Requires a nullable CLR type (validated in 4.2). This is checked before scaling.
 
@@ -215,10 +224,12 @@ At resolution time each property gets a converter delegate chosen by a switch on
 
 On every connect (first connect and each reconnect):
 
-1. Open a new `ModbusTcpClient`.
-2. If the root subject implements `IModbusDiscovery`, call `DiscoverAsync` with a fresh `ModbusDiscoveryContext`. Discovery can read raw registers of all four spaces (default unit ID is `configuration.UnitId`) and call `ExcludeProperty`. After `DiscoverAsync` returns, the context is invalidated and its reads throw `ObjectDisposedException`.
-3. Walk the root subtree through the registry (`RegisteredSubject.GetAllProperties()`), resolve every `[ModbusRegister]` property that is not excluded, and claim it with `SourceOwnershipManager` (requires `WithLifecycle()`). Previously claimed properties that are now excluded or detached are released.
+1. Connect a new `TcpClient`, bounded by `RequestTimeout`, and wrap it in a `ModbusTcpClient`.
+2. If the root subject implements `IModbusDiscovery`, call `DiscoverAsync` with a fresh `ModbusDiscoveryContext`. Discovery can read raw registers of all four spaces (1 to 125 registers or 1 to 2000 bits per call, default unit ID is `configuration.UnitId`) and call `ExcludeProperty`. The context is not thread-safe. After `DiscoverAsync` returns, the context is invalidated and its reads and `ExcludeProperty` throw `ObjectDisposedException`.
+3. Walk the root subtree through the registry (each `RegisteredSubject.Properties` and their children, each subject once), resolve every `[ModbusRegister]` property that is not excluded, and claim it with `SourceOwnershipManager` (requires `WithLifecycle()`). A property owned by another source is logged as an error and not read. Previously claimed properties that are now excluded or detached are released. A stop during the open cancels before claiming, so a disposed source never claims again.
 4. Build the read plan (4.5) and cache it until the next connect.
+
+Any failure disposes the new connection and fails the connect attempt.
 
 Exclusions are reset on every connect, so discovery decides again after each reconnect.
 
@@ -234,8 +245,8 @@ Exclusions are reset on every connect, so discovery decides again after each rec
 - Runs every `PollingInterval` on a single task started from `StartListeningAsync` via `BackgroundTaskLifetime`. The base calls `LoadInitialStateAsync` after `StartListeningAsync` returns, so the loop first awaits a gate that `LoadInitialStateAsync` opens once its full read has finished. The client and the raw cache are therefore never used by the initial load and the loop at the same time.
 - One timestamp per cycle, passed as both changed and received timestamp (Modbus has no source timestamp).
 - The last raw register words are cached per property. A value is converted and applied only when its raw words changed, so an unchanged cycle converts nothing and raises no change events. A changed value is boxed once, because `SetValueFromSource` takes `object?`.
-- Values are applied through `SubjectPropertyWriter.Write` with a static lambda and value-tuple state, calling `PropertyReference.SetValueFromSource`. The interceptor's equality check (`EqualityComparer<T>.Default`) is correct for `decimal?` (23.4m equals 23.40m), enums and `bool`.
-- The per-request timeout uses one reusable `CancellationTokenSource` per connection (`CancelAfter` before, `TryReset` after each request) with the caller's token registered per request, instead of `Task.WaitAsync` allocating a timer per request. A timeout surfaces as `TimeoutException`, a cancellation by the caller as `OperationCanceledException`; FluentModbus closes the stream in both cases, so both end the connection.
+- Values are applied through `SubjectPropertyWriter.Write` with a static lambda and value-tuple state, calling `PropertyReference.SetValueFromSource`. The initial load's apply action calls `SetValueFromSource` directly, catching and logging per property so one rejected value cannot fail the whole load. The interceptor's equality check (`EqualityComparer<T>.Default`) is correct for `decimal?` (23.4m equals 23.40m), enums and `bool`.
+- The per-request timeout uses one reusable `CancellationTokenSource` per connection (`CancelAfter` before, `TryReset` after each request) with the caller's token registered per request, instead of `Task.WaitAsync` allocating a timer per request. A timeout surfaces as `TimeoutException`, a cancellation by the caller as `OperationCanceledException`; FluentModbus closes the stream in both cases, so both end the connection. The TCP connect is bounded by the same `RequestTimeout` (`Task.WaitAsync`, once per connect).
 - In this stage only discovery (before the loop starts), the initial load and the poll loop use the client, strictly one after another, so no lock is needed. The write stage adds a lock around every client transaction.
 - The connector issues only read function codes (FC1 to FC4) in this stage. It contains no call to a FluentModbus write method, and an integration test asserts that the server only ever receives FC1 to FC4.
 
@@ -243,12 +254,13 @@ Exclusions are reset on every connect, so discovery decides again after each rec
 
 `ModbusSubjectClientSource` inherits `SubjectSourceBase`:
 
-- Constructor: calls `configuration.Validate()`, registers claimed-property and polling metrics.
-- `StartListeningAsync`: connect, run discovery, build the plan, call `Metrics.MarkOperational()` (the base never does), start the poll loop. Returns the poll loop lifetime, whose cleanup closes only the client.
+- Constructor: calls `configuration.Validate()`, creates the `SourceOwnershipManager` (throws without `WithLifecycle()`), registers claimed-property and polling metrics.
+- `StartListeningAsync`: connect, run discovery, build the plan (4.4), call `Metrics.MarkOperational()` (the base never does), start the poll loop. Returns the poll loop lifetime, whose cleanup closes the connection and calls `Metrics.MarkNotOperational()`. A failure here is retried by the base after `RetryTime`.
 - `LoadInitialStateAsync`: one full batched read, returned as an apply action, so `Synchronized` is only reported after real values exist. Opens the poll loop gate (4.6).
 - Connection loss while polling (I/O error, `RequestTimeout` or a malformed response): the source runs its own reconnect loop following the MQTT pattern: `Metrics.MarkNotOperational()`, start buffering, wait `RetryTime`, reconnect (4.4), `LoadInitialStateAndResumeAsync`, `Metrics.MarkOperational()`. Only the poll cycles run inside `RunAttemptAsync`; `ReconnectAsync` runs outside it (as in the MQTT source), so a Kill injected while the source reconnects is a no-op.
 - `IFaultInjectable.InjectFaultAsync`: Kill uses `ForceKillCurrentAttemptAsync`, Disconnect closes the client so the reconnect loop takes over.
-- `Dispose`/`DisposeAsync` override and call the base implementation.
+- The reconnect loop retries every `RetryTime` until opening the session and the reload both succeed, reporting each failure through `Metrics.ReportError` and an error log. A failure caused by a stop is not reported.
+- `Dispose`/`DisposeAsync` are idempotent. `Dispose` calls the base first, which cancels the poll loop so a reconnect in flight stops, then closes the connection and releases the ownership. `DisposeAsync` awaits `StopAsync` first, then does the same.
 
 ### 4.8 Local writes in this stage
 
@@ -258,7 +270,8 @@ Resolved properties are claimed, so local changes are routed to `WriteChangesAsy
 
 | Failure | Behavior |
 |---|---|
-| TCP connect failure | Attempt fails, retried after `RetryTime`. |
+| TCP connect failure or connect not completing within `RequestTimeout` | Attempt fails, retried after `RetryTime`. |
+| Value conversion throws | Warning logged, property keeps its value (4.3), other properties continue. |
 | I/O error or timeout during a poll | Connection treated as lost, reconnect loop (4.7). |
 | Malformed response (FluentModbus framing error: invalid protocol identifier, function code or length, reported as exception code 255) | Not a device rejection: connection treated as lost, reconnect loop (4.7). |
 | Modbus exception response for a batch covering more than one property | Re-read that batch's properties individually in the same cycle, and keep them in batches of their own until the next connect (4.5). A property that still fails is marked unavailable until the next connect: logged once, counted in `Polling.UnavailableProperties`, value not updated. |

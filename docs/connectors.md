@@ -14,6 +14,7 @@ In practice, sources act as network clients and servers act as network servers, 
 - [WebSocket](connectors-websocket.md) - Bidirectional WebSocket protocol for real-time synchronization
 - [MQTT](connectors-mqtt.md) - MQTT client/server integration for IoT scenarios
 - [OPC UA](connectors-opcua.md) - OPC UA client/server integration for industrial automation ([Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md) | [Mapping](connectors-opcua-mapping.md))
+- [Modbus](connectors-modbus.md) - Read-only Modbus TCP client that polls device registers
 - [Subject Updates](connectors-subject-updates.md) - Wire format for serializing subject state
 - [Source Monitoring](connectors-monitoring.md) - Synchronization state, waits, and the source event stream
 

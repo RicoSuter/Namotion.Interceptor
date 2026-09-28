@@ -109,7 +109,7 @@ See the XML docs on `SourceState` for what each member means. `Synchronized` spe
 
 ## What Synchronized Means per Protocol
 
-[OPC UA](connectors-opcua-client.md)'s `LoadInitialStateAsync` batch-reads every owned property from the session before returning, and WebSocket's applies the full-state message the server sends on connect. For both, reaching `Synchronized` means real values were confirmed from the external system.
+[OPC UA](connectors-opcua-client.md)'s `LoadInitialStateAsync` batch-reads every owned property from the session before returning, WebSocket's applies the full-state message the server sends on connect, and [Modbus](connectors-modbus.md)'s reads every mapped register (except those the device rejects). For all three, reaching `Synchronized` means real values were confirmed from the external system.
 
 [MQTT](connectors-mqtt.md) is weaker: `Synchronized` means the subscriptions are established, not that retained values have arrived. Retained messages are indistinguishable from live ones and neither 3.1.1 nor 5.0 signals when a topic's retained backlog is exhausted, so there is nothing to wait for. Raising QoS does not help, since it governs delivery of messages that are sent. [#418](https://github.com/RicoSuter/Namotion.Interceptor/issues/418) tracks an opt-in per-topic barrier.
 
