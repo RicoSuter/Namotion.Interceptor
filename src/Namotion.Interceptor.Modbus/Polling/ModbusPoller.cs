@@ -38,6 +38,12 @@ internal sealed class ModbusPoller
 
     public IReadOnlyList<ModbusReadBatch> Batches => _batches;
 
+    /// <summary>
+    /// Gets the path of a mapped property, or its name when this poller does not map it.
+    /// </summary>
+    public string GetPath(PropertyReference property)
+        => _bindingsByProperty.TryGetValue(property, out var binding) ? binding.Path : property.Name;
+
     public void RequestReapply(PropertyReference property)
     {
         if (_bindingsByProperty.TryGetValue(property, out var binding))
@@ -122,7 +128,7 @@ internal sealed class ModbusPoller
         var appliedCount = 0;
         foreach (var binding in _bindings)
         {
-            if (!IsApplyRequired(binding) || !TryGetScaleFactorExponent(binding.ScaleFactor, out var exponent))
+            if (!ConsumeApplyRequirement(binding) || !TryGetScaleFactorExponent(binding.ScaleFactor, out var exponent))
             {
                 continue;
             }
@@ -154,7 +160,8 @@ internal sealed class ModbusPoller
         return appliedCount;
     }
 
-    private static bool IsApplyRequired(ModbusRegisterBinding binding)
+    // Call exactly once per binding per cycle: it consumes the reapply request and may clear HasLast.
+    private static bool ConsumeApplyRequirement(ModbusRegisterBinding binding)
     {
         var isScaleFactorChanged = binding.ScaleFactor is { ChangedThisCycle: true };
         if (!binding.HasCurrent)

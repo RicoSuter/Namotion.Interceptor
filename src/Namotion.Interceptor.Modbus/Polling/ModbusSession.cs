@@ -8,18 +8,18 @@ namespace Namotion.Interceptor.Modbus.Polling;
 /// </summary>
 internal sealed class ModbusSession : IDisposable
 {
+    private readonly ModbusConnection _connection;
+
     public ModbusSession(ModbusConnection connection, ModbusPoller poller)
     {
-        Connection = connection;
+        _connection = connection;
         Poller = poller;
     }
-
-    public ModbusConnection Connection { get; }
 
     public ModbusPoller Poller { get; }
 
     /// <inheritdoc cref="ModbusPoller.ReadAsync" />
-    public Task ReadAsync(CancellationToken cancellationToken) => Poller.ReadAsync(Connection, cancellationToken);
+    public Task ReadAsync(CancellationToken cancellationToken) => Poller.ReadAsync(_connection, cancellationToken);
 
-    public void Dispose() => Connection.Dispose();
+    public void Dispose() => _connection.Dispose();
 }

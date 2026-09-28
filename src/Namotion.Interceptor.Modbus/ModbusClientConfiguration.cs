@@ -81,7 +81,7 @@ public sealed class ModbusClientConfiguration
         if (value < TimeSpan.Zero || (!allowZero && value == TimeSpan.Zero) || value > MaximumDelay)
         {
             var lowerBound = allowZero ? "between 0" : "greater than 0";
-            throw new ArgumentException($"{name} must be {lowerBound} and at most {MaximumDelay}, got: {value}", name);
+            throw new ArgumentException($"{name} must be {lowerBound} and at most {MaximumDelay}, got: {value}");
         }
     }
 }

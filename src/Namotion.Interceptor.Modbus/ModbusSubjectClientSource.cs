@@ -85,8 +85,19 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
         return () =>
         {
             session.Poller.ApplyChanges(
-                (Source: this, Timestamp: timestamp),
-                static (state, property, value) => property.SetValueFromSource(state.Source, state.Timestamp, state.Timestamp, value));
+                (Source: this, session.Poller, Timestamp: timestamp),
+                static (state, property, value) =>
+                {
+                    // Isolated per property like the poll path's writes, so one rejected value cannot fail every load.
+                    try
+                    {
+                        property.SetValueFromSource(state.Source, state.Timestamp, state.Timestamp, value);
+                    }
+                    catch (Exception exception)
+                    {
+                        state.Source._logger.LogWarning(exception, "Failed to apply the Modbus value of {PropertyPath}.", state.Poller.GetPath(property));
+                    }
+                });
 
             // Opened only after the apply, so the poll loop never reads while the initial values are applied.
             initialLoadGate?.TrySetResult();
@@ -103,8 +114,8 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
             if (_writeWarnings.TryAdd(change.Property, 0))
             {
                 _logger.LogWarning(
-                    "Property {PropertyName} is read from Modbus and cannot be written; the next poll restores the device value.",
-                    change.Property.Name);
+                    "Property {PropertyPath} is read from Modbus and cannot be written; the next poll restores the device value.",
+                    poller?.GetPath(change.Property) ?? change.Property.Name);
             }
 
             poller?.RequestReapply(change.Property);
@@ -153,8 +164,9 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
             return;
         }
 
-        DisposeResources();
+        // Cancels the poll loop first, so a reconnect in flight stops before the ownership is released.
         base.Dispose();
+        DisposeResources();
     }
 
     private async Task OpenSessionAsync(CancellationToken cancellationToken)

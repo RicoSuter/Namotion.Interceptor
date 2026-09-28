@@ -184,7 +184,7 @@ internal static class ModbusRegisterResolver
                 }
             }
 
-            if (scaleFactor is null || scaleFactor.Attribute.DataType is not (ModbusDataType.U16 or ModbusDataType.S16))
+            if (scaleFactor?.Attribute.DataType is not (ModbusDataType.U16 or ModbusDataType.S16))
             {
                 throw Error(binding.Path,
                     $"ScaleFactorProperty '{name}' must name a U16 or S16 register property on the same subject that is not excluded.");

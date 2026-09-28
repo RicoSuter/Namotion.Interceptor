@@ -47,6 +47,9 @@ internal sealed class ModbusSessionFactory
         {
             var excludedProperties = await DiscoverAsync(connection, cancellationToken).ConfigureAwait(false);
             var bindings = ModbusRegisterResolver.Resolve(_subject, _configuration.UnitId, excludedProperties);
+
+            // A disposal cancels before it releases the ownership, so a stopped open must not claim afterwards.
+            cancellationToken.ThrowIfCancellationRequested();
             var claimedBindings = ClaimOwnership(bindings);
             var poller = new ModbusPoller(claimedBindings, _configuration.MaximumRegisterGap, _metrics, _logger);
 
