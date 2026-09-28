@@ -38,7 +38,7 @@ public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronik
         _ => null
     };
 
-    string? ILuxtronikGatedSubject.MinimumFirmware => "3.92.0";
+    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
 }

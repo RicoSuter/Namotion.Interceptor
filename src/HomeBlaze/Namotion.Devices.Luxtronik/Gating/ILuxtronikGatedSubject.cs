@@ -5,7 +5,7 @@ namespace Namotion.Devices.Luxtronik;
 /// </summary>
 internal interface ILuxtronikGatedSubject
 {
-    string? MinimumFirmware { get; }
+    Version? MinimumFirmwareVersion { get; }
 
     LuxtronikFeature Feature { get; }
 }

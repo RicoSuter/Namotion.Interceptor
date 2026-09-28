@@ -7,7 +7,12 @@ internal static class LuxtronikGating
     public const int FeatureFlagCount = 12;
 
     /// <summary>
-    /// Checks the property's register attribute gate and its subject's gate.
+    /// Gets firmware version 3.92.0, the gate of the registers added in that release.
+    /// </summary>
+    public static readonly Version Firmware392 = new(3, 92, 0);
+
+    /// <summary>
+    /// Checks the property's register attribute gate and its subject's gate; both must pass.
     /// </summary>
     public static bool IsSupported(
         RegisteredSubjectProperty property, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
@@ -15,27 +20,23 @@ internal static class LuxtronikGating
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is ILuxtronikRegisterGate gate &&
-                !IsSupportedCore(gate.MinimumFirmwareVersion, gate.Feature, firmwareVersion, configuredFeatures))
+                !IsSupported(gate.MinimumFirmwareVersion, gate.Feature, firmwareVersion, configuredFeatures))
             {
                 return false;
             }
         }
 
         return property.Subject is not ILuxtronikGatedSubject subject ||
-            IsSupported(subject.MinimumFirmware, subject.Feature, firmwareVersion, configuredFeatures);
+            IsSupported(subject.MinimumFirmwareVersion, subject.Feature, firmwareVersion, configuredFeatures);
     }
 
     /// <summary>
     /// Checks a firmware and feature requirement. <c>null</c> configured features means the controller does not report them, so feature gates pass.
     /// </summary>
     public static bool IsSupported(
-        string? minimumFirmware, LuxtronikFeature feature, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
-        => IsSupportedCore(minimumFirmware is null ? null : Version.Parse(minimumFirmware), feature, firmwareVersion, configuredFeatures);
-
-    private static bool IsSupportedCore(
-        Version? minimumFirmware, LuxtronikFeature feature, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
+        Version? minimumFirmwareVersion, LuxtronikFeature feature, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
     {
-        if (minimumFirmware is not null && firmwareVersion < minimumFirmware)
+        if (minimumFirmwareVersion is not null && firmwareVersion < minimumFirmwareVersion)
         {
             return false;
         }

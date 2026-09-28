@@ -13,14 +13,14 @@ namespace Namotion.Devices.Luxtronik;
 [InterceptorSubject]
 public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
-    private readonly string? _minimumFirmware;
+    private readonly Version? _minimumFirmwareVersion;
     private readonly LuxtronikFeature _feature;
 
     public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null, LuxtronikFeature feature = LuxtronikFeature.None)
     {
         BaseAddress = address;
         Title = title;
-        _minimumFirmware = minimumFirmware;
+        _minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
         _feature = feature;
         Temperature = null;
     }
@@ -34,7 +34,7 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    string? ILuxtronikGatedSubject.MinimumFirmware => _minimumFirmware;
+    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => _minimumFirmwareVersion;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
 }

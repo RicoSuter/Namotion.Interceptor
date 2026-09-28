@@ -52,7 +52,7 @@ public partial class LuxtronikOutputs : IModbusBaseAddressProvider, ILuxtronikGa
     [State(IsDiscrete = true, Position = 7)]
     public partial bool? CirculationPump { get; internal set; }
 
-    string? ILuxtronikGatedSubject.MinimumFirmware => "3.92.0";
+    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
 }

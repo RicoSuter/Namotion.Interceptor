@@ -54,8 +54,8 @@ public class LuxtronikModelTests
         // Assert
         Assert.Equal(10108, temperatures.Outside.BaseAddress);
         Assert.Equal(10120, temperatures.HotWater.BaseAddress);
-        Assert.Null(((ILuxtronikGatedSubject)temperatures.Outside).MinimumFirmware);
-        Assert.Equal("3.92.0", ((ILuxtronikGatedSubject)temperatures.HeatSourceInlet).MinimumFirmware);
+        Assert.Null(((ILuxtronikGatedSubject)temperatures.Outside).MinimumFirmwareVersion);
+        Assert.Equal(new Version(3, 92, 0), ((ILuxtronikGatedSubject)temperatures.HeatSourceInlet).MinimumFirmwareVersion);
         Assert.Equal("Outside", temperatures.Outside.Title);
     }
 }

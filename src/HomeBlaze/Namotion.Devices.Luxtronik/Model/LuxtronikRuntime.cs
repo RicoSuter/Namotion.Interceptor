@@ -47,7 +47,7 @@ public partial class LuxtronikRuntime : IModbusBaseAddressProvider, ILuxtronikGa
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 6)]
     public partial decimal? Solar { get; internal set; }
 
-    string? ILuxtronikGatedSubject.MinimumFirmware => "3.92.0";
+    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
 }

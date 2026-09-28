@@ -32,7 +32,7 @@ public partial class LuxtronikExtraHotWater : IModbusBaseAddressProvider, ILuxtr
     [State(Unit = StateUnit.Minute, Position = 3)]
     public partial int? RemainingDuration { get; internal set; }
 
-    string? ILuxtronikGatedSubject.MinimumFirmware => "3.92.0";
+    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
 }
