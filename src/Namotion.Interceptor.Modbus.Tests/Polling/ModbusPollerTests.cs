@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus.Attributes;
@@ -53,7 +54,7 @@ public partial class ModbusPollerTests
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
-    private static (ModbusPoller Poller, FakeRegisterReader Reader, ModbusPollingMetrics Metrics) Create()
+    private static (ModbusPoller Poller, FakeRegisterReader Reader, ModbusPollingMetrics Metrics) Create(ILogger? logger = null)
     {
         var subject = new PollerSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
@@ -64,7 +65,7 @@ public partial class ModbusPollerTests
         reader.SetRegister(2, 123);
         reader.SetRegister(3, unchecked((ushort)-1));
         reader.SetBit(0, true);
-        return (new ModbusPoller(bindings, 0, metrics, NullLogger.Instance), reader, metrics);
+        return (new ModbusPoller(bindings, 0, metrics, logger ?? NullLogger.Instance), reader, metrics);
     }
 
     private static Dictionary<string, object?> Apply(ModbusPoller poller)
@@ -284,6 +285,92 @@ public partial class ModbusPollerTests
         // Assert
         Assert.False(applied.ContainsKey("Pump"));
         Assert.Equal(42, applied["First"]);
+        Assert.Equal(1, metrics.FailedBatches);
+        Assert.Equal(0, metrics.UnavailableProperties);
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(10)]
+    [InlineData(11)]
+    public async Task WhenMultiMappingBatchFailsWithTransientCode_ThenItIsSkippedAndReadAsOneRequestAgain(int exceptionCode)
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (poller, reader, metrics) = Create(logger);
+        reader.Reject(1, exceptionCode: exceptionCode);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        var failedCycleRequests = reader.Requests.ToArray();
+        reader.Accept(1);
+        reader.Requests.Clear();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var recoveredCycle = Apply(poller);
+
+        // Assert
+        Assert.Equal("Pump", Assert.Single(failedCycle).Key);
+        Assert.Equal(4, failedCycleRequests.Length);
+        Assert.Contains(((byte)1, ModbusAddressSpace.HoldingRegister, 0, 4), reader.Requests);
+        Assert.Equal(2, reader.Requests.Count);
+        Assert.Equal(21.5m, recoveredCycle["Second"]);
+        Assert.Equal(42, recoveredCycle["First"]);
+        Assert.Equal(2, metrics.FailedBatches);
+        Assert.Equal(2, metrics.BatchCount);
+        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Single(logger.Warnings);
+    }
+
+    [Fact]
+    public async Task WhenMappingFailsWithTransientCodeWhileReadIndividually_ThenItIsNotMarkedUnavailable()
+    {
+        // Arrange (the gap register splits the batch, then the device is busy for Second)
+        var subject = new GapSubject(CreateContext());
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+        var metrics = new ModbusPollingMetrics();
+        var poller = new ModbusPoller(bindings, maximumRegisterGap: 1, metrics, NullLogger.Instance);
+        var reader = new FakeRegisterReader();
+        reader.SetRegister(0, 5);
+        reader.SetRegister(2, 6);
+        reader.Reject(1);
+        reader.Reject(2, exceptionCode: 6);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        reader.Accept(2);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var recoveredCycle = Apply(poller);
+
+        // Assert
+        Assert.Equal(5, Assert.Single(failedCycle).Value);
+        Assert.Equal(6, Assert.Single(recoveredCycle).Value);
+        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(2, metrics.BatchCount);
+    }
+
+    [Fact]
+    public async Task WhenSingleMappingBatchFailsWithTransientCode_ThenItIsCountedAndAppliedOnceDeviceAnswers()
+    {
+        // Arrange
+        var (poller, reader, metrics) = Create();
+        reader.Reject(0, ModbusAddressSpace.Coil, exceptionCode: 6);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        reader.Accept(0, ModbusAddressSpace.Coil);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var recoveredCycle = Apply(poller);
+
+        // Assert
+        Assert.False(failedCycle.ContainsKey("Pump"));
+        Assert.True(Assert.IsType<bool>(Assert.Single(recoveredCycle).Value));
         Assert.Equal(1, metrics.FailedBatches);
         Assert.Equal(0, metrics.UnavailableProperties);
     }

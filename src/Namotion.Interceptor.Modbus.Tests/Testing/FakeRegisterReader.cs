@@ -7,7 +7,7 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
 {
     private readonly Dictionary<(byte UnitId, ModbusAddressSpace Space, int Address), ushort> _registers = [];
     private readonly Dictionary<(byte UnitId, ModbusAddressSpace Space, int Address), bool> _bits = [];
-    private readonly HashSet<(byte UnitId, ModbusAddressSpace Space, int Address)> _rejected = [];
+    private readonly Dictionary<(byte UnitId, ModbusAddressSpace Space, int Address), int> _rejected = [];
 
     public List<(byte UnitId, ModbusAddressSpace Space, int Address, int Count)> Requests { get; } = [];
 
@@ -24,8 +24,8 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
     public void SetBit(int address, bool value, ModbusAddressSpace space = ModbusAddressSpace.Coil, byte unitId = 1)
         => _bits[(unitId, space, address)] = value;
 
-    public void Reject(int address, ModbusAddressSpace space = ModbusAddressSpace.HoldingRegister, byte unitId = 1)
-        => _rejected.Add((unitId, space, address));
+    public void Reject(int address, ModbusAddressSpace space = ModbusAddressSpace.HoldingRegister, byte unitId = 1, int exceptionCode = 2)
+        => _rejected[(unitId, space, address)] = exceptionCode;
 
     public void Accept(int address, ModbusAddressSpace space = ModbusAddressSpace.HoldingRegister, byte unitId = 1)
         => _rejected.Remove((unitId, space, address));
@@ -41,10 +41,10 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
 
         for (var index = 0; index < count; index++)
         {
-            if (_rejected.Contains((unitId, space, address + index)))
+            if (_rejected.TryGetValue((unitId, space, address + index), out var exceptionCode))
             {
                 return Task.FromException<ReadOnlyMemory<byte>>(
-                    new ModbusResponseException(2, "Illegal data address", new InvalidOperationException()));
+                    new ModbusResponseException(exceptionCode, $"Exception code {exceptionCode}", new InvalidOperationException()));
             }
         }
 

@@ -84,21 +84,18 @@ internal sealed class ModbusPoller
                         batch.Space, batch.StartAddress, batch.UnitId);
                 }
             }
-            catch (ModbusResponseException exception) when (batch.Bindings.Length > 1)
+            catch (ModbusResponseException exception) when (exception.IsPermanentRejection && batch.Bindings.Length > 1)
             {
                 _metrics.RecordFailedBatch();
+                _failingBatches.Remove(GetKey(batch));
                 await ReadIndividuallyAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
                 isReplanRequired = true;
             }
             catch (ModbusResponseException exception)
             {
+                // Skipped for this cycle only: its values keep their last value and the plan stays as it is.
                 _metrics.RecordFailedBatch();
-                if (_failingBatches.Add(GetKey(batch)))
-                {
-                    _logger.LogWarning(exception,
-                        "Modbus read of {Path} ({Space} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode}.",
-                        batch.Bindings[0].Path, batch.Space, batch.StartAddress, batch.UnitId, exception.ExceptionCode);
-                }
+                LogFailedRequestOnce(GetKey(batch), batch.Bindings[0].Path, exception);
             }
         }
 
@@ -116,8 +113,7 @@ internal sealed class ModbusPoller
     /// Applies the bindings whose raw value changed, whose scale factor changed, or that were asked to be reapplied,
     /// then remembers the current raw values.
     /// </summary>
-    /// <returns>The number of applied values.</returns>
-    public int ApplyChanges<TState>(TState state, Action<TState, PropertyReference, object?> apply)
+    public void ApplyChanges<TState>(TState state, Action<TState, PropertyReference, object?> apply)
     {
         foreach (var binding in _bindings)
         {
@@ -125,7 +121,6 @@ internal sealed class ModbusPoller
                 (!binding.HasLast || !binding.CurrentRaw.AsSpan().SequenceEqual(binding.LastRaw));
         }
 
-        var appliedCount = 0;
         foreach (var binding in _bindings)
         {
             if (!ConsumeApplyRequirement(binding) || !TryGetScaleFactorExponent(binding.ScaleFactor, out var exponent))
@@ -145,7 +140,6 @@ internal sealed class ModbusPoller
             }
 
             apply(state, binding.Property, value);
-            appliedCount++;
         }
 
         foreach (var binding in _bindings)
@@ -156,8 +150,6 @@ internal sealed class ModbusPoller
                 binding.HasLast = true;
             }
         }
-
-        return appliedCount;
     }
 
     // Call exactly once per binding per cycle: it consumes the reapply request and may clear HasLast.
@@ -229,13 +221,32 @@ internal sealed class ModbusPoller
                 var data = await reader.ReadAsync(binding.UnitId, binding.Space, binding.Address, binding.Count, cancellationToken).ConfigureAwait(false);
                 CopyToBinding(binding, data.Span, binding.Address);
             }
-            catch (ModbusResponseException exception)
+            catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
             {
                 binding.IsUnavailable = true;
                 _logger.LogWarning(exception,
                     "Modbus mapping {Path} ({Space} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
                     binding.Path, binding.Space, binding.Address, binding.UnitId, exception.ExceptionCode);
             }
+            catch (ModbusResponseException exception)
+            {
+                // Keyed like the request of its own this binding gets from the next cycle on.
+                LogFailedRequestOnce((binding.UnitId, binding.Space, binding.Address, binding.Count), binding.Path, exception);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Logs a failed request until it succeeds again, which <see cref="ReadAsync"/> logs.
+    /// </summary>
+    private void LogFailedRequestOnce(
+        (byte UnitId, ModbusAddressSpace Space, int StartAddress, int Count) key, string firstPath, ModbusResponseException exception)
+    {
+        if (_failingBatches.Add(key))
+        {
+            _logger.LogWarning(exception,
+                "Modbus read of {Count} {Space} from {Address} (unit {UnitId}, first mapping {Path}) failed with exception code {ExceptionCode}.",
+                key.Count, key.Space, key.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
         }
     }
 
