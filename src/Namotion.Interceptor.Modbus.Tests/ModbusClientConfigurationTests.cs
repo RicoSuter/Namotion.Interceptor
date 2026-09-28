@@ -27,9 +27,34 @@ public class ModbusClientConfigurationTests
         new ModbusClientConfiguration { Host = "host", RequestTimeout = TimeSpan.Zero },
         new ModbusClientConfiguration { Host = "host", RetryTime = TimeSpan.Zero },
         new ModbusClientConfiguration { Host = "host", BufferTime = TimeSpan.FromMilliseconds(-1) },
+        new ModbusClientConfiguration { Host = "host", PollingInterval = TimeSpan.FromMilliseconds(int.MaxValue + 1L) },
+        new ModbusClientConfiguration { Host = "host", RequestTimeout = TimeSpan.FromMilliseconds(int.MaxValue + 1L) },
+        new ModbusClientConfiguration { Host = "host", RetryTime = TimeSpan.FromMilliseconds(int.MaxValue + 1L) },
+        new ModbusClientConfiguration { Host = "host", BufferTime = TimeSpan.FromMilliseconds(int.MaxValue + 1L) },
         new ModbusClientConfiguration { Host = "host", MaximumRegisterGap = -1 },
         new ModbusClientConfiguration { Host = "host", MaximumRegisterGap = 125 },
     };
+
+    [Fact]
+    public void WhenDelaysAreAtTheirLimits_ThenValidationPasses()
+    {
+        // Arrange
+        var maximumDelay = TimeSpan.FromMilliseconds(int.MaxValue);
+        var configuration = new ModbusClientConfiguration
+        {
+            Host = "host",
+            PollingInterval = maximumDelay,
+            RequestTimeout = maximumDelay,
+            RetryTime = maximumDelay,
+            BufferTime = TimeSpan.Zero
+        };
+
+        // Act
+        var exception = Record.Exception(configuration.Validate);
+
+        // Assert
+        Assert.Null(exception);
+    }
 
     [Theory]
     [MemberData(nameof(InvalidConfigurations))]

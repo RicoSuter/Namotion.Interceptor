@@ -138,6 +138,101 @@ public partial class ModbusRegisterResolverTests
         public partial int? Value { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class HugeAddressSubject
+    {
+        [ModbusRegister(int.MaxValue, ModbusDataType.U32)]
+        public partial long? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class HugeBaseAddressSubject : IModbusBaseAddressProvider
+    {
+        public int BaseAddress => int.MaxValue - 1;
+
+        [ModbusRegister(1, ModbusDataType.U32)]
+        public partial long? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class UndefinedDataTypeSubject
+    {
+        [ModbusRegister(0, (ModbusDataType)99)]
+        public partial int? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class UndefinedSpaceSubject
+    {
+        [ModbusRegister(0, ModbusDataType.U16, Space = (ModbusAddressSpace)99)]
+        public partial int? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class UndefinedWordOrderSubject
+    {
+        [ModbusRegister(0, ModbusDataType.U32, WordOrder = (ModbusWordOrder)99)]
+        public partial long? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class UndefinedNotAvailableValueSubject
+    {
+        [ModbusRegister(0, ModbusDataType.U16, NotAvailableValue = (ModbusNotAvailableValue)99)]
+        public partial int? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class FloatScaleFactorSubject
+    {
+        [ModbusRegister(0, ModbusDataType.S16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.F32)]
+        public partial float? Factor { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class U32ScaleFactorSubject
+    {
+        [ModbusRegister(0, ModbusDataType.S16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.U32)]
+        public partial long? Factor { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class ContainerSubject
+    {
+        public partial List<ResolverChild> Items { get; set; }
+
+        public partial Dictionary<string, ResolverChild> ItemsByName { get; set; }
+
+        public ContainerSubject()
+        {
+            Items = [];
+            ItemsByName = [];
+        }
+    }
+
+    [InterceptorSubject]
+    public partial class SharedChildSubject
+    {
+        public partial ResolverChild? First { get; set; }
+
+        public partial ResolverChild? Second { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class CycleSubject
+    {
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial int? Value { get; set; }
+
+        public partial CycleSubject? Next { get; set; }
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -241,29 +336,111 @@ public partial class ModbusRegisterResolverTests
             () => ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>()));
 
         // Assert
-        Assert.Contains($"{nameof(DuplicateRegisterSubject)}.{nameof(DuplicateRegisterSubject.Value)}", exception.Message);
+        Assert.StartsWith("Invalid Modbus mapping on Value:", exception.Message);
+    }
+
+    [Fact]
+    public void WhenSubjectsAreCollectionAndDictionaryItems_ThenEachItemIsResolvedWithItsOwnPath()
+    {
+        // Arrange
+        var root = new ContainerSubject(CreateContext());
+        var first = new ResolverChild { BaseAddress = 100 };
+        var second = new ResolverChild { BaseAddress = 200 };
+        var named = new ResolverChild { BaseAddress = 300 };
+        root.Items = [first, second];
+        root.ItemsByName = new Dictionary<string, ResolverChild> { ["pump"] = named };
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(root, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        Assert.Equal(3, bindings.Count);
+        Assert.Equal("Items[0].Value", Find(bindings, first, nameof(ResolverChild.Value)).Path);
+        Assert.Equal("Items[1].Value", Find(bindings, second, nameof(ResolverChild.Value)).Path);
+        Assert.Equal("ItemsByName[pump].Value", Find(bindings, named, nameof(ResolverChild.Value)).Path);
+        Assert.Equal(305, Find(bindings, named, nameof(ResolverChild.Value)).Address);
+    }
+
+    [Fact]
+    public void WhenChildSubjectIsReferencedTwice_ThenItIsResolvedOnce()
+    {
+        // Arrange
+        var root = new SharedChildSubject(CreateContext());
+        var shared = new ResolverChild { BaseAddress = 100 };
+        root.First = shared;
+        root.Second = shared;
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(root, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        Assert.Equal(105, Assert.Single(bindings).Address);
+    }
+
+    [Fact]
+    public void WhenSubjectGraphHasCycle_ThenEachSubjectIsResolvedOnce()
+    {
+        // Arrange
+        var root = new CycleSubject(CreateContext());
+        var next = new CycleSubject();
+        root.Next = next;
+        next.Next = root;
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(root, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        Assert.Equal(2, bindings.Count);
+        Assert.Equal("Value", Find(bindings, root, nameof(CycleSubject.Value)).Path);
+        Assert.Equal("Next.Value", Find(bindings, next, nameof(CycleSubject.Value)).Path);
+    }
+
+    [Fact]
+    public void WhenScaleFactorPropertyIsExcluded_ThenConfigurationExceptionIsThrown()
+    {
+        // Arrange
+        var root = new ResolverRoot(CreateContext());
+        var excluded = new HashSet<PropertyReference> { new(root, nameof(ResolverRoot.PowerScaleFactor)) };
+
+        // Act
+        var exception = Assert.Throws<ModbusConfigurationException>(() => ModbusRegisterResolver.Resolve(root, 1, excluded));
+
+        // Assert
+        Assert.StartsWith("Invalid Modbus mapping on Power:", exception.Message);
     }
 
     public static TheoryData<Func<IInterceptorSubjectContext, IInterceptorSubject>> InvalidSubjects => new()
     {
         context => new ScaleAndScaleFactorSubject(context),
         context => new MissingScaleFactorSubject(context),
+        context => new FloatScaleFactorSubject(context),
+        context => new U32ScaleFactorSubject(context),
         context => new StringWithoutLengthSubject(context),
         context => new LengthOnIntegerSubject(context),
         context => new BooleanInRegisterSubject(context),
         context => new IntegerInCoilSubject(context),
         context => new AddressOverflowSubject(context),
         context => new NegativeAddressSubject(context),
+        context => new HugeAddressSubject(context),
+        context => new HugeBaseAddressSubject(context),
+        context => new UndefinedDataTypeSubject(context),
+        context => new UndefinedSpaceSubject(context),
+        context => new UndefinedWordOrderSubject(context),
+        context => new UndefinedNotAvailableValueSubject(context),
     };
 
     [Theory]
     [MemberData(nameof(InvalidSubjects))]
-    public void WhenMappingIsInvalid_ThenConfigurationExceptionIsThrown(Func<IInterceptorSubjectContext, IInterceptorSubject> createSubject)
+    public void WhenMappingIsInvalid_ThenConfigurationExceptionNamesProperty(Func<IInterceptorSubjectContext, IInterceptorSubject> createSubject)
     {
         // Arrange
         var subject = createSubject(CreateContext());
 
-        // Act & Assert
-        Assert.Throws<ModbusConfigurationException>(() => ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>()));
+        // Act
+        var exception = Assert.Throws<ModbusConfigurationException>(
+            () => ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>()));
+
+        // Assert
+        Assert.StartsWith("Invalid Modbus mapping on Value:", exception.Message);
     }
 }

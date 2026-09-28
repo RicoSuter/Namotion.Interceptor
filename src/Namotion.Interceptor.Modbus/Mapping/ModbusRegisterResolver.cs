@@ -2,6 +2,7 @@ using System.Reflection;
 using Namotion.Interceptor.Modbus.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Modbus.Mapping;
 
@@ -14,13 +15,14 @@ internal static class ModbusRegisterResolver
             ?? throw new InvalidOperationException("The root subject is not registered. Add WithRegistry() to the subject context.");
 
         var bindings = new List<ModbusRegisterBinding>();
-        Walk(registeredRoot, defaultUnitId, excludedProperties, bindings, []);
+        Walk(root, registeredRoot, defaultUnitId, excludedProperties, bindings, []);
         LinkScaleFactors(bindings);
         return bindings;
     }
 
     private static void Walk(
-        RegisteredSubject subject, byte inheritedUnitId, IReadOnlySet<PropertyReference> excludedProperties,
+        IInterceptorSubject root, RegisteredSubject subject, byte inheritedUnitId,
+        IReadOnlySet<PropertyReference> excludedProperties,
         List<ModbusRegisterBinding> bindings, HashSet<RegisteredSubject> visited)
     {
         if (!visited.Add(subject))
@@ -33,17 +35,17 @@ internal static class ModbusRegisterResolver
 
         foreach (var property in subject.Properties)
         {
-            var attribute = GetRegisterAttribute(property);
+            var attribute = GetRegisterAttribute(property, root);
             if (attribute is not null && !excludedProperties.Contains(property.Reference))
             {
-                bindings.Add(CreateBinding(property, attribute, unitId, baseAddress));
+                bindings.Add(CreateBinding(property, root, attribute, unitId, baseAddress));
             }
 
             foreach (var child in property.Children)
             {
                 if (child.Subject.TryGetRegisteredSubject() is { } registeredChild)
                 {
-                    Walk(registeredChild, unitId, excludedProperties, bindings, visited);
+                    Walk(root, registeredChild, unitId, excludedProperties, bindings, visited);
                 }
             }
         }
@@ -59,7 +61,7 @@ internal static class ModbusRegisterResolver
         return subject.GetType().GetCustomAttribute<ModbusUnitIdAttribute>(inherit: true)?.UnitId;
     }
 
-    private static ModbusRegisterAttribute? GetRegisterAttribute(RegisteredSubjectProperty property)
+    private static ModbusRegisterAttribute? GetRegisterAttribute(RegisteredSubjectProperty property, IInterceptorSubject root)
     {
         ModbusRegisterAttribute? result = null;
         foreach (var attribute in property.ReflectionAttributes)
@@ -69,7 +71,7 @@ internal static class ModbusRegisterResolver
                 // AllowMultiple only applies per concrete type, so a derived preset attribute can sit next to the base one.
                 if (result is not null)
                 {
-                    throw Error(GetPath(property), "Only one ModbusRegisterAttribute (including derived attributes) is allowed per property.");
+                    throw Error(GetPath(property, root),"Only one ModbusRegisterAttribute (including derived attributes) is allowed per property.");
                 }
 
                 result = registerAttribute;
@@ -80,10 +82,30 @@ internal static class ModbusRegisterResolver
     }
 
     private static ModbusRegisterBinding CreateBinding(
-        RegisteredSubjectProperty property, ModbusRegisterAttribute attribute, byte unitId, int baseAddress)
+        RegisteredSubjectProperty property, IInterceptorSubject root, ModbusRegisterAttribute attribute, byte unitId, int baseAddress)
     {
-        var path = GetPath(property);
+        var path = GetPath(property, root);
         var dataType = attribute.DataType;
+
+        if (!Enum.IsDefined(dataType))
+        {
+            throw Error(path, $"Data type {dataType} is not defined.");
+        }
+
+        if (!Enum.IsDefined(attribute.Space))
+        {
+            throw Error(path, $"Address space {attribute.Space} is not defined.");
+        }
+
+        if (!Enum.IsDefined(attribute.WordOrder))
+        {
+            throw Error(path, $"Word order {attribute.WordOrder} is not defined.");
+        }
+
+        if (!Enum.IsDefined(attribute.NotAvailableValue))
+        {
+            throw Error(path, $"Not-available value {attribute.NotAvailableValue} is not defined.");
+        }
 
         var isBitSpace = attribute.Space is ModbusAddressSpace.Coil or ModbusAddressSpace.DiscreteInput;
         if (isBitSpace && dataType != ModbusDataType.Boolean)
@@ -118,15 +140,16 @@ internal static class ModbusRegisterResolver
             throw Error(path, "Scale must be a finite, non-zero number.");
         }
 
-        var address = baseAddress + attribute.Address;
+        // Summed in 64 bits so a large base address cannot overflow into the valid range.
+        var address = (long)baseAddress + attribute.Address;
         var count = ModbusRegisterCodec.GetRegisterCount(dataType, attribute.Length);
-        if (attribute.Address < 0 || address < 0 || address + count - 1 > 65535)
+        if (attribute.Address < 0 || address < 0 || address > 65536 - count)
         {
             throw Error(path, $"Address {address} with {count} register(s) is outside 0 to 65535.");
         }
 
         var reader = ModbusValueConverters.Create(attribute, property.Type, path);
-        return new ModbusRegisterBinding(property.Reference, path, unitId, address, attribute, reader);
+        return new ModbusRegisterBinding(property.Reference, path, unitId, (int)address, attribute, reader);
     }
 
     private static void LinkScaleFactors(List<ModbusRegisterBinding> bindings)
@@ -159,8 +182,8 @@ internal static class ModbusRegisterResolver
         }
     }
 
-    private static string GetPath(RegisteredSubjectProperty property)
-        => $"{property.Subject.GetType().Name}.{property.Name}";
+    private static string GetPath(RegisteredSubjectProperty property, IInterceptorSubject root)
+        => property.TryGetPath(root) ?? $"{property.Subject.GetType().Name}.{property.Name}";
 
     private static ModbusConfigurationException Error(string path, string message)
         => new($"Invalid Modbus mapping on {path}: {message}");
