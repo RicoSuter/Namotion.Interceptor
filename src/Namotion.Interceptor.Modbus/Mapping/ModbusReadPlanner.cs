@@ -79,6 +79,12 @@ internal static class ModbusReadPlanner
             result = left.Address.CompareTo(right.Address);
         }
 
-        return result != 0 ? result : left.Count.CompareTo(right.Count);
+        if (result == 0)
+        {
+            result = left.Count.CompareTo(right.Count);
+        }
+
+        // Isolated bindings sort last among equal keys so they never split mergeable neighbors.
+        return result != 0 ? result : left.IsIsolated.CompareTo(right.IsIsolated);
     }
 }

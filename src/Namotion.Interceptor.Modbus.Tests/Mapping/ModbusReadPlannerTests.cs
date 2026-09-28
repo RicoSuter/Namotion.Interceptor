@@ -210,4 +210,32 @@ public partial class ModbusReadPlannerTests
         // Assert
         Assert.Equal(new[] { (0, 1), (0, 1) }, batches.Select(batch => (batch.StartAddress, batch.Count)));
     }
+
+    [Fact]
+    public void WhenIsolatedBindingSharesTheKeyOfAMergeableBinding_ThenTheMergeableBindingStillMerges()
+    {
+        // Arrange
+        var first = CreateBinding(0);
+        var isolated = CreateBinding(1);
+        var second = CreateBinding(1);
+        isolated.IsIsolated = true;
+
+        // Act
+        var batches = ModbusReadPlanner.Plan([first, isolated, second], maximumGap: 0);
+
+        // Assert
+        Assert.Equal(new[] { (0, 2), (1, 1) }, batches.Select(batch => (batch.StartAddress, batch.Count)));
+        Assert.Equal(new[] { first, second }, batches[0].Bindings);
+        Assert.Same(isolated, Assert.Single(batches[1].Bindings));
+    }
+
+    [Fact]
+    public void WhenThereAreNoBindings_ThenNoBatchesArePlanned()
+    {
+        // Act
+        var batches = ModbusReadPlanner.Plan([], maximumGap: 0);
+
+        // Assert
+        Assert.Empty(batches);
+    }
 }
