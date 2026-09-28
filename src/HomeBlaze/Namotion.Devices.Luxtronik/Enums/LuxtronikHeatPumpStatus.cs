@@ -1,4 +1,4 @@
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Enums;
 
 /// <summary>
 /// Running compressors and auxiliary heaters (input 10000).

@@ -1,4 +1,4 @@
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Enums;
 
 /// <summary>
 /// Configured buffer tank type (input 10202).

@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Modbus;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Attributes;
 
 /// <summary>
 /// A Smart Home Interface holding register, read only in this version.

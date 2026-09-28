@@ -1,9 +1,12 @@
 // Register map: AIT SHI manual 83026900aDE.
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// A mixing circuit cooling control block (mode, setpoint, offset).

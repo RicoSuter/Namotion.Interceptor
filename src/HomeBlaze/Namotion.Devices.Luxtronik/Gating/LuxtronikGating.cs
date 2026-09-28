@@ -1,6 +1,7 @@
+using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Interceptor.Registry.Abstractions;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Gating;
 
 internal static class LuxtronikGating
 {

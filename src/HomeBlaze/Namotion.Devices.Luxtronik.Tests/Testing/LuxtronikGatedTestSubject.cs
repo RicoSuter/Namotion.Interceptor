@@ -1,3 +1,6 @@
+using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 

@@ -1,9 +1,10 @@
 // Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Attributes;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// Temperatures (inputs 10100 to 10124). Measured values are sensor children; targets and limits are plain values.

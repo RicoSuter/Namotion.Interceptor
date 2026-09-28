@@ -1,9 +1,11 @@
 // Register map: AIT SHI manual 83026900aDE.
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// Operating state of the heat pump (inputs 10000 to 10007 and 10201 to 10207).

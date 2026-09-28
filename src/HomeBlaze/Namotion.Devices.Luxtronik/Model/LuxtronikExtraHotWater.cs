@@ -1,9 +1,12 @@
 // Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// Extra hot water request state (inputs 10500 to 10502), firmware 3.92 and later.

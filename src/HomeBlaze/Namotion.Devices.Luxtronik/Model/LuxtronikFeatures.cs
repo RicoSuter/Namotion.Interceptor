@@ -4,7 +4,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// Which controller functions are configured (discrete inputs 10000 to 10011).

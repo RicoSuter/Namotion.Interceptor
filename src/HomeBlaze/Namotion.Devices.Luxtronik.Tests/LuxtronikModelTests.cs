@@ -1,5 +1,9 @@
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Devices.Luxtronik.Gating;
+using Namotion.Devices.Luxtronik.Model;
 using Namotion.Interceptor.Modbus.Attributes;
 
 namespace Namotion.Devices.Luxtronik.Tests;

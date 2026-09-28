@@ -1,7 +1,9 @@
+using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Attributes;
 
 /// <summary>
 /// A Smart Home Interface register with its firmware and feature requirements; 0x7FFF and 0x7FFFFFFF map to <c>null</c>.

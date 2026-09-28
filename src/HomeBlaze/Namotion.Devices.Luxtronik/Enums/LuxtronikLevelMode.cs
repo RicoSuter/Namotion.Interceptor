@@ -1,4 +1,4 @@
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Enums;
 
 /// <summary>
 /// Smart Home Interface level for heating and hot water.

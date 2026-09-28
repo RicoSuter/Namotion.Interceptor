@@ -1,4 +1,4 @@
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Enums;
 
 /// <summary>
 /// Controller functions that can be configured; the value is the offset of its discrete input from 10000.

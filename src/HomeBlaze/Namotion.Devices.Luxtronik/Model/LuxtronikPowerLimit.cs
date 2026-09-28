@@ -1,9 +1,11 @@
 // Register map: AIT SHI manual 83026900aDE.
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// Power consumption limitation (holding 10040 and 10041) in watts. The controller reports kW in tenths.

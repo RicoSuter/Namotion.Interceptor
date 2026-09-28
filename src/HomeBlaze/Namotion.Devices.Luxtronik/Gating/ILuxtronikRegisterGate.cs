@@ -1,4 +1,6 @@
-namespace Namotion.Devices.Luxtronik;
+using Namotion.Devices.Luxtronik.Enums;
+
+namespace Namotion.Devices.Luxtronik.Gating;
 
 /// <summary>
 /// Firmware and feature requirements declared on a register attribute.

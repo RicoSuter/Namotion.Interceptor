@@ -1,4 +1,4 @@
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Enums;
 
 /// <summary>
 /// How a Smart Home Interface control influences a circuit.

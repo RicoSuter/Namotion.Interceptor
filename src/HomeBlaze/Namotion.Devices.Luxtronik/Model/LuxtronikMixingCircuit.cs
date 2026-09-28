@@ -1,9 +1,10 @@
 // Register map: AIT SHI manual 83026900aDE.
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Devices.Luxtronik;
+namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
 /// Mixing circuit 1, 2 or 3. Registers of circuit n are 10 addresses after those of circuit n - 1.
