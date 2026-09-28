@@ -13,15 +13,15 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
 {
     public LuxtronikTemperatures()
     {
-        Return = new LuxtronikTemperatureSensor(10100, "Return");
-        ExternalReturn = new LuxtronikTemperatureSensor(10102, "External return");
-        Flow = new LuxtronikTemperatureSensor(10105, "Flow");
-        Room = new LuxtronikTemperatureSensor(10106, "Room");
-        Outside = new LuxtronikTemperatureSensor(10108, "Outside");
-        OutsideAverage = new LuxtronikTemperatureSensor(10109, "Outside average", "3.92.0");
-        HeatSourceInlet = new LuxtronikTemperatureSensor(10110, "Heat source inlet", "3.92.0");
-        HeatSourceOutlet = new LuxtronikTemperatureSensor(10111, "Heat source outlet", "3.92.0");
-        HotWater = new LuxtronikTemperatureSensor(10120, "Hot water");
+        Return = new LuxtronikTemperatureSensor(10100, "Return temperature");
+        ExternalReturn = new LuxtronikTemperatureSensor(10102, "External return temperature");
+        Flow = new LuxtronikTemperatureSensor(10105, "Flow temperature");
+        Room = new LuxtronikTemperatureSensor(10106, "Room temperature");
+        Outside = new LuxtronikTemperatureSensor(10108, "Outside temperature");
+        OutsideAverage = new LuxtronikTemperatureSensor(10109, "Outside average temperature", "3.92.0");
+        HeatSourceInlet = new LuxtronikTemperatureSensor(10110, "Heat source inlet temperature", "3.92.0");
+        HeatSourceOutlet = new LuxtronikTemperatureSensor(10111, "Heat source outlet temperature", "3.92.0");
+        HotWater = new LuxtronikTemperatureSensor(10120, "Hot water temperature");
 
         ReturnTarget = null;
         ReturnLimit = null;
@@ -61,6 +61,12 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
     [State(Position = 8)]
     public partial LuxtronikTemperatureSensor HeatSourceOutlet { get; internal set; }
 
+    /// <summary>
+    /// Gets the measured hot water temperature.
+    /// </summary>
+    /// <remarks>
+    /// Reports 75.0 °C when the hot water sensor fails: the controller substitutes this value and it is not filtered.
+    /// </remarks>
     [State(Position = 9)]
     public partial LuxtronikTemperatureSensor HotWater { get; internal set; }
 

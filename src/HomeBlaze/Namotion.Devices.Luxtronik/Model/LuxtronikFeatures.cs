@@ -1,4 +1,4 @@
-// Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
+// Register map: AIT SHI manual 83026900aDE.
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
