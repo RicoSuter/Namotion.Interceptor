@@ -1,13 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>netstandard2.0</TargetFramework>
-        <LangVersion>preview</LangVersion>
-    </PropertyGroup>
-
     <ItemGroup>
         <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
-        <PackageReference Include="System.Collections.Immutable" />
     </ItemGroup>
 
     <ItemGroup>

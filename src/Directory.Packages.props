@@ -48,7 +48,6 @@
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
-    <PackageVersion Include="System.Collections.Immutable" Version="8.0.0" />
     <PackageVersion Include="System.Device.Gpio" Version="3.2.0" />
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
     <PackageVersion Include="Toolbelt.Blazor.HotKeys2" Version="6.0.1" />
