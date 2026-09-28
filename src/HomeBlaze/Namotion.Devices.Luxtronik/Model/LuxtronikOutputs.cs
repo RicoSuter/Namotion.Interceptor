@@ -28,15 +28,15 @@ public partial class LuxtronikOutputs : IModbusBaseAddressProvider, ILuxtronikGa
     [State(IsDiscrete = true, Position = 1)]
     public partial bool? BrineCirculationPump { get; internal set; }
 
-    [LuxtronikInputRegister(1, ModbusDataType.U16, Feature = LuxtronikFeature.MixingCircuit1Heating)]
+    [LuxtronikInputRegister(1, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
     public partial bool? MixingCircuit1Pump { get; internal set; }
 
-    [LuxtronikInputRegister(2, ModbusDataType.U16, Feature = LuxtronikFeature.MixingCircuit2Heating)]
+    [LuxtronikInputRegister(2, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 3)]
     public partial bool? MixingCircuit2Pump { get; internal set; }
 
-    [LuxtronikInputRegister(3, ModbusDataType.U16, Feature = LuxtronikFeature.MixingCircuit3Heating)]
+    [LuxtronikInputRegister(3, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 4)]
     public partial bool? MixingCircuit3Pump { get; internal set; }
 

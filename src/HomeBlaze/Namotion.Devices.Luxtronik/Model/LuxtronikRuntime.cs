@@ -27,11 +27,11 @@ public partial class LuxtronikRuntime : IModbusBaseAddressProvider, ILuxtronikGa
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 1)]
     public partial decimal? HeatPump { get; internal set; }
 
-    [LuxtronikInputRegister(2, ModbusDataType.U32, Feature = LuxtronikFeature.Heating)]
+    [LuxtronikInputRegister(2, ModbusDataType.U32)]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 2)]
     public partial decimal? Heating { get; internal set; }
 
-    [LuxtronikInputRegister(4, ModbusDataType.U32, Feature = LuxtronikFeature.HotWater)]
+    [LuxtronikInputRegister(4, ModbusDataType.U32)]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 3)]
     public partial decimal? HotWater { get; internal set; }
 

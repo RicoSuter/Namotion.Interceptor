@@ -36,11 +36,11 @@ public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
     [State(IsDiscrete = true, Position = 2)]
     public partial LuxtronikOperationMode? OperationMode { get; internal set; }
 
-    [LuxtronikInputRegister(3, ModbusDataType.U16, Feature = LuxtronikFeature.Heating)]
+    [LuxtronikInputRegister(3, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 3)]
     public partial LuxtronikModeStatus? HeatingStatus { get; internal set; }
 
-    [LuxtronikInputRegister(4, ModbusDataType.U16, Feature = LuxtronikFeature.HotWater)]
+    [LuxtronikInputRegister(4, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 4)]
     public partial LuxtronikModeStatus? HotWaterStatus { get; internal set; }
 

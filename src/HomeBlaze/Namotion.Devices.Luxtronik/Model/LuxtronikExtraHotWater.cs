@@ -34,5 +34,5 @@ public partial class LuxtronikExtraHotWater : IModbusBaseAddressProvider, ILuxtr
 
     string? ILuxtronikGatedSubject.MinimumFirmware => "3.92.0";
 
-    LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.HotWater;
+    LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
 }
