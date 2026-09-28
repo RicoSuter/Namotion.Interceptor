@@ -51,6 +51,16 @@ public partial class ModbusPollerTests
         public partial decimal? Scaled { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class NotAvailableScaleFactorSubject
+    {
+        [ModbusRegister(0, ModbusDataType.S16, NotAvailableValue = ModbusNotAvailableValue.SignedMinimum)]
+        public partial short? Factor { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.U16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Scaled { get; set; }
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -171,6 +181,35 @@ public partial class ModbusPollerTests
         // Assert
         Assert.False(failedCycle.ContainsKey("Scaled"));
         Assert.Equal(1.23m, Assert.Single(applied).Value);
+    }
+
+    [Fact]
+    public async Task WhenScaleFactorIsNotAvailable_ThenDependentIsNotUpdatedUntilItIsAvailableAgain()
+    {
+        // Arrange
+        var subject = new NotAvailableScaleFactorSubject(CreateContext());
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+        var poller = new ModbusPoller(bindings, 0, new ModbusPollingMetrics(), NullLogger.Instance);
+        var reader = new FakeRegisterReader();
+        reader.SetRegister(0, unchecked((ushort)-1));
+        reader.SetRegister(1, 123);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var availableCycle = Apply(poller);
+        reader.SetRegister(0, 0x8000);
+        reader.SetRegister(1, 124);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var notAvailableCycle = Apply(poller);
+        reader.SetRegister(0, unchecked((ushort)-1));
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var availableAgainCycle = Apply(poller);
+
+        // Assert
+        Assert.Equal(12.3m, availableCycle["Scaled"]);
+        Assert.Null(Assert.Single(notAvailableCycle, pair => pair.Key == "Factor").Value);
+        Assert.False(notAvailableCycle.ContainsKey("Scaled"));
+        Assert.Equal(12.4m, availableAgainCycle["Scaled"]);
     }
 
     [Fact]

@@ -31,7 +31,7 @@ public class ModbusRegisterAttribute : Attribute
     public double Scale { get; init; } = 1.0;
 
     /// <summary>
-    /// Gets the name of an integer register property on the same subject holding a power-of-ten exponent:
+    /// Gets the name of an <see cref="ModbusDataType.S16"/> register property on the same subject holding a power-of-ten exponent:
     /// value = raw * 10^exponent. Mutually exclusive with <see cref="Scale"/>.
     /// </summary>
     public string? ScaleFactorProperty { get; init; }

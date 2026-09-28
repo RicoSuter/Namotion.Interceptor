@@ -194,7 +194,14 @@ internal sealed class ModbusPoller
             return false;
         }
 
-        exponent = (int)ModbusRegisterCodec.ReadInteger(scaleFactorRaw, scaleFactor.Attribute.DataType, ModbusWordOrder.HighWordFirst);
+        var attribute = scaleFactor.Attribute;
+        if (ModbusRegisterCodec.IsNotAvailable(scaleFactorRaw, attribute.DataType, attribute.WordOrder, attribute.NotAvailableValue))
+        {
+            // Unknown like an unread one; its next available value is a change that reapplies this.
+            return false;
+        }
+
+        exponent = (int)ModbusRegisterCodec.ReadInteger(scaleFactorRaw, attribute.DataType, attribute.WordOrder);
         return true;
     }
 

@@ -197,7 +197,7 @@ Resolution throws `ModbusConfigurationException` naming the property path when:
 
 - a property carries more than one `ModbusRegisterAttribute` (a derived preset next to the base attribute counts)
 - an enum value of the attribute (`DataType`, `Space`, `WordOrder`, `NotAvailableValue`) is not defined
-- `Scale` and `ScaleFactorProperty` are both set, `Scale` is zero or not finite (or outside the `decimal` range for a `decimal` target), or `ScaleFactorProperty` does not name a U16 or S16 register property on the same subject that is resolved (not excluded)
+- `Scale` and `ScaleFactorProperty` are both set, `Scale` is zero or not finite (or outside the `decimal` range for a `decimal` target), or `ScaleFactorProperty` does not name an S16 register property on the same subject that is resolved (not excluded). S16 only, because an exponent is signed and a U16 read would turn -1 into 65535
 - `Length` is set on a non-string type, or outside 1..125 on String
 - `Boolean` is used in a register space, or a non-Boolean type in `Coil`/`DiscreteInput`
 - a scaled value targets a CLR type other than `float`, `double` or `decimal`, F32 targets any other type, or an integral or enum CLR type cannot hold every value of the data type (for example U16 into `short`, or String into `int`)
@@ -214,7 +214,7 @@ At resolution time each property gets a converter delegate chosen by a switch on
 - F32: converts to `float`, `double` or `decimal`. On a `decimal?` target, NaN, infinities and magnitudes beyond the `decimal` range become `null`; on a non-nullable `decimal` the conversion fails (see below).
 - A conversion that throws (for example a dynamic exponent outside ±28 for a `decimal` target) is logged as a warning and the property keeps its value; the raw words are still remembered, so it is retried only when they change.
 - Scaling: `decimal` targets scale in decimal arithmetic (`Scale` converted once via `(decimal)double`), so `234 * 0.1` is exactly `23.4`. `float`/`double` targets scale in double.
-- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the scale-factor property. If the scale factor was never successfully read, the scaled property is not updated in that cycle; otherwise the last successfully read scale factor is used. A changed scale factor reapplies its dependents even when their raw words did not change.
+- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the S16 scale-factor property. If the scale factor was never successfully read, or its raw value matches its own `NotAvailableValue`, it is unknown and the scaled property is not updated in that cycle; otherwise the last successfully read scale factor is used. A changed scale factor reapplies its dependents even when their raw words did not change.
 - Enums: the raw integer is converted with `Enum.ToObject` (AOT safe). Flags enums pass through unchanged. Undefined enum values are passed through, not rejected.
 - `bool`: non-zero is `true`. Works for coils, discrete inputs and unscaled integer registers.
 - `string`: ASCII, trailing `0x00` and `0x20` trimmed on the byte span before decoding (one allocation).

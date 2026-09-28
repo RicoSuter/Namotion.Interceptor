@@ -178,10 +178,11 @@ internal static class ModbusRegisterResolver
                 ReferenceEquals(candidate.Property.Subject, binding.Property.Subject) &&
                 candidate.Property.Name == name);
 
-            if (scaleFactor?.Attribute.DataType is not (ModbusDataType.U16 or ModbusDataType.S16))
+            // S16 only: a scale factor is a signed exponent, which a U16 register cannot hold.
+            if (scaleFactor?.Attribute.DataType is not ModbusDataType.S16)
             {
                 throw Error(binding.Path,
-                    $"ScaleFactorProperty '{name}' must name a U16 or S16 register property on the same subject that is not excluded.");
+                    $"ScaleFactorProperty '{name}' must name an S16 register property on the same subject that is not excluded.");
             }
 
             binding.ScaleFactor = scaleFactor;

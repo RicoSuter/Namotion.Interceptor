@@ -194,6 +194,16 @@ public partial class ModbusRegisterResolverTests
     }
 
     [InterceptorSubject]
+    public partial class U16ScaleFactorSubject
+    {
+        [ModbusRegister(0, ModbusDataType.S16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.U16)]
+        public partial int? Factor { get; set; }
+    }
+
+    [InterceptorSubject]
     public partial class U32ScaleFactorSubject
     {
         [ModbusRegister(0, ModbusDataType.S16, ScaleFactorProperty = nameof(Factor))]
@@ -415,6 +425,7 @@ public partial class ModbusRegisterResolverTests
         context => new ScaleAndScaleFactorSubject(context),
         context => new MissingScaleFactorSubject(context),
         context => new FloatScaleFactorSubject(context),
+        context => new U16ScaleFactorSubject(context),
         context => new U32ScaleFactorSubject(context),
         context => new StringWithoutLengthSubject(context),
         context => new LengthOnIntegerSubject(context),

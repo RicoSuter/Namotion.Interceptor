@@ -54,7 +54,7 @@ To create a source for a subject at runtime, for example in a HomeBlaze device, 
 | `Space` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
 | `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit values |
 | `Scale` | `1.0` | Static factor, requires a `float`, `double` or `decimal` property |
-| `ScaleFactorProperty` | none | Name of a U16 or S16 register property on the same subject holding a power-of-ten exponent. Mutually exclusive with `Scale`, and the named property must not be excluded |
+| `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Mutually exclusive with `Scale`, and the named property must not be excluded |
 | `Length` | 0 | Register count of `String` values, 1 to 125 |
 | `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF or 0x7FFFFFFF), `SignedMinimum` (0x8000 or 0x80000000) or `UnsignedMaximum` (0xFFFF or 0xFFFFFFFF) |
 | `Access` | `ReadWrite` | Declares writability for a later write stage, not enforced yet |
@@ -68,7 +68,7 @@ Values convert as follows:
 - F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
 - String reads two ASCII characters per register and trims trailing NUL and space characters.
 - `NotAvailableValue` requires a nullable property and an integer data type, and is checked before scaling.
-- With `ScaleFactorProperty`, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes.
+- With `ScaleFactorProperty`, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes. A scale factor reading as its own `NotAvailableValue` is unknown, so its dependents are not updated until it is available again.
 
 A subject implementing `IModbusBaseAddressProvider` makes its addresses relative to `BaseAddress`, so one class can describe a repeated block. Base addresses are not inherited by child subjects. `IModbusUnitIdProvider` or `[ModbusUnitId]` sets the unit ID for a subject and its children, the interface taking precedence; otherwise `ModbusClientConfiguration.UnitId` applies. Both are read on every connect, when the connector builds its read plan.
 
