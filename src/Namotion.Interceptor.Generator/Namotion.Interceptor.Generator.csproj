@@ -11,6 +11,11 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+		<AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<InternalsVisibleTo Include="Namotion.Interceptor.Generator.Tests" />
 	</ItemGroup>
 
@@ -23,6 +28,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="4.14.0" PrivateAssets="all" />
 	</ItemGroup>

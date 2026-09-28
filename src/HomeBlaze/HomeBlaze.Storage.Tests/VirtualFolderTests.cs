@@ -20,7 +20,7 @@ public class VirtualFolderTests
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
-        services.AddSingleton<SubjectPathResolver>();
+        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
 
         var serviceProvider = services.BuildServiceProvider();

@@ -1,5 +1,7 @@
 using System;
 using MQTTnet.Protocol;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mqtt.Server;
@@ -9,6 +11,11 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// </summary>
 public class MqttServerConfiguration
 {
+    private static readonly IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> DefaultMapper =
+        new MqttCompositeMapper(
+            new MqttPathProviderMapper(new AttributeBasedPathProvider(MqttConstants.DefaultConnectorName, '/')),
+            new MqttAttributeMapper(MqttConstants.DefaultConnectorName));
+
     /// <summary>
     /// Gets or sets the MQTT broker hostname or IP address to bind to.
     /// Use "localhost" to bind to loopback only, or an IP address to bind to a specific interface.
@@ -32,9 +39,10 @@ public class MqttServerConfiguration
     public string? TopicPrefix { get; init; }
 
     /// <summary>
-    /// Gets or sets the path provider for property-to-topic mapping.
+    /// Gets or sets the property mapper for property-to-topic mapping.
+    /// Defaults to composite of MqttPathProviderMapper and MqttAttributeMapper, both filtered by the "mqtt" connector name.
     /// </summary>
-    public required PathProviderBase PathProvider { get; init; }
+    public IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> Mapper { get; init; } = DefaultMapper;
 
     /// <summary>
     /// Gets or sets the default QoS level. Default is AtLeastOnce (1) for guaranteed delivery.
@@ -92,13 +100,39 @@ public class MqttServerConfiguration
     public Func<ReadOnlyMemory<byte>, DateTimeOffset?> SourceTimestampDeserializer { get; init; } = MqttHelper.DefaultDeserializeTimestamp;
 
     /// <summary>
-    /// Validates the configuration.
+    /// Validates the configuration and throws if invalid.
     /// </summary>
+    /// <exception cref="ArgumentException">Thrown when configuration is invalid.</exception>
     public void Validate()
     {
-        if (PathProvider is null)
+        if (Mapper is null)
         {
-            throw new ArgumentException("PathProvider must be specified.", nameof(PathProvider));
+            throw new ArgumentException("Mapper must be specified.", nameof(Mapper));
+        }
+
+        if (ValueConverter is null)
+        {
+            throw new ArgumentException("ValueConverter must be specified.", nameof(ValueConverter));
+        }
+
+        if (BrokerPort is < 1 or > 65535)
+        {
+            throw new ArgumentException($"BrokerPort must be between 1 and 65535, got: {BrokerPort}", nameof(BrokerPort));
+        }
+
+        if (MaxPendingMessagesPerClient < 0)
+        {
+            throw new ArgumentException($"MaxPendingMessagesPerClient must be non-negative, got: {MaxPendingMessagesPerClient}", nameof(MaxPendingMessagesPerClient));
+        }
+
+        if (BufferTime < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
+        }
+
+        if (InitialStateDelay < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"InitialStateDelay must be non-negative, got: {InitialStateDelay}", nameof(InitialStateDelay));
         }
     }
 }

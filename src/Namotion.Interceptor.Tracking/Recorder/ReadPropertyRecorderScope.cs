@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Tracking.Recorder;
 /// across different component instances/sessions.
 /// Uses AsyncLocal-based storage (via ReadPropertyRecorder) for proper async context isolation.
 /// </summary>
-public class ReadPropertyRecorderScope : IDisposable
+public sealed class ReadPropertyRecorderScope : IDisposable
 {
     private readonly ConcurrentDictionary<PropertyReference, bool> _properties;
     private volatile int _disposed;

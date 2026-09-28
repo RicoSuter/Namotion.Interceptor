@@ -3,7 +3,6 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
@@ -35,13 +34,13 @@ public class DataChangeFilterTests
     {
         // Arrange - Counter has no filter settings in attribute, config has no defaults
         var config = CreateValidConfiguration();
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - No filter when no options specified
         Assert.Null(item.Filter);
@@ -52,13 +51,13 @@ public class DataChangeFilterTests
     {
         // Arrange - Temperature has [OpcUaNode] with DeadbandType.Absolute and DeadbandValue=0.5
         var config = CreateValidConfiguration();
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
         var nodeId = new NodeId("Temperature", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
         Assert.NotNull(item.Filter);
@@ -73,13 +72,13 @@ public class DataChangeFilterTests
     {
         // Arrange - Pressure has [OpcUaNode] with DeadbandType.Percent and DeadbandValue=2.5
         var config = CreateValidConfiguration();
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Pressure")!;
         var nodeId = new NodeId("Pressure", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
         Assert.NotNull(item.Filter);
@@ -94,13 +93,13 @@ public class DataChangeFilterTests
     {
         // Arrange - Status has [OpcUaNode] with DataChangeTrigger.StatusValueTimestamp
         var config = CreateValidConfiguration();
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Status")!;
         var nodeId = new NodeId("Status", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
         Assert.NotNull(item.Filter);
@@ -114,13 +113,13 @@ public class DataChangeFilterTests
     {
         // Arrange - Signal has [OpcUaNode] with SamplingInterval=0
         var config = CreateValidConfiguration();
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Signal")!;
         var nodeId = new NodeId("Signal", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
         Assert.Equal(0, item.SamplingInterval);
@@ -139,14 +138,14 @@ public class DataChangeFilterTests
             DefaultDeadbandType = DeadbandType.Percent,  // Config says Percent
             DefaultDeadbandValue = 10.0                   // Config says 10.0
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         // Temperature has [OpcUaNode] with DeadbandType.Absolute and DeadbandValue=0.5
         var property = registeredSubject.TryGetProperty("Temperature")!;
         var nodeId = new NodeId("Temperature", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Attribute values (Absolute, 0.5) override config defaults (Percent, 10.0)
         Assert.NotNull(item.Filter);
@@ -169,13 +168,13 @@ public class DataChangeFilterTests
             DefaultDeadbandType = DeadbandType.Percent,
             DefaultDeadbandValue = 5.0
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Uses config defaults since Counter has no filter settings in attribute
         Assert.NotNull(item.Filter);
@@ -197,13 +196,13 @@ public class DataChangeFilterTests
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             DefaultQueueSize = 10
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
         Assert.Equal(10u, item.QueueSize);
@@ -221,13 +220,13 @@ public class DataChangeFilterTests
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             DefaultDiscardOldest = false
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert
         Assert.False(item.DiscardOldest);
@@ -245,13 +244,13 @@ public class DataChangeFilterTests
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             DefaultDataChangeTrigger = DataChangeTrigger.Status // Status = 0
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Should be Status (0), not confused with sentinel (-1)
         Assert.NotNull(item.Filter);
@@ -273,13 +272,13 @@ public class DataChangeFilterTests
             DefaultDeadbandType = DeadbandType.None, // None = 0
             DefaultDeadbandValue = 1.0 // Need a value to trigger filter creation
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Should be None (0), not confused with sentinel (-1)
         Assert.NotNull(item.Filter);
@@ -300,13 +299,13 @@ public class DataChangeFilterTests
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             DefaultSamplingInterval = -1 // Server decides
         };
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Counter")!;
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Should be -1, not confused with sentinel (int.MinValue)
         Assert.Equal(-1, item.SamplingInterval);
@@ -317,13 +316,13 @@ public class DataChangeFilterTests
     {
         // Arrange - Temperature has multiple settings: DeadbandType, DeadbandValue
         var config = CreateValidConfiguration();
-        var subject = new TestSensorData(new InterceptorSubjectContext());
+        var subject = new TestSensorData(InterceptorSubjectContext.Create());
         var registeredSubject = new RegisteredSubject(subject);
         var property = registeredSubject.TryGetProperty("Temperature")!;
         var nodeId = new NodeId("Temperature", 2);
 
         // Act
-        var item = MonitoredItemFactory.Create(config, nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property, subject);
 
         // Assert - Both DeadbandType and DeadbandValue are set from attribute
         Assert.NotNull(item.Filter);

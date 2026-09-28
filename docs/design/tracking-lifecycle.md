@@ -47,8 +47,8 @@ After `next()` writes value X to the backing store and before the lock is acquir
 
 `_lastProcessedValues` records what the lifecycle **last processed** for each structural property. It is only updated inside the lock, so it always reflects the lifecycle's actual state. `WriteProperty` uses it as the diff baseline:
 
-- **Old value** = `_lastProcessedValues[property]` (what we last processed — stable, under our control)
-- **New value** = re-read from backing store (what is actually there now — may reflect another thread's write)
+- **Old value** = `_lastProcessedValues[property]` (what we last processed, stable and under our control)
+- **New value** = re-read from backing store (what is actually there now, which may reflect another thread's write)
 
 This asymmetry is the key insight: the old value comes from our private ledger, the new value comes from the shared backing store.
 
@@ -63,7 +63,7 @@ _lastProcessedValues[(subject, "Collection")] = current collection reference
 _lastProcessedValues[(subject, "ObjectRef")]   = current child subject
 ```
 
-This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `null` (meaning "nothing was ever processed"), which triggers a full diff against the backing store — correct but slightly more work than diffing against a known baseline.
+This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `null` (meaning "nothing was ever processed"), which triggers a full diff against the backing store. That is correct but slightly more work than diffing against a known baseline.
 
 ### 2. Updated on every structural write
 
@@ -98,7 +98,7 @@ if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && 
 }
 ```
 
-This is critical because a concurrent `next()` may have written an unattached child to the backing store. `_lastProcessedValues` tells us what was *actually attached* — which is exactly what we need to *detach*.
+This is critical because a concurrent `next()` may have written an unattached child to the backing store. `_lastProcessedValues` tells us what was *actually attached*, which is exactly what we need to *detach*.
 
 ### 5. Removed on detach
 
@@ -106,9 +106,9 @@ Entries are cleaned up in three places:
 
 | Location | When |
 |----------|------|
-| `DetachFromProperty` (isLastDetach) | Last reference to subject removed — all structural property entries cleaned |
-| `DetachFromContext` | Root subject removed — all structural property entries cleaned |
-| Parent-dead check in `WriteProperty` | Undo after attaching to a dead parent — single entry cleaned |
+| `DetachFromProperty` (isLastDetach) | Last reference to subject removed: all structural property entries cleaned |
+| `DetachFromContext` | Root subject removed: all structural property entries cleaned |
+| Parent-dead check in `WriteProperty` | Undo after attaching to a dead parent: single entry cleaned |
 
 ## The Parent-Dead Check
 
@@ -128,9 +128,9 @@ This catches the following race:
 2. Thread B: `next()` already wrote a new child to backing store (before Thread A's lock)
 3. Thread A: reads `_lastProcessedValues` (the old child), detaches it, releases lock
 4. Thread B: acquires lock, diffs, attaches new child, writes `_lastProcessedValues`
-5. Thread B: **parent-dead check** — parent not in `_attachedSubjects` → undo
+5. Thread B: **parent-dead check** finds the parent is not in `_attachedSubjects` → undo
 
-Without this check, the child would be attached to a dead parent and never cleaned up — a memory leak.
+Without this check, the child would be attached to a dead parent and never cleaned up, which is a memory leak.
 
 ## Concurrency Scenarios
 
@@ -174,14 +174,67 @@ Two locks exist in the lifecycle/registry system:
 
 Acquisition order is always: `_attachedSubjects` → `_knownSubjects`. The `SubjectRegistry` never calls back into `LifecycleInterceptor` while holding `_knownSubjects`. No deadlock is possible.
 
-The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled — this is a documented contract requirement.
+The `_attachedSubjects` lock is re-entrant (C# `Monitor`). `WriteProperty` may trigger lifecycle handlers that write to *other* properties, re-entering the lock. Each property has its own `_lastProcessedValues` entry, so there is no interference. Handlers must NOT write to the *same* property being reconciled. This is a documented contract requirement.
+
+## Handler Order Around the Descent
+
+`ContextInheritanceHandler` is the handler that walks down into a newly attached subtree. Where a handler sits relative to it decides both the order it sees subjects in and what it can look up.
+
+Take a subtree built first and attached in one assignment:
+
+```csharp
+var child = new Node();
+var middle = new Node { Child = child };
+var top = new Node { Child = middle };
+
+root.Child = top;   // attaches top, middle and child in one go
+```
+
+Measured callback order for that one assignment, which depends on the handler's position:
+
+| Handler position | Order it sees |
+|---|---|
+| Ahead of the descent (`[RunsBefore(typeof(ContextInheritanceHandler))]`) | `top`, `middle`, `child` |
+| Behind the descent | `child`, `middle`, `top` |
+| The subject's own `ILifecycleHandler` implementation | `child`, `middle`, `top` |
+
+A handler ahead of the descent runs for a subject before that subject's children are visited, so it goes top down. Everything else runs only once the subtree underneath has finished attaching, so it goes deepest first.
+
+`SubjectRegistry` sits ahead of the descent, so it has registered a subject before the descent reaches that subject's children. That holds at every level, which gives a guarantee independent of how the context was composed: **by the time any handler at or behind the registry runs for a subject, every one of its ancestors is already registered.** A handler ordered ahead of the registry is outside that guarantee, for the obvious reason that the registry has not run yet.
+
+```csharp
+public void HandleLifecycleChange(SubjectLifecycleChange change)
+{
+    if (!change.IsContextAttach) return;
+
+    // Called for "child": middle, top and root all resolve here.
+    foreach (var parent in change.Subject.GetParents())
+    {
+        var registered = parent.Property.Subject.TryGetRegisteredSubject();
+    }
+}
+```
+
+(`GetParents()` needs `WithParents()` on the context. Without it the same walk goes over `RegisteredSubject.Parents`, the registry's own parent edges.)
+
+Were the registry behind the descent, `child` would see only part of that chain and `TryGetRegisteredSubject()` would return null for the rest, so a walk would compute a wrong answer rather than fail. Derived getters are exposed to this too, because `DerivedPropertyChangeHandler` evaluates them while the property attaches.
+
+A handler that records something other handlers read during attach therefore has to say so with `[RunsBefore(typeof(ContextInheritanceHandler))]`. Registration order alone is not enough, because an unrelated handler's ordering constraint can move it. `[RunsAfter(typeof(SubjectRegistry))]` is not a substitute: it constrains the handler only against the registry, leaving its position relative to the descent dependent on where it was registered.
+
+`SubjectRegistry` and `ParentTrackingHandler` both carry it, and the registry is additionally ordered ahead of parent tracking. Neither reads the other, so that direction only fixes what a handler placed between them sees; without it, which of the two had already run would depend on how the context was composed. The pre-descent segment therefore resolves the same way for every composition: registry, then parent tracking, then the descent. A handler asking for the slot between the two, with `[RunsAfter(typeof(ParentTrackingHandler))]` and `[RunsBefore(typeof(SubjectRegistry))]` together, now closes a cycle and is rejected when the chain resolves.
+
+There is a second boundary inside attach that the handler ordering cannot cross. A subject's `ILifecycleHandler` chain runs to completion first, and only then do its properties attach, which is where `SubjectRegistry` invokes every `ISubjectPropertyInitializer`. So a lifecycle handler never sees properties an initializer adds to the same subject, at any ordering position. A handler that needs initializer output has to observe `IPropertyLifecycleHandler` instead, ordered with `[RunsAfter(typeof(SubjectRegistry))]` so it resolves behind the registry.
+
+Detach is not the mirror of attach. Below the root of the detached subtree, each ancestor is deregistered further up the descent before the callback reaches a descendant, so the walk stops at the first one and nothing above it is resolvable through the registry either, including ancestors outside the subtree that are still registered. `GetParents()` is not a substitute, because it yields at most the immediate parent there, and only for the subject's own handler or one ordered ahead of `ParentTrackingHandler`. A handler that needs ancestor state on detach has to capture it at attach.
+
+Pinned by `RegistryHandlerOrderTests`, and for the derived-getter path by `RegistryAncestorResolutionTests`. The initializer phase boundary above is measured but not pinned by a test.
 
 ## Invariants
 
 After all concurrent `WriteProperty` / `DetachFromProperty` / `AttachSubjectToContext` / `DetachSubjectFromContext` operations complete:
 
-1. **Reachable → Registered**: Every subject reachable from the root via the object graph is in `_attachedSubjects`
-2. **Not reachable → Not registered**: Every subject NOT reachable from the root is NOT in `_attachedSubjects`
+1. **Reachable → Registered**: Every subject reachable from the root through intercepted properties is in `_attachedSubjects`. Properties that are not intercepted, such as non-partial `[Derived]` getters, never attach the subjects they return, so they do not make a subject reachable.
+2. **Not reachable → Not registered**: Every subject NOT reachable from the root through intercepted properties is NOT in `_attachedSubjects`
 3. **`_lastProcessedValues` matches attachment state**: For every attached subject, `_lastProcessedValues` entries exist for all structural properties that have been written or seeded
 4. **No dangling entries**: No `_lastProcessedValues` entries exist for detached subjects
 

@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services.Tests.Models;
 
 namespace HomeBlaze.Services.Tests;
@@ -265,6 +266,27 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
 
         // Assert - InlinePaths are the same for both styles
         Assert.Equal("/Notes", path);
+    }
+
+    [Fact]
+    public void WhenSubjectHasMultipleParents_ThenShortestPathIsReturnedFirst()
+    {
+        // Arrange
+        var shared = new TestContainer(Context) { Name = "Shared" };
+        var intermediate = new TestContainer(Context) { Name = "Intermediate", Child = shared };
+        var root = new TestContainer(Context) { Name = "Root", Child = intermediate };
+        root.Children = new Dictionary<string, TestContainer> { ["Shortcut"] = shared };
+        RootManager.Root = root;
+
+        // Act
+        var firstPath = Resolver.GetPath(shared, PathStyle.Canonical);
+        var allPaths = Resolver.GetPaths(shared, PathStyle.Canonical);
+
+        // Assert
+        Assert.Equal(2, allPaths.Count);
+        Assert.Equal("/Children[Shortcut]", allPaths[0]);
+        Assert.Equal("/Child/Child", allPaths[1]);
+        Assert.Equal("/Children[Shortcut]", firstPath);
     }
 
     #endregion

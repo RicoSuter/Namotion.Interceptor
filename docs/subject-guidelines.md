@@ -62,7 +62,20 @@ team.Roles = new Dictionary<string, Person>(team.Roles) { ["leader"] = person };
 
 **Why?** Property interceptors hook into the setter. Collection mutations bypass the setter entirely.
 
-**Supported collections**: Arrays, `List<T>`, `Dictionary<K,V>`, `ICollection<T>`, `IReadOnlyCollection<T>` - all work when replaced entirely.
+All of the following work when replaced entirely (assigning a new value to the property):
+
+**Supported collection types:**
+- `T[]`
+- `List<T>`
+- `ICollection<T>` / `IReadOnlyCollection<T>` / `IReadOnlyList<T>`
+- `IEnumerable<T>`
+- `ImmutableArray<T>`
+- `ArrayList`
+
+**Supported dictionary types:**
+- `Dictionary<K, V>`
+- `IDictionary<K, V>` / `IReadOnlyDictionary<K, V>`
+- `Hashtable`
 
 ### Lifecycle Tracking for Nested Subjects
 
@@ -108,9 +121,9 @@ public Entity(IInterceptorSubjectContext context) : this() { /* setup */ }
 
 ## What Doesn't Work
 
-### Explicit Interface Implementation
+### Intercepted Explicit Interface Implementation
 
-C# doesn't allow `partial` on explicit interface implementations.
+C# does not allow `partial` on an explicit interface implementation (CS0754), so an explicitly implemented property can never be intercepted. Implement the interface implicitly instead:
 
 ```csharp
 public interface INamed { string Name { get; set; } }
@@ -118,26 +131,33 @@ public interface INamed { string Name { get; set; } }
 [InterceptorSubject]
 public partial class Entity : INamed
 {
-    // ❌ Won't compile
+    // ❌ Explicit implementations cannot be partial (CS0754)
     // partial string INamed.Name { get; set; }
-    
-    // ✅ Use implicit implementation
+
+    // ✅ Implicit implementation supports interception
     public partial string Name { get; set; }
+
+    public Entity() => Name = string.Empty;
 }
 ```
 
+A **non-partial** explicit implementation is supported and does appear in the subject's property metadata, keyed by the member's simple name, but it is not intercepted. Use it for values that are fixed or computed rather than tracked, and put attributes on the interface member rather than on the implementation. See [Interface Default Properties](generator.md#interface-default-properties) in the generator reference for that shape and the diagnostics around it.
+
 ### Abstract Properties
 
-Abstract properties can't be partial.
+A partial property cannot be `abstract` (CS0750). Declare it `virtual` on the base subject and `override` it below, as under [Virtual and Override](#virtual-and-override). See [Limitations](generator.md#limitations) in the generator reference.
 
 ```csharp
-public abstract class Base
+[InterceptorSubject]
+public abstract partial class Entity
 {
-    // ❌ Won't compile
+    // ❌ Abstract partial properties are not supported (CS0750)
     // public abstract partial string Name { get; set; }
-    
-    // ✅ Use virtual instead
+
+    // ✅ The generator supplies accessors that derived subjects can override
     public virtual partial string Name { get; set; }
+
+    public Entity() => Name = string.Empty;
 }
 ```
 
@@ -150,19 +170,26 @@ public abstract class Base
 public partial class Animal
 {
     public virtual partial string Name { get; set; }
+
+    public Animal() => Name = string.Empty;
 }
 
 [InterceptorSubject]
 public partial class Dog : Animal
 {
-    // Override to change accessor visibility
-    public override partial string Name { get; protected set; }
+    // ❌ Hiding an ancestor subject property creates a second slot (NI0065)
+    // public new partial string Name { get; set; }
+
+    // ✅ Override the existing property
+    public override partial string Name { get; set; }
 }
 ```
 
+`virtual` and `override` are the only way to re-declare a property an ancestor subject already exposes. Hiding it with `new` is rejected as NI0065, whether or not the new declaration is `partial`, because one metadata key cannot reach two backing fields. `new` and `sealed` are supported where the hidden member is not an ancestor subject's property, such as a property on a plain base class. See [New and Sealed Properties](generator.md#new-and-sealed-properties) and [Fixing NI0060, NI0061 and NI0065](generator.md#fixing-ni0060-ni0061-and-ni0065) in the generator reference for the broken shapes next to the ones that build.
+
 ### Interface Default Properties
 
-Interface default implementations are automatically included in property tracking. Mark computed properties with `[Derived]` for change notification:
+Interface default implementations are automatically included in property metadata. Mark a computed one with `[Derived]` on the interface member to enable dependency tracking when full property tracking is configured:
 
 ```csharp
 public interface ITemperatureSensor
@@ -177,11 +204,16 @@ public interface ITemperatureSensor
 public partial class Sensor : ITemperatureSensor
 {
     public partial double Celsius { get; set; }
-    // Fahrenheit is automatically tracked from the interface
+
+    public Sensor() => Celsius = 20;
 }
 ```
 
+With `WithFullPropertyTracking()`, changing `Celsius` also updates tracking for `Fahrenheit`. An adopted default is a fallback, so a property declared anywhere in a hierarchy beats it. See [Interface Default Properties](generator.md#interface-default-properties) for explicit implementations and attribute limitations, and [Property Precedence Across a Hierarchy](generator.md#property-precedence-across-a-hierarchy) for a three-level example.
+
 ### Required and Init
+
+`required` and `init` work on partial properties. Initialize an `init` property in the constructor or an object initializer. A `required` property must be supplied at the construction site:
 
 ```csharp
 [InterceptorSubject]
@@ -189,10 +221,23 @@ public partial class Config
 {
     public required partial string ConnectionString { get; set; }
     public partial string Environment { get; init; }
-    
-    public Config() { Environment = "Development"; }
+
+    public Config() => Environment = "Development";
 }
 ```
+
+```csharp
+// ❌ Missing required property (CS9035)
+// var config = new Config();
+
+// ✅ Supply the required value during construction
+var config = new Config { ConnectionString = "Server=localhost" };
+
+// ❌ An init-only property cannot be assigned after construction
+// config.Environment = "Production";
+```
+
+See [Init-Only and Required Properties](generator.md#init-only-and-required-properties) for use with the generated context constructor.
 
 ### Nullable Reference Types
 
@@ -270,6 +315,12 @@ public partial class Sensor
     }
 }
 ```
+
+## Base Classes and Subclasses
+
+A subject can derive from another subject: mark both classes `[InterceptorSubject]` and `partial`, and properties declared anywhere in the hierarchy are intercepted, so writing a base-declared property on a derived instance goes through the interceptor chain exactly like writing one the derived class declares. A plain class with no attribute may sit between two subjects, and a subject may be `sealed` at any level. See [Inheritance](generator.md#inheritance) in the generator reference.
+
+Writing either side of that relationship by hand is possible but demanding. It needs a contract this page does not cover; see [Hand-written base classes and subclasses](generator.md#hand-written-base-classes-and-subclasses) in the generator reference.
 
 ## Property Change Hooks
 
@@ -380,7 +431,7 @@ The event fires only when a property actually changes:
 2. **Initialize in constructors** - No field initializers on partial properties
 3. **Replace collections, don't mutate** - `arr = newArray`, not `arr[0] = x`
 4. **Use `[Derived]`** for computed properties
-5. **Explicit interfaces don't work** - Use implicit implementation
+5. **Explicit implementations are not intercepted** - Use implicit implementation for tracked writes
 6. **Abstract doesn't work** - Use `virtual` instead
 
 Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.

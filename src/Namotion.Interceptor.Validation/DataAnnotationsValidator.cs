@@ -7,16 +7,19 @@ public class DataAnnotationsValidator : IPropertyValidator
 {
     private static readonly ConcurrentDictionary<(Type SubjectType, string PropertyName), bool> RequiresValidationCache = new();
 
-    public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
+    public IEnumerable<ValidationResult> Validate<TProperty>(in PropertyValidationContext<TProperty> context)
     {
+        var property = context.Property;
+
         // Fast path: no validation attributes = no boxing, no allocation
         if (!CheckRequiresValidation(property))
         {
             return [];
         }
 
-        // Slow path: has attributes, must box for .NET Validator API
-        return ValidateCore(property, value);
+        // Slow path: has attributes, must box for .NET Validator API. Origin is ignored:
+        // data annotations validate the value regardless of where the write came from.
+        return ValidateCore(property, context.Value);
     }
 
     private static IEnumerable<ValidationResult> ValidateCore(PropertyReference property, object? value)

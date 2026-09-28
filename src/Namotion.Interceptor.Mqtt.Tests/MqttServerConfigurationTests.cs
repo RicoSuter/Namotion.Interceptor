@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry.Paths;
 using Xunit;
@@ -6,8 +8,8 @@ namespace Namotion.Interceptor.Mqtt.Tests;
 
 public class MqttServerConfigurationTests
 {
-    private static PathProviderBase CreateTestPathProvider() =>
-        new AttributeBasedPathProvider("test", '/');
+    private static IReversePropertyMapper<MqttPropertyMapping, MqttLookupKey> CreateTestMapper() =>
+        new MqttPathProviderMapper(new AttributeBasedPathProvider("test", '/'));
 
     [Fact]
     public void Validate_ValidConfiguration_DoesNotThrow()
@@ -16,7 +18,7 @@ public class MqttServerConfigurationTests
         var config = new MqttServerConfiguration
         {
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Act & Assert
@@ -31,7 +33,7 @@ public class MqttServerConfigurationTests
         {
             BrokerHost = "127.0.0.1",
             BrokerPort = 1883,
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Act & Assert
@@ -39,13 +41,13 @@ public class MqttServerConfigurationTests
     }
 
     [Fact]
-    public void Validate_NullPathProvider_ThrowsArgumentException()
+    public void Validate_NullMapper_ThrowsArgumentException()
     {
         // Arrange
         var config = new MqttServerConfiguration
         {
             BrokerPort = 1883,
-            PathProvider = null!
+            Mapper = null!
         };
 
         // Act & Assert
@@ -58,7 +60,7 @@ public class MqttServerConfigurationTests
         // Arrange & Act
         var config = new MqttServerConfiguration
         {
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
 
         // Assert
@@ -74,7 +76,7 @@ public class MqttServerConfigurationTests
         // Arrange
         var config = new MqttServerConfiguration
         {
-            PathProvider = CreateTestPathProvider()
+            Mapper = CreateTestMapper()
         };
         var timestamp = DateTimeOffset.UtcNow;
 

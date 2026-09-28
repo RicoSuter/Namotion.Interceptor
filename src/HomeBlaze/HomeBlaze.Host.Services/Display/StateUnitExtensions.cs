@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Registry.Abstractions;
+using HomeBlaze.Components.Abstractions.TimeZones;
 
 namespace HomeBlaze.Host.Services.Display;
 
@@ -17,7 +18,7 @@ public static class StateUnitExtensions
         [(StateUnit.WattHour, "Wh", 1m), (StateUnit.KilowattHour, "kWh", 1000m)],
         [(StateUnit.Millimeter, "mm", 1m), (StateUnit.Meter, "m", 1000m), (StateUnit.Kilometer, "km", 1_000_000m)],
         [(StateUnit.Milliampere, "mA", 1m), (StateUnit.Ampere, "A", 1000m)],
-        [(StateUnit.Kilobyte, "kB", 1m), (default, "MB", 1000m), (default, "GB", 1_000_000m)],
+        [(StateUnit.Byte, "B", 1m), (StateUnit.Kilobyte, "kB", 1000m), (default, "MB", 1_000_000m), (default, "GB", 1_000_000_000m)],
         [(StateUnit.KilobytePerSecond, "kB/s", 1m), (default, "MB/s", 1000m)],
     ];
 
@@ -45,7 +46,8 @@ public static class StateUnitExtensions
     /// <summary>
     /// Renders a property value with proper formatting including unit support.
     /// </summary>
-    public static string GetPropertyDisplayValue(this RegisteredSubjectProperty property, object? value)
+    public static string GetPropertyDisplayValue(
+        this RegisteredSubjectProperty property, object? value, ITimeZoneDisplay? timeZone = null)
     {
         if (value == null)
         {
@@ -67,7 +69,8 @@ public static class StateUnitExtensions
             // Percent and Currency use special formatting, not auto-scaling
             if (unit == StateUnit.Percent)
             {
-                return $"{(int)(Convert.ToDecimal(value) * 100m)}%";
+                var percent = Math.Round(Convert.ToDecimal(value) * 100m, 1);
+                return $"{percent.ToString("0.##", CultureInfo.InvariantCulture)}%";
             }
 
             if (unit == StateUnit.Currency)
@@ -96,8 +99,15 @@ public static class StateUnitExtensions
         return value switch
         {
             bool b => b ? "Yes" : "No",
-            DateTime dt => dt.ToString("g"),
-            DateTimeOffset dto => $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
+            double d => d.ToString("0.##", CultureInfo.InvariantCulture),
+            float f => f.ToString("0.##", CultureInfo.InvariantCulture),
+            decimal m => m.ToString("0.##", CultureInfo.InvariantCulture),
+            DateTime dt => timeZone is not null
+                ? timeZone.Format(dt)
+                : dt.ToString("g"),
+            DateTimeOffset dto => timeZone is not null
+                ? timeZone.Format(dto)
+                : $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
             IEnumerable<string> strings => string.Join("\n", strings),
             _ => value.ToString() ?? ""
@@ -135,7 +145,7 @@ public static class StateUnitExtensions
             return FormatDecimalValue(displayValue, bestEntry.Suffix);
         }
 
-        // No family found — use static suffix with space handling
+        // No family found: use static suffix with space handling
         var unitInfo = GetUnitInfo(unit);
         if (unitInfo != null)
         {
@@ -178,6 +188,7 @@ public static class StateUnitExtensions
         StateUnit.Meter => ("m", true),
         StateUnit.Millimeter => ("mm", true),
         StateUnit.MillimeterPerHour => ("mm/h", true),
+        StateUnit.Byte => ("B", true),
         StateUnit.Kilobyte => ("kB", true),
         StateUnit.KilobytePerSecond => ("kB/s", true),
         StateUnit.MegabitPerSecond => ("Mbit/s", true),
@@ -199,9 +210,9 @@ public static class StateUnitExtensions
     private static string FormatTimeSpan(TimeSpan ts)
     {
         return ts.TotalSeconds < 5
-            ? $"{ts.TotalMilliseconds} ms"
+            ? $"{ts.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture)} ms"
             : ts.TotalHours >= 1
-                ? $"{ts.TotalHours:F1} h"
-                : ts.ToString(@"hh\:mm\:ss");
+                ? $"{ts.TotalHours.ToString("0.#", CultureInfo.InvariantCulture)} h"
+                : ts.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
     }
 }

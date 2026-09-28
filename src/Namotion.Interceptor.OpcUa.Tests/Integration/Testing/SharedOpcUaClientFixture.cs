@@ -1,5 +1,3 @@
-using Xunit;
-
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 /// <summary>

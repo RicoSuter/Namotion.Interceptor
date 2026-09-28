@@ -5,13 +5,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
+using System.Text;
 using Namotion.Interceptor.Registry.Attributes;
+using Opc.Ua;
 
 namespace HomeBlaze.OpcUa;
 
@@ -25,7 +25,6 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
 {
     private readonly ILogger<OpcUaClient> _logger;
     private IOpcUaSubjectClientSource? _clientSource;
-    private SubjectSourceBackgroundService? _sourceService;
 
     // Configuration properties
 
@@ -42,10 +41,29 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string ServerUrl { get; set; }
 
     /// <summary>
-    /// Optional OPC UA root node name to start browsing from under the Objects folder.
+    /// Optional root path to start browsing from under the Objects folder (use / as delimiter, e.g. "Machines/MyMachine").
     /// </summary>
     [Configuration]
-    public partial string? RootName { get; set; }
+    public partial string? RootPath { get; set; }
+
+    /// <summary>
+    /// Optional username for OPC UA server authentication. When empty, anonymous authentication is used.
+    /// </summary>
+    [Configuration]
+    public partial string? Username { get; set; }
+
+    /// <summary>
+    /// Optional password for OPC UA server authentication.
+    /// </summary>
+    [Configuration(IsSecret = true)]
+    public partial string? Password { get; set; }
+
+    /// <summary>
+    /// Default sampling interval in milliseconds for monitored items.
+    /// Null uses the server default. 0 enables exception-based monitoring (immediate reporting).
+    /// </summary>
+    [Configuration]
+    public partial int? SamplingInterval { get; set; }
 
     /// <summary>
     /// Whether the client is enabled and should auto-start on application startup.
@@ -69,7 +87,8 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string? StatusMessage { get; set; }
 
     /// <summary>
-    /// Whether the client is currently connected. Null when not running.
+    /// Whether the client is currently connected. Null when not running or before the client has
+    /// reported its liveness.
     /// </summary>
     [State]
     public partial bool? IsConnected { get; set; }
@@ -85,6 +104,30 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// </summary>
     [State]
     public partial double? OutgoingChangesPerSecond { get; set; }
+
+    /// <summary>
+    /// Number of monitored items in the client. Null when not running.
+    /// </summary>
+    [State]
+    public partial double? MonitoredItemCount { get; set; }
+
+    /// <summary>
+    /// Number of items using polling fallback. Null when not running.
+    /// </summary>
+    [State]
+    public partial int? PollingItemCount { get; set; }
+
+    /// <summary>
+    /// Number of writes queued for retry during disconnection. Null when not running.
+    /// </summary>
+    [State]
+    public partial int? PendingWriteCount { get; set; }
+
+    /// <summary>
+    /// Total number of reconnections since start. Null when not running.
+    /// </summary>
+    [State(IsCumulative = true)]
+    public partial long? TotalReconnections { get; set; }
 
     /// <summary>
     /// Dynamic root subject containing discovered OPC UA properties.
@@ -147,21 +190,15 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (IsEnabled)
         {
             await StartClientAsync(stoppingToken);
+            UpdateDiagnostics();
         }
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (_clientSource is { } source)
-                {
-                    var diagnostics = source.Diagnostics;
-                    IsConnected = diagnostics.IsConnected;
-                    IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
-                    OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                UpdateDiagnostics();
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -175,6 +212,21 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     {
         await StopClientAsync(cancellationToken);
         await StartClientAsync(cancellationToken);
+    }
+
+    private void UpdateDiagnostics()
+    {
+        if (_clientSource is { } source)
+        {
+            var diagnostics = source.Diagnostics;
+            IsConnected = diagnostics.IsOperational;
+            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+            MonitoredItemCount = diagnostics.MonitoredItemCount;
+            PollingItemCount = diagnostics.Polling?.ItemCount ?? 0;
+            PendingWriteCount = diagnostics.OutboundRetries.Depth;
+            TotalReconnections = diagnostics.Reconnects.TotalAttempts;
+        }
     }
 
     private async Task StartClientAsync(CancellationToken cancellationToken)
@@ -191,29 +243,25 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 return;
             }
 
-            var root = new DynamicSubject(((IInterceptorSubject)this).Context);
+            var rootPathSegments = RootPath?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var root = new OpcUaDynamicSubject(rootPathSegments is { Length: > 0 } ? rootPathSegments[^1] : "Root");
             Root = root;
 
             var configuration = new OpcUaClientConfiguration
             {
                 ServerUrl = ServerUrl,
-                RootName = RootName,
+                RootPath = rootPathSegments,
+                DefaultSamplingInterval = SamplingInterval,
                 TypeResolver = new HomeBlazeOpcUaTypeResolver(_logger),
                 ValueConverter = new OpcUaValueConverter(),
-                SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+                SubjectFactory = new HomeBlazeOpcUaSubjectFactory(),
+                CreateUserIdentity = !string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(Password)
+                    ? _ => Task.FromResult(new UserIdentity(Username, Encoding.UTF8.GetBytes(Password)))
+                    : null,
             };
 
             _clientSource = root.CreateOpcUaClientSource(configuration, _logger);
-            _sourceService = new SubjectSourceBackgroundService(
-                (ISubjectSource)_clientSource,
-                ((IInterceptorSubject)root).Context,
-                _logger,
-                configuration.BufferTime,
-                configuration.RetryTime,
-                configuration.WriteRetryQueueSize);
-
             await this.AttachHostedServiceAsync(_clientSource, cancellationToken);
-            await this.AttachHostedServiceAsync(_sourceService, cancellationToken);
 
             Status = ServiceStatus.Running;
             _logger.LogInformation("OPC UA client started for server: {ServerUrl}", ServerUrl);
@@ -230,14 +278,11 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     {
         if (_clientSource != null)
         {
+            var clientSource = _clientSource;
             try
             {
                 Status = ServiceStatus.Stopping;
-                if (_sourceService != null)
-                {
-                    await this.DetachHostedServiceAsync(_sourceService, cancellationToken);
-                }
-                await this.DetachHostedServiceAsync(_clientSource, cancellationToken);
+                await this.DetachHostedServiceAsync(clientSource, cancellationToken);
                 _logger.LogInformation("OPC UA client stopped");
             }
             catch (Exception ex)
@@ -246,11 +291,30 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             }
             finally
             {
+                // Detaching only stops the hosted service; the source also owns a lifecycle
+                // subscription and a SemaphoreSlim that are released only on dispose. Without
+                // this, every start/stop cycle leaks one of each (a new source is created on
+                // each StartClientAsync).
+                if (clientSource is IAsyncDisposable disposable)
+                {
+                    try
+                    {
+                        await disposable.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to dispose OPC UA client source");
+                    }
+                }
+
                 _clientSource = null;
-                _sourceService = null;
                 Root = null;
                 Status = ServiceStatus.Stopped;
                 IsConnected = null;
+                MonitoredItemCount = null;
+                PollingItemCount = null;
+                PendingWriteCount = null;
+                TotalReconnections = null;
                 IncomingChangesPerSecond = null;
                 OutgoingChangesPerSecond = null;
             }

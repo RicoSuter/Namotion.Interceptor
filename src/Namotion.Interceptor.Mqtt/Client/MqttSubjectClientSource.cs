@@ -5,16 +5,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Connectors.Paths;
+using Namotion.Interceptor.Mqtt.Mapping;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking.Performance;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Mqtt.Client;
@@ -22,7 +20,7 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// <summary>
 /// MQTT client source that subscribes to an MQTT broker and synchronizes properties.
 /// </summary>
-internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IFaultInjectable, IAsyncDisposable
+internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
     // Pool for UserProperties lists to avoid allocations on hot path
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
@@ -35,35 +33,47 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private readonly MqttClientFactory _factory;
 
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
-    private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
+    private readonly ConcurrentDictionary<PropertyReference, (string? Topic, MqttPropertyMapping? Mapping)> _propertyToTopic = new();
 
     private readonly SourceOwnershipManager _ownership;
 
-    private IMqttClient? _client;
-    private SubjectPropertyWriter? _propertyWriter;
-    private MqttConnectionMonitor? _connectionMonitor;
+    // Publishes and retires the client/ownership pair atomically. Never held across an await or a
+    // property commit, so user interceptors cannot participate in this lock order.
+    private readonly Lock _transportPublicationLock = new();
+
+    private volatile IMqttClient? _client;
+    private volatile ConnectorCommitLease? _transportOwnership;
+    private volatile Func<MqttApplicationMessageReceivedEventArgs, Task>? _applicationMessageHandler;
+    private volatile SubjectPropertyWriter? _propertyWriter;
+    private volatile MqttConnectionMonitor? _connectionMonitor;
 
     private int _disposed;
-    private volatile bool _isStarted;
-    private volatile bool _isForceKill;
-    private volatile CancellationTokenSource? _forceKillCts;
 
     public MqttSubjectClientSource(
         IInterceptorSubject subject,
         MqttClientConfiguration configuration,
         ILogger<MqttSubjectClientSource> logger)
+        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
-        _subject = subject ?? throw new ArgumentNullException(nameof(subject));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _subject = subject;
+        _configuration = configuration;
+        _logger = logger;
 
         _factory = new MqttClientFactory();
         _ownership = new SourceOwnershipManager(
             this,
             onSubjectDetaching: CleanupTopicCachesForSubject);
 
+        Metrics.RegisterClaimedProperties(() => _ownership.Count);
+
         configuration.Validate();
     }
+
+    internal SourceOwnershipManager Ownership => _ownership;
 
     private void CleanupTopicCachesForSubject(IInterceptorSubject subject)
     {
@@ -88,57 +98,297 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     }
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
-    public int WriteBatchSize => 0; // No server-imposed limit for MQTT
+    public override int WriteBatchSize => 0; // No server-imposed limit for MQTT
 
     /// <inheritdoc />
-    public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         _propertyWriter = propertyWriter;
-        _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
 
-        _client = _factory.CreateMqttClient();
-        _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
-        _client.DisconnectedAsync += OnDisconnectedAsync;
-
-        await _client.ConnectAsync(GetClientOptions(), cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("Connected to MQTT broker successfully.");
-
-        await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
-
-        _connectionMonitor = new MqttConnectionMonitor(
-            _client,
-            _configuration,
-            GetClientOptions,
-            async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
-            () =>
-            {
-                _propertyWriter?.StartBuffering();
-                return Task.CompletedTask;
-            }, _logger);
-
-        _isStarted = true;
-
-        return new MqttConnectionLifetime(async () =>
+        IMqttClient? client = null;
+        MqttConnectionMonitor? connectionMonitor = null;
+        Func<MqttApplicationMessageReceivedEventArgs, Task>? applicationMessageHandler = null;
+        ConnectorCommitLease? transportOwnership = null;
+        try
         {
-            if (_client?.IsConnected == true)
+            (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
+                await CreateMqttConnectionAsync(cancellationToken).ConfigureAwait(false);
+            Metrics.MarkOperational();
+            await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
+
+            var clientForLifetime = client;
+            var monitorForLifetime = connectionMonitor;
+            var applicationMessageHandlerForLifetime = applicationMessageHandler;
+            var transportOwnershipForLifetime = transportOwnership;
+            return BackgroundTaskLifetime.Start(
+                cancellationToken,
+                _logger,
+                ct => RunMonitorWithKillRestartAsync(
+                    clientForLifetime,
+                    monitorForLifetime,
+                    applicationMessageHandlerForLifetime,
+                    transportOwnershipForLifetime,
+                    ct),
+                () => DisposeMqttConnectionAsync(
+                    _client,
+                    _connectionMonitor,
+                    _applicationMessageHandler,
+                    _transportOwnership,
+                    clearPropertyWriter: true));
+        }
+        catch
+        {
+            await DisposeMqttConnectionAsync(
+                client,
+                connectionMonitor,
+                applicationMessageHandler,
+                transportOwnership,
+                clearPropertyWriter: true).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task<(
+        IMqttClient Client,
+        MqttConnectionMonitor Monitor,
+        Func<MqttApplicationMessageReceivedEventArgs, Task> ApplicationMessageHandler,
+        ConnectorCommitLease TransportOwnership)> CreateMqttConnectionAsync(
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Connecting to MQTT broker at {Host}:{Port}.",
+            _configuration.BrokerHost,
+            _configuration.BrokerPort);
+
+        IMqttClient? client = null;
+        Func<MqttApplicationMessageReceivedEventArgs, Task>? applicationMessageHandler = null;
+        ConnectorCommitLease? transportOwnership = null;
+        try
+        {
+            client = _factory.CreateMqttClient();
+            transportOwnership = new ConnectorCommitLease();
+            applicationMessageHandler = e => OnMessageReceivedAsync(client, transportOwnership, e);
+            client.ApplicationMessageReceivedAsync += applicationMessageHandler;
+            client.DisconnectedAsync += OnDisconnectedAsync;
+
+            lock (_transportPublicationLock)
             {
-                await _client.DisconnectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                _client = client;
+                _transportOwnership = transportOwnership;
+                _applicationMessageHandler = applicationMessageHandler;
             }
-        });
+
+            await client.ConnectAsync(GetClientOptions(), cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Connected to MQTT broker successfully.");
+
+            var connectionMonitor = new MqttConnectionMonitor(
+                client,
+                _configuration,
+                GetClientOptions,
+                async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
+                () =>
+                {
+                    Metrics.MarkNotOperational();
+                    _propertyWriter?.StartBuffering();
+                    return Task.CompletedTask;
+                },
+                Metrics.ReportError,
+                _logger);
+            _connectionMonitor = connectionMonitor;
+            return (client, connectionMonitor, applicationMessageHandler, transportOwnership);
+        }
+        catch
+        {
+            await DisposeMqttConnectionAsync(
+                client,
+                connectionMonitor: null,
+                applicationMessageHandler,
+                transportOwnership,
+                clearPropertyWriter: false)
+                .ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task RunMonitorWithKillRestartAsync(
+        IMqttClient initialClient,
+        MqttConnectionMonitor initialConnectionMonitor,
+        Func<MqttApplicationMessageReceivedEventArgs, Task> initialApplicationMessageHandler,
+        ConnectorCommitLease initialTransportOwnership,
+        CancellationToken stoppingToken)
+    {
+        // stoppingToken (from the lifetime) breaks out for good on host shutdown
+        // or when the listen lifetime is disposed by the base retry path.
+        var client = initialClient;
+        var connectionMonitor = initialConnectionMonitor;
+        var applicationMessageHandler = initialApplicationMessageHandler;
+        var transportOwnership = initialTransportOwnership;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var wasForceKilled = false;
+
+            await RunAttemptAsync(stoppingToken, async attempt =>
+            {
+                try
+                {
+                    await connectionMonitor.MonitorConnectionAsync(attempt.Token).ConfigureAwait(false);
+                    wasForceKilled = attempt.WasForceKilled;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                }
+                catch (OperationCanceledException) when (attempt.WasForceKilled)
+                {
+                    wasForceKilled = true;
+                }
+            }).ConfigureAwait(false);
+
+            if (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            if (!wasForceKilled)
+            {
+                continue;
+            }
+
+            _logger.LogWarning("MQTT client force-killed. Replacing the transport connection...");
+            Metrics.MarkNotOperational();
+            _propertyWriter?.StartBuffering();
+            await DisposeMqttConnectionAsync(
+                client,
+                connectionMonitor,
+                applicationMessageHandler,
+                transportOwnership,
+                clearPropertyWriter: false)
+                .ConfigureAwait(false);
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(_configuration.ReconnectDelay, stoppingToken).ConfigureAwait(false);
+                    (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
+                        await CreateMqttConnectionAsync(stoppingToken).ConfigureAwait(false);
+                    await SubscribeToPropertiesAsync(stoppingToken).ConfigureAwait(false);
+
+                    if (_propertyWriter is not null)
+                    {
+                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                    }
+
+                    Metrics.MarkOperational();
+                    break;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    Metrics.ReportError(exception);
+                    _logger.LogError(exception, "Failed to replace the force-killed MQTT client connection.");
+                    await DisposeMqttConnectionAsync(
+                        _client,
+                        _connectionMonitor,
+                        _applicationMessageHandler,
+                        _transportOwnership,
+                        clearPropertyWriter: false)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    private async ValueTask DisposeMqttConnectionAsync(
+        IMqttClient? client,
+        MqttConnectionMonitor? connectionMonitor,
+        Func<MqttApplicationMessageReceivedEventArgs, Task>? applicationMessageHandler,
+        ConnectorCommitLease? transportOwnership,
+        bool clearPropertyWriter)
+    {
+        // The disconnect below cannot report this: the event handler is detached first, so
+        // OnDisconnectedAsync never runs for a teardown.
+        Metrics.MarkNotOperational();
+
+        Task retirementTask;
+        lock (_transportPublicationLock)
+        {
+            // Mark retirement before clearing the published identity. A final writer action either
+            // acquired the lease first (and this teardown waits for it) or is rejected from now on.
+            retirementTask = transportOwnership?.RetireAsync() ?? Task.CompletedTask;
+            if (ReferenceEquals(_client, client) &&
+                ReferenceEquals(_transportOwnership, transportOwnership))
+            {
+                _client = null;
+                _transportOwnership = null;
+
+                if (ReferenceEquals(_applicationMessageHandler, applicationMessageHandler))
+                {
+                    _applicationMessageHandler = null;
+                }
+            }
+        }
+
+        if (client is not null)
+        {
+            if (applicationMessageHandler is not null)
+            {
+                client.ApplicationMessageReceivedAsync -= applicationMessageHandler;
+            }
+            client.DisconnectedAsync -= OnDisconnectedAsync;
+        }
+
+        if (connectionMonitor is not null)
+        {
+            try { await connectionMonitor.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "MQTT connection monitor threw during disposal."); }
+        }
+
+        await retirementTask.ConfigureAwait(false);
+        if (transportOwnership is not null)
+        {
+            AfterTransportCommitDrain?.Invoke();
+        }
+
+        if (client is not null)
+        {
+            try
+            {
+                if (client.IsConnected)
+                {
+                    await client.DisconnectAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting MQTT client during disposal."); }
+
+            try { client.Dispose(); } catch { /* ignore */ }
+        }
+
+        if (ReferenceEquals(_connectionMonitor, connectionMonitor))
+        {
+            _connectionMonitor = null;
+        }
+
+        if (clearPropertyWriter)
+        {
+            _propertyWriter = null;
+        }
     }
 
     /// <inheritdoc />
-    public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         // Retained messages are received through the normal message handler: No separate initial load needed/possible
         return Task.FromResult<Action?>(null);
     }
 
     /// <inheritdoc />
-    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {
@@ -176,7 +426,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                         continue;
                     }
 
-                    var topic = TryGetTopicForProperty(change.Property, property);
+                    var (topic, mapping) = TryGetTopicForProperty(change.Property, property);
                     if (topic is null) continue;
 
                     byte[] payload;
@@ -196,8 +446,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     {
                         Topic = topic,
                         PayloadSegment = new ArraySegment<byte>(payload),
-                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                        Retain = _configuration.UseRetainedMessages
+                        QualityOfServiceLevel = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService,
+                        Retain = mapping?.Retain ?? _configuration.UseRetainedMessages
                     };
 
                     if (userPropertiesArray is not null)
@@ -300,7 +550,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
+            .Where(p => !p.CanContainSubjects && _configuration.Mapper.TryGetMapping(p, _subject, out _))
             .ToList();
 
         if (properties.Count == 0)
@@ -313,7 +563,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         foreach (var property in properties)
         {
-            var topic = TryGetTopicForProperty(property.Reference, property);
+            var (topic, mapping) = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
 
             if (!_ownership.ClaimSource(property.Reference))
@@ -325,9 +575,10 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             }
 
             _topicToProperty[topic] = property.Reference;
+            var qos = mapping?.QualityOfService ?? _configuration.DefaultQualityOfService;
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
-                .WithQualityOfServiceLevel(_configuration.DefaultQualityOfService));
+                .WithQualityOfServiceLevel(qos));
         }
 
         await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
@@ -335,30 +586,33 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
     }
 
-    private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
+    internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
     {
-        if (_propertyToTopic.TryGetValue(propertyReference, out var cachedTopic))
+        if (_propertyToTopic.TryGetValue(propertyReference, out var cached))
         {
-            return cachedTopic;
+            return cached;
         }
 
-        var path = property.TryGetPath(_configuration.PathProvider, _subject);
-        var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+        string? topic = null;
+        MqttPropertyMapping? resolvedMapping = null;
+        if (_configuration.Mapper.TryGetMapping(property, _subject, out var mapping) && mapping.Topic is not null)
+        {
+            topic = MqttHelper.BuildTopic(mapping.Topic, _configuration.TopicPrefix);
+            resolvedMapping = mapping;
+        }
+
+        var entry = (topic, resolvedMapping);
 
         // Add first, then validate (guarantees no memory leak)
-        if (_propertyToTopic.TryAdd(propertyReference, topic))
+        if (_propertyToTopic.TryAdd(propertyReference, entry) && !IsRetainable(propertyReference.Subject))
         {
-            var registeredSubject = propertyReference.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
-            {
-                _propertyToTopic.TryRemove(propertyReference, out _);
-            }
+            _propertyToTopic.TryRemove(propertyReference, out _);
         }
 
-        return topic;
+        return entry;
     }
 
-    private PropertyReference? TryGetPropertyForTopic(string topic)
+    internal async ValueTask<PropertyReference?> TryGetPropertyForTopicAsync(string topic)
     {
         if (_topicToProperty.TryGetValue(topic, out var cachedProperty))
         {
@@ -366,111 +620,114 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
-        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
+        var registered = _subject.TryGetRegisteredSubject();
+        var property = registered is null
+            ? null
+            : await _configuration.Mapper.TryGetPropertyAsync(new MqttLookupKey(path), registered, CancellationToken.None).ConfigureAwait(false);
         var propertyReference = property?.Reference;
 
-        // Add first, then validate (guarantees no memory leak)
-        if (_topicToProperty.TryAdd(topic, propertyReference))
+        // A missing path can become reachable after a structural change; only cache resolved properties.
+        if (propertyReference is { } resolvedProperty &&
+            _topicToProperty.TryAdd(topic, propertyReference) &&
+            !IsRetainable(resolvedProperty.Subject))
         {
-            if (propertyReference is { } propRef)
-            {
-                var registeredSubject = propRef.Subject.TryGetRegisteredSubject();
-                if (registeredSubject is null || registeredSubject.ReferenceCount <= 0)
-                {
-                    _topicToProperty.TryRemove(topic, out _);
-                }
-            }
+            _topicToProperty.TryRemove(topic, out _);
         }
 
         return propertyReference;
     }
 
-    private Task OnMessageReceivedAsync(MqttApplicationMessageReceivedEventArgs e)
+    /// <summary>
+    /// Whether a cache entry for a property of <paramref name="subject"/> may stay. The reference count
+    /// drops before LifecycleInterceptor.SubjectDetaching fires, where the eviction scan runs, and the registry
+    /// deregisters only after that. Only the count catches a lookup that inserts in between. The connector root is
+    /// exempt: it is anchored to the context rather than to a property, so its count is zero for its whole life.
+    /// </summary>
+    private bool IsRetainable(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        return registeredSubject is not null &&
+            (registeredSubject.ReferenceCount > 0 || ReferenceEquals(subject, _subject));
+    }
+
+    private async Task OnMessageReceivedAsync(
+        IMqttClient client,
+        ConnectorCommitLease transportOwnership,
+        MqttApplicationMessageReceivedEventArgs e)
     {
         var topic = e.ApplicationMessage.Topic;
-        if (TryGetPropertyForTopic(topic) is not { } propertyReference)
-        {
-            return Task.CompletedTask;
-        }
 
-        var registeredProperty = propertyReference.TryGetRegisteredProperty();
-        if (registeredProperty is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        object? value;
+        // Isolate per-message failures: a bad message must not escape into the MQTT receive loop and tear
+        // down the subscription. No cancellation token flows in, so every failure is logged and skipped.
         try
         {
-            var payload = e.ApplicationMessage.Payload;
-            value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            if (await TryGetPropertyForTopicAsync(topic).ConfigureAwait(false) is not { } propertyReference)
+            {
+                return;
+            }
+
+            var registeredProperty = propertyReference.TryGetRegisteredProperty();
+            if (registeredProperty is null)
+            {
+                return;
+            }
+
+            object? value;
+            try
+            {
+                var payload = e.ApplicationMessage.Payload;
+                value = _configuration.ValueConverter.Deserialize(payload, registeredProperty.Type);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize MQTT message for topic {Topic}.", topic);
+                return;
+            }
+
+            var propertyWriter = _propertyWriter;
+            if (propertyWriter is null)
+            {
+                return;
+            }
+
+            // Extract timestamps
+            var receivedTimestamp = DateTimeOffset.UtcNow;
+            var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
+                e.ApplicationMessage.UserProperties,
+                _configuration.SourceTimestampPropertyName,
+                _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
+
+            // Static delegate and value-tuple state keep the message hot path allocation-free. The
+            // lease lock is not held while SetValueFromSource invokes interceptors or user code.
+            propertyWriter.Write(
+                (propertyReference, value, source: this, client, transportOwnership, sourceTimestamp, receivedTimestamp),
+                static state =>
+                {
+                    if (!state.transportOwnership.TryAcquireCommit())
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        if (ReferenceEquals(state.source._client, state.client))
+                        {
+                            state.propertyReference.SetValueFromSource(
+                                state.source,
+                                state.sourceTimestamp,
+                                state.receivedTimestamp,
+                                state.value);
+                        }
+                    }
+                    finally
+                    {
+                        state.transportOwnership.ReleaseCommit();
+                    }
+                });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to deserialize MQTT message for topic {Topic}.", topic);
-            return Task.CompletedTask;
-        }
-
-        var propertyWriter = _propertyWriter;
-        if (propertyWriter is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        // Extract timestamps
-        var receivedTimestamp = DateTimeOffset.UtcNow;
-        var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
-            e.ApplicationMessage.UserProperties,
-            _configuration.SourceTimestampPropertyName,
-            _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
-
-        // Use static delegate to avoid allocations on hot path
-        propertyWriter.Write(
-            (propertyReference, value, this, sourceTimestamp, receivedTimestamp),
-            static state => state.propertyReference.SetValueFromSource(state.Item3, state.sourceTimestamp, state.receivedTimestamp, state.value));
-
-        return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Wait until StartListeningAsync has been called
-        while (!_isStarted && !stoppingToken.IsCancellationRequested)
-        {
-            await Task.Delay(100, stoppingToken).ConfigureAwait(false);
-        }
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            _forceKillCts = cts;
-            var linkedToken = cts.Token;
-
-            try
-            {
-                if (_connectionMonitor is not null)
-                {
-                    await _connectionMonitor.MonitorConnectionAsync(linkedToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    break;
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (OperationCanceledException) when (_isForceKill)
-            {
-                _logger.LogWarning("MQTT client force-killed. Restarting...");
-            }
-            finally
-            {
-                _isForceKill = false;
-                cts.Dispose();
-            }
+            _logger.LogError(ex, "Failed to handle MQTT message for topic {Topic}.", topic);
         }
     }
 
@@ -482,6 +739,9 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
 
         _logger.LogWarning(e.Exception, "MQTT client disconnected. Reason: {Reason}.", e.Reason);
+
+        // The callback can arrive after the monitor has already reconnected this client. Let the
+        // monitor confirm the loss before it marks the source down and starts buffering.
         _connectionMonitor?.SignalReconnectNeeded();
 
         return Task.CompletedTask;
@@ -494,6 +754,10 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         {
             await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        // Last, because the connection monitor treats a throw from anywhere above as a failed
+        // reconnect: a client that could not resubscribe is not serving anything.
+        Metrics.MarkOperational();
     }
 
     /// <inheritdoc />
@@ -502,9 +766,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         switch (faultType)
         {
             case FaultType.Kill:
-                _isForceKill = true;
-                try { _forceKillCts?.Cancel(); }
-                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                await ForceKillCurrentAttemptAsync().ConfigureAwait(false);
                 break;
 
             case FaultType.Disconnect:
@@ -553,32 +815,14 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        if (_connectionMonitor is not null)
-        {
-            await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
-        }
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
 
-        var client = _client;
-        if (client is not null)
-        {
-            client.ApplicationMessageReceivedAsync -= OnMessageReceivedAsync;
-            client.DisconnectedAsync -= OnDisconnectedAsync;
-
-            if (client.IsConnected)
-            {
-                try
-                {
-                    await client.DisconnectAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error disconnecting MQTT client.");
-                }
-            }
-
-            client.Dispose();
-            _client = null;
-        }
+        await DisposeMqttConnectionAsync(
+            _client,
+            _connectionMonitor,
+            _applicationMessageHandler,
+            _transportOwnership,
+            clearPropertyWriter: true).ConfigureAwait(false);
 
         _ownership.Dispose();
         _topicToProperty.Clear();
@@ -586,4 +830,9 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         Dispose();
     }
+
+    // Test seam for an interleaving with no externally observable synchronization point: the instant
+    // the commit drain releases a teardown. Always null in production; the tests sample ordering
+    // from it.
+    internal Action? AfterTransportCommitDrain { get; set; }
 }

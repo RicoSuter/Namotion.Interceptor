@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors.Mapping;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -8,9 +9,10 @@ namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
-    private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
-        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
-        new AttributeOpcUaNodeMapper());
+    private static readonly IPropertyMapper<OpcUaPropertyMapping> DefaultMapper =
+        new OpcUaCompositeMapper(
+            new OpcUaPathProviderMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
+            new OpcUaAttributeMapper(OpcUaConstants.DefaultConnectorName));
 
     /// <summary>
     /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.
@@ -34,13 +36,13 @@ public class OpcUaServerConfiguration
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; set; }
+    public OpcUaValueConverter ValueConverter { get; set; } = new();
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.
-    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
+    /// Defaults to composite of OpcUaPathProviderMapper and OpcUaAttributeMapper, both filtered by the "opc" connector name.
     /// </summary>
-    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
+    public IPropertyMapper<OpcUaPropertyMapping> Mapper { get; set; } = DefaultMapper;
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the
@@ -60,11 +62,11 @@ public class OpcUaServerConfiguration
     public string BaseAddress { get; set; } = "opc.tcp://localhost:4840/";
 
     /// <summary>
-    /// Gets or sets the telemetry context for OPC UA operations.
-    /// Defaults to NullTelemetryContext for minimal overhead.
-    /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
+    /// Gets or sets the telemetry context for OPC UA operations. When null and the connector is registered
+    /// through the AddOpcUaSubject* DI extensions, it is filled with a DI-backed telemetry context; otherwise it
+    /// falls back to NullTelemetryContext. Set a value (including NullTelemetryContext.Instance) to keep your own.
     /// </summary>
-    public ITelemetryContext TelemetryContext { get; set; } = NullTelemetryContext.Instance;
+    public ITelemetryContext? TelemetryContext { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether to automatically accept untrusted certificates.
@@ -80,13 +82,18 @@ public class OpcUaServerConfiguration
     public string CertificateStoreBasePath { get; set; } = "pki";
 
     /// <summary>
+    /// The telemetry context to use for SDK calls, never null (falls back to the no-op context when unset).
+    /// </summary>
+    public ITelemetryContext ResolvedTelemetryContext => TelemetryContext ?? NullTelemetryContext.Instance;
+
+    /// <summary>
     /// Creates and configures an OPC UA application instance for the server.
     /// Override this method to customize application configuration, security settings, or certificate handling.
     /// </summary>
     /// <returns>A configured <see cref="ApplicationInstance"/> ready for hosting an OPC UA server.</returns>
     public virtual async Task<ApplicationInstance> CreateApplicationInstanceAsync()
     {
-        var application = new ApplicationInstance(TelemetryContext)
+        var application = new ApplicationInstance(ResolvedTelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server
@@ -198,7 +205,7 @@ public class OpcUaServerConfiguration
                 OutputFilePath = "Logs/OpcUaServer.log",
                 DeleteOnLoad = true
             },
-            CertificateValidator = new CertificateValidator(TelemetryContext)
+            CertificateValidator = new CertificateValidator(ResolvedTelemetryContext)
         };
 
         // Register the certificate validator with the configuration.

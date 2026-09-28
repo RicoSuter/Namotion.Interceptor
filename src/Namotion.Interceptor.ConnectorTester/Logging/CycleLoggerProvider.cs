@@ -1,12 +1,13 @@
 using System.Collections.Concurrent;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 namespace Namotion.Interceptor.ConnectorTester.Logging;
 
 /// <summary>
 /// Logger provider that writes to both console and per-cycle log files.
-/// The verification engine signals cycle boundaries via StartNewCycle/FinishCycle.
+/// The verification engine signals cycle boundaries via StartCycle/FinishCycle.
 /// </summary>
-public sealed class CycleLoggerProvider : ILoggerProvider
+public sealed class CycleLoggerProvider : ILoggerProvider, ICycleRecorder
 {
     private const int MaxPassingLogFiles = 50;
 
@@ -24,7 +25,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         Directory.CreateDirectory(_logDirectory);
     }
 
-    public void StartNewCycle(int cycleNumber)
+    public void StartCycle(int cycleNumber)
     {
         lock (_fileLock)
         {
@@ -32,9 +33,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentWriter?.Dispose();
 
             _currentCycle = cycleNumber;
-            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ss");
             _currentFilePath = Path.Combine(_logDirectory,
-                $"cycle-{cycleNumber:D4}-pending-{timestamp}.log");
+                $"cycle-{cycleNumber:D4}-pending.log");
 
             _currentWriter = new StreamWriter(_currentFilePath, append: false)
             {
@@ -43,7 +43,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         }
     }
 
-    public void FinishCycle(int cycleNumber, bool passed)
+    public void FinishCycle(int cycleNumber, CycleResult result)
     {
         lock (_fileLock)
         {
@@ -54,9 +54,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentWriter.Dispose();
             _currentWriter = null;
 
-            // Rename file with result
-            var result = passed ? "pass" : "FAIL";
-            var newPath = _currentFilePath.Replace("-pending-", $"-{result}-");
+            var resultSuffix = result == CycleResult.Pass ? "pass" : "FAIL";
+            var newPath = _currentFilePath.Replace("-pending.log", $"-{resultSuffix}.log");
 
             try
             {
@@ -100,7 +99,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
     {
         try
         {
-            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass-*.log")
+            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass.log")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .Skip(MaxPassingLogFiles)
                 .ToList();
@@ -156,11 +155,21 @@ public sealed class CycleLoggerProvider : ILoggerProvider
                 LogLevel.Critical => "CRIT",
                 _ => "INFO"
             };
-            var message = $"[{timestamp}] [{level}] [{_categoryName}] {formatter(state, exception)}";
+            // Participant tagging is baked into _categoryName by TaggingLoggerFactory (one factory
+            // per participant SP), so the suffix is already present here for connector-internal
+            // loggers and absent for main-host loggers (verification engine, etc.).
+            var prefix = $"[{timestamp}] [{level}] [{_categoryName}] ";
+            var message = prefix + formatter(state, exception);
 
             if (exception != null)
             {
-                message += Environment.NewLine + exception;
+                // Prefix every line of the exception text so the cycle log stays line-grep-able.
+                // Without this, exception/stack-trace lines drop the [time] [level] [category]
+                // prefix and slip through grep filters used to triage CI failures.
+                foreach (var line in exception.ToString().Split('\n'))
+                {
+                    message += Environment.NewLine + prefix + line.TrimEnd('\r');
+                }
             }
 
             // Write to cycle log file (console is handled by the default console provider)

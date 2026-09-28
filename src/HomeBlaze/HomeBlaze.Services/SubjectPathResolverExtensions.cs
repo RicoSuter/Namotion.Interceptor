@@ -1,4 +1,4 @@
-using System.Collections;
+using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -8,21 +8,6 @@ namespace HomeBlaze.Services;
 
 public static class SubjectPathResolverExtensions
 {
-    /// <summary>
-    /// Registers the SubjectPathResolver service.
-    /// Requires WithRegistry() and WithLifecycle() to be called first.
-    /// </summary>
-    public static IInterceptorSubjectContext WithPathResolver(this IInterceptorSubjectContext context)
-    {
-        return context
-            .WithLifecycle()
-            .WithService(() =>
-            {
-                var rootManager = context.GetService<RootManager>();
-                return new SubjectPathResolver(rootManager, context);
-            }, _ => true);
-    }
-
     /// <summary>
     /// Resolves a property value from a path.
     /// Splits on last '/' to separate subject path from property name,
@@ -72,28 +57,11 @@ public static class SubjectPathResolverExtensions
         if (value == null)
             return null;
 
-        if (value is IDictionary dictionary)
-        {
-            foreach (DictionaryEntry entry in dictionary)
-            {
-                var key = entry.Key?.ToString();
-                if (key == indexStr && entry.Value is IInterceptorSubject subject)
-                    return subject;
-            }
-        }
-        else if (value is IEnumerable enumerable and not string)
-        {
-            if (int.TryParse(indexStr, out var index))
-            {
-                var i = 0;
-                foreach (var item in enumerable)
-                {
-                    if (i == index && item is IInterceptorSubject subject)
-                        return subject;
-                    i++;
-                }
-            }
-        }
+        if (property.IsSubjectDictionary)
+            return SubjectLookup.FindSubjectInDictionary(value, indexStr);
+
+        if (property.IsSubjectCollection && int.TryParse(indexStr, out var index))
+            return SubjectLookup.FindSubjectInCollection(value, index);
 
         return null;
     }

@@ -58,25 +58,15 @@ internal sealed class OutboundWriter
 
             return result;
         }
+        catch (InvalidCastException ex)
+        {
+            _logger.LogError(ex, "OPC UA WriteAsync returned unexpected response type (issue #287).");
+            return WriteResult.Failure(changes, ex);
+        }
         catch (Exception ex)
         {
             return WriteResult.Failure(changes, ex);
         }
-    }
-
-    internal static bool IsTransientWriteError(StatusCode statusCode)
-    {
-        if (statusCode == StatusCodes.BadNodeIdUnknown ||
-            statusCode == StatusCodes.BadAttributeIdInvalid ||
-            statusCode == StatusCodes.BadTypeMismatch ||
-            statusCode == StatusCodes.BadWriteNotSupported ||
-            statusCode == StatusCodes.BadUserAccessDenied ||
-            statusCode == StatusCodes.BadNotWritable)
-        {
-            return false;
-        }
-
-        return StatusCode.IsBad(statusCode);
     }
 
     private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
@@ -108,7 +98,7 @@ internal sealed class OutboundWriter
             if (!StatusCode.IsGood(results[resultIndex]))
             {
                 failedChanges.Add(change);
-                if (IsTransientWriteError(results[resultIndex]))
+                if (OpcUaStatusCodeClassifier.IsTransientError(results[resultIndex]))
                     transientCount++;
             }
             resultIndex++;

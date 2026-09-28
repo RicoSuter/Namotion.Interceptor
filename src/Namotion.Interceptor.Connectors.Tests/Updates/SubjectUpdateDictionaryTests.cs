@@ -18,7 +18,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenKeyAdded_ThenInsertOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var node = new CycleTestNode(context)
         {
@@ -43,7 +43,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenKeyRemoved_ThenRemoveOperationIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var item2 = new CycleTestNode { Name = "Item2" };
         var node = new CycleTestNode(context)
@@ -68,7 +68,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenItemPropertyChanged_ThenSparseUpdateByKeyIsCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var item2 = new CycleTestNode { Name = "Item2" };
         var node = new CycleTestNode(context)
@@ -93,7 +93,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenMultipleItemsHavePropertyChanges_ThenSparseUpdatesAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var item2 = new CycleTestNode { Name = "Item2" };
         var item3 = new CycleTestNode { Name = "Item3" };
@@ -125,7 +125,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenAddAndRemoveCombined_ThenBothOperationsAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var item2 = new CycleTestNode { Name = "Item2" };
         var node = new CycleTestNode(context)
@@ -151,7 +151,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenInsertWithPropertyUpdateOnExisting_ThenBothTypesAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var node = new CycleTestNode(context)
         {
@@ -177,7 +177,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenDictionaryBecomesEmpty_ThenRemoveOperationsAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var item2 = new CycleTestNode { Name = "Item2" };
         var node = new CycleTestNode(context)
@@ -202,7 +202,7 @@ public class SubjectUpdateDictionaryTests
     public async Task WhenDictionaryPopulatedFromEmpty_ThenInsertOperationsAreCreated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var node = new CycleTestNode(context)
         {
             Name = "Root",
@@ -249,7 +249,7 @@ public class SubjectUpdateDictionaryTests
         // Arrange
         // This tests replacing the VALUE at an existing key with a DIFFERENT object.
         // This should be treated as a Remove + Insert, not ignored.
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var node = new CycleTestNode(context)
         {
@@ -269,6 +269,46 @@ public class SubjectUpdateDictionaryTests
         // Assert - the new item should be included in the update
         // Either as an Insert operation or as a sparse update with full data
         await Verify(update);
+    }
+
+    [Fact]
+    public void WhenValueReplacedAtSameKey_ThenRemoveIsEmittedBeforeInsertForThatKey()
+    {
+        // Arrange
+        // The apply side walks operations sequentially, so the Remove for the replaced key
+        // has to precede the Insert that carries the replacement.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
+        var item1 = new CycleTestNode { Name = "Item1" };
+        var node = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1 }
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act
+        var item2 = new CycleTestNode { Name = "ReplacementItem" };
+        node.Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item2 };
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert
+        var operations = update.Subjects[update.Root]["Lookup"].Operations;
+        Assert.NotNull(operations);
+        Assert.Collection(operations,
+            operation =>
+            {
+                Assert.Equal(SubjectCollectionOperationType.Remove, operation.Action);
+                Assert.Equal("key1", operation.Index);
+            },
+            operation =>
+            {
+                Assert.Equal(SubjectCollectionOperationType.Insert, operation.Action);
+                Assert.Equal("key1", operation.Index);
+                Assert.NotNull(operation.Id);
+            });
     }
 
     [Fact]
@@ -295,7 +335,7 @@ public class SubjectUpdateDictionaryTests
     public void WhenDictionarySetToNull_ThenPartialUpdateHasValueKindWithNull()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var node = new CycleTestNode(context)
         {
@@ -323,7 +363,7 @@ public class SubjectUpdateDictionaryTests
     public void WhenNullDictionaryApplied_ThenTargetDictionaryBecomesNull()
     {
         // Arrange - create source with dictionary then set to null
-        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions().WithRegistry();
         var item1 = new CycleTestNode { Name = "Item1" };
         var source = new CycleTestNode(sourceContext)
         {
@@ -346,7 +386,7 @@ public class SubjectUpdateDictionaryTests
         };
 
         // Act
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
         Assert.Null(target.Lookup);

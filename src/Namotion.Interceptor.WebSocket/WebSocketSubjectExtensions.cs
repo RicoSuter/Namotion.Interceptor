@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.WebSocket.Client;
 using Namotion.Interceptor.WebSocket.Server;
 
@@ -95,19 +94,7 @@ public static class WebSocketSubjectExtensions
                     serviceProvider.GetRequiredKeyedService<WebSocketClientConfiguration>(key),
                     serviceProvider.GetRequiredService<ILogger<WebSocketSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(serviceProvider => serviceProvider.GetRequiredKeyedService<WebSocketSubjectClientSource>(key))
-            .AddSingleton<IHostedService>(serviceProvider =>
-            {
-                var configuration = serviceProvider.GetRequiredKeyedService<WebSocketClientConfiguration>(key);
-                var subject = serviceProvider.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    serviceProvider.GetRequiredKeyedService<WebSocketSubjectClientSource>(key),
-                    subject.Context,
-                    serviceProvider.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
-                    configuration.BufferTime,
-                    configuration.RetryTime,
-                    configuration.WriteRetryQueueSize);
-            });
+            .AddSingleton<IHostedService>(serviceProvider => serviceProvider.GetRequiredKeyedService<WebSocketSubjectClientSource>(key));
     }
 
     /// <summary>

@@ -23,7 +23,7 @@
       FirstName: {
         Kind: Value,
         Value: Parent,
-        Timestamp: DateTimeOffset_2,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           MaxLength: {
             Kind: Value,
@@ -39,7 +39,8 @@
       },
       FullName: {
         Kind: Value,
-        Value: Parent 
+        Value: Parent ,
+        Timestamp: DateTimeOffset_1
       },
       LastName: {
         Kind: Value
@@ -62,7 +63,7 @@
       FirstName: {
         Kind: Value,
         Value: Child1,
-        Timestamp: DateTimeOffset_3,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           MaxLength: {
             Kind: Value,
@@ -78,7 +79,8 @@
       },
       FullName: {
         Kind: Value,
-        Value: Child1 
+        Value: Child1 ,
+        Timestamp: DateTimeOffset_1
       },
       LastName: {
         Kind: Value
@@ -101,7 +103,7 @@
       FirstName: {
         Kind: Value,
         Value: Child2,
-        Timestamp: DateTimeOffset_4,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           MaxLength: {
             Kind: Value,
@@ -117,7 +119,8 @@
       },
       FullName: {
         Kind: Value,
-        Value: Child2 
+        Value: Child2 ,
+        Timestamp: DateTimeOffset_1
       },
       LastName: {
         Kind: Value

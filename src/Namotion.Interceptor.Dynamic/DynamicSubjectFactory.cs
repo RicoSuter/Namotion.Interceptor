@@ -39,8 +39,8 @@ public class DynamicSubjectFactory
                     property.Name,
                     property.PropertyType,
                     property.GetCustomAttributesIncludingInterfaces(),
-                    property.GetValue,
-                    property.SetValue,
+                    property.CanRead ? property.GetValue : null,
+                    property.CanWrite ? property.SetValue : null,
                     isIntercepted: true,
                     isDynamic: false))
                 .ToArray();

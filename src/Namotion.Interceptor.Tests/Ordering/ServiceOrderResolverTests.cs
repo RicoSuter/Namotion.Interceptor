@@ -8,6 +8,31 @@ public class ServiceOrderResolverTests
     #region Basic cases
 
     [Fact]
+    public void WhenDependencyTypesAreMissingFromMultipleServices_ThenRegistrationOrderIsPreserved()
+    {
+        // Arrange
+        var services = new object[] { new ServiceBeforeA(), new ServiceB(), new ServiceAfterA() };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(services, result);
+    }
+
+    [Fact]
+    public void WhenConflictingGroupAttributesAppearAmongMultipleServices_ThenPartitioningRejectsThem()
+    {
+        // Arrange
+        var services = new object[] { new ServiceA(), new FirstAndLastService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("Service FirstAndLastService cannot have both [RunsFirst] and [RunsLast]", exception.Message);
+    }
+
+    [Fact]
     public void EmptyList_ReturnsEmptyArray()
     {
         // Arrange
@@ -332,9 +357,68 @@ public class ServiceOrderResolverTests
         Assert.Same(last2, result[2]);
     }
 
+    [Fact]
+    public void WhenFirstRunsAfterFirstAndLastRunsBeforeLast_ThenOrdersInstancesWithinGroups()
+    {
+        // Arrange
+        var first = new FirstService();
+        var afterFirst = new FirstServiceWithRunsAfterFirst();
+        var middle = new ServiceA();
+        var beforeLast = new LastServiceWithRunsBeforeLast();
+        var last = new LastService();
+        var services = new object[] { last, afterFirst, middle, beforeLast, first };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(5, result.Length);
+        Assert.Same(first, result[0]);
+        Assert.Same(afterFirst, result[1]);
+        Assert.Same(middle, result[2]);
+        Assert.Same(beforeLast, result[3]);
+        Assert.Same(last, result[4]);
+    }
+
     #endregion
 
     #region Error cases
+
+    [Fact]
+    public void WhenFirstServiceRunsAfterLastService_ThenThrowsCrossGroupDependencyException()
+    {
+        // Arrange
+        var services = new object[] { new FirstServiceWithRunsAfterLast(), new LastService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("[RunsFirst] service FirstServiceWithRunsAfterLast cannot have [RunsAfter(LastService)] where LastService is not also [RunsFirst]", exception.Message);
+    }
+
+    [Fact]
+    public void WhenLastServiceRunsBeforeFirstService_ThenThrowsCrossGroupDependencyException()
+    {
+        // Arrange
+        var services = new object[] { new LastServiceWithRunsBeforeFirst(), new FirstService() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("[RunsLast] service LastServiceWithRunsBeforeFirst cannot have [RunsBefore(FirstService)] where FirstService is not also [RunsLast]", exception.Message);
+    }
+
+    [Fact]
+    public void WhenFirstGroupHasValidRunsAfterAndLastRunsBeforeMiddle_ThenRejectsLastDependency()
+    {
+        // Arrange
+        var services = new object[] { new FirstService(), new FirstServiceWithRunsAfterFirst(), new ServiceA(), new LastServiceWithRunsBeforeMiddle() };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Equal("[RunsLast] service LastServiceWithRunsBeforeMiddle cannot have [RunsBefore(ServiceA)] where ServiceA is not also [RunsLast]", exception.Message);
+    }
 
     [Fact]
     public void CircularDependency_ThrowsWithTypeNames()
@@ -398,6 +482,142 @@ public class ServiceOrderResolverTests
 
     #endregion
 
+    #region Multi-instance (duplicated types)
+
+    [Fact]
+    public void RunsBefore_WithDuplicatedTarget_OrdersBeforeAllInstances()
+    {
+        // Arrange: [D0, C, D1] where C runs before D; last-index binding leaves D0 before C
+        var duplicated0 = new DuplicatedService();
+        var constrainer = new ServiceBeforeDuplicated();
+        var duplicated1 = new DuplicatedService();
+        var services = new object[] { duplicated0, constrainer, duplicated1 };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: constrainer first, duplicates keep registration order
+        Assert.Equal(3, result.Length);
+        Assert.Same(constrainer, result[0]);
+        Assert.Same(duplicated0, result[1]);
+        Assert.Same(duplicated1, result[2]);
+    }
+
+    [Fact]
+    public void DuplicatedType_WithinRunsFirstGroup_OrdersAgainstAllInstances()
+    {
+        // Arrange: two RunsFirst duplicates around a RunsFirst constrainer, plus a middle service
+        var duplicatedFirst0 = new DuplicatedFirstService();
+        var middle = new ServiceA();
+        var constrainer = new FirstServiceBeforeDuplicatedFirst();
+        var duplicatedFirst1 = new DuplicatedFirstService();
+        var services = new object[] { duplicatedFirst0, middle, constrainer, duplicatedFirst1 };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: within the first group the constrainer precedes both duplicates; middle service last
+        Assert.Equal(4, result.Length);
+        Assert.Same(constrainer, result[0]);
+        Assert.Same(duplicatedFirst0, result[1]);
+        Assert.Same(duplicatedFirst1, result[2]);
+        Assert.Same(middle, result[3]);
+    }
+
+    [Fact]
+    public void RunsAfter_WithDuplicatedTarget_OrdersAfterAllInstances()
+    {
+        // Arrange: constrained service registered first, two duplicates after it
+        var constrained = new ServiceAfterDuplicated();
+        var duplicated0 = new DuplicatedService();
+        var duplicated1 = new DuplicatedService();
+        var services = new object[] { constrained, duplicated0, duplicated1 };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: both duplicates precede the constrained service
+        Assert.Equal(3, result.Length);
+        Assert.Same(duplicated0, result[0]);
+        Assert.Same(duplicated1, result[1]);
+        Assert.Same(constrained, result[2]);
+    }
+
+    [Fact]
+    public void DuplicatedType_WithoutConstraints_PreservesRegistrationOrder()
+    {
+        // Arrange: duplicates that no constraint references
+        var duplicated0 = new DuplicatedService();
+        var serviceB = new ServiceB();
+        var duplicated1 = new DuplicatedService();
+        var services = new object[] { duplicated0, serviceB, duplicated1 };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(3, result.Length);
+        Assert.Same(duplicated0, result[0]);
+        Assert.Same(serviceB, result[1]);
+        Assert.Same(duplicated1, result[2]);
+    }
+
+    [Fact]
+    public void DuplicatedType_InTypeLevelCycle_ThrowsCircularDependency()
+    {
+        // Arrange: mutual RunsBefore between two types, one of them duplicated
+        var services = new object[] { new Circular1(), new Circular2(), new Circular1() };
+
+        // Act & Assert: throw outcome is invariant under the fix; only the set of
+        // listed type names may differ, so assert the prefix, never the exact message
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ServiceOrderResolver.OrderByDependencies(services));
+        Assert.Contains("Circular dependency detected", ex.Message);
+    }
+
+    [Fact]
+    public void DuplicatedInstances_OfConstrainedType_PreserveRegistrationOrder()
+    {
+        // Arrange: three duplicates, all constrained by the same RunsAfter service
+        var duplicated0 = new DuplicatedService();
+        var constrained = new ServiceAfterDuplicated();
+        var duplicated1 = new DuplicatedService();
+        var duplicated2 = new DuplicatedService();
+        var services = new object[] { duplicated0, constrained, duplicated1, duplicated2 };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert: duplicates emit in registration order relative to each other
+        Assert.Equal(4, result.Length);
+        Assert.Same(duplicated0, result[0]);
+        Assert.Same(duplicated1, result[1]);
+        Assert.Same(duplicated2, result[2]);
+        Assert.Same(constrained, result[3]);
+    }
+
+    [Fact]
+    public void ParallelEdges_WithDuplicatedTarget_SortCleanly()
+    {
+        // Arrange: U declares RunsBefore(T) and T declares RunsAfter(U), so every
+        // instance pair gets the same edge twice; in-degree accounting must stay symmetric
+        var target0 = new DuplicatedTargetService();
+        var source = new ParallelEdgeSource();
+        var target1 = new DuplicatedTargetService();
+        var services = new object[] { target0, source, target1 };
+
+        // Act
+        var result = ServiceOrderResolver.OrderByDependencies(services);
+
+        // Assert
+        Assert.Equal(3, result.Length);
+        Assert.Same(source, result[0]);
+        Assert.Same(target0, result[1]);
+        Assert.Same(target1, result[2]);
+    }
+
+    #endregion
+
     #region Test services
 
     // Basic services without attributes
@@ -450,6 +670,14 @@ public class ServiceOrderResolverTests
     [RunsAfter(typeof(LastService))]
     private class LastServiceAfterLast1 { }
 
+    [RunsFirst]
+    [RunsAfter(typeof(FirstService))]
+    private class FirstServiceWithRunsAfterFirst { }
+
+    [RunsLast]
+    [RunsBefore(typeof(LastService))]
+    private class LastServiceWithRunsBeforeLast { }
+
     // Error case services
     [RunsBefore(typeof(Circular2))]
     private class Circular1 { }
@@ -468,6 +696,37 @@ public class ServiceOrderResolverTests
     [RunsLast]
     [RunsBefore(typeof(ServiceA))]
     private class LastServiceWithRunsBeforeMiddle { }
+
+    [RunsFirst]
+    [RunsAfter(typeof(LastService))]
+    private class FirstServiceWithRunsAfterLast { }
+
+    [RunsLast]
+    [RunsBefore(typeof(FirstService))]
+    private class LastServiceWithRunsBeforeFirst { }
+
+    // Multi-instance services (duplicate-type aggregation, issue #380)
+    private class DuplicatedService { }
+
+    [RunsBefore(typeof(DuplicatedService))]
+    private class ServiceBeforeDuplicated { }
+
+    [RunsFirst]
+    private class DuplicatedFirstService { }
+
+    [RunsFirst]
+    [RunsBefore(typeof(DuplicatedFirstService))]
+    private class FirstServiceBeforeDuplicatedFirst { }
+
+    [RunsAfter(typeof(DuplicatedService))]
+    private class ServiceAfterDuplicated { }
+
+    // Parallel-edge pair: both sides declare the same relationship
+    [RunsBefore(typeof(DuplicatedTargetService))]
+    private class ParallelEdgeSource { }
+
+    [RunsAfter(typeof(ParallelEdgeSource))]
+    private class DuplicatedTargetService { }
 
     #endregion
 }

@@ -19,5 +19,12 @@ public class ChaosConfiguration
 
         if (DurationMin > DurationMax)
             throw new ArgumentException("Chaos DurationMin must be <= DurationMax.");
+
+        var normalizedMode = Mode?.ToLowerInvariant();
+        if (normalizedMode is not "kill" and not "disconnect" and not "both")
+        {
+            throw new ArgumentException(
+                $"Chaos Mode must be one of: kill, disconnect, both. Got '{Mode}'.");
+        }
     }
 }

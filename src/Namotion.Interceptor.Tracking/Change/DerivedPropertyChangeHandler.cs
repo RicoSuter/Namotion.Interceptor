@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -18,6 +17,11 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
+// Outer of the change interceptor so the cascade recalculation runs after that interceptor has
+// dispatched: a triggering write is announced before the derived recalculations it causes. Only
+// load-bearing under aggregation, where instances would otherwise interleave and one context's
+// cascade could be announced before another's dispatch of the triggering write.
+[RunsBefore(typeof(PropertyChangeInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
@@ -29,6 +33,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
+
+    internal static bool IsRecordingDerivedProperty
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _recorder?.IsRecording == true;
+    }
 
     // Global counter incremented on every write (Interlocked.Increment, full fence).
     // Paired with Volatile.Read in AttachProperty/RecalculateDerivedProperty to detect
@@ -66,11 +76,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 }
                 catch (Exception)
                 {
-                    // Getter threw — value will be computed on the next dependency write.
+                    // Getter threw. The value will be computed on the next dependency write.
                 }
             }
         }
@@ -119,7 +129,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <inheritdoc />
-    public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
+    public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
 
@@ -137,7 +147,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        // Signal write before TryGet so writes to not-yet-tracked properties are also detected.
+        if (!context.IsWritten)
+        {
+            return;
+        }
+
+        // Signal landed writes before TryGet so writes to not-yet-tracked properties are also detected.
         Interlocked.Increment(ref _writeGeneration);
 
         var data = context.Property.TryGetDerivedPropertyData();
@@ -150,34 +165,37 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+            var rawTimestamp = context.WriteTimestampRaw;
+            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
+            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
         }
 
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Suppress cascading recalculations during transaction capture (replayed on commit).
-            if (SubjectTransaction.HasActiveTransaction &&
-                SubjectTransaction.Current is { IsCommitting: false })
+            // Thread the trigger's resolved timestamp into each dependent's context, skipping a
+            // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
+            var rawTimestamp = context.WriteTimestampRaw;
+            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
+            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
+    {
+        for (var i = 0; i < usedByProperties.Length; i++)
+        {
+            var dependent = usedByProperties[i];
+            if (dependent == triggerProperty)
             {
-                return;
+                // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
+                // via the normal recorder path.
+                continue;
             }
 
-            var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-            for (var i = 0; i < usedByProperties.Length; i++)
-            {
-                var dependent = usedByProperties[i];
-                if (dependent == context.Property)
-                {
-                    // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
-                    // via the normal recorder path.
-                    continue;
-                }
-
-                RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
-            }
+            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
         }
     }
 
@@ -188,7 +206,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -216,61 +234,22 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Outer loop handles the post-notification RecalculationNeeded check without recursion,
         // preventing stack overflow under sustained concurrent writes.
         // The try-finally at this level ensures IsRecalculating is always cleared on exit.
-        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged — this
+        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged. This
         // serializes notification delivery with recalculation, preventing a stale notification
         // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
         try
         {
             for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
             {
-                object? newValue;
-                long sequence;
-
-                // Inner loop: re-evaluates when the state changes during evaluation.
-                while (true)
+                if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, out var newValue, out var sequence))
                 {
-                    // Phase 2: Evaluate getter OUTSIDE lock(data).
-                    // This prevents deadlock: getter side effects can safely acquire
-                    // lock(_attachedSubjects) in LifecycleInterceptor without lock ordering inversion.
-                    try
-                    {
-                        newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
-                    }
-                    catch (Exception)
-                    {
-                        // Getter threw — keep LastKnownValue, concurrent writer's cascade will retry.
-                        return;
-                    }
-
-                    // Phase 3: Commit result under lock.
-                    lock (data)
-                    {
-                        if (!data.IsAttached)
-                        {
-                            return;
-                        }
-
-                        // State changed during evaluation (write, attach, or detach set this flag).
-                        // Discard the stale result and re-evaluate with a fresh state.
-                        if (data.RecalculationNeeded)
-                        {
-                            data.RecalculationNeeded = false;
-                            continue;
-                        }
-
-                        data.LastKnownValue = newValue;
-                        sequence = ++data.RecalculationSequence;
-                        derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
-                        break;
-                    }
+                    return;
                 }
 
-                // Deliver notification while IsRecalculating is still true.
                 // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
                 // so no new recalculation (or notification) can start until delivery completes.
-                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue);
+                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
 
-                // Handle recalculations that arrived during evaluation or notification delivery.
                 // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
                 lock (data)
                 {
@@ -280,12 +259,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
 
                     data.RecalculationNeeded = false;
-                    // IsRecalculating stays true for next iteration
                     oldValue = data.LastKnownValue;
                 }
             }
 
-            // Safety: if the outer loop exhausted MaxStabilizationIterations, log a warning.
             Trace.TraceWarning(
                 $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
                 $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
@@ -314,7 +291,58 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             if (needsRetrigger)
             {
-                RecalculateDerivedProperty(ref derivedProperty, timestampUtcTicks);
+                RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Evaluates without holding lock(data), retries stale results, and commits the value and timestamp under lock.
+    /// Requires recalculation ownership. Returns false if evaluation throws or the property is detached.
+    /// </summary>
+    private static bool TryEvaluateAndCommit(
+        DerivedPropertyData data,
+        ref PropertyReference derivedProperty,
+        long storageTimestamp,
+        out object? newValue,
+        out long sequence)
+    {
+        newValue = null;
+        sequence = 0;
+
+        while (true)
+        {
+            // Getter side effects can acquire lock(_attachedSubjects) in LifecycleInterceptor,
+            // so holding lock(data) here would invert the lock order.
+            try
+            {
+                newValue = EvaluateAndStabilize(data, derivedProperty, callerHoldsLock: false);
+            }
+            catch (Exception)
+            {
+                // Getter threw. Keep LastKnownValue; a concurrent writer's cascade will retry.
+                return false;
+            }
+
+            lock (data)
+            {
+                if (!data.IsAttached)
+                {
+                    return false;
+                }
+
+                // State changed during evaluation (write, attach, or detach set this flag).
+                // Discard the stale result and re-evaluate with a fresh state.
+                if (data.RecalculationNeeded)
+                {
+                    data.RecalculationNeeded = false;
+                    continue;
+                }
+
+                data.LastKnownValue = newValue;
+                sequence = ++data.RecalculationSequence;
+                derivedProperty.SetWriteTimestamp(storageTimestamp);
+                return true;
             }
         }
     }
@@ -330,7 +358,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         DerivedPropertyData data,
         long sequence,
         object? newValue,
-        object? oldValue)
+        object? oldValue,
+        long rawTimestamp)
     {
         if (sequence != Volatile.Read(ref data.RecalculationSequence))
         {
@@ -343,10 +372,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        using (SubjectChangeContext.WithSource(null))
-        {
-            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);
-        }
+        // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
+        // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
+        // not need a WithChangedTimestamp scope active to share the time with the dependent).
+        // newValue is the value the stabilization loop settled on and the value paired with
+        // oldValue by the guards above. The cascade re-entry path publishes it rather than
+        // re-invoking the getter, which could return a later value that never coexisted with
+        // oldValue (see PropertyWriteContext.FinalValueIsNewValue).
+        derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {
@@ -367,66 +400,40 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         DerivedPropertyData data, in PropertyReference property, bool callerHoldsLock)
     {
         var generationBefore = Volatile.Read(ref _writeGeneration);
+        var ownsActiveRecording = false;
 
         try
         {
             StartRecordingTouchedProperties(property);
+            ownsActiveRecording = true;
             var result = property.Metadata.GetValue?.Invoke(property.Subject);
-            var recordedDeps = _recorder!.FinishRecording();
+            var recordedDependencies = _recorder!.FinishRecording();
+            ownsActiveRecording = false;
 
-            bool dependenciesChanged;
-            if (callerHoldsLock)
-            {
-                dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
-            }
-            else
-            {
-                lock (data)
-                {
-                    if (!data.IsAttached || data.RecalculationNeeded)
-                    {
-                        _recorder.ClearLastRecording();
-                        return result;
-                    }
-
-                    dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
-                }
-            }
-
-            if (!dependenciesChanged || Volatile.Read(ref _writeGeneration) == generationBefore)
+            var dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
+            if (dependencyUpdate != DependencyUpdate.Changed || Volatile.Read(ref _writeGeneration) == generationBefore)
             {
                 return result;
             }
 
-            // Concurrent write detected while dependencies changed — stabilize.
+            // Concurrent write detected while dependencies changed. Stabilize.
             for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
             {
                 StartRecordingTouchedProperties(property);
+                ownsActiveRecording = true;
                 result = property.Metadata.GetValue?.Invoke(property.Subject);
-                recordedDeps = _recorder.FinishRecording();
+                recordedDependencies = _recorder.FinishRecording();
+                ownsActiveRecording = false;
 
-                if (callerHoldsLock)
+                dependencyUpdate = ReconcileDependencies(data, property, recordedDependencies, callerHoldsLock);
+                if (dependencyUpdate == DependencyUpdate.Abandoned)
                 {
-                    if (!data.UpdateDependencies(property, recordedDeps, _recorder))
-                    {
-                        break;
-                    }
+                    return result;
                 }
-                else
-                {
-                    lock (data)
-                    {
-                        if (!data.IsAttached || data.RecalculationNeeded)
-                        {
-                            _recorder.ClearLastRecording();
-                            return result;
-                        }
 
-                        if (!data.UpdateDependencies(property, recordedDeps, _recorder))
-                        {
-                            break;
-                        }
-                    }
+                if (dependencyUpdate == DependencyUpdate.Unchanged)
+                {
+                    return result;
                 }
             }
 
@@ -438,7 +445,45 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
         finally
         {
-            DiscardActiveRecording();
+            DiscardActiveRecording(ownsActiveRecording);
+        }
+    }
+
+    private enum DependencyUpdate
+    {
+        Changed,
+        Unchanged,
+        Abandoned
+    }
+
+    /// <summary>
+    /// Reconciles dependencies under the caller's lock or a brief lock acquired here, then clears the recording.
+    /// When acquiring the lock, abandons the recording if attachment or recalculation state changed.
+    /// </summary>
+    private static DependencyUpdate ReconcileDependencies(
+        DerivedPropertyData data,
+        in PropertyReference property,
+        ReadOnlySpan<PropertyReference> recordedDependencies,
+        bool callerHoldsLock)
+    {
+        if (callerHoldsLock)
+        {
+            return data.UpdateDependencies(property, recordedDependencies, _recorder!)
+                ? DependencyUpdate.Changed
+                : DependencyUpdate.Unchanged;
+        }
+
+        lock (data)
+        {
+            if (!data.IsAttached || data.RecalculationNeeded)
+            {
+                _recorder!.ClearLastRecording();
+                return DependencyUpdate.Abandoned;
+            }
+
+            return data.UpdateDependencies(property, recordedDependencies, _recorder!)
+                ? DependencyUpdate.Changed
+                : DependencyUpdate.Unchanged;
         }
     }
 
@@ -453,14 +498,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// No-op on the happy path (recording already finished and cleared).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void DiscardActiveRecording()
+    private static void DiscardActiveRecording(bool ownsActiveRecording)
     {
         if (_recorder is null)
         {
             return;
         }
 
-        if (_recorder.IsRecording)
+        if (ownsActiveRecording)
         {
             _recorder.FinishRecording();
         }

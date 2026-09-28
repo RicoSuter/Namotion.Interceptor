@@ -12,12 +12,6 @@ internal sealed class WriteInterceptorChain<TProperty>
     private readonly ExecuteTerminalFunc _executeTerminal;
     private readonly WriteContinuationNode[] _continuations;
 
-    // Using thread static per generic type instantiation, one per TProperty type,
-    // this is required to make this is thread-safe
-    [ThreadStatic]
-    // ReSharper disable once StaticMemberInGenericType
-    private static Action<IInterceptorSubject, TProperty>? _threadLocalTerminal;
-
     public WriteInterceptorChain(
         ImmutableArray<IWriteInterceptor> interceptors,
         ExecuteTerminalFunc executeTerminal)
@@ -35,7 +29,9 @@ internal sealed class WriteInterceptorChain<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Execute(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> terminal)
     {
-        _threadLocalTerminal = terminal;
+        // The terminal is per-call state; thread it through the by-ref context (which already flows
+        // to the end of the chain) rather than a ThreadStatic on this shared chain instance.
+        context.Terminal = terminal;
         ExecuteAtIndex(0, ref context);
     }
 
@@ -44,7 +40,7 @@ internal sealed class WriteInterceptorChain<TProperty>
     {
         if (index >= _interceptors.Length)
         {
-            _executeTerminal(ref context, _threadLocalTerminal!);
+            _executeTerminal(ref context, context.Terminal!);
             return;
         }
 

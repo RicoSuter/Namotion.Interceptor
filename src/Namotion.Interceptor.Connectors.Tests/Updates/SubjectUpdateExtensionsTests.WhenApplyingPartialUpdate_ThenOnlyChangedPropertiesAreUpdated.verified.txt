@@ -10,7 +10,7 @@
       FullName: {
         Kind: Value,
         Value: Updated Name,
-        Timestamp: DateTimeOffset_2
+        Timestamp: DateTimeOffset_1
       }
     }
   }

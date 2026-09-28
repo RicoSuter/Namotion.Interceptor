@@ -15,6 +15,10 @@ public static class SubjectTransactionExtensions
     /// <summary>
     /// Begins a new transaction bound to this context.
     /// </summary>
+    /// <remarks>
+    /// Begin, use, commit, and dispose a transaction within the same async flow; committing from a
+    /// different flow throws <see cref="InvalidOperationException"/>.
+    /// </remarks>
     /// <param name="context">The context to bind the transaction to.</param>
     /// <param name="failureHandling">The failure handling mode controlling what happens when writes fail.</param>
     /// <param name="locking">The locking mode. Exclusive (default) acquires lock at begin; Optimistic acquires only during commit.</param>
@@ -65,7 +69,7 @@ public readonly struct TransactionAwaitable
 /// <summary>
 /// Custom awaiter that sets AsyncLocal in the caller's context after GetResult.
 /// </summary>
-public readonly struct TransactionAwaiter : INotifyCompletion, ICriticalNotifyCompletion
+public readonly struct TransactionAwaiter : ICriticalNotifyCompletion
 {
     private readonly ValueTaskAwaiter<SubjectTransaction> _awaiter;
 
@@ -76,6 +80,7 @@ public readonly struct TransactionAwaiter : INotifyCompletion, ICriticalNotifyCo
 
     public bool IsCompleted => _awaiter.IsCompleted;
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S5034", Justification = "The awaiter protocol consumes the completed operation here and sets the transaction in the caller's execution context; an async wrapper would isolate that AsyncLocal assignment.")]
     public SubjectTransaction GetResult()
     {
         SubjectTransaction? transaction = null;

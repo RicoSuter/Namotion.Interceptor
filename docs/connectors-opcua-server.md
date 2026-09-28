@@ -16,7 +16,7 @@ public partial class Sensor
 
 builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
+    connectorName: "opc",
     rootName: "MySensor");
 
 // ...
@@ -53,7 +53,7 @@ For direct instantiation (without DI), `CreateOpcUaServer` returns `IOpcUaSubjec
 ```csharp
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectServer<Machine>(
-    sourceName: "opc",
+    connectorName: "opc",
     rootName: "MyMachine");
 ```
 
@@ -75,7 +75,7 @@ builder.Services.AddOpcUaSubjectServer(
 ```
 
 **Parameters:**
-- `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
+- `connectorName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
 - `rootName` - Optional root folder name under the OPC UA ObjectsFolder
 
 Multiple servers can be registered in the same DI container. Each registration uses keyed singletons internally, so they operate independently.
@@ -98,12 +98,14 @@ await server.StartAsync(cancellationToken);
 | `BaseAddress` | `string` | "opc.tcp://localhost:4840/" | Server endpoint address |
 | `NamespaceUri` | `string` | "http://namotion.com/Interceptor/" | Primary namespace URI for custom nodes |
 | `ValueConverter` | `OpcUaValueConverter` | *required* | Converts between C# properties and OPC UA values |
-| `NodeMapper` | `IOpcUaNodeMapper` | CompositeNodeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
+| `Mapper` | `IPropertyMapper<OpcUaPropertyMapping>` | OpcUaCompositeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 | `BufferTime` | `TimeSpan?` | 8ms | Time window to buffer incoming property changes before publishing to clients |
 | `TelemetryContext` | `ITelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
 | `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
 | `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
+
+Final outbound delivery on stop uses the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
 ## Security
 
@@ -178,6 +180,29 @@ The following limits are configured by default. Override `CreateApplicationInsta
 | MaxNodesPerBrowse | 4,000 |
 | MaxMonitoredItemsPerCall | 4,000 |
 
+## Subject Deduplication
+
+When the same C# subject instance is referenced from multiple properties in the model (for example, the same `Identification` instance reachable from both a machine root and a building-blocks folder), the server publishes it as a single OPC UA node referenced from each parent rather than creating duplicate nodes. The mapping is keyed by the registered subject identity, so reuse applies whether the property is a single reference, a collection element, or a dictionary value. See [connectors-opcua-client.md](connectors-opcua-client.md#subject-deduplication) for the symmetric client-side behavior.
+
+### BrowseName Limitation
+
+In OPC UA the `BrowseName` is an attribute of the target node, not of the reference pointing at it, so a node has exactly one BrowseName regardless of how many parents reference it. When the same C# subject is reused, the first property to publish it wins: the BrowseName of that property is stored on the node, and every other reference (from the same parent or another) carries the same BrowseName when clients browse it.
+
+This is invisible for the common case where every reusing property uses the same browse name (the typical cross-parent DAG, e.g. both `MyMachine.Identification` and `MachineryBuildingBlocks.Identification` resolve to "Identification"). It is lossy when two properties reference the same instance under different browse names. The most common shape of this is two properties on the **same parent** pointing at one instance:
+
+```csharp
+[InterceptorSubject]
+public partial class Root
+{
+    public partial SubA Primary { get; set; }
+    public partial SubA Backup { get; set; }   // same instance as Primary
+}
+```
+
+The server publishes a single node (named after whichever property was registered first) plus a second naked `HasComponent` reference from `Root` to that node. A round-trip client browses two references that are indistinguishable (same target NodeId, same BrowseName) and can only bind one of `Primary` / `Backup`; the other stays unset. If you need both names to round-trip, give each property its own subject instance.
+
+The server logs a warning when it detects this case (BrowseName mismatch between the existing node and the new reference). The address space is still constructed, the warning is purely informational.
+
 ## Companion Specifications
 
 The server automatically loads embedded NodeSets for common industrial standards:
@@ -189,7 +214,7 @@ The server automatically loads embedded NodeSets for common industrial standards
 
 Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
 
-For mapping patterns with companion specs, see [OPC UA Mapping Guide -- Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
+For mapping patterns with companion specs, see [OPC UA Mapping Guide: Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
 
 ### Custom Namespaces
 
@@ -231,9 +256,20 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade of type `OpcUaServerDiagnostics`. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
-Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)), `IncomingChangesPerSecond` (client writes to server, 60-second sliding window), `OutgoingChangesPerSecond` (subject changes pushed to OPC UA nodes, 60-second sliding window).
+`OpcUaServerDiagnostics` derives from `ConnectorDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this server.
+
+**`IsOperational` here means the server has started and is accepting client connections.** This built-in server implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes explicit true or false values. The server restarts itself internally on failure, and the two timestamps split along that line: `OperationalChangeTime` moves on every internal restart, while the inherited `StartTime` marks the current run of the hosted service and does not.
+
+This server measures both throughput directions, so `Throughput.IncomingPerSecond` (client writes to the server) and `Throughput.OutgoingPerSecond` (subject changes pushed to OPC UA nodes) are never `null` here. `OutboundChanges` is the change queue feeding the address space, and its `Capacity` is `null` because that queue is unbounded.
+
+| Member | Meaning |
+|---|---|
+| `ActiveSessionCount` | Currently active client sessions. |
+| `ConsecutiveFailures` | Consecutive startup failures. A gauge that resets on a successful start, which is why it carries no `Total` prefix. See [Resilience](#resilience). |
+
+`LastError` is cleared by a restart of the hosted service, not by the server's own internal restart, so a non-null value means "a start failed, or something escaped the change queue processor, at some point during this run of the hosted service". A failed write into the address space is not one of them: the change queue processor logs and swallows every exception its write handler raises, so those never reach `LastError` at all.
 
 ## Direct Server Access
 

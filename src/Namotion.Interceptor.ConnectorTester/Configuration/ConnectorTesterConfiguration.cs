@@ -1,9 +1,18 @@
+using Namotion.Interceptor.ConnectorTester.Connectors;
+
 namespace Namotion.Interceptor.ConnectorTester.Configuration;
 
 public class ConnectorTesterConfiguration
 {
     /// <summary>"opcua", "mqtt", or "websocket"</summary>
     public string Connector { get; set; } = "opcua";
+
+    /// <summary>Parsed connector kind based on <see cref="Connector"/>.</summary>
+    public ConnectorKind ConnectorKind =>
+        Enum.TryParse<ConnectorKind>(Connector, ignoreCase: true, out var kind)
+            ? kind
+            : throw new InvalidOperationException(
+                $"Unknown ConnectorTester:Connector value '{Connector}'. Expected one of: {string.Join(", ", Enum.GetNames<ConnectorKind>())}.");
 
     /// <summary>Number of collection children in the test graph.</summary>
     public int CollectionCount { get; set; } = 20;
@@ -12,9 +21,9 @@ public class ConnectorTesterConfiguration
     public int DictionaryCount { get; set; } = 10;
 
     /// <summary>
-    /// Number of batches per second for BatchMutationEngine.
-    /// 0 = use RandomMutationEngine (single random mutations).
-    /// Greater than 0 = use BatchMutationEngine (parallel batched updates).
+    /// Number of batches per second for the value mutation loop.
+    /// 0 = use RandomValueMutationStrategy (single random mutations).
+    /// Greater than 0 = use BatchValueMutationStrategy (parallel batched updates).
     /// Each batch mutates ceil(ValueMutationRate / NumberOfBatches) nodes.
     /// </summary>
     public int NumberOfBatches { get; set; } = 0;

@@ -32,6 +32,18 @@ foreach (var prop in registeredTire.Properties)
 }
 ```
 
+You can also resolve a specific registered property from a strongly-typed expression, including nested paths across subjects:
+
+```csharp
+// Direct property
+var pressureProperty = tire.TryGetRegisteredProperty(t => t.Pressure);
+
+// Nested path, including collection or dictionary segments
+var frontPressureProperty = car.TryGetRegisteredProperty(c => c.Tires[0].Pressure);
+```
+
+Member-access hops resolve through the registry; index and dictionary segments evaluate against the object graph. The lookup is null-safe either way: if a subject along the path is null or not tracked by the registry, the method returns `null` instead of throwing.
+
 ## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:
@@ -105,7 +117,7 @@ Derived properties automatically participate in change tracking and will update 
 
 ### Lifecycle tracking for dynamic properties
 
-Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2 — one from the collection property and one from the derived property.
+Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2, one from the collection property and one from the derived property. This holds because dynamic properties are intercepted. A generated non-partial `[Derived]` getter is not intercepted, so it never attaches the subject it returns and never adds a reference.
 
 When the underlying data changes, derived properties are re-evaluated and lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones).
 
@@ -142,7 +154,9 @@ This pattern is useful for creating adaptive metadata that changes based on the 
 
 ## Custom property initializers
 
-Implement `ISubjectPropertyInitializer` in a .NET attribute to automatically add metadata attributes when properties are created:
+Implement `ISubjectPropertyInitializer` to automatically add metadata attributes when properties are attached. There are two ways to register an initializer:
+
+**As an attribute.** When you own the attribute class, implement the interface directly on it:
 
 ```csharp
 public class UnitAttribute : Attribute, ISubjectPropertyInitializer
@@ -157,12 +171,36 @@ public class UnitAttribute : Attribute, ISubjectPropertyInitializer
     }
 }
 
-// Usage - automatically creates a Unit attribute
+// Automatically creates a "Unit" attribute when the property is registered
 [Unit("°C")]
 public partial decimal Temperature { get; set; }
 ```
 
-This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
+**As a global initializer.** Register an `ISubjectPropertyInitializer` on the context to run for every property that gets attached. This allows initialization based on any source, e.g. reflection attributes or external configuration.
+
+```csharp
+public class DefaultValueInitializer : ISubjectPropertyInitializer
+{
+    public void InitializeProperty(RegisteredSubjectProperty property)
+    {
+        var attribute = property.ReflectionAttributes
+            .OfType<DefaultValueAttribute>()
+            .FirstOrDefault();
+
+        if (attribute is not null)
+        {
+            property.AddAttribute("DefaultValue", property.Type,
+                _ => attribute.Value, null);
+        }
+    }
+}
+
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking();
+
+context.AddService<ISubjectPropertyInitializer>(new DefaultValueInitializer());
+```
 
 ## Subject IDs
 
@@ -217,4 +255,4 @@ Subject IDs are automatically managed during the subject lifecycle:
 
 ### Without a registry
 
-Subject IDs also work without a registry configured — IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.
+Subject IDs also work without a registry configured, because IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.

@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 {
     [Fact]
-    public async Task BestEffortMode_LocalPropertyThrows_AppliesSuccessfulChanges()
+    public async Task WhenLocalPropertyThrowsInBestEffortMode_ThenSuccessfulChangesAreApplied()
     {
         // Arrange - PropertyB throws during commit, PropertyA succeeds
         var context = CreateContext();
@@ -31,7 +31,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert - PropertyA should be applied, PropertyB should fail
         Assert.True(device.PropertyA);
@@ -41,7 +41,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyThrows_RevertsAllChanges()
+    public async Task WhenLocalPropertyThrowsInRollbackMode_ThenAllChangesAreReverted()
     {
         // Arrange - PropertyB throws during commit, PropertyA succeeds initially
         var context = CreateContext();
@@ -58,7 +58,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert - Both should be reverted (PropertyA was applied then rolled back)
         Assert.False(device.PropertyA); // Rolled back
@@ -67,7 +67,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyThrows_RevertsExternalSources()
+    public async Task WhenLocalPropertyThrowsInRollbackMode_ThenExternalSourcesAreReverted()
     {
         // Arrange - FirstName has external source, PropertyB (local) throws during commit
         var context = CreateContext();
@@ -96,7 +96,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         // External source should have been written and then reverted (2 calls)
@@ -107,43 +107,98 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task RollbackMode_LocalPropertyRevertThrows_ReportsMultipleFailures()
+    public async Task WhenLocalRevertAlsoThrowsInRollbackMode_ThenMultipleFailuresAreReported()
     {
-        // Arrange - PropertyA throws on revert (when setting back to false)
-        var revertPhase = false;
+        // Arrange - PropertyA applies successfully then throws on its revert; PropertyB throws on apply,
+        // which triggers the rollback. The throw is sequence-based so PropertyA's apply succeeds (first
+        // setter call during commit) and only its revert fails (second call) - a phase flag set before
+        // commit would instead make PropertyA fail on apply and never reach the revert path.
+        var propertyACommitCalls = 0;
         var context = CreateContext();
-        var device = new ThrowingDevice(context);
-
-        device.ShouldThrow = prop =>
+        var device = new ThrowingDevice(context)
         {
-            if (prop == nameof(ThrowingDevice.PropertyB))
-                return true; // Always throw on PropertyB during commit
-            if (prop == nameof(ThrowingDevice.PropertyA) && revertPhase)
-                return true; // Throw on PropertyA during revert
-            return false;
+            ShouldThrow = prop =>
+            {
+                if (prop == nameof(ThrowingDevice.PropertyB))
+                    return true; // PropertyB fails on apply, forcing a rollback
+                if (prop == nameof(ThrowingDevice.PropertyA))
+                {
+                    propertyACommitCalls++;
+                    return propertyACommitCalls >= 2; // succeed on apply, throw on revert
+                }
+                return false;
+            }
         };
 
         // Act - capture changes (throwing disabled)
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-        device.PropertyA = true;  // Will succeed initially, then fail on revert
-        device.PropertyB = true;  // Will throw during commit
+        device.PropertyA = true;  // Applied during commit, then reverted (revert throws)
+        device.PropertyB = true;  // Throws during apply
 
         // Enable throwing for commit phase
         device.ThrowingEnabled = true;
 
-        // The revert phase will be triggered after PropertyB fails
-        // PropertyA's revert will also fail
-        revertPhase = true;
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        // Assert - PropertyA was applied then reverted (two setter calls), so this is genuinely a revert failure.
+        Assert.Equal(2, propertyACommitCalls);
 
-        // Assert - Both PropertyA (revert failure) and PropertyB (initial failure) should be reported
+        // Both PropertyA (revert failure) and PropertyB (apply failure) should be reported.
         Assert.Equal(2, exception.FailedChanges.Count);
         Assert.Equal(2, exception.Errors.Count);
     }
 
     [Fact]
-    public async Task NoWriter_BestEffortMode_LocalPropertyThrows_AppliesSuccessfulChanges()
+    public async Task WhenLocalRevertThrowsInRollbackMode_ThenForwardChangeIsReportedNotInvertedRollback()
+    {
+        // Arrange - PropertyA applies successfully (false -> true) then throws on its revert; PropertyB
+        // throws on apply (triggering the rollback). The throw is sequence-based so PropertyA's apply
+        // succeeds (first setter call during commit) and only its revert fails (second call).
+        var propertyACommitCalls = 0;
+        var context = CreateContext();
+        var device = new ThrowingDevice(context)
+        {
+            ShouldThrow = prop =>
+            {
+                if (prop == nameof(ThrowingDevice.PropertyB))
+                    return true; // PropertyB fails on apply, forcing a rollback
+                if (prop == nameof(ThrowingDevice.PropertyA))
+                {
+                    propertyACommitCalls++;
+                    return propertyACommitCalls >= 2; // succeed on apply, throw on revert
+                }
+                return false;
+            }
+        };
+
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        device.PropertyA = true;
+        device.PropertyB = true;
+
+        device.ThrowingEnabled = true;
+
+        // Act
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - PropertyA was applied then reverted (two setter calls), so this is genuinely a revert failure.
+        Assert.Equal(2, propertyACommitCalls);
+
+        // The reported PropertyA failure is the forward change the caller submitted (old=false, new=true),
+        // not the inverted rollback record (old=true, new=false).
+        SubjectPropertyChange? propertyAFailure = null;
+        foreach (var change in exception.FailedChanges)
+        {
+            if (change.Property.Metadata.Name == nameof(ThrowingDevice.PropertyA))
+                propertyAFailure = change;
+        }
+
+        Assert.NotNull(propertyAFailure);
+        Assert.False(propertyAFailure.Value.GetOldValue<bool>());
+        Assert.True(propertyAFailure.Value.GetNewValue<bool>());
+    }
+
+    [Fact]
+    public async Task WhenLocalPropertyThrowsInBestEffortModeWithoutWriter_ThenSuccessfulChangesAreApplied()
     {
         // Arrange - Context without WithSourceTransactions(), only WithTransactions()
         var context = InterceptorSubjectContext
@@ -164,7 +219,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         Assert.True(device.PropertyA); // Applied
@@ -173,7 +228,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task NoWriter_RollbackMode_LocalPropertyThrows_RevertsSuccessfulChanges()
+    public async Task WhenLocalPropertyThrowsInRollbackModeWithoutWriter_ThenSuccessfulChangesAreReverted()
     {
         // Arrange - Context without WithSourceTransactions(), only WithTransactions()
         var context = InterceptorSubjectContext
@@ -194,7 +249,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         // Enable throwing just before commit
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert - PropertyA should be rolled back
         Assert.False(device.PropertyA); // Rolled back
@@ -203,7 +258,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task AllLocalPropertiesSucceed_NoException()
+    public async Task WhenAllLocalPropertiesSucceed_ThenCommitSucceeds()
     {
         // Arrange - No properties throw
         var context = CreateContext();
@@ -225,7 +280,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task MixedSourceAndLocal_SourceFails_LocalNotApplied_InRollbackMode()
+    public async Task WhenSourceFailsWithMixedChangesInRollbackMode_ThenLocalChangesAreNotApplied()
     {
         // Arrange - External source fails, local should not be applied in rollback mode
         var context = CreateContext();
@@ -243,7 +298,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
         person.FirstName = "John";  // External source - fails
         device.PropertyA = true;     // Local - would succeed but shouldn't be applied
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert - Local properties should not be applied when external source fails in rollback mode
         Assert.Null(person.FirstName);
@@ -251,7 +306,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task StagedExecution_ExternalSourcesWrittenBeforeLocalProperties()
+    public async Task WhenCommitting_ThenExternalSourcesAreWrittenBeforeLocalApplies()
     {
         // Arrange - Verify that external sources are written BEFORE local OnSet* methods are called
         var executionOrder = new List<string>();
@@ -296,10 +351,10 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task StagedExecution_SourceBoundPropertyOnSetThrows_RevertsExternalSources()
+    public async Task WhenSourceBoundApplyThrows_ThenExternalSourcesAreReverted()
     {
         // Arrange - Tests Stage 3 failure: source-bound property's OnSet* throws after external write succeeds
-        // This is different from local property failure - it's when applying source-bound values to in-process model fails
+        // This is different from local property failure - it's when applying source-bound values to the local model fails
         var context = CreateContext();
         var device = new ThrowingDevice(context);
 
@@ -311,7 +366,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
             .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
                 new ValueTask<WriteResult>(WriteResult.Success));
 
-        // Bind PropertyA to external source - it will throw during in-process apply (Stage 3)
+        // Bind PropertyA to external source - it will throw during the local apply (Stage 3)
         new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(successSource.Object);
 
         device.ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA);
@@ -322,7 +377,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert - External source was written and then reverted (2 calls)
         Assert.Equal(2, writeCount);
@@ -331,7 +386,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_SourceBoundPropertyOnSetThrows_RevertsFailedSourceOnly()
+    public async Task WhenSourceBoundApplyThrowsInBestEffortMode_ThenOnlyFailedSourceIsReverted()
     {
         // Arrange - BestEffort mode should rollback failed property's source to maintain per-property consistency
         var context = CreateContext();
@@ -368,7 +423,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         device.ThrowingEnabled = true;
 
-        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         // PropertyA: source written (1) + rolled back (2) = 2 calls
@@ -385,7 +440,7 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
     }
 
     [Fact]
-    public async Task BestEffortMode_SourceBoundPropertyOnSetThrows_MaintainsPerPropertyConsistency()
+    public async Task WhenSourceBoundApplyThrowsInBestEffortMode_ThenPerPropertyConsistencyIsMaintained()
     {
         // Arrange - Verifies that each property stays in sync with its source
         var context = CreateContext();
@@ -413,14 +468,134 @@ public class SubjectTransactionLocalPropertyTests : TransactionTestBase
 
         device.ThrowingEnabled = true;
 
-        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert - Source was written with true, then rolled back with false
         Assert.Equal(2, writtenValues.Count);
         Assert.Equal(("PropertyA", true), writtenValues[0]);   // Initial write
         Assert.Equal(("PropertyA", false), writtenValues[1]);  // Rollback write
 
-        // In-process model matches source (both have false)
+        // Local model matches source (both have false)
         Assert.False(device.PropertyA);
+    }
+
+    [Fact]
+    public async Task WhenSourceBoundApplyThrowsInRollbackModeWithSingleSource_ThenEverythingIsReverted()
+    {
+        // Arrange - One source bound to two device properties (PropertyA throws on apply,
+        // PropertyB applies fine) plus a local (no-source) change. In Rollback mode an apply
+        // failure must leave nothing applied: the source-bound apply failure reverts the source
+        // for every written change and the local change is rolled back too.
+        var context = CreateContext();
+        var person = new Person(context);
+        var device = new ThrowingDevice(context)
+        {
+            ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA)
+        };
+
+        var writtenValues = new List<(string Property, bool Value)>();
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(0);
+        source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add((change.Property.Name, change.GetNewValue<bool>()));
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(source.Object);
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyB)).SetSource(source.Object);
+        // person.LastName has no source -> local change.
+
+        // Act & Assert
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+        device.PropertyA = true; // Source-bound, OnSet* throws during apply
+        device.PropertyB = true; // Source-bound, OnSet* succeeds
+        person.LastName = "Doe"; // Local, would succeed
+
+        device.ThrowingEnabled = true;
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - nothing stays applied to the local model
+        Assert.False(device.PropertyA); // Never applied (apply threw)
+        Assert.False(device.PropertyB); // Applied then rolled back
+        Assert.Null(person.LastName);   // Local change rolled back
+        Assert.Empty(exception.AppliedChanges);
+        Assert.Contains("Rollback was attempted", exception.Message);
+
+        // Under all-or-nothing rollback, FailedChanges reports every submitted change that did not commit:
+        // the source-bound apply failure (PropertyA) and the no-source local that was applied then reverted
+        // (LastName). PropertyB (source-bound, written then cleanly reverted) is not reported, matching the
+        // source-write-failure branch.
+        Assert.Equal(2, exception.FailedChanges.Count);
+        Assert.Contains(exception.FailedChanges, c => c.Property.Name == nameof(ThrowingDevice.PropertyA));
+        Assert.Contains(exception.FailedChanges, c => c.Property.Name == nameof(Person.LastName));
+        Assert.DoesNotContain(exception.FailedChanges, c => c.Property.Name == nameof(ThrowingDevice.PropertyB));
+
+        // Both source-bound writes were reverted at the source (each written true then false)
+        Assert.Equal(2, writtenValues.Count(v => v.Value));   // initial writes
+        Assert.Equal(2, writtenValues.Count(v => !v.Value));  // revert writes
+    }
+
+    [Fact]
+    public async Task WhenSourceBoundApplyThrowsInBestEffortModeWithSingleSource_ThenSuccessfulKeptAndFailedSourceReverted()
+    {
+        // Arrange - One source bound to two device properties (PropertyA throws on apply,
+        // PropertyB applies fine) plus a local (no-source) change. In BestEffort mode the
+        // successful changes (PropertyB written+applied, local applied) stay, while the
+        // failed-apply property has its source write reverted so source and model agree.
+        var context = CreateContext();
+        var person = new Person(context);
+        var device = new ThrowingDevice(context)
+        {
+            ShouldThrow = prop => prop == nameof(ThrowingDevice.PropertyA)
+        };
+
+        var writtenValues = new List<(string Property, bool Value)>();
+        var source = new Mock<ISubjectSource>();
+        source.Setup(s => s.WriteBatchSize).Returns(0);
+        source.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenValues.Add((change.Property.Name, change.GetNewValue<bool>()));
+                }
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyA)).SetSource(source.Object);
+        new PropertyReference(device, nameof(ThrowingDevice.PropertyB)).SetSource(source.Object);
+        // person.LastName has no source -> local change.
+
+        // Act & Assert
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        device.PropertyA = true; // Source-bound, OnSet* throws during apply
+        device.PropertyB = true; // Source-bound, OnSet* succeeds
+        person.LastName = "Doe"; // Local, succeeds
+
+        device.ThrowingEnabled = true;
+
+        var exception = await Assert.ThrowsAsync<SubjectTransactionException>(() => transaction.CommitAsync(CancellationToken.None).AsTask());
+
+        // Assert - successful changes stay applied
+        Assert.False(device.PropertyA);     // Failed apply, not applied; source reverted to match
+        Assert.True(device.PropertyB);      // Written and applied
+        Assert.Equal("Doe", person.LastName); // Local applied
+
+        // Only the failed-apply property is reported; the other two succeeded
+        Assert.Single(exception.FailedChanges);
+        Assert.Equal(nameof(ThrowingDevice.PropertyA), exception.FailedChanges[0].Property.Metadata.Name);
+        Assert.Equal(2, exception.AppliedChanges.Count);
+
+        // PropertyA's source was reverted (true then false); PropertyB written once and not reverted.
+        Assert.Single(writtenValues, v => v.Property == nameof(ThrowingDevice.PropertyA) && !v.Value);
+        Assert.Contains((nameof(ThrowingDevice.PropertyA), true), writtenValues);
+        Assert.Single(writtenValues, v => v.Property == nameof(ThrowingDevice.PropertyB));
+        Assert.Contains((nameof(ThrowingDevice.PropertyB), true), writtenValues);
     }
 }

@@ -195,6 +195,8 @@ public class DerivedPropertyConcurrencyTests
 
         // Assert
         Assert.False(weakTire.IsAlive, "Detached tire should be garbage collected");
+        // Keep the owning graph alive so stale references cannot disappear with it.
+        GC.KeepAlive(context);
     }
 
     [Fact]
@@ -611,36 +613,12 @@ public class DerivedPropertyConcurrencyTests
                 var random = new Random(Thread.CurrentThread.ManagedThreadId);
                 for (var j = 0; j < operationsPerThread; j++)
                 {
-                    var index = random.Next(subjectPoolSize);
-                    var person = persons[index];
-                    var operation = random.Next(4);
-                    var count = Interlocked.Increment(ref operationCounter);
-
-                    switch (operation)
-                    {
-                        case 0:
-                            person.FirstName = $"F{count}";
-                            break;
-                        case 1:
-                            person.LastName = $"L{count}";
-                            break;
-                        case 2:
-                            _ = person.FullName;
-                            _ = person.FullNameWithPrefix;
-                            break;
-                        case 3:
-                            bool shouldDetach;
-                            lock (detachedLock)
-                            {
-                                shouldDetach = detachedProperties.Add(index);
-                            }
-                            if (shouldDetach)
-                            {
-                                var property = new PropertyReference(person, nameof(Person.FullNameWithPrefix));
-                                person.DetachSubjectProperty(property);
-                            }
-                            break;
-                    }
+                    PerformRandomOperation(
+                        persons,
+                        random,
+                        detachedProperties,
+                        detachedLock,
+                        ref operationCounter);
                 }
             }));
         }
@@ -667,6 +645,54 @@ public class DerivedPropertyConcurrencyTests
                 Assert.Equal($"Mr. {expected}", person.FullNameWithPrefix);
             }
         }
+    }
+
+    private static void PerformRandomOperation(
+        Person[] persons,
+        Random random,
+        HashSet<int> detachedProperties,
+        object detachedLock,
+        ref int operationCounter)
+    {
+        var index = random.Next(persons.Length);
+        var person = persons[index];
+        var operation = random.Next(4);
+        var count = Interlocked.Increment(ref operationCounter);
+
+        switch (operation)
+        {
+            case 0:
+                person.FirstName = $"F{count}";
+                break;
+            case 1:
+                person.LastName = $"L{count}";
+                break;
+            case 2:
+                _ = person.FullName;
+                _ = person.FullNameWithPrefix;
+                break;
+            case 3:
+                DetachDerivedPropertyOnce(person, index, detachedProperties, detachedLock);
+                break;
+        }
+    }
+
+    private static void DetachDerivedPropertyOnce(
+        Person person,
+        int index,
+        HashSet<int> detachedProperties,
+        object detachedLock)
+    {
+        lock (detachedLock)
+        {
+            if (!detachedProperties.Add(index))
+            {
+                return;
+            }
+        }
+
+        var property = new PropertyReference(person, nameof(Person.FullNameWithPrefix));
+        person.DetachSubjectProperty(property);
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -705,7 +731,10 @@ public class DerivedPropertyConcurrencyTests
                 .Subscribe(observedChanges.Enqueue);
 
             // Drain initial setup notifications.
-            while (observedChanges.TryDequeue(out _)) { }
+            while (observedChanges.TryDequeue(out _))
+            {
+                // Discard setup notifications before exercising concurrent writes.
+            }
 
             var barrier = new Barrier(threadCount);
             var counter = 0;
@@ -718,17 +747,7 @@ public class DerivedPropertyConcurrencyTests
             {
                 var isFirstName = t % 2 == 0;
                 tasks[t] = Task.Run(() =>
-                {
-                    barrier.SignalAndWait();
-                    for (var j = 0; j < writesPerThread; j++)
-                    {
-                        var value = Interlocked.Increment(ref counter).ToString();
-                        if (isFirstName)
-                            person.FirstName = value;
-                        else
-                            person.LastName = value;
-                    }
-                });
+                    WriteSharedDependency(person, barrier, writesPerThread, isFirstName, ref counter));
             }
 
             await Task.WhenAll(tasks);
@@ -749,6 +768,28 @@ public class DerivedPropertyConcurrencyTests
                 var newValue = change.GetNewValue<string?>();
                 Assert.NotNull(newValue);
                 Assert.Contains(" ", newValue);
+            }
+        }
+    }
+
+    private static void WriteSharedDependency(
+        Person person,
+        Barrier barrier,
+        int writesPerThread,
+        bool isFirstName,
+        ref int counter)
+    {
+        barrier.SignalAndWait();
+        for (var index = 0; index < writesPerThread; index++)
+        {
+            var value = Interlocked.Increment(ref counter).ToString();
+            if (isFirstName)
+            {
+                person.FirstName = value;
+            }
+            else
+            {
+                person.LastName = value;
             }
         }
     }

@@ -57,36 +57,6 @@ public class ParentAccessDuringLifecycleTests
     }
 
     [Fact]
-    public void WhenComponentWithoutContextAttachedViaContextInheritance_ThenParentsAreSetBeforeAttachSubject()
-    {
-        // This test specifically tests the scenario where:
-        // 1. Root has context with WithContextInheritance
-        // 2. Child is created WITHOUT context
-        // 3. When child is attached, context is inherited AND parents should be set
-
-        // Arrange: Create context with both context inheritance and parent tracking
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithParents();
-
-        var simulation = new Simulation(context) { Name = "Root" };
-
-        // Component created without context - will inherit via ContextInheritanceHandler
-        var component = new Component { Name = "Child" };
-
-        // Act: Attach component - context will be inherited, parents should be set
-        simulation.Component = component;
-
-        // Assert: Parents should be available when component's AttachSubjectToContext runs
-        Assert.Null(component.AttachException);
-        Assert.NotNull(component.ParentsFoundDuringAttach);
-        Assert.NotEmpty(component.ParentsFoundDuringAttach);
-        Assert.NotNull(component.RootFoundDuringAttach);
-        Assert.Same(simulation, component.RootFoundDuringAttach);
-    }
-
-    [Fact]
     public void WhenParentsCalledWithoutParentTracking_ThenReturnsEmptySet()
     {
         // Arrange: Create context WITHOUT parent tracking
@@ -112,8 +82,8 @@ public class ParentAccessDuringLifecycleTests
         // Test with WithParents() called BEFORE WithFullPropertyTracking()
         var context = InterceptorSubjectContext
             .Create()
-            .WithFullPropertyTracking()
-            .WithParents();
+            .WithParents()
+            .WithFullPropertyTracking();
 
         var simulation = new Simulation(context) { Name = "Root" };
         var component = new Component { Name = "Child" };

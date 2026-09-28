@@ -20,8 +20,8 @@ public partial class Machine
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    rootName: "MyMachine");
+    connectorName: "opc",
+    rootPath: ["MyMachine"]);
 
 // ...
 var host = builder.Build();
@@ -34,8 +34,8 @@ For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name 
 
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
-- `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `rootName` - Optional root node name to start browsing from under the Objects folder
+- `connectorName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
+- `rootPath` - Optional path segments to the root node to start browsing from under the Objects folder (e.g., `["MyMachine"]`)
 
 Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
 
@@ -82,7 +82,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
 
         // Optional
-        RootName = "Machines",
+        RootPath = ["Machines"],
         DefaultNamespaceUri = "http://factory.com/machines",
         ApplicationName = "MyOpcUaClient",
         ReconnectInterval = TimeSpan.FromSeconds(5),
@@ -91,7 +91,7 @@ builder.Services.AddOpcUaSubjectClientSource(
         DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
-        MaximumItemsPerSubscription = 1000,
+        MaxItemsPerSubscription = 1000,
 
         // Data change filter (null = use OPC UA library defaults)
         DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
@@ -100,7 +100,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
-        RetryTime = TimeSpan.FromSeconds(1)
+        RetryTime = TimeSpan.FromSeconds(10)   // delay between reconnect attempts
     });
 ```
 
@@ -141,7 +141,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `CertificateStoreBasePath` | "pki" | Base directory for certificate stores |
 | `SessionFactory` | null | Custom session factory (uses `DefaultSessionFactory` when null) |
 | `TelemetryContext` | NullTelemetryContext | Telemetry integration for logging and diagnostics |
-| `NodeMapper` | CompositeNodeMapper | Maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
+| `Mapper` | OpcUaCompositeMapper | `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` that maps C# properties to OPC UA nodes (see [Mapping Guide](connectors-opcua-mapping.md)) |
 
 **Subscription Tuning:**
 
@@ -151,7 +151,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 | `SubscriptionKeepAliveCount` | 10 | Keep-alive count for subscriptions |
 | `SubscriptionLifetimeCount` | 100 | Lifetime count (must be >= 3x keep-alive count) |
 | `SubscriptionPriority` | 0 | Subscription priority (0 = server default) |
-| `SubscriptionMaximumNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
+| `SubscriptionMaxNotificationsPerPublish` | 0 | Max notifications per publish (0 = server default) |
 | `MinPublishRequestCount` | 3 | Minimum outstanding publish requests |
 | `SubscriptionSequentialPublishing` | false | Process messages in order (reduces throughput) |
 
@@ -177,7 +177,7 @@ Beyond the settings shown above, the following properties are available on `OpcU
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
+| `MaxReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
 
 ## Security
 
@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). This feature is provided by the `SubjectSourceBackgroundService` (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue)).
+Write retry queue behavior (ring buffer, reconcile by commit order on reconnection) is provided by `SubjectSourceBase`. See [Connectors: Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -391,17 +391,14 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
+        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default, 0 to disable)
     });
 
 // Writes are automatically queued during disconnection
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
 
-**Configuration:**
-- `WriteRetryQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
-- Ring buffer semantics: drops oldest when full, keeps latest values
-- Optimistic re-apply after reconnection (source wins on conflict)
+`Diagnostics.OutboundRetries` reports this queue: `Depth` is what is parked right now, `Capacity` echoes `WriteRetryQueueSize`, and `TotalDropped` counts capacity eviction, failed or terminally unconfirmed writes, and owned connect-window writes that cannot be retained since `StartTime`. A capacity of 0 retains nothing but still counts those owned writes. Writes made before the source claims their property remain unattributable; see [Known Limitations](connectors.md#known-limitations).
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -427,7 +424,7 @@ builder.Services.AddOpcUaSubjectClientSource(
 
 ### Auto-Healing of Failed Monitored Items
 
-The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
+The library retries failed subscription items that may succeed later (for example when server resources free up), bounded so a persistently failing item escalates rather than retrying forever.
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -439,14 +436,17 @@ builder.Services.AddOpcUaSubjectClientSource(
     });
 ```
 
-**Smart retry logic:**
-- Retries transient errors: `BadTooManyMonitoredItems`, `BadOutOfService`, `BadMonitoringModeUnsupported`
-- Skips permanent errors: `BadNodeIdUnknown`
-- Health checks run at configurable intervals (minimum: 5 seconds)
-- Items that permanently don't support subscriptions automatically fall back to polling
+**Retry and escalation logic:**
+- Retries transient errors (for example `BadTooManyMonitoredItems`, `BadOutOfService`) for up to three consecutive health checks (roughly 15 seconds at the default interval), so a genuinely transient failure recovers on its own.
+- If an item keeps failing past that bound and `EnablePollingFallback` is enabled (the default), it escalates to polling rather than retrying the subscription forever.
+- With polling disabled there is nothing better to escalate to, so the item keeps being retried and recovers on its own once the node returns; it is never dropped.
+- Nodes that do not support subscriptions (`BadNotSupported`, `BadMonitoredItemFilterUnsupported`) fall back to polling immediately when enabled.
+- Skips permanent design-time errors (`BadNodeIdUnknown`, `BadAttributeIdInvalid`, `BadIndexRangeInvalid`).
+- Reconnect re-attempts a real subscription for every item, so escalation to polling is not permanent.
+- Health checks run at configurable intervals (minimum: 1 second, default: 5 seconds).
 
 **Configuration validation:**
-- `SubscriptionHealthCheckInterval` minimum of 5 seconds enforced
+- `SubscriptionHealthCheckInterval` minimum of 1 second enforced
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
@@ -475,7 +475,7 @@ When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts t
 
 If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
 
-1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed)
+1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed, and incoming notifications buffered so stale values from the abandoned subscription are not applied during the gap before manual reconnection)
 2. The health check loop detects the dead session and triggers manual reconnection
 3. Manual reconnection creates a fresh session, new subscriptions, and performs a full state read
 4. Full consistency is restored
@@ -507,7 +507,7 @@ Between the SDK's `OnReconnectComplete` (step 3) and the health check's full sta
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, queued changes are optimistically re-applied only if the server hasn't changed the property (source wins on conflict). Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, each queued change is sent unless a later local write superseded it, so a write that already committed is not discarded by the reload. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
 
 ### Resilience Configuration
 
@@ -525,6 +525,8 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+
+Final outbound delivery on stop shares the internal five-second safety bound described in [Flushing On Stop](connectors.md#flushing-on-stop). It cannot be configured per connector.
 
 ## Extensibility
 
@@ -606,15 +608,100 @@ if (dynamicProperty != null)
 }
 ```
 
+#### Type Resolution
+
+The `OpcUaTypeResolver` maps OPC UA nodes to CLR types during dynamic discovery:
+
+- **Object nodes** become `DynamicSubject` (named sub-properties on the parent subject).
+- **Object nodes with `[numeric]` convention** (e.g., `People[0]`, `People[1]`) become `DynamicSubject[]` collections.
+- **Object nodes with `[string]` convention** (e.g., `Devices[SensorA]`) become `IReadOnlyDictionary<string, DynamicSubject>` dictionaries.
+
+The bracket convention is produced by this library's OPC UA server when exposing C# collections and dictionaries. Standard OPC UA servers typically use named children and are always treated as single subjects.
+- **Variable nodes** are mapped to CLR types based on their OPC UA DataType. The resolver uses `session.TypeTree` to walk the type hierarchy, so custom DataType subtypes (e.g., a server-specific `LocalizedText` variant) are correctly resolved to their base built-in type.
+
+| OPC UA BuiltInType | CLR Type | Notes |
+|---|---|---|
+| Boolean, SByte, Byte, Int16, ... | bool, sbyte, byte, short, ... | Direct mapping |
+| String | string | |
+| DateTime | DateTime | |
+| LocalizedText | LocalizedText | |
+| Enumeration | int | Mapped to underlying Int32 |
+| Number | double | Abstract numeric base type |
+| Integer | long | Abstract signed integer |
+| UInteger | ulong | Abstract unsigned integer |
+| ExtensionObject | ExtensionObject | Complex structured types |
+| XmlElement | string | |
+| Variant, Null | (skipped) | Type cannot be determined |
+
+Override `TryGetTypeForNodeAsync` on `OpcUaTypeResolver` to customize type mapping for specific nodes.
+
+#### Subject Deduplication
+
+When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items. The same applies within a single browse call: if a server exposes one target through multiple reference types (e.g., both `HasComponent` and `HasProperty`), the duplicate browse references are filtered so the underlying node is processed exactly once per parent, at both the property and attribute level.
+
+Round-trip identity is preserved for the common cross-parent DAG: if the server-side C# model has a single instance reachable from two different parent paths, the client materializes one instance bound to both parent properties. The case where two properties on the **same parent** reference the same instance under different names does not round-trip because OPC UA stores the BrowseName on the target node rather than on the reference. See [connectors-opcua-server.md](connectors-opcua-server.md#subject-deduplication) for the full discussion of the server-side behavior and its limitations.
+
 ## Write Error Handling
 
 When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
 
 ## Diagnostics
 
-`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade of type `OpcUaClientDiagnostics`. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
-Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), throughput (`IncomingChangesPerSecond`, `OutgoingChangesPerSecond`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes) (`PollingItemCount`), [read-after-write](#read-after-write-fallback) (`PendingReadAfterWrites`). All properties are thread-safe for reading.
+`OpcUaClientDiagnostics` derives from `SourceDiagnostics`, whose members, buffer semantics and read guarantees are described once in [Connector Diagnostics](connectors.md#connector-diagnostics). What follows is what is specific to this client.
+
+**`IsOperational` here means the client has a live session with its subscriptions set up.** This built-in client implements liveness monitoring, but `IsOperational` is `null` before its first protocol-specific observation. It then publishes false for the whole address space browse and subscription creation, which on a large server takes minutes. Which step raises it depends on how the session came about: the first health check tick on an initial connect, the completed subscription transfer on an SDK reconnect, and the completed state reload on a manual reconnect. It drops whenever the session is lost, killed or torn down, and whenever a connect attempt ends, so a client sitting in its retry delay reports an explicit false rather than serving.
+
+It is not a claim that the model is in sync, and the two are not ordered against each other: the initial value read can run either side of the rise on an initial connect, and on a manual reconnect the reload always finishes first. While that read runs, `ISubjectSource.State` is `Synchronizing`, so reading it together with `IsOperational` is how a dropped network is told apart from a connected client that is still loading. See [Diagnostics and State answer different questions](connectors-monitoring.md#diagnostics-and-state-answer-different-questions).
+
+This client measures both throughput directions, so `Throughput.IncomingPerSecond` and `Throughput.OutgoingPerSecond` are never `null` here.
+
+This built-in client registers the `ClaimedPropertyCount` gauge, so it reports the measured number of currently owned properties, including zero.
+
+| Member | Meaning |
+|---|---|
+| `IsReconnecting` | A reconnection attempt is in flight. A distinct sub-state of not being operational, not a second spelling of it. |
+| `SessionId` | The current session identifier, `null` when there is no session. |
+| `SubscriptionCount` | Active OPC UA subscriptions. |
+| `MonitoredItemCount` | Monitored items across all subscriptions. |
+
+`Reconnects` is the reconnection history. Every counter is monotonic since `StartTime`, so a reconnect storm is visible as `TotalAttempts` climbing without `TotalSucceeded` keeping up. `LastConnectionTime` is the exception listed first below: it is not a counter and deliberately survives the epoch reset, because it records a discrete past event rather than an amount accumulated during the run.
+
+| Member | Meaning |
+|---|---|
+| `Reconnects.LastConnectionTime` | When a session was last established, `null` if never. Records a past event and survives the disconnection that follows it. |
+| `Reconnects.TotalAttempts` | Attempts started. Once all in-flight attempts resolve, this equals the three below summed. |
+| `Reconnects.TotalSucceeded` | Attempts that produced a usable session. |
+| `Reconnects.TotalFailed` | Attempts that ended with a genuine fault, meaning an exception raised while the attempt was still live. |
+| `Reconnects.TotalAbandoned` | Attempts that ended without a usable session and without a fault: a null session, a failed transfer, a preserved session after a server restart, a stall reset, or a cancellation from a kill or from the listen attempt being torn down, which happens both when the source stops and when the retry loop ends an attempt. |
+
+`Polling` is `null` when the [polling fallback](#polling-fallback-for-unsupported-nodes) is off, no session has been set up yet, or the client is between connect attempts. That last case is not a startup-only condition: the block reads through the session manager and goes `null` as soon as that manager is disposed, which every way out of a connect attempt does, so it stays `null` for the whole retry delay. The totals underneath survive that and reappear at their previous values once a session exists again. Otherwise it reports:
+
+| Member | Meaning |
+|---|---|
+| `Polling.ItemCount` | Items currently being polled. |
+| `Polling.TotalSuccessfulReads` | Reads that succeeded. |
+| `Polling.TotalFailedReads` | Reads that failed. |
+| `Polling.TotalValueChanges` | Value changes detected by polling. |
+| `Polling.TotalSlowPolls` | Polls whose duration exceeded the polling interval. |
+| `Polling.TotalCircuitBreakerTrips` | Times the circuit breaker tripped. |
+| `Polling.IsCircuitBreakerOpen` | The circuit breaker is currently open. |
+| `Polling.IsRunning` | The polling loop is running. This is a sub-component's own state, not a second spelling of `IsOperational`, which describes the connector as a whole. |
+
+`ReadAfterWrite` is `null` when [read-after-write](#read-after-write-fallback) is off, no session has been set up yet, or the client is between connect attempts, for the same reason as `Polling` above and with its totals surviving the same way. Every counter here describes a read that follows a write, and each member names its noun so a failed verification read does not read as a failed write:
+
+| Member | Meaning |
+|---|---|
+| `ReadAfterWrite.PendingReads` | Verification reads currently pending. |
+| `ReadAfterWrite.TotalScheduledReads` | Verification reads scheduled. |
+| `ReadAfterWrite.TotalExecutedReads` | Verification reads executed. |
+| `ReadAfterWrite.TotalCoalescedReads` | Scheduled reads replaced by a subsequent write. |
+| `ReadAfterWrite.TotalFailedReads` | Verification reads that failed. |
+
+The sub-block counters survive a reconnect. `PollingManager` and `ReadAfterWriteManager` are rebuilt on every connect attempt, including failed ones, but their counters are owned by the source, so they do not rebase to zero during the reconnect storm that is exactly when they matter.
+
+For outbound retry capacity, depth, and drop accounting, including capacity 0, see [Write Retry Queue During Disconnection](#write-retry-queue-during-disconnection).
 
 ## Direct Session Access
 
@@ -631,7 +718,7 @@ if (source.CurrentSession is { } session)
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it — they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it: they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
 
 ```csharp
 opcUaSource.CurrentSessionChanged += (_, args) =>
@@ -655,7 +742,7 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 };
 ```
 
-The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
+The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes; the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers, so isolate exceptions in your own handler if multiple must run.
 
 ## Node ID Resolution
 
@@ -679,15 +766,16 @@ Write queue operations use `Interlocked` operations for thread-safe counter upda
 **Update ordering:**
 By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
 
-For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
+Set `SubscriptionSequentialPublishing = true` to order subscription messages at the cost of reduced throughput. This does not order them against local writes: a transaction commit does not wait for subscription echoes, and a delayed notification can overwrite newer local state or cause a transaction conflict.
 
-To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
+To prevent feedback loops when external sources update properties, apply inbound values with the `SetValueFromSource()` extension method, which stamps the write with a `FromSource` origin (source marking is per write, not through an ambient scope):
 
 ```csharp
-using (SubjectChangeContext.WithSource(opcUaSource))
-{
-    subject.Temperature = newValue;
-}
+propertyReference.SetValueFromSource(
+    source: opcUaSource,
+    changedTimestamp: sourceTimestamp,
+    receivedTimestamp: DateTimeOffset.Now,
+    valueFromSource: newValue);
 ```
 
 ## Lifecycle
@@ -707,19 +795,22 @@ See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that
 ### Class Dependency Graph
 
 ```
-OpcUaSubjectClientSource (orchestrator, BackgroundService)
+OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
+ ├── owns SourceMetrics                    (from the base: liveness, error, buffers, throughput)
  ├── owns ReconnectionMetrics              (standalone, thread-safe counters)
+ ├── owns PollingMetrics                   (standalone, handed to each SessionManager)
+ ├── owns ReadAfterWriteMetrics            (standalone, handed to each SessionManager)
  ├── owns IncomingThroughput               (standalone, ThroughputCounter)
  ├── owns OutgoingThroughput               (standalone, ThroughputCounter)
  ├── owns SubscriptionHealthMonitor        (standalone)
  ├── owns OpcUaSubjectLoader               (back-ref to source)
- ├── owns OpcUaClientDiagnostics           (back-ref to source, read-only facade)
+ ├── owns OpcUaClientDiagnostics           (back-ref to source, read-only facade over SourceMetrics)
  ├── creates SessionManager                (back-ref to source)
  │    ├── creates SubscriptionManager      (back-ref to source)
  │    │    ├── uses PollingManager
  │    │    └── uses ReadAfterWriteManager
- │    ├── creates PollingManager           (back-ref to source)
- │    └── creates ReadAfterWriteManager
+ │    ├── creates PollingManager           (back-ref to source, receives PollingMetrics)
+ │    └── creates ReadAfterWriteManager    (receives ReadAfterWriteMetrics)
  └── creates OutboundWriter
       ├── receives SessionManager
       └── receives ThroughputCounter
@@ -729,7 +820,7 @@ OpcUaSubjectClientSource (orchestrator, BackgroundService)
 
 | Class | Role |
 |-------|------|
-| `OpcUaSubjectClientSource` | Orchestrator. Owns the lifecycle, health check loop, reconnection logic, and the `ISubjectSource` contract. |
+| `OpcUaSubjectClientSource` | Orchestrator. Inherits `SubjectSourceBase` (which owns the pump skeleton: buffer, listen, load initial state, run change queue, retry on failure). Adds the OPC UA-specific health check loop, reconnection logic, and the `ISubjectSource` contract. |
 | `SessionManager` | Manages the OPC UA session lifecycle (create, reconnect, dispose). Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
 | `SubscriptionManager` | Creates and manages OPC UA subscriptions and monitored items. Routes incoming data change notifications. |
 | `OutboundWriter` | Writes property changes to the OPC UA server. Tracks outgoing throughput. |
@@ -737,14 +828,15 @@ OpcUaSubjectClientSource (orchestrator, BackgroundService)
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
 | `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
 | `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
-| `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
+| `OpcUaClientDiagnostics` | Read-only public facade, a `SourceDiagnostics` narrowed for this connector, that aggregates diagnostics from all internal components. |
 | `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
+| `PollingMetrics`, `ReadAfterWriteMetrics` | Thread-safe counters for the polling fallback and the read-after-write fallback. Owned by the source rather than by the manager that feeds them, so a rebuilt session does not rebase them. |
 | `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
 
 ### Key Design Decisions
 
-**Single-threaded health loop.** `OpcUaSubjectClientSource.ExecuteAsync` runs a single loop that checks session health, triggers reconnection, and detects stalls. All reconnection coordination flows through this loop.
+**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that checks session health, triggers reconnection, and detects stalls. The loop is spawned from `StartListeningAsync` via `BackgroundTaskLifetime.Start`, so it is started and stopped together with the listener. The pump skeleton itself lives in `SubjectSourceBase`. All reconnection coordination flows through this loop.
 
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
-**Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+**Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. `SessionManager` creates and caches its `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers, so repeated reads reuse the same objects without exposing internal types.

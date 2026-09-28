@@ -2,6 +2,8 @@
 
 The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.Interceptor and OPC UA (Open Platform Communications Unified Architecture), enabling bidirectional synchronization between C# objects and industrial automation systems. It supports both client and server modes.
 
+Both built-in OPC UA connectors implement liveness monitoring. Before their first protocol-specific liveness observation, `IsOperational` can be `null`; after that observation, they publish explicit `true` or `false` values. The client registers the `ClaimedPropertyCount` gauge, so its count is measured, including zero.
+
 - [OPC UA Client](connectors-opcua-client.md) - Configuration, authentication, monitoring, resilience, extensibility
 - [OPC UA Server](connectors-opcua-server.md) - Configuration, security, companion specs, diagnostics
 - [OPC UA Mapping](connectors-opcua-mapping.md) - Attributes, fluent configuration, companion spec patterns
@@ -34,8 +36,8 @@ public partial class Machine
 builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc",
-    rootName: "MyMachine");
+    connectorName: "opc",
+    rootPath: ["MyMachine"]);
 
 // ...
 var host = builder.Build();
@@ -45,10 +47,10 @@ machine.Speed = 100; // Writes to OPC UA server
 
 // Access diagnostics via DI (unnamed singleton)
 var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
-Console.WriteLine(source.Diagnostics.IsConnected);
+Console.WriteLine(source.Diagnostics.IsOperational);
 ```
 
-See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility.
+See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility, and [Source Monitoring](connectors-monitoring.md) for waiting until the model is in sync rather than merely connected.
 
 ### Server
 
@@ -64,7 +66,7 @@ public partial class Sensor
 
 builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
+    connectorName: "opc",
     rootName: "MySensor");
 
 // ...
@@ -73,14 +75,14 @@ await host.StartAsync();
 
 // Access diagnostics via DI (unnamed singleton)
 var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
-Console.WriteLine(server.Diagnostics.IsRunning);
+Console.WriteLine(server.Diagnostics.IsOperational);
 ```
 
 See [OPC UA Server](connectors-opcua-server.md) for configuration, security, companion specifications, and diagnostics.
 
 ## Property Mapping
 
-Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` / `[OpcUaReference]` attributes). A `FluentOpcUaNodeMapper<T>` is also available for runtime code-based configuration. Custom mappers can be added to the composite chain.
+Both client and server configurations include a `Mapper` property that controls how C# properties map to OPC UA nodes. The client uses `IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>` (forward mapping plus reverse lookup from OPC UA node references), while the server uses `IPropertyMapper<OpcUaPropertyMapping>` (forward mapping only). The default for both is an `OpcUaCompositeMapper` combining `OpcUaPathProviderMapper` (maps `[Path]` attributes) and `OpcUaAttributeMapper` (maps `[OpcUaNode]` / `[OpcUaReference]` attributes). `OpcUaFluentMapperBuilder<TRoot>` is also available for code-based type-level configuration. Custom mappers can be added to the composite chain. See [Property Mappers](connectors.md#property-mappers) for the generic abstraction that these types implement.
 
 For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes:
 

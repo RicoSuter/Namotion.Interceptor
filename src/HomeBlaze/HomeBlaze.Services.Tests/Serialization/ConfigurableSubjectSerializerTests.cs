@@ -427,7 +427,7 @@ public class ConfigurableSubjectSerializerTests
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
+            .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
         var subject = new TestSubject(context) { ConfigProperty = "original" };
@@ -448,7 +448,7 @@ public class ConfigurableSubjectSerializerTests
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
+            .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
         var subject = new TestSubject(context) { ConfigProperty = "original" };
@@ -470,7 +470,7 @@ public class ConfigurableSubjectSerializerTests
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
+            .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
         var subject = new SubjectWithMixedProperties(context)

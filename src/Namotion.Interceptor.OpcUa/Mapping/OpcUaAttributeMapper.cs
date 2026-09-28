@@ -1,0 +1,245 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
+using Namotion.Interceptor.Connectors.Mapping;
+using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.Registry.Abstractions;
+
+namespace Namotion.Interceptor.OpcUa.Mapping;
+
+/// <summary>
+/// Maps properties using OpcUaNode, OpcUaReference, and OpcUaValue attributes.
+/// </summary>
+public class OpcUaAttributeMapper : IReversePropertyMapper<OpcUaPropertyMapping, OpcUaLookupKey>
+{
+    private readonly string _connectorName;
+    private readonly string? _defaultNamespaceUri;
+
+    /// <summary>
+    /// Creates a new attribute-based node mapper.
+    /// </summary>
+    /// <param name="connectorName">
+    /// The connector name carried on <see cref="OpcUaNodeAttribute"/> (as its <c>Name</c>,
+    /// inherited from the base path attribute) that this mapper filters by. Only attributes whose
+    /// <c>Name</c> matches are picked up, so multiple OPC UA mappings can coexist on the same
+    /// subject. Defaults to <see cref="OpcUaConstants.DefaultConnectorName"/> ("opc").
+    /// </param>
+    /// <param name="defaultNamespaceUri">Default namespace URI for nodes without explicit namespace.</param>
+    public OpcUaAttributeMapper(string? connectorName = null, string? defaultNamespaceUri = null)
+    {
+        _connectorName = connectorName ?? OpcUaConstants.DefaultConnectorName;
+        _defaultNamespaceUri = defaultNamespaceUri;
+    }
+
+    /// <inheritdoc />
+    public bool TryGetMapping(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject rootSubject,
+        [NotNullWhen(true)] out OpcUaPropertyMapping? mapping)
+    {
+        // Get class-level OpcUaNode from the property's type (for object references)
+        var classAttribute = GetClassLevelOpcUaNodeAttribute(property);
+
+        // Get property-level attributes (single pass to avoid LINQ allocations)
+        OpcUaNodeAttribute? propertyAttribute = null;
+        OpcUaReferenceAttribute? referenceAttribute = null;
+        OpcUaValueAttribute? valueAttribute = null;
+
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            switch (attribute)
+            {
+                case OpcUaNodeAttribute node when propertyAttribute is null && Matches(node):
+                    propertyAttribute = node;
+                    break;
+                case OpcUaReferenceAttribute reference when referenceAttribute is null:
+                    referenceAttribute = reference;
+                    break;
+                case OpcUaValueAttribute value when valueAttribute is null:
+                    valueAttribute = value;
+                    break;
+            }
+
+            if (propertyAttribute is not null && referenceAttribute is not null && valueAttribute is not null)
+                break;
+        }
+
+        // No OPC UA configuration at all
+        if (classAttribute is null && propertyAttribute is null && referenceAttribute is null && valueAttribute is null)
+        {
+            mapping = null;
+            return false;
+        }
+
+        var classConfig = classAttribute is not null ? BuildConfigFromNodeAttribute(classAttribute) : null;
+        var propertyConfig = propertyAttribute is not null ? BuildConfigFromNodeAttribute(propertyAttribute) : null;
+
+        // Start with property config, merge class config as fallback
+        var config = propertyConfig?.WithFallback(classConfig) ?? classConfig ?? new OpcUaPropertyMapping();
+
+        // Apply reference attribute
+        if (referenceAttribute is not null)
+        {
+            config = config with
+            {
+                ReferenceType = config.ReferenceType ?? referenceAttribute.ReferenceType,
+                ReferenceTypeNamespace = config.ReferenceTypeNamespace ?? referenceAttribute.ReferenceTypeNamespace,
+                ItemReferenceType = config.ItemReferenceType ?? referenceAttribute.ItemReferenceType,
+                ItemReferenceTypeNamespace = config.ItemReferenceTypeNamespace ?? referenceAttribute.ItemReferenceTypeNamespace
+            };
+        }
+
+        if (valueAttribute is not null)
+        {
+            // Validate: OpcUaValue requires the containing class to have NodeClass = Variable
+            var containingClassAttribute = property.Parent.Subject.GetType().GetCustomAttribute<OpcUaNodeAttribute>();
+            if (containingClassAttribute?.NodeClass != OpcUaNodeClass.Variable)
+            {
+                throw new InvalidOperationException(
+                    $"[OpcUaValue] attribute on property '{property.Name}' requires the containing class " +
+                    $"'{property.Parent.Subject.GetType().Name}' to have [OpcUaNode(NodeClass = OpcUaNodeClass.Variable)]. " +
+                    $"In OPC UA, only Variable nodes have a Value attribute.");
+            }
+
+            config = config with { IsValue = true };
+        }
+
+        mapping = config;
+        return true;
+    }
+
+    /// <inheritdoc />
+    public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+        OpcUaLookupKey key,
+        RegisteredSubject subject,
+        CancellationToken cancellationToken)
+    {
+        var nodeReference = key.Reference;
+        var session = key.Session;
+
+        var nodeIdString = nodeReference.NodeId.Identifier.ToString();
+        var nodeNamespaceUri = nodeReference.NodeId.NamespaceUri
+            ?? session.NamespaceUris.GetString(nodeReference.NodeId.NamespaceIndex);
+
+        var browseName = nodeReference.BrowseName.Name;
+        var browseNamespaceIndex = nodeReference.BrowseName.NamespaceIndex;
+
+        RegisteredSubjectProperty? browseNameMatch = null;
+        foreach (var property in subject.Properties)
+        {
+            if (property.IsAttribute)
+                continue;
+
+            // Single-pass lookup of the first OpcUaNode attribute (avoids a LINQ iterator allocation per property)
+            OpcUaNodeAttribute? attribute = null;
+            foreach (var candidate in property.ReflectionAttributes)
+            {
+                if (candidate is OpcUaNodeAttribute node && Matches(node))
+                {
+                    attribute = node;
+                    break;
+                }
+            }
+
+            if (attribute is null)
+                continue;
+
+            // Priority 1: Explicit NodeIdentifier match - return immediately
+            if (attribute.NodeIdentifier == nodeIdString)
+            {
+                var propertyNamespaceUri = attribute.NodeNamespaceUri ?? _defaultNamespaceUri;
+                if (propertyNamespaceUri is null || propertyNamespaceUri == nodeNamespaceUri)
+                {
+                    return new ValueTask<RegisteredSubjectProperty?>(property);
+                }
+            }
+
+            // Priority 2: BrowseName match - track first candidate
+            if (browseNameMatch is null && attribute.BrowseName == browseName)
+            {
+                if (attribute.BrowseNamespaceUri is not null)
+                {
+                    var expectedNamespaceIndex = (ushort)session.NamespaceUris.GetIndex(attribute.BrowseNamespaceUri);
+                    if (browseNamespaceIndex != expectedNamespaceIndex)
+                    {
+                        continue; // Namespace doesn't match, try next property
+                    }
+                }
+
+                browseNameMatch = property;
+            }
+        }
+
+        return new ValueTask<RegisteredSubjectProperty?>(browseNameMatch);
+    }
+
+    private OpcUaNodeAttribute? GetClassLevelOpcUaNodeAttribute(RegisteredSubjectProperty property)
+    {
+        if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
+        {
+            var elementType = GetElementType(property.Type);
+            if (elementType is null)
+                return null;
+
+            foreach (var attribute in elementType.GetCustomAttributes<OpcUaNodeAttribute>(inherit: true))
+            {
+                if (Matches(attribute))
+                    return attribute;
+            }
+        }
+        return null;
+    }
+
+    private bool Matches(OpcUaNodeAttribute attribute) => attribute.Name == _connectorName;
+
+    private static Type GetElementType(Type type)
+    {
+        if (type.IsArray)
+        {
+            return type.GetElementType()!;
+        }
+
+        if (type.IsGenericType)
+        {
+            var args = type.GetGenericArguments();
+            switch (args.Length)
+            {
+                case 2:
+                    return args[1];
+                case 1:
+                    return args[0];
+            }
+        }
+        return type;
+    }
+
+    private static OpcUaPropertyMapping BuildConfigFromNodeAttribute(OpcUaNodeAttribute attribute)
+    {
+        return new OpcUaPropertyMapping
+        {
+            BrowseName = attribute.BrowseName,
+            BrowseNamespaceUri = attribute.BrowseNamespaceUri,
+            NodeIdentifier = attribute.NodeIdentifier,
+            NodeNamespaceUri = attribute.NodeNamespaceUri,
+            DisplayName = attribute.DisplayName,
+            Description = attribute.Description,
+            TypeDefinition = attribute.TypeDefinition,
+            TypeDefinitionNamespace = attribute.TypeDefinitionNamespace,
+            NodeClass = attribute.NodeClass != OpcUaNodeClass.Auto ? attribute.NodeClass : null,
+            DataType = attribute.DataType,
+            DataTypeNamespace = attribute.DataTypeNamespace,
+            SamplingInterval = attribute.SamplingInterval != int.MinValue ? attribute.SamplingInterval : null,
+            QueueSize = attribute.QueueSize != uint.MaxValue ? attribute.QueueSize : null,
+            DiscardOldest = attribute.DiscardOldest switch
+            {
+                DiscardOldestMode.True => true,
+                DiscardOldestMode.False => false,
+                _ => null
+            },
+            DataChangeTrigger = (int)attribute.DataChangeTrigger != -1 ? attribute.DataChangeTrigger : null,
+            DeadbandType = (int)attribute.DeadbandType != -1 ? attribute.DeadbandType : null,
+            DeadbandValue = !double.IsNaN(attribute.DeadbandValue) ? attribute.DeadbandValue : null,
+            ModellingRule = attribute.ModellingRule != ModellingRule.Unset ? attribute.ModellingRule : null,
+            EventNotifier = attribute.EventNotifier != byte.MaxValue ? attribute.EventNotifier : null,
+        };
+    }
+}

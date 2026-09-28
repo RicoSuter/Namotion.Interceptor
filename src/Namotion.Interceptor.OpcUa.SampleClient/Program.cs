@@ -25,7 +25,7 @@ context.AddService(root);
 
 builder.Services.AddSingleton(root);
 builder.Services.AddHostedService<ClientWorker>();
-builder.Services.AddOpcUaSubjectClientSource<Root>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClientSource<Root>("opc.tcp://localhost:4840", "opc", rootPath: ["Root"]);
 
 using var performanceProfiler = new PerformanceProfiler(context, "Client");
 var host = builder.Build();

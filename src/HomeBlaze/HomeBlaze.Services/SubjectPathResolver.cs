@@ -1,10 +1,11 @@
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Text;
+using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -14,9 +15,9 @@ namespace HomeBlaze.Services;
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
 /// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
 /// </summary>
-public class SubjectPathResolver : ILifecycleHandler
+public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
 {
-    private readonly RootManager _rootManager;
+    private readonly Func<IInterceptorSubject?> _getRoot;
 
     // Subject → canonical paths cache (with leading /)
     private readonly ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> _canonicalPathsCache = new();
@@ -24,10 +25,15 @@ public class SubjectPathResolver : ILifecycleHandler
     // (path, style) → Subject resolve cache (absolute paths only)
     private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
 
-    public SubjectPathResolver(RootManager rootManager, IInterceptorSubjectContext context)
+    /// <param name="getRoot">
+    /// Resolves the current graph root. A delegate rather than the RootManager itself, because
+    /// RootManager needs this resolver registered in the context before it loads the graph, and taking
+    /// RootManager here would make that a constructor cycle. Nothing is read from it until a path is
+    /// actually resolved.
+    /// </param>
+    public SubjectPathResolver(Func<IInterceptorSubject?> getRoot)
     {
-        _rootManager = rootManager;
-        context.AddService(this);
+        _getRoot = getRoot;
     }
 
     /// <summary>
@@ -44,7 +50,7 @@ public class SubjectPathResolver : ILifecycleHandler
         PathStyle style,
         IInterceptorSubject? relativeTo = null)
     {
-        var root = _rootManager.Root;
+        var root = _getRoot();
 
         if (string.IsNullOrEmpty(path))
             return relativeTo ?? root;
@@ -173,9 +179,8 @@ public class SubjectPathResolver : ILifecycleHandler
             return canonicalPath;
 
         var sb = new StringBuilder(canonicalPath.Length);
-        for (var i = 0; i < canonicalPath.Length; i++)
+        foreach (var ch in canonicalPath)
         {
-            var ch = canonicalPath[i];
             if (ch == '[')
                 sb.Append('/');
             else if (ch != ']')
@@ -232,10 +237,11 @@ public class SubjectPathResolver : ILifecycleHandler
                 if (inlinePathsPropertyName != null)
                 {
                     var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
-                    if (childrenProperty?.GetValue() is IDictionary childrenDictionary &&
-                        childrenDictionary.Contains(segment))
+                    var childrenValue = childrenProperty?.GetValue();
+                    if (childrenValue is not null)
                     {
-                        if (childrenDictionary[segment] is IInterceptorSubject childSubject)
+                        var childSubject = SubjectLookup.FindSubjectInDictionary(childrenValue, segment);
+                        if (childSubject is not null)
                         {
                             current = childSubject;
                             continue;
@@ -272,32 +278,13 @@ public class SubjectPathResolver : ILifecycleHandler
 
             IInterceptorSubject? found = null;
 
-            if (value is IDictionary dict)
+            if (property.IsSubjectDictionary)
             {
-                foreach (DictionaryEntry entry in dict)
-                {
-                    if (entry.Key?.ToString() == index && entry.Value is IInterceptorSubject s)
-                    {
-                        found = s;
-                        break;
-                    }
-                }
+                found = SubjectLookup.FindSubjectInDictionary(value, index);
             }
-            else if (value is IEnumerable enumerable)
+            else if (property.IsSubjectCollection && int.TryParse(index, out var idx))
             {
-                if (int.TryParse(index, out var idx))
-                {
-                    var j = 0;
-                    foreach (var item in enumerable)
-                    {
-                        if (j == idx && item is IInterceptorSubject s)
-                        {
-                            found = s;
-                            break;
-                        }
-                        j++;
-                    }
-                }
+                found = SubjectLookup.FindSubjectInCollection(value, idx);
             }
 
             if (found == null)
@@ -311,7 +298,7 @@ public class SubjectPathResolver : ILifecycleHandler
 
     private IReadOnlyList<string> ComputeCanonicalPaths(IInterceptorSubject subject)
     {
-        var root = _rootManager.Root;
+        var root = _getRoot();
 
         // Root subject's canonical path is "/"
         if (subject == root)
@@ -342,6 +329,24 @@ public class SubjectPathResolver : ILifecycleHandler
             }
         }
 
+        if (paths.Count > 1)
+        {
+            // Order by path depth (number of '/' separators) so the shallowest path is first.
+            // OrderBy is a documented stable sort: keys are computed once per element, and equal
+            // keys preserve insertion order so paths at the same depth stay deterministic.
+            paths = paths
+                .OrderBy(static path =>
+                {
+                    var depth = 0;
+                    foreach (var ch in path)
+                    {
+                        if (ch == '/') depth++;
+                    }
+                    return depth;
+                })
+                .ToList();
+        }
+
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 
@@ -366,16 +371,10 @@ public class SubjectPathResolver : ILifecycleHandler
             string segment;
             if (parent.Index != null)
             {
-                if (isInlinePathsProperty)
-                {
-                    // InlinePaths: just the key (dots are fine with / separator)
-                    segment = parent.Index.ToString()!;
-                }
-                else
-                {
+                // InlinePaths: just the key (dots are fine with / separator)
+                segment = isInlinePathsProperty ? parent.Index.ToString()! :
                     // Regular collection/dict: PropertyName[index]
-                    segment = $"{parent.Property.Name}[{parent.Index}]";
-                }
+                    $"{parent.Property.Name}[{parent.Index}]";
             }
             else
             {

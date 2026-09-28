@@ -15,10 +15,6 @@ internal sealed class MethodInvocationChain<TInterceptor>
     private readonly ExecuteTerminalFunc _executeTerminal;
     private readonly InvocationContinuationNode[] _continuations;
 
-    [ThreadStatic]
-    // ReSharper disable once StaticMemberInGenericType
-    private static Func<IInterceptorSubject, object?[], object?>? _threadLocalTerminal;
-
     public MethodInvocationChain(
         ImmutableArray<TInterceptor> interceptors,
         ExecuteInterceptorFunc executeInterceptor,
@@ -38,7 +34,9 @@ internal sealed class MethodInvocationChain<TInterceptor>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? Execute(ref MethodInvocationContext context, Func<IInterceptorSubject, object?[], object?> terminal)
     {
-        _threadLocalTerminal = terminal;
+        // The terminal is per-call state; store it on the context (set once, never mutated, so it
+        // survives the by-value interceptor hops) rather than a ThreadStatic on this shared chain.
+        context.Terminal = terminal;
         return ExecuteAtIndex(0, ref context);
     }
 
@@ -47,7 +45,7 @@ internal sealed class MethodInvocationChain<TInterceptor>
     {
         if (index >= _interceptors.Length)
         {
-            return _executeTerminal(ref context, _threadLocalTerminal!);
+            return _executeTerminal(ref context, context.Terminal!);
         }
 
         var interceptor = _interceptors[index];

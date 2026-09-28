@@ -6,15 +6,11 @@ namespace Namotion.Interceptor.Cache;
 
 internal sealed class ReadInterceptorChain<TProperty>
 {
-    public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> terminal);
+    public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> terminal);
 
     private readonly ImmutableArray<IReadInterceptor> _interceptors;
     private readonly ReadInterceptionFunc _executeTerminal;
     private readonly ContinuationNode[] _continuations;
-
-    [ThreadStatic]
-    // ReSharper disable once StaticMemberInGenericType
-    private static Func<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public ReadInterceptorChain(
         ImmutableArray<IReadInterceptor> interceptors,
@@ -31,18 +27,20 @@ internal sealed class ReadInterceptorChain<TProperty>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TProperty Execute(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> terminal)
+    public TProperty Execute(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> terminal)
     {
-        _threadLocalTerminal = terminal;
+        // The terminal is per-call state; thread it through the by-ref context (which already flows
+        // to the end of the chain) rather than a ThreadStatic on this shared chain instance.
+        context.Terminal = terminal;
         return ExecuteAtIndex(0, ref context);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private TProperty ExecuteAtIndex(int index, ref PropertyReadContext context)
+    private TProperty ExecuteAtIndex(int index, ref PropertyReadContext<TProperty> context)
     {
         if (index >= _interceptors.Length)
         {
-            return _executeTerminal(ref context, _threadLocalTerminal!);
+            return _executeTerminal(ref context, context.Terminal!);
         }
 
         var interceptor = _interceptors[index];
@@ -67,7 +65,7 @@ internal sealed class ReadInterceptorChain<TProperty>
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty ExecuteNext(ref PropertyReadContext context)
+        private TProperty ExecuteNext(ref PropertyReadContext<TProperty> context)
         {
             return _chain.ExecuteAtIndex(_nextIndex, ref context);
         }

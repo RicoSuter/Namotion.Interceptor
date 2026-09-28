@@ -43,7 +43,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Port = 0 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Port = 70000 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Path = "" };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { Path = "   " };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class WebSocketServerConfigurationTests
         };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { MaxMessageSize = 0 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { MaxConnections = 0 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public class WebSocketServerConfigurationTests
         };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { WriteBatchSize = -1 };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class WebSocketServerConfigurationTests
         var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.FromSeconds(-1) };
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => configuration.Validate());
+        Assert.Throws<ArgumentException>(configuration.Validate);
     }
 
     [Fact]
@@ -157,6 +157,31 @@ public class WebSocketServerConfigurationTests
     {
         // Arrange
         var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.Zero };
+
+        // Act & Assert
+        configuration.Validate(); // should not throw
+    }
+
+    [Fact]
+    public void WhenHeartbeatIntervalIsPositiveButBelowTheMinimum_ThenValidateThrows()
+    {
+        // Arrange - a heartbeat is broadcast to every connected client, so a sub-second interval
+        // floods the connections rather than probing them.
+        var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.FromMilliseconds(500) };
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(configuration.Validate);
+        Assert.Equal(nameof(WebSocketServerConfiguration.HeartbeatInterval), exception.ParamName);
+    }
+
+    [Fact]
+    public void WhenHeartbeatIntervalIsExactlyTheMinimum_ThenValidateAccepts()
+    {
+        // Arrange
+        var configuration = new WebSocketServerConfiguration
+        {
+            HeartbeatInterval = WebSocketServerConfiguration.MinimumHeartbeatInterval
+        };
 
         // Act & Assert
         configuration.Validate(); // should not throw

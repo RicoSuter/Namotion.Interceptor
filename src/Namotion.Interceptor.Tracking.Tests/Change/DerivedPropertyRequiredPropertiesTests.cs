@@ -209,7 +209,7 @@ public class DerivedPropertyRequiredPropertiesTests
 
         // Assert — data exists (created because DynamicFull depends on FirstName), but IsDerived is false.
         Assert.NotNull(firstNameData);
-        Assert.False(firstNameData!.IsDerived);
+        Assert.False(firstNameData.IsDerived);
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public class DerivedPropertyRequiredPropertiesTests
 
         // Assert
         Assert.NotNull(derivedData);
-        Assert.True(derivedData!.IsDerived);
+        Assert.True(derivedData.IsDerived);
     }
 
     [Fact]

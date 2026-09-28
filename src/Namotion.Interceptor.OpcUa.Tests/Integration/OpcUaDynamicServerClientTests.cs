@@ -5,7 +5,6 @@ using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry;
 using Xunit.Abstractions;
-using Xunit.Extensions.AssemblyFixture;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 

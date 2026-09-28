@@ -231,8 +231,8 @@ public partial class OpcUaRegistrationTests
         services.AddSingleton(_ => CreateSubject());
         services.AddOpcUaSubjectClientSource<RegistrationTestSubject>(
             serverUrl: "opc.tcp://localhost:4840",
-            sourceName: "opc",
-            rootName: "Root");
+            connectorName: "opc",
+            rootPath: ["Root"]);
 
         // Act
         using var serviceProvider = services.BuildServiceProvider();
@@ -251,7 +251,7 @@ public partial class OpcUaRegistrationTests
         services.AddLogging();
         services.AddSingleton(_ => CreateSubject());
         services.AddOpcUaSubjectServer<RegistrationTestSubject>(
-            sourceName: "opc",
+            connectorName: "opc",
             rootName: "Root");
 
         // Act
@@ -272,8 +272,8 @@ public partial class OpcUaRegistrationTests
         services.AddKeyedOpcUaSubjectClientSource<RegistrationTestSubject>(
             name: "server1",
             serverUrl: "opc.tcp://localhost:4840",
-            sourceName: "opc",
-            rootName: "Root");
+            connectorName: "opc",
+            rootPath: ["Root"]);
 
         // Act
         using var serviceProvider = services.BuildServiceProvider();
@@ -293,7 +293,7 @@ public partial class OpcUaRegistrationTests
         services.AddSingleton(_ => CreateSubject());
         services.AddKeyedOpcUaSubjectServer<RegistrationTestSubject>(
             name: "server1",
-            sourceName: "opc",
+            connectorName: "opc",
             rootName: "Root");
 
         // Act
@@ -310,11 +310,11 @@ public partial class OpcUaRegistrationTests
         // Arrange
         var subject = CreateSubject();
         var configuration = new OpcUaServerConfiguration { ValueConverter = new OpcUaValueConverter() };
-        var logger = NullLogger<OpcUaSubjectServerBackgroundService>.Instance;
+        var logger = NullLogger<OpcUaSubjectServer>.Instance;
 
         // Act
-        var first = new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
-        var second = new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
+        var first = new OpcUaSubjectServer(subject, configuration, logger);
+        var second = new OpcUaSubjectServer(subject, configuration, logger);
 
         // Assert
         Assert.NotEqual(first.OpcUaVariableKey, second.OpcUaVariableKey);

@@ -72,7 +72,7 @@ public class ParentTrackingHandlerTests
         child1.FirstName = "Child1";
         child1.Mother = mother;
 
-        var child2 = new Person(context)
+        _ = new Person(context)
         {
             FirstName = "Child2",
             Mother = mother

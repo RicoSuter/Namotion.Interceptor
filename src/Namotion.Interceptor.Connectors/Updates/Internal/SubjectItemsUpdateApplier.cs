@@ -19,7 +19,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
+        var workingItems = SubjectValueConvert.ToSubjectMutableList(property.GetValue());
         var structureChanged = false;
 
         // Apply structural operations in two phases:
@@ -121,10 +121,7 @@ internal static class SubjectItemsUpdateApplier
         if (structureChanged)
         {
             var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
-            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-            {
-                property.SetValue(collection);
-            }
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
         }
     }
 
@@ -137,17 +134,17 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var existingDictionary = property.GetValue() as IDictionary;
-        var targetKeyType = property.Type.GenericTypeArguments[0];
+        var targetKeyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
-        if (existingDictionary is not null)
+        var existingValue = property.GetValue();
+        if (existingValue is not null)
         {
-            foreach (DictionaryEntry entry in existingDictionary)
+            foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
             {
-                if (entry.Value is IInterceptorSubject item)
-                    workingDictionary[entry.Key] = item;
+                if (entry.Value is IInterceptorSubject subject)
+                    workingDictionary[entry.Key] = subject;
             }
         }
 
@@ -206,10 +203,7 @@ internal static class SubjectItemsUpdateApplier
         if (structureChanged)
         {
             var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
-            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-            {
-                property.SetValue(dictionary);
-            }
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
         }
     }
 
