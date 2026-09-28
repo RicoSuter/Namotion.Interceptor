@@ -50,7 +50,7 @@ internal static class ModbusValueConverters
                 return static (raw, _) => raw[0] != 0 ? True : False;
 
             case ModbusDataType.F32:
-                return CreateFloatReader(attribute, targetType, propertyPath, wordOrder, hasDynamicScale, isScaled);
+                return CreateFloatReader(attribute, targetType, propertyPath, wordOrder, isNullable, hasDynamicScale, isScaled);
 
             default:
                 return CreateIntegerReader(attribute, targetType, propertyPath, dataType, wordOrder, notAvailableValue, hasDynamicScale, isScaled);
@@ -59,7 +59,7 @@ internal static class ModbusValueConverters
 
     private static ModbusValueReader CreateFloatReader(
         ModbusRegisterAttribute attribute, Type targetType, string propertyPath,
-        ModbusWordOrder wordOrder, bool hasDynamicScale, bool isScaled)
+        ModbusWordOrder wordOrder, bool isNullable, bool hasDynamicScale, bool isScaled)
     {
         var staticScale = attribute.Scale;
         if (targetType == typeof(float))
@@ -79,7 +79,16 @@ internal static class ModbusValueConverters
         if (targetType == typeof(decimal))
         {
             var decimalScale = (decimal)staticScale;
-            return (raw, exponent) => (decimal)ModbusRegisterCodec.ReadSingle(raw, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+            return (raw, exponent) =>
+            {
+                var value = ModbusRegisterCodec.ReadSingle(raw, wordOrder);
+                if (isNullable && !float.IsFinite(value))
+                {
+                    return null;
+                }
+
+                return (decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+            };
         }
 
         throw Error(propertyPath, $"F32 requires a float, double or decimal property, not {targetType.Name}.");

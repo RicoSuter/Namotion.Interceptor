@@ -116,6 +116,28 @@ public class ModbusValueConvertersTests
         Assert.Equal(1.5f, value);
     }
 
+    [Theory]
+    [InlineData(new byte[] { 0x7F, 0xC0, 0x00, 0x00 })]
+    [InlineData(new byte[] { 0x7F, 0x80, 0x00, 0x00 })]
+    public void WhenNonFiniteFloatTargetsNullableDecimal_ThenNullIsReturned(byte[] raw)
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), raw);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenNaNFloatTargetsDouble_ThenNaNIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(double), [0x7F, 0xC0, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(double.NaN, value);
+    }
+
     [Fact]
     public void WhenDataTypeIsString_ThenTextIsReturned()
     {
