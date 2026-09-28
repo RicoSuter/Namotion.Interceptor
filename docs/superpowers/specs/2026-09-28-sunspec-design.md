@@ -93,7 +93,7 @@ public partial class SunSpecDevice : BackgroundService, IModbusConnectedHandler 
 {
     [Configuration] public partial string Host { get; set; }
     [Configuration] public partial int Port { get; set; }
-    [Configuration] public partial byte[] UnitIds { get; set; }
+    [Configuration] public partial int[] UnitIds { get; set; }   // int[], byte[] would serialize as base64
 
     public partial Dictionary<byte, SunSpecUnit> Units { get; set; }
 
@@ -140,7 +140,7 @@ Handled entirely by the connector: `IModbusUnitIdProvider` on `SunSpecUnit` rout
 | No `SunS` marker on a unit | Warning, unit skipped, `Units` contains only found units. |
 | Malformed chain (overrun, unexpected end) | Error, discovery abandoned for that unit, other units continue. |
 | Unknown model ID | Information log, model skipped. |
-| SunSpec "not implemented" values (0xFFFF, 0x8000, 0x7FFF depending on type) | Open: map to `null`. Needs a connector feature (per-attribute "not implemented" sentinel) or a converter hook; decide during the brainstorm. |
+| SunSpec "not implemented" values (0x8000 int16, 0xFFFF uint16, 0x80000000 int32, 0xFFFFFFFF uint32) | Mapped to `null` by the connector's `NotAvailableValue` (`SignedMinimum`, `UnsignedMaximum`) on each register attribute, ideally through SunSpec preset attributes derived from `ModbusRegisterAttribute`. |
 
 ## 6. Testing
 
@@ -162,3 +162,7 @@ Handled entirely by the connector: `IModbusUnitIdProvider` on `SunSpecUnit` rout
 - Generator (`tools/Namotion.Devices.SunSpec.Generator/`) consuming the SunSpec Alliance JSON models, emitting checked-in `[InterceptorSubject]` classes and one `[Derived]` accessor per model on `SunSpecUnit`, with a CI check that generated files match the JSON.
 - Controls through the connector write stage.
 - Other Modbus device libraries reusing the connector (for example Eastron SDM630, Schneider PM5560).
+
+## 9. Subject rules
+
+Same rules as the Luxtronik library (connector spec 5.2): child subjects and register values are partial properties with `internal set`, initialized in the constructor (`Models`, `Units` and every register property), `[State]` with units on values, and constant constructor-set metadata (`BaseAddress`, `ModelId`, `UnitId`) as plain get-only properties.
