@@ -23,6 +23,6 @@ public enum ModbusDataType
     /// <summary>IEEE 754 single precision float, two registers.</summary>
     F32,
 
-    /// <summary>ASCII string, two characters per register, <c>Length</c> registers.</summary>
+    /// <summary>ASCII string, two characters per register, <see cref="Attributes.ModbusRegisterAttribute.Length"/> registers.</summary>
     String
 }

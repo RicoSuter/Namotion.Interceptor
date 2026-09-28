@@ -44,7 +44,7 @@ public class ModbusRegisterAttribute : Attribute
     public ModbusAccess Access { get; init; } = ModbusAccess.ReadWrite;
 
     /// <summary>
-    /// Gets the raw pattern that maps to <c>null</c>. Requires a nullable property.
+    /// Gets the raw pattern that maps to <c>null</c>. Requires a nullable property and an integer data type.
     /// </summary>
     public ModbusNotAvailableValue NotAvailableValue { get; init; } = ModbusNotAvailableValue.None;
 }
