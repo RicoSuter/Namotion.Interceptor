@@ -25,6 +25,7 @@ Two deliverables in one plan, connector first:
 - `Access` declared on the attribute (enforced by the write stage)
 - Reconnect, diagnostics, DI and imperative wire-up following the OPC UA and MQTT connectors
 - Luxtronik SHI model with firmware gating, HomeBlaze device and UI
+- HomeBlaze abstractions on the Luxtronik model: `ITemperatureSensor` child subjects for measured temperatures, `IPowerSensor`, and a new `IThermalPowerSensor` in `HomeBlaze.Abstractions`
 
 ### Out of scope
 
@@ -245,11 +246,13 @@ Protocol facts from python-luxtronik that shape the design:
 All scaled values are `decimal?` in HomeBlaze units (°C, W, Wh). Addresses below are absolute; each class declares offsets from its own `BaseAddress`.
 
 ```
-LuxtronikHeatPump   BackgroundService subject, IModbusConnectedHandler, IPowerSensor, IConnectionState,
-│                   ISoftwareState, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider, ILastUpdatedProvider
+LuxtronikHeatPump   BackgroundService subject, IModbusConnectedHandler, IPowerSensor, IThermalPowerSensor,
+│                   IConnectionState, ISoftwareState, IConfigurable, IMonitoredService, ITitleProvider,
+│                   IIconProvider, ILastUpdatedProvider
 │  [Configuration] Host, Port = 502, PollInterval = 2 s
 │  SoftwareVersion (string, set by the handler from input 10400-10402)
 │  [Derived] Power => Energy.ElectricalPower, EnergyConsumed => Energy.TotalElectricalEnergy
+│  [Derived] ThermalPower => Energy.HeatingPower, ThermalEnergyProduced => Energy.TotalThermalEnergy
 │
 ├─ Status            LuxtronikStatus, input 10000
 │    0 HeatPumpStatus (flags), 2 OperationMode, 3 HeatingStatus, 4 HotWaterStatus, 6 CoolingStatus,
@@ -257,10 +260,12 @@ LuxtronikHeatPump   BackgroundService subject, IModbusConnectedHandler, IPowerSe
 │    205 CoolingConfigured, 206 PoolHeatingConfigured, 207 CoolingReleased (bool)
 │    [Derived] IsCompressorRunning, IsAuxiliaryHeaterRunning
 ├─ Temperatures      LuxtronikTemperatures, input 10100, all Scale 0.1
-│    100 Return, 101 ReturnTarget (100/101 disputed, verified on hardware), 102 ExternalReturn, 103 ReturnLimit,
-│    104 ReturnMinimumTarget, 105 Flow, 106 Room, 107 HeatingLimit, 108 Outside,
-│    120 HotWater, 121 HotWaterTarget, 122 HotWaterMinimum, 123 HotWaterMaximum, 124 HotWaterLimit
-│    3.92+: 109 OutsideAverage, 110 HeatSourceInlet, 111 HeatSourceOutlet, 112 MaximumFlow
+│    measured, as LuxtronikTemperatureSensor children:
+│      100 Return (100/101 disputed, verified on hardware), 102 ExternalReturn, 105 Flow, 106 Room, 108 Outside,
+│      120 HotWater; 3.92+: 109 OutsideAverage, 110 HeatSourceInlet, 111 HeatSourceOutlet
+│    setpoints and limits, as plain decimal? properties:
+│      101 ReturnTarget, 103 ReturnLimit, 104 ReturnMinimumTarget, 107 HeatingLimit,
+│      121 HotWaterTarget, 122 HotWaterMinimum, 123 HotWaterMaximum, 124 HotWaterLimit; 3.92+: 112 MaximumFlow
 ├─ Energy            LuxtronikEnergy, input 10300
 │    300 HeatingPower (S16), 301 ElectricalPower, 302 MinimumPredictedElectricalPower   (Scale 100: kW/10 to W)
 │    310/312/314/316/318 Electrical energy Total, Heating, HotWater, Cooling, Pool      (S32, Scale 100: kWh/10 to Wh)
@@ -268,7 +273,8 @@ LuxtronikHeatPump   BackgroundService subject, IModbusConnectedHandler, IPowerSe
 ├─ Heating           LuxtronikControl, holding 10000
 ├─ HotWater          LuxtronikControl, holding 10005
 ├─ MixingCircuit1..3 LuxtronikMixingCircuit
-│    ├─ Temperatures LuxtronikMixingCircuitTemperatures, input 10140 / 10150 / 10160: Temperature, Target, Minimum, Maximum
+│    ├─ Temperature  LuxtronikTemperatureSensor, input 10140 / 10150 / 10160
+│    ├─ Setpoints    LuxtronikMixingCircuitSetpoints, input 10141 / 10151 / 10161: Target, Minimum, Maximum
 │    ├─ Heating      LuxtronikControl, holding 10010 / 10020 / 10030
 │    └─ Cooling      LuxtronikCoolingControl, holding 10015 / 10025 / 10035
 ├─ PowerLimit        LuxtronikPowerLimit, holding 10040: Mode, Limit (Scale 100: kW/10 to W)
@@ -284,7 +290,54 @@ All holding register properties are `Access = ReadOnly` in this stage, even thou
 
 The 32-bit energy registers need their word order and signedness verified on hardware (sources disagree). Until then the model uses `S32` with `LowWordFirst` per raibisch, and the hardware test (6.4) settles it.
 
-### 5.3 Enums
+### 5.3 HomeBlaze abstractions
+
+`ITemperatureSensor` has a single `Temperature` property, so each measured temperature is its own child subject, as in `EcowittTemperatureSensor` and `ShellyTemperatureSensor`. This makes the heat pump's temperatures visible to dashboards, history and the MCP type discovery without Luxtronik-specific code.
+
+```csharp
+[InterceptorSubject]
+public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider
+{
+    public LuxtronikTemperatureSensor(int address, string title, Version? minimumFirmware = null)
+    {
+        BaseAddress = address;
+        Title = title;
+        MinimumFirmware = minimumFirmware;
+    }
+
+    public int BaseAddress { get; }
+    public string? Title { get; }
+    public Version? MinimumFirmware { get; }
+
+    [ModbusRegister(0, ModbusDataType.S16, Space = ModbusAddressSpace.InputRegister, Scale = 0.1, Access = ModbusAccess.ReadOnly)]
+    public partial decimal? Temperature { get; set; }
+}
+```
+
+- Each instance's `BaseAddress` is its own register address. Batching works on addresses, so the sensors still merge into contiguous reads.
+- S16 is used for all temperature registers: the U16 ones (100, 101, 102, 105) decode identically for every value below 3276.7 °C.
+- Firmware-gated sensors (3.92+) get the minimum firmware as an optional constructor argument (`LuxtronikTemperatureSensor.MinimumFirmware`), since an attribute on the shared `Temperature` property cannot differ per instance. The handler treats it like `[LuxtronikFirmware]` (5.5). Excluded sensors keep `Temperature` `null`.
+
+New abstraction in `HomeBlaze.Abstractions/Sensors/IThermalPowerSensor.cs`, mirroring `IPowerSensor`:
+
+```csharp
+[SubjectAbstraction]
+[Description("Reports thermal power output in watts and total thermal energy produced in watt-hours.")]
+public interface IThermalPowerSensor
+{
+    [State(Unit = StateUnit.Watt, Position = 350)]
+    decimal? ThermalPower { get; }
+
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 351)]
+    decimal? ThermalEnergyProduced { get; }
+}
+```
+
+Intended for any heat producer (heat pumps, solar thermal, heat meters). On firmware older than 3.92, `ThermalEnergyProduced` is `null` because the thermal energy registers are excluded.
+
+The Luxtronik error code has no abstraction; it stays a Luxtronik property and is reflected in `IMonitoredService.StatusMessage` when non-zero.
+
+### 5.4 Enums
 
 From python-luxtronik `datatypes.py`:
 
@@ -300,14 +353,14 @@ public enum LuxtronikBufferType    : ushort { SeriesBuffer = 0, SeparationBuffer
 public enum LuxtronikHeatPumpStatus : ushort { None = 0, Compressor1 = 1, Compressor2 = 2, AuxiliaryHeater1 = 4, AuxiliaryHeater2 = 8, AuxiliaryHeater3 = 16 }
 ```
 
-### 5.4 Firmware gating
+### 5.5 Firmware gating
 
 - Properties that exist only from a firmware version carry `[LuxtronikFirmware(3, 92)]` (a Luxtronik attribute, unknown to the connector).
-- `LuxtronikHeatPump.OnModbusConnectedAsync` reads input 10400 to 10402, sets `SoftwareVersion`, walks its own subtree and calls `context.ExcludeProperty` for every property whose `[LuxtronikFirmware]` is newer than the device.
+- `LuxtronikHeatPump.OnModbusConnectedAsync` reads input 10400 to 10402, sets `SoftwareVersion`, walks its own subtree and calls `context.ExcludeProperty` for every property whose `[LuxtronikFirmware]`, or whose subject's `MinimumFirmware` (temperature sensors), is newer than the device.
 - The model tree is always fully constructed. Excluded properties stay `null` and unclaimed, so the UI can show "not supported" (unclaimed) separately from "not read yet" (claimed, `null`).
 - If the version read fails, the handler throws and the connect attempt is retried.
 
-### 5.5 HomeBlaze device
+### 5.6 HomeBlaze device
 
 Follows `HomeBlaze.OpcUa/OpcUaClient.cs` and `Namotion.Devices.Wallbox/WallboxCharger.cs`:
 
@@ -315,7 +368,7 @@ Follows `HomeBlaze.OpcUa/OpcUaClient.cs` and `Namotion.Devices.Wallbox/WallboxCh
 - `IConnectionState.IsConnected` and `IMonitoredService.Status` reflect `Diagnostics.IsOperational` and `Diagnostics.LastError`.
 - Deliverables from the `create-homeblaze-library` command: `LuxtronikServiceCollectionExtensions` using `AddHostedSubject`, device docs under `HomeBlaze/Data/Docs/devices/`, a sample device configuration, project references in `HomeBlaze.csproj`, and `TypeProvider.AddAssembly` registration for both assemblies in `Program.cs`.
 
-### 5.6 UI (`Namotion.Devices.Luxtronik.HomeBlaze`)
+### 5.7 UI (`Namotion.Devices.Luxtronik.HomeBlaze`)
 
 Following the Wallbox UI project: `LuxtronikHeatPumpWidget` (operation mode, outside/flow/hot water temperatures, electrical and heating power, error code), `LuxtronikHeatPumpSetupComponent` and `LuxtronikHeatPumpEditComponent` (host, port, poll interval).
 
@@ -349,6 +402,7 @@ No hardcoded waits: `AsyncTestHelpers.WaitUntilAsync` and `SourceStateRecorder`.
 - Full read of the model, enums, scaling to W and Wh, signed temperatures.
 - Firmware 3.90 vs 3.92: 3.92 properties excluded and unclaimed on 3.90, and the 3.90 server rejecting 3.92 addresses causes no failures.
 - Energy decoding with the chosen word order.
+- Abstractions: temperature sensor children report `ITemperatureSensor.Temperature`, the device reports `IPowerSensor` and `IThermalPowerSensor` in W and Wh.
 
 ### 6.4 Hardware verification (`[Trait("Category", "Hardware")]`)
 
