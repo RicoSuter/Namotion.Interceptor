@@ -7,8 +7,7 @@ namespace Namotion.Interceptor;
 /// </summary>
 /// <remarks>
 /// Written under the subject's lock, read without it. The 64-bit fields go through
-/// <see cref="Interlocked"/> because netstandard2.0 includes 32-bit runtimes, where a plain
-/// <c>long</c> store can tear.
+/// <see cref="Interlocked"/> because a plain <c>long</c> store can tear on 32-bit runtimes.
 /// </remarks>
 internal sealed class PropertyWriteState
 {
