@@ -117,15 +117,84 @@ public class ModbusValueConvertersTests
     }
 
     [Theory]
-    [InlineData(new byte[] { 0x7F, 0xC0, 0x00, 0x00 })]
-    [InlineData(new byte[] { 0x7F, 0x80, 0x00, 0x00 })]
-    public void WhenNonFiniteFloatTargetsNullableDecimal_ThenNullIsReturned(byte[] raw)
+    [InlineData(new byte[] { 0x7F, 0xC0, 0x00, 0x00 })] // NaN
+    [InlineData(new byte[] { 0x7F, 0x80, 0x00, 0x00 })] // +Infinity
+    [InlineData(new byte[] { 0xFF, 0x80, 0x00, 0x00 })] // -Infinity
+    [InlineData(new byte[] { 0x6F, 0x80, 0x00, 0x00 })] // 2^96
+    [InlineData(new byte[] { 0xEF, 0x80, 0x00, 0x00 })] // -2^96
+    public void WhenFloatIsOutsideDecimalRangeForNullableDecimal_ThenNullIsReturned(byte[] raw)
     {
         // Act
         var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), raw);
 
         // Assert
         Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenNaNFloatTargetsNonNullableDecimal_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal), [0x7F, 0xC0, 0x00, 0x00]));
+    }
+
+    [Fact]
+    public void WhenFloatTargetsDecimalWithStaticScale_ThenScaleIsApplied()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32) { Scale = 0.1 }, typeof(decimal), [0x3F, 0xC0, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(0.15m, value);
+    }
+
+    [Theory]
+    [InlineData(ModbusDataType.U16)]
+    [InlineData(ModbusDataType.F32)]
+    public void WhenStaticScaleIsOutsideDecimalRange_ThenConfigurationExceptionIsThrown(ModbusDataType dataType)
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() =>
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Scale = 1e30 }, typeof(decimal?), "Test.Property"));
+    }
+
+    [Theory]
+    [InlineData(29)]
+    [InlineData(-29)]
+    [InlineData(int.MinValue)]
+    public void WhenDynamicScaleExponentIsOutsideDecimalRange_ThenOverflowExceptionIsThrown(int exponent)
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { ScaleFactorProperty = "Factor" }, typeof(decimal?), [0x00, 0x7B], exponent));
+    }
+
+    [Fact]
+    public void WhenEnumValueIsUndefined_ThenRawValueIsPassedThrough()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(Mode), [0x00, 0x05]);
+
+        // Assert
+        Assert.Equal((Mode)5, value);
+    }
+
+    [Theory]
+    [InlineData(ModbusDataType.F32, typeof(float?))]
+    [InlineData(ModbusDataType.Boolean, typeof(bool?))]
+    [InlineData(ModbusDataType.String, typeof(string))]
+    public void WhenNotAvailableValueIsUsedWithUnsupportedDataType_ThenConfigurationExceptionIsThrown(ModbusDataType dataType, Type propertyType)
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() =>
+            ModbusValueConverters.Create(
+                new ModbusRegisterAttribute(0, dataType)
+                {
+                    Length = dataType == ModbusDataType.String ? 1 : 0,
+                    NotAvailableValue = ModbusNotAvailableValue.SignedMaximum
+                },
+                propertyType, "Test.Property"));
     }
 
     [Fact]
@@ -174,6 +243,7 @@ public class ModbusValueConvertersTests
     [InlineData(ModbusDataType.S16, typeof(ushort))]
     [InlineData(ModbusDataType.U32, typeof(int))]
     [InlineData(ModbusDataType.S32, typeof(uint))]
+    [InlineData(ModbusDataType.S16, typeof(uint))]
     [InlineData(ModbusDataType.U16, typeof(byte))]
     public void WhenIntegralTargetCannotHoldTheRange_ThenConfigurationExceptionIsThrown(ModbusDataType dataType, Type propertyType)
     {

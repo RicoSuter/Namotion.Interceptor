@@ -3,14 +3,22 @@ using Namotion.Interceptor.Modbus.Attributes;
 namespace Namotion.Interceptor.Modbus.Mapping;
 
 /// <summary>
-/// Converts the raw wire bytes of one mapping into the boxed property value, or <c>null</c> for a not-available value.
+/// Converts the raw wire bytes of one mapping into the boxed property value, or <c>null</c> when the value is not available.
 /// </summary>
 internal delegate object? ModbusValueReader(ReadOnlySpan<byte> raw, int scaleFactorExponent);
 
 internal static class ModbusValueConverters
 {
+    private const int MaximumDecimalExponent = 28;
+
+    // 2^96: the smallest float magnitude that no longer fits in a decimal.
+    private const float DecimalFloatLimit = 79228162514264337593543950336f;
+
     private static readonly object True = true;
     private static readonly object False = false;
+
+    private static readonly decimal[] PowersOfTen = CreatePowersOfTen();
+    private static readonly decimal[] NegativePowersOfTen = CreateNegativePowersOfTen();
 
     public static ModbusValueReader Create(ModbusRegisterAttribute attribute, Type propertyType, string propertyPath)
     {
@@ -78,11 +86,12 @@ internal static class ModbusValueConverters
 
         if (targetType == typeof(decimal))
         {
-            var decimalScale = (decimal)staticScale;
+            var decimalScale = ToDecimalScale(propertyPath, staticScale);
             return (raw, exponent) =>
             {
                 var value = ModbusRegisterCodec.ReadSingle(raw, wordOrder);
-                if (isNullable && !float.IsFinite(value))
+                // Also true for NaN, which fails every comparison.
+                if (isNullable && !(Math.Abs(value) < DecimalFloatLimit))
                 {
                     return null;
                 }
@@ -102,7 +111,7 @@ internal static class ModbusValueConverters
 
         if (targetType == typeof(decimal))
         {
-            var decimalScale = (decimal)staticScale;
+            var decimalScale = ToDecimalScale(propertyPath, staticScale);
             return (raw, exponent) => IsNotAvailable(raw)
                 ? null
                 : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
@@ -202,13 +211,47 @@ internal static class ModbusValueConverters
             return staticScale;
         }
 
-        var power = 1m;
-        for (var index = 0; index < Math.Abs(exponent); index++)
+        if (exponent is < -MaximumDecimalExponent or > MaximumDecimalExponent)
         {
-            power *= 10m;
+            throw new OverflowException($"Scale factor exponent {exponent} is outside the decimal range.");
         }
 
-        return exponent < 0 ? 1m / power : power;
+        return exponent < 0 ? NegativePowersOfTen[-exponent] : PowersOfTen[exponent];
+    }
+
+    private static decimal ToDecimalScale(string propertyPath, double scale)
+    {
+        try
+        {
+            return (decimal)scale;
+        }
+        catch (OverflowException)
+        {
+            throw Error(propertyPath, "Scale is outside the decimal range.");
+        }
+    }
+
+    private static decimal[] CreatePowersOfTen()
+    {
+        var powers = new decimal[MaximumDecimalExponent + 1];
+        powers[0] = 1m;
+        for (var exponent = 1; exponent <= MaximumDecimalExponent; exponent++)
+        {
+            powers[exponent] = powers[exponent - 1] * 10m;
+        }
+
+        return powers;
+    }
+
+    private static decimal[] CreateNegativePowersOfTen()
+    {
+        var powers = new decimal[MaximumDecimalExponent + 1];
+        for (var exponent = 0; exponent <= MaximumDecimalExponent; exponent++)
+        {
+            powers[exponent] = new decimal(1, 0, 0, false, (byte)exponent);
+        }
+
+        return powers;
     }
 
     private static void RequireTarget(string propertyPath, bool condition, ModbusDataType dataType, Type targetType)
