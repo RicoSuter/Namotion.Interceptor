@@ -23,7 +23,7 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(reader);
 
         // Act
-        var registers = await context.ReadHoldingRegistersAsync(400, 2, CancellationToken.None);
+        var registers = await context.ReadHoldingRegistersAsync(400, 2);
 
         // Assert
         Assert.Equal(new ushort[] { 3, 92 }, registers);
@@ -39,7 +39,7 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(reader);
 
         // Act
-        var registers = await context.ReadInputRegistersAsync(0, 1, CancellationToken.None, unitId: 4);
+        var registers = await context.ReadInputRegistersAsync(0, 1, unitId: 4);
 
         // Assert
         Assert.Equal(new ushort[] { 5 }, registers);
@@ -54,10 +54,27 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(reader);
 
         // Act
-        var bits = await context.ReadDiscreteInputsAsync(10000, 3, CancellationToken.None);
+        var bits = await context.ReadDiscreteInputsAsync(10000, 3);
 
         // Assert
         Assert.Equal(new[] { false, true, false }, bits);
+    }
+
+    [Fact]
+    public async Task WhenReadingCoils_ThenBitsAreDecodedAcrossBytes()
+    {
+        // Arrange
+        var reader = new FakeRegisterReader();
+        reader.SetBit(20, true);
+        reader.SetBit(29, true);
+        var context = Create(reader);
+
+        // Act
+        var bits = await context.ReadCoilsAsync(20, 10);
+
+        // Assert
+        Assert.Equal(new[] { true, false, false, false, false, false, false, false, false, true }, bits);
+        Assert.Equal(ModbusAddressSpace.Coil, Assert.Single(reader.Requests).Space);
     }
 
     [Fact]
@@ -82,7 +99,7 @@ public partial class ModbusDiscoveryContextTests
         context.Invalidate();
 
         // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => context.ReadHoldingRegistersAsync(0, 1, CancellationToken.None));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => context.ReadHoldingRegistersAsync(0, 1));
         Assert.Throws<ObjectDisposedException>(() =>
             context.ExcludeProperty(new PropertyReference(new ContextSubject(), nameof(ContextSubject.Value))));
     }
@@ -96,6 +113,30 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(new FakeRegisterReader());
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => context.ReadHoldingRegistersAsync(0, count, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => context.ReadHoldingRegistersAsync(0, count));
+    }
+
+    [Theory]
+    [InlineData(-1, 1)]
+    [InlineData(65535, 2)]
+    public async Task WhenAddressRangeIsOutOfBounds_ThenArgumentOutOfRangeExceptionIsThrown(int address, int count)
+    {
+        // Arrange
+        var reader = new FakeRegisterReader();
+        var context = Create(reader);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => context.ReadHoldingRegistersAsync(address, count));
+        Assert.Empty(reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenCoilCountExceedsTheMaximum_ThenArgumentOutOfRangeExceptionIsThrown()
+    {
+        // Arrange
+        var context = Create(new FakeRegisterReader());
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => context.ReadCoilsAsync(0, 2001));
     }
 }

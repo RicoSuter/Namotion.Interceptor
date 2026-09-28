@@ -21,7 +21,7 @@ public sealed class ModbusClientDiagnostics : SourceDiagnostics
 }
 
 /// <summary>
-/// Polling statistics since the source started.
+/// Polling statistics of a Modbus client source.
 /// </summary>
 public sealed class ModbusPollingDiagnostics
 {
@@ -33,12 +33,12 @@ public sealed class ModbusPollingDiagnostics
     }
 
     /// <summary>
-    /// Gets the number of completed poll cycles.
+    /// Gets the number of completed poll cycles since the source started or the diagnostics were last reset.
     /// </summary>
     public long TotalPolls => _metrics.TotalPolls;
 
     /// <summary>
-    /// Gets the number of read requests answered with a Modbus exception response.
+    /// Gets the number of read requests answered with a Modbus exception response since the source started or the diagnostics were last reset.
     /// </summary>
     public long FailedBatches => _metrics.FailedBatches;
 

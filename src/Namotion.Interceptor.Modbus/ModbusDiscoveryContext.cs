@@ -36,32 +36,32 @@ public sealed class ModbusDiscoveryContext
     /// Reads 1 to 125 holding registers, from the configured unit unless <paramref name="unitId"/> is given.
     /// </summary>
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToRegisters(await ReadAsync(ModbusAddressSpace.HoldingRegister, address, count, ModbusReadPlanner.MaximumRegistersPerRequest, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <summary>
     /// Reads 1 to 125 input registers, from the configured unit unless <paramref name="unitId"/> is given.
     /// </summary>
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<ushort[]> ReadInputRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<ushort[]> ReadInputRegistersAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToRegisters(await ReadAsync(ModbusAddressSpace.InputRegister, address, count, ModbusReadPlanner.MaximumRegistersPerRequest, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <summary>
     /// Reads 1 to 2000 coils, from the configured unit unless <paramref name="unitId"/> is given.
     /// </summary>
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<bool[]> ReadCoilsAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<bool[]> ReadCoilsAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToBits(await ReadAsync(ModbusAddressSpace.Coil, address, count, ModbusReadPlanner.MaximumBitsPerRequest, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <summary>
     /// Reads 1 to 2000 discrete inputs, from the configured unit unless <paramref name="unitId"/> is given.
     /// </summary>
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<bool[]> ReadDiscreteInputsAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<bool[]> ReadDiscreteInputsAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToBits(await ReadAsync(ModbusAddressSpace.DiscreteInput, address, count, ModbusReadPlanner.MaximumBitsPerRequest, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <summary>
-    /// Excludes a mapped property from this connection's read plan: it is neither claimed nor read.
+    /// Excludes a mapped property from this connection's read plan: it is neither claimed nor read. Has no effect for a property the connector does not map.
     /// </summary>
     public void ExcludeProperty(PropertyReference property)
     {

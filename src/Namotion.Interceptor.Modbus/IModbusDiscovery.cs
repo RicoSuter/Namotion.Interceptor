@@ -8,7 +8,8 @@ namespace Namotion.Interceptor.Modbus;
 public interface IModbusDiscovery
 {
     /// <summary>
-    /// Called after the connection is established. The context is invalid once the returned task completes.
+    /// Called after the connection is established. All context calls must complete before the returned task completes:
+    /// the context is invalid afterwards and polling then uses the connection.
     /// Throwing fails the connect attempt, which is retried.
     /// </summary>
     Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken);

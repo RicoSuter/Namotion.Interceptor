@@ -2181,7 +2181,7 @@ public partial class LuxtronikHeatPump : BackgroundService,
     /// </summary>
     public async Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken)
     {
-        var versionRegisters = await context.ReadInputRegistersAsync(FirmwareAddress, 3, cancellationToken).ConfigureAwait(false);
+        var versionRegisters = await context.ReadInputRegistersAsync(FirmwareAddress, 3, cancellationToken: cancellationToken).ConfigureAwait(false);
         var firmwareVersion = new Version(versionRegisters[0], versionRegisters[1], versionRegisters[2]);
         new PropertyReference(this, nameof(SoftwareVersion))
             .SetValueFromSource(context.Source, null, null, firmwareVersion.ToString());
@@ -2189,7 +2189,7 @@ public partial class LuxtronikHeatPump : BackgroundService,
         IReadOnlySet<LuxtronikFeature>? configuredFeatures = null;
         try
         {
-            var flags = await context.ReadDiscreteInputsAsync(FeatureFlagsAddress, LuxtronikGating.FeatureFlagCount, cancellationToken).ConfigureAwait(false);
+            var flags = await context.ReadDiscreteInputsAsync(FeatureFlagsAddress, LuxtronikGating.FeatureFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
             configuredFeatures = LuxtronikGating.GetConfiguredFeatures(flags);
         }
         catch (ModbusResponseException exception)

@@ -3332,7 +3332,7 @@ public sealed class ModbusClientDiagnostics : SourceDiagnostics
 }
 
 /// <summary>
-/// Polling statistics since the source started.
+/// Polling statistics of a Modbus client source.
 /// </summary>
 public sealed class ModbusPollingDiagnostics
 {
@@ -3346,7 +3346,7 @@ public sealed class ModbusPollingDiagnostics
     public long TotalPolls => _metrics.TotalPolls;
 
     /// <summary>
-    /// Gets the number of read requests answered with a Modbus exception response.
+    /// Gets the number of read requests answered with a Modbus exception response since the source started or the diagnostics were last reset.
     /// </summary>
     public long FailedBatches => _metrics.FailedBatches;
 
@@ -3415,7 +3415,7 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(reader);
 
         // Act
-        var registers = await context.ReadHoldingRegistersAsync(400, 2, CancellationToken.None);
+        var registers = await context.ReadHoldingRegistersAsync(400, 2);
 
         // Assert
         Assert.Equal(new ushort[] { 3, 92 }, registers);
@@ -3431,7 +3431,7 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(reader);
 
         // Act
-        var registers = await context.ReadInputRegistersAsync(0, 1, CancellationToken.None, unitId: 4);
+        var registers = await context.ReadInputRegistersAsync(0, 1, unitId: 4);
 
         // Assert
         Assert.Equal(new ushort[] { 5 }, registers);
@@ -3446,7 +3446,7 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(reader);
 
         // Act
-        var bits = await context.ReadDiscreteInputsAsync(10000, 3, CancellationToken.None);
+        var bits = await context.ReadDiscreteInputsAsync(10000, 3);
 
         // Assert
         Assert.Equal(new[] { false, true, false }, bits);
@@ -3474,7 +3474,7 @@ public partial class ModbusDiscoveryContextTests
         context.Invalidate();
 
         // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => context.ReadHoldingRegistersAsync(0, 1, CancellationToken.None));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => context.ReadHoldingRegistersAsync(0, 1));
         Assert.Throws<ObjectDisposedException>(() =>
             context.ExcludeProperty(new PropertyReference(new ContextSubject(), nameof(ContextSubject.Value))));
     }
@@ -3488,7 +3488,7 @@ public partial class ModbusDiscoveryContextTests
         var context = Create(new FakeRegisterReader());
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => context.ReadHoldingRegistersAsync(0, count, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => context.ReadHoldingRegistersAsync(0, count));
     }
 }
 ```
@@ -3513,7 +3513,8 @@ namespace Namotion.Interceptor.Modbus;
 public interface IModbusDiscovery
 {
     /// <summary>
-    /// Called after the connection is established. The context is invalid once the returned task completes.
+    /// Called after the connection is established. All context calls must complete before the returned task completes:
+    /// the context is invalid afterwards and polling then uses the connection.
     /// Throwing fails the connect attempt, which is retried.
     /// </summary>
     Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken);
@@ -3556,23 +3557,23 @@ public sealed class ModbusDiscoveryContext
     internal IReadOnlySet<PropertyReference> ExcludedProperties => _excludedProperties;
 
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToRegisters(await ReadAsync(ModbusAddressSpace.HoldingRegister, address, count, 125, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<ushort[]> ReadInputRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<ushort[]> ReadInputRegistersAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToRegisters(await ReadAsync(ModbusAddressSpace.InputRegister, address, count, 125, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<bool[]> ReadCoilsAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<bool[]> ReadCoilsAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToBits(await ReadAsync(ModbusAddressSpace.Coil, address, count, 2000, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <exception cref="ModbusResponseException">The device rejected the request.</exception>
-    public async Task<bool[]> ReadDiscreteInputsAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null)
+    public async Task<bool[]> ReadDiscreteInputsAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default)
         => ToBits(await ReadAsync(ModbusAddressSpace.DiscreteInput, address, count, 2000, unitId, cancellationToken).ConfigureAwait(false), count);
 
     /// <summary>
-    /// Excludes a mapped property from this connection's read plan: it is neither claimed nor read.
+    /// Excludes a mapped property from this connection's read plan: it is neither claimed nor read. Has no effect for a property the connector does not map.
     /// </summary>
     public void ExcludeProperty(PropertyReference property)
     {
@@ -3888,10 +3889,10 @@ public partial class ModbusSubjectClientSourceTests
         var (_, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = async (context, cancellationToken) =>
         {
             capturedContext = context;
-            holdingRegisters = await context.ReadHoldingRegistersAsync(0, 2, cancellationToken);
-            inputRegisters = await context.ReadInputRegistersAsync(10, 2, cancellationToken);
-            coils = await context.ReadCoilsAsync(0, 4, cancellationToken);
-            discreteInputs = await context.ReadDiscreteInputsAsync(0, 2, cancellationToken);
+            holdingRegisters = await context.ReadHoldingRegistersAsync(0, 2, cancellationToken: cancellationToken);
+            inputRegisters = await context.ReadInputRegistersAsync(10, 2, cancellationToken: cancellationToken);
+            coils = await context.ReadCoilsAsync(0, 4, cancellationToken: cancellationToken);
+            discreteInputs = await context.ReadDiscreteInputsAsync(0, 2, cancellationToken: cancellationToken);
         });
         try
         {
@@ -3901,7 +3902,7 @@ public partial class ModbusSubjectClientSourceTests
             Assert.Equal(new[] { false, false, false, true }, coils);
             Assert.Equal(new[] { false, true }, discreteInputs);
             await Assert.ThrowsAsync<ObjectDisposedException>(() =>
-                capturedContext!.ReadHoldingRegistersAsync(0, 1, CancellationToken.None));
+                capturedContext!.ReadHoldingRegistersAsync(0, 1));
         }
         finally
         {
@@ -4836,7 +4837,7 @@ Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non
 
 ## Discovery
 
-A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces, `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. The context is invalid once `DiscoverAsync` returns. A rejected read throws `ModbusResponseException` with the Modbus exception code. Throwing from `DiscoverAsync` fails the connect attempt, which is retried after `RetryTime`.
+A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces, `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Await every context call before `DiscoverAsync` returns: the context is invalid afterwards and polling then uses the connection. A rejected read throws `ModbusResponseException` with the Modbus exception code. Throwing from `DiscoverAsync` fails the connect attempt, which is retried after `RetryTime`.
 
 ## Configuration
 

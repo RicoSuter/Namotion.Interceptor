@@ -109,7 +109,7 @@ Values are `decimal?` to match the HomeBlaze capability interfaces (`IPowerSenso
 
 ```
 for each unitId in UnitIds:
-  read 2 holding registers at 40000 (context.ReadHoldingRegistersAsync(..., unitId))
+  read 2 holding registers at 40000 (context.ReadHoldingRegistersAsync(40000, 2, unitId, cancellationToken))
   if not "SunS" (0x5375, 0x6E53): log warning, skip unit
   address = 40002
   models = new Dictionary<int, ISunSpecModel>()

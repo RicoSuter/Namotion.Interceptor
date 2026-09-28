@@ -105,10 +105,10 @@ public interface IModbusDiscovery
 public sealed class ModbusDiscoveryContext   // invalid once DiscoverAsync returns
 {
     public ISubjectSource Source { get; }
-    public Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null);
-    public Task<ushort[]> ReadInputRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null);
-    public Task<bool[]> ReadCoilsAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null);
-    public Task<bool[]> ReadDiscreteInputsAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null);
+    public Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default);
+    public Task<ushort[]> ReadInputRegistersAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default);
+    public Task<bool[]> ReadCoilsAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default);
+    public Task<bool[]> ReadDiscreteInputsAsync(int address, int count, byte? unitId = null, CancellationToken cancellationToken = default);
     public void ExcludeProperty(PropertyReference property);
 }
 
