@@ -190,6 +190,47 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
+    public async Task WhenScaleFactorBecomesValidAfterConversionFailure_ThenUnchangedDependentIsApplied()
+    {
+        // Arrange
+        var (poller, reader, _) = Create();
+        reader.SetRegister(3, 29);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        reader.SetRegister(3, unchecked((ushort)-1));
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.False(failedCycle.ContainsKey("Scaled"));
+        Assert.Equal(12.3m, applied["Scaled"]);
+    }
+
+    [Fact]
+    public async Task WhenPlanIsRebuiltWhileSingleMappingBatchStillFails_ThenItsWarningIsNotLoggedAgain()
+    {
+        // Arrange (the rejected holding register rebuilds the plan at the end of the first cycle)
+        var subject = new PollerSubject(CreateContext());
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+        var logger = new RecordingLogger();
+        var poller = new ModbusPoller(bindings, 0, new ModbusPollingMetrics(), logger);
+        var reader = new FakeRegisterReader();
+        reader.Reject(1);
+        reader.Reject(0, ModbusAddressSpace.Coil);
+        var batchesBeforeReplan = poller.Batches;
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        await poller.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.NotSame(batchesBeforeReplan, poller.Batches);
+        Assert.Single(logger.Warnings, warning => warning.Contains(nameof(PollerSubject.Pump)));
+    }
+
+    [Fact]
     public async Task WhenReapplyIsRequested_ThenUnchangedValueIsApplied()
     {
         // Arrange

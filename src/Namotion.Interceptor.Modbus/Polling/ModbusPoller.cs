@@ -194,9 +194,12 @@ internal sealed class ModbusPoller
     private async Task ReadIndividuallyAsync(
         IModbusRegisterReader reader, ModbusReadBatch batch, ModbusResponseException batchException, CancellationToken cancellationToken)
     {
-        _logger.LogDebug(batchException,
-            "Modbus read of {Count} {Space} from {Address} (unit {UnitId}) was rejected; reading its mappings one by one from now on.",
-            batch.Count, batch.Space, batch.StartAddress, batch.UnitId);
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug(batchException,
+                "Modbus read of {Count} {Space} from {Address} (unit {UnitId}) was rejected; reading its mappings one by one from now on.",
+                batch.Count, batch.Space, batch.StartAddress, batch.UnitId);
+        }
 
         foreach (var binding in batch.Bindings)
         {

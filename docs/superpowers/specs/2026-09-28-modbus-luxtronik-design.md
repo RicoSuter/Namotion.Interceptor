@@ -205,7 +205,7 @@ At resolution time each property gets a converter delegate chosen by a switch on
 
 - Numeric targets: `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, and their nullable forms.
 - Scaling: `decimal` targets scale in decimal arithmetic (`Scale` converted once via `(decimal)double`), so `234 * 0.1` is exactly `23.4`. `float`/`double` targets scale in double.
-- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the scale-factor property. If the scale factor is not yet known (never read, or its read failed), the scaled property is not updated in that cycle.
+- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the scale-factor property. If the scale factor was never successfully read, the scaled property is not updated in that cycle; otherwise the last successfully read scale factor is used.
 - Enums: the raw integer is converted with `Enum.ToObject` (AOT safe). Flags enums pass through unchanged. Undefined enum values are passed through, not rejected.
 - `bool`: non-zero is `true`. Works for coils, discrete inputs and U16 registers.
 - `string`: ASCII, trailing `0x00` and `0x20` trimmed on the byte span before decoding (one allocation).
@@ -262,7 +262,7 @@ Resolved properties are claimed, so local changes are routed to `WriteChangesAsy
 | I/O error or timeout during a poll | Connection treated as lost, reconnect loop (4.7). |
 | Malformed response (FluentModbus framing error: invalid protocol identifier, function code or length, reported as exception code 255) | Not a device rejection: connection treated as lost, reconnect loop (4.7). |
 | Modbus exception response for a batch covering more than one property | Re-read that batch's properties individually in the same cycle, and keep them in batches of their own until the next connect (4.5). A property that still fails is marked unavailable until the next connect: logged once, counted in `Polling.UnavailableProperties`, value not updated. |
-| Modbus exception response for a single-property batch | Warning logged once until the batch succeeds again, counted in `Polling.FailedBatches`, other batches continue. |
+| Modbus exception response for a single-property batch | Warning logged once until the batch succeeds again (tracked by unit ID, space, start address and count, so rebuilding the plan does not log it again), counted in `Polling.FailedBatches`, other batches continue. |
 | No response to a request (some devices stay silent on unmapped reads instead of answering with an exception) | Treated as a timeout, so as connection loss. Device libraries avoid it by never planning unmapped reads (gap 0, exclusion); the Luxtronik hardware test records the controller's actual behavior. |
 | `DiscoverAsync` throws | Connect attempt fails, retried after `RetryTime`. |
 | Configuration error | `ModbusConfigurationException` from the connect attempt, logged as error, retried (a HomeBlaze device reports it through `IMonitoredService`). |
