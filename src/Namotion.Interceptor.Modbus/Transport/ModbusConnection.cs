@@ -4,7 +4,8 @@ using FluentModbus;
 namespace Namotion.Interceptor.Modbus.Transport;
 
 /// <summary>
-/// One Modbus TCP connection. Not thread-safe: the source issues one request at a time.
+/// One Modbus TCP connection. <see cref="Dispose"/> may be called concurrently to abort an in-flight read; the other
+/// members are not thread-safe.
 /// </summary>
 internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
 {
@@ -55,8 +56,6 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
         var timeoutSource = _timeoutSource;
         timeoutSource.CancelAfter(_requestTimeout);
 
-        // The caller's token differs per call (poll attempt, discovery, initial load), so it is registered per
-        // request instead of being linked once. Re-registering on a long-lived token reuses its callback nodes.
         var registration = cancellationToken.UnsafeRegister(
             static state => ((CancellationTokenSource)state!).Cancel(), timeoutSource);
         try
@@ -99,8 +98,9 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
             return;
         }
 
+        // The timeout source is left to the in-flight read, which still resets or replaces it. It never creates a
+        // wait handle, so it holds nothing that needs disposing.
         _client.Dispose();
         _tcpClient.Dispose();
-        _timeoutSource.Dispose();
     }
 }

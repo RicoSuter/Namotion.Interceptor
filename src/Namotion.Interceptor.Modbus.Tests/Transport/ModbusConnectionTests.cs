@@ -142,6 +142,66 @@ public class ModbusConnectionTests
     }
 
     [Fact]
+    public async Task WhenReadingRepeatedly_ThenEveryReadSucceeds()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        using var connection = await ConnectAsync(server);
+        var values = new List<int>();
+
+        // Act
+        for (var index = 0; index < 50; index++)
+        {
+            server.SetHoldingRegister<ushort>(0, (ushort)index);
+            var bytes = await connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None);
+            values.Add((bytes.Span[0] << 8) | bytes.Span[1]);
+        }
+
+        // Assert
+        Assert.Equal(Enumerable.Range(0, 50), values);
+    }
+
+    [Fact]
+    public async Task WhenDisposedDuringRead_ThenReadFailsWithTheConnectionError()
+    {
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource();
+        var serverTask = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            await client.GetStream().ReadExactlyAsync(new byte[12]);
+            requestReceived.SetResult();
+            await release.Task;
+        });
+        var connection = await ModbusConnection.ConnectAsync("127.0.0.1", port, TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        try
+        {
+            var readTask = connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None);
+            await requestReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Act
+            connection.Dispose();
+            var exception = await Record.ExceptionAsync(() => readTask);
+
+            // Assert
+            // The aborted socket read surfaces as IOException, or as the stream's ObjectDisposedException when the
+            // read had not started yet, but never as a disposed CancellationTokenSource masking it.
+            Assert.True(exception is IOException or ObjectDisposedException { ObjectName: "System.Net.Sockets.NetworkStream" or "System.Net.Sockets.Socket" }, exception?.ToString());
+        }
+        finally
+        {
+            release.TrySetResult();
+            await serverTask;
+        }
+    }
+
+    [Fact]
     public async Task WhenDisposed_ThenReadThrowsObjectDisposedException()
     {
         // Arrange
