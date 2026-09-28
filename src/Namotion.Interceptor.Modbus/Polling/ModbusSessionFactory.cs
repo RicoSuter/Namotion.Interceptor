@@ -48,9 +48,7 @@ internal sealed class ModbusSessionFactory
             var excludedProperties = await DiscoverAsync(connection, cancellationToken).ConfigureAwait(false);
             var bindings = ModbusRegisterResolver.Resolve(_subject, _configuration.UnitId, excludedProperties);
 
-            // A disposal cancels before it releases the ownership, so a stopped open must not claim afterwards.
-            cancellationToken.ThrowIfCancellationRequested();
-            var claimedBindings = ClaimOwnership(bindings);
+            var claimedBindings = ClaimOwnership(bindings, cancellationToken);
             var poller = new ModbusPoller(claimedBindings, _configuration.MaximumRegisterGap, _metrics, _logger);
 
             _logger.LogInformation(
@@ -86,7 +84,7 @@ internal sealed class ModbusSessionFactory
         return context.ExcludedProperties;
     }
 
-    private List<ModbusRegisterBinding> ClaimOwnership(List<ModbusRegisterBinding> bindings)
+    private List<ModbusRegisterBinding> ClaimOwnership(List<ModbusRegisterBinding> bindings, CancellationToken cancellationToken)
     {
         var claimedBindings = new List<ModbusRegisterBinding>(bindings.Count);
         var claimedProperties = new HashSet<PropertyReference>(PropertyReference.Comparer);
@@ -99,6 +97,8 @@ internal sealed class ModbusSessionFactory
             }
             else
             {
+                // A disposal cancels before it disposes the ownership, which then rejects every claim.
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger.LogError("Property {PropertyPath} is owned by another source and is not read from Modbus.", binding.Path);
             }
         }
