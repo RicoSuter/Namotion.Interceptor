@@ -12,7 +12,7 @@ internal sealed class ModbusTestServer : IDisposable
 {
     private readonly byte[] _unitIds;
     private readonly Lock _rejectionsLock = new();
-    private readonly List<(byte UnitId, ModbusAddressSpace Space, int Address)> _rejectedAddresses = [];
+    private readonly List<(byte UnitId, ModbusAddressSpace Space, int Address, ModbusExceptionCode ExceptionCode)> _rejectedAddresses = [];
     private readonly ConcurrentQueue<(byte UnitId, ModbusFunctionCode FunctionCode, int Address, int Quantity)> _requests = new();
     private ModbusTcpServer? _server;
 
@@ -24,6 +24,8 @@ internal sealed class ModbusTestServer : IDisposable
     }
 
     public int Port { get; }
+
+    public int ConnectionCount => _server?.ConnectionCount ?? 0;
 
     public IReadOnlyList<(byte UnitId, ModbusFunctionCode FunctionCode, int Address, int Quantity)> Requests => _requests.ToArray();
 
@@ -87,11 +89,12 @@ internal sealed class ModbusTestServer : IDisposable
         }
     }
 
-    public void RejectAddress(ModbusAddressSpace space, int address, byte unitId = 1)
+    public void RejectAddress(
+        ModbusAddressSpace space, int address, byte unitId = 1, ModbusExceptionCode exceptionCode = ModbusExceptionCode.IllegalDataAddress)
     {
         lock (_rejectionsLock)
         {
-            _rejectedAddresses.Add((unitId, space, address));
+            _rejectedAddresses.Add((unitId, space, address, exceptionCode));
         }
     }
 
@@ -121,7 +124,7 @@ internal sealed class ModbusTestServer : IDisposable
                 if (rejected.UnitId == unitId && rejected.Space == space &&
                     rejected.Address >= address && rejected.Address < address + quantity)
                 {
-                    return ModbusExceptionCode.IllegalDataAddress;
+                    return rejected.ExceptionCode;
                 }
             }
         }

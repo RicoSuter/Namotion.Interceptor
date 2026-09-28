@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using FluentModbus;
 using Namotion.Interceptor.Modbus.Tests.Testing;
 using Namotion.Interceptor.Modbus.Transport;
 
@@ -55,6 +56,30 @@ public class ModbusConnectionTests
         // Assert
         Assert.Equal(2, exception.ExceptionCode);
         Assert.Equal(new byte[] { 0x00, 0x07 }, afterwards);
+    }
+
+    [Theory]
+    [InlineData(ModbusExceptionCode.IllegalFunction, true)]
+    [InlineData(ModbusExceptionCode.IllegalDataValue, true)]
+    [InlineData(ModbusExceptionCode.ServerDeviceFailure, false)]
+    [InlineData(ModbusExceptionCode.ServerDeviceBusy, false)]
+    [InlineData(ModbusExceptionCode.GatewayTargetDeviceFailedToRespond, false)]
+    public async Task WhenDeviceAnswersWithExceptionCode_ThenResponseExceptionCarriesTheCode(
+        ModbusExceptionCode exceptionCode, bool isPermanentRejection)
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        server.RejectAddress(ModbusAddressSpace.HoldingRegister, 5, exceptionCode: exceptionCode);
+        using var connection = await ConnectAsync(server);
+
+        // Act
+        var exception = await Assert.ThrowsAsync<ModbusResponseException>(() =>
+            connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 5, 1, CancellationToken.None));
+
+        // Assert
+        Assert.Equal((int)exceptionCode, exception.ExceptionCode);
+        Assert.Equal(isPermanentRejection, exception.IsPermanentRejection);
     }
 
     [Fact]

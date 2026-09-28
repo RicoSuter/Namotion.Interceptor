@@ -78,14 +78,16 @@ public partial class ModbusSubjectClientSourceTests
         server.SetDiscreteInput(1, true);
     }
 
-    private static async Task<(TestDevice Device, ModbusSubjectClientSource Source, SourceStateRecorder Recorder)> StartAsync(
-        ModbusTestServer server, Action<TestDevice>? configure = null)
+    private static TestDevice CreateDevice(Action<TestDevice>? configure = null)
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
         var device = new TestDevice(context);
         configure?.Invoke(device);
+        return device;
+    }
 
-        var source = device.CreateModbusClientSource(
+    private static ModbusSubjectClientSource CreateSource(TestDevice device, ModbusTestServer server)
+        => device.CreateModbusClientSource(
             new ModbusClientConfiguration
             {
                 Host = "127.0.0.1",
@@ -95,6 +97,12 @@ public partial class ModbusSubjectClientSourceTests
                 RequestTimeout = TimeSpan.FromSeconds(2)
             },
             NullLogger.Instance);
+
+    private static async Task<(TestDevice Device, ModbusSubjectClientSource Source, SourceStateRecorder Recorder)> StartAsync(
+        ModbusTestServer server, Action<TestDevice>? configure = null)
+    {
+        var device = CreateDevice(configure);
+        var source = CreateSource(device, server);
 
         var recorder = SourceStateRecorder.SubscribeTo(source);
         await source.StartAsync(CancellationToken.None);
@@ -420,5 +428,155 @@ public partial class ModbusSubjectClientSourceTests
         // Assert
         Assert.False(counter.TryGetSource(out _));
         Assert.False(source.Diagnostics.IsOperational);
+    }
+
+    [Fact]
+    public async Task WhenSourceIsDisposedSynchronously_ThenClaimsAreReleasedAndPollingStops()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        var (device, source, recorder) = await StartAsync(server);
+        var counter = new PropertyReference(device, nameof(TestDevice.Counter));
+        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= 2, TimeSpan.FromSeconds(10), message: "Polling should start.");
+        var executeTask = source.ExecuteTask;
+        Assert.NotNull(executeTask);
+
+        // Act
+        recorder.Dispose();
+        ((IDisposable)source).Dispose();
+
+        // Assert (the poll loop ends before the execution does)
+        Assert.False(counter.TryGetSource(out _));
+        Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
+        await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await AsyncTestHelpers.WaitUntilAsync(() => server.ConnectionCount == 0, TimeSpan.FromSeconds(10), message: "The connection should be closed.");
+    }
+
+    [Fact]
+    public async Task WhenServerIsUnreachableAtStart_ThenSourceSynchronizesOnceItAppears()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        var device = CreateDevice();
+        var source = CreateSource(device, server);
+        using var recorder = SourceStateRecorder.SubscribeTo(source);
+        try
+        {
+            await source.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.LastError is not null, TimeSpan.FromSeconds(10), message: "The first connect should fail.");
+
+            // Act
+            server.Start();
+            SeedServer(server);
+
+            // Assert
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should synchronize.", SourceState.Synchronized);
+            Assert.Equal(42, device.Counter);
+            Assert.True(source.Diagnostics.IsOperational);
+        }
+        finally
+        {
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenDiscoveryFailsOnce_ThenTheRetrySynchronizes()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+
+        // Act
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = (_, _) =>
+            testDevice.DiscoveryCount == 1
+                ? Task.FromException(new InvalidOperationException("Discovery failed once."))
+                : Task.CompletedTask);
+        try
+        {
+            // Assert
+            Assert.Equal(2, device.DiscoveryCount);
+            Assert.Equal(42, device.Counter);
+            Assert.IsType<InvalidOperationException>(source.Diagnostics.LastError);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenReconnectExcludesAPreviouslyClaimedProperty_ThenItIsReleased()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = (context, _) =>
+        {
+            if (testDevice.DiscoveryCount > 1)
+            {
+                context.ExcludeProperty(new PropertyReference(testDevice, nameof(TestDevice.Optional)));
+            }
+
+            return Task.CompletedTask;
+        });
+        var optional = new PropertyReference(device, nameof(TestDevice.Optional));
+        try
+        {
+            Assert.True(optional.TryGetSource(out _));
+
+            // Act
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+
+            // Assert
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
+                SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
+            Assert.False(optional.TryGetSource(out _));
+            Assert.Equal(5, source.Diagnostics.ClaimedPropertyCount);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsOwnedByAnotherSource_ThenItIsNeitherClaimedNorRead()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        var device = CreateDevice();
+        var optional = new PropertyReference(device, nameof(TestDevice.Optional));
+        await using var otherSource = CreateSource(device, server);
+        Assert.True(optional.SetSource(otherSource));
+        var source = CreateSource(device, server);
+        using var recorder = SourceStateRecorder.SubscribeTo(source);
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should synchronize.", SourceState.Synchronized);
+
+            // Assert
+            Assert.Null(device.Optional);
+            Assert.True(optional.TryGetSource(out var owner));
+            Assert.Same(otherSource, owner);
+            Assert.Equal(5, source.Diagnostics.ClaimedPropertyCount);
+            Assert.DoesNotContain(server.Requests, request =>
+                request.FunctionCode == ModbusFunctionCode.ReadHoldingRegisters &&
+                request.Address <= 20 && request.Address + request.Quantity > 20);
+        }
+        finally
+        {
+            await source.DisposeAsync();
+        }
     }
 }
