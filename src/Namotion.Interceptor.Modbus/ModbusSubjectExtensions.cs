@@ -28,7 +28,8 @@ public static class ModbusSubjectExtensions
 
     /// <summary>
     /// Registers a hosted Modbus client source for the <typeparamref name="TSubject"/> singleton, resolvable as
-    /// <see cref="ModbusSubjectClientSource"/>.
+    /// <see cref="ModbusSubjectClientSource"/>. The configuration is validated when the source is resolved, and
+    /// resolving fails unless the subject's context has lifecycle tracking (<c>WithLifecycle()</c>).
     /// </summary>
     /// <exception cref="InvalidOperationException">An unnamed Modbus client source is already registered.</exception>
     public static IServiceCollection AddModbusSubjectClientSource<TSubject>(
@@ -42,7 +43,8 @@ public static class ModbusSubjectExtensions
 
     /// <summary>
     /// Registers a hosted Modbus client source, resolvable as <see cref="ModbusSubjectClientSource"/>.
-    /// The configuration is validated when the source is resolved.
+    /// The configuration is validated when the source is resolved, and resolving fails unless the subject's context
+    /// has lifecycle tracking (<c>WithLifecycle()</c>).
     /// </summary>
     /// <exception cref="InvalidOperationException">An unnamed Modbus client source is already registered.</exception>
     public static IServiceCollection AddModbusSubjectClientSource(
@@ -51,6 +53,8 @@ public static class ModbusSubjectExtensions
         Func<IServiceProvider, ModbusClientConfiguration> configurationProvider)
     {
         ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(subjectSelector);
+        ArgumentNullException.ThrowIfNull(configurationProvider);
         if (services.Any(descriptor => descriptor.ServiceType == typeof(ModbusSubjectClientSource) && descriptor.ServiceKey is null))
         {
             throw new InvalidOperationException(
@@ -65,7 +69,8 @@ public static class ModbusSubjectExtensions
 
     /// <summary>
     /// Registers a hosted Modbus client source, resolvable as a keyed <see cref="ModbusSubjectClientSource"/>
-    /// under <paramref name="name"/>. The configuration is validated when the source is resolved.
+    /// under <paramref name="name"/>. The configuration is validated when the source is resolved, and resolving
+    /// fails unless the subject's context has lifecycle tracking (<c>WithLifecycle()</c>).
     /// </summary>
     /// <exception cref="InvalidOperationException">A Modbus client source with this name is already registered.</exception>
     public static IServiceCollection AddKeyedModbusSubjectClientSource(
@@ -76,6 +81,8 @@ public static class ModbusSubjectExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(subjectSelector);
+        ArgumentNullException.ThrowIfNull(configurationProvider);
         if (services.Any(descriptor => descriptor.ServiceType == typeof(ModbusSubjectClientSource) && name.Equals(descriptor.ServiceKey)))
         {
             throw new InvalidOperationException($"A ModbusSubjectClientSource with name '{name}' is already registered.");
@@ -91,9 +98,6 @@ public static class ModbusSubjectExtensions
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, ModbusClientConfiguration> configurationProvider)
     {
-        ArgumentNullException.ThrowIfNull(subjectSelector);
-        ArgumentNullException.ThrowIfNull(configurationProvider);
-
         var key = Guid.NewGuid().ToString();
         services
             .AddKeyedSingleton(key, (serviceProvider, _) => configurationProvider(serviceProvider))

@@ -77,6 +77,25 @@ public partial class ModbusRegistrationTests
     }
 
     [Fact]
+    public void WhenNamedAndUnnamedSourcesAreRegistered_ThenBothResolve()
+    {
+        // Arrange
+        var services = CreateServices();
+        services.AddModbusSubjectClientSource<RegistrationSubject>("127.0.0.1");
+        services.AddKeyedModbusSubjectClientSource("device", _ => CreateSubject(), _ => new ModbusClientConfiguration { Host = "127.0.0.2" });
+        using var provider = services.BuildServiceProvider();
+
+        // Act
+        var unnamed = provider.GetRequiredService<ModbusSubjectClientSource>();
+        var named = provider.GetRequiredKeyedService<ModbusSubjectClientSource>("device");
+
+        // Assert
+        Assert.NotSame(unnamed, named);
+        Assert.Same(provider.GetRequiredService<RegistrationSubject>(), unnamed.RootSubject);
+        Assert.Equal(2, provider.GetServices<IHostedService>().Count());
+    }
+
+    [Fact]
     public void WhenNamedSourceIsRegisteredTwice_ThenInvalidOperationExceptionIsThrown()
     {
         // Arrange
