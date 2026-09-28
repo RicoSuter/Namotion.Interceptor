@@ -21,6 +21,7 @@
 - Every register property carries `[State]` with its unit (`DegreeCelsius`, `Kelvin`, `Watt`, `WattHour`, `Minute`, `Hour`), `IsCumulative = true` on totals and `IsDiscrete = true` on enums and bools. Without `[State]` HomeBlaze UI and history ignore the property.
 - Test names `When<Condition>_Then<ExpectedBehavior>` with `// Arrange`, `// Act`, `// Assert`; no hardcoded waits.
 - No abbreviations, no em dashes in docs and comments, commit after each task, no AI attribution.
+- The device and test projects reference `SonarAnalyzer.CSharp` (Task 3), so `S`-prefixed diagnostics are build errors. Follow the Analyzer Policy in `AGENTS.md`: fix findings, and never add an exception to `src/.editorconfig` without user approval.
 - Unit tests: `dotnet test src/HomeBlaze/Namotion.Devices.Luxtronik.Tests --filter "Category!=Integration"`; integration: `dotnet test src/HomeBlaze/Namotion.Devices.Luxtronik.Tests --filter "Category=Integration"`.
 - Register addresses are raw (no +1). Input, holding and discrete input addresses all start at 10000 in separate spaces. The `3.92` gates come from python-luxtronik `since` fields (commit `02afea84bd5bf3ee87445de6f2a42b8029983169`); names, types and enum values follow the official AIT SHI manual (83026900aDE).
 
@@ -206,6 +207,7 @@ git commit -m "feat: add the thermal power sensor abstraction"
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -238,6 +240,7 @@ git commit -m "feat: add the thermal power sensor abstraction"
     <PackageReference Include="FluentModbus" Version="5.3.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" PrivateAssets="all" />
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

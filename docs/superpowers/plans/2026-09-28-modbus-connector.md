@@ -17,6 +17,7 @@
 - Read `AGENTS.md` first. Test names `When<Condition>_Then<ExpectedBehavior>`, explicit `// Arrange`, `// Act`, `// Assert` comments, no `Task.Delay`/`Thread.Sleep` in tests (use `AsyncTestHelpers.WaitUntilAsync` or `SourceStateRecorder.WaitForStatesAsync`).
 - No abbreviations in names, no em dashes in docs or comments, comments only for the why a reader cannot derive.
 - Warnings are errors (`src/Directory.Build.props`). A broken `<see cref>` is a build error.
+- The connector and test projects reference `SonarAnalyzer.CSharp`, so `S`-prefixed diagnostics are build errors. Follow the Analyzer Policy in `AGENTS.md` and never add an exception (`#pragma`, `SuppressMessage` or `src/.editorconfig`) without user approval.
 - Commit after each task with a `feat:`/`test:`/`docs:` prefix. No AI attribution, no `Co-Authored-By` trailer.
 - Unit tests: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "Category!=Integration"`. Integration tests: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "Category=Integration"`.
 - Long-running verification: the Connector Tester is not run for this connector (agreed in spec 6.5: client-only, read-only).
