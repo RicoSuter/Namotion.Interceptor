@@ -1,0 +1,372 @@
+# Modbus connector and Luxtronik SHI design
+
+Date: 2026-09-28
+Status: design (pre-implementation)
+Replaces: `2026-05-04-modbus-design.md` (the SunSpec part moved to [2026-09-28-sunspec-design.md](2026-09-28-sunspec-design.md))
+
+## 1. Goals and scope
+
+Two deliverables in one plan, connector first:
+
+- **Part A: `Namotion.Interceptor.Modbus`**, a generic Modbus TCP client connector with a complete read side. Models are plain `[InterceptorSubject]` classes with `[ModbusRegister]` attributes; the connector attaches to them, polls, and applies values. Models contain no Modbus code.
+- **Part B: `Namotion.Devices.Luxtronik`** (+ `.HomeBlaze` UI, + `.Tests`), a strongly typed, read-only model of the Luxtronik 2.1 Smart Home Interface (SHI, Modbus TCP port 502) and the first consumer of the connector. Target device: Alpha Innotec SWCV 92H3 with Luxtronik 2.1 firmware 3.92.3.
+
+### In scope
+
+- Reads of holding registers (FC3), input registers (FC4), coils (FC1) and discrete inputs (FC2)
+- Data types U16, S16, U32, S32, F32, String (multi-register ASCII), Boolean (coils and discrete inputs)
+- All four word orders for multi-register values
+- Static scale (`Scale`) and dynamic scale factors (`ScaleFactorProperty`, SunSpec style `value * 10^sf`)
+- Conversion to any numeric CLR type, `decimal`, nullable types, enums (including flags enums), `bool` and `string`
+- Unit ID per subject (`[ModbusUnitId]`, `IModbusUnitIdProvider`) with configuration fallback
+- Per-subject base addresses (`IModbusBaseAddressProvider`)
+- Batching with a configurable maximum gap and PDU limits, plus split-on-failure fallback
+- Connect handler (`IModbusConnectedHandler`) with raw reads and `ExcludeProperty`
+- `Access` declared on the attribute (enforced by the write stage)
+- Reconnect, diagnostics, DI and imperative wire-up following the OPC UA and MQTT connectors
+- Luxtronik SHI model with firmware gating, HomeBlaze device and UI
+
+### Out of scope
+
+- Writes (FC5, FC6, FC15, FC16), write validation (minimum/maximum) and the stale-control reconnect policy. This is the next stage.
+- A Modbus server connector and Connector Tester support. Planned together with writes.
+- Modbus RTU (serial).
+- Bit fields inside registers (flags enums cover the Luxtronik status register).
+- Luxtronik data that SHI does not expose (flow rate, operating hours, heat pump type) and the proprietary CFI protocol (port 8889).
+- Registers that python-luxtronik marks as unknown.
+- Rebuilding the read plan when subjects are attached after the connect handler ran (picked up on the next reconnect).
+
+## 2. Architecture
+
+```
+Namotion.Devices.Luxtronik.HomeBlaze   Blazor widget and setup components   net10.0
+            |
+Namotion.Devices.Luxtronik             plain models + HomeBlaze device       net10.0
+            |
+Namotion.Interceptor.Modbus            generic connector                     net9.0
+            |
+FluentModbus (internal only)  ->  Modbus TCP
+```
+
+- `Namotion.Interceptor.Modbus` is the only module that talks Modbus. FluentModbus is an implementation detail: no FluentModbus type appears in the public API, so the wire library can be replaced without breaking device libraries. FluentModbus was chosen over NModbus for `CancellationToken` support, a pooled response buffer (no allocation per read) and a built-in `ModbusTcpServer` for tests.
+- `Namotion.Devices.Luxtronik` is the only module that knows Luxtronik. It depends on the connector and `HomeBlaze.Abstractions`.
+- `Namotion.Devices.Luxtronik.HomeBlaze` owns UI only.
+
+Project locations:
+
+- `src/Namotion.Interceptor.Modbus/`, `src/Namotion.Interceptor.Modbus.Tests/` (in the `/Connectors/` and `/Tests/` solution folders)
+- `src/HomeBlaze/Namotion.Devices.Luxtronik/`, `src/HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze/`, `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/`
+
+## 3. Part A: connector public surface
+
+Namespaces: attributes in `Namotion.Interceptor.Modbus.Attributes`, everything else in `Namotion.Interceptor.Modbus`, DI extensions in `Microsoft.Extensions.DependencyInjection`.
+
+```csharp
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class ModbusRegisterAttribute(int address, ModbusDataType dataType) : Attribute
+{
+    public int Address { get; } = address;                  // relative to the subject's BaseAddress
+    public ModbusDataType DataType { get; } = dataType;
+    public ModbusAddressSpace Space { get; init; } = ModbusAddressSpace.HoldingRegister;
+    public ModbusWordOrder WordOrder { get; init; } = ModbusWordOrder.HighWordFirst;
+    public double Scale { get; init; } = 1.0;                // static scale
+    public string? ScaleFactorProperty { get; init; }        // dynamic scale: value * 10^sf
+    public int Length { get; init; }                         // String only: register count
+    public ModbusAccess Access { get; init; } = ModbusAccess.ReadWrite;
+}
+
+public enum ModbusDataType     { Boolean, U16, S16, U32, S32, F32, String }
+public enum ModbusAddressSpace { HoldingRegister, InputRegister, Coil, DiscreteInput }
+public enum ModbusWordOrder    { HighWordFirst, LowWordFirst, HighWordFirstByteSwapped, LowWordFirstByteSwapped }
+public enum ModbusAccess       { ReadWrite, ReadOnly }
+
+[AttributeUsage(AttributeTargets.Class)]
+public sealed class ModbusUnitIdAttribute(byte unitId) : Attribute { public byte UnitId { get; } = unitId; }
+
+public interface IModbusUnitIdProvider      { byte UnitId { get; } }
+public interface IModbusBaseAddressProvider { int BaseAddress { get; } }
+
+public interface IModbusConnectedHandler
+{
+    Task OnModbusConnectedAsync(ModbusConnectedContext context, CancellationToken cancellationToken);
+}
+
+public sealed class ModbusConnectedContext
+{
+    public ISubjectSource Source { get; }
+    public Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null);
+    public Task<ushort[]> ReadInputRegistersAsync(int address, int count, CancellationToken cancellationToken, byte? unitId = null);
+    public void ExcludeProperty(PropertyReference property);
+}
+
+public sealed class ModbusClientConfiguration
+{
+    public required string Host { get; init; }
+    public int Port { get; init; } = 502;
+    public byte UnitId { get; init; } = 1;
+    public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan RetryTime { get; init; } = TimeSpan.FromSeconds(10);
+    public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
+    public int MaximumRegisterGap { get; init; } = 0;
+    public void Validate();
+}
+
+public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
+{
+    internal ModbusSubjectClientSource(...);
+    public override ModbusClientDiagnostics Diagnostics { get; }
+}
+
+public class ModbusClientDiagnostics : SourceDiagnostics
+{
+    public ModbusPollingDiagnostics Polling { get; }   // TotalPolls, FailedBatches, UnavailableProperties,
+                                                       // LastPollDuration, LastPollTime
+}
+
+public static class ModbusSubjectExtensions
+{
+    public static ModbusSubjectClientSource CreateModbusClientSource(
+        this IInterceptorSubject subject, ModbusClientConfiguration configuration, ILogger logger);
+}
+
+// Microsoft.Extensions.DependencyInjection
+public static class ModbusSubjectServiceCollectionExtensions
+{
+    public static IServiceCollection AddModbusSubjectClientSource<TSubject>(
+        this IServiceCollection services, string host, int port = 502) where TSubject : IInterceptorSubject;
+
+    public static IServiceCollection AddModbusSubjectClientSource(
+        this IServiceCollection services, string key,
+        Func<IServiceProvider, IInterceptorSubject> subjectSelector,
+        Func<IServiceProvider, ModbusClientConfiguration> configurationProvider);
+}
+```
+
+Notes:
+
+- There is no `IModbusSubjectClientSource` interface. The source is a public sealed class with an internal constructor, created only through `CreateModbusClientSource` and the DI extensions. A HomeBlaze device needs to attach it as a hosted service, dispose it and read its diagnostics, which the class covers.
+- DI follows the MQTT and OPC UA registration pattern: keyed configuration, subject and source singletons, and `AddSingleton<IHostedService>` resolving the keyed source. The configuration provider is invoked once.
+- `SourceDiagnostics` already provides operational state, last error, throughput, retry queue, inbound buffer and claimed property count. `ModbusClientDiagnostics` adds only the polling counters, kept in an internal metrics class using `Interlocked` and registered via `Metrics.RegisterResettable`.
+
+## 4. Part A: connector behavior
+
+### 4.1 Address and unit ID resolution
+
+- Absolute address = `BaseAddress` of the subject declaring the property (0 if it does not implement `IModbusBaseAddressProvider`) + `ModbusRegisterAttribute.Address`. Base addresses are not inherited from parents.
+- Unit ID = first match of: the declaring subject's `IModbusUnitIdProvider`, its `[ModbusUnitId]`, the same two checks on the nearest ancestor, then `ModbusClientConfiguration.UnitId`.
+- Base addresses and unit IDs are read once when the read plan is built, so they must be set before the subject is attached.
+- Register count per data type: Boolean 1 bit, U16/S16 1, U32/S32/F32 2, String `Length`.
+
+### 4.2 Validation
+
+Resolution throws `ModbusConfigurationException` naming the property path when:
+
+- `Scale` and `ScaleFactorProperty` are both set, or `ScaleFactorProperty` does not name an integer register property on the same subject
+- `Length` is set on a non-string type, or missing on String
+- `Boolean` is used in a register space, or a non-Boolean type in `Coil`/`DiscreteInput`
+- a scaled value targets an integral or enum CLR type, or the CLR type cannot hold the data type (for example String into `int`)
+- the absolute address is outside 0..65535
+
+### 4.3 Value conversion
+
+At resolution time each property gets a converter delegate chosen by a switch on (data type, CLR type), so the poll loop does no reflection. This keeps the connector AOT friendly.
+
+- Numeric targets: `byte`, `sbyte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `float`, `double`, `decimal`, and their nullable forms.
+- Scaling: `decimal` targets scale in decimal arithmetic (`Scale` converted once via `(decimal)double`), so `234 * 0.1` is exactly `23.4`. `float`/`double` targets scale in double.
+- Dynamic scale factors: `value = raw * 10^sf` where `sf` is the current raw value of the scale-factor property. If the scale factor is not yet known (never read, or its read failed), the scaled property is not updated in that cycle.
+- Enums: the raw integer is converted to the enum's underlying type. Flags enums pass through unchanged. Undefined enum values are passed through, not rejected.
+- `bool`: non-zero is `true`. Works for coils, discrete inputs and U16 registers.
+- `string`: ASCII, trailing `0x00` and `0x20` trimmed on the byte span before decoding (one allocation).
+
+### 4.4 Connect handler and read plan
+
+On every connect (first connect and each reconnect):
+
+1. Open a new `ModbusTcpClient`.
+2. If the root subject implements `IModbusConnectedHandler`, call `OnModbusConnectedAsync` with a fresh `ModbusConnectedContext`. The handler can read raw registers (default unit ID is `configuration.UnitId`) and call `ExcludeProperty`. After the handler returns, the context is invalidated and its reads throw `ObjectDisposedException`.
+3. Walk the root subtree through the registry (`RegisteredSubject.GetAllProperties()`), resolve every `[ModbusRegister]` property that is not excluded, and claim it with `SourceOwnershipManager` (requires `WithLifecycle()`). Previously claimed properties that are now excluded or detached are released.
+4. Build the read plan (4.5) and cache it until the next connect.
+
+Exclusions are reset on every connect, so the handler decides again after each reconnect.
+
+### 4.5 Batching
+
+- Group resolved properties by (unit ID, address space), sort by address.
+- Merge neighbours while the gap between them is at most `MaximumRegisterGap` (default 0, strictly contiguous, because many devices reject reads that cover unmapped registers) and the request stays within the PDU limit (125 registers for FC3/FC4, 2000 bits for FC1/FC2).
+- Batches containing scale-factor properties are ordered before batches containing properties that depend on them, so dynamic scale factors are current within the same cycle.
+
+### 4.6 Poll loop
+
+- Runs every `PollInterval` on a single task started from `StartListeningAsync` via `BackgroundTaskLifetime`.
+- One timestamp per cycle, passed as both changed and received timestamp (Modbus has no source timestamp).
+- The last raw register words are cached per property. A value is converted and applied only when its raw words changed, so steady-state cycles allocate nothing and raise no change events.
+- Values are applied through `SubjectPropertyWriter.Write` with a static lambda and value-tuple state, calling `PropertyReference.SetValueFromSource`.
+- In this stage only the handler (before the loop starts) and the poll loop use the client, never at the same time, so no lock is needed. The write stage adds a lock around every client transaction.
+
+### 4.7 Lifecycle
+
+`ModbusSubjectClientSource` inherits `SubjectSourceBase`:
+
+- `StartListeningAsync`: connect, run the handler, build the plan, start the poll loop. Returns the poll loop lifetime, whose cleanup closes only the client.
+- `LoadInitialStateAsync`: one full batched read, returned as an apply action, so `Synchronized` is only reported after real values exist.
+- Connection loss while polling (I/O error or `RequestTimeout`): the source runs its own reconnect loop following the MQTT pattern: `Metrics.MarkNotOperational()`, start buffering, wait `RetryTime`, reconnect (4.4), `LoadInitialStateAndResumeAsync`, `Metrics.MarkOperational()`. The attempt is wrapped so `IFaultInjectable` Kill and Disconnect work.
+- `Dispose`/`DisposeAsync` override and call the base implementation.
+
+### 4.8 Local writes in this stage
+
+Resolved properties are claimed, so local changes are routed to `WriteChangesAsync`. Until the write stage exists, it logs a warning (once per property until the next connect), invalidates the raw cache of the affected properties and returns `WriteResult.Success`. The next poll re-applies the device value, so the model converges back to the device state. Returning `Failure` would park the changes in the retry queue forever.
+
+### 4.9 Error handling
+
+| Failure | Behavior |
+|---|---|
+| TCP connect failure | Attempt fails, retried after `RetryTime`. |
+| I/O error or timeout during a poll | Connection treated as lost, reconnect loop (4.7). |
+| Modbus exception response for a batch covering more than one property | Re-read that batch's properties individually in the same cycle. A property that still fails is marked unavailable until the next connect: logged once, counted in `Polling.UnavailableProperties`, value not updated. |
+| Modbus exception response for a single-property batch | Warning logged once until the batch succeeds again, counted in `Polling.FailedBatches`, other batches continue. |
+| Handler throws | Connect attempt fails, retried after `RetryTime`. |
+| Configuration error | `ModbusConfigurationException` from the connect attempt, logged as error, retried (a HomeBlaze device reports it through `IMonitoredService`). |
+
+## 5. Part B: Luxtronik SHI library
+
+### 5.1 Source of truth
+
+Register definitions are cross-checked against `Bouni/python-luxtronik` at commit `02afea84bd5bf3ee87445de6f2a42b8029983169` (`luxtronik/definitions/inputs.py`, `holdings.py`, `datatypes.py`) and raibisch's LuxModbusSHI table. The pinned commit is referenced in a comment on the model classes. The library has no runtime dependency on external schemas.
+
+Protocol facts from python-luxtronik that shape the design:
+
+- Addresses are raw (no `3xxxx`/`4xxxx` prefix, no +1): input and holding registers both start at 10000, in separate address spaces.
+- Reading a non-existent register fails the whole request, and features disabled by configuration return no data. Hence `MaximumRegisterGap = 0` and the split-on-failure fallback (4.9).
+- The firmware version (input 10400 to 10402) decides which fields exist. python-luxtronik also reads it on connect and filters fields by version.
+
+### 5.2 Model tree
+
+All scaled values are `decimal?` in HomeBlaze units (°C, W, Wh). Addresses below are absolute; each class declares offsets from its own `BaseAddress`.
+
+```
+LuxtronikHeatPump   BackgroundService subject, IModbusConnectedHandler, IPowerSensor, IConnectionState,
+│                   ISoftwareState, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider, ILastUpdatedProvider
+│  [Configuration] Host, Port = 502, PollInterval = 2 s
+│  SoftwareVersion (string, set by the handler from input 10400-10402)
+│  [Derived] Power => Energy.ElectricalPower, EnergyConsumed => Energy.TotalElectricalEnergy
+│
+├─ Status            LuxtronikStatus, input 10000
+│    0 HeatPumpStatus (flags), 2 OperationMode, 3 HeatingStatus, 4 HotWaterStatus, 6 CoolingStatus,
+│    7 PoolHeatingStatus, 201 ErrorCode (ushort), 202 BufferType, 203 MinimumOffTime, 204 MinimumRunTime (minutes),
+│    205 CoolingConfigured, 206 PoolHeatingConfigured, 207 CoolingReleased (bool)
+│    [Derived] IsCompressorRunning, IsAuxiliaryHeaterRunning
+├─ Temperatures      LuxtronikTemperatures, input 10100, all Scale 0.1
+│    100 Return, 101 ReturnTarget (100/101 disputed, verified on hardware), 102 ExternalReturn, 103 ReturnLimit,
+│    104 ReturnMinimumTarget, 105 Flow, 106 Room, 107 HeatingLimit, 108 Outside,
+│    120 HotWater, 121 HotWaterTarget, 122 HotWaterMinimum, 123 HotWaterMaximum, 124 HotWaterLimit
+│    3.92+: 109 OutsideAverage, 110 HeatSourceInlet, 111 HeatSourceOutlet, 112 MaximumFlow
+├─ Energy            LuxtronikEnergy, input 10300
+│    300 HeatingPower (S16), 301 ElectricalPower, 302 MinimumPredictedElectricalPower   (Scale 100: kW/10 to W)
+│    310/312/314/316/318 Electrical energy Total, Heating, HotWater, Cooling, Pool      (S32, Scale 100: kWh/10 to Wh)
+│    3.92+: 320/322/324/326/328 Thermal energy Total, Heating, HotWater, Cooling, Pool
+├─ Heating           LuxtronikControl, holding 10000
+├─ HotWater          LuxtronikControl, holding 10005
+├─ MixingCircuit1..3 LuxtronikMixingCircuit
+│    ├─ Temperatures LuxtronikMixingCircuitTemperatures, input 10140 / 10150 / 10160: Temperature, Target, Minimum, Maximum
+│    ├─ Heating      LuxtronikControl, holding 10010 / 10020 / 10030
+│    └─ Cooling      LuxtronikCoolingControl, holding 10015 / 10025 / 10035
+├─ PowerLimit        LuxtronikPowerLimit, holding 10040: Mode, Limit (Scale 100: kW/10 to W)
+├─ Locks             LuxtronikLocks, holding 10050: 52 Cooling, 53 SwimmingPool; 3.92+: 50 Heating, 51 HotWater (bool)
+├─ OverallHeating    LuxtronikOverallHeating, holding 10065, 3.92+: Mode, Offset, Level
+└─ HotWaterRequests  LuxtronikHotWaterRequests, holding 10070, 3.92+: Circulation, ExtraHotWater (bool)
+
+LuxtronikControl         +0 Mode, +1 Setpoint (°C), +2 Offset (K, S16), 3.92+: +3 Level
+LuxtronikCoolingControl  +0 Mode, +1 Setpoint (°C), +2 Offset (K, S16)
+```
+
+All holding register properties are `Access = ReadOnly` in this stage, even though the device accepts writes; the write stage relaxes this per property together with range validation.
+
+The 32-bit energy registers need their word order and signedness verified on hardware (sources disagree). Until then the model uses `S32` with `LowWordFirst` per raibisch, and the hardware test (6.4) settles it.
+
+### 5.3 Enums
+
+From python-luxtronik `datatypes.py`:
+
+```csharp
+public enum LuxtronikOperationMode : ushort { Heating = 0, HotWater = 1, PoolOrSolar = 2, UtilityLockout = 3, Defrost = 4, NoRequest = 5, HeatingExternalSource = 6, Cooling = 7 }
+public enum LuxtronikModeStatus    : ushort { Disabled = 0, NoRequest = 1, Requested = 2, Running = 3 }
+public enum LuxtronikControlMode   : ushort { Off = 0, Setpoint = 1, Offset = 2, Level = 3 }
+public enum LuxtronikLevelMode     : ushort { Normal = 0, Increased = 1, Increased2 = 2, Decreased = 3 }   // 2 is undocumented beyond "increased"
+public enum LuxtronikPowerLimitMode : ushort { NoLimit = 0, SoftLimit = 1, HardLimit = 2 }
+public enum LuxtronikBufferType    : ushort { SeriesBuffer = 0, SeparationBuffer = 1, MultifunctionBuffer = 2 }
+
+[Flags]
+public enum LuxtronikHeatPumpStatus : ushort { None = 0, Compressor1 = 1, Compressor2 = 2, AuxiliaryHeater1 = 4, AuxiliaryHeater2 = 8, AuxiliaryHeater3 = 16 }
+```
+
+### 5.4 Firmware gating
+
+- Properties that exist only from a firmware version carry `[LuxtronikFirmware(3, 92)]` (a Luxtronik attribute, unknown to the connector).
+- `LuxtronikHeatPump.OnModbusConnectedAsync` reads input 10400 to 10402, sets `SoftwareVersion`, walks its own subtree and calls `context.ExcludeProperty` for every property whose `[LuxtronikFirmware]` is newer than the device.
+- The model tree is always fully constructed. Excluded properties stay `null` and unclaimed, so the UI can show "not supported" (unclaimed) separately from "not read yet" (claimed, `null`).
+- If the version read fails, the handler throws and the connect attempt is retried.
+
+### 5.5 HomeBlaze device
+
+Follows `HomeBlaze.OpcUa/OpcUaClient.cs` and `Namotion.Devices.Wallbox/WallboxCharger.cs`:
+
+- `ExecuteAsync` builds a `ModbusClientConfiguration` from `Host`, `Port`, `PollInterval`, creates the source with `this.CreateModbusClientSource(configuration, logger)` and attaches it with `AttachHostedServiceAsync`. On stop or configuration change it detaches and disposes the source, then recreates it.
+- `IConnectionState.IsConnected` and `IMonitoredService.Status` reflect `Diagnostics.IsOperational` and `Diagnostics.LastError`.
+- Deliverables from the `create-homeblaze-library` command: `LuxtronikServiceCollectionExtensions` using `AddHostedSubject`, device docs under `HomeBlaze/Data/Docs/devices/`, a sample device configuration, project references in `HomeBlaze.csproj`, and `TypeProvider.AddAssembly` registration for both assemblies in `Program.cs`.
+
+### 5.6 UI (`Namotion.Devices.Luxtronik.HomeBlaze`)
+
+Following the Wallbox UI project: `LuxtronikHeatPumpWidget` (operation mode, outside/flow/hot water temperatures, electrical and heating power, error code), `LuxtronikHeatPumpSetupComponent` and `LuxtronikHeatPumpEditComponent` (host, port, poll interval).
+
+## 6. Testing and verification
+
+### 6.1 Connector unit tests (`Namotion.Interceptor.Modbus.Tests`)
+
+- Codecs: every data type times every word order, encode/decode round trips, string trimming.
+- Conversion: all numeric targets, `decimal?` exactness, enums, flags enums, `bool`, static and dynamic scaling.
+- Resolution: base addresses, unit ID precedence, every validation rule in 4.2.
+- Batch planner: gap handling, PDU limits for registers and bits, scale-factor ordering, grouping by unit ID and space.
+- Public API snapshot (`VerifyChecksTests.PublicApi`).
+
+### 6.2 Connector integration tests (`[Trait("Category", "Integration")]`)
+
+In-process FluentModbus `ModbusTcpServer` on a free port, registers written directly into server memory:
+
+- Batched reads across all four address spaces and several unit IDs.
+- Split-on-failure: the server's request validator rejects chosen addresses; neighbours still update, the rejected property is marked unavailable.
+- Connect handler: raw reads, `ExcludeProperty`, context invalid after return.
+- Reconnect: stop and restart the server, the handler runs again, polling resumes, state goes through `Synchronized` again (non-parallel test collection because of port reuse).
+- Local write: value restored by the next poll.
+- Diagnostics counters.
+
+No hardcoded waits: `AsyncTestHelpers.WaitUntilAsync` and `SourceStateRecorder`.
+
+### 6.3 Luxtronik tests (`Namotion.Devices.Luxtronik.Tests`)
+
+`LuxtronikTestServer` wraps `ModbusTcpServer` pre-filled with the SHI map (firmware 3.92.3 by default) or a recorded register dump:
+
+- Full read of the model, enums, scaling to W and Wh, signed temperatures.
+- Firmware 3.90 vs 3.92: 3.92 properties excluded and unclaimed on 3.90, and the 3.90 server rejecting 3.92 addresses causes no failures.
+- Energy decoding with the chosen word order.
+
+### 6.4 Hardware verification (`[Trait("Category", "Hardware")]`)
+
+Runs only when `LUXTRONIK_HOST` is set. It connects to the real controller and writes every mapped register's raw value to a JSON dump. Run once against the target 3.92.3 unit, compare with the controller display (return actual vs target at 10100/10101, electrical and thermal energy, heating power, cooling configured), fix word order and mappings, and check the dump in as a fixture for `LuxtronikTestServer`.
+
+### 6.5 Long-running verification
+
+The Connector Tester is not run for this stage: the connector is client-only and read-only, and the Connector Tester pairs a server with a client. It is planned together with the Modbus server connector and writes.
+
+## 7. Designed for SunSpec
+
+SunSpec is the next device library ([2026-09-28-sunspec-design.md](2026-09-28-sunspec-design.md)). This connector already provides what it needs for reading: strings (Common model), dynamic scale factors, `IModbusUnitIdProvider` for several units per connection, `IModbusBaseAddressProvider` for model instances at runtime addresses, and `IModbusConnectedHandler` for the chain walk. The write stage adds what SunSpec controls need.
+
+## 8. Future work
+
+- Write stage: FC5/FC6/FC15/FC16, reverse scaling from the cached scale factors, a client lock shared with the poll loop, `Access` enforcement, minimum/maximum validation, and a reconnect policy for volatile controls (Luxtronik SHI controls are volatile and must not be replayed blindly after a long disconnect).
+- Modbus server connector (`Namotion.Interceptor.Modbus` `Server/`) and Connector Tester integration.
+- Rebuilding the read plan on attach/detach instead of on reconnect.
+- Probing unknown firmware instead of version tables.
+- Modbus RTU.
+- Luxtronik data beyond SHI (flow rate, operating hours, heat pump type) through the web interface or CFI.
