@@ -4,7 +4,7 @@
 
 **Goal:** Build `Namotion.Devices.Luxtronik`, a read-only, strongly typed HomeBlaze device for the Luxtronik 2.1 Smart Home Interface (Modbus TCP), plus its UI and docs.
 
-**Architecture:** Plain `[InterceptorSubject]` model classes carry `[ModbusRegister]`-derived attributes and contain no Modbus code. `LuxtronikHeatPump` is a HomeBlaze device (`BackgroundService`) that creates a `ModbusSubjectClientSource` over itself. Its `IModbusConnectedHandler` reads the firmware version and the configured-feature flags on every connect and excludes properties the controller does not support. Measured temperatures are `ITemperatureSensor` child subjects; the device implements `IPowerSensor` and the new `IThermalPowerSensor`.
+**Architecture:** Plain `[InterceptorSubject]` model classes carry `[ModbusRegister]`-derived attributes and contain no Modbus code. `LuxtronikHeatPump` is a HomeBlaze device (`BackgroundService`) that creates a `ModbusSubjectClientSource` over itself. Its discovery (`IModbusDiscovery.DiscoverAsync`) runs on every (re)connect before the bindings are resolved: it reads the firmware version and the configured-feature flags through the discovery context and excludes properties the controller does not support. Measured temperatures are `ITemperatureSensor` child subjects; the device implements `IPowerSensor` and the new `IThermalPowerSensor`.
 
 **Tech Stack:** .NET 10 (device), `Namotion.Interceptor.Modbus` (.NET 9), HomeBlaze.Abstractions, MudBlazor, xUnit, FluentModbus (tests only).
 
@@ -29,6 +29,7 @@
 ```
 src/HomeBlaze/HomeBlaze.Abstractions/Attributes/StateUnit.cs              + Kelvin, Minute, Hour
 src/HomeBlaze/HomeBlaze.Host.Services/Display/StateUnitExtensions.cs       + suffixes
+src/HomeBlaze/HomeBlaze/Data/Docs/development/building-subjects.md         + Kelvin, Minute, Hour in the unit list
 src/HomeBlaze/HomeBlaze.Abstractions/Sensors/IThermalPowerSensor.cs        new abstraction
 src/HomeBlaze/Namotion.Devices.Luxtronik/
   Namotion.Devices.Luxtronik.csproj
@@ -45,9 +46,10 @@ src/HomeBlaze/Namotion.Devices.Luxtronik/
   LuxtronikHeatPump.cs, LuxtronikServiceCollectionExtensions.cs
 src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/
   Namotion.Devices.Luxtronik.Tests.csproj
-  Testing/TestHost.cs, Testing/LuxtronikTestServer.cs, Testing/LuxtronikHardwareFactAttribute.cs
-  LuxtronikGatingTests.cs, LuxtronikModelTests.cs, LuxtronikHeatPumpTests.cs (Integration), LuxtronikTestServerTests.cs,
-  LuxtronikHardwareTests.cs
+  Testing/TestHost.cs, Testing/LuxtronikTestServer.cs, Testing/LuxtronikHardwareFactAttribute.cs,
+  Testing/LuxtronikIntegrationCollection.cs
+  LuxtronikGatingTests.cs, LuxtronikModelTests.cs, LuxtronikHeatPumpDeviceTests.cs, LuxtronikHeatPumpTests.cs (Integration),
+  LuxtronikHeatPumpLifecycleTests.cs (Integration), LuxtronikHardwareTests.cs
 src/HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze/
   Namotion.Devices.Luxtronik.HomeBlaze.csproj, _Imports.razor, LuxtronikHeatPumpWidget.razor, LuxtronikHeatPumpEditComponent.razor
 src/HomeBlaze/HomeBlaze/HomeBlaze.csproj, Program.cs, Data/Devices/Luxtronik.json, Data/Docs/devices/Luxtronik.md
@@ -61,6 +63,7 @@ src/Namotion.Interceptor.slnx
 **Files:**
 - Modify: `src/HomeBlaze/HomeBlaze.Abstractions/Attributes/StateUnit.cs`
 - Modify: `src/HomeBlaze/HomeBlaze.Host.Services/Display/StateUnitExtensions.cs` (`GetUnitInfo`)
+- Modify: `src/HomeBlaze/HomeBlaze/Data/Docs/development/building-subjects.md` (**Available units** list)
 - Test: `src/HomeBlaze/HomeBlaze.Host.Services.Tests/Display/StateUnitExtensionsTests.cs`
 
 - [ ] **Step 1: Write the failing test cases**
@@ -103,10 +106,24 @@ In `StateUnitExtensions.GetUnitInfo`, add before the `_ => null` arm:
 Run: `dotnet test src/HomeBlaze/HomeBlaze.Host.Services.Tests --filter "FullyQualifiedName~StateUnitExtensionsTests"`
 Expected: PASS, including the 3 new cases.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Document the units**
+
+In `building-subjects.md`, section **Available units**, replace the last entry of the `StateUnit` code block (`HexColor           // #FF0000` and the closing brace) with:
+
+```csharp
+    HexColor,          // #FF0000
+    Kelvin,            // 1.5 K (temperature differences)
+    Minute,            // 30 min
+    Hour               // 1234 h
+}
+```
+
+The listed enum is already behind the source (it lacks `Kilometer`, `MeterPerSecond`, `Hectopascal`, `Degree`, `UvIndex`, `Byte`); only add the three new units here.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/HomeBlaze/HomeBlaze.Abstractions/Attributes/StateUnit.cs src/HomeBlaze/HomeBlaze.Host.Services/Display/StateUnitExtensions.cs src/HomeBlaze/HomeBlaze.Host.Services.Tests/Display/StateUnitExtensionsTests.cs
+git add src/HomeBlaze/HomeBlaze.Abstractions/Attributes/StateUnit.cs src/HomeBlaze/HomeBlaze.Host.Services/Display/StateUnitExtensions.cs src/HomeBlaze/HomeBlaze.Host.Services.Tests/Display/StateUnitExtensionsTests.cs src/HomeBlaze/HomeBlaze/Data/Docs/development/building-subjects.md
 git commit -m "feat: add Kelvin, minute and hour state units"
 ```
 
@@ -167,6 +184,7 @@ git commit -m "feat: add the thermal power sensor abstraction"
 **Files:**
 - Create: `src/HomeBlaze/Namotion.Devices.Luxtronik/Namotion.Devices.Luxtronik.csproj`
 - Create: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/Namotion.Devices.Luxtronik.Tests.csproj`
+- Create: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/Testing/LuxtronikIntegrationCollection.cs`
 - Modify: `src/Namotion.Interceptor.slnx` (`/HomeBlaze/Devices/` folder)
 
 - [ ] **Step 1: Create the device project**
@@ -218,12 +236,17 @@ git commit -m "feat: add the thermal power sensor abstraction"
 
   <ItemGroup>
     <PackageReference Include="FluentModbus" Version="5.3.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.*" />
     <PackageReference Include="xunit" Version="2.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
   </ItemGroup>
 
   <ItemGroup>
@@ -235,7 +258,25 @@ git commit -m "feat: add the thermal power sensor abstraction"
 </Project>
 ```
 
-- [ ] **Step 3: Add the projects to the solution**
+`Microsoft.Extensions.DependencyInjection` provides `ServiceCollection.BuildServiceProvider` for the lifecycle test in Task 8. There is no `Verify.Xunit` here to supply the global `Xunit` using, so the project declares it.
+
+- [ ] **Step 3: Add the integration test collection**
+
+`Testing/LuxtronikIntegrationCollection.cs`:
+
+```csharp
+namespace Namotion.Devices.Luxtronik.Tests.Testing;
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class LuxtronikIntegrationCollection
+{
+    public const string Name = "Luxtronik integration";
+}
+```
+
+The simulated-controller tests (Task 8) join it so their servers, sockets and polling loops do not compete with each other under a parallel run.
+
+- [ ] **Step 4: Add the projects to the solution**
 
 In `src/Namotion.Interceptor.slnx`, inside `<Folder Name="/HomeBlaze/Devices/">` after the Ecowitt lines:
 
@@ -244,12 +285,12 @@ In `src/Namotion.Interceptor.slnx`, inside `<Folder Name="/HomeBlaze/Devices/">`
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.Tests/Namotion.Devices.Luxtronik.Tests.csproj" />
 ```
 
-- [ ] **Step 4: Build**
+- [ ] **Step 5: Build**
 
 Run: `dotnet build src/HomeBlaze/Namotion.Devices.Luxtronik.Tests`
 Expected: `Build succeeded`, 0 warnings.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/HomeBlaze/Namotion.Devices.Luxtronik src/HomeBlaze/Namotion.Devices.Luxtronik.Tests src/Namotion.Interceptor.slnx
@@ -448,7 +489,7 @@ namespace Namotion.Devices.Luxtronik;
 /// </summary>
 internal interface ILuxtronikRegisterGate
 {
-    string? MinimumFirmware { get; }
+    Version? MinimumFirmwareVersion { get; }
 
     LuxtronikFeature Feature { get; }
 }
@@ -485,6 +526,8 @@ namespace Namotion.Devices.Luxtronik;
 /// </summary>
 public sealed class LuxtronikInputRegisterAttribute : ModbusRegisterAttribute, ILuxtronikRegisterGate
 {
+    private Version? _minimumFirmwareVersion;
+
     public LuxtronikInputRegisterAttribute(int address, ModbusDataType dataType)
         : base(address, dataType)
     {
@@ -499,9 +542,13 @@ public sealed class LuxtronikInputRegisterAttribute : ModbusRegisterAttribute, I
     public string? MinimumFirmware { get; init; }
 
     /// <summary>
-    /// Gets the controller function that must be configured for the register to be read.
+    /// Gets the controller function that must be configured for the register to be read;
+    /// <see cref="LuxtronikFeature.None"/> (the default) means no requirement.
     /// </summary>
     public LuxtronikFeature Feature { get; init; } = LuxtronikFeature.None;
+
+    Version? ILuxtronikRegisterGate.MinimumFirmwareVersion =>
+        MinimumFirmware is null ? null : _minimumFirmwareVersion ??= Version.Parse(MinimumFirmware);
 }
 ```
 
@@ -518,6 +565,8 @@ namespace Namotion.Devices.Luxtronik;
 /// </summary>
 public sealed class LuxtronikHoldingRegisterAttribute : ModbusRegisterAttribute, ILuxtronikRegisterGate
 {
+    private Version? _minimumFirmwareVersion;
+
     public LuxtronikHoldingRegisterAttribute(int address, ModbusDataType dataType)
         : base(address, dataType)
     {
@@ -532,9 +581,13 @@ public sealed class LuxtronikHoldingRegisterAttribute : ModbusRegisterAttribute,
     public string? MinimumFirmware { get; init; }
 
     /// <summary>
-    /// Gets the controller function that must be configured for the register to be read.
+    /// Gets the controller function that must be configured for the register to be read;
+    /// <see cref="LuxtronikFeature.None"/> (the default) means no requirement.
     /// </summary>
     public LuxtronikFeature Feature { get; init; } = LuxtronikFeature.None;
+
+    Version? ILuxtronikRegisterGate.MinimumFirmwareVersion =>
+        MinimumFirmware is null ? null : _minimumFirmwareVersion ??= Version.Parse(MinimumFirmware);
 }
 ```
 
@@ -553,7 +606,7 @@ public class LuxtronikGatingTests
     [InlineData("3.92.0", 3, 92, 0, true)]
     [InlineData("3.92.1", 3, 92, 0, false)]
     [InlineData("3.92.0", 3, 92, 3, true)]
-    public void WhenCheckingFirmware_ThenOlderFirmwareIsNotSupported(string? minimumFirmware, int major, int minor, int patch, bool expected)
+    public void WhenCheckingFirmware_ThenMinimumVersionIsEnforced(string? minimumFirmware, int major, int minor, int patch, bool expected)
     {
         // Act
         var isSupported = LuxtronikGating.IsSupported(minimumFirmware, LuxtronikFeature.None, new Version(major, minor, patch), configuredFeatures: null);
@@ -632,7 +685,7 @@ internal static class LuxtronikGating
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is ILuxtronikRegisterGate gate &&
-                !IsSupported(gate.MinimumFirmware, gate.Feature, firmwareVersion, configuredFeatures))
+                !IsSupportedCore(gate.MinimumFirmwareVersion, gate.Feature, firmwareVersion, configuredFeatures))
             {
                 return false;
             }
@@ -642,11 +695,17 @@ internal static class LuxtronikGating
             IsSupported(subject.MinimumFirmware, subject.Feature, firmwareVersion, configuredFeatures);
     }
 
-    /// <param name="configuredFeatures"><c>null</c> when the controller does not report its features; feature gates then pass.</param>
+    /// <summary>
+    /// Checks a firmware and feature requirement. <c>null</c> configured features means the controller does not report them, so feature gates pass.
+    /// </summary>
     public static bool IsSupported(
         string? minimumFirmware, LuxtronikFeature feature, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
+        => IsSupportedCore(minimumFirmware is null ? null : Version.Parse(minimumFirmware), feature, firmwareVersion, configuredFeatures);
+
+    private static bool IsSupportedCore(
+        Version? minimumFirmware, LuxtronikFeature feature, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
     {
-        if (minimumFirmware is not null && firmwareVersion < Version.Parse(minimumFirmware))
+        if (minimumFirmware is not null && firmwareVersion < minimumFirmware)
         {
             return false;
         }
@@ -689,9 +748,10 @@ git commit -m "feat: add Luxtronik enums, register attributes and firmware gatin
 - Create: `src/HomeBlaze/Namotion.Devices.Luxtronik/Model/LuxtronikFeatures.cs`, `LuxtronikOperatingStatus.cs`, `LuxtronikTemperatureSensor.cs`, `LuxtronikTemperatures.cs`, `LuxtronikEnergy.cs`, `LuxtronikOutputs.cs`, `LuxtronikSmartGrid.cs`, `LuxtronikRuntime.cs`, `LuxtronikExtraHotWater.cs`
 - Test: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/LuxtronikModelTests.cs`
 
-Addresses in attributes are offsets from the class's `BaseAddress`. Groups that exist only from firmware 3.92 gate the whole subject through `ILuxtronikGatedSubject`; single registers gate through the attribute's `MinimumFirmware`/`Feature`. Every file starts with:
+Addresses in attributes are offsets from the class's `BaseAddress`. Groups that exist only from firmware 3.92 gate the whole subject through `ILuxtronikGatedSubject`; single registers gate through the attribute's `MinimumFirmware`/`Feature`. Every file starts with the source reference required by spec 5.1 and the common usings:
 
 ```csharp
+// Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
@@ -941,9 +1001,10 @@ public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
 
 - [ ] **Step 5: Temperature sensor and temperatures**
 
-`Model/LuxtronikTemperatureSensor.cs`:
+`Model/LuxtronikTemperatureSensor.cs` (own usings, same source reference line):
 
 ```csharp
+// Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Sensors;
@@ -1383,7 +1444,7 @@ git commit -m "feat: model the Luxtronik SHI input registers"
 - Create: `src/HomeBlaze/Namotion.Devices.Luxtronik/Model/LuxtronikControl.cs`, `LuxtronikCoolingControl.cs`, `LuxtronikMixingCircuitSetpoints.cs`, `LuxtronikMixingCircuit.cs`, `LuxtronikPowerLimit.cs`, `LuxtronikLocks.cs`, `LuxtronikRoomControl.cs`, `LuxtronikOverallHeating.cs`, `LuxtronikHotWaterRequests.cs`
 - Modify: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/LuxtronikModelTests.cs`
 
-Same common usings as Task 5.
+Same file header as Task 5 (source reference line and common usings).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1557,9 +1618,10 @@ public partial class LuxtronikMixingCircuitSetpoints : IModbusBaseAddressProvide
 }
 ```
 
-`Model/LuxtronikMixingCircuit.cs`:
+`Model/LuxtronikMixingCircuit.cs` (own usings, same source reference line):
 
 ```csharp
+// Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
@@ -1828,6 +1890,7 @@ public partial class TestHost
 `LuxtronikHeatPumpDeviceTests.cs`:
 
 ```csharp
+using System.Reactive.Concurrency;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor.Tracking;
@@ -1874,7 +1937,7 @@ public class LuxtronikHeatPumpDeviceTests
         // Arrange
         var (heatPump, context) = TestHost.CreateAttachedHeatPump();
         var changedProperties = new List<string>();
-        using var subscription = context.GetPropertyChangeObservable()
+        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
             .Subscribe(change => changedProperties.Add(change.Property.Name));
 
         // Act
@@ -1913,7 +1976,7 @@ public class LuxtronikHeatPumpDeviceTests
 }
 ```
 
-`Subscribe(Action<T>)` comes from System.Reactive's `ObservableExtensions` in the `System` namespace (implicit usings cover it).
+`GetPropertyChangeObservable()` without a scheduler observes on `Scheduler.Default`, which delivers asynchronously, so the assertion could run before the change arrives. `ImmediateScheduler.Instance` (from `System.Reactive.Concurrency`) delivers the change synchronously inside the write. `Subscribe(Action<T>)` comes from System.Reactive's `ObservableExtensions` in the `System` namespace (implicit usings cover it).
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
@@ -1950,7 +2013,7 @@ namespace Namotion.Devices.Luxtronik;
 [Description("Luxtronik 2.1 heat pump (Alpha Innotec, Novelan) via the Smart Home Interface, read only")]
 [InterceptorSubject]
 public partial class LuxtronikHeatPump : BackgroundService,
-    IModbusConnectedHandler,
+    IModbusDiscovery,
     IPowerSensor,
     IThermalPowerSensor,
     IConnectionState,
@@ -1992,7 +2055,7 @@ public partial class LuxtronikHeatPump : BackgroundService,
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     /// <summary>
-    /// Gets the controller firmware, such as "3.92.3", read on every connect.
+    /// Gets the controller firmware, such as "3.92.3", read by the discovery on every connect.
     /// </summary>
     [State]
     public partial string? SoftwareVersion { get; internal set; }
@@ -2116,7 +2179,7 @@ public partial class LuxtronikHeatPump : BackgroundService,
     /// <summary>
     /// Reads the firmware version and configured functions, and excludes the registers the controller does not provide.
     /// </summary>
-    public async Task OnModbusConnectedAsync(ModbusConnectedContext context, CancellationToken cancellationToken)
+    public async Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken)
     {
         var versionRegisters = await context.ReadInputRegistersAsync(FirmwareAddress, 3, cancellationToken).ConfigureAwait(false);
         var firmwareVersion = new Version(versionRegisters[0], versionRegisters[1], versionRegisters[2]);
@@ -2266,6 +2329,12 @@ public partial class LuxtronikHeatPump : BackgroundService,
             return false;
         }
     }
+
+    public override void Dispose()
+    {
+        _configurationChanged.Dispose();
+        base.Dispose();
+    }
 }
 ```
 
@@ -2287,6 +2356,9 @@ git commit -m "feat: add the Luxtronik heat pump device"
 **Files:**
 - Create: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/Testing/LuxtronikTestServer.cs`
 - Test: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/LuxtronikHeatPumpTests.cs`
+- Test: `src/HomeBlaze/Namotion.Devices.Luxtronik.Tests/LuxtronikHeatPumpLifecycleTests.cs`
+
+Both test classes join the `LuxtronikIntegrationCollection` from Task 3, which disables parallel execution.
 
 The test server imitates the controller: a request that touches any unmapped address, or a 3.92 address on older firmware, is rejected with "illegal data address", as python-luxtronik documents for the real device. The tests therefore also prove that the model never plans a read across unmapped registers.
 
@@ -2517,6 +2589,7 @@ using Namotion.Interceptor.Testing;
 namespace Namotion.Devices.Luxtronik.Tests;
 
 [Trait("Category", "Integration")]
+[Collection(LuxtronikIntegrationCollection.Name)]
 public class LuxtronikHeatPumpTests
 {
     private static async Task<(LuxtronikHeatPump HeatPump, ModbusSubjectClientSource Source, SourceStateRecorder Recorder)> StartAsync(
@@ -2573,7 +2646,7 @@ public class LuxtronikHeatPumpTests
             Assert.Equal(35.0m, heatPump.Heating.Setpoint);
             Assert.Equal(28.0m, heatPump.MixingCircuit1.Heating.Setpoint);
             Assert.Equal(30000m, heatPump.PowerLimit.Limit);
-            Assert.Equal(true, heatPump.Features.Heating);
+            Assert.True(heatPump.Features.Heating);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
             Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
             Assert.True(heatPump.IsConnected);
@@ -2729,12 +2802,89 @@ public class LuxtronikHeatPumpTests
 
 `TryGetSource` is `Namotion.Interceptor.Connectors.SourcePropertyExtensions`; `CreateModbusClientSource` is in `Microsoft.Extensions.DependencyInjection`.
 
-- [ ] **Step 3: Run the tests**
+- [ ] **Step 3: Write the device lifecycle test**
 
-Run: `dotnet test src/HomeBlaze/Namotion.Devices.Luxtronik.Tests --filter "FullyQualifiedName~LuxtronikHeatPumpTests"`
-Expected: PASS, 6 tests. A non-zero `FailedBatches` means the model plans a read across an unmapped register: find the property whose address is missing from the ranges, and fix either the model address or the gate.
+The tests above drive the source directly. This one runs the device as HomeBlaze does: the context's hosted service handler starts the attached heat pump, `ExecuteAsync` creates and attaches the source, and `UpdateStatus` mirrors its diagnostics. Modelled on `src/HomeBlaze/HomeBlaze.Services.Tests/Serialization/ConfigurableSubjectStartupTests.cs`.
 
-- [ ] **Step 4: Commit**
+`LuxtronikHeatPumpLifecycleTests.cs`:
+
+```csharp
+using HomeBlaze.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Devices.Luxtronik.Tests.Testing;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
+
+namespace Namotion.Devices.Luxtronik.Tests;
+
+[Trait("Category", "Integration")]
+[Collection(LuxtronikIntegrationCollection.Name)]
+public class LuxtronikHeatPumpLifecycleTests
+{
+    [Fact]
+    public async Task WhenControllerStops_ThenHostedHeatPumpReportsError()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+
+        var services = new ServiceCollection()
+            .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithHostedServices(services);
+        await using var provider = services.BuildServiceProvider();
+        var handler = Assert.Single(provider.GetServices<IHostedService>());
+        await handler.StartAsync(CancellationToken.None);
+
+        var heatPump = new LuxtronikHeatPump(NullLogger<LuxtronikHeatPump>.Instance)
+        {
+            HostAddress = "127.0.0.1",
+            Port = server.Port,
+            PollingInterval = TimeSpan.FromMilliseconds(200)
+        };
+
+        try
+        {
+            _ = new TestHost(context) { HeatPump = heatPump };
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running && heatPump.LastUpdated is not null,
+                TimeSpan.FromSeconds(30),
+                message: "The hosted heat pump should connect and poll.");
+
+            // Act
+            server.Dispose();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !heatPump.IsConnected && heatPump.Status == ServiceStatus.Error,
+                TimeSpan.FromSeconds(30),
+                message: "The heat pump should report the lost controller.");
+        }
+        finally
+        {
+            await handler.StopAsync(CancellationToken.None);
+        }
+    }
+}
+```
+
+`WithHostedServices` registers the handler as the collection's only `IHostedService` and adds `WithLifecycle`; the handler needs an `ILogger<HostedServiceHandler>`, hence the open generic `NullLogger<>` registration. `LuxtronikTestServer.Dispose` is idempotent, so the explicit call and the `using` do not conflict.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `dotnet test src/HomeBlaze/Namotion.Devices.Luxtronik.Tests --filter "FullyQualifiedName~LuxtronikHeatPumpTests|FullyQualifiedName~LuxtronikHeatPumpLifecycleTests"`
+Expected: PASS, 7 tests. A non-zero `FailedBatches` means the model plans a read across an unmapped register: find the property whose address is missing from the ranges, and fix either the model address or the gate.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/HomeBlaze/Namotion.Devices.Luxtronik.Tests
@@ -2790,9 +2940,12 @@ namespace Namotion.Devices.Luxtronik.Tests;
 [Trait("Category", "Integration")]
 public class LuxtronikHardwareTests
 {
+    private const int Port = 502;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
 
     private readonly ITestOutputHelper _output;
+    private TcpClient? _tcpClient;
+    private ModbusTcpClient? _client;
 
     public LuxtronikHardwareTests(ITestOutputHelper output)
     {
@@ -2810,93 +2963,153 @@ public class LuxtronikHardwareTests
         var holdingRegisters = new SortedDictionary<string, ushort>(StringComparer.Ordinal);
         var discreteInputs = new SortedDictionary<string, bool>(StringComparer.Ordinal);
         var failures = new List<string>();
-
-        using var tcpClient = new TcpClient();
-        await tcpClient.ConnectAsync(host, 502).WaitAsync(RequestTimeout);
-        var client = new ModbusTcpClient();
-        client.Initialize(tcpClient, ModbusEndianness.BigEndian);
+        var unmappedReadBehavior = "not read";
 
         // Act (reads only: this test must never call a FluentModbus write method)
-        foreach (var (start, end, _) in LuxtronikTestServer.InputRanges)
-        {
-            await ReadRegistersAsync(() => client.ReadInputRegistersAsync((byte)1, (ushort)start, (ushort)(end - start + 1), CancellationToken.None),
-                start, inputRegisters, failures, "input");
-        }
-
-        foreach (var (start, end, _) in LuxtronikTestServer.HoldingRanges)
-        {
-            await ReadRegistersAsync(() => client.ReadHoldingRegistersAsync((byte)1, (ushort)start, (ushort)(end - start + 1), CancellationToken.None),
-                start, holdingRegisters, failures, "holding");
-        }
-
         try
         {
-            var bits = (await client.ReadDiscreteInputsAsync(1, 10000, 12, CancellationToken.None).WaitAsync(RequestTimeout)).ToArray();
-            for (var index = 0; index < 12; index++)
+            await ConnectAsync(host);
+
+            foreach (var (start, end, _) in LuxtronikTestServer.InputRanges)
             {
-                discreteInputs[(10000 + index).ToString()] = ((bits[index / 8] >> (index % 8)) & 1) != 0;
+                var data = await TryReadAsync(host, $"input {start}", failures,
+                    client => client.ReadInputRegistersAsync((byte)1, (ushort)start, (ushort)(end - start + 1), CancellationToken.None));
+                AddRegisters(data, start, inputRegisters);
+            }
+
+            foreach (var (start, end, _) in LuxtronikTestServer.HoldingRanges)
+            {
+                var data = await TryReadAsync(host, $"holding {start}", failures,
+                    client => client.ReadHoldingRegistersAsync((byte)1, (ushort)start, (ushort)(end - start + 1), CancellationToken.None));
+                AddRegisters(data, start, holdingRegisters);
+            }
+
+            var bits = await TryReadAsync(host, "discrete 10000", failures,
+                client => client.ReadDiscreteInputsAsync(1, 10000, 12, CancellationToken.None));
+            if (bits is not null)
+            {
+                for (var index = 0; index < 12; index++)
+                {
+                    discreteInputs[(10000 + index).ToString()] = ((bits[index / 8] >> (index % 8)) & 1) != 0;
+                }
+            }
+
+            // Input 10001 is not mapped; how the controller answers decides how the connector's split-on-failure behaves.
+            try
+            {
+                var value = (await _client!.ReadInputRegistersAsync((byte)1, (ushort)10001, (ushort)1, CancellationToken.None).WaitAsync(RequestTimeout)).ToArray();
+                unmappedReadBehavior = $"answered with value {BinaryPrimitives.ReadUInt16BigEndian(value)}";
+            }
+            catch (ModbusException exception)
+            {
+                unmappedReadBehavior = $"exception response {exception.ExceptionCode}";
+            }
+            catch (TimeoutException)
+            {
+                unmappedReadBehavior = "no response";
+            }
+            catch (IOException exception)
+            {
+                unmappedReadBehavior = $"connection error: {exception.Message}";
             }
         }
-        catch (ModbusException exception)
+        finally
         {
-            failures.Add($"discrete 10000-10011: {exception.ExceptionCode}");
-        }
+            Disconnect();
 
-        // Input 10001 is not mapped; how the controller answers decides how the connector's split-on-failure behaves.
-        string unmappedReadBehavior;
-        try
-        {
-            var value = (await client.ReadInputRegistersAsync((byte)1, (ushort)10001, (ushort)1, CancellationToken.None).WaitAsync(RequestTimeout)).ToArray();
-            unmappedReadBehavior = $"answered with value {BinaryPrimitives.ReadUInt16BigEndian(value)}";
+            var dump = new
+            {
+                capturedAt = DateTimeOffset.UtcNow,
+                unmappedReadBehavior,
+                failures,
+                inputRegisters,
+                holdingRegisters,
+                discreteInputs
+            };
+            await File.WriteAllTextAsync(dumpPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = true }));
+            _output.WriteLine($"Dump written to {dumpPath}");
         }
-        catch (ModbusException exception)
-        {
-            unmappedReadBehavior = $"exception response {exception.ExceptionCode}";
-        }
-        catch (TimeoutException)
-        {
-            unmappedReadBehavior = "no response";
-        }
-
-        var dump = new
-        {
-            capturedAt = DateTimeOffset.UtcNow,
-            unmappedReadBehavior,
-            failures,
-            inputRegisters,
-            holdingRegisters,
-            discreteInputs
-        };
-        await File.WriteAllTextAsync(dumpPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = true }));
 
         // Assert
         Assert.True(inputRegisters.ContainsKey("10400"), "The firmware registers must be readable.");
         _output.WriteLine($"Firmware {inputRegisters["10400"]}.{inputRegisters["10401"]}.{inputRegisters["10402"]}");
         _output.WriteLine($"Unmapped read: {unmappedReadBehavior}");
         _output.WriteLine($"Failures: {(failures.Count == 0 ? "none" : string.Join(", ", failures))}");
-        _output.WriteLine($"Dump written to {dumpPath}");
     }
 
-    private static async Task ReadRegistersAsync(
-        Func<Task<Memory<byte>>> read, int start, SortedDictionary<string, ushort> target, List<string> failures, string space)
+    private async Task<byte[]?> TryReadAsync(
+        string host, string description, List<string> failures, Func<ModbusTcpClient, Task<Memory<byte>>> read)
     {
         try
         {
-            var data = (await read().WaitAsync(RequestTimeout)).ToArray();
-            for (var index = 0; index < data.Length / 2; index++)
-            {
-                target[(start + index).ToString()] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(index * 2));
-            }
+            return (await read(_client!).WaitAsync(RequestTimeout)).ToArray();
         }
         catch (ModbusException exception)
         {
-            failures.Add($"{space} {start}: {exception.ExceptionCode}");
+            failures.Add($"{description}: {exception.ExceptionCode}");
+        }
+        catch (TimeoutException)
+        {
+            failures.Add($"{description}: timeout");
+            await ConnectAsync(host);
+        }
+        catch (IOException exception)
+        {
+            failures.Add($"{description}: error: {exception.Message}");
+            await ConnectAsync(host);
+        }
+
+        return null;
+    }
+
+    // A timed-out request may still be answered later, and that late response would be taken as the
+    // answer to the next request, so every timeout or connection error continues on a fresh connection.
+    private async Task ConnectAsync(string host)
+    {
+        Disconnect();
+
+        var tcpClient = new TcpClient();
+        try
+        {
+            await tcpClient.ConnectAsync(host, Port).WaitAsync(RequestTimeout);
+        }
+        catch
+        {
+            tcpClient.Dispose();
+            throw;
+        }
+
+        var client = new ModbusTcpClient();
+        client.Initialize(tcpClient, ModbusEndianness.BigEndian);
+        _tcpClient = tcpClient;
+        _client = client;
+    }
+
+    // A ModbusTcpClient initialized with an external TcpClient does not dispose it, so both are disposed.
+    private void Disconnect()
+    {
+        _client?.Dispose();
+        _tcpClient?.Dispose();
+        _client = null;
+        _tcpClient = null;
+    }
+
+    private static void AddRegisters(byte[]? data, int start, SortedDictionary<string, ushort> target)
+    {
+        if (data is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < data.Length / 2; index++)
+        {
+            target[(start + index).ToString()] = BinaryPrimitives.ReadUInt16BigEndian(data.AsSpan(index * 2));
         }
     }
 }
 ```
 
-The anonymous object serializes with camel-case names already (`inputRegisters`, `holdingRegisters`, `discreteInputs`), which is the shape `LuxtronikTestServer.LoadDump` reads.
+The anonymous object serializes with camel-case names already (`inputRegisters`, `holdingRegisters`, `discreteInputs`), which is the shape `LuxtronikTestServer.LoadDump` reads. Each block read tolerates a Modbus exception response, a timeout and a connection error (`IOException`), records it in `failures`, and the dump is written in the `finally` block so a partial run still leaves its evidence on disk.
 
 - [ ] **Step 3: Verify the test is skipped without hardware**
 
@@ -3228,11 +3441,13 @@ The Razor component's namespace is `Namotion.Devices.Luxtronik.HomeBlaze` (root 
 {
   "$type": "Namotion.Devices.Luxtronik.LuxtronikHeatPump",
   "name": "Heat Pump",
-  "hostAddress": "192.168.1.x",
+  "hostAddress": "",
   "port": 502,
   "pollingInterval": "00:00:05"
 }
 ```
+
+The empty host address keeps the device idle in stock HomeBlaze: `ExecuteAsync` reports `Stopped` with "No host address configured" until a host is entered in the editor, instead of retrying a placeholder address.
 
 - [ ] **Step 4: Build HomeBlaze**
 
@@ -3342,6 +3557,8 @@ Temperatures are °C, power W, energy Wh. A value is empty when the controller d
 - **Values stay empty:** the function is not configured on the controller, or the firmware is older than 3.92 for that value.
 - **Controller error 816:** more than one tool writes to SHI. This integration does not write; check other integrations.
 - **Status "Standby" on the controller:** no requests for 10 minutes; check that HomeBlaze is running and connected.
+- **Hot water temperature shows exactly 75.0 °C:** the controller reports this substitute value (input 10120) when the hot water sensor is faulty. It is passed through unfiltered; check the sensor.
+- **A value keeps showing after a function was switched off:** functions and firmware are checked on every reconnect, and a value excluded on a later reconnect keeps its last reading until HomeBlaze restarts.
 
 ## Modbus Register Map
 

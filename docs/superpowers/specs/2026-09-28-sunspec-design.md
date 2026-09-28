@@ -10,7 +10,7 @@ Depends on: [2026-09-28-modbus-luxtronik-design.md](2026-09-28-modbus-luxtronik-
 
 ### In scope (first version)
 
-- Chain-walk discovery through `IModbusConnectedHandler`
+- Chain-walk discovery through `IModbusDiscovery`
 - Hand-coded Common (Model 1) and Inverter Three-Phase (Model 103)
 - Several unit IDs on one connection (SolarEdge exposes inverter, meters and batteries under different unit IDs)
 - HomeBlaze device and UI
@@ -89,7 +89,7 @@ public partial class SunSpecUnit : IModbusUnitIdProvider
 }
 
 [InterceptorSubject]
-public partial class SunSpecDevice : BackgroundService, IModbusConnectedHandler /* + IConnectionState, IMonitoredService, IConfigurable, ... */
+public partial class SunSpecDevice : BackgroundService, IModbusDiscovery /* + IConnectionState, IMonitoredService, IConfigurable, ... */
 {
     [Configuration] public partial string Host { get; set; }
     [Configuration] public partial int Port { get; set; }
@@ -97,7 +97,7 @@ public partial class SunSpecDevice : BackgroundService, IModbusConnectedHandler 
 
     public partial Dictionary<byte, SunSpecUnit> Units { get; set; }
 
-    public Task OnModbusConnectedAsync(ModbusConnectedContext context, CancellationToken cancellationToken);   // chain walk, 4.1
+    public Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken);   // chain walk, 4.1
 }
 ```
 
@@ -105,7 +105,7 @@ Values are `decimal?` to match the HomeBlaze capability interfaces (`IPowerSenso
 
 ## 4. Data flow
 
-### 4.1 Discovery (`SunSpecDevice.OnModbusConnectedAsync`)
+### 4.1 Discovery (`SunSpecDevice.DiscoverAsync`)
 
 ```
 for each unitId in UnitIds:

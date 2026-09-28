@@ -4,7 +4,7 @@
 
 **Goal:** Build `Namotion.Interceptor.Modbus`, a read-only Modbus TCP client connector that polls registers into `[ModbusRegister]`-annotated subject properties.
 
-**Architecture:** A `ModbusSubjectClientSource` derived from `SubjectSourceBase` connects with FluentModbus (internal only), runs an optional `IModbusConnectedHandler` on the root subject, resolves every `[ModbusRegister]` property in the root subtree into a binding, plans contiguous read batches and polls them. Each cycle reads all batches into per-binding raw buffers, then applies only values whose raw words changed through `SubjectPropertyWriter`. Connection loss is handled by a reconnect loop inside the source (MQTT pattern).
+**Architecture:** A `ModbusSubjectClientSource` derived from `SubjectSourceBase` connects with FluentModbus (internal only), runs the optional `IModbusDiscovery` of the root subject, resolves every `[ModbusRegister]` property in the root subtree into a binding, plans contiguous read batches and polls them. Each cycle reads all batches into per-binding raw buffers, then applies only values whose raw words changed through `SubjectPropertyWriter`. Connection loss is handled by a reconnect loop inside the source (MQTT pattern).
 
 **Tech Stack:** .NET 9, C# 13, FluentModbus 5.3.2, xUnit 2.9.3, Verify + PublicApiGenerator.
 
@@ -25,7 +25,9 @@
 
 - Low-level reads `ReadHoldingRegistersAsync(byte unitIdentifier, ushort startingAddress, ushort quantity, CancellationToken)` and `ReadInputRegistersAsync(...)` return `Task<Memory<byte>>` with the raw wire bytes (big endian per register). `ReadCoilsAsync(int, int, int, CancellationToken)` and `ReadDiscreteInputsAsync(...)` return packed bits, lowest address in bit 0 of byte 0.
 - The returned memory is a reused internal buffer: the next request overwrites it. Copy before the next read.
-- A Modbus exception response throws `FluentModbus.ModbusException` (constructors are internal) with `ExceptionCode`; the connection stays usable.
+- A Modbus exception response throws `FluentModbus.ModbusException` (constructors are internal) with `ExceptionCode`; the connection stays usable. FluentModbus also throws `ModbusException` for framing errors (invalid protocol identifier, response function code or message length) through its `ModbusException(string)` constructor, which sets `ExceptionCode` to 255. Those are not device rejections.
+- The async TCP read (`TransceiveFrameAsync`) creates its own `CancellationTokenSource` from `NetworkStream.ReadTimeout` per request, links the caller's token to it and closes the network stream when either fires. A cancelled or timed out request therefore always leaves the connection unusable.
+- The `int` unit ID overloads (`ReadCoilsAsync`, `ReadDiscreteInputsAsync`) go through `ModbusClient.ConvertUnitIdentifier`, which only rejects values outside 0 to 255. The 247 limit exists only in the RTU clients. Every `byte` unit ID is valid on Modbus TCP (255 commonly addresses the TCP device itself), so the connector does not restrict unit IDs further.
 - `ModbusTcpClient.Initialize(TcpClient, ModbusEndianness)` accepts an externally connected `TcpClient`.
 - `ModbusTcpServer` in single-unit mode (no `AddUnit`) only answers unit 0 and drops the connection for other unit IDs. Tests always call `AddUnit`. With units added, a request to an unknown unit gets no response (times out).
 - `server.GetHoldingRegisters(unitId).SetBigEndian<T>(address, value)` writes wire order; `SetBigEndian<int>` writes the high word first. Bits: `server.GetCoils(unitId).Set(address, value)`. Mutate server memory inside `lock (server.Lock)`.
@@ -38,10 +40,10 @@
 src/Namotion.Interceptor.Modbus/
   Namotion.Interceptor.Modbus.csproj
   ModbusDataType.cs, ModbusAddressSpace.cs, ModbusWordOrder.cs, ModbusAccess.cs, ModbusNotAvailableValue.cs   public enums
-  IModbusUnitIdProvider.cs, IModbusBaseAddressProvider.cs, IModbusConnectedHandler.cs                          public interfaces
+  IModbusUnitIdProvider.cs, IModbusBaseAddressProvider.cs, IModbusDiscovery.cs                                     public interfaces
   ModbusConfigurationException.cs, ModbusResponseException.cs                                                    public exceptions
   ModbusClientConfiguration.cs                                                                                     public configuration
-  ModbusConnectedContext.cs                                                                                        public handler context
+  ModbusDiscoveryContext.cs                                                                                        public discovery context
   ModbusSubjectClientSource.cs                                                                                     public source
   ModbusClientDiagnostics.cs                                                                                       public diagnostics (+ ModbusPollingDiagnostics)
   ModbusSubjectExtensions.cs                                                                                       public Create/Add extensions (Microsoft.Extensions.DependencyInjection namespace)
@@ -59,12 +61,10 @@ src/Namotion.Interceptor.Modbus.Tests/
   Namotion.Interceptor.Modbus.Tests.csproj, VerifyTests.cs, VerifyChecksTests.PublicApi.verified.txt
   Testing/ModbusTestServer.cs, Testing/FakeRegisterReader.cs, Testing/ModbusIntegrationCollection.cs
   Mapping/ModbusRegisterCodecTests.cs, Mapping/ModbusValueConvertersTests.cs, Mapping/ModbusRegisterResolverTests.cs, Mapping/ModbusReadPlannerTests.cs
-  ModbusClientConfigurationTests.cs, ModbusConnectedContextTests.cs, Polling/ModbusPollerTests.cs
+  ModbusClientConfigurationTests.cs, ModbusClientDiagnosticsTests.cs, ModbusDiscoveryContextTests.cs, Polling/ModbusPollerTests.cs
   Transport/ModbusConnectionTests.cs (Integration), ModbusSubjectClientSourceTests.cs (Integration), ModbusRegistrationTests.cs
-docs/connectors-modbus.md (new), docs/connectors.md, README.md (links)
+docs/connectors-modbus.md (new), docs/connectors.md, README.md (links), .github/workflows/build.yml (Modbus integration job)
 ```
-
-Spec note: the handler needs to recognise a rejected read (for example when a device does not support a discrete input block), so this plan adds a public `ModbusResponseException` (exception code, internal constructor) that the connector throws for Modbus exception responses instead of FluentModbus's type. The spec already lists it in section 3.
 
 ---
 
@@ -560,6 +560,32 @@ public class ModbusRegisterCodecTests
     }
 
     [Fact]
+    public void WhenReadingS32WithLowWordFirst_ThenWordsAreSwappedBeforeSignExtension()
+    {
+        // Arrange (-2 is 0xFFFFFFFE, so the low word 0xFFFE comes first on the wire)
+        byte[] raw = [0xFF, 0xFE, 0xFF, 0xFF];
+
+        // Act
+        var value = ModbusRegisterCodec.ReadInteger(raw, ModbusDataType.S32, ModbusWordOrder.LowWordFirst);
+
+        // Assert
+        Assert.Equal(-2L, value);
+    }
+
+    [Fact]
+    public void WhenReadingSingleWithLowWordFirstByteSwapped_ThenIeeeBitsAreDecoded()
+    {
+        // Arrange (1.5f is 0x3FC00000, which is D C B A on the wire)
+        byte[] raw = [0x00, 0x00, 0xC0, 0x3F];
+
+        // Act
+        var value = ModbusRegisterCodec.ReadSingle(raw, ModbusWordOrder.LowWordFirstByteSwapped);
+
+        // Assert
+        Assert.Equal(1.5f, value);
+    }
+
+    [Fact]
     public void WhenReadingString_ThenTrailingNullsAndSpacesAreTrimmed()
     {
         // Arrange
@@ -701,7 +727,7 @@ internal static class ModbusRegisterCodec
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusRegisterCodecTests"`
-Expected: PASS, 27 tests.
+Expected: PASS, 29 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -737,7 +763,7 @@ public class ModbusValueConvertersTests
     }
 
     [Flags]
-    private enum Flags : ushort
+    private enum Features : ushort
     {
         None = 0,
         First = 1,
@@ -795,10 +821,10 @@ public class ModbusValueConvertersTests
     public void WhenTargetIsFlagsEnum_ThenBitsArePassedThrough()
     {
         // Act
-        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(Flags), [0x00, 0x03]);
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(Features), [0x00, 0x03]);
 
         // Assert
-        Assert.Equal(Flags.First | Flags.Second, value);
+        Assert.Equal(Features.First | Features.Second, value);
     }
 
     [Fact]
@@ -1441,6 +1467,23 @@ public partial class ModbusRegisterResolverTests
         public partial int? Value { get; set; }
     }
 
+    public sealed class PresetRegisterAttribute : ModbusRegisterAttribute
+    {
+        public PresetRegisterAttribute(int address)
+            : base(address, ModbusDataType.S16)
+        {
+            Space = ModbusAddressSpace.InputRegister;
+            NotAvailableValue = ModbusNotAvailableValue.SignedMaximum;
+        }
+    }
+
+    [InterceptorSubject]
+    public partial class PresetSubject
+    {
+        [PresetRegister(4)]
+        public partial decimal? Value { get; set; }
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -1515,6 +1558,22 @@ public partial class ModbusRegisterResolverTests
 
         // Assert
         Assert.Equal((byte)9, Assert.Single(bindings).UnitId);
+    }
+
+    [Fact]
+    public void WhenAttributeIsDerivedWithPresets_ThenPresetsApply()
+    {
+        // Arrange
+        var subject = new PresetSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var binding = Assert.Single(bindings);
+        Assert.Equal(4, binding.Address);
+        Assert.Equal(ModbusAddressSpace.InputRegister, binding.Space);
+        Assert.Null(binding.Reader(new byte[] { 0x7F, 0xFF }, 0));
     }
 
     public static TheoryData<Func<IInterceptorSubjectContext, IInterceptorSubject>> InvalidSubjects => new()
@@ -1616,6 +1675,12 @@ internal sealed class ModbusRegisterBinding
     public bool ChangedThisCycle { get; set; }
 
     public bool IsUnavailable { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this binding is read in a request of its own, set after a request spanning it was
+    /// rejected. Holds until the next connect creates new bindings.
+    /// </summary>
+    public bool IsIsolated { get; set; }
 
     // Requested from the change queue thread, consumed by the poll loop.
     public void RequestReapply() => Volatile.Write(ref _reapplyRequested, 1);
@@ -1791,7 +1856,7 @@ internal static class ModbusRegisterResolver
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusRegisterResolverTests"`
-Expected: PASS, 12 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1810,6 +1875,8 @@ git commit -m "feat: resolve Modbus register mappings from the subject tree"
 - Test: `src/Namotion.Interceptor.Modbus.Tests/Mapping/ModbusReadPlannerTests.cs`
 
 Scale-factor ordering (spec 4.5) is not needed in the planner: the poller reads every batch of a cycle before it converts anything (Task 9), so a scale factor from any batch of the same cycle is current when its dependents are converted.
+
+A binding marked `IsIsolated` (the poller sets it after a request spanning it was rejected, Task 9) is never merged with a neighbour, so a rejected gap register or a device that rejects block-crossing reads costs one failed request per connect, not one per cycle.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1913,6 +1980,22 @@ public partial class ModbusReadPlannerTests
         var batch = Assert.Single(batches);
         Assert.Equal((0, 4), (batch.StartAddress, batch.Count));
     }
+
+    [Fact]
+    public void WhenBindingsAreIsolated_ThenEachIsReadAloneAndOthersStillMerge()
+    {
+        // Arrange
+        var first = CreateBinding(0);
+        var second = CreateBinding(1);
+        first.IsIsolated = true;
+        second.IsIsolated = true;
+
+        // Act
+        var batches = ModbusReadPlanner.Plan([first, second, CreateBinding(2), CreateBinding(3)], maximumGap: 0);
+
+        // Assert
+        Assert.Equal(new[] { (0, 1), (1, 1), (2, 2) }, batches.Select(batch => (batch.StartAddress, batch.Count)));
+    }
 }
 ```
 
@@ -1986,6 +2069,8 @@ internal static class ModbusReadPlanner
             {
                 var bindingEnd = binding.Address + binding.Count;
                 if (current.Count > 0 &&
+                    !binding.IsIsolated &&
+                    !current[^1].IsIsolated &&
                     binding.Address - end <= maximumGap &&
                     Math.Max(end, bindingEnd) - start <= limit)
                 {
@@ -2019,7 +2104,7 @@ internal static class ModbusReadPlanner
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusReadPlannerTests"`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -2213,6 +2298,8 @@ internal sealed class ModbusTestServer : IDisposable
 `Transport/ModbusConnectionTests.cs`:
 
 ```csharp
+using System.Net;
+using System.Net.Sockets;
 using Namotion.Interceptor.Modbus.Tests.Testing;
 using Namotion.Interceptor.Modbus.Transport;
 
@@ -2284,6 +2371,59 @@ public class ModbusConnectionTests
     }
 
     [Fact]
+    public async Task WhenCallerCancels_ThenOperationCanceledExceptionIsThrown()
+    {
+        // Arrange
+        using var server = new ModbusTestServer(1);
+        server.Start();
+        using var connection = await ConnectAsync(server, TimeSpan.FromSeconds(30));
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            connection.ReadAsync(9, ModbusAddressSpace.HoldingRegister, 0, 1, cancellationTokenSource.Token));
+    }
+
+    [Fact]
+    public async Task WhenResponseHasInvalidProtocolIdentifier_ThenItIsNotReportedAsDeviceRejection()
+    {
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var release = new TaskCompletionSource();
+        var serverTask = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            var stream = client.GetStream();
+            var request = new byte[12];
+            await stream.ReadExactlyAsync(request);
+
+            // Echoed transaction ID, protocol ID 1 instead of 0, length 5, unit, function 3, 2 bytes, value 7.
+            await stream.WriteAsync(new byte[] { request[0], request[1], 0x00, 0x01, 0x00, 0x05, request[6], 0x03, 0x02, 0x00, 0x07 });
+            await release.Task;
+        });
+        using var connection = await ModbusConnection.ConnectAsync("127.0.0.1", port, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+        try
+        {
+            // Act
+            var exception = await Record.ExceptionAsync(() =>
+                connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None));
+
+            // Assert
+            Assert.NotNull(exception);
+            Assert.IsNotType<ModbusResponseException>(exception);
+            Assert.IsNotType<TimeoutException>(exception);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await serverTask;
+        }
+    }
+
+    [Fact]
     public async Task WhenServerStops_ThenReadFailsWithConnectionError()
     {
         // Arrange
@@ -2337,9 +2477,16 @@ namespace Namotion.Interceptor.Modbus.Transport;
 /// </summary>
 internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
 {
+    // FluentModbus throws ModbusException with this code for framing errors (invalid protocol identifier,
+    // function code or length). Those are not device rejections and must propagate as a lost connection.
+    private const ModbusExceptionCode FramingErrorCode = (ModbusExceptionCode)255;
+
     private readonly TcpClient _tcpClient;
     private readonly ModbusTcpClient _client;
     private readonly TimeSpan _requestTimeout;
+
+    // Reused by every request of this connection and replaced only after it fired.
+    private CancellationTokenSource _timeoutSource = new();
     private int _disposed;
 
     private ModbusConnection(TcpClient tcpClient, ModbusTcpClient client, TimeSpan requestTimeout)
@@ -2374,24 +2521,43 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
-        var read = space switch
-        {
-            ModbusAddressSpace.HoldingRegister => _client.ReadHoldingRegistersAsync(unitId, (ushort)address, (ushort)count, cancellationToken),
-            ModbusAddressSpace.InputRegister => _client.ReadInputRegistersAsync(unitId, (ushort)address, (ushort)count, cancellationToken),
-            ModbusAddressSpace.Coil => _client.ReadCoilsAsync(unitId, address, count, cancellationToken),
-            ModbusAddressSpace.DiscreteInput => _client.ReadDiscreteInputsAsync(unitId, address, count, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(space), space, null)
-        };
+        var timeoutSource = _timeoutSource;
+        timeoutSource.CancelAfter(_requestTimeout);
 
+        // The caller's token differs per call (poll attempt, discovery, initial load), so it is registered per
+        // request instead of being linked once. Re-registering on a long-lived token reuses its callback nodes.
+        var registration = cancellationToken.UnsafeRegister(
+            static state => ((CancellationTokenSource)state!).Cancel(), timeoutSource);
         try
         {
-            // A request abandoned by this timeout leaves the frame stream out of step, so the caller must
-            // treat the TimeoutException as a lost connection and reconnect.
-            return await read.WaitAsync(_requestTimeout, cancellationToken).ConfigureAwait(false);
+            var token = timeoutSource.Token;
+            return space switch
+            {
+                ModbusAddressSpace.HoldingRegister => await _client.ReadHoldingRegistersAsync(unitId, (ushort)address, (ushort)count, token).ConfigureAwait(false),
+                ModbusAddressSpace.InputRegister => await _client.ReadInputRegistersAsync(unitId, (ushort)address, (ushort)count, token).ConfigureAwait(false),
+                ModbusAddressSpace.Coil => await _client.ReadCoilsAsync(unitId, address, count, token).ConfigureAwait(false),
+                ModbusAddressSpace.DiscreteInput => await _client.ReadDiscreteInputsAsync(unitId, address, count, token).ConfigureAwait(false),
+                _ => throw new ArgumentOutOfRangeException(nameof(space), space, null)
+            };
         }
-        catch (ModbusException exception) when ((int)exception.ExceptionCode > 0)
+        catch (ModbusException exception) when (exception.ExceptionCode is not ModbusExceptionCode.OK and not FramingErrorCode)
         {
             throw new ModbusResponseException((int)exception.ExceptionCode, exception.Message, exception);
+        }
+        catch (Exception exception) when (timeoutSource.IsCancellationRequested)
+        {
+            // FluentModbus closes the stream when its token fires, so both cases leave the connection unusable.
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new TimeoutException($"The Modbus request did not complete within {_requestTimeout}.", exception);
+        }
+        finally
+        {
+            registration.Dispose();
+            if (!timeoutSource.TryReset())
+            {
+                _timeoutSource = new CancellationTokenSource();
+                timeoutSource.Dispose();
+            }
         }
     }
 
@@ -2404,6 +2570,7 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
 
         _client.Dispose();
         _tcpClient.Dispose();
+        _timeoutSource.Dispose();
     }
 }
 ```
@@ -2411,7 +2578,7 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusConnectionTests"`
-Expected: PASS, 5 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 7: Commit**
 
@@ -2430,7 +2597,7 @@ git commit -m "feat: add the Modbus TCP connection and an in-process test server
 - Create: `src/Namotion.Interceptor.Modbus.Tests/Testing/FakeRegisterReader.cs`
 - Test: `src/Namotion.Interceptor.Modbus.Tests/Polling/ModbusPollerTests.cs`
 
-A cycle has two phases. `ReadAsync` reads every batch into each binding's `CurrentRaw` (a rejected multi-mapping batch is re-read one mapping at a time, and mappings that still fail are marked unavailable and dropped from the plan until the next connect). `ApplyChanges` then converts and applies only mappings whose raw words changed, whose scale factor changed, or that were asked to be reapplied, and finally copies `CurrentRaw` to `LastRaw`. Unchanged cycles allocate nothing.
+A cycle has two phases. `ReadAsync` reads every batch into each binding's `CurrentRaw`. A rejected multi-mapping batch is re-read one mapping at a time; its mappings are then isolated (read in requests of their own) and mappings that still fail are marked unavailable and dropped, both until the next connect, and the plan is rebuilt. `ApplyChanges` then converts and applies only mappings whose raw words changed, whose scale factor changed, or that were asked to be reapplied, and finally copies `CurrentRaw` to `LastRaw`. An unchanged cycle converts nothing and raises no change events.
 
 - [ ] **Step 1: Write the fake reader**
 
@@ -2452,6 +2619,11 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
 
     public Exception? ConnectionFailure { get; set; }
 
+    /// <summary>
+    /// Gets or sets the zero-based index of the first request that fails with <see cref="ConnectionFailure"/>.
+    /// </summary>
+    public int ConnectionFailureFromRequest { get; set; }
+
     public void SetRegister(int address, ushort value, ModbusAddressSpace space = ModbusAddressSpace.HoldingRegister, byte unitId = 1)
         => _registers[(unitId, space, address)] = value;
 
@@ -2465,7 +2637,7 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
         byte unitId, ModbusAddressSpace space, int address, int count, CancellationToken cancellationToken)
     {
         Requests.Add((unitId, space, address, count));
-        if (ConnectionFailure is not null)
+        if (ConnectionFailure is not null && Requests.Count > ConnectionFailureFromRequest)
         {
             return Task.FromException<ReadOnlyMemory<byte>>(ConnectionFailure);
         }
@@ -2541,9 +2713,22 @@ public partial class ModbusPollerTests
         public partial bool? Pump { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class GapSubject
+    {
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial int? First { get; set; }
+
+        [ModbusRegister(2, ModbusDataType.U16)]
+        public partial int? Second { get; set; }
+    }
+
+    private static IInterceptorSubjectContext CreateContext()
+        => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+
     private static (ModbusPoller Poller, FakeRegisterReader Reader, ModbusPollingMetrics Metrics) Create()
     {
-        var subject = new PollerSubject(InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle());
+        var subject = new PollerSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
         var metrics = new ModbusPollingMetrics();
         var reader = new FakeRegisterReader();
@@ -2702,6 +2887,49 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
+    public async Task WhenConnectionFailsWhileReadingIndividually_ThenExceptionPropagatesAndNothingIsMarkedUnavailable()
+    {
+        // Arrange (request 0 is the rejected holding batch, request 1 reads First, request 2 reads Second)
+        var (poller, reader, metrics) = Create();
+        reader.Reject(1);
+        reader.ConnectionFailure = new IOException("Connection reset");
+        reader.ConnectionFailureFromRequest = 2;
+
+        // Act & Assert
+        await Assert.ThrowsAsync<IOException>(() => poller.ReadAsync(reader, CancellationToken.None));
+        Assert.Equal(0, metrics.UnavailableProperties);
+    }
+
+    [Fact]
+    public async Task WhenGapAddressIsRejected_ThenLaterCyclesReadTheMappingsSeparately()
+    {
+        // Arrange
+        var subject = new GapSubject(CreateContext());
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+        var metrics = new ModbusPollingMetrics();
+        var poller = new ModbusPoller(bindings, maximumRegisterGap: 1, metrics, NullLogger.Instance);
+        var reader = new FakeRegisterReader();
+        reader.SetRegister(0, 5);
+        reader.SetRegister(2, 6);
+        reader.Reject(1);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var firstCycle = Apply(poller);
+        reader.Requests.Clear();
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(5, firstCycle["First"]);
+        Assert.Equal(6, firstCycle["Second"]);
+        Assert.Equal(2, reader.Requests.Count);
+        Assert.All(reader.Requests, request => Assert.Equal(1, request.Count));
+        Assert.Equal(1, metrics.FailedBatches);
+        Assert.Equal(2, metrics.BatchCount);
+        Assert.Equal(0, metrics.UnavailableProperties);
+    }
+
+    [Fact]
     public async Task WhenCycleCompletes_ThenMetricsAreRecorded()
     {
         // Arrange
@@ -2777,12 +3005,13 @@ internal sealed class ModbusPollingMetrics : IResettableMetrics
         Volatile.Write(ref _unavailableProperties, unavailableProperties);
     }
 
+    /// <summary>
+    /// Resets the cumulative counters. The plan gauges and the last poll time and duration are left alone.
+    /// </summary>
     public void Reset()
     {
         Interlocked.Exchange(ref _totalPolls, 0);
         Interlocked.Exchange(ref _failedBatches, 0);
-        Interlocked.Exchange(ref _lastPollDurationTicks, 0);
-        Interlocked.Exchange(ref _lastPollTimeUtcTicks, 0);
     }
 }
 ```
@@ -2850,7 +3079,7 @@ internal sealed class ModbusPoller
             binding.HasCurrent = false;
         }
 
-        var hasNewUnavailableBindings = false;
+        var isReplanRequired = false;
         foreach (var batch in _batches)
         {
             try
@@ -2873,7 +3102,8 @@ internal sealed class ModbusPoller
             catch (ModbusResponseException exception) when (batch.Bindings.Length > 1)
             {
                 _metrics.RecordFailedBatch();
-                hasNewUnavailableBindings |= await ReadIndividuallyAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
+                await ReadIndividuallyAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
+                isReplanRequired = true;
             }
             catch (ModbusResponseException exception)
             {
@@ -2887,7 +3117,7 @@ internal sealed class ModbusPoller
             }
         }
 
-        if (hasNewUnavailableBindings)
+        if (isReplanRequired)
         {
             var availableBindings = _bindings.Where(binding => !binding.IsUnavailable).ToArray();
             _batches = ModbusReadPlanner.Plan(availableBindings, _maximumRegisterGap);
@@ -2973,16 +3203,21 @@ internal sealed class ModbusPoller
         return appliedCount;
     }
 
-    private async Task<bool> ReadIndividuallyAsync(
+    /// <summary>
+    /// Reads the bindings of a rejected batch one by one and isolates them until the next connect.
+    /// </summary>
+    private async Task ReadIndividuallyAsync(
         IModbusRegisterReader reader, ModbusReadBatch batch, ModbusResponseException batchException, CancellationToken cancellationToken)
     {
         _logger.LogDebug(batchException,
-            "Modbus read of {Count} {Space} from {Address} (unit {UnitId}) was rejected; reading its mappings one by one.",
+            "Modbus read of {Count} {Space} from {Address} (unit {UnitId}) was rejected; reading its mappings one by one from now on.",
             batch.Count, batch.Space, batch.StartAddress, batch.UnitId);
 
-        var hasNewUnavailableBindings = false;
         foreach (var binding in batch.Bindings)
         {
+            // Even when every binding reads fine alone (a rejected gap register, or a device rejecting
+            // block-crossing reads), merging them again would fail and re-read one by one every cycle.
+            binding.IsIsolated = true;
             try
             {
                 var data = await reader.ReadAsync(binding.UnitId, binding.Space, binding.Address, binding.Count, cancellationToken).ConfigureAwait(false);
@@ -2991,14 +3226,11 @@ internal sealed class ModbusPoller
             catch (ModbusResponseException exception)
             {
                 binding.IsUnavailable = true;
-                hasNewUnavailableBindings = true;
                 _logger.LogWarning(
                     "Modbus mapping {Path} ({Space} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
                     binding.Path, binding.Space, binding.Address, binding.UnitId, exception.ExceptionCode);
             }
         }
-
-        return hasNewUnavailableBindings;
     }
 
     private static void CopyToBinding(ModbusRegisterBinding binding, ReadOnlySpan<byte> data, int startAddress)
@@ -3021,7 +3253,7 @@ internal sealed class ModbusPoller
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusPollerTests"`
-Expected: PASS, 9 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 7: Commit**
 
@@ -3148,12 +3380,12 @@ git commit -m "feat: add Modbus client diagnostics"
 
 ---
 
-## Task 11: Connect handler and its context
+## Task 11: Discovery and its context
 
 **Files:**
-- Create: `src/Namotion.Interceptor.Modbus/IModbusConnectedHandler.cs`
-- Create: `src/Namotion.Interceptor.Modbus/ModbusConnectedContext.cs`
-- Test: `src/Namotion.Interceptor.Modbus.Tests/ModbusConnectedContextTests.cs`
+- Create: `src/Namotion.Interceptor.Modbus/IModbusDiscovery.cs`
+- Create: `src/Namotion.Interceptor.Modbus/ModbusDiscoveryContext.cs`
+- Test: `src/Namotion.Interceptor.Modbus.Tests/ModbusDiscoveryContextTests.cs`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3163,7 +3395,7 @@ using Namotion.Interceptor.Modbus.Tests.Testing;
 
 namespace Namotion.Interceptor.Modbus.Tests;
 
-public partial class ModbusConnectedContextTests
+public partial class ModbusDiscoveryContextTests
 {
     [InterceptorSubject]
     public partial class ContextSubject
@@ -3171,7 +3403,7 @@ public partial class ModbusConnectedContextTests
         public partial int? Value { get; set; }
     }
 
-    private static ModbusConnectedContext Create(FakeRegisterReader reader) => new(source: null!, reader, defaultUnitId: 1);
+    private static ModbusDiscoveryContext Create(FakeRegisterReader reader) => new(source: null!, reader, defaultUnitId: 1);
 
     [Fact]
     public async Task WhenReadingHoldingRegisters_ThenValuesAreDecodedWithTheDefaultUnit()
@@ -3263,32 +3495,34 @@ public partial class ModbusConnectedContextTests
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusConnectedContextTests"`
-Expected: build error, `ModbusConnectedContext` does not exist.
+Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusDiscoveryContextTests"`
+Expected: build error, `ModbusDiscoveryContext` does not exist.
 
-- [ ] **Step 3: Implement the handler interface**
+- [ ] **Step 3: Implement the discovery interface**
 
-`IModbusConnectedHandler.cs`:
+`IModbusDiscovery.cs`:
 
 ```csharp
 namespace Namotion.Interceptor.Modbus;
 
 /// <summary>
-/// Implemented by a source's root subject to run on every connect (first connect and each reconnect), before
-/// the connector builds its read plan. Typical uses are firmware gating and runtime discovery.
+/// Implemented by a source's root subject to inspect the device on every connect (first connect and each
+/// reconnect), before the connector resolves its register bindings. Typical uses are firmware gating and
+/// runtime discovery.
 /// </summary>
-public interface IModbusConnectedHandler
+public interface IModbusDiscovery
 {
     /// <summary>
-    /// Called after the connection is established. Throwing fails the connect attempt, which is retried.
+    /// Called after the connection is established. The context is invalid once the returned task completes.
+    /// Throwing fails the connect attempt, which is retried.
     /// </summary>
-    Task OnModbusConnectedAsync(ModbusConnectedContext context, CancellationToken cancellationToken);
+    Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken);
 }
 ```
 
 - [ ] **Step 4: Implement the context**
 
-`ModbusConnectedContext.cs`:
+`ModbusDiscoveryContext.cs`:
 
 ```csharp
 using System.Buffers.Binary;
@@ -3298,16 +3532,16 @@ using Namotion.Interceptor.Modbus.Transport;
 namespace Namotion.Interceptor.Modbus;
 
 /// <summary>
-/// Raw access to the connected device for <see cref="IModbusConnectedHandler"/>. Only valid while the handler runs.
+/// Raw access to the connected device for <see cref="IModbusDiscovery.DiscoverAsync"/>. Only valid while it runs.
 /// </summary>
-public sealed class ModbusConnectedContext
+public sealed class ModbusDiscoveryContext
 {
     private readonly IModbusRegisterReader _reader;
     private readonly byte _defaultUnitId;
     private readonly HashSet<PropertyReference> _excludedProperties = new(PropertyReference.Comparer);
     private bool _isInvalidated;
 
-    internal ModbusConnectedContext(ISubjectSource source, IModbusRegisterReader reader, byte defaultUnitId)
+    internal ModbusDiscoveryContext(ISubjectSource source, IModbusRegisterReader reader, byte defaultUnitId)
     {
         Source = source;
         _reader = reader;
@@ -3315,7 +3549,7 @@ public sealed class ModbusConnectedContext
     }
 
     /// <summary>
-    /// Gets the source, for applying values the handler reads with <c>SetValueFromSource</c>.
+    /// Gets the source, for applying values the discovery reads with <c>SetValueFromSource</c>.
     /// </summary>
     public ISubjectSource Source { get; }
 
@@ -3387,7 +3621,7 @@ public sealed class ModbusConnectedContext
     {
         if (_isInvalidated)
         {
-            throw new ObjectDisposedException(nameof(ModbusConnectedContext), "The context is only valid while OnModbusConnectedAsync runs.");
+            throw new ObjectDisposedException(nameof(ModbusDiscoveryContext), "The context is only valid while DiscoverAsync runs.");
         }
     }
 }
@@ -3397,14 +3631,14 @@ Note: `ReadAsync` validates synchronously, so a range error surfaces from the aw
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusConnectedContextTests"`
+Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~ModbusDiscoveryContextTests"`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/Namotion.Interceptor.Modbus src/Namotion.Interceptor.Modbus.Tests
-git commit -m "feat: add the Modbus connect handler and its context"
+git commit -m "feat: add Modbus discovery and its context"
 ```
 
 ---
@@ -3418,7 +3652,7 @@ git commit -m "feat: add the Modbus connect handler and its context"
 Lifecycle contract of `SubjectSourceBase` (read `src/Namotion.Interceptor.Connectors/SubjectSourceBase.cs` `RunAsync`): per attempt the base calls `StartBuffering`, then `StartListeningAsync`, then `LoadInitialStateAndResumeAsync` (which calls `LoadInitialStateAsync`, runs the returned action under the writer lock, replays buffered updates and reports `Synchronized`), then runs the change queue processor until stopped. The base retries only failures of that sequence. Failures after it (a dropped connection while polling) are handled by the source's own reconnect loop, following `MqttSubjectClientSource.RunMonitorWithKillRestartAsync`.
 
 This source:
-- `StartListeningAsync`: connect, run the handler, resolve and claim, build the poller, `MarkOperational`, start the poll loop via `BackgroundTaskLifetime` (cleanup closes the connection).
+- `StartListeningAsync`: connect, run discovery, resolve and claim, build the poller, `MarkOperational`, start the poll loop via `BackgroundTaskLifetime` (cleanup closes the connection).
 - `LoadInitialStateAsync`: one full read; the returned action applies every value and opens the poll loop's gate, so the loop never overlaps the initial read.
 - Poll loop: each polling period, inside `RunAttemptAsync` (so `FaultType.Kill` works), read and apply through `SubjectPropertyWriter.Write`. Any exception that is not cancellation means the connection is lost: report it, `MarkNotOperational`, `StartBuffering`, close, then retry `ConnectAndPrepareAsync` plus `LoadInitialStateAndResumeAsync` every `RetryTime` until it succeeds, then `MarkOperational`.
 - `WriteChangesAsync`: sends nothing, logs a warning once per property per connection, asks the poller to reapply the device value next cycle, returns `WriteResult.Success`.
@@ -3455,9 +3689,9 @@ public partial class ModbusSubjectClientSourceTests
     ];
 
     [InterceptorSubject]
-    public partial class TestDevice : IModbusConnectedHandler
+    public partial class TestDevice : IModbusDiscovery
     {
-        private int _connectedCount;
+        private int _discoveryCount;
 
         [ModbusRegister(0, ModbusDataType.S16, Scale = 0.1)]
         public partial decimal? Temperature { get; set; }
@@ -3479,14 +3713,14 @@ public partial class ModbusSubjectClientSourceTests
 
         public partial SecondUnit? Second { get; set; }
 
-        public Func<ModbusConnectedContext, CancellationToken, Task>? OnConnected { get; set; }
+        public Func<ModbusDiscoveryContext, CancellationToken, Task>? OnDiscover { get; set; }
 
-        public int ConnectedCount => Volatile.Read(ref _connectedCount);
+        public int DiscoveryCount => Volatile.Read(ref _discoveryCount);
 
-        public Task OnModbusConnectedAsync(ModbusConnectedContext context, CancellationToken cancellationToken)
+        public Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref _connectedCount);
-            return OnConnected?.Invoke(context, cancellationToken) ?? Task.CompletedTask;
+            Interlocked.Increment(ref _discoveryCount);
+            return OnDiscover?.Invoke(context, cancellationToken) ?? Task.CompletedTask;
         }
     }
 
@@ -3551,7 +3785,7 @@ public partial class ModbusSubjectClientSourceTests
             Assert.Equal(true, device.Pump);
             Assert.Equal(true, device.Alarm);
             Assert.Equal(7, device.Optional);
-            Assert.Equal(1, device.ConnectedCount);
+            Assert.Equal(1, device.DiscoveryCount);
         }
         finally
         {
@@ -3608,7 +3842,7 @@ public partial class ModbusSubjectClientSourceTests
     }
 
     [Fact]
-    public async Task WhenHandlerExcludesProperty_ThenItIsNeitherClaimedNorRead()
+    public async Task WhenDiscoveryExcludesProperty_ThenItIsNeitherClaimedNorRead()
     {
         // Arrange
         using var server = new ModbusTestServer();
@@ -3616,7 +3850,7 @@ public partial class ModbusSubjectClientSourceTests
         SeedServer(server);
 
         // Act
-        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnConnected = (context, _) =>
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = (context, _) =>
         {
             context.ExcludeProperty(new PropertyReference(testDevice, nameof(TestDevice.Optional)));
             return Task.CompletedTask;
@@ -3638,25 +3872,34 @@ public partial class ModbusSubjectClientSourceTests
     }
 
     [Fact]
-    public async Task WhenHandlerReadsRegisters_ThenValuesAreReturnedAndTheContextExpiresAfterwards()
+    public async Task WhenDiscoveryReadsAllSpaces_ThenValuesAreReturnedAndTheContextExpiresAfterwards()
     {
         // Arrange
         using var server = new ModbusTestServer();
         server.Start();
         SeedServer(server);
-        ushort[]? registers = null;
-        ModbusConnectedContext? capturedContext = null;
+        ushort[]? holdingRegisters = null;
+        ushort[]? inputRegisters = null;
+        bool[]? coils = null;
+        bool[]? discreteInputs = null;
+        ModbusDiscoveryContext? capturedContext = null;
 
         // Act
-        var (_, source, recorder) = await StartAsync(server, testDevice => testDevice.OnConnected = async (context, cancellationToken) =>
+        var (_, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = async (context, cancellationToken) =>
         {
             capturedContext = context;
-            registers = await context.ReadHoldingRegistersAsync(0, 2, cancellationToken);
+            holdingRegisters = await context.ReadHoldingRegistersAsync(0, 2, cancellationToken);
+            inputRegisters = await context.ReadInputRegistersAsync(10, 2, cancellationToken);
+            coils = await context.ReadCoilsAsync(0, 4, cancellationToken);
+            discreteInputs = await context.ReadDiscreteInputsAsync(0, 2, cancellationToken);
         });
         try
         {
-            // Assert
-            Assert.Equal(new ushort[] { 215, 42 }, registers);
+            // Assert (100000 is 0x000186A0: high word 1, low word 0x86A0)
+            Assert.Equal(new ushort[] { 215, 42 }, holdingRegisters);
+            Assert.Equal(new ushort[] { 1, 0x86A0 }, inputRegisters);
+            Assert.Equal(new[] { false, false, false, true }, coils);
+            Assert.Equal(new[] { false, true }, discreteInputs);
             await Assert.ThrowsAsync<ObjectDisposedException>(() =>
                 capturedContext!.ReadHoldingRegistersAsync(0, 1, CancellationToken.None));
         }
@@ -3717,7 +3960,7 @@ public partial class ModbusSubjectClientSourceTests
     }
 
     [Fact]
-    public async Task WhenServerRestarts_ThenSourceReconnectsAndRunsTheHandlerAgain()
+    public async Task WhenServerRestarts_ThenSourceReconnectsAndRunsDiscoveryAgain()
     {
         // Arrange
         using var server = new ModbusTestServer();
@@ -3738,7 +3981,7 @@ public partial class ModbusSubjectClientSourceTests
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover.",
                 SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
             await AsyncTestHelpers.WaitUntilAsync(() => device.Counter == 77, TimeSpan.FromSeconds(10), message: "Counter should update after the reconnect.");
-            Assert.True(device.ConnectedCount >= 2);
+            Assert.True(device.DiscoveryCount >= 2);
         }
         finally
         {
@@ -3757,6 +4000,9 @@ public partial class ModbusSubjectClientSourceTests
         var (_, source, recorder) = await StartAsync(server);
         try
         {
+            // The kill only acts inside a poll attempt, so wait until the poll loop runs.
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= 2, TimeSpan.FromSeconds(10), message: "Polling should start.");
+
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Kill, CancellationToken.None);
 
@@ -3842,8 +4088,6 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
     internal ModbusSubjectClientSource(IInterceptorSubject subject, ModbusClientConfiguration configuration, ILogger logger)
         : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(logger);
         configuration.Validate();
 
         _subject = subject;
@@ -3981,12 +4225,12 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
         try
         {
             var excludedProperties = NoExcludedProperties;
-            if (_subject is IModbusConnectedHandler handler)
+            if (_subject is IModbusDiscovery discovery)
             {
-                var context = new ModbusConnectedContext(this, connection, _configuration.UnitId);
+                var context = new ModbusDiscoveryContext(this, connection, _configuration.UnitId);
                 try
                 {
-                    await handler.OnModbusConnectedAsync(context, cancellationToken).ConfigureAwait(false);
+                    await discovery.DiscoverAsync(context, cancellationToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -4191,6 +4435,9 @@ public static class ModbusSubjectExtensions
     public static ModbusSubjectClientSource CreateModbusClientSource(
         this IInterceptorSubject subject, ModbusClientConfiguration configuration, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
         return new ModbusSubjectClientSource(subject, configuration, logger);
     }
 }
@@ -4380,6 +4627,9 @@ public static class ModbusSubjectExtensions
     public static ModbusSubjectClientSource CreateModbusClientSource(
         this IInterceptorSubject subject, ModbusClientConfiguration configuration, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
         return new ModbusSubjectClientSource(subject, configuration, logger);
     }
 
@@ -4479,7 +4729,8 @@ git commit -m "feat: register the Modbus client source with dependency injection
 - Create: `docs/connectors-modbus.md`
 - Modify: `docs/connectors.md` (protocol list near line 14)
 - Modify: `README.md` (line 11, the "same pattern" paragraph near line 356, the connectors table near line 399)
-- Modify: `docs/superpowers/specs/2026-09-28-modbus-luxtronik-design.md` (section 3 and 4.5)
+- Modify: `.github/workflows/build.yml` (Modbus integration test job)
+- Modify: `docs/superpowers/specs/2026-09-28-modbus-luxtronik-design.md` (sections 3 and 4)
 
 - [ ] **Step 1: Add the public API snapshot test**
 
@@ -4513,7 +4764,7 @@ namespace Namotion.Interceptor.Modbus.Tests
 Run: `dotnet test src/Namotion.Interceptor.Modbus.Tests --filter "FullyQualifiedName~VerifyChecksTests"`
 Expected: `PublicApi` FAILS and writes `VerifyChecksTests.PublicApi.received.txt`.
 
-Review the received file: it must list only the public types of spec section 3 plus `ModbusResponseException`, `ModbusPollingDiagnostics` and the members inherited from `SubjectSourceBase`, and no `Mapping`, `Transport` or `Polling` types. Then accept it:
+Review the received file: it must list only the public types of spec section 3 plus `ModbusConfigurationException` and the members inherited from `SubjectSourceBase`, and no `Mapping`, `Transport` or `Polling` types. Then accept it:
 
 ```bash
 mv src/Namotion.Interceptor.Modbus.Tests/VerifyChecksTests.PublicApi.received.txt src/Namotion.Interceptor.Modbus.Tests/VerifyChecksTests.PublicApi.verified.txt
@@ -4536,8 +4787,8 @@ The `Namotion.Interceptor.Modbus` package polls Modbus TCP devices into C# objec
 - Conversion to numeric types, `decimal`, nullable types, enums and flags enums
 - "Not available" raw patterns mapped to `null`
 - Per-subject base addresses and unit IDs for reusable model classes
-- Contiguous read batching with a configurable gap, split on rejected requests
-- Connect handler for firmware gating and runtime discovery
+- Contiguous read batching with a configurable gap, split for good when the device rejects a request
+- Discovery hook for firmware gating and runtime discovery
 - Automatic reconnection and diagnostics
 
 ## Client Setup
@@ -4583,9 +4834,9 @@ Device libraries can derive from `ModbusRegisterAttribute` to preset values such
 
 Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non-string) throw `ModbusConfigurationException` when the source connects.
 
-## Connect Handler
+## Discovery
 
-A root subject implementing `IModbusConnectedHandler` runs on every connect, before the read plan is built. The `ModbusConnectedContext` offers raw reads of all four spaces, `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. The context is invalid once the handler returns. A rejected read throws `ModbusResponseException` with the Modbus exception code.
+A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces, `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. The context is invalid once `DiscoverAsync` returns. A rejected read throws `ModbusResponseException` with the Modbus exception code. Throwing from `DiscoverAsync` fails the connect attempt, which is retried after `RetryTime`.
 
 ## Configuration
 
@@ -4602,12 +4853,12 @@ A root subject implementing `IModbusConnectedHandler` runs on every connect, bef
 
 ## Batching and Polling
 
-Mappings are grouped by unit ID and space, sorted by address and merged into requests of at most 125 registers or 2000 bits. With the default gap of 0 only contiguous mappings are merged, because many devices reject reads that touch unmapped addresses. Each cycle reads all requests first and then applies only values whose raw registers changed, so an unchanged cycle allocates nothing and raises no change events.
+Mappings are grouped by unit ID and space, sorted by address and merged into requests of at most 125 registers or 2000 bits. With the default gap of 0 only contiguous mappings are merged, because many devices reject reads that touch unmapped addresses. Each cycle reads all requests first and then applies only values whose raw registers changed, so an unchanged cycle converts nothing and raises no change events.
 
 ## Resilience
 
-- A request answered with a Modbus exception is re-read one mapping at a time. Mappings that still fail are logged once, reported in `Diagnostics.Polling.UnavailableProperties` and skipped until the next connect.
-- An I/O error or timeout closes the connection. The source reports `Synchronizing`, reconnects every `RetryTime`, runs the connect handler again, reloads all values and reports `Synchronized`.
+- A request answered with a Modbus exception is re-read one mapping at a time, and its mappings keep being read one at a time until the next connect, so a rejected gap register or a device that rejects reads across block boundaries costs one failed request per connect, not one per cycle. Mappings that still fail alone are logged once, reported in `Diagnostics.Polling.UnavailableProperties` and skipped until the next connect.
+- An I/O error, a timeout or a malformed response closes the connection. The source reports `Synchronizing`, reconnects every `RetryTime`, runs discovery again, reloads all values and reports `Synchronized`.
 
 ## Diagnostics
 
@@ -4650,15 +4901,72 @@ In `README.md`:
 | **Namotion.Interceptor.Modbus** | Read-only Modbus TCP polling | [Modbus](docs/connectors-modbus.md) |
 ```
 
-- [ ] **Step 5: Check the spec**
+- [ ] **Step 5: Run the Modbus integration tests in CI**
 
-Confirm `docs/superpowers/specs/2026-09-28-modbus-luxtronik-design.md` still matches the implementation: section 3 (public surface including `ModbusResponseException`) and section 4 (behavior). Fix the spec where the implementation had to deviate.
+The integration tests are excluded from the main `test` job (`Category!=Integration`), so without a job of their own they never run in CI. In `.github/workflows/build.yml`:
 
-- [ ] **Step 6: Commit**
+In the `changes` job `outputs`, after the `mqtt` line add:
+
+```yaml
+      modbus: ${{ github.event_name != 'pull_request' || steps.filter.outputs.modbus == 'true' }}
+```
+
+In the `filters` block, after the `mqtt` filter add:
+
+```yaml
+            modbus:
+              - *shared
+              - 'src/Namotion.Interceptor.Modbus*/**'
+```
+
+After the `test-mqtt-integration` job add:
+
+```yaml
+  test-modbus-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.modbus == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run Modbus integration tests
+        run: |
+          dotnet test src/Namotion.Interceptor.Modbus.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload Modbus integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-modbus-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+```
+
+In the `deploy` job, append `test-modbus-integration` to `needs` after `test-mqtt-integration`.
+
+- [ ] **Step 6: Check the spec**
+
+Confirm `docs/superpowers/specs/2026-09-28-modbus-luxtronik-design.md` still matches the implementation: section 3 (public surface including `ModbusResponseException`, `ModbusPollingDiagnostics.BatchCount`) and section 4 (behavior). In 4.7, state that `ReconnectAsync` runs outside `RunAttemptAsync` (as in the MQTT source), so a `FaultType.Kill` injected while the source reconnects is a no-op; only the poll cycles run inside an attempt. Fix the spec wherever else the implementation had to deviate.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/Namotion.Interceptor.Modbus.Tests docs/connectors-modbus.md docs/connectors.md README.md docs/superpowers/specs/2026-09-28-modbus-luxtronik-design.md
-git commit -m "docs: document the Modbus connector and snapshot its public API"
+git add src/Namotion.Interceptor.Modbus.Tests docs/connectors-modbus.md docs/connectors.md README.md .github/workflows/build.yml docs/superpowers/specs/2026-09-28-modbus-luxtronik-design.md
+git commit -m "docs: document the Modbus connector, run its integration tests in CI and snapshot its public API"
 ```
 
 ---
