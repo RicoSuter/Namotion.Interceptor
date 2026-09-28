@@ -535,7 +535,6 @@ public sealed class LuxtronikInputRegisterAttribute : ModbusRegisterAttribute, I
         : base(address, dataType)
     {
         Space = ModbusAddressSpace.InputRegister;
-        Access = ModbusAccess.ReadOnly;
         NotAvailableValue = ModbusNotAvailableValue.SignedMaximum;
     }
 
@@ -863,51 +862,51 @@ public partial class LuxtronikFeatures : IModbusBaseAddressProvider
 
     public int BaseAddress => 10000;
 
-    [ModbusRegister(0, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(0, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 1)]
     public partial bool? Heating { get; internal set; }
 
-    [ModbusRegister(1, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(1, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 2)]
     public partial bool? HotWater { get; internal set; }
 
-    [ModbusRegister(2, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(2, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 3)]
     public partial bool? Cooling { get; internal set; }
 
-    [ModbusRegister(3, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(3, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 4)]
     public partial bool? Pool { get; internal set; }
 
-    [ModbusRegister(4, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(4, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 5)]
     public partial bool? Solar { get; internal set; }
 
-    [ModbusRegister(5, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(5, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 6)]
     public partial bool? RoomControlUnit { get; internal set; }
 
-    [ModbusRegister(6, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(6, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 7)]
     public partial bool? MixingCircuit1Heating { get; internal set; }
 
-    [ModbusRegister(7, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(7, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 8)]
     public partial bool? MixingCircuit1Cooling { get; internal set; }
 
-    [ModbusRegister(8, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(8, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 9)]
     public partial bool? MixingCircuit2Heating { get; internal set; }
 
-    [ModbusRegister(9, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(9, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 10)]
     public partial bool? MixingCircuit2Cooling { get; internal set; }
 
-    [ModbusRegister(10, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(10, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 11)]
     public partial bool? MixingCircuit3Heating { get; internal set; }
 
-    [ModbusRegister(11, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput, Access = ModbusAccess.ReadOnly)]
+    [ModbusRegister(11, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 12)]
     public partial bool? MixingCircuit3Cooling { get; internal set; }
 }

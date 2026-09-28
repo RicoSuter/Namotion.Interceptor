@@ -41,6 +41,11 @@ public class ModbusRegisterAttribute : Attribute
     /// </summary>
     public int Length { get; init; }
 
+    /// <summary>
+    /// Gets whether the mapping may be written. Reserved for writing and not enforced by this read-only connector.
+    /// Ignored for <see cref="ModbusAddressSpace.InputRegister"/> and <see cref="ModbusAddressSpace.DiscreteInput"/>,
+    /// which are read only by definition.
+    /// </summary>
     public ModbusAccess Access { get; init; } = ModbusAccess.ReadWrite;
 
     /// <summary>
