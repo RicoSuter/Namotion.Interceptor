@@ -63,12 +63,12 @@ internal static class ModbusValueConverters
 
         if (!isNullable)
         {
-            throw Error(propertyPath, "NotAvailableValue requires a nullable property type.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, "NotAvailableValue requires a nullable property type.");
         }
 
         if (attribute.DataType is ModbusDataType.Boolean or ModbusDataType.F32 or ModbusDataType.String)
         {
-            throw Error(propertyPath, $"NotAvailableValue is not supported for {attribute.DataType}.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"NotAvailableValue is not supported for {attribute.DataType}.");
         }
     }
 
@@ -110,7 +110,7 @@ internal static class ModbusValueConverters
             };
         }
 
-        throw Error(propertyPath, $"F32 requires a float, double or decimal property, not {targetType.Name}.");
+        throw ModbusConfigurationException.ForMapping(propertyPath, $"F32 requires a float, double or decimal property, not {targetType.Name}.");
     }
 
     private static ModbusValueReader CreateScaledIntegerReader(
@@ -196,12 +196,12 @@ internal static class ModbusValueConverters
         if (GetDataTypeRange(dataType) is not { } dataRange ||
             GetIntegralTypeRange(targetType) is not { } targetRange)
         {
-            throw Error(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.");
         }
 
         if (dataRange.Minimum < targetRange.Minimum || dataRange.Maximum > targetRange.Maximum)
         {
-            throw Error(propertyPath, $"{targetType.Name} cannot hold every {dataType} value.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"{targetType.Name} cannot hold every {dataType} value.");
         }
     }
 
@@ -253,7 +253,7 @@ internal static class ModbusValueConverters
         }
         catch (OverflowException)
         {
-            throw Error(propertyPath, "Scale is outside the decimal range.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, "Scale is outside the decimal range.");
         }
     }
 
@@ -284,7 +284,7 @@ internal static class ModbusValueConverters
     {
         if (!condition)
         {
-            throw Error(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"{dataType} cannot be converted to {targetType.Name}.");
         }
     }
 
@@ -292,10 +292,7 @@ internal static class ModbusValueConverters
     {
         if (isScaled)
         {
-            throw Error(propertyPath, $"Scaling requires a float, double or decimal property, not {targetType.Name}.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"Scaling requires a float, double or decimal property, not {targetType.Name}.");
         }
     }
-
-    private static ModbusConfigurationException Error(string propertyPath, string message)
-        => new($"Invalid Modbus mapping on {propertyPath}: {message}");
 }

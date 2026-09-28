@@ -64,6 +64,21 @@ internal sealed class ModbusSessionFactory
         }
     }
 
+    /// <summary>
+    /// Logs a failed reconnect attempt, telling an invalid mapping apart from a connection failure.
+    /// </summary>
+    public void LogReconnectFailure(Exception exception)
+    {
+        if (exception is ModbusConfigurationException)
+        {
+            _logger.LogError(exception, "Invalid Modbus mapping configuration; retrying in {RetryTime}.", _configuration.RetryTime);
+        }
+        else
+        {
+            _logger.LogError(exception, "Failed to reconnect to Modbus server at {Host}:{Port}.", _configuration.Host, _configuration.Port);
+        }
+    }
+
     private async Task<IReadOnlySet<PropertyReference>> DiscoverAsync(ModbusConnection connection, CancellationToken cancellationToken)
     {
         if (_subject is not IModbusDiscovery discovery)

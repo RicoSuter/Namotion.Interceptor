@@ -71,7 +71,7 @@ internal static class ModbusRegisterResolver
                 // AllowMultiple only applies per concrete type, so a derived preset attribute can sit next to the base one.
                 if (result is not null)
                 {
-                    throw Error(GetPath(property, root),"Only one ModbusRegisterAttribute (including derived attributes) is allowed per property.");
+                    throw ModbusConfigurationException.ForMapping(GetPath(property, root), "Only one ModbusRegisterAttribute (including derived attributes) is allowed per property.");
                 }
 
                 result = registerAttribute;
@@ -92,9 +92,9 @@ internal static class ModbusRegisterResolver
         // Summed in 64 bits so a large base address cannot overflow into the valid range.
         var address = (long)baseAddress + attribute.Address;
         var count = ModbusRegisterCodec.GetRegisterCount(attribute.DataType, attribute.Length);
-        if (attribute.Address < 0 || address < 0 || address > 65536 - count)
+        if (attribute.Address < 0 || address < 0 || address > ModbusAddressSpaceExtensions.AddressCount - count)
         {
-            throw Error(path, $"Address {address} with {count} register(s) is outside 0 to 65535.");
+            throw ModbusConfigurationException.ForMapping(path, $"Address {address} with {count} register(s) is outside 0 to {ModbusAddressSpaceExtensions.AddressCount - 1}.");
         }
 
         var reader = ModbusValueConverters.Create(attribute, property.Type, path);
@@ -105,49 +105,49 @@ internal static class ModbusRegisterResolver
     {
         if (!Enum.IsDefined(attribute.DataType))
         {
-            throw Error(path, $"Data type {attribute.DataType} is not defined.");
+            throw ModbusConfigurationException.ForMapping(path, $"Data type {attribute.DataType} is not defined.");
         }
 
         if (!Enum.IsDefined(attribute.Space))
         {
-            throw Error(path, $"Address space {attribute.Space} is not defined.");
+            throw ModbusConfigurationException.ForMapping(path, $"Address space {attribute.Space} is not defined.");
         }
 
         if (!Enum.IsDefined(attribute.WordOrder))
         {
-            throw Error(path, $"Word order {attribute.WordOrder} is not defined.");
+            throw ModbusConfigurationException.ForMapping(path, $"Word order {attribute.WordOrder} is not defined.");
         }
 
         if (!Enum.IsDefined(attribute.NotAvailableValue))
         {
-            throw Error(path, $"Not-available value {attribute.NotAvailableValue} is not defined.");
+            throw ModbusConfigurationException.ForMapping(path, $"Not-available value {attribute.NotAvailableValue} is not defined.");
         }
     }
 
     private static void ValidateDataType(string path, ModbusRegisterAttribute attribute)
     {
         var dataType = attribute.DataType;
-        var isBitSpace = attribute.Space is ModbusAddressSpace.Coil or ModbusAddressSpace.DiscreteInput;
+        var isBitSpace = attribute.Space.IsBitSpace();
         if (isBitSpace && dataType != ModbusDataType.Boolean)
         {
-            throw Error(path, $"{attribute.Space} requires the Boolean data type.");
+            throw ModbusConfigurationException.ForMapping(path, $"{attribute.Space} requires the Boolean data type.");
         }
 
         if (!isBitSpace && dataType == ModbusDataType.Boolean)
         {
-            throw Error(path, "Boolean requires the Coil or DiscreteInput space.");
+            throw ModbusConfigurationException.ForMapping(path, "Boolean requires the Coil or DiscreteInput space.");
         }
 
         if (dataType == ModbusDataType.String)
         {
-            if (attribute.Length is < 1 or > 125)
+            if (attribute.Length is < 1 or > ModbusReadPlanner.MaximumRegistersPerRequest)
             {
-                throw Error(path, "String requires a Length between 1 and 125 registers.");
+                throw ModbusConfigurationException.ForMapping(path, $"String requires a Length between 1 and {ModbusReadPlanner.MaximumRegistersPerRequest} registers.");
             }
         }
         else if (attribute.Length != 0)
         {
-            throw Error(path, "Length is only valid for String.");
+            throw ModbusConfigurationException.ForMapping(path, "Length is only valid for String.");
         }
     }
 
@@ -155,12 +155,12 @@ internal static class ModbusRegisterResolver
     {
         if (attribute.ScaleFactorProperty is not null && attribute.Scale is not 1.0)
         {
-            throw Error(path, "Scale and ScaleFactorProperty are mutually exclusive.");
+            throw ModbusConfigurationException.ForMapping(path, "Scale and ScaleFactorProperty are mutually exclusive.");
         }
 
         if (!double.IsFinite(attribute.Scale) || attribute.Scale == 0)
         {
-            throw Error(path, "Scale must be a finite, non-zero number.");
+            throw ModbusConfigurationException.ForMapping(path, "Scale must be a finite, non-zero number.");
         }
     }
 
@@ -181,7 +181,7 @@ internal static class ModbusRegisterResolver
             // S16 only: a scale factor is a signed exponent, which a U16 register cannot hold.
             if (scaleFactor?.Attribute.DataType is not ModbusDataType.S16)
             {
-                throw Error(binding.Path,
+                throw ModbusConfigurationException.ForMapping(binding.Path,
                     $"ScaleFactorProperty '{name}' must name an S16 register property on the same subject that is not excluded.");
             }
 
@@ -191,7 +191,4 @@ internal static class ModbusRegisterResolver
 
     private static string GetPath(RegisteredSubjectProperty property, IInterceptorSubject root)
         => property.TryGetPath(root) ?? $"{property.Subject.GetType().Name}.{property.Name}";
-
-    private static ModbusConfigurationException Error(string path, string message)
-        => new($"Invalid Modbus mapping on {path}: {message}");
 }

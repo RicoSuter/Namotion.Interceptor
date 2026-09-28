@@ -99,7 +99,8 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
                     }
                 });
 
-            // Opened only after the apply, so the poll loop never reads while the initial values are applied.
+            // Opened only after the apply, so the poll loop never reads while the initial values are applied. The writer
+            // skips this action only after a later StartBuffering, and the only one this source calls waits for this gate.
             initialLoadGate?.TrySetResult();
         };
     }
@@ -277,7 +278,7 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 }
 
                 Metrics.ReportError(exception);
-                _logger.LogError(exception, "Failed to reconnect to Modbus server at {Host}:{Port}.", _configuration.Host, _configuration.Port);
+                _sessionFactory.LogReconnectFailure(exception);
                 CloseSession();
             }
         }

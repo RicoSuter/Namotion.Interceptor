@@ -59,7 +59,7 @@ internal static class ModbusReadPlanner
            !previous.IsIsolated;
 
     private static int GetLimit(ModbusAddressSpace space)
-        => space is ModbusAddressSpace.Coil or ModbusAddressSpace.DiscreteInput
+        => space.IsBitSpace()
             ? MaximumBitsPerRequest
             : MaximumRegistersPerRequest;
 

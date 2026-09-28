@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Modbus.Mapping;
+
 namespace Namotion.Interceptor.Modbus;
 
 /// <summary>
@@ -5,6 +7,7 @@ namespace Namotion.Interceptor.Modbus;
 /// </summary>
 public sealed class ModbusClientConfiguration
 {
+    private const int MaximumRegisterGapLimit = ModbusReadPlanner.MaximumRegistersPerRequest - 1;
     private static readonly TimeSpan MaximumDelay = TimeSpan.FromMilliseconds(int.MaxValue);
 
     /// <summary>
@@ -70,9 +73,9 @@ public sealed class ModbusClientConfiguration
         ValidateDelay(RetryTime, allowZero: false, nameof(RetryTime));
         ValidateDelay(BufferTime, allowZero: true, nameof(BufferTime));
 
-        if (MaximumRegisterGap is < 0 or > 124)
+        if (MaximumRegisterGap is < 0 or > MaximumRegisterGapLimit)
         {
-            throw new ArgumentException($"MaximumRegisterGap must be between 0 and 124, got: {MaximumRegisterGap}");
+            throw new ArgumentException($"MaximumRegisterGap must be between 0 and {MaximumRegisterGapLimit}, got: {MaximumRegisterGap}");
         }
     }
 

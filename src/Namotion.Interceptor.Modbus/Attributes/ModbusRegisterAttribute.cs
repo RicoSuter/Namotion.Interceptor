@@ -8,16 +8,29 @@ namespace Namotion.Interceptor.Modbus.Attributes;
 [AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
 public class ModbusRegisterAttribute : Attribute
 {
+    /// <summary>
+    /// Initializes a new instance mapping the register or bit at <paramref name="address"/> as <paramref name="dataType"/>.
+    /// </summary>
     public ModbusRegisterAttribute(int address, ModbusDataType dataType)
     {
         Address = address;
         DataType = dataType;
     }
 
+    /// <summary>
+    /// Gets the raw protocol address of the (first) register or the bit. With the base address added it must lie in 0 to 65535.
+    /// </summary>
     public int Address { get; }
 
+    /// <summary>
+    /// Gets how the raw registers or bit are decoded.
+    /// </summary>
     public ModbusDataType DataType { get; }
 
+    /// <summary>
+    /// Gets the address space read from. The bit spaces require <see cref="ModbusDataType.Boolean"/>. Default is
+    /// <see cref="ModbusAddressSpace.HoldingRegister"/>.
+    /// </summary>
     public ModbusAddressSpace Space { get; init; } = ModbusAddressSpace.HoldingRegister;
 
     /// <summary>

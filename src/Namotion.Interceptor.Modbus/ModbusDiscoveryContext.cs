@@ -78,7 +78,7 @@ public sealed class ModbusDiscoveryContext
         ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(count, maximumCount);
         ArgumentOutOfRangeException.ThrowIfNegative(address);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(address, 65536 - count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(address, ModbusAddressSpaceExtensions.AddressCount - count);
         return _reader.ReadAsync(unitId ?? _defaultUnitId, space, address, count, cancellationToken);
     }
 

@@ -6,5 +6,8 @@ namespace Namotion.Interceptor.Modbus;
 /// <remarks>Read when the connector builds its read plan on connect.</remarks>
 public interface IModbusBaseAddressProvider
 {
+    /// <summary>
+    /// Gets the address added to the <see cref="Attributes.ModbusRegisterAttribute.Address"/> of this subject's mappings.
+    /// </summary>
     int BaseAddress { get; }
 }
