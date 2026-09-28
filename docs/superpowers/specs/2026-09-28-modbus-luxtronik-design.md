@@ -124,6 +124,12 @@ public sealed class ModbusClientConfiguration
     public void Validate();
 }
 
+public sealed class ModbusResponseException : Exception   // Modbus exception response (e.g. 2, illegal data address); connection stays usable
+{
+    internal ModbusResponseException(int exceptionCode, string message, Exception innerException);
+    public int ExceptionCode { get; }
+}
+
 public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
     internal ModbusSubjectClientSource(...);
@@ -210,7 +216,7 @@ Exclusions are reset on every connect, so the handler decides again after each r
 
 - Group resolved properties by (unit ID, address space), sort by address.
 - Merge neighbours while the gap between them is at most `MaximumRegisterGap` (default 0, strictly contiguous, because many devices reject reads that cover unmapped registers) and the request stays within the PDU limit (125 registers for FC3/FC4, 2000 bits for FC1/FC2).
-- Batches containing scale-factor properties are ordered before batches containing properties that depend on them, so dynamic scale factors are current within the same cycle.
+- Each cycle reads all batches before converting any value, so a dynamic scale factor from any batch of the same cycle is current when its dependents are converted.
 
 ### 4.6 Poll loop
 
@@ -300,7 +306,7 @@ LuxtronikHeatPump   [Category("Devices")] [Description(...)] BackgroundService s
 │    0 Heating, 1 HotWater, 2 Cooling, 3 Pool, 4 Solar, 5 RoomControlUnit,
 │    6 MixingCircuit1Heating, 7 MixingCircuit1Cooling, 8 MixingCircuit2Heating, 9 MixingCircuit2Cooling,
 │    10 MixingCircuit3Heating, 11 MixingCircuit3Cooling
-├─ Status            LuxtronikStatus, input 10000
+├─ OperatingStatus   LuxtronikOperatingStatus, input 10000 (not named Status, which IMonitoredService uses)
 │    0 HeatPumpStatus (flags), 2 OperationMode, 3 HeatingStatus, 4 HotWaterStatus, 6 CoolingStatus (Cooling),
 │    7 PoolHeatingStatus (Pool), 201 ErrorCode, 202 BufferType, 203 MinimumOffTime, 204 MinimumRunTime (Minute),
 │    207 CoolingReleased (Cooling)
@@ -358,31 +364,36 @@ LuxtronikCoolingControl  +0 Mode, +1 Setpoint (°C), +2 Offset (K, S16)
 
 ```csharp
 [InterceptorSubject]
-public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGated
+public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
-    public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null, LuxtronikFeature? feature = null)
+    private readonly string? _minimumFirmware;
+    private readonly LuxtronikFeature _feature;
+
+    public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null, LuxtronikFeature feature = LuxtronikFeature.None)
     {
         BaseAddress = address;
         Title = title;
-        MinimumFirmware = minimumFirmware;
-        Feature = feature;
+        _minimumFirmware = minimumFirmware;
+        _feature = feature;
         Temperature = null;
     }
 
     public int BaseAddress { get; }
     public string? Title { get; }
-    public string? MinimumFirmware { get; }
-    public LuxtronikFeature? Feature { get; }
 
     [LuxtronikInputRegister(0, ModbusDataType.S16, Scale = 0.1)]
-    public partial decimal? Temperature { get; internal set; }   // [State] comes from ITemperatureSensor
+    [State(Unit = StateUnit.DegreeCelsius)]
+    public partial decimal? Temperature { get; internal set; }
+
+    string? ILuxtronikGatedSubject.MinimumFirmware => _minimumFirmware;
+    LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
 }
 ```
 
 - Each instance's `BaseAddress` is its own register address. Batching works on addresses, so the sensors still merge into contiguous reads.
 - S16 is used for all temperature registers: the U16 ones (100, 101, 102, 105) decode identically below 3276.7 °C.
 - A parameterized constructor means the generator emits no parameterless constructor. That is fine for children the parent creates (as `EcowittTemperatureSensor(int channel)` does); HomeBlaze never deserializes them because only `[Configuration]` properties are persisted.
-- `ILuxtronikGated` (internal: `MinimumFirmware`, `Feature`) lets a subject carry gating per instance where an attribute on a shared property cannot differ. `LuxtronikMixingCircuit` passes its feature flags to its children the same way.
+- `ILuxtronikGatedSubject` (internal, implemented explicitly: `MinimumFirmware`, `Feature`) lets a subject carry gating per instance where an attribute on a shared property cannot differ. `LuxtronikMixingCircuit` passes its feature flags to its children the same way.
 
 New abstraction in `HomeBlaze.Abstractions/Sensors/IThermalPowerSensor.cs`, mirroring `IPowerSensor`:
 
@@ -433,7 +444,7 @@ public enum LuxtronikHeatPumpStatus : ushort { None = 0, Compressor1 = 1, Compre
 
 1. Read input 10400 to 10402. On failure, throw (the connect attempt is retried). Set `SoftwareVersion` via `SetValueFromSource(context.Source, ...)`.
 2. Read discrete inputs 10000 to 10011. If this read fails (the official manual does not version it), skip feature gating and rely on not-available values instead.
-3. Walk the device subtree once. For every register property, gating comes from its preset attribute (`MinimumFirmware`, `Feature`), read from `RegisteredSubjectProperty.ReflectionAttributes`, combined with the declaring subject's `ILuxtronikGated`. Call `context.ExcludeProperty` when the firmware is older than required or the required feature is not configured.
+3. Walk the device subtree once. For every register property, gating comes from its preset attribute (`MinimumFirmware`, `Feature`), read from `RegisteredSubjectProperty.ReflectionAttributes`, combined with the declaring subject's `ILuxtronikGatedSubject`. Call `context.ExcludeProperty` when the firmware is older than required or the required feature is not configured.
 
 The model tree is always fully constructed. Excluded properties stay `null` and unclaimed, so the UI can show "not supported" (unclaimed) separately from "not available right now" (claimed, `null` from a not-available value). The firmware `since` versions come from python-luxtronik; the official manual does not version its registers.
 
