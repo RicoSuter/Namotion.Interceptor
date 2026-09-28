@@ -473,7 +473,8 @@ public partial class ModbusSubjectClientSourceTests
 
             // Assert
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should synchronize.", SourceState.Synchronized);
-            Assert.Equal(42, device.Counter);
+            // A retry can load between Start and SeedServer, so the seeded value may arrive with a later poll.
+            await AsyncTestHelpers.WaitUntilAsync(() => device.Counter == 42, TimeSpan.FromSeconds(10), message: "Counter should load.");
             Assert.True(source.Diagnostics.IsOperational);
         }
         finally

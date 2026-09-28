@@ -244,7 +244,7 @@ internal sealed class ModbusPoller
     }
 
     /// <summary>
-    /// Logs a failed request until it succeeds again, which <see cref="ReadAsync"/> logs.
+    /// Logs a failed request once until it succeeds again.
     /// </summary>
     private void LogFailedRequestOnce(
         (byte UnitId, ModbusAddressSpace Space, int StartAddress, int Count) key, string firstPath, ModbusResponseException exception)
