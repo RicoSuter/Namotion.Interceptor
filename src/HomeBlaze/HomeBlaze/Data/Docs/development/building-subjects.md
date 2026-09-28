@@ -133,7 +133,10 @@ public enum StateUnit
     Milliampere,       // 100 mA
     LiterPerHour,      // 50 L/h
     Currency,          // $10.00
-    HexColor           // #FF0000
+    HexColor,          // #FF0000
+    Kelvin,            // 1.5 K (temperature differences)
+    Minute,            // 30 min
+    Hour               // 1234 h
 }
 ```
 
