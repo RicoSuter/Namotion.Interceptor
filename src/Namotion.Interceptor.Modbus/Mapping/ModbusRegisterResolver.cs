@@ -174,15 +174,9 @@ internal static class ModbusRegisterResolver
                 continue;
             }
 
-            ModbusRegisterBinding? scaleFactor = null;
-            foreach (var candidate in bindings)
-            {
-                if (ReferenceEquals(candidate.Property.Subject, binding.Property.Subject) && candidate.Property.Name == name)
-                {
-                    scaleFactor = candidate;
-                    break;
-                }
-            }
+            var scaleFactor = bindings.FirstOrDefault(candidate =>
+                ReferenceEquals(candidate.Property.Subject, binding.Property.Subject) &&
+                candidate.Property.Name == name);
 
             if (scaleFactor?.Attribute.DataType is not (ModbusDataType.U16 or ModbusDataType.S16))
             {
