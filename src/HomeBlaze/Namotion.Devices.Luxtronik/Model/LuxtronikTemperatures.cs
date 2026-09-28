@@ -1,0 +1,106 @@
+// Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Modbus;
+
+namespace Namotion.Devices.Luxtronik;
+
+/// <summary>
+/// Temperatures (inputs 10100 to 10124). Measured values are sensor children; targets and limits are plain values.
+/// </summary>
+[InterceptorSubject]
+public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
+{
+    public LuxtronikTemperatures()
+    {
+        Return = new LuxtronikTemperatureSensor(10100, "Return");
+        ExternalReturn = new LuxtronikTemperatureSensor(10102, "External return");
+        Flow = new LuxtronikTemperatureSensor(10105, "Flow");
+        Room = new LuxtronikTemperatureSensor(10106, "Room");
+        Outside = new LuxtronikTemperatureSensor(10108, "Outside");
+        OutsideAverage = new LuxtronikTemperatureSensor(10109, "Outside average", "3.92.0");
+        HeatSourceInlet = new LuxtronikTemperatureSensor(10110, "Heat source inlet", "3.92.0");
+        HeatSourceOutlet = new LuxtronikTemperatureSensor(10111, "Heat source outlet", "3.92.0");
+        HotWater = new LuxtronikTemperatureSensor(10120, "Hot water");
+
+        ReturnTarget = null;
+        ReturnLimit = null;
+        ReturnMinimumTarget = null;
+        HeatingLimit = null;
+        MaximumFlow = null;
+        CalculatedFlow = null;
+        HotWaterTarget = null;
+        HotWaterMinimum = null;
+        HotWaterMaximum = null;
+        HotWaterLimit = null;
+    }
+
+    public int BaseAddress => 10100;
+
+    [State(Position = 1)]
+    public partial LuxtronikTemperatureSensor Return { get; internal set; }
+
+    [State(Position = 2)]
+    public partial LuxtronikTemperatureSensor ExternalReturn { get; internal set; }
+
+    [State(Position = 3)]
+    public partial LuxtronikTemperatureSensor Flow { get; internal set; }
+
+    [State(Position = 4)]
+    public partial LuxtronikTemperatureSensor Room { get; internal set; }
+
+    [State(Position = 5)]
+    public partial LuxtronikTemperatureSensor Outside { get; internal set; }
+
+    [State(Position = 6)]
+    public partial LuxtronikTemperatureSensor OutsideAverage { get; internal set; }
+
+    [State(Position = 7)]
+    public partial LuxtronikTemperatureSensor HeatSourceInlet { get; internal set; }
+
+    [State(Position = 8)]
+    public partial LuxtronikTemperatureSensor HeatSourceOutlet { get; internal set; }
+
+    [State(Position = 9)]
+    public partial LuxtronikTemperatureSensor HotWater { get; internal set; }
+
+    [LuxtronikInputRegister(1, ModbusDataType.U16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 20)]
+    public partial decimal? ReturnTarget { get; internal set; }
+
+    [LuxtronikInputRegister(3, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 21)]
+    public partial decimal? ReturnLimit { get; internal set; }
+
+    [LuxtronikInputRegister(4, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 22)]
+    public partial decimal? ReturnMinimumTarget { get; internal set; }
+
+    [LuxtronikInputRegister(7, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 23)]
+    public partial decimal? HeatingLimit { get; internal set; }
+
+    [LuxtronikInputRegister(12, ModbusDataType.U16, Scale = 0.1, MinimumFirmware = "3.92.0")]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 24)]
+    public partial decimal? MaximumFlow { get; internal set; }
+
+    [LuxtronikInputRegister(13, ModbusDataType.S16, Scale = 0.1, MinimumFirmware = "3.92.0")]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 25)]
+    public partial decimal? CalculatedFlow { get; internal set; }
+
+    [LuxtronikInputRegister(21, ModbusDataType.U16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 26)]
+    public partial decimal? HotWaterTarget { get; internal set; }
+
+    [LuxtronikInputRegister(22, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 27)]
+    public partial decimal? HotWaterMinimum { get; internal set; }
+
+    [LuxtronikInputRegister(23, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 28)]
+    public partial decimal? HotWaterMaximum { get; internal set; }
+
+    [LuxtronikInputRegister(24, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 29)]
+    public partial decimal? HotWaterLimit { get; internal set; }
+}
