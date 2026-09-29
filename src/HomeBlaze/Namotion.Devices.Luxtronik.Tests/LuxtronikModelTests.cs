@@ -135,9 +135,9 @@ public class LuxtronikModelTests
     {
         // Act
         var roomControl = (ILuxtronikGatedSubject)new LuxtronikRoomControl();
-        var overallHeating = (ILuxtronikGatedSubject)new LuxtronikOverallHeating();
+        var overallHeating = (ILuxtronikGatedSubject)new LuxtronikOverallSmartHomeControl();
         var hotWaterRequests = (ILuxtronikGatedSubject)new LuxtronikHotWaterRequests();
-        var control = (ILuxtronikGatedSubject)new LuxtronikControl(10000, LuxtronikFeature.None);
+        var control = (ILuxtronikGatedSubject)new LuxtronikSmartHomeControl(10000, LuxtronikFeature.None);
 
         // Assert
         Assert.Equal(new Version(3, 92, 1), roomControl.MinimumFirmwareVersion);
@@ -154,7 +154,7 @@ public class LuxtronikModelTests
     [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.HotWater), "3.92.0", LuxtronikFeature.None)]
     [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Cooling), null, LuxtronikFeature.Cooling)]
     [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Pool), null, LuxtronikFeature.Pool)]
-    [InlineData(typeof(LuxtronikControl), nameof(LuxtronikControl.Level), "3.92.0", LuxtronikFeature.None)]
+    [InlineData(typeof(LuxtronikSmartHomeControl), nameof(LuxtronikSmartHomeControl.Level), "3.92.0", LuxtronikFeature.None)]
     public void WhenInspectingHoldingRegisters_ThenRegisterGatesFollowTheManual(
         Type subjectType, string propertyName, string? minimumFirmware, LuxtronikFeature feature)
     {

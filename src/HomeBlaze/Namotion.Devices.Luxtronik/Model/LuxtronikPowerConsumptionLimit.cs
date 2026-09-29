@@ -8,15 +8,15 @@ using Namotion.Interceptor.Modbus;
 namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
-/// Power consumption limitation (holding 10040 and 10041) in watts. The controller reports kW in tenths.
+/// The electrical power consumption limit (LPC, holding 10040 and 10041). The limit is in watts; the controller reports kW in tenths.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikPowerLimit : IModbusBaseAddressProvider
+public partial class LuxtronikPowerConsumptionLimit : IModbusBaseAddressProvider
 {
     /// <summary>
     /// Initializes the registers as unknown (<c>null</c>) until they are read.
     /// </summary>
-    public LuxtronikPowerLimit()
+    public LuxtronikPowerConsumptionLimit()
     {
         Mode = null;
         Limit = null;
@@ -30,7 +30,7 @@ public partial class LuxtronikPowerLimit : IModbusBaseAddressProvider
     /// </summary>
     [LuxtronikHoldingRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
-    public partial LuxtronikPowerLimitMode? Mode { get; internal set; }
+    public partial LuxtronikPowerConsumptionLimitMode? Mode { get; internal set; }
 
     /// <summary>
     /// Gets the electrical power limit.

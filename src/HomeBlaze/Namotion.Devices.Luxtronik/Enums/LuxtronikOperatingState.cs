@@ -3,7 +3,7 @@ namespace Namotion.Devices.Luxtronik.Enums;
 /// <summary>
 /// The heat pump's current operation (input 10002).
 /// </summary>
-public enum LuxtronikOperationMode : ushort
+public enum LuxtronikOperatingState : ushort
 {
     Heating = 0,
     HotWater = 1,

@@ -9,15 +9,15 @@ using Namotion.Interceptor.Modbus;
 namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
-/// Global heating control for all heating circuits (holding 10065 to 10067), firmware 3.92 and later.
+/// The overall setpoint configuration (holding 10065 to 10067), firmware 3.92 and later: an offset or level for the heating circuit and all mixing circuits. The individual configurations apply only in mode Individual.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikOverallHeating : IModbusBaseAddressProvider, ILuxtronikGatedSubject
+public partial class LuxtronikOverallSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
     /// <summary>
     /// Initializes the registers as unknown (<c>null</c>) until they are read.
     /// </summary>
-    public LuxtronikOverallHeating()
+    public LuxtronikOverallSmartHomeControl()
     {
         Mode = null;
         Offset = null;
@@ -32,17 +32,17 @@ public partial class LuxtronikOverallHeating : IModbusBaseAddressProvider, ILuxt
     /// </summary>
     [LuxtronikHoldingRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
-    public partial LuxtronikOverallHeatingMode? Mode { get; internal set; }
+    public partial LuxtronikOverallControlMode? Mode { get; internal set; }
 
     /// <summary>
-    /// Gets the offset, which only applies when <see cref="Mode"/> is <see cref="LuxtronikOverallHeatingMode.Offset"/>.
+    /// Gets the offset, which only applies when <see cref="Mode"/> is <see cref="LuxtronikOverallControlMode.Offset"/>.
     /// </summary>
     [LuxtronikHoldingRegister(1, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.Kelvin, Position = 2)]
     public partial decimal? Offset { get; internal set; }
 
     /// <summary>
-    /// Gets the level, which only applies when <see cref="Mode"/> is <see cref="LuxtronikOverallHeatingMode.Level"/>.
+    /// Gets the level, which only applies when <see cref="Mode"/> is <see cref="LuxtronikOverallControlMode.Level"/>.
     /// </summary>
     [LuxtronikHoldingRegister(2, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 3)]

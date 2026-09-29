@@ -30,8 +30,8 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
         Temperature = new LuxtronikTemperatureSensor(
             10140 + offset, $"Mixing circuit {index} temperature", feature: heatingFeature);
         Setpoints = new LuxtronikMixingCircuitSetpoints(10141 + offset, heatingFeature);
-        Heating = new LuxtronikControl(10010 + offset, heatingFeature);
-        Cooling = new LuxtronikCoolingControl(10015 + offset, coolingFeature);
+        Heating = new LuxtronikSmartHomeControl(10010 + offset, heatingFeature);
+        Cooling = new LuxtronikCoolingSmartHomeControl(10015 + offset, coolingFeature);
     }
 
     /// <summary>
@@ -58,11 +58,11 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
     /// Gets the heating control of the circuit.
     /// </summary>
     [State(Position = 3)]
-    public partial LuxtronikControl Heating { get; internal set; }
+    public partial LuxtronikSmartHomeControl Heating { get; internal set; }
 
     /// <summary>
     /// Gets the cooling control of the circuit.
     /// </summary>
     [State(Position = 4)]
-    public partial LuxtronikCoolingControl Cooling { get; internal set; }
+    public partial LuxtronikCoolingSmartHomeControl Cooling { get; internal set; }
 }

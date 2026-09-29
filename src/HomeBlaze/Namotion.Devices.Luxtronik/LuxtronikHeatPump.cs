@@ -91,10 +91,10 @@ public partial class LuxtronikHeatPump :
     public partial LuxtronikFeatures Features { get; internal set; }
 
     [State(Position = 20)]
-    public partial LuxtronikControl Heating { get; internal set; }
+    public partial LuxtronikSmartHomeControl Heating { get; internal set; }
 
     [State(Position = 21)]
-    public partial LuxtronikControl HotWater { get; internal set; }
+    public partial LuxtronikSmartHomeControl HotWater { get; internal set; }
 
     [State(Position = 22)]
     public partial LuxtronikMixingCircuit MixingCircuit1 { get; internal set; }
@@ -106,7 +106,7 @@ public partial class LuxtronikHeatPump :
     public partial LuxtronikMixingCircuit MixingCircuit3 { get; internal set; }
 
     [State(Position = 25)]
-    public partial LuxtronikPowerLimit PowerLimit { get; internal set; }
+    public partial LuxtronikPowerConsumptionLimit PowerConsumptionLimit { get; internal set; }
 
     [State(Position = 26)]
     public partial LuxtronikLocks Locks { get; internal set; }
@@ -115,7 +115,7 @@ public partial class LuxtronikHeatPump :
     public partial LuxtronikRoomControl RoomControl { get; internal set; }
 
     [State(Position = 28)]
-    public partial LuxtronikOverallHeating OverallHeating { get; internal set; }
+    public partial LuxtronikOverallSmartHomeControl OverallHeating { get; internal set; }
 
     [State(Position = 29)]
     public partial LuxtronikHotWaterRequests HotWaterRequests { get; internal set; }
@@ -167,15 +167,15 @@ public partial class LuxtronikHeatPump :
         SmartGrid = new LuxtronikSmartGrid();
         ExtraHotWater = new LuxtronikExtraHotWater();
         Features = new LuxtronikFeatures();
-        Heating = new LuxtronikControl(10000, LuxtronikFeature.None);
-        HotWater = new LuxtronikControl(10005, LuxtronikFeature.None);
+        Heating = new LuxtronikSmartHomeControl(10000, LuxtronikFeature.None);
+        HotWater = new LuxtronikSmartHomeControl(10005, LuxtronikFeature.None);
         MixingCircuit1 = new LuxtronikMixingCircuit(1);
         MixingCircuit2 = new LuxtronikMixingCircuit(2);
         MixingCircuit3 = new LuxtronikMixingCircuit(3);
-        PowerLimit = new LuxtronikPowerLimit();
+        PowerConsumptionLimit = new LuxtronikPowerConsumptionLimit();
         Locks = new LuxtronikLocks();
         RoomControl = new LuxtronikRoomControl();
-        OverallHeating = new LuxtronikOverallHeating();
+        OverallHeating = new LuxtronikOverallSmartHomeControl();
         HotWaterRequests = new LuxtronikHotWaterRequests();
     }
 }

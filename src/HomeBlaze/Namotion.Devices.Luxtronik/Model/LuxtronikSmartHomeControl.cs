@@ -1,4 +1,4 @@
-// Register map: AIT SHI manual 83026900aDE.
+// Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.Luxtronik.Attributes;
 using Namotion.Devices.Luxtronik.Enums;
@@ -9,23 +9,24 @@ using Namotion.Interceptor.Modbus;
 namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
-/// A mixing circuit cooling control block (mode, setpoint, offset).
+/// The setpoint configuration a smart home system sends over the SHI (manual: Sollwertkonfiguration; shown on the controller under Empfangene Daten): mode, setpoint, offset and level, reused at several holding addresses.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikCoolingControl : IModbusBaseAddressProvider, ILuxtronikGatedSubject
+public partial class LuxtronikSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
     private readonly LuxtronikFeature _feature;
 
     /// <summary>
-    /// Initializes a cooling control block at <paramref name="baseAddress"/> whose registers require <paramref name="feature"/>.
+    /// Initializes a control block at <paramref name="baseAddress"/> whose registers require <paramref name="feature"/>.
     /// </summary>
-    public LuxtronikCoolingControl(int baseAddress, LuxtronikFeature feature)
+    public LuxtronikSmartHomeControl(int baseAddress, LuxtronikFeature feature)
     {
         BaseAddress = baseAddress;
         _feature = feature;
         Mode = null;
         Setpoint = null;
         Offset = null;
+        Level = null;
     }
 
     /// <inheritdoc />
@@ -51,6 +52,13 @@ public partial class LuxtronikCoolingControl : IModbusBaseAddressProvider, ILuxt
     [LuxtronikHoldingRegister(2, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.Kelvin, Position = 3)]
     public partial decimal? Offset { get; internal set; }
+
+    /// <summary>
+    /// Gets the level, which only applies when <see cref="Mode"/> is <see cref="LuxtronikControlMode.Level"/>.
+    /// </summary>
+    [LuxtronikHoldingRegister(3, ModbusDataType.U16, MinimumFirmware = "3.92.0")]
+    [State(IsDiscrete = true, Position = 4)]
+    public partial LuxtronikLevelMode? Level { get; internal set; }
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => null;
 

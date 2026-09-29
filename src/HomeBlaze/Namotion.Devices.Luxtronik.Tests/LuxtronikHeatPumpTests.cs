@@ -36,7 +36,7 @@ public class LuxtronikHeatPumpTests
             // Assert
             Assert.Equal("3.92.3", heatPump.SoftwareVersion);
             Assert.True(heatPump.OperatingStatus.IsCompressorRunning);
-            Assert.Equal(LuxtronikOperationMode.Heating, heatPump.OperatingStatus.OperationMode);
+            Assert.Equal(LuxtronikOperatingState.Heating, heatPump.OperatingStatus.OperationMode);
             Assert.Equal(LuxtronikModeStatus.Running, heatPump.OperatingStatus.HeatingStatus);
             Assert.Equal(35.2m, heatPump.Temperatures.Flow.Temperature);
             Assert.Equal(-4.5m, heatPump.Temperatures.Outside.Temperature);
@@ -50,7 +50,7 @@ public class LuxtronikHeatPumpTests
             Assert.Equal(12345m, heatPump.Runtime.HeatPump);
             Assert.Equal(35.0m, heatPump.Heating.Setpoint);
             Assert.Equal(28.0m, heatPump.MixingCircuit1.Heating.Setpoint);
-            Assert.Equal(30000m, heatPump.PowerLimit.Limit);
+            Assert.Equal(30000m, heatPump.PowerConsumptionLimit.Limit);
             Assert.True(heatPump.Features.Heating);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
             Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
@@ -85,7 +85,7 @@ public class LuxtronikHeatPumpTests
             Assert.Null(heatPump.Energy.TotalThermalEnergy);
             Assert.Null(heatPump.ThermalEnergyProduced);
             Assert.False(IsClaimed(heatPump.Runtime, nameof(LuxtronikRuntime.HeatPump)));
-            Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikControl.Level)));
+            Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikSmartHomeControl.Level)));
             Assert.False(IsClaimed(heatPump.Locks, nameof(LuxtronikLocks.Heating)));
             Assert.True(IsClaimed(heatPump.Locks, nameof(LuxtronikLocks.Cooling)));
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
@@ -114,11 +114,11 @@ public class LuxtronikHeatPumpTests
             // Assert
             Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.PoolHeatingStatus)));
             Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.CoolingStatus)));
-            Assert.False(IsClaimed(heatPump.MixingCircuit2.Heating, nameof(LuxtronikControl.Mode)));
+            Assert.False(IsClaimed(heatPump.MixingCircuit2.Heating, nameof(LuxtronikSmartHomeControl.Mode)));
             Assert.False(IsClaimed(heatPump.RoomControl, nameof(LuxtronikRoomControl.TemperatureSetpoint)));
             Assert.False(IsClaimed(heatPump.Temperatures.Room, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.True(IsClaimed(heatPump.Temperatures.Outside, nameof(LuxtronikTemperatureSensor.Temperature)));
-            Assert.True(IsClaimed(heatPump.MixingCircuit1.Heating, nameof(LuxtronikControl.Mode)));
+            Assert.True(IsClaimed(heatPump.MixingCircuit1.Heating, nameof(LuxtronikSmartHomeControl.Mode)));
             Assert.True(IsClaimed(heatPump.Outputs, nameof(LuxtronikOutputs.MixingCircuit2Pump)));
             Assert.Equal(28.0m, heatPump.MixingCircuit1.Heating.Setpoint);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
@@ -148,8 +148,8 @@ public class LuxtronikHeatPumpTests
             // Assert
             Assert.True(IsClaimed(heatPump.MixingCircuit2.Temperature, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.True(IsClaimed(heatPump.MixingCircuit2.Setpoints, nameof(LuxtronikMixingCircuitSetpoints.Target)));
-            Assert.True(IsClaimed(heatPump.MixingCircuit2.Cooling, nameof(LuxtronikCoolingControl.Mode)));
-            Assert.False(IsClaimed(heatPump.MixingCircuit2.Heating, nameof(LuxtronikControl.Mode)));
+            Assert.True(IsClaimed(heatPump.MixingCircuit2.Cooling, nameof(LuxtronikCoolingSmartHomeControl.Mode)));
+            Assert.False(IsClaimed(heatPump.MixingCircuit2.Heating, nameof(LuxtronikSmartHomeControl.Mode)));
             Assert.False(IsClaimed(heatPump.MixingCircuit3.Temperature, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.Equal(21.5m, heatPump.MixingCircuit2.Temperature.Temperature);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);

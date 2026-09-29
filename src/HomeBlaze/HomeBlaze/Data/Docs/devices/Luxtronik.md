@@ -89,7 +89,7 @@ The function flags partly follow the operating modes rather than the configurati
 | `Features` | Which functions are active on the controller (heating, hot water, cooling, pool, solar, room control unit, heating and cooling per mixing circuit) |
 | `Heating`, `HotWater` | Current SHI control values: `Mode`, `Setpoint`, `Offset`, `Level` |
 | `MixingCircuit1` to `MixingCircuit3` | `Temperature` (flow temperature sensor), `Setpoints` (`Target`, `Minimum`, `Maximum`), `Heating` and `Cooling` SHI controls |
-| `PowerLimit`, `Locks`, `RoomControl`, `OverallHeating`, `HotWaterRequests` | Current SHI control values |
+| `PowerConsumptionLimit`, `Locks`, `RoomControl`, `OverallHeating`, `HotWaterRequests` | Current SHI control values |
 
 The SHI control values show what the controller currently uses; with no writing client they read "no influence" (mode 0, locks and requests off).
 

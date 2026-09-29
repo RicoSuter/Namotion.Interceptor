@@ -46,7 +46,7 @@ public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
     /// </summary>
     [LuxtronikInputRegister(2, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
-    public partial LuxtronikOperationMode? OperationMode { get; internal set; }
+    public partial LuxtronikOperatingState? OperationMode { get; internal set; }
 
     /// <summary>
     /// Gets the state of heating.

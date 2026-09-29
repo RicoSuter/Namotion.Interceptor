@@ -45,17 +45,17 @@
     private static string? Format(decimal? value, string format, string unit) =>
         value is null ? null : $"{value.Value.ToString(format)} {unit}";
 
-    private static string? GetDisplayName(LuxtronikOperationMode? mode) => mode switch
+    private static string? GetDisplayName(LuxtronikOperatingState? mode) => mode switch
     {
         null => null,
-        LuxtronikOperationMode.Heating => "Heating",
-        LuxtronikOperationMode.HotWater => "Hot water",
-        LuxtronikOperationMode.PoolOrSolar => "Pool or solar",
-        LuxtronikOperationMode.UtilityLockout => "Utility lockout",
-        LuxtronikOperationMode.Defrost => "Defrost",
-        LuxtronikOperationMode.NoRequest => "No request",
-        LuxtronikOperationMode.HeatingExternalSource => "Heating (external source)",
-        LuxtronikOperationMode.Cooling => "Cooling",
+        LuxtronikOperatingState.Heating => "Heating",
+        LuxtronikOperatingState.HotWater => "Hot water",
+        LuxtronikOperatingState.PoolOrSolar => "Pool or solar",
+        LuxtronikOperatingState.UtilityLockout => "Utility lockout",
+        LuxtronikOperatingState.Defrost => "Defrost",
+        LuxtronikOperatingState.NoRequest => "No request",
+        LuxtronikOperatingState.HeatingExternalSource => "Heating (external source)",
+        LuxtronikOperatingState.Cooling => "Cooling",
         _ => mode.ToString()
     };
 
