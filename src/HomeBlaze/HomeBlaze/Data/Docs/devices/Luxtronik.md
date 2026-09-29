@@ -5,22 +5,20 @@ icon: HeatPump
 
 # Luxtronik Heat Pump
 
-Reads Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan and other ait-deutschland brands) through the Smart Home Interface (SHI), which is Modbus TCP on port 502. This integration is strictly read only: it only ever sends Modbus read requests (function codes 1 to 4) and never writes a value to the controller.
+Reads Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan and other ait-deutschland brands) through the Smart Home Interface (SHI), which is Modbus TCP on port 502. This integration is strictly read only: it only ever sends read function codes (2 to 4) and never writes a value to the controller.
 
 ## Supported Devices
 
 - Luxtronik 2.1 controllers with the Smart Home Interface, firmware 3.90.1 or later (the minimum the SHI manual names)
-- Values added in firmware 3.92 (thermal energy, operating hours, pump outputs, Smart Grid signals, levels, heating and hot water locks, hot water requests) are read only when the controller runs 3.92 or later; the room temperature setpoint needs 3.92.1
+- Values added in firmware 3.92 (thermal energy, operating hours, pump outputs, Smart Grid signals, the outside average, heat source and maximum and calculated flow temperatures, extra hot water state, levels, heating and hot water locks, overall heating control, hot water requests) are read only when the controller runs 3.92 or later; the room temperature setpoint needs 3.92.1
 
 ## Safety and Prerequisites
 
-Reading does not change how the heat pump runs. Reads change no controller state and write nothing to flash, and every SHI control starts at "no influence" and only takes effect once a client writes it, which this integration never does. The risks come from enabling the interface itself, so read this section before switching it on.
+Reading does not change how the heat pump runs. Reads change no controller state, and every SHI control starts at "no influence" and only takes effect once a client writes it, which this integration never does. The risks come from enabling the interface itself, so read this section before switching it on.
 
 ### Enabling the Smart Home Interface
 
-The SHI is switched on in the service menu: SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface. AIT reserves controller settings for authorised service personnel, so if you do this yourself, change only this one setting. Write down the current Smart Grid setting (SERVICE > Einstellungen > Systemeinstellungen > Smart Grid) before you start, so you can tell whether anything changed.
-
-Keep Smart Grid (SG-Ready) switched off while the SHI is in use. The Luxtronik manual asks for this because the two functions can influence each other.
+The SHI is switched on in the service menu: SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface. AIT reserves controller settings for authorised service personnel, so if you do this yourself, change only this one setting. Note the current Smart Grid (SG-Ready) setting before you start and leave it unchanged. The Luxtronik manual (Teil 2, p. 47) says that Smart Grid and the SHI can influence each other.
 
 Switch the SHI off again when you no longer need it.
 
@@ -36,12 +34,12 @@ The SHI has no read-only mode (it is only on or off) and no authentication: any 
 
 The controller accepts several SHI clients at once, but when two of them write the same data point it raises error 816 "Datenpunkt wurde von mehreren Quellen überschrieben". The manual warns that this can damage the device, and the SHI is disabled while the error persists. Only one system (for example evcc or an energy manager) should ever write to the SHI. HomeBlaze only reads, so it never causes this error.
 
-Written values fall back to their defaults 15 minutes after the last request from the master, and reads count as requests. While HomeBlaze polls, values that another client wrote can therefore stay active after that client stopped. Stop HomeBlaze (or clear the host address) if you rely on this timeout to reset another client's values.
+Written values fall back to their defaults 15 minutes after the last request from the master. If the controller counts reads from any client as requests, continuous polling can keep another client's last written values active after that client stopped. Stop HomeBlaze (or clear the host address) if you rely on this timeout to reset another client's values.
 
 ### First run
 
 1. Connect one client at a time. Start with HomeBlaze alone.
-2. Watch "Empfangene Daten" (received data) on the controller display. It lists every value written through the SHI and must keep showing "---" while only HomeBlaze is connected. No SHI symbol appears on the navigation screen either, because that symbol only shows once a value was written.
+2. Watch "Empfangene Daten" (received data) on the controller display. It lists every value written through the SHI and must keep showing "---" while only HomeBlaze is connected. The SHI symbol on the navigation screen, which appears once a value was written through the SHI (Teil 2, p. 48), stays hidden as well.
 3. Compare a few values with the display (outside, flow and return temperatures, electrical power, energy totals).
 
 The controller shows the SHI as "Standby" after 10 minutes without requests and "Aktiv" while requests arrive.
@@ -64,7 +62,7 @@ A configuration change restarts the connection.
 | Stopped | No host address configured | "No host address configured" |
 | Starting | Connecting, no error yet | "Connecting..." |
 | Running | Connected and polling | "Heat pump error N" when the controller reports error N, otherwise empty |
-| Error | The connection failed; stays set while reconnecting | The last error |
+| Error | The connection failed (stays set while reconnecting), or the configuration is invalid | The last error, or the configuration error |
 
 A controller error does not change `Status`: the connection is healthy, so it stays Running and the error number is shown in `StatusMessage` and in the widget.
 
@@ -126,7 +124,7 @@ Each measured temperature is a child sensor titled after its value, such as "Ret
 
 ### Register dump
 
-The test project contains a hardware test that reads every mapped register (read function codes only, one request at a time with short pauses) and writes the raw values to JSON. It is skipped unless `LUXTRONIK_HOST` is set, so set the variable only in the shell session you run it from and never persistently, otherwise every test run would contact the controller:
+The test project contains a hardware test that reads every mapped register (read function codes only, one request at a time with short pauses), probes one unmapped input register (10001) to record how the controller answers it, and writes the raw values to JSON. It is skipped unless `LUXTRONIK_HOST` is set, so set the variable only in the shell session you run it from and never persistently, otherwise every test run would contact the controller:
 
 ```powershell
 $env:LUXTRONIK_HOST='192.168.x.y'; dotnet test src/HomeBlaze/Namotion.Devices.Luxtronik.Tests --filter "FullyQualifiedName~LuxtronikHardwareTests" --logger "console;verbosity=detailed"

@@ -130,9 +130,9 @@ public enum StateUnit
     Kilobyte,          // 1024 KB
     KilobytePerSecond, // 100 KB/s
     MegabitPerSecond,  // 100 Mbps
+    LiterPerHour,      // 50 L/h
     KilowattHour,      // 500 kWh
     Milliampere,       // 100 mA
-    LiterPerHour,      // 50 L/h
     Currency,          // $10.00
     HexColor,          // #FF0000
     MeterPerSecond,    // 3.2 m/s
