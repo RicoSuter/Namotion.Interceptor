@@ -72,7 +72,9 @@ A controller error does not change `Status`: the connection is healthy, so it st
 
 Temperatures are °C, temperature offsets K, power W, energy Wh, durations minutes and operating hours h. Properties are read only; a local change is replaced by the controller value on the next poll.
 
-A value is empty when the controller does not provide it. On every connect the device reads the firmware version and the configured functions (discrete inputs 10000 to 10011) and skips values the firmware or configuration does not support. Values the controller reports as not available (0x7FFF or 0x7FFFFFFF) are also shown empty.
+A value is empty when the controller does not provide it. On every connect the device reads the firmware version and the active functions (discrete inputs 10000 to 10011) and skips values the firmware or the active functions do not support. Values the controller reports as not available (0x7FFF or 0x7FFFFFFF) are also shown empty.
+
+The function flags partly follow the operating modes rather than the configuration: heating is active while the heating mode is not "Aus", cooling while the cooling mode is "Automatisch", and the mixing circuit heating and cooling flags follow the heating and cooling modes as well. Hot water, pool, solar and the room control unit reflect the configuration. The flags are polled with the other values, and when they change the device reconnects and discovers its values again, so switching a mode on makes its values available within a few polling intervals.
 
 | Group | Properties |
 |-------|-----------|
@@ -84,7 +86,7 @@ A value is empty when the controller does not provide it. On every connect the d
 | `Outputs` | Pump outputs: `BrineCirculationPump` (BOSUP), `MixingCircuit1Pump` to `MixingCircuit3Pump` (FP1 to FP3), `HeatingCirculationPump` (HUP), `HotWaterLoadingPump` (BUP), `CirculationPump` (hot water circulation, ZIP) |
 | `SmartGrid` | `Evu1`, `Evu2`, `State` (Locked, Reduced, Normal, Increased) |
 | `ExtraHotWater` | `Setpoint`, `Duration`, `RemainingDuration` |
-| `Features` | Which functions are configured on the controller (heating, hot water, cooling, pool, solar, room control unit, heating and cooling per mixing circuit) |
+| `Features` | Which functions are active on the controller (heating, hot water, cooling, pool, solar, room control unit, heating and cooling per mixing circuit) |
 | `Heating`, `HotWater` | Current SHI control values: `Mode`, `Setpoint`, `Offset`, `Level` |
 | `MixingCircuit1` to `MixingCircuit3` | `Temperature` (flow temperature sensor), `Setpoints` (`Target`, `Minimum`, `Maximum`), `Heating` and `Cooling` SHI controls |
 | `PowerLimit`, `Locks`, `RoomControl`, `OverallHeating`, `HotWaterRequests` | Current SHI control values |
@@ -117,11 +119,11 @@ Each measured temperature is a child sensor titled after its value, such as "Ret
 ## Troubleshooting
 
 - **Connection refused or timeouts:** the SHI is not enabled on the controller, or a firewall blocks port 502.
-- **Values stay empty:** the function is not configured on the controller, or the value needs firmware 3.92. If the controller rejects the read of its configured functions, the device reads every value regardless of configuration and relies on the not-available values instead. A temporary rejection of that read fails the connect, which is retried.
+- **Values stay empty:** the function is not configured on the controller or its operating mode is off, or the value needs firmware 3.92. If the controller rejects the read of its configured functions, the device reads every value regardless of configuration and relies on the not-available values instead. A temporary rejection of that read fails the connect, which is retried.
 - **Controller error 816:** more than one client writes the same SHI data point, and the SHI stays disabled while the error persists. HomeBlaze does not write; check the other clients.
 - **SHI "Standby" on the controller:** no requests for 10 minutes; check that HomeBlaze is running and connected.
 - **Hot water or a mixing circuit temperature shows exactly 75.0 °C, or the external return 5.0 °C:** the controller reports these substitute values when the sensor is faulty. They are passed through unfiltered; check the sensor.
-- **A value keeps its last reading after a function was switched off:** functions and firmware are checked on every connect, and a value that a later reconnect skips keeps its last reading until HomeBlaze restarts.
+- **A value keeps its last reading after a function was switched off:** functions and firmware are checked on every connect and whenever the function flags change, and a value that a later discovery skips keeps its last reading until HomeBlaze restarts.
 
 ## Modbus Register Map
 
@@ -149,7 +151,7 @@ Addresses are raw Modbus addresses (no +1). Input registers are read with functi
 | 10060 | Holding | Room temperature setpoint (3.92.1, room control unit) |
 | 10065 to 10067 | Holding | Overall heating control (3.92) |
 | 10070 to 10071 | Holding | Circulation and extra hot water requests (3.92) |
-| 10000 to 10011 | Discrete input | Configured functions |
+| 10000 to 10011 | Discrete input | Active functions |
 
 The firmware gates come from python-luxtronik; the official manual does not version its registers.
 
