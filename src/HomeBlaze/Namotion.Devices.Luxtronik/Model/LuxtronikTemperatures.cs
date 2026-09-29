@@ -1,6 +1,7 @@
 // Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
@@ -20,7 +21,7 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
         Return = new LuxtronikTemperatureSensor(10100, "Return temperature");
         ExternalReturn = new LuxtronikTemperatureSensor(10102, "External return temperature");
         Flow = new LuxtronikTemperatureSensor(10105, "Flow temperature");
-        Room = new LuxtronikTemperatureSensor(10106, "Room temperature");
+        Room = new LuxtronikTemperatureSensor(10106, "Room temperature", feature: LuxtronikFeature.RoomControlUnit);
         Outside = new LuxtronikTemperatureSensor(10108, "Outside temperature");
         OutsideAverage = new LuxtronikTemperatureSensor(10109, "Outside average temperature", "3.92.0");
         HeatSourceInlet = new LuxtronikTemperatureSensor(10110, "Heat source inlet temperature", "3.92.0");
@@ -61,7 +62,7 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
     public partial LuxtronikTemperatureSensor Flow { get; internal set; }
 
     /// <summary>
-    /// Gets the measured room temperature.
+    /// Gets the room temperature measured by the room control unit.
     /// </summary>
     [State(Position = 4)]
     public partial LuxtronikTemperatureSensor Room { get; internal set; }

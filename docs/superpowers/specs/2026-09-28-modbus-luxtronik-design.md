@@ -340,7 +340,7 @@ LuxtronikHeatPump   [Category("Devices")] [Description(...)] BackgroundService s
 │    [Derived] IsCompressorRunning, IsAuxiliaryHeaterRunning
 ├─ Temperatures      LuxtronikTemperatures, input 10100, Scale 0.1
 │    measured, as LuxtronikTemperatureSensor children:
-│      100 Return, 102 ExternalReturn, 105 Flow, 106 Room, 108 Outside, 120 HotWater;
+│      100 Return, 102 ExternalReturn, 105 Flow, 106 Room (RoomControlUnit), 108 Outside, 120 HotWater;
 │      3.92: 109 OutsideAverage, 110 HeatSourceInlet, 111 HeatSourceOutlet
 │    setpoints and limits, plain properties:
 │      101 ReturnTarget, 103 ReturnLimit, 104 ReturnMinimumTarget, 107 HeatingLimit,

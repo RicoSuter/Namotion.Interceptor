@@ -85,6 +85,18 @@ public class LuxtronikModelTests
         Assert.Equal("Outside temperature", temperatures.Outside.Title);
     }
 
+    [Fact]
+    public void WhenTemperaturesAreConstructed_ThenRoomTemperatureRequiresTheRoomControlUnit()
+    {
+        // Act
+        var temperatures = new LuxtronikTemperatures();
+
+        // Assert
+        Assert.Equal(10106, temperatures.Room.BaseAddress);
+        Assert.Equal(LuxtronikFeature.RoomControlUnit, ((ILuxtronikGatedSubject)temperatures.Room).Feature);
+        Assert.Equal(LuxtronikFeature.None, ((ILuxtronikGatedSubject)temperatures.Outside).Feature);
+    }
+
     [Theory]
     [InlineData(1, 10140, 10141, 10010, 10015, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling)]
     [InlineData(2, 10150, 10151, 10020, 10025, LuxtronikFeature.MixingCircuit2Heating, LuxtronikFeature.MixingCircuit2Cooling)]

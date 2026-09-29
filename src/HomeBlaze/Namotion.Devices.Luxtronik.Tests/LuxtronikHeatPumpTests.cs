@@ -116,6 +116,8 @@ public class LuxtronikHeatPumpTests
             Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.CoolingStatus)));
             Assert.False(IsClaimed(heatPump.MixingCircuit2.Heating, nameof(LuxtronikControl.Mode)));
             Assert.False(IsClaimed(heatPump.RoomControl, nameof(LuxtronikRoomControl.TemperatureSetpoint)));
+            Assert.False(IsClaimed(heatPump.Temperatures.Room, nameof(LuxtronikTemperatureSensor.Temperature)));
+            Assert.True(IsClaimed(heatPump.Temperatures.Outside, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.True(IsClaimed(heatPump.MixingCircuit1.Heating, nameof(LuxtronikControl.Mode)));
             Assert.True(IsClaimed(heatPump.Outputs, nameof(LuxtronikOutputs.MixingCircuit2Pump)));
             Assert.Equal(28.0m, heatPump.MixingCircuit1.Heating.Setpoint);
