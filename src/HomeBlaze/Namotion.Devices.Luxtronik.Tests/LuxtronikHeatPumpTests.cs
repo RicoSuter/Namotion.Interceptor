@@ -1,3 +1,4 @@
+using FluentModbus;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -28,6 +29,8 @@ public class LuxtronikHeatPumpTests
         var (heatPump, source, recorder) = await StartAsync(server);
         try
         {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => source.Diagnostics.IsOperational == true, TimeSpan.FromSeconds(10), message: "The source should be operational.");
             heatPump.UpdateStatus(source.Diagnostics);
 
             // Assert
@@ -40,6 +43,7 @@ public class LuxtronikHeatPumpTests
             Assert.Equal(8.1m, heatPump.Temperatures.HeatSourceInlet.Temperature);
             Assert.Equal(48.2m, heatPump.Temperatures.HotWater.Temperature);
             Assert.Equal(6500m, heatPump.Energy.HeatingPower);
+            Assert.Equal(6500m, heatPump.ThermalPower);
             Assert.Equal(1500m, heatPump.Power);
             Assert.Equal(12345600m, heatPump.EnergyConsumed);
             Assert.Equal(45678900m, heatPump.ThermalEnergyProduced);
@@ -79,6 +83,7 @@ public class LuxtronikHeatPumpTests
             Assert.Null(heatPump.Temperatures.HeatSourceInlet.Temperature);
             Assert.False(IsClaimed(heatPump.Temperatures.HeatSourceInlet, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.Null(heatPump.Energy.TotalThermalEnergy);
+            Assert.Null(heatPump.ThermalEnergyProduced);
             Assert.False(IsClaimed(heatPump.Runtime, nameof(LuxtronikRuntime.HeatPump)));
             Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikControl.Level)));
             Assert.False(IsClaimed(heatPump.Locks, nameof(LuxtronikLocks.Heating)));
@@ -115,6 +120,7 @@ public class LuxtronikHeatPumpTests
             Assert.True(IsClaimed(heatPump.Outputs, nameof(LuxtronikOutputs.MixingCircuit2Pump)));
             Assert.Equal(28.0m, heatPump.MixingCircuit1.Heating.Setpoint);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
         }
         finally
         {
@@ -144,6 +150,63 @@ public class LuxtronikHeatPumpTests
             Assert.Null(heatPump.Energy.PoolElectricalEnergy);
             Assert.False(IsClaimed(heatPump.Features, nameof(LuxtronikFeatures.Heating)));
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenFeatureReadIsBusyOnce_ThenDiscoveryRetriesAndGatesByFeature()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater);
+        server.RejectFeatureReads(1, ModbusExceptionCode.ServerDeviceBusy);
+
+        // Act
+        var (heatPump, source, recorder) = await StartAsync(server);
+        try
+        {
+            // Assert
+            var error = Assert.IsType<ModbusResponseException>(source.Diagnostics.LastError);
+            Assert.Equal((int)ModbusExceptionCode.ServerDeviceBusy, error.ExceptionCode);
+            Assert.True(IsClaimed(heatPump.Features, nameof(LuxtronikFeatures.Cooling)));
+            Assert.False(heatPump.Features.Cooling);
+            Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.CoolingStatus)));
+            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("3.92.0", false)]
+    [InlineData("3.92.1", true)]
+    public async Task WhenRoomControlNeedsFirmware3921_ThenItIsClaimedOnlyFromThatVersion(string firmware, bool isClaimed)
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(Version.Parse(firmware));
+        server.Start();
+        server.SeedTypicalValues();
+
+        // Act
+        var (heatPump, source, recorder) = await StartAsync(server);
+        try
+        {
+            // Assert
+            Assert.Equal(isClaimed, IsClaimed(heatPump.RoomControl, nameof(LuxtronikRoomControl.TemperatureSetpoint)));
+            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
         }
         finally
         {

@@ -17,7 +17,7 @@ namespace Namotion.Devices.Luxtronik.Tests;
 public class LuxtronikHeatPumpLifecycleTests
 {
     [Fact]
-    public async Task WhenControllerStops_ThenHostedHeatPumpReportsError()
+    public async Task WhenControllerStopsAndRestarts_ThenHostedHeatPumpReportsErrorAndRecovers()
     {
         // Arrange
         using var server = new LuxtronikTestServer(new Version(3, 92, 3));
@@ -49,14 +49,19 @@ public class LuxtronikHeatPumpLifecycleTests
                 TimeSpan.FromSeconds(30),
                 message: "The hosted heat pump should connect and poll.");
 
-            // Act
+            // Act & Assert
             server.Stop();
-
-            // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !heatPump.IsConnected && heatPump.Status == ServiceStatus.Error,
                 TimeSpan.FromSeconds(30),
                 message: "The heat pump should report the lost controller.");
+
+            server.Start();
+            server.SeedTypicalValues();
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running,
+                TimeSpan.FromSeconds(60),
+                message: "The heat pump should recover once the controller is back.");
         }
         finally
         {

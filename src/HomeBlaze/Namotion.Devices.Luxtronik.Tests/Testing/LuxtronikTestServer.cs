@@ -9,7 +9,7 @@ namespace Namotion.Devices.Luxtronik.Tests.Testing;
 
 /// <summary>
 /// In-process Modbus server imitating a Luxtronik 2.1 Smart Home Interface on unit 1. A read that touches an unmapped
-/// address, or a 3.92 address on older firmware, is rejected with "illegal data address" like the real controller.
+/// address, or an address newer than the firmware, is rejected with "illegal data address" like the real controller.
 /// </summary>
 internal sealed class LuxtronikTestServer : IDisposable
 {
@@ -17,31 +17,36 @@ internal sealed class LuxtronikTestServer : IDisposable
     private const int FeatureFlagsAddress = 10000;
     private const int FeatureFlagCount = 12;
 
-    // Mapped registers per the AIT manual and python-luxtronik; Requires392 marks registers added in firmware 3.92.
-    private static readonly (int Start, int End, bool Requires392)[] InputRanges =
-    [
-        (10000, 10000, false), (10002, 10004, false), (10006, 10007, false),
-        (10100, 10108, false), (10109, 10113, true), (10120, 10124, false),
-        (10140, 10143, false), (10150, 10153, false), (10160, 10163, false),
-        (10201, 10207, false), (10300, 10302, false), (10310, 10319, false), (10320, 10329, true),
-        (10350, 10356, true), (10360, 10361, true), (10400, 10402, false),
-        (10404, 10413, true), (10416, 10417, true), (10500, 10502, true)
-    ];
-
-    private static readonly (int Start, int End, bool Requires392)[] HoldingRanges =
-    [
-        (10000, 10002, false), (10003, 10003, true), (10005, 10007, false), (10008, 10008, true),
-        (10010, 10012, false), (10013, 10013, true), (10015, 10017, false),
-        (10020, 10022, false), (10023, 10023, true), (10025, 10027, false),
-        (10030, 10032, false), (10033, 10033, true), (10035, 10037, false),
-        (10040, 10041, false), (10050, 10051, true), (10052, 10053, false),
-        (10060, 10060, true), (10065, 10067, true), (10070, 10071, true)
-    ];
-
     private static readonly Version Firmware392 = new(3, 92, 0);
+    private static readonly Version Firmware3921 = new(3, 92, 1);
+
+    // Mapped registers per the AIT manual and python-luxtronik; MinimumFirmware is null for registers of every firmware.
+    internal static readonly (int Start, int End, Version? MinimumFirmware)[] InputRanges =
+    [
+        (10000, 10000, null), (10002, 10004, null), (10006, 10007, null),
+        (10100, 10108, null), (10109, 10113, Firmware392), (10120, 10124, null),
+        (10140, 10143, null), (10150, 10153, null), (10160, 10163, null),
+        (10201, 10204, null), (10207, 10207, null),
+        (10300, 10302, null), (10310, 10319, null), (10320, 10329, Firmware392),
+        (10350, 10356, Firmware392), (10360, 10361, Firmware392), (10400, 10402, null),
+        (10404, 10413, Firmware392), (10416, 10417, Firmware392), (10500, 10502, Firmware392)
+    ];
+
+    internal static readonly (int Start, int End, Version? MinimumFirmware)[] HoldingRanges =
+    [
+        (10000, 10002, null), (10003, 10003, Firmware392), (10005, 10007, null), (10008, 10008, Firmware392),
+        (10010, 10012, null), (10013, 10013, Firmware392), (10015, 10017, null),
+        (10020, 10022, null), (10023, 10023, Firmware392), (10025, 10027, null),
+        (10030, 10032, null), (10033, 10033, Firmware392), (10035, 10037, null),
+        (10040, 10041, null), (10050, 10051, Firmware392), (10052, 10053, null),
+        (10060, 10060, Firmware3921), (10065, 10067, Firmware392), (10070, 10071, Firmware392)
+    ];
 
     private readonly Version _firmware;
     private readonly bool _supportsDiscreteInputs;
+    private readonly Lock _rejectionLock = new();
+    private int _pendingFeatureReadRejections;
+    private ModbusExceptionCode _featureReadRejectionCode;
     private ModbusTcpServer? _server;
 
     public LuxtronikTestServer(Version firmware, bool supportsDiscreteInputs = true)
@@ -165,12 +170,36 @@ internal sealed class LuxtronikTestServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Rejects the next <paramref name="count"/> reads of the feature flags with <paramref name="exceptionCode"/>.
+    /// </summary>
+    public void RejectFeatureReads(int count, ModbusExceptionCode exceptionCode)
+    {
+        lock (_rejectionLock)
+        {
+            _pendingFeatureReadRejections = count;
+            _featureReadRejectionCode = exceptionCode;
+        }
+    }
+
     public void Dispose() => Stop();
 
     private ModbusTcpServer GetServer() => _server ?? throw new InvalidOperationException("The test server is not started.");
 
     private ModbusExceptionCode ValidateRequest(byte unitId, ModbusFunctionCode functionCode, ushort address, ushort quantity)
     {
+        if (functionCode == ModbusFunctionCode.ReadDiscreteInputs)
+        {
+            lock (_rejectionLock)
+            {
+                if (_pendingFeatureReadRejections > 0)
+                {
+                    _pendingFeatureReadRejections--;
+                    return _featureReadRejectionCode;
+                }
+            }
+        }
+
         var isMapped = functionCode switch
         {
             ModbusFunctionCode.ReadInputRegisters => IsMapped(InputRanges, address, quantity),
@@ -183,15 +212,15 @@ internal sealed class LuxtronikTestServer : IDisposable
         return isMapped ? ModbusExceptionCode.OK : ModbusExceptionCode.IllegalDataAddress;
     }
 
-    private bool IsMapped((int Start, int End, bool Requires392)[] ranges, int address, int quantity)
+    private bool IsMapped((int Start, int End, Version? MinimumFirmware)[] ranges, int address, int quantity)
     {
-        var supports392 = _firmware >= Firmware392;
         for (var current = address; current < address + quantity; current++)
         {
             var isKnown = false;
             foreach (var range in ranges)
             {
-                if (current >= range.Start && current <= range.End && (supports392 || !range.Requires392))
+                if (current >= range.Start && current <= range.End &&
+                    (range.MinimumFirmware is null || _firmware >= range.MinimumFirmware))
                 {
                     isKnown = true;
                     break;
