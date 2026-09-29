@@ -2,6 +2,8 @@
 
 The `Namotion.Interceptor.Modbus` package polls Modbus TCP devices into C# objects. Properties are mapped to registers with attributes, and the connector reads them on a fixed interval. This version is a read-only client: local changes are not sent to the device and are replaced by the device value on the next poll.
 
+Dependencies: [FluentModbus](https://github.com/Apollo3zehn/FluentModbus) (MIT)
+
 ## Key Features
 
 - Attribute-based mapping of holding registers, input registers, coils and discrete inputs
