@@ -15,7 +15,6 @@ namespace Namotion.Devices.Luxtronik;
 public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IConfigurable
 {
     private const int FirmwareAddress = 10400;
-    private const int FeatureFlagsAddress = 10000;
 
     /// <summary>
     /// The minimum <see cref="PollingInterval"/> in seconds; shorter intervals are raised to it.
@@ -40,7 +39,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         IReadOnlySet<LuxtronikFeature>? configuredFeatures = null;
         try
         {
-            var flags = await context.ReadDiscreteInputsAsync(FeatureFlagsAddress, LuxtronikGating.FeatureFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var flags = await context.ReadDiscreteInputsAsync(Features.BaseAddress, LuxtronikGating.FeatureFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
             configuredFeatures = LuxtronikGating.GetConfiguredFeatures(flags);
         }
         catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
