@@ -17,6 +17,9 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     private const int FirmwareAddress = 10400;
     private const int FeatureFlagsAddress = 10000;
 
+    // Protects the controller from a hand-edited configuration that would poll it continuously.
+    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(2);
+
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
 
     /// <summary>
@@ -122,10 +125,19 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         }
     }
 
+    /// <summary>
+    /// Gets the configured <see cref="PollingInterval"/>, raised to the minimum of 2 seconds.
+    /// </summary>
+    internal TimeSpan GetEffectivePollingInterval()
+    {
+        var pollingInterval = PollingInterval;
+        return pollingInterval < MinimumPollingInterval ? MinimumPollingInterval : pollingInterval;
+    }
+
     private async Task RunSourceAsync(string hostAddress, CancellationToken stoppingToken)
     {
         // Captured once, so a configuration edit applies only through the restart it signals.
-        var pollingInterval = PollingInterval;
+        var pollingInterval = GetEffectivePollingInterval();
 
         ModbusSubjectClientSource source;
         try

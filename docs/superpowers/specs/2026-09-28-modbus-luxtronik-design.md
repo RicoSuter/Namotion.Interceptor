@@ -322,7 +322,7 @@ All scaled values are `decimal?` in HomeBlaze units (°C, K, W, Wh, minutes, hou
 LuxtronikHeatPump   [Category("Devices")] [Description(...)] BackgroundService subject, IModbusDiscovery,
 │                   IPowerSensor, IThermalPowerSensor, IConnectionState, ISoftwareState, IConfigurable,
 │                   IMonitoredService, ITitleProvider, IIconProvider, ILastUpdatedProvider
-│  [Configuration] Name, HostAddress, Port = 502, PollingInterval = 5 s
+│  [Configuration] Name, HostAddress, Port = 502, PollingInterval = 5 s (raised to at least 2 s)
 │  [Derived] Title => Name ?? "Luxtronik Heat Pump"
 │  [State] SoftwareVersion (set by discovery), [Derived] AvailableSoftwareUpdate => null
 │  [State] IsConnected, Status, StatusMessage, LastUpdated (mirrored from diagnostics, 5.8)

@@ -38,7 +38,7 @@ public class LuxtronikHeatPumpLifecycleTests
         {
             HostAddress = "127.0.0.1",
             Port = server.Port,
-            PollingInterval = TimeSpan.FromMilliseconds(200)
+            PollingInterval = TimeSpan.FromSeconds(2)
         };
 
         try

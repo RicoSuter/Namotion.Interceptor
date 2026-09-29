@@ -95,4 +95,21 @@ public class LuxtronikHeatPumpDeviceTests
         Assert.Equal(10005, heatPump.HotWater.BaseAddress);
         Assert.Equal(2, heatPump.MixingCircuit2.Index);
     }
+
+    [Theory]
+    [InlineData(0, 2000)]
+    [InlineData(100, 2000)]
+    [InlineData(2000, 2000)]
+    [InlineData(10000, 10000)]
+    public void WhenPollingIntervalIsConfigured_ThenTheSourcePollsNoFasterThanTheMinimum(int configuredMilliseconds, int expectedMilliseconds)
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+
+        // Act
+        heatPump.PollingInterval = TimeSpan.FromMilliseconds(configuredMilliseconds);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedMilliseconds), heatPump.GetEffectivePollingInterval());
+    }
 }
