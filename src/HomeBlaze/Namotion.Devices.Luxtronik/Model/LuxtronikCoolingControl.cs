@@ -28,8 +28,12 @@ public partial class LuxtronikCoolingControl : IModbusBaseAddressProvider, ILuxt
         Offset = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress { get; }
 
+    /// <summary>
+    /// Gets how the control influences its circuit.
+    /// </summary>
     [LuxtronikHoldingRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
     public partial LuxtronikControlMode? Mode { get; internal set; }

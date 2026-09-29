@@ -19,6 +19,9 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
     private readonly Version? _minimumFirmwareVersion;
     private readonly LuxtronikFeature _feature;
 
+    /// <summary>
+    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmware"/> and only when <paramref name="feature"/> is configured.
+    /// </summary>
     public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null, LuxtronikFeature feature = LuxtronikFeature.None)
     {
         BaseAddress = address;
@@ -28,11 +31,14 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
         Temperature = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress { get; }
 
+    /// <inheritdoc />
     public string? Title { get; }
 
     // S16 for every temperature: the registers the manual types as UINT16 decode the same below 3276.7 degrees.
+    /// <inheritdoc />
     [LuxtronikInputRegister(0, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }

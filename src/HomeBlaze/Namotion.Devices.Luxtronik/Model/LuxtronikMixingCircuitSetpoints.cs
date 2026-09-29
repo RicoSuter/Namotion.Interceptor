@@ -28,16 +28,26 @@ public partial class LuxtronikMixingCircuitSetpoints : IModbusBaseAddressProvide
         Maximum = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress { get; }
 
+    /// <summary>
+    /// Gets the circuit target temperature.
+    /// </summary>
     [LuxtronikInputRegister(0, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 1)]
     public partial decimal? Target { get; internal set; }
 
+    /// <summary>
+    /// Gets the minimum circuit temperature.
+    /// </summary>
     [LuxtronikInputRegister(1, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 2)]
     public partial decimal? Minimum { get; internal set; }
 
+    /// <summary>
+    /// Gets the maximum circuit temperature.
+    /// </summary>
     [LuxtronikInputRegister(2, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 3)]
     public partial decimal? Maximum { get; internal set; }

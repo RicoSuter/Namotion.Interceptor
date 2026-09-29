@@ -16,13 +16,20 @@ public partial class LuxtronikRoomControl : IModbusBaseAddressProvider, ILuxtron
 {
     private static readonly Version Firmware3921 = new(3, 92, 1);
 
+    /// <summary>
+    /// Initializes the registers as unknown (<c>null</c>) until they are read.
+    /// </summary>
     public LuxtronikRoomControl()
     {
         TemperatureSetpoint = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress => 10060;
 
+    /// <summary>
+    /// Gets the room temperature setpoint.
+    /// </summary>
     [LuxtronikHoldingRegister(0, ModbusDataType.U16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 1)]
     public partial decimal? TemperatureSetpoint { get; internal set; }

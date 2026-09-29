@@ -4,6 +4,7 @@ using Namotion.Devices.Luxtronik.Attributes;
 using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Devices.Luxtronik.Model;
+using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
 
 namespace Namotion.Devices.Luxtronik.Tests;
@@ -137,18 +138,45 @@ public class LuxtronikModelTests
     }
 
     [Theory]
-    [InlineData(nameof(LuxtronikLocks.Heating), "3.92.0", LuxtronikFeature.None)]
-    [InlineData(nameof(LuxtronikLocks.HotWater), "3.92.0", LuxtronikFeature.None)]
-    [InlineData(nameof(LuxtronikLocks.Cooling), null, LuxtronikFeature.Cooling)]
-    [InlineData(nameof(LuxtronikLocks.Pool), null, LuxtronikFeature.Pool)]
-    public void WhenInspectingLocks_ThenRegisterGatesFollowTheManual(string propertyName, string? minimumFirmware, LuxtronikFeature feature)
+    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Heating), "3.92.0", LuxtronikFeature.None)]
+    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.HotWater), "3.92.0", LuxtronikFeature.None)]
+    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Cooling), null, LuxtronikFeature.Cooling)]
+    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Pool), null, LuxtronikFeature.Pool)]
+    [InlineData(typeof(LuxtronikControl), nameof(LuxtronikControl.Level), "3.92.0", LuxtronikFeature.None)]
+    public void WhenInspectingHoldingRegisters_ThenRegisterGatesFollowTheManual(
+        Type subjectType, string propertyName, string? minimumFirmware, LuxtronikFeature feature)
     {
         // Act
-        var attribute = typeof(LuxtronikLocks).GetProperty(propertyName)!.GetCustomAttribute<LuxtronikHoldingRegisterAttribute>()!;
+        var attribute = subjectType.GetProperty(propertyName)!.GetCustomAttribute<LuxtronikHoldingRegisterAttribute>()!;
 
         // Assert
         Assert.Equal(minimumFirmware, attribute.MinimumFirmware);
         Assert.Equal(feature, attribute.Feature);
+    }
+
+    [Fact]
+    public void WhenInspectingRegisterProperties_ThenAllAreReadOnly()
+    {
+        // Arrange
+        var registerProperties = GetRegisterProperties();
+
+        // Act
+        var writableHoldingRegisters = registerProperties
+            .Where(property => property.GetCustomAttribute<LuxtronikRegisterAttribute>() is
+                { Space: ModbusAddressSpace.HoldingRegister, Access: not ModbusAccess.ReadOnly })
+            .Select(GetDisplayName)
+            .ToList();
+
+        var publiclySettableProperties = registerProperties
+            .Where(property => property.SetMethod is { IsPublic: true })
+            .Select(GetDisplayName)
+            .ToList();
+
+        // Assert
+        Assert.Contains(registerProperties, property =>
+            property.GetCustomAttribute<LuxtronikRegisterAttribute>()?.Space == ModbusAddressSpace.HoldingRegister);
+        Assert.Empty(writableHoldingRegisters);
+        Assert.Empty(publiclySettableProperties);
     }
 
     [Fact]

@@ -21,6 +21,7 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
         ArgumentOutOfRangeException.ThrowIfGreaterThan(index, 3);
 
         Index = index;
+        Title = $"Mixing circuit {index}";
         var offset = (index - 1) * 10;
         var heatingFeature = LuxtronikFeature.MixingCircuit1Heating + (index - 1) * 2;
         var coolingFeature = heatingFeature + 1;
@@ -31,19 +32,35 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
         Cooling = new LuxtronikCoolingControl(10015 + offset, coolingFeature);
     }
 
+    /// <summary>
+    /// Gets the circuit number, from 1 to 3.
+    /// </summary>
     public int Index { get; }
 
-    public string? Title => $"Mixing circuit {Index}";
+    /// <inheritdoc />
+    public string? Title { get; }
 
+    /// <summary>
+    /// Gets the measured circuit temperature.
+    /// </summary>
     [State(Position = 1)]
     public partial LuxtronikTemperatureSensor Temperature { get; internal set; }
 
+    /// <summary>
+    /// Gets the circuit target temperature and its limits.
+    /// </summary>
     [State(Position = 2)]
     public partial LuxtronikMixingCircuitSetpoints Setpoints { get; internal set; }
 
+    /// <summary>
+    /// Gets the heating control of the circuit.
+    /// </summary>
     [State(Position = 3)]
     public partial LuxtronikControl Heating { get; internal set; }
 
+    /// <summary>
+    /// Gets the cooling control of the circuit.
+    /// </summary>
     [State(Position = 4)]
     public partial LuxtronikCoolingControl Cooling { get; internal set; }
 }

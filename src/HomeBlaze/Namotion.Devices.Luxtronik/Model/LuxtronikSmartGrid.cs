@@ -14,22 +14,35 @@ namespace Namotion.Devices.Luxtronik.Model;
 [InterceptorSubject]
 public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
+    /// <summary>
+    /// Initializes the registers as unknown (<c>null</c>) until they are read.
+    /// </summary>
     public LuxtronikSmartGrid()
     {
         Evu1 = null;
         Evu2 = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress => 10360;
 
+    /// <summary>
+    /// Gets the utility EVU1 signal.
+    /// </summary>
     [LuxtronikInputRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
     public partial bool? Evu1 { get; internal set; }
 
+    /// <summary>
+    /// Gets the utility EVU2 signal.
+    /// </summary>
     [LuxtronikInputRegister(1, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
     public partial bool? Evu2 { get; internal set; }
 
+    /// <summary>
+    /// Gets the Smart Grid state from both EVU signals, or <c>null</c> when either is unknown.
+    /// </summary>
     [Derived]
     [State(IsDiscrete = true, Position = 3)]
     public LuxtronikSmartGridState? State => (Evu1, Evu2) switch

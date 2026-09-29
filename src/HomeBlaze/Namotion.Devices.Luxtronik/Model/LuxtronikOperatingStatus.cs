@@ -13,6 +13,9 @@ namespace Namotion.Devices.Luxtronik.Model;
 [InterceptorSubject]
 public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
 {
+    /// <summary>
+    /// Initializes the registers as unknown (<c>null</c>) until they are read.
+    /// </summary>
     public LuxtronikOperatingStatus()
     {
         HeatPumpStatus = null;
@@ -28,28 +31,47 @@ public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
         CoolingReleased = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress => 10000;
 
+    /// <summary>
+    /// Gets the running compressors and auxiliary heaters.
+    /// </summary>
     [LuxtronikInputRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
     public partial LuxtronikHeatPumpStatus? HeatPumpStatus { get; internal set; }
 
+    /// <summary>
+    /// Gets the current operation of the heat pump.
+    /// </summary>
     [LuxtronikInputRegister(2, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
     public partial LuxtronikOperationMode? OperationMode { get; internal set; }
 
+    /// <summary>
+    /// Gets the state of heating.
+    /// </summary>
     [LuxtronikInputRegister(3, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 3)]
     public partial LuxtronikModeStatus? HeatingStatus { get; internal set; }
 
+    /// <summary>
+    /// Gets the state of hot water.
+    /// </summary>
     [LuxtronikInputRegister(4, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 4)]
     public partial LuxtronikModeStatus? HotWaterStatus { get; internal set; }
 
+    /// <summary>
+    /// Gets the state of cooling.
+    /// </summary>
     [LuxtronikInputRegister(6, ModbusDataType.U16, Feature = LuxtronikFeature.Cooling)]
     [State(IsDiscrete = true, Position = 5)]
     public partial LuxtronikModeStatus? CoolingStatus { get; internal set; }
 
+    /// <summary>
+    /// Gets the state of pool heating.
+    /// </summary>
     [LuxtronikInputRegister(7, ModbusDataType.U16, Feature = LuxtronikFeature.Pool)]
     [State(IsDiscrete = true, Position = 6)]
     public partial LuxtronikModeStatus? PoolHeatingStatus { get; internal set; }
@@ -61,28 +83,46 @@ public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
     [State(IsDiscrete = true, Position = 7)]
     public partial ushort? ErrorCode { get; internal set; }
 
+    /// <summary>
+    /// Gets the configured buffer tank type.
+    /// </summary>
     [LuxtronikInputRegister(202, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 8)]
     public partial LuxtronikBufferType? BufferType { get; internal set; }
 
+    /// <summary>
+    /// Gets the compressor minimum off time.
+    /// </summary>
     [LuxtronikInputRegister(203, ModbusDataType.U16)]
     [State(Unit = StateUnit.Minute, Position = 9)]
     public partial int? MinimumOffTime { get; internal set; }
 
+    /// <summary>
+    /// Gets the compressor minimum run time.
+    /// </summary>
     [LuxtronikInputRegister(204, ModbusDataType.U16)]
     [State(Unit = StateUnit.Minute, Position = 10)]
     public partial int? MinimumRunTime { get; internal set; }
 
+    /// <summary>
+    /// Gets whether cooling is released.
+    /// </summary>
     [LuxtronikInputRegister(207, ModbusDataType.U16, Feature = LuxtronikFeature.Cooling)]
     [State(IsDiscrete = true, Position = 11)]
     public partial bool? CoolingReleased { get; internal set; }
 
+    /// <summary>
+    /// Gets whether a compressor is running, or <c>null</c> when <see cref="HeatPumpStatus"/> is unknown.
+    /// </summary>
     [Derived]
     [State(IsDiscrete = true, Position = 20)]
     public bool? IsCompressorRunning => HeatPumpStatus is { } status
         ? (status & (LuxtronikHeatPumpStatus.Compressor1 | LuxtronikHeatPumpStatus.Compressor2)) != 0
         : null;
 
+    /// <summary>
+    /// Gets whether an auxiliary heater is running, or <c>null</c> when <see cref="HeatPumpStatus"/> is unknown.
+    /// </summary>
     [Derived]
     [State(IsDiscrete = true, Position = 21)]
     public bool? IsAuxiliaryHeaterRunning => HeatPumpStatus is { } status

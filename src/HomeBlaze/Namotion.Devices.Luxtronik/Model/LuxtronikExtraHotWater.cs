@@ -14,6 +14,9 @@ namespace Namotion.Devices.Luxtronik.Model;
 [InterceptorSubject]
 public partial class LuxtronikExtraHotWater : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
+    /// <summary>
+    /// Initializes the registers as unknown (<c>null</c>) until they are read.
+    /// </summary>
     public LuxtronikExtraHotWater()
     {
         Setpoint = null;
@@ -21,16 +24,26 @@ public partial class LuxtronikExtraHotWater : IModbusBaseAddressProvider, ILuxtr
         RemainingDuration = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress => 10500;
 
+    /// <summary>
+    /// Gets the extra hot water target temperature.
+    /// </summary>
     [LuxtronikInputRegister(0, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 1)]
     public partial decimal? Setpoint { get; internal set; }
 
+    /// <summary>
+    /// Gets the requested extra hot water duration.
+    /// </summary>
     [LuxtronikInputRegister(1, ModbusDataType.S16)]
     [State(Unit = StateUnit.Minute, Position = 2)]
     public partial int? Duration { get; internal set; }
 
+    /// <summary>
+    /// Gets the remaining extra hot water duration.
+    /// </summary>
     [LuxtronikInputRegister(2, ModbusDataType.S16)]
     [State(Unit = StateUnit.Minute, Position = 3)]
     public partial int? RemainingDuration { get; internal set; }

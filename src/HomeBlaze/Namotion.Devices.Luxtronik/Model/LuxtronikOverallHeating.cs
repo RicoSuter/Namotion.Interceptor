@@ -14,6 +14,9 @@ namespace Namotion.Devices.Luxtronik.Model;
 [InterceptorSubject]
 public partial class LuxtronikOverallHeating : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
+    /// <summary>
+    /// Initializes the registers as unknown (<c>null</c>) until they are read.
+    /// </summary>
     public LuxtronikOverallHeating()
     {
         Mode = null;
@@ -21,8 +24,12 @@ public partial class LuxtronikOverallHeating : IModbusBaseAddressProvider, ILuxt
         Level = null;
     }
 
+    /// <inheritdoc />
     public int BaseAddress => 10065;
 
+    /// <summary>
+    /// Gets how all heating circuits are controlled.
+    /// </summary>
     [LuxtronikHoldingRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
     public partial LuxtronikOverallHeatingMode? Mode { get; internal set; }
