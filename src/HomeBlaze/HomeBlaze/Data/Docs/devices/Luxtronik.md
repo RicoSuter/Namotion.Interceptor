@@ -10,7 +10,7 @@ Reads Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan and other ait-deutschland
 ## Supported Devices
 
 - Luxtronik 2.1 controllers with the Smart Home Interface, firmware 3.90.1 or later (the minimum the SHI manual names)
-- Values added in firmware 3.92 (thermal energy, operating hours, pump outputs, Smart Grid signals, the outside average, heat source and maximum and calculated flow temperatures, extra hot water state, levels, heating and hot water locks, overall heating control, hot water requests) are read only when the controller runs 3.92 or later; the room temperature setpoint needs 3.92.1
+- Values added in firmware 3.92 (thermal energy, operating hours, pump outputs, Smart Grid signals, the outside average, heat source and maximum and calculated flow temperatures, extra hot water state, levels, heating and hot water locks, overall smart home control, circulation and extra hot water requests) are read only when the controller runs 3.92 or later; the room temperature setpoint needs 3.92.1
 
 ## Safety and Prerequisites
 
@@ -72,34 +72,37 @@ A controller error does not change `Status`: the connection is healthy, so it st
 
 Temperatures are °C, temperature offsets K, power W, energy Wh, durations minutes and operating hours h. Properties are read only; a local change is replaced by the controller value on the next poll.
 
-A value is empty when the controller does not provide it. On every connect the device reads the firmware version and the active functions (discrete inputs 10000 to 10011) and skips values the firmware or the active functions do not support. Values the controller reports as not available (0x7FFF or 0x7FFFFFFF) are also shown empty.
+The model is grouped by function. Measured temperatures are child sensors (`ITemperatureSensor`) and pump outputs are child switches (`ISwitchState`, read only), each titled after what it measures or drives, such as "Return temperature" or "Hot water loading pump (BUP)"; targets, limits, states, locks, energy and operating hours are plain values.
 
-The function flags partly follow the operating modes rather than the configuration: heating is active while the heating mode is not "Aus", cooling while the cooling mode is "Automatisch", and the mixing circuit heating and cooling flags follow the heating and cooling modes as well. Hot water, pool, solar and the room control unit reflect the configuration. The flags are polled with the other values, and when they change the device reconnects and discovers its values again, so switching a mode on makes its values available within a few polling intervals.
+`Heating` and `HotWater` always exist. `Cooling`, `Pool`, `Solar`, `RoomControl` and `MixingCircuit1` to `MixingCircuit3` exist while their function is active on the controller (discrete inputs 10000 to 10011, shown under `Features`); a mixing circuit exists while its heating or its cooling is active. The flags follow the operating modes for heating ("Aus" clears it), hot water ("Aus" clears it), cooling and pool (set only in "Automatisch") and the mixing circuits; solar and the room control unit reflect the configuration. The flags are polled with the other values, and when they change the device reconnects and discovers its values again, so a function appears or disappears within a few polling intervals.
+
+On every connect the device also reads the firmware version and skips values the firmware does not provide. Values the controller reports as not available (0x7FFF or 0x7FFFFFFF) are shown empty.
 
 | Group | Properties |
 |-------|-----------|
 | Device | `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`, `SoftwareVersion` (firmware, such as "3.92.3"), `Power`, `EnergyConsumed`, `ThermalPower`, `ThermalEnergyProduced` |
-| `OperatingStatus` | `HeatPumpStatus` (running compressors and auxiliary heaters), `IsCompressorRunning`, `IsAuxiliaryHeaterRunning`, `OperationMode`, `HeatingStatus`, `HotWaterStatus`, `CoolingStatus`, `PoolHeatingStatus`, `ErrorCode`, `BufferType`, `MinimumOffTime` (cycling lock), `MinimumRunTime`, `CoolingReleased` |
-| `Temperatures` | Sensors: `Return`, `ExternalReturn`, `Flow`, `Room` (needs a room control unit), `Outside`, `OutsideAverage` (24 hours), `HeatSourceInlet`, `HeatSourceOutlet`, `HotWater`. Values: `ReturnTarget`, `ReturnLimit` (maximum return), `ReturnMinimumTarget` (minimum return target), `HeatingLimit`, `MaximumFlow`, `CalculatedFlow` (return target plus spread), `HotWaterTarget`, `HotWaterMinimum`, `HotWaterMaximum`, `HotWaterLimit` (below it the heat pump ignores a soft power limit) |
-| `Energy` | `HeatingPower`, `ElectricalPower`, `MinimumPredictedElectricalPower`; electrical and thermal energy totals for all modes, heating, hot water, cooling and pool |
-| `Runtime` | Operating hours: `HeatPump`, `Heating`, `HotWater`, `Cooling`, `Pool`, `Solar` |
-| `Outputs` | Pump outputs: `BrineCirculationPump` (BOSUP), `MixingCircuit1Pump` to `MixingCircuit3Pump` (FP1 to FP3), `HeatingCirculationPump` (HUP), `HotWaterLoadingPump` (BUP), `CirculationPump` (hot water circulation, ZIP) |
+| `OperatingStatus` | `HeatPumpStatus` (running compressors and auxiliary heaters), `IsCompressorRunning`, `IsAuxiliaryHeaterRunning`, `OperatingState` (heating, hot water, defrost, ...), `ErrorNumber`, `BufferType`, `MinimumOffTime` (cycling lock), `MinimumRunTime`, `OperatingHours`, `BrinePump` (VBO) |
+| `Temperatures` | Sensors of the heat pump itself: `Flow`, `Return`, `Outside`, `OutsideAverage` (24 hours), `HeatSourceInlet`, `HeatSourceOutlet`; `MaximumFlowTemperature` |
+| `Energy` | `ThermalPower`, `ElectricalPower`, `MinimumPredictedElectricalPower`, `TotalElectricalEnergy`, `TotalThermalEnergy` |
 | `SmartGrid` | `Evu1`, `Evu2`, `State` (Locked, Reduced, Normal, Increased) |
-| `ExtraHotWater` | `Setpoint`, `Duration`, `RemainingDuration` |
-| `Features` | Which functions are active on the controller (heating, hot water, cooling, pool, solar, room control unit, heating and cooling per mixing circuit) |
-| `Heating`, `HotWater` | Current SHI control values: `Mode`, `Setpoint`, `Offset`, `Level` |
-| `MixingCircuit1` to `MixingCircuit3` | `Temperature` (flow temperature sensor), `Setpoints` (`Target`, `Minimum`, `Maximum`), `Heating` and `Cooling` SHI controls |
-| `PowerConsumptionLimit`, `Locks`, `RoomControl`, `OverallHeating`, `HotWaterRequests` | Current SHI control values |
+| `PowerConsumptionLimit` | `Mode` (none, soft, hard), `Limit` |
+| `Features` | Which functions are active (see above) |
+| `Heating` | `Status`, `ReturnTarget`, `MinimumReturnTarget`, `ReturnLimit` (maximum return target), `LimitTemperature` (above it heating demand counts as optional), `CalculatedFlowTemperature`, `Locked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `ExternalReturn` sensor (separation or multifunction tank), `CirculationPump` (HUP), `SmartHomeControl`, `OverallSmartHomeControl` |
+| `HotWater` | `Status`, `Target`, `MinimumTarget`, `MaximumTarget`, `LimitTemperature` (below it a soft power limit is ignored), `Locked`, `CirculationRequested`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `Temperature` sensor, `LoadingPump` (BUP), `CirculationPump` (ZIP), `SmartHomeControl`, `ExtraHotWater` (`Requested`, `Target`, `Duration`, `RemainingDuration`) |
+| `Cooling` | `Status`, `Released`, `Locked`, `OperatingHours` (active cooling), `ElectricalEnergy`, `ThermalEnergy` |
+| `Pool` | `Status`, `Locked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy` |
+| `Solar` | `OperatingHours` |
+| `RoomControl` | `Temperature` sensor, `TemperatureSetpoint` |
+| `MixingCircuit1` to `MixingCircuit3` | `Target`, `MinimumTarget` and `MaximumTarget` (read while the circuit heats); `Temperature` flow sensor, `Pump` (FP1 to FP3), `HeatingSmartHomeControl` (read while the circuit heats), `CoolingSmartHomeControl` (read while the circuit cools) |
 
-The SHI control values show what the controller currently uses; with no writing client they read "no influence" (mode 0, locks and requests off).
-
-Each measured temperature is a child sensor titled after its value, such as "Return temperature" or "Mixing circuit 1 temperature".
+The `SmartHomeControl` blocks show the setpoint configuration a smart home system sends over the SHI (the controller lists it under "Empfangene Daten"): `Mode` (no influence, setpoint, offset, level), `Setpoint`, `Offset` and `Level`. The cooling blocks have no `Level`, and `OverallSmartHomeControl` has `Mode` (individual, offset, level), `Offset` and `Level`. With no writing client they read "no influence" ("individual" for the overall block), and locks and requests read off.
 
 ## Interfaces
 
 - `IPowerSensor`: electrical power and consumed energy
-- `IThermalPowerSensor`: heating power and produced thermal energy (thermal energy needs firmware 3.92)
+- `IThermalPowerSensor`: thermal power and produced thermal energy (thermal energy needs firmware 3.92)
 - `ITemperatureSensor`: each measured temperature is its own child sensor
+- `ISwitchState`: each pump output is its own child switch (read only)
 - `IConnectionState`: SHI connection state
 - `ISoftwareState`: controller firmware version (`AvailableSoftwareUpdate` is always empty)
 - `IMonitoredService`: service status and heat pump error number
@@ -119,39 +122,38 @@ Each measured temperature is a child sensor titled after its value, such as "Ret
 ## Troubleshooting
 
 - **Connection refused or timeouts:** the SHI is not enabled on the controller, or a firewall blocks port 502.
-- **Values stay empty:** the function is not configured on the controller or its operating mode is off, or the value needs firmware 3.92. If the controller rejects the read of its configured functions, the device reads every value regardless of configuration and relies on the not-available values instead. A temporary rejection of that read fails the connect, which is retried.
+- **Values stay empty:** the value needs firmware 3.92. If the controller rejects the read of its active functions, the device creates every function and relies on the not-available values instead. A temporary rejection of that read fails the connect, which is retried.
 - **Controller error 816:** more than one client writes the same SHI data point, and the SHI stays disabled while the error persists. HomeBlaze does not write; check the other clients.
 - **SHI "Standby" on the controller:** no requests for 10 minutes; check that HomeBlaze is running and connected.
 - **Hot water or a mixing circuit temperature shows exactly 75.0 °C, or the external return 5.0 °C:** the controller reports these substitute values when the sensor is faulty. They are passed through unfiltered; check the sensor.
-- **A value keeps its last reading after a function was switched off:** functions and firmware are checked on every connect and whenever the function flags change, and a value that a later discovery skips keeps its last reading until HomeBlaze restarts.
+- **`SmartGrid.State` stays empty:** EVU2 (input 10361) is only provided by air heat pumps and propane brine heat pumps; on other models only `Evu1` is read.
+- **A function disappeared:** its operating mode was switched off (see State Properties); it reappears when the mode is switched on again.
 
 ## Modbus Register Map
 
 Addresses are raw Modbus addresses (no +1). Input registers are read with function code 4, holding registers with 3, discrete inputs with 2. Input, holding and discrete input addresses all start at 10000 in separate address spaces. 32-bit values are high word first.
 
-| Address | Space | Content |
-|---------|-------|---------|
-| 10000 | Input | Heat pump status bits (compressors, auxiliary heaters) |
-| 10002 to 10007 | Input | Operation mode, heating, hot water, cooling and pool status |
-| 10100 to 10113 | Input | Return, flow, room, outside and heat source temperatures and limits (0.1 °C); 10109 to 10113 from 3.92 |
-| 10120 to 10124 | Input | Hot water temperature, target and limits (0.1 °C) |
-| 10140 to 10163 | Input | Mixing circuit 1 to 3 flow temperature, target, minimum, maximum (0.1 °C) |
-| 10201 to 10207 | Input | Error number, buffer type, minimum off and run times, cooling release |
-| 10300 to 10302 | Input | Heating power, electrical power, minimum predicted power (0.1 kW) |
-| 10310 to 10329 | Input | Electrical and thermal energy, 32-bit (0.1 kWh); thermal from 3.92 |
-| 10350 to 10356 | Input | Pump outputs (3.92) |
-| 10360 to 10361 | Input | Smart Grid signals EVU1 and EVU2 (3.92) |
-| 10400 to 10402 | Input | Firmware major, minor, patch |
-| 10404 to 10417 | Input | Operating hours, 32-bit (3.92) |
-| 10500 to 10502 | Input | Extra hot water setpoint, duration, remaining time (3.92) |
-| 10000 to 10008 | Holding | Heating and hot water control: mode, setpoint, offset, level (level from 3.92) |
-| 10010 to 10037 | Holding | Mixing circuit 1 to 3 heating and cooling control |
-| 10040 to 10041 | Holding | Power limit mode and value (0.1 kW) |
-| 10050 to 10053 | Holding | Heating, hot water, cooling and pool locks (heating and hot water from 3.92) |
-| 10060 | Holding | Room temperature setpoint (3.92.1, room control unit) |
-| 10065 to 10067 | Holding | Overall heating control (3.92) |
-| 10070 to 10071 | Holding | Circulation and extra hot water requests (3.92) |
-| 10000 to 10011 | Discrete input | Active functions |
+| Group | Space | Addresses |
+|-------|-------|-----------|
+| Firmware | Input | 10400 to 10402 (major, minor, patch) |
+| Functions (`Features`) | Discrete input | 10000 to 10011 |
+| `OperatingStatus` | Input | 10000, 10002, 10201 to 10204, 10404 (3.92), 10350 (3.92) |
+| `Temperatures` | Input | 10100, 10105, 10108, 10109 to 10112 (3.92) |
+| `Energy` | Input | 10300 to 10302, 10310, 10320 (3.92) |
+| `SmartGrid` | Input | 10360, 10361 (3.92) |
+| `PowerConsumptionLimit` | Holding | 10040, 10041 |
+| `Heating` | Input | 10003, 10101 to 10104, 10107, 10113 (3.92), 10312, 10322 (3.92), 10354 (3.92), 10406 (3.92) |
+| `Heating` | Holding | 10000 to 10003 (level 3.92), 10050 (3.92), 10065 to 10067 (3.92) |
+| `HotWater` | Input | 10004, 10120 to 10124, 10314, 10324 (3.92), 10355, 10356 (3.92), 10408 (3.92), 10500 to 10502 (3.92) |
+| `HotWater` | Holding | 10005 to 10008 (level 3.92), 10051 (3.92), 10070, 10071 (3.92) |
+| `Cooling` | Input | 10006, 10207, 10316, 10326 (3.92), 10410 (3.92) |
+| `Cooling` | Holding | 10052 |
+| `Pool` | Input | 10007, 10318, 10328 (3.92), 10412 (3.92) |
+| `Pool` | Holding | 10053 |
+| `Solar` | Input | 10416 (3.92) |
+| `RoomControl` | Input / Holding | 10106 / 10060 (3.92.1) |
+| `MixingCircuit1` to `3` | Input | 10140 to 10143, 10150 to 10153, 10160 to 10163; pumps 10351 to 10353 (3.92) |
+| `MixingCircuit1` to `3` | Holding | heating 10010 to 10013, 10020 to 10023, 10030 to 10033 (level 3.92); cooling 10015 to 10017, 10025 to 10027, 10035 to 10037 |
 
 The firmware gates come from python-luxtronik; the official manual does not version its registers.
 
