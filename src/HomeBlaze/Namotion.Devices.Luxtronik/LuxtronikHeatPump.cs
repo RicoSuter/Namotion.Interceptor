@@ -172,9 +172,9 @@ public partial class LuxtronikHeatPump :
     public string? AvailableSoftwareUpdate => null;
 
     [Derived]
-    public string? Title => string.IsNullOrEmpty(Name) ? "Luxtronik Heat Pump" : Name;
+    public string Title => string.IsNullOrEmpty(Name) ? "Luxtronik Heat Pump" : Name;
 
-    public string? IconName => "HeatPump";
+    public string IconName => "HeatPump";
 
     [Derived]
     public string? IconColor => IsConnected ? "Success" : null;
