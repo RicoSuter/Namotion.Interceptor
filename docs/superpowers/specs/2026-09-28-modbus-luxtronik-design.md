@@ -288,7 +288,7 @@ Resolved properties are claimed, so local changes are routed to `WriteChangesAsy
 In order of authority:
 
 1. AIT, "Betriebsanleitung Smart Home Interface Modbus TCP" (83026900aDE), the official register table. Primary source for addresses, types, scales, enum values, not-available values and timeouts.
-2. AIT, "Betriebsanleitung Luxtronik 2.1 Teil 2" (83055400oDE), SHI activation (pp. 45-46) and Smart Grid (pp. 36-37).
+2. AIT, "Betriebsanleitung Luxtronik 2.1 Teil 2" (83055400pDE), SHI activation and status (pp. 47-48), Smart Grid (pp. 36-37) and error 816 (p. 62).
 3. `Bouni/python-luxtronik` at commit `02afea84bd5bf3ee87445de6f2a42b8029983169` (`definitions/inputs.py`, `definitions/holdings.py`, `datatypes.py`, `constants.py`, `shi/`). Source for the firmware `since` versions, which the official manual does not state.
 4. raibisch LuxModbusSHI, for cross-checks only: its table has known errors (10100/10101 swapped, energy word order, level and buffer type values).
 
@@ -312,7 +312,7 @@ These apply to every Luxtronik class (per `docs/subject-guidelines.md` and the e
 - Register properties are `public partial T? Name { get; internal set; }`, initialized to `null` in the constructor. `internal set` keeps them read-only in the HomeBlaze UI.
 - Every register property carries `[State]` with `Unit` (`DegreeCelsius`, `Kelvin`, `Watt`, `WattHour`, `Minute`, `Hour`), `IsCumulative = true` on energy and runtime totals, `IsDiscrete = true` on enums and bools, and a `Position` ordering the group. Without `[State]` the UI and history ignore a property.
 - Constant, constructor-set metadata (`BaseAddress`, `Title` on sensors, gating information) are plain get-only properties; they never change, so they need no interception.
-- Two preset attributes derived from `ModbusRegisterAttribute` keep the model compact: `LuxtronikInputRegisterAttribute` and `LuxtronikHoldingRegisterAttribute` preset `Space`, `Access = ReadOnly` and `NotAvailableValue = SignedMaximum`, and add `MinimumFirmware` (string such as `"3.92.0"`, parsed once and cached on the attribute) and `Feature` (a `LuxtronikFeature` whose `None = -1` sentinel means no requirement, because attribute arguments cannot be nullable enums; 5.6). Discrete inputs use a plain `ModbusRegisterAttribute`.
+- Two preset attributes keep the model compact: `LuxtronikInputRegisterAttribute` and `LuxtronikHoldingRegisterAttribute` derive from an abstract `LuxtronikRegisterAttribute : ModbusRegisterAttribute`, preset `Space` and `NotAvailableValue = SignedMaximum` (the holding preset also sets `Access = ReadOnly`; `Access` is ignored for input spaces), and add `MinimumFirmware` (string such as `"3.92.0"`, parsed once and cached on the attribute) and `Feature` (a `LuxtronikFeature` whose `None = -1` sentinel means no requirement, because attribute arguments cannot be nullable enums; 5.6). Discrete inputs use a plain `ModbusRegisterAttribute`.
 
 ### 5.3 Model tree
 
@@ -393,14 +393,14 @@ LuxtronikCoolingControl  +0 Mode, +1 Setpoint (°C), +2 Offset (K, S16)
 [InterceptorSubject]
 public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
-    private readonly string? _minimumFirmware;
+    private readonly Version? _minimumFirmwareVersion;
     private readonly LuxtronikFeature _feature;
 
     public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null, LuxtronikFeature feature = LuxtronikFeature.None)
     {
         BaseAddress = address;
         Title = title;
-        _minimumFirmware = minimumFirmware;
+        _minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
         _feature = feature;
         Temperature = null;
     }
@@ -412,7 +412,7 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    string? ILuxtronikGatedSubject.MinimumFirmware => _minimumFirmware;
+    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => _minimumFirmwareVersion;
     LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
 }
 ```
@@ -420,7 +420,7 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
 - Each instance's `BaseAddress` is its own register address. Batching works on addresses, so the sensors still merge into contiguous reads.
 - S16 is used for all temperature registers: the U16 ones (100, 101, 102, 105) decode identically below 3276.7 °C.
 - A parameterized constructor means the generator emits no parameterless constructor. That is fine for children the parent creates (as `EcowittTemperatureSensor(int channel)` does); HomeBlaze never deserializes them because only `[Configuration]` properties are persisted.
-- `ILuxtronikGatedSubject` (internal, implemented explicitly: `MinimumFirmware`, `Feature`) lets a subject carry gating per instance where an attribute on a shared property cannot differ. `LuxtronikMixingCircuit` passes its feature flags to its children the same way.
+- `ILuxtronikGatedSubject` (internal, implemented explicitly: `MinimumFirmwareVersion`, `Feature`) lets a subject carry gating per instance where an attribute on a shared property cannot differ. `LuxtronikMixingCircuit` passes its feature flags to its children the same way.
 
 New abstraction in `HomeBlaze.Abstractions/Sensors/IThermalPowerSensor.cs`, mirroring `IPowerSensor`:
 
@@ -470,10 +470,10 @@ public enum LuxtronikHeatPumpStatus : ushort { None = 0, Compressor1 = 1, Compre
 `LuxtronikHeatPump.DiscoverAsync`:
 
 1. Read input 10400 to 10402. On failure, throw (the connect attempt is retried). Set `SoftwareVersion` via `SetValueFromSource(context.Source, ...)`.
-2. Read discrete inputs 10000 to 10011. If this read fails (the official manual does not version it), skip feature gating and rely on not-available values instead.
+2. Read discrete inputs 10000 to 10011. If this read is permanently rejected (exception codes 1 to 3; the official manual does not version it), every feature gate passes and not-available values mark unconfigured functions instead. A transient rejection fails the connect attempt, which is retried.
 3. Walk the device subtree once. For every register property, gating comes from its preset attribute (`MinimumFirmware`, `Feature`), read from `RegisteredSubjectProperty.ReflectionAttributes`, combined with the declaring subject's `ILuxtronikGatedSubject`. Call `context.ExcludeProperty` when the firmware is older than required or the required feature is not configured.
 
-The model tree is always fully constructed. Excluded properties stay `null` and unclaimed, so the UI can show "not supported" (unclaimed) separately from "not available right now" (claimed, `null` from a not-available value). The firmware `since` versions come from python-luxtronik; the official manual does not version its registers.
+The model tree is always fully constructed. Discovery runs on every connect. Excluded properties stay `null` and unclaimed (a property first excluded on a later reconnect keeps its last value until restart), so the UI can show "not supported" (unclaimed) separately from "not available right now" (claimed, `null` from a not-available value). The firmware `since` versions come from python-luxtronik; the official manual does not version its registers.
 
 ### 5.7 Safety
 
@@ -486,10 +486,11 @@ Read-only use cannot change the heat pump's behavior:
 
 Preconditions documented for the user (HomeBlaze device doc):
 
-- Enabling SHI is a service-menu setting (Service > Systemsteuerung > Konnektivität > Smart Home Interface > ModBus TCP). AIT reserves controller settings for authorized personnel.
-- Note the Smart Grid setting before enabling SHI and do not change it for a read-only test (the manual says SHI and Smart Grid can influence each other; with default holdings SHI exerts no influence).
-- Modbus TCP has no authentication. Keep port 502 LAN-only; never forward it on the router, even though the manual mentions it.
-- Only one SHI writer may be active (a second writer raises error 816). Read-only HomeBlaze is not a writer, but if another tool writes (evcc, SolarManager), continuous reads may keep that tool's last values alive past the 15-minute reset if the timeout is tracked per interface rather than per client.
+- Enabling SHI is a service-menu setting (SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface). AIT reserves controller settings for authorized personnel; change only this setting.
+- Note the Smart Grid setting before enabling SHI. Keep Smart Grid (SG-Ready) off while SHI is in use: the manual says the two can influence each other.
+- SHI has no read-only mode (only on or off) and Modbus TCP has no authentication, so any host reaching port 502 can write. Keep port 502 LAN-only and firewalled to trusted hosts; never forward it on the router, even though the manual mentions it. For extra safety, put a read-only Modbus proxy in front (evcc modbusproxy with `readonly: true` or `readonly: deny`).
+- Several clients may connect, but only one may write: two clients writing the same data point raise error 816, and SHI is disabled while it persists. Read-only HomeBlaze is not a writer, but written values reset 15 minutes after the master's last request and reads count as requests, so continuous polling can keep another client's last written values active.
+- First run: one client at a time, and check that "Empfangene Daten" keeps showing "---".
 - Switch SHI off again if it is not needed after testing.
 
 ### 5.8 HomeBlaze device
@@ -497,7 +498,7 @@ Preconditions documented for the user (HomeBlaze device doc):
 Follows `HomeBlaze.OpcUa/OpcUaClient.cs` and `Namotion.Devices.Wallbox/WallboxCharger.cs`:
 
 - `ExecuteAsync` builds a `ModbusClientConfiguration` from `HostAddress`, `Port` and `PollingInterval`, creates the source with `this.CreateModbusClientSource(configuration, logger)` and attaches it with `AttachHostedServiceAsync`. On stop or configuration change it detaches and disposes the source, then recreates it.
-- Source diagnostics are not tracked properties, so the same loop refreshes the device's partial `[State]` properties every `PollingInterval`: `IsConnected = Diagnostics.IsOperational == true`, `Status` and `StatusMessage` from `Diagnostics.LastError` and `Status.ErrorCode`, `LastUpdated` from `Diagnostics.Polling.LastPollTime` (as `OpcUaClient` does in its diagnostics loop).
+- Source diagnostics are not tracked properties, so the same loop refreshes the device's partial `[State]` properties every `PollingInterval`: `IsConnected = Diagnostics.IsOperational == true`, `Status` Starting until the source reports an error, Error once the connection fails and Running while connected (a non-zero `OperatingStatus.ErrorCode` appears in `StatusMessage` only), `LastUpdated` from `Diagnostics.Polling.LastPollTime` (as `OpcUaClient` does in its diagnostics loop).
 - Deliverables from the `create-homeblaze-library` command: `LuxtronikServiceCollectionExtensions` using `AddHostedSubject`, the device doc and sample configuration (5.10), project references in `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`, and `TypeProvider.AddAssembly` registration for both assemblies in `Program.cs`.
 
 ### 5.9 UI (`Namotion.Devices.Luxtronik.HomeBlaze`)
@@ -517,7 +518,7 @@ Also link the new page from `docs/connectors.md` (connector list) and `README.md
 **`src/HomeBlaze/HomeBlaze/Data/Docs/devices/Luxtronik.md`**, modelled on `Wallbox.md` and `Shelly.md`: frontmatter `title`/`icon`, intro, Supported Devices, Safety and Prerequisites (5.7), Configuration table, State Properties grouped per child subject (property, unit, description), Interfaces, JSON configuration example (`"$type": "Namotion.Devices.Luxtronik.LuxtronikHeatPump"`), Troubleshooting (SHI not enabled, port blocked, error 816, 0x7FFF values, "Standby" status), Modbus Register Map, and a final **References** section:
 
 - AIT, Betriebsanleitung Smart Home Interface Modbus TCP (83026900aDE): https://files.ait-group.net/FILES/Alpha-InnoTec/Betriebsanleitungen/01%20Waermepumpen/05%20Regler/Zubehoer/83026900aDE_SHI.pdf
-- AIT, Betriebsanleitung Luxtronik 2.1 Teil 2 (83055400oDE): https://www.alpha-innotec.com/download/18.682db7e519782568f993847/1752825715519/Betriebsanleitung_Regler_Luxtronik_2.1_Teil_2_83055400oDE.pdf
+- AIT, Betriebsanleitung Luxtronik 2.1 Teil 2 (83055400pDE): https://files.ait-group.net/FILES/Alpha-InnoTec/Betriebsanleitungen/01%20Waermepumpen/05%20Regler/LUX/83055400pDE_Lux_21_Teil_2.pdf
 - python-luxtronik SHI README: https://github.com/Bouni/python-luxtronik/blob/02afea84bd5bf3ee87445de6f2a42b8029983169/luxtronik/shi/README.md
 - python-luxtronik input definitions: https://github.com/Bouni/python-luxtronik/blob/02afea84bd5bf3ee87445de6f2a42b8029983169/luxtronik/definitions/inputs.py
 - python-luxtronik holding definitions: https://github.com/Bouni/python-luxtronik/blob/02afea84bd5bf3ee87445de6f2a42b8029983169/luxtronik/definitions/holdings.py
