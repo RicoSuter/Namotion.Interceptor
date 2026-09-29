@@ -1,0 +1,123 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(LuxtronikHeatPump))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_hostAddress"
+                  Label="Host Address (IP or hostname)"
+                  Required="true"
+                  RequiredError="Host address is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField Value="_port"
+                     ValueChanged="@((int value) => { _port = value; OnFieldChanged(); })"
+                     Label="Port"
+                     Min="1"
+                     Max="65535"
+                     Class="mt-4" />
+
+    <MudNumericField Value="_pollingIntervalSeconds"
+                     ValueChanged="@((int value) => { _pollingIntervalSeconds = value; OnFieldChanged(); })"
+                     Label="Polling Interval (seconds)"
+                     Min="MinimumPollingIntervalSeconds"
+                     Max="300"
+                     Class="mt-4" />
+
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
+        Read only. Enable the Smart Home Interface (ModBus TCP) on the controller and keep port 502 inside your network.
+    </MudAlert>
+
+    @if (!IsCreating && HeatPump is not null)
+    {
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudText>Status: @HeatPump.Status @HeatPump.StatusMessage</MudText>
+        @if (HeatPump.SoftwareVersion is not null)
+        {
+            <MudText>Firmware: @HeatPump.SoftwareVersion</MudText>
+        }
+    }
+</MudForm>
+
+@code {
+    // Matches the minimum the device enforces, so the editor does not accept a value the device silently raises.
+    private const int MinimumPollingIntervalSeconds = 2;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private LuxtronikHeatPump? HeatPump => Subject as LuxtronikHeatPump;
+
+    private string _name = string.Empty;
+    private string? _hostAddress;
+    private int _port = 502;
+    private int _pollingIntervalSeconds = 5;
+
+    private string _originalName = string.Empty;
+    private string? _originalHostAddress;
+    private int _originalPort = 502;
+    private int _originalPollingIntervalSeconds = 5;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
+                           _port is >= 1 and <= 65535 &&
+                           _pollingIntervalSeconds >= MinimumPollingIntervalSeconds;
+
+    public bool IsDirty => _name != _originalName ||
+                           _hostAddress != _originalHostAddress ||
+                           _port != _originalPort ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (HeatPump is not null)
+        {
+            _name = HeatPump.Name;
+            _hostAddress = HeatPump.HostAddress;
+            _port = HeatPump.Port;
+            _pollingIntervalSeconds = (int)HeatPump.PollingInterval.TotalSeconds;
+            StoreOriginalValues();
+        }
+    }
+
+    private void StoreOriginalValues()
+    {
+        _originalName = _name;
+        _originalHostAddress = _hostAddress;
+        _originalPort = _port;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (HeatPump is not null && IsValid)
+        {
+            HeatPump.Name = _name;
+            HeatPump.HostAddress = _hostAddress;
+            HeatPump.Port = _port;
+            HeatPump.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            StoreOriginalValues();
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

@@ -1,0 +1,52 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(LuxtronikHeatPump))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.HeatPump" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(HeatPump?.Title ?? "Luxtronik Heat Pump")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(HeatPump?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(HeatPump?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (HeatPump is not null)
+        {
+            <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
+                @Value("Mode", HeatPump.OperatingStatus.OperationMode?.ToString())
+                @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "°C"))
+                @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "°C"))
+                @Value("Hot water", Format(HeatPump.Temperatures.HotWater.Temperature, "°C"))
+                @Value("Electrical", Format(HeatPump.Energy.ElectricalPower, "W"))
+                @Value("Heating", Format(HeatPump.Energy.HeatingPower, "W"))
+            </MudStack>
+
+            @if (HeatPump.OperatingStatus.ErrorCode is > 0)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">Heat pump error @HeatPump.OperatingStatus.ErrorCode</MudAlert>
+            }
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private LuxtronikHeatPump? HeatPump => Subject as LuxtronikHeatPump;
+
+    private static string? Format(decimal? value, string unit) => value is null ? null : $"{value:0.#} {unit}";
+
+    private static RenderFragment Value(string caption, string? value) =>
+        @<MudStack>
+            <MudText Typo="Typo.caption">@caption</MudText>
+            <MudText Typo="Typo.h5">@(value ?? "-")</MudText>
+        </MudStack>;
+}
