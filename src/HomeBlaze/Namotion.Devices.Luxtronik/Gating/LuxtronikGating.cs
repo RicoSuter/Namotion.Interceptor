@@ -1,4 +1,5 @@
 using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Interceptor.Modbus.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Devices.Luxtronik.Gating;
@@ -53,6 +54,27 @@ internal static class LuxtronikGating
         }
 
         return feature == LuxtronikFeature.None || configuredFeatures is null || configuredFeatures.Contains(feature);
+    }
+
+    /// <summary>
+    /// Gets whether <paramref name="property"/> is a mapped register that can hold <c>null</c>.
+    /// </summary>
+    public static bool IsNullableRegister(RegisteredSubjectProperty property)
+    {
+        if (property.Type.IsValueType && Nullable.GetUnderlyingType(property.Type) is null)
+        {
+            return false;
+        }
+
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            if (attribute is ModbusRegisterAttribute)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static LuxtronikFeature Shift(LuxtronikFeature feature, int offset)

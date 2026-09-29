@@ -76,6 +76,12 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             if (isUnreadableFeatureFlag || !LuxtronikGating.IsSupported(property, firmwareVersion, configuredFeatures))
             {
                 context.ExcludeProperty(property.Reference);
+
+                // A register of a kept subject (a mixing circuit losing one of its flags) would otherwise keep its stale reading.
+                if (LuxtronikGating.IsNullableRegister(property))
+                {
+                    property.Reference.SetValueFromSource(context.Source, null, null, null);
+                }
             }
         }
 

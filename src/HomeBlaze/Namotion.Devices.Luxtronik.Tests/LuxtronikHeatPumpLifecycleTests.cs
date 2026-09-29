@@ -261,6 +261,7 @@ public class LuxtronikHeatPumpLifecycleTests
         server.Start();
         server.SeedTypicalValues();
         server.SetInput<short>(10152, 200);
+        server.SetInput<short>(10153, 450);
         server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling);
 
         await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
@@ -277,10 +278,42 @@ public class LuxtronikHeatPumpLifecycleTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.MixingCircuit2?.MinimumTarget == 20.0m,
+            () => heatPump.MixingCircuit2?.MinimumTarget == 20.0m && heatPump.MixingCircuit2?.MaximumTarget == 45.0m,
             WaitTimeout,
-            message: "The minimum target should be read once the circuit heats.");
+            message: "The minimum and maximum targets should be read once the circuit heats.");
         Assert.Same(circuit, heatPump.MixingCircuit2);
+    }
+
+    [Fact]
+    public async Task WhenMixingCircuitHeatingIsSwitchedOff_ThenItsHeatingValuesAreCleared()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetInput<short>(10151, 350);
+        server.SetInput<short>(10152, 200);
+        server.SetInput<short>(10153, 450);
+        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling, LuxtronikFeature.MixingCircuit2Heating);
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.MixingCircuit2?.MinimumTarget == 20.0m && heatPump.MixingCircuit2?.MaximumTarget == 45.0m,
+            WaitTimeout,
+            message: "The minimum and maximum targets should be read while the circuit heats.");
+        var circuit = heatPump.MixingCircuit2!;
+
+        // Act
+        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => circuit.MinimumTarget is null && circuit.MaximumTarget is null,
+            WaitTimeout,
+            message: "The minimum and maximum targets should be cleared once the circuit only cools.");
+        Assert.Same(circuit, heatPump.MixingCircuit2);
+        Assert.Equal(35.0m, circuit.Target);
     }
 
     private sealed class HostedHeatPump : IAsyncDisposable
