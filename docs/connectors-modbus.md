@@ -80,9 +80,37 @@ Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non
 
 ## Discovery
 
-A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces (`ReadHoldingRegistersAsync(address, count, unitId, cancellationToken)` and its siblings, from the configured unit ID unless one is given), `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Exclusions are reset on every connect. Excluding a property that another mapping names as its `ScaleFactorProperty` makes every connect fail with `ModbusConfigurationException`.
+A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces (`ReadHoldingRegistersAsync(address, count, unitId, cancellationToken)` and its siblings, from the configured unit ID unless one is given), `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Exclusions are reset on every connect. Excluding a property that another mapping names as its `ScaleFactorProperty` makes every connect fail with `ModbusConfigurationException`. Discovery may also create, replace or clear child subjects: the bindings are resolved from the subject tree after `DiscoverAsync` returns, so the registers of a new child are read and the properties of a removed child are released.
 
 Await every context call before the next one and before `DiscoverAsync` returns: the context is not thread-safe, and once `DiscoverAsync` returns it throws `ObjectDisposedException` because polling then uses the connection. A rejected read throws `ModbusResponseException` with the Modbus exception code, and the connection stays usable. Its `IsPermanentRejection` is true for codes 1 to 3 (illegal function, data address or data value), meaning the device does not support the request; other codes, such as 6 (server busy), may pass on a later try. Throwing from `DiscoverAsync` fails the connect attempt, which is retried after `RetryTime`.
+
+## Building a Device Library
+
+A device library is a set of subject classes for one device family, with the connector underneath. The Luxtronik heat pump in `src/HomeBlaze/Namotion.Devices.Luxtronik` is a complete example.
+
+1. Model the device as subjects grouped by what a user looks for (functions, not register blocks), with plain properties for values and child subjects for components such as sensors.
+2. Derive a register attribute that presets what every register of the device shares, such as `Space` and `NotAvailableValue`.
+3. Give a subject that repeats at several addresses an `IModbusBaseAddressProvider`, and use absolute addresses everywhere else.
+4. Implement `IModbusDiscovery` on the root to read version and capability registers on every connect, exclude what the device does not provide, and create or clear the child subjects of optional parts.
+5. Own the source in the device: create it with `CreateModbusClientSource`, restart it when the configuration or a capability read during polling changes, and map `Diagnostics` to the device status.
+6. Test against an in-process FluentModbus `ModbusTcpServer` that rejects unmapped addresses like the real device.
+
+```csharp
+[InterceptorSubject]
+public partial class Inverter : IModbusDiscovery
+{
+    [ModbusRegister(100, ModbusDataType.S32, Space = ModbusAddressSpace.InputRegister, NotAvailableValue = ModbusNotAvailableValue.SignedMinimum)]
+    public partial decimal? Power { get; internal set; }
+
+    public partial Battery? Battery { get; internal set; }
+
+    public async Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken)
+    {
+        var batteryRegisters = await context.ReadInputRegistersAsync(200, 1, cancellationToken: cancellationToken);
+        Battery = batteryRegisters[0] != 0 ? Battery ?? new Battery() : null;
+    }
+}
+```
 
 ## Configuration
 

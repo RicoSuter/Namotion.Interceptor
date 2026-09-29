@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using FluentModbus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -50,6 +51,8 @@ public partial class ModbusSubjectClientSourceTests
 
         public partial SecondUnit? Second { get; set; }
 
+        public partial DiscoveredChild? Discovered { get; set; }
+
         public Func<ModbusDiscoveryContext, CancellationToken, Task>? OnDiscover { get; set; }
 
         public int DiscoveryCount => Volatile.Read(ref _discoveryCount);
@@ -66,6 +69,13 @@ public partial class ModbusSubjectClientSourceTests
     public partial class SecondUnit
     {
         [ModbusRegister(0, ModbusDataType.U16)]
+        public partial int? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class DiscoveredChild
+    {
+        [ModbusRegister(30, ModbusDataType.U16)]
         public partial int? Value { get; set; }
     }
 
@@ -379,6 +389,43 @@ public partial class ModbusSubjectClientSourceTests
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
                 SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
             Assert.True(device.DiscoveryCount >= 2);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenDiscoveryAddsAndLaterRemovesAChildSubject_ThenItsRegistersAreReadAndThenReleased()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        server.SetHoldingRegister<ushort>(30, 9);
+        var isChildActive = new StrongBox<bool>(true);
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = (_, _) =>
+        {
+            testDevice.Discovered = isChildActive.Value ? testDevice.Discovered ?? new DiscoveredChild() : null;
+            return Task.CompletedTask;
+        });
+        try
+        {
+            var child = Assert.IsType<DiscoveredChild>(device.Discovered);
+            Assert.Equal(9, child.Value);
+
+            // Act
+            isChildActive.Value = false;
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+
+            // Assert
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
+                SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
+            Assert.True(device.DiscoveryCount >= 2);
+            Assert.Null(device.Discovered);
+            Assert.False(new PropertyReference(child, nameof(DiscoveredChild.Value)).TryGetSource(out _));
         }
         finally
         {
