@@ -114,13 +114,9 @@ public class LuxtronikModelTests
         Assert.Equal(heatingAddress, circuit.Heating.BaseAddress);
         Assert.Equal(coolingAddress, circuit.Cooling.BaseAddress);
         Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.Temperature).Feature);
-        Assert.Equal(coolingFeature, ((ILuxtronikGatedSubject)circuit.Temperature).AlternativeFeature);
         Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.Setpoints).Feature);
-        Assert.Equal(coolingFeature, ((ILuxtronikGatedSubject)circuit.Setpoints).AlternativeFeature);
         Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.Heating).Feature);
-        Assert.Equal(LuxtronikFeature.None, ((ILuxtronikGatedSubject)circuit.Heating).AlternativeFeature);
         Assert.Equal(coolingFeature, ((ILuxtronikGatedSubject)circuit.Cooling).Feature);
-        Assert.Equal(LuxtronikFeature.None, ((ILuxtronikGatedSubject)circuit.Cooling).AlternativeFeature);
         Assert.Equal($"Mixing circuit {index}", circuit.Title);
         Assert.Equal($"Mixing circuit {index} temperature", circuit.Temperature.Title);
     }

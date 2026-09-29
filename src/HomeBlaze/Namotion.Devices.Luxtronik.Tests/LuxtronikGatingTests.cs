@@ -24,7 +24,7 @@ public class LuxtronikGatingTests
         var minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(minimumFirmwareVersion, LuxtronikFeature.None, LuxtronikFeature.None, new Version(major, minor, patch), configuredFeatures: null);
+        var isSupported = LuxtronikGating.IsSupported(minimumFirmwareVersion, LuxtronikFeature.None, new Version(major, minor, patch), configuredFeatures: null);
 
         // Assert
         Assert.Equal(expected, isSupported);
@@ -37,36 +37,7 @@ public class LuxtronikGatingTests
         var configuredFeatures = new HashSet<LuxtronikFeature> { LuxtronikFeature.Heating };
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFeature.Pool, LuxtronikFeature.None, new Version(3, 92, 3), configuredFeatures);
-
-        // Assert
-        Assert.False(isSupported);
-    }
-
-    [Theory]
-    [InlineData(new[] { LuxtronikFeature.MixingCircuit1Heating }, true)]
-    [InlineData(new[] { LuxtronikFeature.MixingCircuit1Cooling }, true)]
-    [InlineData(new[] { LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling }, true)]
-    [InlineData(new[] { LuxtronikFeature.Heating, LuxtronikFeature.MixingCircuit2Cooling }, false)]
-    public void WhenFeatureHasAnAlternative_ThenEitherConfiguredFeatureSatisfiesIt(LuxtronikFeature[] configuredFeatures, bool expected)
-    {
-        // Act
-        var isSupported = LuxtronikGating.IsSupported(
-            null, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling, new Version(3, 92, 3), configuredFeatures.ToHashSet());
-
-        // Assert
-        Assert.Equal(expected, isSupported);
-    }
-
-    [Fact]
-    public void WhenOnlyTheAlternativeFeatureIsConfiguredButFirmwareIsTooOld_ThenItIsNotSupported()
-    {
-        // Arrange
-        var configuredFeatures = new HashSet<LuxtronikFeature> { LuxtronikFeature.MixingCircuit1Cooling };
-
-        // Act
-        var isSupported = LuxtronikGating.IsSupported(
-            new Version(3, 92, 0), LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling, new Version(3, 90, 1), configuredFeatures);
+        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFeature.Pool, new Version(3, 92, 3), configuredFeatures);
 
         // Assert
         Assert.False(isSupported);
@@ -76,7 +47,7 @@ public class LuxtronikGatingTests
     public void WhenFeatureFlagsAreUnknown_ThenFeatureGatesAreIgnored()
     {
         // Act
-        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFeature.Pool, LuxtronikFeature.None, new Version(3, 92, 3), configuredFeatures: null);
+        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFeature.Pool, new Version(3, 92, 3), configuredFeatures: null);
 
         // Assert
         Assert.True(isSupported);
@@ -162,17 +133,18 @@ public class LuxtronikGatingTests
     }
 
     [Theory]
-    [InlineData(new[] { LuxtronikFeature.Pool }, true)]
-    [InlineData(new[] { LuxtronikFeature.Solar }, true)]
-    [InlineData(new[] { LuxtronikFeature.Heating }, false)]
-    public void WhenSubjectHasAnAlternativeFeature_ThenEitherOneLetsItsPropertiesBeRead(LuxtronikFeature[] configuredFeatures, bool expected)
+    [InlineData(0, new[] { LuxtronikFeature.MixingCircuit1Heating }, true)]
+    [InlineData(2, new[] { LuxtronikFeature.MixingCircuit2Heating }, true)]
+    [InlineData(2, new[] { LuxtronikFeature.MixingCircuit1Heating }, false)]
+    [InlineData(4, new[] { LuxtronikFeature.MixingCircuit3Heating }, true)]
+    [InlineData(4, new[] { LuxtronikFeature.MixingCircuit3Cooling }, false)]
+    public void WhenCircuitSubjectShiftsItsFeatures_ThenTheRegisterRequiresTheCircuitsOwnFlag(
+        int featureOffset, LuxtronikFeature[] configuredFeatures, bool expected)
     {
         // Arrange
-        var property = GetProperty(new LuxtronikGatedTestSubject(CreateContext())
-        {
-            SubjectFeature = LuxtronikFeature.Pool,
-            SubjectAlternativeFeature = LuxtronikFeature.Solar
-        }, nameof(LuxtronikGatedTestSubject.Ungated));
+        var property = GetProperty(
+            new LuxtronikCircuitTestSubject(CreateContext()) { FeatureOffset = featureOffset },
+            nameof(LuxtronikCircuitTestSubject.CircuitGated));
 
         // Act
         var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), configuredFeatures.ToHashSet());

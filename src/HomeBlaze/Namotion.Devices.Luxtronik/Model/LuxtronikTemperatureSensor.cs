@@ -18,23 +18,20 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
 {
     private readonly Version? _minimumFirmwareVersion;
     private readonly LuxtronikFeature _feature;
-    private readonly LuxtronikFeature _alternativeFeature;
 
     /// <summary>
-    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmware"/> and only when <paramref name="feature"/> or <paramref name="alternativeFeature"/> is configured.
+    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmware"/> and only when <paramref name="feature"/> is configured.
     /// </summary>
     public LuxtronikTemperatureSensor(
         int address,
         string title,
         string? minimumFirmware = null,
-        LuxtronikFeature feature = LuxtronikFeature.None,
-        LuxtronikFeature alternativeFeature = LuxtronikFeature.None)
+        LuxtronikFeature feature = LuxtronikFeature.None)
     {
         BaseAddress = address;
         Title = title;
         _minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
         _feature = feature;
-        _alternativeFeature = alternativeFeature;
         Temperature = null;
     }
 
@@ -53,6 +50,4 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => _minimumFirmwareVersion;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
-
-    LuxtronikFeature ILuxtronikGatedSubject.AlternativeFeature => _alternativeFeature;
 }

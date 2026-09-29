@@ -16,33 +16,34 @@ internal static class LuxtronikGating
     public static readonly Version Firmware392 = new(3, 92, 0);
 
     /// <summary>
-    /// Checks the property's register attribute gate and its subject's gate; both must pass.
+    /// Gets whether <paramref name="property"/> is read: its register gates and its subject's gate must all pass.
+    /// On an <see cref="ILuxtronikCircuitSubject"/>, register feature gates are shifted to the circuit's own feature.
     /// </summary>
     public static bool IsSupported(
         RegisteredSubjectProperty property, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
     {
+        var featureOffset = property.Subject is ILuxtronikCircuitSubject circuit ? circuit.FeatureOffset : 0;
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is ILuxtronikRegisterGate gate &&
-                !IsSupported(gate.MinimumFirmwareVersion, gate.Feature, LuxtronikFeature.None, firmwareVersion, configuredFeatures))
+                !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Feature, featureOffset), firmwareVersion, configuredFeatures))
             {
                 return false;
             }
         }
 
         return property.Subject is not ILuxtronikGatedSubject subject ||
-            IsSupported(subject.MinimumFirmwareVersion, subject.Feature, subject.AlternativeFeature, firmwareVersion, configuredFeatures);
+            IsSupported(subject.MinimumFirmwareVersion, subject.Feature, firmwareVersion, configuredFeatures);
     }
 
     /// <summary>
-    /// Checks a firmware requirement and a feature requirement that <paramref name="feature"/> or
-    /// <paramref name="alternativeFeature"/> satisfies. <c>null</c> configured features means the controller does not
+    /// Gets whether a gate passes: the firmware is at least <paramref name="minimumFirmwareVersion"/>, and
+    /// <paramref name="feature"/> is active. <c>null</c> configured features means the controller does not
     /// report them, so feature gates pass.
     /// </summary>
     public static bool IsSupported(
         Version? minimumFirmwareVersion,
         LuxtronikFeature feature,
-        LuxtronikFeature alternativeFeature,
         Version firmwareVersion,
         IReadOnlySet<LuxtronikFeature>? configuredFeatures)
     {
@@ -51,14 +52,11 @@ internal static class LuxtronikGating
             return false;
         }
 
-        if (feature == LuxtronikFeature.None || configuredFeatures is null)
-        {
-            return true;
-        }
-
-        return configuredFeatures.Contains(feature) ||
-            (alternativeFeature != LuxtronikFeature.None && configuredFeatures.Contains(alternativeFeature));
+        return feature == LuxtronikFeature.None || configuredFeatures is null || configuredFeatures.Contains(feature);
     }
+
+    private static LuxtronikFeature Shift(LuxtronikFeature feature, int offset)
+        => feature == LuxtronikFeature.None ? feature : feature + offset;
 
     /// <summary>
     /// Gets the functions whose flag is set; the flag index is the <see cref="LuxtronikFeature"/> value.

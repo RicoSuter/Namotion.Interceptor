@@ -20,8 +20,6 @@ public partial class LuxtronikGatedTestSubject : ILuxtronikGatedSubject
 
     public LuxtronikFeature SubjectFeature { get; init; } = LuxtronikFeature.None;
 
-    public LuxtronikFeature SubjectAlternativeFeature { get; init; } = LuxtronikFeature.None;
-
     [LuxtronikInputRegister(0, ModbusDataType.U16)]
     public partial ushort? Ungated { get; set; }
 
@@ -34,6 +32,4 @@ public partial class LuxtronikGatedTestSubject : ILuxtronikGatedSubject
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => SubjectMinimumFirmwareVersion;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => SubjectFeature;
-
-    LuxtronikFeature ILuxtronikGatedSubject.AlternativeFeature => SubjectAlternativeFeature;
 }

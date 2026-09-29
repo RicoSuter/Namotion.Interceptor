@@ -15,16 +15,14 @@ namespace Namotion.Devices.Luxtronik.Model;
 public partial class LuxtronikMixingCircuitSetpoints : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
     private readonly LuxtronikFeature _feature;
-    private readonly LuxtronikFeature _alternativeFeature;
 
     /// <summary>
-    /// Initializes the setpoints at <paramref name="baseAddress"/> whose registers require <paramref name="feature"/> or <paramref name="alternativeFeature"/>.
+    /// Initializes the setpoints at <paramref name="baseAddress"/> whose registers require <paramref name="feature"/>.
     /// </summary>
-    public LuxtronikMixingCircuitSetpoints(int baseAddress, LuxtronikFeature feature, LuxtronikFeature alternativeFeature)
+    public LuxtronikMixingCircuitSetpoints(int baseAddress, LuxtronikFeature feature)
     {
         BaseAddress = baseAddress;
         _feature = feature;
-        _alternativeFeature = alternativeFeature;
         Target = null;
         Minimum = null;
         Maximum = null;
@@ -57,6 +55,4 @@ public partial class LuxtronikMixingCircuitSetpoints : IModbusBaseAddressProvide
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => null;
 
     LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
-
-    LuxtronikFeature ILuxtronikGatedSubject.AlternativeFeature => _alternativeFeature;
 }

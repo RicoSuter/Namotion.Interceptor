@@ -28,8 +28,8 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
 
         // The manual provides the circuit temperature and setpoints while heating or cooling of the circuit is active.
         Temperature = new LuxtronikTemperatureSensor(
-            10140 + offset, $"Mixing circuit {index} temperature", feature: heatingFeature, alternativeFeature: coolingFeature);
-        Setpoints = new LuxtronikMixingCircuitSetpoints(10141 + offset, heatingFeature, coolingFeature);
+            10140 + offset, $"Mixing circuit {index} temperature", feature: heatingFeature);
+        Setpoints = new LuxtronikMixingCircuitSetpoints(10141 + offset, heatingFeature);
         Heating = new LuxtronikControl(10010 + offset, heatingFeature);
         Cooling = new LuxtronikCoolingControl(10015 + offset, coolingFeature);
     }
