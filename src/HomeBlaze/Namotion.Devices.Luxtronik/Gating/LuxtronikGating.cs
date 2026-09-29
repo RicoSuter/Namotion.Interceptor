@@ -21,28 +21,40 @@ internal static class LuxtronikGating
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is ILuxtronikRegisterGate gate &&
-                !IsSupported(gate.MinimumFirmwareVersion, gate.Feature, firmwareVersion, configuredFeatures))
+                !IsSupported(gate.MinimumFirmwareVersion, gate.Feature, LuxtronikFeature.None, firmwareVersion, configuredFeatures))
             {
                 return false;
             }
         }
 
         return property.Subject is not ILuxtronikGatedSubject subject ||
-            IsSupported(subject.MinimumFirmwareVersion, subject.Feature, firmwareVersion, configuredFeatures);
+            IsSupported(subject.MinimumFirmwareVersion, subject.Feature, subject.AlternativeFeature, firmwareVersion, configuredFeatures);
     }
 
     /// <summary>
-    /// Checks a firmware and feature requirement. <c>null</c> configured features means the controller does not report them, so feature gates pass.
+    /// Checks a firmware requirement and a feature requirement that <paramref name="feature"/> or
+    /// <paramref name="alternativeFeature"/> satisfies. <c>null</c> configured features means the controller does not
+    /// report them, so feature gates pass.
     /// </summary>
     public static bool IsSupported(
-        Version? minimumFirmwareVersion, LuxtronikFeature feature, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
+        Version? minimumFirmwareVersion,
+        LuxtronikFeature feature,
+        LuxtronikFeature alternativeFeature,
+        Version firmwareVersion,
+        IReadOnlySet<LuxtronikFeature>? configuredFeatures)
     {
         if (minimumFirmwareVersion is not null && firmwareVersion < minimumFirmwareVersion)
         {
             return false;
         }
 
-        return feature == LuxtronikFeature.None || configuredFeatures is null || configuredFeatures.Contains(feature);
+        if (feature == LuxtronikFeature.None || configuredFeatures is null)
+        {
+            return true;
+        }
+
+        return configuredFeatures.Contains(feature) ||
+            (alternativeFeature != LuxtronikFeature.None && configuredFeatures.Contains(alternativeFeature));
     }
 
     public static HashSet<LuxtronikFeature> GetConfiguredFeatures(bool[] flags)

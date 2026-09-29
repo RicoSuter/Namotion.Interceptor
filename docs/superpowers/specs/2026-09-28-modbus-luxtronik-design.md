@@ -364,10 +364,10 @@ LuxtronikHeatPump   [Category("Devices")] [Description(...)] BackgroundService s
 ├─ Heating           LuxtronikControl, holding 10000
 ├─ HotWater          LuxtronikControl, holding 10005
 ├─ MixingCircuit1..3 LuxtronikMixingCircuit(index), features MixingCircuitNHeating / MixingCircuitNCooling
-│    ├─ Temperature  LuxtronikTemperatureSensor, input 10140 / 10150 / 10160
-│    ├─ Setpoints    LuxtronikMixingCircuitSetpoints, input 10141 / 10151 / 10161: Target, Minimum, Maximum
-│    ├─ Heating      LuxtronikControl, holding 10010 / 10020 / 10030
-│    └─ Cooling      LuxtronikCoolingControl, holding 10015 / 10025 / 10035
+│    ├─ Temperature  LuxtronikTemperatureSensor, input 10140 / 10150 / 10160 (Heating or Cooling)
+│    ├─ Setpoints    LuxtronikMixingCircuitSetpoints, input 10141 / 10151 / 10161 (Heating or Cooling): Target, Minimum, Maximum
+│    ├─ Heating      LuxtronikControl, holding 10010 / 10020 / 10030 (Heating)
+│    └─ Cooling      LuxtronikCoolingControl, holding 10015 / 10025 / 10035 (Cooling)
 ├─ PowerLimit        LuxtronikPowerLimit, holding 10040: Mode, Limit (Scale 100: kW/10 to W)
 ├─ Locks             LuxtronikLocks, holding 10050 (bool): 52 Cooling (Cooling), 53 Pool (Pool);
 │                    3.92: 50 Heating, 51 HotWater
@@ -420,7 +420,7 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
 - Each instance's `BaseAddress` is its own register address. Batching works on addresses, so the sensors still merge into contiguous reads.
 - S16 is used for all temperature registers: the U16 ones (100, 101, 102, 105) decode identically below 3276.7 °C.
 - A parameterized constructor means the generator emits no parameterless constructor. That is fine for children the parent creates (as `EcowittTemperatureSensor(int channel)` does); HomeBlaze never deserializes them because only `[Configuration]` properties are persisted.
-- `ILuxtronikGatedSubject` (internal, implemented explicitly: `MinimumFirmwareVersion`, `Feature`) lets a subject carry gating per instance where an attribute on a shared property cannot differ. `LuxtronikMixingCircuit` passes its feature flags to its children the same way.
+- `ILuxtronikGatedSubject` (internal, implemented explicitly: `MinimumFirmwareVersion`, `Feature`, and optionally `AlternativeFeature`, which also satisfies the feature requirement) lets a subject carry gating per instance where an attribute on a shared property cannot differ. `LuxtronikMixingCircuit` passes its feature flags to its children the same way: the official manual provides the circuit temperature and setpoints while heating or cooling of that circuit is active, so they pass with either flag, and the heating and cooling controls each require their own.
 
 New abstraction in `HomeBlaze.Abstractions/Sensors/IThermalPowerSensor.cs`, mirroring `IPowerSensor`:
 

@@ -26,8 +26,10 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
         var heatingFeature = LuxtronikFeature.MixingCircuit1Heating + (index - 1) * 2;
         var coolingFeature = heatingFeature + 1;
 
-        Temperature = new LuxtronikTemperatureSensor(10140 + offset, $"Mixing circuit {index} temperature", feature: heatingFeature);
-        Setpoints = new LuxtronikMixingCircuitSetpoints(10141 + offset, heatingFeature);
+        // The manual provides the circuit temperature and setpoints while heating or cooling of the circuit is active.
+        Temperature = new LuxtronikTemperatureSensor(
+            10140 + offset, $"Mixing circuit {index} temperature", feature: heatingFeature, alternativeFeature: coolingFeature);
+        Setpoints = new LuxtronikMixingCircuitSetpoints(10141 + offset, heatingFeature, coolingFeature);
         Heating = new LuxtronikControl(10010 + offset, heatingFeature);
         Cooling = new LuxtronikCoolingControl(10015 + offset, coolingFeature);
     }

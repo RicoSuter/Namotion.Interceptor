@@ -121,7 +121,6 @@ Each measured temperature is a child sensor titled after its value, such as "Ret
 - **Controller error 816:** more than one client writes the same SHI data point, and the SHI stays disabled while the error persists. HomeBlaze does not write; check the other clients.
 - **SHI "Standby" on the controller:** no requests for 10 minutes; check that HomeBlaze is running and connected.
 - **Hot water or a mixing circuit temperature shows exactly 75.0 °C, or the external return 5.0 °C:** the controller reports these substitute values when the sensor is faulty. They are passed through unfiltered; check the sensor.
-- **A cooling-only mixing circuit shows no temperature or setpoints:** these values are read only when the circuit is configured for heating. The controller provides the temperature and target for cooling circuits too, so this is a known limitation.
 - **A value keeps its last reading after a function was switched off:** functions and firmware are checked on every connect, and a value that a later reconnect skips keeps its last reading until HomeBlaze restarts.
 
 ### Register dump

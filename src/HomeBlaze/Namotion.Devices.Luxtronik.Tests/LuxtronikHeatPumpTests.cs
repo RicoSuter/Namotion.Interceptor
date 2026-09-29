@@ -130,6 +130,37 @@ public class LuxtronikHeatPumpTests
     }
 
     [Fact]
+    public async Task WhenMixingCircuitIsConfiguredOnlyForCooling_ThenItsTemperatureAndSetpointsAreRead()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetInput<short>(10150, 215);
+        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.MixingCircuit2Cooling);
+
+        // Act
+        var (heatPump, source, recorder) = await StartAsync(server);
+        try
+        {
+            // Assert
+            Assert.True(IsClaimed(heatPump.MixingCircuit2.Temperature, nameof(LuxtronikTemperatureSensor.Temperature)));
+            Assert.True(IsClaimed(heatPump.MixingCircuit2.Setpoints, nameof(LuxtronikMixingCircuitSetpoints.Target)));
+            Assert.True(IsClaimed(heatPump.MixingCircuit2.Cooling, nameof(LuxtronikCoolingControl.Mode)));
+            Assert.False(IsClaimed(heatPump.MixingCircuit2.Heating, nameof(LuxtronikControl.Mode)));
+            Assert.False(IsClaimed(heatPump.MixingCircuit3.Temperature, nameof(LuxtronikTemperatureSensor.Temperature)));
+            Assert.Equal(21.5m, heatPump.MixingCircuit2.Temperature.Temperature);
+            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenDiscreteInputsAreRejected_ThenNotAvailableValuesMapToNull()
     {
         // Arrange

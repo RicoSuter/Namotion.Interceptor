@@ -10,4 +10,10 @@ internal interface ILuxtronikGatedSubject
     Version? MinimumFirmwareVersion { get; }
 
     LuxtronikFeature Feature { get; }
+
+    /// <summary>
+    /// Gets a second function that also satisfies the <see cref="Feature"/> requirement;
+    /// <see cref="LuxtronikFeature.None"/> means only <see cref="Feature"/> does.
+    /// </summary>
+    LuxtronikFeature AlternativeFeature => LuxtronikFeature.None;
 }
