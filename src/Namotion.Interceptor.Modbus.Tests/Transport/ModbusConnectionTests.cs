@@ -215,9 +215,15 @@ public class ModbusConnectionTests
             var exception = await Record.ExceptionAsync(() => readTask);
 
             // Assert
-            // The aborted socket read surfaces as IOException, or as the stream's ObjectDisposedException when the
-            // read had not started yet, but never as a disposed CancellationTokenSource masking it.
-            Assert.True(exception is IOException or ObjectDisposedException { ObjectName: "System.Net.Sockets.NetworkStream" or "System.Net.Sockets.Socket" }, exception?.ToString());
+            // The connection error depends on the platform (IOException on Windows, FluentModbus's "connection
+            // closed" InvalidOperationException on Linux, or the stream's ObjectDisposedException when the read had
+            // not started yet), but it must never be a disposed CancellationTokenSource masking it.
+            Assert.NotNull(exception);
+            Assert.IsNotType<ModbusResponseException>(exception);
+            Assert.False(
+                exception is ObjectDisposedException disposedException &&
+                disposedException.ObjectName is not ("System.Net.Sockets.NetworkStream" or "System.Net.Sockets.Socket"),
+                exception.ToString());
         }
         finally
         {
