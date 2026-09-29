@@ -261,12 +261,12 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
             {
                 await Task.Delay(_configuration.RetryTime, cancellationToken).ConfigureAwait(false);
                 await OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+                Metrics.MarkOperational();
                 if (_propertyWriter is { } propertyWriter)
                 {
                     await propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                Metrics.MarkOperational();
                 return;
             }
             catch (Exception exception)
@@ -280,6 +280,7 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 Metrics.ReportError(exception);
                 _sessionFactory.LogReconnectFailure(exception);
                 CloseSession();
+                Metrics.MarkNotOperational();
             }
         }
     }

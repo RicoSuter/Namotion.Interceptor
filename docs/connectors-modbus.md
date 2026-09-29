@@ -118,7 +118,7 @@ Mapped properties are owned by the source, so local changes reach it but are not
 
 ## Diagnostics
 
-`ModbusSubjectClientSource.Diagnostics` is a `ModbusClientDiagnostics`, which extends the shared model described in [Connector Diagnostics](connectors.md#connector-diagnostics). `IsOperational` is set once the connection is open and discovery ran, and drops when the connection is lost until the reconnect and the reload have both succeeded. The claimed property count is measured, throughput is not.
+`ModbusSubjectClientSource.Diagnostics` is a `ModbusClientDiagnostics`, which extends the shared model described in [Connector Diagnostics](connectors.md#connector-diagnostics). `IsOperational` is set once the connection is open and discovery ran, and drops when the connection is lost until a reconnect has opened the connection and run discovery again. In both cases it is set before the values are loaded, which `State` reports by reaching `Synchronized`. The claimed property count is measured, throughput is not.
 
 `Polling` adds:
 

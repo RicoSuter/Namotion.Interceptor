@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentModbus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -381,6 +382,42 @@ public partial class ModbusSubjectClientSourceTests
         }
         finally
         {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenSourceReconnects_ThenItIsOperationalBeforeItSynchronizes()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        var (_, source, recorder) = await StartAsync(server);
+        var operationalWhenSynchronized = new ConcurrentQueue<bool?>();
+        void OnStateChanged(object? sender, SourceEvent sourceEvent)
+        {
+            if (sourceEvent.NewState == SourceState.Synchronized)
+            {
+                operationalWhenSynchronized.Enqueue(source.Diagnostics.IsOperational);
+            }
+        }
+
+        source.StateChanged += OnStateChanged;
+        try
+        {
+            // Act
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => !operationalWhenSynchronized.IsEmpty, TimeSpan.FromSeconds(30),
+                message: "The source should synchronize again after the disconnect.");
+            Assert.All(operationalWhenSynchronized, isOperational => Assert.True(isOperational));
+        }
+        finally
+        {
+            source.StateChanged -= OnStateChanged;
             recorder.Dispose();
             await source.DisposeAsync();
         }
