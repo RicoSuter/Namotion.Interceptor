@@ -170,8 +170,9 @@
                             currentPathParts.Add(childKey);
                             currentPath = $"{currentPath}{childKey}/";
                             var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                            _breadcrumbs.Add(new BreadcrumbItem(childKey, breadcrumbPath));
-                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childKey, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
+                            var childDisplayName = GetChildDisplayName(property, child, childKey);
+                            _breadcrumbs.Add(new BreadcrumbItem(childDisplayName, breadcrumbPath));
+                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
                             currentSubject = child;
                             continue;
                         }
@@ -199,7 +200,7 @@
                 currentPathParts.Add(indexStr);
                 currentPath = $"{currentPath}{propertyName}/{indexStr}/";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                var displayName = $"{propertyName}[{indexStr}]";
+                var displayName = GetChildDisplayName(property, child, indexStr);
                 _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
                 _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
@@ -212,8 +213,9 @@
 
                 currentPath = $"{currentPath}{propertyName}/";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                _breadcrumbs.Add(new BreadcrumbItem(propertyName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = propertyName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
+                var displayName = GetChildDisplayName(property, child, index: null);
+                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
+                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
                 currentSubject = child;
             }
             else
@@ -239,9 +241,10 @@
         // Build display name and path using slash notation
         var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
             clickedPane.Subject.GetType(), propertyName);
-        var displayName = index != null
-            ? (isInlinePathsProperty ? index.ToString()! : $"{propertyName}[{index}]")
-            : propertyName;
+        var property = clickedPane.Subject.TryGetRegisteredSubject()?.TryGetProperty(propertyName);
+        var displayName = property is not null
+            ? GetChildDisplayName(property, subject, index)
+            : index?.ToString() ?? propertyName;
         var parentPath = clickedPane.Path.TrimEnd('/');
         var path = index != null
             ? (isInlinePathsProperty
@@ -421,6 +424,10 @@
             _breadcrumbs.Add(new BreadcrumbItem(pane.DisplayName, breadcrumbPath));
         }
     }
+
+    // Breadcrumbs and pane titles use the same label as the child list of the parent pane.
+    private static string GetChildDisplayName(RegisteredSubjectProperty property, IInterceptorSubject child, object? index)
+        => property.GetChildDisplayName(new SubjectPropertyChild { Subject = child, Index = index });
 
     public void Dispose()
     {
