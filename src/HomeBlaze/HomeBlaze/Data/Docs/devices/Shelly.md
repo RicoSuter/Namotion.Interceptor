@@ -75,7 +75,7 @@ Note: The energy meter does not have its own temperature. On devices like the Pr
 ### Input (`input:N`)
 | Property | Description |
 |----------|-------------|
-| `State` | Digital input on/off |
+| `IsActive` | Digital input on/off |
 | `CountTotal` | Counter mode total (if applicable) |
 | `CountFrequency` | Counter frequency in Hz |
 
