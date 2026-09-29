@@ -156,36 +156,6 @@ public class LuxtronikHeatPumpLifecycleTests
     }
 
     [Fact]
-    public async Task WhenCoolingIsSwitchedOn_ThenHeatPumpDiscoversAgainAndReadsTheCoolingRegisters()
-    {
-        // Arrange
-        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
-        server.Start();
-        server.SeedTypicalValues();
-        server.SetInput<ushort>(10006, (ushort)LuxtronikModeStatus.Running);
-        var allFeatures = Enum.GetValues<LuxtronikFeature>().Where(feature => feature != LuxtronikFeature.None).ToArray();
-        server.SetFeatures(allFeatures.Where(feature => feature != LuxtronikFeature.Cooling).ToArray());
-
-        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
-        var heatPump = host.HeatPump;
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.Features.Cooling == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
-            WaitTimeout,
-            message: "The heat pump should read the flags without cooling.");
-        Assert.Null(heatPump.Cooling);
-
-        // Act
-        server.SetFeatures(allFeatures);
-
-        // Assert
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.Cooling?.Status == LuxtronikModeStatus.Running,
-            WaitTimeout,
-            message: "The heat pump should discover again and read the cooling status.");
-        Assert.Equal(2, heatPump.DiscoveryCount);
-    }
-
-    [Fact]
     public async Task WhenFeaturesStayTheSame_ThenHeatPumpDoesNotDiscoverAgain()
     {
         // Arrange
@@ -242,6 +212,7 @@ public class LuxtronikHeatPumpLifecycleTests
             WaitTimeout,
             message: "Cooling should appear and read its status.");
         var cooling = heatPump.Cooling!;
+        Assert.Equal(2, heatPump.DiscoveryCount);
         server.SetFeatures(withoutCooling);
 
         // Assert

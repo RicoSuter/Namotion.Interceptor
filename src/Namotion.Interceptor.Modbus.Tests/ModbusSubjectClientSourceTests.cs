@@ -426,6 +426,12 @@ public partial class ModbusSubjectClientSourceTests
             Assert.True(device.DiscoveryCount >= 2);
             Assert.Null(device.Discovered);
             Assert.False(new PropertyReference(child, nameof(DiscoveredChild.Value)).TryGetSource(out _));
+
+            server.SetHoldingRegister<ushort>(30, 10);
+            var pollsAfterChange = source.Diagnostics.Polling.TotalPolls;
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= pollsAfterChange + 2, TimeSpan.FromSeconds(10),
+                message: "Polling should continue after the child is removed.");
+            Assert.Equal(9, child.Value);
         }
         finally
         {
