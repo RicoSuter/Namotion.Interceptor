@@ -3,6 +3,9 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Devices.Luxtronik.Gating;
 
+/// <summary>
+/// Decides whether a register is read, from the controller firmware and its configured functions.
+/// </summary>
 internal static class LuxtronikGating
 {
     public const int FeatureFlagCount = 12;
@@ -57,6 +60,9 @@ internal static class LuxtronikGating
             (alternativeFeature != LuxtronikFeature.None && configuredFeatures.Contains(alternativeFeature));
     }
 
+    /// <summary>
+    /// Gets the functions whose flag is set; the flag index is the <see cref="LuxtronikFeature"/> value.
+    /// </summary>
     public static HashSet<LuxtronikFeature> GetConfiguredFeatures(bool[] flags)
     {
         var features = new HashSet<LuxtronikFeature>();
