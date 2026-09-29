@@ -87,11 +87,9 @@ public class LuxtronikHeatPumpLifecycleTests
         server.Start();
         server.SeedTypicalValues();
 
-        // Act
+        // Act & Assert
         await using var host = await HostedHeatPump.StartAsync(hostAddress: null, server.Port);
         var heatPump = host.HeatPump;
-
-        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.StatusMessage == "No host address configured",
             WaitTimeout,
@@ -115,11 +113,9 @@ public class LuxtronikHeatPumpLifecycleTests
         server.Start();
         server.SeedTypicalValues();
 
-        // Act
+        // Act & Assert
         await using var host = await HostedHeatPump.StartAsync("127.0.0.1", port: 0);
         var heatPump = host.HeatPump;
-
-        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Status == ServiceStatus.Error,
             WaitTimeout,
@@ -179,8 +175,17 @@ public class LuxtronikHeatPumpLifecycleTests
                 .WithRegistry()
                 .WithHostedServices(services);
             var provider = services.BuildServiceProvider();
-            var handler = Assert.Single(provider.GetServices<IHostedService>());
-            await handler.StartAsync(CancellationToken.None);
+            IHostedService handler;
+            try
+            {
+                handler = Assert.Single(provider.GetServices<IHostedService>());
+                await handler.StartAsync(CancellationToken.None);
+            }
+            catch
+            {
+                await provider.DisposeAsync();
+                throw;
+            }
 
             var heatPump = new LuxtronikHeatPump(NullLogger<LuxtronikHeatPump>.Instance)
             {
