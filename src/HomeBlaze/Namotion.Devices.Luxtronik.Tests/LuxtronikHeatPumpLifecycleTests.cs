@@ -4,8 +4,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Luxtronik.Enums;
+using Namotion.Devices.Luxtronik.Model;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -211,6 +213,74 @@ public class LuxtronikHeatPumpLifecycleTests
         // Assert
         Assert.Equal(1, heatPump.DiscoveryCount);
         Assert.True(heatPump.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenCoolingIsSwitchedOnAndOffAgain_ThenTheCoolingSubjectAppearsAndIsRemoved()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetInput<ushort>(10006, (ushort)LuxtronikModeStatus.Running);
+        var allFeatures = Enum.GetValues<LuxtronikFeature>().Where(feature => feature != LuxtronikFeature.None).ToArray();
+        var withoutCooling = allFeatures.Where(feature => feature != LuxtronikFeature.Cooling).ToArray();
+        server.SetFeatures(withoutCooling);
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.Features.Cooling == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
+            WaitTimeout,
+            message: "The heat pump should read the flags without cooling.");
+        Assert.Null(heatPump.Cooling);
+
+        // Act
+        server.SetFeatures(allFeatures);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.Cooling?.Status == LuxtronikModeStatus.Running,
+            WaitTimeout,
+            message: "Cooling should appear and read its status.");
+        var cooling = heatPump.Cooling!;
+        server.SetFeatures(withoutCooling);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.Cooling is null,
+            WaitTimeout,
+            message: "Cooling should be removed once its flag is clear.");
+        Assert.False(new PropertyReference(cooling, nameof(LuxtronikCooling.Status)).TryGetSource(out _));
+        Assert.Equal(3, heatPump.DiscoveryCount);
+    }
+
+    [Fact]
+    public async Task WhenMixingCircuitHeatingIsSwitchedOn_ThenItsMinimumAndMaximumAreRead()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetInput<short>(10152, 200);
+        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling);
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.MixingCircuit2 is not null && heatPump.Temperatures.Outside.Temperature == -4.5m,
+            WaitTimeout,
+            message: "Mixing circuit 2 should exist for cooling.");
+        var circuit = heatPump.MixingCircuit2!;
+        Assert.Null(circuit.MinimumTarget);
+
+        // Act
+        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling, LuxtronikFeature.MixingCircuit2Heating);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.MixingCircuit2?.MinimumTarget == 20.0m,
+            WaitTimeout,
+            message: "The minimum target should be read once the circuit heats.");
+        Assert.Same(circuit, heatPump.MixingCircuit2);
     }
 
     private sealed class HostedHeatPump : IAsyncDisposable

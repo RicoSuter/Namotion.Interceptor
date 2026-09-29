@@ -5,6 +5,7 @@ using Namotion.Devices.Luxtronik.Attributes;
 using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Devices.Luxtronik.Model;
+using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
 
@@ -173,6 +174,82 @@ public class LuxtronikModelTests
         // Assert
         Assert.NotEmpty(registerProperties);
         Assert.Empty(invalidProperties);
+    }
+
+    [Fact]
+    public void WhenCoolingAndMixingCircuit2CoolingAreActive_ThenOnlyTheirFunctionSubjectsExist()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+
+        // Act
+        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFeature> { LuxtronikFeature.Cooling, LuxtronikFeature.MixingCircuit2Cooling });
+
+        // Assert
+        Assert.NotNull(heatPump.Cooling);
+        Assert.NotNull(heatPump.MixingCircuit2);
+        Assert.Null(heatPump.Pool);
+        Assert.Null(heatPump.Solar);
+        Assert.Null(heatPump.RoomControl);
+        Assert.Null(heatPump.MixingCircuit1);
+        Assert.Null(heatPump.MixingCircuit3);
+    }
+
+    [Fact]
+    public void WhenFunctionsAreUpdatedWithTheSameFeaturesAgain_ThenTheExistingSubjectsAreKept()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+        var activeFeatures = new HashSet<LuxtronikFeature> { LuxtronikFeature.Cooling, LuxtronikFeature.MixingCircuit2Cooling };
+        heatPump.UpdateFunctionSubjects(activeFeatures);
+        var cooling = heatPump.Cooling;
+        var mixingCircuit2 = heatPump.MixingCircuit2;
+
+        // Act
+        heatPump.UpdateFunctionSubjects(activeFeatures);
+
+        // Assert
+        Assert.Same(cooling, heatPump.Cooling);
+        Assert.Same(mixingCircuit2, heatPump.MixingCircuit2);
+    }
+
+    [Fact]
+    public void WhenNoOptionalFeatureIsActiveAnymore_ThenAllOptionalFunctionSubjectsAreRemoved()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+        heatPump.UpdateFunctionSubjects(null);
+
+        // Act
+        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFeature>());
+
+        // Assert
+        Assert.Null(heatPump.Cooling);
+        Assert.Null(heatPump.Pool);
+        Assert.Null(heatPump.Solar);
+        Assert.Null(heatPump.RoomControl);
+        Assert.Null(heatPump.MixingCircuit1);
+        Assert.Null(heatPump.MixingCircuit2);
+        Assert.Null(heatPump.MixingCircuit3);
+    }
+
+    [Fact]
+    public void WhenActiveFeaturesAreUnknown_ThenAllOptionalFunctionSubjectsExist()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+
+        // Act
+        heatPump.UpdateFunctionSubjects(null);
+
+        // Assert
+        Assert.NotNull(heatPump.Cooling);
+        Assert.NotNull(heatPump.Pool);
+        Assert.NotNull(heatPump.Solar);
+        Assert.NotNull(heatPump.RoomControl);
+        Assert.NotNull(heatPump.MixingCircuit1);
+        Assert.NotNull(heatPump.MixingCircuit2);
+        Assert.NotNull(heatPump.MixingCircuit3);
     }
 
     private static List<PropertyInfo> GetRegisterProperties()
