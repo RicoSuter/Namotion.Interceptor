@@ -114,7 +114,7 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
     public partial decimal? ReturnLimit { get; internal set; }
 
     /// <summary>
-    /// Gets the minimum return temperature.
+    /// Gets the minimum return target temperature.
     /// </summary>
     [LuxtronikInputRegister(4, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 22)]

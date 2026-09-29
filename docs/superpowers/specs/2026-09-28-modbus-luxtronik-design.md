@@ -355,7 +355,7 @@ LuxtronikHeatPump   [Category("Devices")] [Description(...)] BackgroundService s
 │            326 CoolingThermalEnergy (Cooling), 328 PoolThermalEnergy (Pool)
 ├─ Outputs           LuxtronikOutputs, input 10350, 3.92, bool
 │    350 BrineCirculationPump, 351 MixingCircuit1Pump, 352 MixingCircuit2Pump, 353 MixingCircuit3Pump,
-│    354 HeatingCirculationPump, 355 HotWaterCirculationPump, 356 CirculationPump
+│    354 HeatingCirculationPump, 355 HotWaterLoadingPump, 356 CirculationPump
 ├─ SmartGrid         LuxtronikSmartGrid, input 10360, 3.92: 360 Evu1, 361 Evu2 (bool), [Derived] State
 ├─ Runtime           LuxtronikRuntime, input 10404, 3.92, U32 hours, IsCumulative
 │    404 HeatPump, 406 Heating, 408 HotWater, 410 Cooling (Cooling), 412 Pool (Pool), 416 Solar (Solar)

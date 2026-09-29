@@ -1257,7 +1257,7 @@ public partial class LuxtronikOutputs : IModbusBaseAddressProvider, ILuxtronikGa
         MixingCircuit2Pump = null;
         MixingCircuit3Pump = null;
         HeatingCirculationPump = null;
-        HotWaterCirculationPump = null;
+        HotWaterLoadingPump = null;
         CirculationPump = null;
     }
 
@@ -1285,7 +1285,7 @@ public partial class LuxtronikOutputs : IModbusBaseAddressProvider, ILuxtronikGa
 
     [LuxtronikInputRegister(5, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 6)]
-    public partial bool? HotWaterCirculationPump { get; internal set; }
+    public partial bool? HotWaterLoadingPump { get; internal set; }
 
     [LuxtronikInputRegister(6, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 7)]
