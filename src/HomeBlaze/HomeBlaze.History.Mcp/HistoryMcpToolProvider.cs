@@ -299,7 +299,7 @@ public class HistoryMcpToolProvider : IMcpToolProvider
         return (path, new
         {
             value_type = valueType,
-            truncated = result.Truncated,
+            truncated = result.IsTruncated,
             coverage = result.CoverageRanges.Select(range => new
             {
                 from = FormatUtc(range.From),

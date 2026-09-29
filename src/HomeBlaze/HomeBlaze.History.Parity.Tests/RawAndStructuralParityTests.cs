@@ -26,7 +26,7 @@ public class RawAndStructuralParityTests
             Aggregation: HistoryAggregations.Last, MaxPoints: 3));
 
         // Assert
-        Assert.True(series.Truncated);
+        Assert.True(series.IsTruncated);
         ParityAssert.NumbersEqual(new double?[] { 2d, 3d, 4d }, series);
     }
 

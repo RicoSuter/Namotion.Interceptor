@@ -20,16 +20,16 @@ internal readonly record struct RawRow(long Ticks, long? Long, double? Double, s
 /// <summary>
 /// The result of routing a value into a <see cref="Row"/>: the row plus whether a string value was
 /// replaced by the oversize placeholder. The engine owns the oversize counter and increments it when
-/// <see cref="Oversized"/> is true (the routing helper is pure and never mutates engine state).
+/// <see cref="IsOversized"/> is true (the routing helper is pure and never mutates engine state).
 /// </summary>
-internal readonly record struct RoutedRow(Row Row, bool Oversized);
+internal readonly record struct RoutedRow(Row Row, bool IsOversized);
 
 /// <summary>
 /// The placeholder stored in place of an oversize string value: a small JSON object recording that the
 /// original was dropped for being too large, with its measured size.
 /// </summary>
 internal readonly record struct OversizePlaceholder(
-    [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool Oversize,
+    [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool IsOversize,
     [property: System.Text.Json.Serialization.JsonPropertyName("size")] int Size);
 
 /// <summary>
@@ -92,7 +92,7 @@ internal static class SqliteValueRouting
 
     // Serializes a value to its JSON text. Returns the placeholder text (and oversized = true) when a
     // string value exceeds the cap; otherwise the verbatim JSON (and oversized = false).
-    public static (string Json, bool Oversized) SerializeJson(object value, int maxJsonSize)
+    public static (string Json, bool IsOversized) SerializeJson(object value, int maxJsonSize)
     {
         // enum -> name; string -> native JSON; oversize string -> placeholder.
         JsonElement element = value is Enum

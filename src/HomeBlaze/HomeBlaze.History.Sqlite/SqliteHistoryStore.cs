@@ -244,7 +244,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
             PublishUncommittedWatermark();
         }
 
-        if (routed.Oversized)
+        if (routed.IsOversized)
         {
             Interlocked.Increment(ref _oversizeCount);
         }

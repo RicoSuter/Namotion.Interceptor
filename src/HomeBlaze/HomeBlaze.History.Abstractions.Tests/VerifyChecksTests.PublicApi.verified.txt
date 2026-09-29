@@ -82,11 +82,11 @@ namespace HomeBlaze.History.Abstractions
     }
     public class HistorySeries : System.IEquatable<HomeBlaze.History.Abstractions.HistorySeries>
     {
-        public HistorySeries(string PropertyPath, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points, bool Truncated, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges) { }
+        public HistorySeries(string PropertyPath, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points, bool IsTruncated, System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges) { }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> CoverageRanges { get; init; }
+        public bool IsTruncated { get; init; }
         public System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryPoint> Points { get; init; }
         public string PropertyPath { get; init; }
-        public bool Truncated { get; init; }
     }
     public interface IHistoryRecorder
     {

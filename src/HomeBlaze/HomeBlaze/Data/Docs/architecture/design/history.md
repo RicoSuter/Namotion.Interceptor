@@ -81,13 +81,13 @@ public record HistoryQuery(
 public record HistorySeries(
     string PropertyPath,
     ImmutableArray<HistoryPoint> Points,
-    bool Truncated,
+    bool IsTruncated,
     ImmutableArray<HistoryCoverage> CoverageRanges);
 ```
 
 Queries require a non-empty path and aggregation, `From < To`, a positive optional bucket, and a positive `MaxPoints`. Every entry point validates these invariants and honors cancellation.
 
-Stores return the newest `MaxPoints` results in ascending timestamp order. `Truncated` is true when older results were omitted. `HistorySeries.CoverageRanges` describes effective coverage within the requested range.
+Stores return the newest `MaxPoints` results in ascending timestamp order. `IsTruncated` is true when older results were omitted. `HistorySeries.CoverageRanges` describes effective coverage within the requested range.
 
 ## Coverage
 
