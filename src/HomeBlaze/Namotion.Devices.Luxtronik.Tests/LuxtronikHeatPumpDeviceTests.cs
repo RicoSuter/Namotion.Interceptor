@@ -56,10 +56,24 @@ public class LuxtronikHeatPumpDeviceTests
     }
 
     [Fact]
-    public void WhenNameIsEmpty_ThenDefaultTitleIsUsed()
+    public void WhenNameIsSet_ThenNameIsTheTitle()
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+
+        // Act
+        heatPump.Name = "Basement heat pump";
+
+        // Assert
+        Assert.Equal("Basement heat pump", heatPump.Title);
+    }
+
+    [Fact]
+    public void WhenNameIsCleared_ThenDefaultTitleIsUsed()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+        heatPump.Name = "Basement heat pump";
 
         // Act
         heatPump.Name = "";

@@ -44,6 +44,10 @@ public partial class LuxtronikHeatPump :
     [State(IsDiscrete = true)]
     public partial bool IsConnected { get; internal set; }
 
+    /// <summary>
+    /// Gets the connection status. A non-zero controller error code is reported in <see cref="StatusMessage"/> while the
+    /// connection is healthy, and the status stays <see cref="ServiceStatus.Running"/>.
+    /// </summary>
     [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; internal set; }
 

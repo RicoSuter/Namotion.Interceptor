@@ -35,7 +35,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             var flags = await context.ReadDiscreteInputsAsync(FeatureFlagsAddress, LuxtronikGating.FeatureFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
             configuredFeatures = LuxtronikGating.GetConfiguredFeatures(flags);
         }
-        catch (ModbusResponseException exception)
+        catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
         {
             _logger.LogInformation(
                 exception,
@@ -68,6 +68,10 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         {
             // A change is already signaled and not yet consumed, which covers this one.
         }
+        catch (ObjectDisposedException)
+        {
+            // The device is disposed, so there is no source left to restart.
+        }
 
         return Task.CompletedTask;
     }
@@ -96,12 +100,13 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     /// <summary>
     /// Mirrors the source diagnostics into <see cref="IsConnected"/>, <see cref="Status"/>, <see cref="StatusMessage"/>
     /// and <see cref="LastUpdated"/>. Disconnected reads as <see cref="ServiceStatus.Error"/> once the source reported an
-    /// error, which stays set while it reconnects.
+    /// error, which stays set while it reconnects. While the connection is healthy, a non-zero controller error code is
+    /// reported in <see cref="StatusMessage"/> and the status stays <see cref="ServiceStatus.Running"/>.
     /// </summary>
     internal void UpdateStatus(ModbusClientDiagnostics diagnostics)
     {
         IsConnected = diagnostics.IsOperational == true;
-        LastUpdated = diagnostics.Polling.LastPollTime;
+        LastUpdated = diagnostics.Polling.LastPollTime ?? LastUpdated;
 
         if (IsConnected)
         {
@@ -129,7 +134,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
                 new ModbusClientConfiguration { Host = hostAddress, Port = Port, PollingInterval = pollingInterval },
                 _logger);
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
             _logger.LogError(exception, "Luxtronik heat pump {HostAddress} has an invalid configuration.", hostAddress);
             Status = ServiceStatus.Error;
@@ -189,7 +194,15 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             _logger.LogWarning(exception, "Failed to detach the Modbus source of {HostAddress}.", hostAddress);
         }
 
-        await source.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await source.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to dispose the Modbus source of {HostAddress}.", hostAddress);
+        }
+
         IsConnected = false;
     }
 
@@ -200,6 +213,10 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             return await _configurationChanged.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
         {
             return false;
         }
