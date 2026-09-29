@@ -49,8 +49,8 @@ public class LuxtronikModelTests
         var smartGrid = new LuxtronikSmartGrid();
 
         // Act
-        smartGrid.Evu1 = evu1;
-        smartGrid.Evu2 = evu2;
+        smartGrid.IsEvu1Active = evu1;
+        smartGrid.IsEvu2Active = evu2;
 
         // Assert
         Assert.Equal(expected, smartGrid.State);
@@ -66,8 +66,8 @@ public class LuxtronikModelTests
         var smartGrid = new LuxtronikSmartGrid();
 
         // Act
-        smartGrid.Evu1 = evu1;
-        smartGrid.Evu2 = evu2;
+        smartGrid.IsEvu1Active = evu1;
+        smartGrid.IsEvu2Active = evu2;
 
         // Assert
         Assert.Null(smartGrid.State);

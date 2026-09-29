@@ -84,13 +84,13 @@ On every connect the device also reads the firmware version and skips values the
 | `OperatingStatus` | `HeatPumpStatus` (running compressors and auxiliary heaters), `IsCompressorRunning`, `IsAuxiliaryHeaterRunning`, `OperatingState` (heating, hot water, defrost, ...), `ErrorNumber`, `BufferType`, `MinimumOffTime` (cycling lock), `MinimumRunTime`, `OperatingHours`, `BrinePump` (VBO) |
 | `Temperatures` | Sensors of the heat pump itself: `Flow`, `Return`, `Outside`, `OutsideAverage` (24 hours), `HeatSourceInlet`, `HeatSourceOutlet`; `MaximumFlowTemperature` |
 | `Energy` | `ThermalPower`, `ElectricalPower`, `MinimumPredictedElectricalPower`, `TotalElectricalEnergy`, `TotalThermalEnergy` |
-| `SmartGrid` | `Evu1`, `Evu2`, `State` (Locked, Reduced, Normal, Increased) |
+| `SmartGrid` | `IsEvu1Active`, `IsEvu2Active`, `State` (Locked, Reduced, Normal, Increased) |
 | `PowerConsumptionLimit` | `Mode` (none, soft, hard), `Limit` |
 | `Functions` | `IsHeatingEnabled`, `IsHotWaterEnabled`, `IsCoolingEnabled`, `IsPoolEnabled` and `IsMixingCircuit1HeatingEnabled` to `IsMixingCircuit3CoolingEnabled` (the operating mode is switched on), `IsSolarConfigured`, `IsRoomControlUnitConfigured` (see above) |
-| `Heating` | `Status` (Off when the operating mode is switched off, NoRequest, Requested, Running), `ReturnTarget`, `MinimumReturnTarget`, `ReturnLimit` (maximum return target), `LimitTemperature` (above it heating demand counts as optional), `CalculatedFlowTemperature`, `Locked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `ExternalReturn` sensor (separation or multifunction tank), `CirculationPump` (HUP), `SmartHomeControl`, `OverallSmartHomeControl` |
-| `HotWater` | `Status`, `Target`, `MinimumTarget`, `MaximumTarget`, `LimitTemperature` (below it a soft power limit is ignored), `Locked`, `CirculationRequested`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `Temperature` sensor, `LoadingPump` (BUP), `CirculationPump` (ZIP), `SmartHomeControl`, `ExtraHotWater` (`Requested`, `Target`, `Duration`, `RemainingDuration`) |
-| `Cooling` | `Status`, `Released`, `Locked`, `OperatingHours` (active cooling), `ElectricalEnergy`, `ThermalEnergy` |
-| `Pool` | `Status`, `Locked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy` |
+| `Heating` | `Status` (Off when the operating mode is switched off, NoRequest, Requested, Running), `ReturnTarget`, `MinimumReturnTarget`, `ReturnLimit` (maximum return target), `LimitTemperature` (above it heating demand counts as optional), `CalculatedFlowTemperature`, `IsLocked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `ExternalReturn` sensor (separation or multifunction tank), `CirculationPump` (HUP), `SmartHomeControl`, `OverallSmartHomeControl` |
+| `HotWater` | `Status`, `Target`, `MinimumTarget`, `MaximumTarget`, `LimitTemperature` (below it a soft power limit is ignored), `IsLocked`, `IsCirculationRequested`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `Temperature` sensor, `LoadingPump` (BUP), `CirculationPump` (ZIP), `SmartHomeControl`, `ExtraHotWater` (`IsRequested`, `Target`, `Duration`, `RemainingDuration`) |
+| `Cooling` | `Status`, `IsReleased`, `IsLocked`, `OperatingHours` (active cooling), `ElectricalEnergy`, `ThermalEnergy` |
+| `Pool` | `Status`, `IsLocked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy` |
 | `Solar` | `OperatingHours` |
 | `RoomControl` | `Temperature` sensor, `TemperatureSetpoint` |
 | `MixingCircuit1` to `MixingCircuit3` | `Target`; `MinimumTarget` and `MaximumTarget` (read while the circuit heats); `Temperature` flow sensor, `Pump` (FP1 to FP3), `HeatingSmartHomeControl` (read while the circuit heats), `CoolingSmartHomeControl` (read while the circuit cools) |
@@ -126,7 +126,7 @@ The `SmartHomeControl` blocks show the setpoint configuration a smart home syste
 - **Controller error 816:** more than one client writes the same SHI data point, and the SHI stays disabled while the error persists. HomeBlaze does not write; check the other clients.
 - **SHI "Standby" on the controller:** no requests for 10 minutes; check that HomeBlaze is running and connected.
 - **Hot water or a mixing circuit temperature shows exactly 75.0 °C, or the external return 5.0 °C:** the controller reports these substitute values when the sensor is faulty. They are passed through unfiltered; check the sensor.
-- **`SmartGrid.State` stays empty:** EVU2 (input 10361) is only provided by air heat pumps and propane brine heat pumps; on other models only `Evu1` is read.
+- **`SmartGrid.State` stays empty:** EVU2 (input 10361) is only provided by air heat pumps and propane brine heat pumps; on other models only `IsEvu1Active` is read.
 - **A function disappeared:** its operating mode was switched off, or, for solar and the room control unit, it is no longer configured (see State Properties); it reappears when switched on again.
 
 ## Modbus Register Map

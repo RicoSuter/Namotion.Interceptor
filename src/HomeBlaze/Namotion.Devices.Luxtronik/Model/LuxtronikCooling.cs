@@ -19,8 +19,8 @@ public partial class LuxtronikCooling
     public LuxtronikCooling()
     {
         Status = null;
-        Released = null;
-        Locked = null;
+        IsReleased = null;
+        IsLocked = null;
         OperatingHours = null;
         ElectricalEnergy = null;
         ThermalEnergy = null;
@@ -38,14 +38,14 @@ public partial class LuxtronikCooling
     /// </summary>
     [LuxtronikInputRegister(10207, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
-    public partial bool? Released { get; internal set; }
+    public partial bool? IsReleased { get; internal set; }
 
     /// <summary>
     /// Gets whether cooling is locked over the SHI.
     /// </summary>
     [LuxtronikHoldingRegister(10052, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 3)]
-    public partial bool? Locked { get; internal set; }
+    public partial bool? IsLocked { get; internal set; }
 
     /// <summary>
     /// Gets the operating hours of active cooling.

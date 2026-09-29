@@ -28,8 +28,8 @@ public partial class LuxtronikHotWater
         MinimumTarget = null;
         MaximumTarget = null;
         LimitTemperature = null;
-        Locked = null;
-        CirculationRequested = null;
+        IsLocked = null;
+        IsCirculationRequested = null;
         OperatingHours = null;
         ElectricalEnergy = null;
         ThermalEnergy = null;
@@ -75,14 +75,14 @@ public partial class LuxtronikHotWater
     /// </summary>
     [LuxtronikHoldingRegister(10051, ModbusDataType.U16, MinimumFirmware = "3.92.0")]
     [State(IsDiscrete = true, Position = 6)]
-    public partial bool? Locked { get; internal set; }
+    public partial bool? IsLocked { get; internal set; }
 
     /// <summary>
     /// Gets whether a circulation run is requested over the SHI.
     /// </summary>
     [LuxtronikHoldingRegister(10070, ModbusDataType.U16, MinimumFirmware = "3.92.0")]
     [State(IsDiscrete = true, Position = 7)]
-    public partial bool? CirculationRequested { get; internal set; }
+    public partial bool? IsCirculationRequested { get; internal set; }
 
     /// <summary>
     /// Gets the operating hours in hot water.

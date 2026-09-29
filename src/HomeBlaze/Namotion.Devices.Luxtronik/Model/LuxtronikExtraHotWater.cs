@@ -19,7 +19,7 @@ public partial class LuxtronikExtraHotWater : ILuxtronikGatedSubject
     /// </summary>
     public LuxtronikExtraHotWater()
     {
-        Requested = null;
+        IsRequested = null;
         Target = null;
         Duration = null;
         RemainingDuration = null;
@@ -30,7 +30,7 @@ public partial class LuxtronikExtraHotWater : ILuxtronikGatedSubject
     /// </summary>
     [LuxtronikHoldingRegister(10071, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
-    public partial bool? Requested { get; internal set; }
+    public partial bool? IsRequested { get; internal set; }
 
     /// <summary>
     /// Gets the extra hot water target temperature.

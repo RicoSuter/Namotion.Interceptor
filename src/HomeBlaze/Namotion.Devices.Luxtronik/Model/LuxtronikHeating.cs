@@ -28,7 +28,7 @@ public partial class LuxtronikHeating
         ReturnLimit = null;
         LimitTemperature = null;
         CalculatedFlowTemperature = null;
-        Locked = null;
+        IsLocked = null;
         OperatingHours = null;
         ElectricalEnergy = null;
         ThermalEnergy = null;
@@ -81,7 +81,7 @@ public partial class LuxtronikHeating
     /// </summary>
     [LuxtronikHoldingRegister(10050, ModbusDataType.U16, MinimumFirmware = "3.92.0")]
     [State(IsDiscrete = true, Position = 7)]
-    public partial bool? Locked { get; internal set; }
+    public partial bool? IsLocked { get; internal set; }
 
     /// <summary>
     /// Gets the operating hours in heating.

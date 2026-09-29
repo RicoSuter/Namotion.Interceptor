@@ -19,7 +19,7 @@ public partial class LuxtronikPool
     public LuxtronikPool()
     {
         Status = null;
-        Locked = null;
+        IsLocked = null;
         OperatingHours = null;
         ElectricalEnergy = null;
         ThermalEnergy = null;
@@ -37,7 +37,7 @@ public partial class LuxtronikPool
     /// </summary>
     [LuxtronikHoldingRegister(10053, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
-    public partial bool? Locked { get; internal set; }
+    public partial bool? IsLocked { get; internal set; }
 
     /// <summary>
     /// Gets the operating hours in pool heating.

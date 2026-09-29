@@ -88,8 +88,8 @@ public class LuxtronikHeatPumpTests
             Assert.Null(heatPump.ThermalEnergyProduced);
             Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.OperatingHours)));
             Assert.False(IsClaimed(heatPump.Heating.SmartHomeControl, nameof(LuxtronikSmartHomeControl.Level)));
-            Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikHeating.Locked)));
-            Assert.True(IsClaimed(heatPump.Cooling!, nameof(LuxtronikCooling.Locked)));
+            Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikHeating.IsLocked)));
+            Assert.True(IsClaimed(heatPump.Cooling!, nameof(LuxtronikCooling.IsLocked)));
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
             Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
         }
