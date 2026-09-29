@@ -21,5 +21,5 @@ public sealed class ModbusResponseException : Exception
     /// Gets whether the device does not support the request: 1 (illegal function), 2 (illegal data address) or
     /// 3 (illegal data value). Any other code, such as 6 (server busy) or a gateway error, may pass on a later try.
     /// </summary>
-    internal bool IsPermanentRejection => ExceptionCode is 1 or 2 or 3;
+    public bool IsPermanentRejection => ExceptionCode is 1 or 2 or 3;
 }

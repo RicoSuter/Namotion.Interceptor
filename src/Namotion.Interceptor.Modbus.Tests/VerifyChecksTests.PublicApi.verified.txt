@@ -120,6 +120,7 @@ namespace Namotion.Interceptor.Modbus
     public sealed class ModbusResponseException : System.Exception
     {
         public int ExceptionCode { get; }
+        public bool IsPermanentRejection { get; }
     }
     public sealed class ModbusSubjectClientSource : Namotion.Interceptor.Connectors.SubjectSourceBase, Namotion.Interceptor.Connectors.IFaultInjectable, System.IAsyncDisposable
     {
