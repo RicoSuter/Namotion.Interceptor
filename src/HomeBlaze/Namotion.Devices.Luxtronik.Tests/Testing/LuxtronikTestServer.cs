@@ -1,7 +1,5 @@
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
-using System.Text.Json;
 using FluentModbus;
 using Namotion.Devices.Luxtronik.Enums;
 
@@ -21,7 +19,7 @@ internal sealed class LuxtronikTestServer : IDisposable
     private static readonly Version Firmware3921 = new(3, 92, 1);
 
     // Mapped registers per the AIT manual and python-luxtronik; MinimumFirmware is null for registers of every firmware.
-    internal static readonly (int Start, int End, Version? MinimumFirmware)[] InputRanges =
+    private static readonly (int Start, int End, Version? MinimumFirmware)[] InputRanges =
     [
         (10000, 10000, null), (10002, 10004, null), (10006, 10007, null),
         (10100, 10108, null), (10109, 10113, Firmware392), (10120, 10124, null),
@@ -32,7 +30,7 @@ internal sealed class LuxtronikTestServer : IDisposable
         (10404, 10413, Firmware392), (10416, 10417, Firmware392), (10500, 10502, Firmware392)
     ];
 
-    internal static readonly (int Start, int End, Version? MinimumFirmware)[] HoldingRanges =
+    private static readonly (int Start, int End, Version? MinimumFirmware)[] HoldingRanges =
     [
         (10000, 10002, null), (10003, 10003, Firmware392), (10005, 10007, null), (10008, 10008, Firmware392),
         (10010, 10012, null), (10013, 10013, Firmware392), (10015, 10017, null),
@@ -135,37 +133,6 @@ internal sealed class LuxtronikTestServer : IDisposable
             for (var index = 0; index < FeatureFlagCount; index++)
             {
                 discreteInputs.Set(FeatureFlagsAddress + index, configuredFeatures.Contains((LuxtronikFeature)index));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Loads a raw register dump in the format written by the hardware test.
-    /// </summary>
-    public void LoadDump(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
-
-        foreach (var register in root.GetProperty("inputRegisters").EnumerateObject())
-        {
-            SetInput(int.Parse(register.Name, CultureInfo.InvariantCulture), register.Value.GetUInt16());
-        }
-
-        foreach (var register in root.GetProperty("holdingRegisters").EnumerateObject())
-        {
-            SetHolding(int.Parse(register.Name, CultureInfo.InvariantCulture), register.Value.GetUInt16());
-        }
-
-        if (root.TryGetProperty("discreteInputs", out var discreteInputs))
-        {
-            var server = GetServer();
-            lock (server.Lock)
-            {
-                foreach (var input in discreteInputs.EnumerateObject())
-                {
-                    server.GetDiscreteInputs(UnitId).Set(int.Parse(input.Name, CultureInfo.InvariantCulture), input.Value.GetBoolean());
-                }
             }
         }
     }

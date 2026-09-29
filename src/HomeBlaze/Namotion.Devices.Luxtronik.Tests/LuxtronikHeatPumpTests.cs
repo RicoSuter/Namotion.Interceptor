@@ -272,35 +272,6 @@ public class LuxtronikHeatPumpTests
         }
     }
 
-    [Fact]
-    public async Task WhenDumpIsLoaded_ThenTheModelReadsIt()
-    {
-        // Arrange
-        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
-        server.Start();
-        server.LoadDump("""
-            {
-              "inputRegisters": { "10105": 400, "10400": 3, "10401": 92, "10402": 3 },
-              "holdingRegisters": { "10001": 330 },
-              "discreteInputs": { "10000": true }
-            }
-            """);
-
-        // Act
-        var (heatPump, source, recorder) = await StartAsync(server);
-        try
-        {
-            // Assert
-            Assert.Equal(40.0m, heatPump.Temperatures.Flow.Temperature);
-            Assert.Equal(33.0m, heatPump.Heating.Setpoint);
-        }
-        finally
-        {
-            recorder.Dispose();
-            await source.DisposeAsync();
-        }
-    }
-
     private static async Task<(LuxtronikHeatPump HeatPump, ModbusSubjectClientSource Source, SourceStateRecorder Recorder)> StartAsync(
         LuxtronikTestServer server)
     {

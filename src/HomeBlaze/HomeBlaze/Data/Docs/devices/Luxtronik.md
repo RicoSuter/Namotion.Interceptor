@@ -123,16 +123,6 @@ Each measured temperature is a child sensor titled after its value, such as "Ret
 - **Hot water or a mixing circuit temperature shows exactly 75.0 °C, or the external return 5.0 °C:** the controller reports these substitute values when the sensor is faulty. They are passed through unfiltered; check the sensor.
 - **A value keeps its last reading after a function was switched off:** functions and firmware are checked on every connect, and a value that a later reconnect skips keeps its last reading until HomeBlaze restarts.
 
-### Register dump
-
-The test project contains a hardware test that reads every mapped register (read function codes only, one request at a time with short pauses), probes one unmapped input register (10001) to record how the controller answers it, and writes the raw values to JSON. It is skipped unless `LUXTRONIK_HOST` is set, so set the variable only in the shell session you run it from and never persistently, otherwise every test run would contact the controller:
-
-```powershell
-$env:LUXTRONIK_HOST='192.168.x.y'; dotnet test src/HomeBlaze/Namotion.Devices.Luxtronik.Tests --filter "FullyQualifiedName~LuxtronikHardwareTests" --logger "console;verbosity=detailed"
-```
-
-The dump is written to `bin/Debug/net10.0/luxtronik-dump.json` in the test project, or to the path in `LUXTRONIK_DUMP_PATH`. `LUXTRONIK_PORT` overrides port 502.
-
 ## Modbus Register Map
 
 Addresses are raw Modbus addresses (no +1). Input registers are read with function code 4, holding registers with 3, discrete inputs with 2. Input, holding and discrete input addresses all start at 10000 in separate address spaces. 32-bit values are high word first.
