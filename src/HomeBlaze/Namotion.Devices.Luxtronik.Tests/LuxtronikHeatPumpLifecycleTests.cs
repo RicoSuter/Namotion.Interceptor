@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
@@ -149,6 +150,66 @@ public class LuxtronikHeatPumpLifecycleTests
             WaitTimeout,
             message: "The heat pump should report the controller error.");
         Assert.Equal(ServiceStatus.Running, heatPump.Status);
+        Assert.True(heatPump.IsConnected);
+    }
+
+    [Fact]
+    public async Task WhenCoolingIsSwitchedOn_ThenHeatPumpDiscoversAgainAndReadsTheCoolingRegisters()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetInput<ushort>(10006, (ushort)LuxtronikModeStatus.Running);
+        var allFeatures = Enum.GetValues<LuxtronikFeature>().Where(feature => feature != LuxtronikFeature.None).ToArray();
+        server.SetFeatures(allFeatures.Where(feature => feature != LuxtronikFeature.Cooling).ToArray());
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.Features.Cooling == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
+            WaitTimeout,
+            message: "The heat pump should read the flags without cooling.");
+        Assert.Null(heatPump.OperatingStatus.CoolingStatus);
+
+        // Act
+        server.SetFeatures(allFeatures);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.OperatingStatus.CoolingStatus == LuxtronikModeStatus.Running,
+            WaitTimeout,
+            message: "The heat pump should discover again and read the cooling status.");
+        Assert.Equal(2, heatPump.DiscoveryCount);
+    }
+
+    [Fact]
+    public async Task WhenFeaturesStayTheSame_ThenHeatPumpDoesNotDiscoverAgain()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Features.GetFeatureMask() is not null && heatPump.LastUpdated is not null,
+            WaitTimeout,
+            message: "The heat pump should connect and read the flags.");
+
+        // Act
+        for (var poll = 0; poll < 2; poll++)
+        {
+            var lastUpdated = heatPump.LastUpdated;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => heatPump.LastUpdated > lastUpdated,
+                WaitTimeout,
+                message: "The heat pump should keep polling.");
+        }
+
+        // Assert
+        Assert.Equal(1, heatPump.DiscoveryCount);
         Assert.True(heatPump.IsConnected);
     }
 

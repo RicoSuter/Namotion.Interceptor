@@ -24,23 +24,37 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     // Protects the controller from a hand-edited configuration that would poll it continuously.
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
 
+    private const int UnknownFeatureMask = -1;
+
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
 
+    // Written by the discovery on the source's thread, read by the status loop.
+    private int _discoveredFeatureMask = UnknownFeatureMask;
+
     /// <summary>
-    /// Reads the firmware version and configured functions, and excludes the registers the controller does not provide.
+    /// Gets how often <see cref="DiscoverAsync"/> ran.
+    /// </summary>
+    internal int DiscoveryCount { get; private set; }
+
+    /// <summary>
+    /// Reads the firmware version and active functions, and excludes the registers the controller does not provide.
     /// </summary>
     public async Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken)
     {
+        DiscoveryCount++;
+
         var versionRegisters = await context.ReadInputRegistersAsync(FirmwareAddress, 3, cancellationToken: cancellationToken).ConfigureAwait(false);
         var firmwareVersion = new Version(versionRegisters[0], versionRegisters[1], versionRegisters[2]);
         new PropertyReference(this, nameof(SoftwareVersion))
             .SetValueFromSource(context.Source, null, null, firmwareVersion.ToString());
 
         IReadOnlySet<LuxtronikFeature>? configuredFeatures = null;
+        var featureMask = UnknownFeatureMask;
         try
         {
             var flags = await context.ReadDiscreteInputsAsync(Features.BaseAddress, LuxtronikGating.FeatureFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
             configuredFeatures = LuxtronikGating.GetConfiguredFeatures(flags);
+            featureMask = LuxtronikGating.GetFeatureMask(flags);
         }
         catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
         {
@@ -62,6 +76,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             }
         }
 
+        Volatile.Write(ref _discoveredFeatureMask, featureMask);
         _logger.LogInformation("Luxtronik {HostAddress} runs firmware {FirmwareVersion}.", HostAddress, firmwareVersion);
     }
 
@@ -159,6 +174,9 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             return;
         }
 
+        // Discards the previous source's discovery, whose mismatch with the polled flags would restart this source again.
+        Volatile.Write(ref _discoveredFeatureMask, UnknownFeatureMask);
+
         var hasFailed = false;
         try
         {
@@ -171,7 +189,8 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             while (!stoppingToken.IsCancellationRequested)
             {
                 UpdateStatus(source.Diagnostics);
-                if (await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false))
+                if (HaveFeaturesChanged(hostAddress) ||
+                    await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false))
                 {
                     break;
                 }
@@ -197,6 +216,24 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         {
             await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Gets whether the polled <see cref="Features"/> differ from the flags the last discovery read, which excluded the
+    /// registers of the inactive functions. <c>false</c> until both are known.
+    /// </summary>
+    private bool HaveFeaturesChanged(string hostAddress)
+    {
+        var discoveredMask = Volatile.Read(ref _discoveredFeatureMask);
+        if (discoveredMask == UnknownFeatureMask || Features.GetFeatureMask() is not { } polledMask || polledMask == discoveredMask)
+        {
+            return false;
+        }
+
+        _logger.LogInformation(
+            "Luxtronik {HostAddress} changed its active functions ({ChangedFeatures}); discovering its registers again.",
+            hostAddress, LuxtronikGating.GetFeatureNames(polledMask ^ discoveredMask));
+        return true;
     }
 
     private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress)

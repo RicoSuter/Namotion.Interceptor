@@ -100,6 +100,24 @@ public class LuxtronikGatingTests
             features.OrderBy(feature => feature));
     }
 
+    [Fact]
+    public void WhenFeatureFlagsDiffer_ThenMaskDifferenceNamesTheChangedFeatures()
+    {
+        // Arrange
+        var previousFlags = new bool[12];
+        previousFlags[0] = true;
+        previousFlags[7] = true;
+        var currentFlags = new bool[12];
+        currentFlags[0] = true;
+        currentFlags[2] = true;
+
+        // Act
+        var changedMask = LuxtronikGating.GetFeatureMask(previousFlags) ^ LuxtronikGating.GetFeatureMask(currentFlags);
+
+        // Assert
+        Assert.Equal("Cooling, MixingCircuit1Cooling", LuxtronikGating.GetFeatureNames(changedMask));
+    }
+
     [Theory]
     [InlineData(null, nameof(LuxtronikGatedTestSubject.Ungated), "3.90.1", true)]
     [InlineData(null, nameof(LuxtronikGatedTestSubject.FirmwareGated), "3.92.3", false)]

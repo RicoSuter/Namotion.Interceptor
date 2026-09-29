@@ -4,7 +4,7 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace Namotion.Devices.Luxtronik.Gating;
 
 /// <summary>
-/// Decides whether a register is read, from the controller firmware and its configured functions.
+/// Decides whether a register is read, from the controller firmware and its active functions.
 /// </summary>
 internal static class LuxtronikGating
 {
@@ -75,5 +75,39 @@ internal static class LuxtronikGating
         }
 
         return features;
+    }
+
+    /// <summary>
+    /// Gets the set flags as a bit mask; the bit index is the <see cref="LuxtronikFeature"/> value.
+    /// </summary>
+    public static int GetFeatureMask(ReadOnlySpan<bool> flags)
+    {
+        var mask = 0;
+        for (var index = 0; index < Math.Min(flags.Length, FeatureFlagCount); index++)
+        {
+            if (flags[index])
+            {
+                mask |= 1 << index;
+            }
+        }
+
+        return mask;
+    }
+
+    /// <summary>
+    /// Gets the names of the functions whose bit is set in <paramref name="mask"/>, separated by commas.
+    /// </summary>
+    public static string GetFeatureNames(int mask)
+    {
+        var names = new List<string>();
+        for (var index = 0; index < FeatureFlagCount; index++)
+        {
+            if ((mask & (1 << index)) != 0)
+            {
+                names.Add(((LuxtronikFeature)index).ToString());
+            }
+        }
+
+        return string.Join(", ", names);
     }
 }
