@@ -170,14 +170,14 @@ public class LuxtronikHeatPumpLifecycleTests
             () => heatPump.Features.Cooling == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
             WaitTimeout,
             message: "The heat pump should read the flags without cooling.");
-        Assert.Null(heatPump.OperatingStatus.CoolingStatus);
+        Assert.Null(heatPump.Cooling);
 
         // Act
         server.SetFeatures(allFeatures);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.OperatingStatus.CoolingStatus == LuxtronikModeStatus.Running,
+            () => heatPump.Cooling?.Status == LuxtronikModeStatus.Running,
             WaitTimeout,
             message: "The heat pump should discover again and read the cooling status.");
         Assert.Equal(2, heatPump.DiscoveryCount);

@@ -30,7 +30,7 @@ public class LuxtronikHeatPumpDeviceTests
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
 
         // Act
-        heatPump.Energy.HeatingPower = 6500m;
+        heatPump.Energy.ThermalPower = 6500m;
         heatPump.Energy.TotalThermalEnergy = 45678900m;
 
         // Assert
@@ -91,9 +91,10 @@ public class LuxtronikHeatPumpDeviceTests
         // Assert
         Assert.Equal(502, heatPump.Port);
         Assert.Equal(TimeSpan.FromSeconds(5), heatPump.PollingInterval);
-        Assert.Equal(10000, heatPump.Heating.BaseAddress);
-        Assert.Equal(10005, heatPump.HotWater.BaseAddress);
-        Assert.Equal(2, heatPump.MixingCircuit2.Index);
+        Assert.Equal(10000, heatPump.Heating.SmartHomeControl.BaseAddress);
+        Assert.Equal(10005, heatPump.HotWater.SmartHomeControl.BaseAddress);
+        Assert.Null(heatPump.Cooling);
+        Assert.Null(heatPump.MixingCircuit1);
     }
 
     [Theory]

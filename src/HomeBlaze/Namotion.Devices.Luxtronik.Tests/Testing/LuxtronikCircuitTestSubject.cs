@@ -12,10 +12,14 @@ public partial class LuxtronikCircuitTestSubject : ILuxtronikCircuitSubject
     public LuxtronikCircuitTestSubject()
     {
         CircuitGated = null;
+        Ungated = null;
     }
 
     public int FeatureOffset { get; init; }
 
     [LuxtronikInputRegister(0, ModbusDataType.U16, Feature = LuxtronikFeature.MixingCircuit1Heating)]
     public partial ushort? CircuitGated { get; set; }
+
+    [LuxtronikInputRegister(1, ModbusDataType.U16)]
+    public partial ushort? Ungated { get; set; }
 }

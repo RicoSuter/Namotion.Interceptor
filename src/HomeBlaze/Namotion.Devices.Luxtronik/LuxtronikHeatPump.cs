@@ -5,7 +5,6 @@ using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Networking;
 using HomeBlaze.Abstractions.Sensors;
 using Microsoft.Extensions.Logging;
-using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Model;
 using Namotion.Interceptor.Attributes;
 
@@ -48,7 +47,7 @@ public partial class LuxtronikHeatPump :
     public partial bool IsConnected { get; internal set; }
 
     /// <summary>
-    /// Gets the connection status. A non-zero controller error code is reported in <see cref="StatusMessage"/> while the
+    /// Gets the connection status. A non-zero controller error number is reported in <see cref="StatusMessage"/> while the
     /// connection is healthy, and the status stays <see cref="ServiceStatus.Running"/>.
     /// </summary>
     [State(IsDiscrete = true)]
@@ -66,59 +65,95 @@ public partial class LuxtronikHeatPump :
     [State]
     public partial string? SoftwareVersion { get; internal set; }
 
+    /// <summary>
+    /// Gets the operating state of the heat pump as a whole.
+    /// </summary>
     [State(Position = 10)]
     public partial LuxtronikOperatingStatus OperatingStatus { get; internal set; }
 
+    /// <summary>
+    /// Gets the temperatures of the heat pump itself.
+    /// </summary>
     [State(Position = 11)]
     public partial LuxtronikTemperatures Temperatures { get; internal set; }
 
+    /// <summary>
+    /// Gets the power and energy totals.
+    /// </summary>
     [State(Position = 12)]
     public partial LuxtronikEnergy Energy { get; internal set; }
 
+    /// <summary>
+    /// Gets the Smart Grid (EVU) signals.
+    /// </summary>
     [State(Position = 13)]
-    public partial LuxtronikRuntime Runtime { get; internal set; }
-
-    [State(Position = 14)]
-    public partial LuxtronikOutputs Outputs { get; internal set; }
-
-    [State(Position = 15)]
     public partial LuxtronikSmartGrid SmartGrid { get; internal set; }
 
-    [State(Position = 16)]
-    public partial LuxtronikExtraHotWater ExtraHotWater { get; internal set; }
-
-    [State(Position = 17)]
-    public partial LuxtronikFeatures Features { get; internal set; }
-
-    [State(Position = 20)]
-    public partial LuxtronikSmartHomeControl Heating { get; internal set; }
-
-    [State(Position = 21)]
-    public partial LuxtronikSmartHomeControl HotWater { get; internal set; }
-
-    [State(Position = 22)]
-    public partial LuxtronikMixingCircuit MixingCircuit1 { get; internal set; }
-
-    [State(Position = 23)]
-    public partial LuxtronikMixingCircuit MixingCircuit2 { get; internal set; }
-
-    [State(Position = 24)]
-    public partial LuxtronikMixingCircuit MixingCircuit3 { get; internal set; }
-
-    [State(Position = 25)]
+    /// <summary>
+    /// Gets the electrical power consumption limit.
+    /// </summary>
+    [State(Position = 14)]
     public partial LuxtronikPowerConsumptionLimit PowerConsumptionLimit { get; internal set; }
 
+    /// <summary>
+    /// Gets which functions are active; the optional function subjects follow these flags.
+    /// </summary>
+    [State(Position = 15)]
+    public partial LuxtronikFeatures Features { get; internal set; }
+
+    /// <summary>
+    /// Gets heating.
+    /// </summary>
+    [State(Position = 20)]
+    public partial LuxtronikHeating Heating { get; internal set; }
+
+    /// <summary>
+    /// Gets hot water.
+    /// </summary>
+    [State(Position = 21)]
+    public partial LuxtronikHotWater HotWater { get; internal set; }
+
+    /// <summary>
+    /// Gets cooling, or <c>null</c> while its flag is clear.
+    /// </summary>
+    [State(Position = 22)]
+    public partial LuxtronikCooling? Cooling { get; internal set; }
+
+    /// <summary>
+    /// Gets pool heating, or <c>null</c> while its flag is clear.
+    /// </summary>
+    [State(Position = 23)]
+    public partial LuxtronikPool? Pool { get; internal set; }
+
+    /// <summary>
+    /// Gets solar, or <c>null</c> while its flag is clear.
+    /// </summary>
+    [State(Position = 24)]
+    public partial LuxtronikSolar? Solar { get; internal set; }
+
+    /// <summary>
+    /// Gets the room control unit, or <c>null</c> while its flag is clear.
+    /// </summary>
+    [State(Position = 25)]
+    public partial LuxtronikRoomControl? RoomControl { get; internal set; }
+
+    /// <summary>
+    /// Gets mixing circuit 1, or <c>null</c> while neither its heating nor its cooling flag is set.
+    /// </summary>
     [State(Position = 26)]
-    public partial LuxtronikLocks Locks { get; internal set; }
+    public partial LuxtronikMixingCircuit? MixingCircuit1 { get; internal set; }
 
+    /// <summary>
+    /// Gets mixing circuit 2, or <c>null</c> while neither its heating nor its cooling flag is set.
+    /// </summary>
     [State(Position = 27)]
-    public partial LuxtronikRoomControl RoomControl { get; internal set; }
+    public partial LuxtronikMixingCircuit? MixingCircuit2 { get; internal set; }
 
+    /// <summary>
+    /// Gets mixing circuit 3, or <c>null</c> while neither its heating nor its cooling flag is set.
+    /// </summary>
     [State(Position = 28)]
-    public partial LuxtronikOverallSmartHomeControl OverallHeating { get; internal set; }
-
-    [State(Position = 29)]
-    public partial LuxtronikHotWaterRequests HotWaterRequests { get; internal set; }
+    public partial LuxtronikMixingCircuit? MixingCircuit3 { get; internal set; }
 
     [Derived]
     public decimal? Power => Energy.ElectricalPower;
@@ -127,7 +162,7 @@ public partial class LuxtronikHeatPump :
     public decimal? EnergyConsumed => Energy.TotalElectricalEnergy;
 
     [Derived]
-    public decimal? ThermalPower => Energy.HeatingPower;
+    public decimal? ThermalPower => Energy.ThermalPower;
 
     [Derived]
     public decimal? ThermalEnergyProduced => Energy.TotalThermalEnergy;
@@ -162,20 +197,17 @@ public partial class LuxtronikHeatPump :
         OperatingStatus = new LuxtronikOperatingStatus();
         Temperatures = new LuxtronikTemperatures();
         Energy = new LuxtronikEnergy();
-        Runtime = new LuxtronikRuntime();
-        Outputs = new LuxtronikOutputs();
         SmartGrid = new LuxtronikSmartGrid();
-        ExtraHotWater = new LuxtronikExtraHotWater();
-        Features = new LuxtronikFeatures();
-        Heating = new LuxtronikSmartHomeControl(10000, LuxtronikFeature.None);
-        HotWater = new LuxtronikSmartHomeControl(10005, LuxtronikFeature.None);
-        MixingCircuit1 = new LuxtronikMixingCircuit(1);
-        MixingCircuit2 = new LuxtronikMixingCircuit(2);
-        MixingCircuit3 = new LuxtronikMixingCircuit(3);
         PowerConsumptionLimit = new LuxtronikPowerConsumptionLimit();
-        Locks = new LuxtronikLocks();
-        RoomControl = new LuxtronikRoomControl();
-        OverallHeating = new LuxtronikOverallSmartHomeControl();
-        HotWaterRequests = new LuxtronikHotWaterRequests();
+        Features = new LuxtronikFeatures();
+        Heating = new LuxtronikHeating();
+        HotWater = new LuxtronikHotWater();
+        Cooling = null;
+        Pool = null;
+        Solar = null;
+        RoomControl = null;
+        MixingCircuit1 = null;
+        MixingCircuit2 = null;
+        MixingCircuit3 = null;
     }
 }

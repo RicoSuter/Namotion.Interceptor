@@ -80,44 +80,31 @@ public class LuxtronikModelTests
 
         // Assert
         Assert.Equal(10108, temperatures.Outside.BaseAddress);
-        Assert.Equal(10120, temperatures.HotWater.BaseAddress);
+        Assert.Equal(10105, temperatures.Flow.BaseAddress);
         Assert.Null(((ILuxtronikGatedSubject)temperatures.Outside).MinimumFirmwareVersion);
         Assert.Equal(new Version(3, 92, 0), ((ILuxtronikGatedSubject)temperatures.HeatSourceInlet).MinimumFirmwareVersion);
         Assert.Equal("Outside temperature", temperatures.Outside.Title);
     }
 
-    [Fact]
-    public void WhenTemperaturesAreConstructed_ThenRoomTemperatureRequiresTheRoomControlUnit()
-    {
-        // Act
-        var temperatures = new LuxtronikTemperatures();
-
-        // Assert
-        Assert.Equal(10106, temperatures.Room.BaseAddress);
-        Assert.Equal(LuxtronikFeature.RoomControlUnit, ((ILuxtronikGatedSubject)temperatures.Room).Feature);
-        Assert.Equal(LuxtronikFeature.None, ((ILuxtronikGatedSubject)temperatures.Outside).Feature);
-    }
-
     [Theory]
-    [InlineData(1, 10140, 10141, 10010, 10015, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling)]
-    [InlineData(2, 10150, 10151, 10020, 10025, LuxtronikFeature.MixingCircuit2Heating, LuxtronikFeature.MixingCircuit2Cooling)]
-    [InlineData(3, 10160, 10161, 10030, 10035, LuxtronikFeature.MixingCircuit3Heating, LuxtronikFeature.MixingCircuit3Cooling)]
-    public void WhenMixingCircuitIsConstructed_ThenChildrenUseItsAddressesAndFeatures(
-        int index, int temperatureAddress, int setpointsAddress, int heatingAddress, int coolingAddress,
-        LuxtronikFeature heatingFeature, LuxtronikFeature coolingFeature)
+    [InlineData(1, 0, 10351, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling)]
+    [InlineData(2, 10, 10352, LuxtronikFeature.MixingCircuit2Heating, LuxtronikFeature.MixingCircuit2Cooling)]
+    [InlineData(3, 20, 10353, LuxtronikFeature.MixingCircuit3Heating, LuxtronikFeature.MixingCircuit3Cooling)]
+    public void WhenMixingCircuitIsConstructed_ThenItAndItsChildrenUseTheCircuitAddressesAndFlags(
+        int index, int baseAddress, int pumpAddress, LuxtronikFeature heatingFeature, LuxtronikFeature coolingFeature)
     {
         // Act
         var circuit = new LuxtronikMixingCircuit(index);
 
         // Assert
-        Assert.Equal(temperatureAddress, circuit.Temperature.BaseAddress);
-        Assert.Equal(setpointsAddress, circuit.Setpoints.BaseAddress);
-        Assert.Equal(heatingAddress, circuit.Heating.BaseAddress);
-        Assert.Equal(coolingAddress, circuit.Cooling.BaseAddress);
-        Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.Temperature).Feature);
-        Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.Setpoints).Feature);
-        Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.Heating).Feature);
-        Assert.Equal(coolingFeature, ((ILuxtronikGatedSubject)circuit.Cooling).Feature);
+        Assert.Equal(baseAddress, circuit.BaseAddress);
+        Assert.Equal(10140 + baseAddress, circuit.Temperature.BaseAddress);
+        Assert.Equal(pumpAddress, circuit.Pump.BaseAddress);
+        Assert.Equal(10010 + baseAddress, circuit.HeatingSmartHomeControl.BaseAddress);
+        Assert.Equal(10015 + baseAddress, circuit.CoolingSmartHomeControl.BaseAddress);
+        Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.HeatingSmartHomeControl).Feature);
+        Assert.Equal(coolingFeature, ((ILuxtronikGatedSubject)circuit.CoolingSmartHomeControl).Feature);
+        Assert.Equal(heatingFeature, LuxtronikFeature.MixingCircuit1Heating + ((ILuxtronikCircuitSubject)circuit).FeatureOffset);
         Assert.Equal($"Mixing circuit {index}", circuit.Title);
         Assert.Equal($"Mixing circuit {index} temperature", circuit.Temperature.Title);
     }
@@ -143,42 +130,7 @@ public class LuxtronikModelTests
         Assert.Equal("Heating circulation pump (HUP)", pump.Title);
         Assert.Null(pump.IsOn);
         Assert.Equal(LuxtronikGating.Firmware392, ((ILuxtronikGatedSubject)pump).MinimumFirmwareVersion);
-    }
-
-    [Fact]
-    public void WhenHoldingSubjectsAreConstructed_ThenTheirGatesFollowTheManual()
-    {
-        // Act
-        var roomControl = (ILuxtronikGatedSubject)new LuxtronikRoomControl();
-        var overallHeating = (ILuxtronikGatedSubject)new LuxtronikOverallSmartHomeControl();
-        var hotWaterRequests = (ILuxtronikGatedSubject)new LuxtronikHotWaterRequests();
-        var control = (ILuxtronikGatedSubject)new LuxtronikSmartHomeControl(10000, LuxtronikFeature.None);
-
-        // Assert
-        Assert.Equal(new Version(3, 92, 1), roomControl.MinimumFirmwareVersion);
-        Assert.Equal(LuxtronikFeature.RoomControlUnit, roomControl.Feature);
-        Assert.Equal(LuxtronikGating.Firmware392, overallHeating.MinimumFirmwareVersion);
-        Assert.Equal(LuxtronikFeature.None, overallHeating.Feature);
-        Assert.Equal(LuxtronikGating.Firmware392, hotWaterRequests.MinimumFirmwareVersion);
-        Assert.Equal(LuxtronikFeature.None, hotWaterRequests.Feature);
-        Assert.Null(control.MinimumFirmwareVersion);
-    }
-
-    [Theory]
-    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Heating), "3.92.0", LuxtronikFeature.None)]
-    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.HotWater), "3.92.0", LuxtronikFeature.None)]
-    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Cooling), null, LuxtronikFeature.Cooling)]
-    [InlineData(typeof(LuxtronikLocks), nameof(LuxtronikLocks.Pool), null, LuxtronikFeature.Pool)]
-    [InlineData(typeof(LuxtronikSmartHomeControl), nameof(LuxtronikSmartHomeControl.Level), "3.92.0", LuxtronikFeature.None)]
-    public void WhenInspectingHoldingRegisters_ThenRegisterGatesFollowTheManual(
-        Type subjectType, string propertyName, string? minimumFirmware, LuxtronikFeature feature)
-    {
-        // Act
-        var attribute = subjectType.GetProperty(propertyName)!.GetCustomAttribute<LuxtronikHoldingRegisterAttribute>()!;
-
-        // Assert
-        Assert.Equal(minimumFirmware, attribute.MinimumFirmware);
-        Assert.Equal(feature, attribute.Feature);
+        Assert.Equal(LuxtronikFeature.None, ((ILuxtronikGatedSubject)pump).Feature);
     }
 
     [Fact]
@@ -221,41 +173,6 @@ public class LuxtronikModelTests
         // Assert
         Assert.NotEmpty(registerProperties);
         Assert.Empty(invalidProperties);
-    }
-
-    [Fact]
-    public void WhenInspectingCoolingPoolAndSolarRegisters_ThenEachRequiresItsFeature()
-    {
-        // Arrange
-        var featuresByPrefix = new Dictionary<string, LuxtronikFeature>
-        {
-            ["Cooling"] = LuxtronikFeature.Cooling,
-            ["Pool"] = LuxtronikFeature.Pool,
-            ["Solar"] = LuxtronikFeature.Solar
-        };
-
-        // Act
-        var gatedRegisters = GetRegisterProperties()
-            .Select(property => (Property: property, Attribute: property.GetCustomAttribute<LuxtronikRegisterAttribute>()))
-            .Where(register => register.Attribute is not null)
-            .Select(register => (
-                register.Property,
-                register.Attribute!.Feature,
-                ExpectedFeature: featuresByPrefix
-                    .Where(pair => register.Property.Name.StartsWith(pair.Key, StringComparison.Ordinal))
-                    .Select(pair => (LuxtronikFeature?)pair.Value)
-                    .FirstOrDefault()))
-            .Where(register => register.ExpectedFeature is not null)
-            .ToList();
-
-        var ungatedRegisters = gatedRegisters
-            .Where(register => register.Feature != register.ExpectedFeature)
-            .Select(register => GetDisplayName(register.Property))
-            .ToList();
-
-        // Assert
-        Assert.NotEmpty(gatedRegisters);
-        Assert.Empty(ungatedRegisters);
     }
 
     private static List<PropertyInfo> GetRegisterProperties()

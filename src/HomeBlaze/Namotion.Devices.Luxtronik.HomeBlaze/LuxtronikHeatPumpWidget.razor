@@ -20,17 +20,17 @@
         @if (HeatPump is not null)
         {
             <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
-                @Value("Mode", GetDisplayName(HeatPump.OperatingStatus.OperationMode))
+                @Value("Mode", GetDisplayName(HeatPump.OperatingStatus.OperatingState))
                 @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "F1", "°C"))
                 @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "F1", "°C"))
-                @Value("Hot water", Format(HeatPump.Temperatures.HotWater.Temperature, "F1", "°C"))
+                @Value("Hot water", Format(HeatPump.HotWater.Temperature.Temperature, "F1", "°C"))
                 @Value("Electrical", Format(HeatPump.Energy.ElectricalPower, "F0", "W"))
-                @Value("Heating", Format(HeatPump.Energy.HeatingPower, "F0", "W"))
+                @Value("Thermal", Format(HeatPump.Energy.ThermalPower, "F0", "W"))
             </MudStack>
 
-            @if (HeatPump.OperatingStatus.ErrorCode is > 0)
+            @if (HeatPump.OperatingStatus.ErrorNumber is > 0)
             {
-                <MudAlert Severity="Severity.Error" Dense="true">Heat pump error @HeatPump.OperatingStatus.ErrorCode</MudAlert>
+                <MudAlert Severity="Severity.Error" Dense="true">Heat pump error @HeatPump.OperatingStatus.ErrorNumber</MudAlert>
             }
         }
     </MudStack>
@@ -45,7 +45,7 @@
     private static string? Format(decimal? value, string format, string unit) =>
         value is null ? null : $"{value.Value.ToString(format)} {unit}";
 
-    private static string? GetDisplayName(LuxtronikOperatingState? mode) => mode switch
+    private static string? GetDisplayName(LuxtronikOperatingState? state) => state switch
     {
         null => null,
         LuxtronikOperatingState.Heating => "Heating",
@@ -56,7 +56,7 @@
         LuxtronikOperatingState.NoRequest => "No request",
         LuxtronikOperatingState.HeatingExternalSource => "Heating (external source)",
         LuxtronikOperatingState.Cooling => "Cooling",
-        _ => mode.ToString()
+        _ => state.ToString()
     };
 
     private static RenderFragment Value(string caption, string? value) =>

@@ -17,21 +17,15 @@ namespace Namotion.Devices.Luxtronik.Model;
 public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
     private readonly Version? _minimumFirmwareVersion;
-    private readonly LuxtronikFeature _feature;
 
     /// <summary>
-    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmware"/> and only when <paramref name="feature"/> is configured.
+    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmware"/>.
     /// </summary>
-    public LuxtronikTemperatureSensor(
-        int address,
-        string title,
-        string? minimumFirmware = null,
-        LuxtronikFeature feature = LuxtronikFeature.None)
+    public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null)
     {
         BaseAddress = address;
         Title = title;
         _minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
-        _feature = feature;
         Temperature = null;
     }
 
@@ -49,5 +43,5 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => _minimumFirmwareVersion;
 
-    LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
+    LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
 }

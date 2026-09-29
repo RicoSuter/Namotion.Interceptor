@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Gating;
+using Namotion.Devices.Luxtronik.Model;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Modbus;
@@ -37,7 +38,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     internal int DiscoveryCount { get; private set; }
 
     /// <summary>
-    /// Reads the firmware version and active functions, and excludes the registers the controller does not provide.
+    /// Reads the firmware version and active functions, creates or removes the optional function subjects, and excludes the registers the controller does not provide.
     /// </summary>
     public async Task DiscoverAsync(ModbusDiscoveryContext context, CancellationToken cancellationToken)
     {
@@ -64,6 +65,8 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
                 HostAddress, exception.ExceptionCode);
         }
 
+        UpdateFunctionSubjects(configuredFeatures);
+
         var registeredSubject = this.TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("The heat pump is not registered. Attach it to a subject graph with a registry.");
 
@@ -78,6 +81,40 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
 
         Volatile.Write(ref _discoveredFeatureMask, featureMask);
         _logger.LogInformation("Luxtronik {HostAddress} runs firmware {FirmwareVersion}.", HostAddress, firmwareVersion);
+    }
+
+    /// <summary>
+    /// Creates the subjects of the active optional functions, keeps existing ones, and removes the inactive ones; all exist when <paramref name="activeFeatures"/> is unknown (<c>null</c>).
+    /// </summary>
+    internal void UpdateFunctionSubjects(IReadOnlySet<LuxtronikFeature>? activeFeatures)
+    {
+        Cooling = GetFunctionSubject(activeFeatures, LuxtronikFeature.Cooling, LuxtronikFeature.None,
+            Cooling, static () => new LuxtronikCooling());
+        Pool = GetFunctionSubject(activeFeatures, LuxtronikFeature.Pool, LuxtronikFeature.None,
+            Pool, static () => new LuxtronikPool());
+        Solar = GetFunctionSubject(activeFeatures, LuxtronikFeature.Solar, LuxtronikFeature.None,
+            Solar, static () => new LuxtronikSolar());
+        RoomControl = GetFunctionSubject(activeFeatures, LuxtronikFeature.RoomControlUnit, LuxtronikFeature.None,
+            RoomControl, static () => new LuxtronikRoomControl());
+        MixingCircuit1 = GetFunctionSubject(activeFeatures, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling,
+            MixingCircuit1, static () => new LuxtronikMixingCircuit(1));
+        MixingCircuit2 = GetFunctionSubject(activeFeatures, LuxtronikFeature.MixingCircuit2Heating, LuxtronikFeature.MixingCircuit2Cooling,
+            MixingCircuit2, static () => new LuxtronikMixingCircuit(2));
+        MixingCircuit3 = GetFunctionSubject(activeFeatures, LuxtronikFeature.MixingCircuit3Heating, LuxtronikFeature.MixingCircuit3Cooling,
+            MixingCircuit3, static () => new LuxtronikMixingCircuit(3));
+    }
+
+    // LuxtronikFeature.None is never active, so it serves as "no alternative".
+    private static TSubject? GetFunctionSubject<TSubject>(
+        IReadOnlySet<LuxtronikFeature>? activeFeatures,
+        LuxtronikFeature feature,
+        LuxtronikFeature alternativeFeature,
+        TSubject? current,
+        Func<TSubject> create)
+        where TSubject : class
+    {
+        var isActive = activeFeatures is null || activeFeatures.Contains(feature) || activeFeatures.Contains(alternativeFeature);
+        return isActive ? current ?? create() : null;
     }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
@@ -122,7 +159,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     /// <summary>
     /// Mirrors the source diagnostics into <see cref="IsConnected"/>, <see cref="Status"/>, <see cref="StatusMessage"/>
     /// and <see cref="LastUpdated"/>. Disconnected reads as <see cref="ServiceStatus.Error"/> once the source reported an
-    /// error, which stays set while it reconnects. While the connection is healthy, a non-zero controller error code is
+    /// error, which stays set while it reconnects. While the connection is healthy, a non-zero controller error number is
     /// reported in <see cref="StatusMessage"/> and the status stays <see cref="ServiceStatus.Running"/>.
     /// </summary>
     internal void UpdateStatus(ModbusClientDiagnostics diagnostics)
@@ -132,9 +169,9 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
 
         if (IsConnected)
         {
-            var errorCode = OperatingStatus.ErrorCode;
+            var errorNumber = OperatingStatus.ErrorNumber;
             Status = ServiceStatus.Running;
-            StatusMessage = errorCode is > 0 ? $"Heat pump error {errorCode}" : null;
+            StatusMessage = errorNumber is > 0 ? $"Heat pump error {errorNumber}" : null;
         }
         else
         {

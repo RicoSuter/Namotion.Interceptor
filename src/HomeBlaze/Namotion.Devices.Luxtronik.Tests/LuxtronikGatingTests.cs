@@ -154,6 +154,22 @@ public class LuxtronikGatingTests
     }
 
     [Fact]
+    public void WhenCircuitSubjectShiftsItsFeatures_ThenAnUngatedRegisterStaysUngated()
+    {
+        // Arrange
+        var property = GetProperty(
+            new LuxtronikCircuitTestSubject(CreateContext()) { FeatureOffset = 2 },
+            nameof(LuxtronikCircuitTestSubject.Ungated));
+
+        // Act
+        var isSupported = LuxtronikGating.IsSupported(
+            property, new Version(3, 92, 3), new HashSet<LuxtronikFeature> { LuxtronikFeature.Heating });
+
+        // Assert
+        Assert.True(isSupported);
+    }
+
+    [Fact]
     public void WhenInspectingTheModel_ThenEveryRegisterMinimumFirmwareIsParseable()
     {
         // Arrange

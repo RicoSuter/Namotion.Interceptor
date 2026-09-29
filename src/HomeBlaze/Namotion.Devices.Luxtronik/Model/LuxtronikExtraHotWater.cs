@@ -9,43 +9,48 @@ using Namotion.Interceptor.Modbus;
 namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
-/// Extra hot water request state (inputs 10500 to 10502), firmware 3.92 and later.
+/// Extra hot water: the SHI request (holding 10071) and its state (inputs 10500 to 10502), firmware 3.92 and later.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikExtraHotWater : IModbusBaseAddressProvider, ILuxtronikGatedSubject
+public partial class LuxtronikExtraHotWater : ILuxtronikGatedSubject
 {
     /// <summary>
     /// Initializes the registers as unknown (<c>null</c>) until they are read.
     /// </summary>
     public LuxtronikExtraHotWater()
     {
-        Setpoint = null;
+        Requested = null;
+        Target = null;
         Duration = null;
         RemainingDuration = null;
     }
 
-    /// <inheritdoc />
-    public int BaseAddress => 10500;
+    /// <summary>
+    /// Gets whether extra hot water is requested over the SHI.
+    /// </summary>
+    [LuxtronikHoldingRegister(10071, ModbusDataType.U16)]
+    [State(IsDiscrete = true, Position = 1)]
+    public partial bool? Requested { get; internal set; }
 
     /// <summary>
     /// Gets the extra hot water target temperature.
     /// </summary>
-    [LuxtronikInputRegister(0, ModbusDataType.S16, Scale = 0.1)]
-    [State(Unit = StateUnit.DegreeCelsius, Position = 1)]
-    public partial decimal? Setpoint { get; internal set; }
+    [LuxtronikInputRegister(10500, ModbusDataType.S16, Scale = 0.1)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 2)]
+    public partial decimal? Target { get; internal set; }
 
     /// <summary>
     /// Gets the requested extra hot water duration.
     /// </summary>
-    [LuxtronikInputRegister(1, ModbusDataType.S16)]
-    [State(Unit = StateUnit.Minute, Position = 2)]
+    [LuxtronikInputRegister(10501, ModbusDataType.S16)]
+    [State(Unit = StateUnit.Minute, Position = 3)]
     public partial int? Duration { get; internal set; }
 
     /// <summary>
     /// Gets the remaining extra hot water duration.
     /// </summary>
-    [LuxtronikInputRegister(2, ModbusDataType.S16)]
-    [State(Unit = StateUnit.Minute, Position = 3)]
+    [LuxtronikInputRegister(10502, ModbusDataType.S16)]
+    [State(Unit = StateUnit.Minute, Position = 4)]
     public partial int? RemainingDuration { get; internal set; }
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;

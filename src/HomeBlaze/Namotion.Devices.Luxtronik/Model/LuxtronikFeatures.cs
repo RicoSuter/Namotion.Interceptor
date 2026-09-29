@@ -8,7 +8,7 @@ using Namotion.Interceptor.Modbus.Attributes;
 namespace Namotion.Devices.Luxtronik.Model;
 
 /// <summary>
-/// Which controller functions are active (discrete inputs 10000 to 10011). Heating, cooling and the mixing circuit flags follow the operating modes, the others the controller configuration.
+/// Which controller functions are active (discrete inputs 10000 to 10011). Heating, hot water, cooling, pool and the mixing circuit flags follow the operating modes, solar and the room control unit the controller configuration.
 /// </summary>
 [InterceptorSubject]
 public partial class LuxtronikFeatures : IModbusBaseAddressProvider
@@ -69,7 +69,7 @@ public partial class LuxtronikFeatures : IModbusBaseAddressProvider
     public partial bool? Heating { get; internal set; }
 
     /// <summary>
-    /// Gets whether hot water is configured.
+    /// Gets whether the hot water operating mode is not off.
     /// </summary>
     [ModbusRegister(1, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 2)]
@@ -83,7 +83,7 @@ public partial class LuxtronikFeatures : IModbusBaseAddressProvider
     public partial bool? Cooling { get; internal set; }
 
     /// <summary>
-    /// Gets whether pool heating is configured.
+    /// Gets whether the pool operating mode is automatic.
     /// </summary>
     [ModbusRegister(3, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 4)]
