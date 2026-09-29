@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor;
 
@@ -22,11 +23,28 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// cache would bloat every copy and force the struct to be mutable (see the readonly-struct
     /// declaration). The lookup is cheap, but hoist it to a local if you read it more than once in a hot path.
     /// </summary>
-    public SubjectPropertyMetadata Metadata =>
-        Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
-            throw new InvalidOperationException(
-                $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
-                $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
+    public SubjectPropertyMetadata Metadata
+    {
+        get
+        {
+            if (!Subject.Properties.TryGetValue(Name, out var metadata))
+            {
+                ThrowMetadataNotFound(Subject, Name);
+            }
+
+            return metadata;
+        }
+    }
+
+    // Kept out of the getter: an interpolated message there would zero stack on every call.
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowMetadataNotFound(IInterceptorSubject subject, string name)
+    {
+        throw new InvalidOperationException(
+            $"No metadata found for property '{name}' on {subject.GetType().Name}. " +
+            $"Available properties ({subject.Properties.Count}): [{string.Join(", ", subject.Properties.Keys)}]");
+    }
 
     public void SetPropertyData(string key, object? value)
     {
