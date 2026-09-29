@@ -89,11 +89,11 @@ Await every context call before the next one and before `DiscoverAsync` returns:
 A device library is a set of subject classes for one device family, with the connector underneath. The Luxtronik heat pump in `src/HomeBlaze/Namotion.Devices.Luxtronik` is a complete example.
 
 1. Model the device as subjects grouped by what a user looks for (functions, not register blocks), with plain properties for values and child subjects for components such as sensors.
-2. Derive a register attribute that presets what every register of the device shares, such as `Space` and `NotAvailableValue`.
+2. Derive a register attribute that presets what every register of the device shares, such as `Space` and `NotAvailableValue` (see Register Mapping).
 3. Give a subject that repeats at several addresses an `IModbusBaseAddressProvider`, and use absolute addresses everywhere else.
 4. Implement `IModbusDiscovery` on the root to read version and capability registers on every connect, exclude what the device does not provide, and create or clear the child subjects of optional parts.
 5. Own the source in the device: create it with `CreateModbusClientSource`, restart it when the configuration or a capability read during polling changes, and map `Diagnostics` to the device status.
-6. Test against an in-process FluentModbus `ModbusTcpServer` that rejects unmapped addresses like the real device.
+6. Test against an in-process FluentModbus `ModbusTcpServer` whose `RequestValidator` rejects unmapped addresses like the real device (the Luxtronik tests' `LuxtronikTestServer` is an example).
 
 ```csharp
 [InterceptorSubject]

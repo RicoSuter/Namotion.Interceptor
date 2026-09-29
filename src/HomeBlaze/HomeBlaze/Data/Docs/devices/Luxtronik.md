@@ -93,7 +93,7 @@ On every connect the device also reads the firmware version and skips values the
 | `Pool` | `Status`, `Locked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy` |
 | `Solar` | `OperatingHours` |
 | `RoomControl` | `Temperature` sensor, `TemperatureSetpoint` |
-| `MixingCircuit1` to `MixingCircuit3` | `Target`, `MinimumTarget` and `MaximumTarget` (read while the circuit heats); `Temperature` flow sensor, `Pump` (FP1 to FP3), `HeatingSmartHomeControl` (read while the circuit heats), `CoolingSmartHomeControl` (read while the circuit cools) |
+| `MixingCircuit1` to `MixingCircuit3` | `Target`; `MinimumTarget` and `MaximumTarget` (read while the circuit heats); `Temperature` flow sensor, `Pump` (FP1 to FP3), `HeatingSmartHomeControl` (read while the circuit heats), `CoolingSmartHomeControl` (read while the circuit cools) |
 
 The `SmartHomeControl` blocks show the setpoint configuration a smart home system sends over the SHI (the controller lists it under "Empfangene Daten"): `Mode` (no influence, setpoint, offset, level), `Setpoint`, `Offset` and `Level`. The cooling blocks have no `Level`, and `OverallSmartHomeControl` has `Mode` (individual, offset, level), `Offset` and `Level`. With no writing client they read "no influence" ("individual" for the overall block), and locks and requests read off.
 
@@ -122,12 +122,12 @@ The `SmartHomeControl` blocks show the setpoint configuration a smart home syste
 ## Troubleshooting
 
 - **Connection refused or timeouts:** the SHI is not enabled on the controller, or a firewall blocks port 502.
-- **Values stay empty:** the value needs firmware 3.92. If the controller rejects the read of its active functions, the device creates every function and relies on the not-available values instead. A temporary rejection of that read fails the connect, which is retried.
+- **Values stay empty:** the value needs firmware 3.92 (3.92.1 for the room temperature setpoint). A mixing circuit's heating values stay empty while it only cools, and its cooling values while it only heats; they are cleared when that flag clears. If the controller rejects the read of its active functions, the device creates every function and relies on the not-available values instead. A temporary rejection of that read fails the connect, which is retried.
 - **Controller error 816:** more than one client writes the same SHI data point, and the SHI stays disabled while the error persists. HomeBlaze does not write; check the other clients.
 - **SHI "Standby" on the controller:** no requests for 10 minutes; check that HomeBlaze is running and connected.
 - **Hot water or a mixing circuit temperature shows exactly 75.0 °C, or the external return 5.0 °C:** the controller reports these substitute values when the sensor is faulty. They are passed through unfiltered; check the sensor.
 - **`SmartGrid.State` stays empty:** EVU2 (input 10361) is only provided by air heat pumps and propane brine heat pumps; on other models only `Evu1` is read.
-- **A function disappeared:** its operating mode was switched off (see State Properties); it reappears when the mode is switched on again.
+- **A function disappeared:** its operating mode was switched off, or, for solar and the room control unit, it is no longer configured (see State Properties); it reappears when switched on again.
 
 ## Modbus Register Map
 
