@@ -17,8 +17,13 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     private const int FirmwareAddress = 10400;
     private const int FeatureFlagsAddress = 10000;
 
+    /// <summary>
+    /// The minimum <see cref="PollingInterval"/> in seconds; shorter intervals are raised to it.
+    /// </summary>
+    public const int MinimumPollingIntervalSeconds = 2;
+
     // Protects the controller from a hand-edited configuration that would poll it continuously.
-    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
 
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
 
@@ -126,7 +131,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     }
 
     /// <summary>
-    /// Gets the configured <see cref="PollingInterval"/>, raised to the minimum of 2 seconds.
+    /// Gets the configured <see cref="PollingInterval"/>, raised to <see cref="MinimumPollingIntervalSeconds"/>.
     /// </summary>
     internal TimeSpan GetEffectivePollingInterval()
     {

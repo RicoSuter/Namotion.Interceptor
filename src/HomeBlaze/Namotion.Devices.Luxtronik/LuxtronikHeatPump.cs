@@ -39,7 +39,7 @@ public partial class LuxtronikHeatPump :
     public partial int Port { get; set; }
 
     /// <summary>
-    /// Gets or sets the interval between reads of the controller. Values below 2 seconds are raised to 2 seconds.
+    /// Gets or sets the interval between reads of the controller. Values below <see cref="MinimumPollingIntervalSeconds"/> are raised to it.
     /// </summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }

@@ -23,9 +23,12 @@
                      Class="mt-4" />
 
     <MudNumericField Value="_pollingIntervalSeconds"
-                     ValueChanged="@((int value) => { _pollingIntervalSeconds = value; OnFieldChanged(); })"
+                     ValueChanged="@((double value) => { _pollingIntervalSeconds = value; OnFieldChanged(); })"
                      Label="Polling Interval (seconds)"
-                     Min="MinimumPollingIntervalSeconds"
+                     HelperText="@($"At least {LuxtronikHeatPump.MinimumPollingIntervalSeconds} seconds")"
+                     Error="@(!IsPollingIntervalValid)"
+                     ErrorText="@($"The polling interval must be at least {LuxtronikHeatPump.MinimumPollingIntervalSeconds} seconds")"
+                     Min="LuxtronikHeatPump.MinimumPollingIntervalSeconds"
                      Max="300"
                      Class="mt-4" />
 
@@ -46,9 +49,6 @@
 </MudForm>
 
 @code {
-    // Matches the minimum the device enforces, so the editor does not accept a value the device silently raises.
-    private const int MinimumPollingIntervalSeconds = 2;
-
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
@@ -60,16 +60,18 @@
     private string _name = string.Empty;
     private string? _hostAddress;
     private int _port = 502;
-    private int _pollingIntervalSeconds = 5;
+    private double _pollingIntervalSeconds = 5;
 
     private string _originalName = string.Empty;
     private string? _originalHostAddress;
     private int _originalPort = 502;
-    private int _originalPollingIntervalSeconds = 5;
+    private double _originalPollingIntervalSeconds = 5;
+
+    private bool IsPollingIntervalValid => _pollingIntervalSeconds >= LuxtronikHeatPump.MinimumPollingIntervalSeconds;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
                            _port is >= 1 and <= 65535 &&
-                           _pollingIntervalSeconds >= MinimumPollingIntervalSeconds;
+                           IsPollingIntervalValid;
 
     public bool IsDirty => _name != _originalName ||
                            _hostAddress != _originalHostAddress ||
@@ -87,7 +89,7 @@
             _name = HeatPump.Name;
             _hostAddress = HeatPump.HostAddress;
             _port = HeatPump.Port;
-            _pollingIntervalSeconds = (int)HeatPump.PollingInterval.TotalSeconds;
+            _pollingIntervalSeconds = HeatPump.PollingInterval.TotalSeconds;
             StoreOriginalValues();
         }
     }

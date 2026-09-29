@@ -20,12 +20,12 @@
         @if (HeatPump is not null)
         {
             <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
-                @Value("Mode", HeatPump.OperatingStatus.OperationMode?.ToString())
-                @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "°C"))
-                @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "°C"))
-                @Value("Hot water", Format(HeatPump.Temperatures.HotWater.Temperature, "°C"))
-                @Value("Electrical", Format(HeatPump.Energy.ElectricalPower, "W"))
-                @Value("Heating", Format(HeatPump.Energy.HeatingPower, "W"))
+                @Value("Mode", GetDisplayName(HeatPump.OperatingStatus.OperationMode))
+                @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "F1", "°C"))
+                @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "F1", "°C"))
+                @Value("Hot water", Format(HeatPump.Temperatures.HotWater.Temperature, "F1", "°C"))
+                @Value("Electrical", Format(HeatPump.Energy.ElectricalPower, "F0", "W"))
+                @Value("Heating", Format(HeatPump.Energy.HeatingPower, "F0", "W"))
             </MudStack>
 
             @if (HeatPump.OperatingStatus.ErrorCode is > 0)
@@ -42,7 +42,22 @@
 
     private LuxtronikHeatPump? HeatPump => Subject as LuxtronikHeatPump;
 
-    private static string? Format(decimal? value, string unit) => value is null ? null : $"{value:0.#} {unit}";
+    private static string? Format(decimal? value, string format, string unit) =>
+        value is null ? null : $"{value.Value.ToString(format)} {unit}";
+
+    private static string? GetDisplayName(LuxtronikOperationMode? mode) => mode switch
+    {
+        null => null,
+        LuxtronikOperationMode.Heating => "Heating",
+        LuxtronikOperationMode.HotWater => "Hot water",
+        LuxtronikOperationMode.PoolOrSolar => "Pool or solar",
+        LuxtronikOperationMode.UtilityLockout => "Utility lockout",
+        LuxtronikOperationMode.Defrost => "Defrost",
+        LuxtronikOperationMode.NoRequest => "No request",
+        LuxtronikOperationMode.HeatingExternalSource => "Heating (external source)",
+        LuxtronikOperationMode.Cooling => "Cooling",
+        _ => mode.ToString()
+    };
 
     private static RenderFragment Value(string caption, string? value) =>
         @<MudStack>
