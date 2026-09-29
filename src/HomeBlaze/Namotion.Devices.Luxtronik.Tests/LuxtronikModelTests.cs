@@ -1,5 +1,6 @@
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Devices;
 using Namotion.Devices.Luxtronik.Attributes;
 using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Gating;
@@ -128,6 +129,20 @@ public class LuxtronikModelTests
     {
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => new LuxtronikMixingCircuit(index));
+    }
+
+    [Fact]
+    public void WhenPumpIsConstructed_ThenItIsASwitchStateAtItsRegisterFromFirmware392()
+    {
+        // Act
+        var pump = new LuxtronikPump(10354, "Heating circulation pump (HUP)");
+
+        // Assert
+        Assert.IsAssignableFrom<ISwitchState>(pump);
+        Assert.Equal(10354, pump.BaseAddress);
+        Assert.Equal("Heating circulation pump (HUP)", pump.Title);
+        Assert.Null(pump.IsOn);
+        Assert.Equal(LuxtronikGating.Firmware392, ((ILuxtronikGatedSubject)pump).MinimumFirmwareVersion);
     }
 
     [Fact]
