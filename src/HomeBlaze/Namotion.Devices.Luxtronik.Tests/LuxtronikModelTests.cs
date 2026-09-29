@@ -88,11 +88,11 @@ public class LuxtronikModelTests
     }
 
     [Theory]
-    [InlineData(1, 0, 10351, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling)]
-    [InlineData(2, 10, 10352, LuxtronikFeature.MixingCircuit2Heating, LuxtronikFeature.MixingCircuit2Cooling)]
-    [InlineData(3, 20, 10353, LuxtronikFeature.MixingCircuit3Heating, LuxtronikFeature.MixingCircuit3Cooling)]
+    [InlineData(1, 0, 10351, LuxtronikFunction.MixingCircuit1Heating, LuxtronikFunction.MixingCircuit1Cooling)]
+    [InlineData(2, 10, 10352, LuxtronikFunction.MixingCircuit2Heating, LuxtronikFunction.MixingCircuit2Cooling)]
+    [InlineData(3, 20, 10353, LuxtronikFunction.MixingCircuit3Heating, LuxtronikFunction.MixingCircuit3Cooling)]
     public void WhenMixingCircuitIsConstructed_ThenItAndItsChildrenUseTheCircuitAddressesAndFlags(
-        int index, int baseAddress, int pumpAddress, LuxtronikFeature heatingFeature, LuxtronikFeature coolingFeature)
+        int index, int baseAddress, int pumpAddress, LuxtronikFunction heatingFunction, LuxtronikFunction coolingFunction)
     {
         // Act
         var circuit = new LuxtronikMixingCircuit(index);
@@ -103,9 +103,9 @@ public class LuxtronikModelTests
         Assert.Equal(pumpAddress, circuit.Pump.BaseAddress);
         Assert.Equal(10010 + baseAddress, circuit.HeatingSmartHomeControl.BaseAddress);
         Assert.Equal(10015 + baseAddress, circuit.CoolingSmartHomeControl.BaseAddress);
-        Assert.Equal(heatingFeature, ((ILuxtronikGatedSubject)circuit.HeatingSmartHomeControl).Feature);
-        Assert.Equal(coolingFeature, ((ILuxtronikGatedSubject)circuit.CoolingSmartHomeControl).Feature);
-        Assert.Equal(heatingFeature, LuxtronikFeature.MixingCircuit1Heating + ((ILuxtronikCircuitSubject)circuit).FeatureOffset);
+        Assert.Equal(heatingFunction, ((ILuxtronikGatedSubject)circuit.HeatingSmartHomeControl).Function);
+        Assert.Equal(coolingFunction, ((ILuxtronikGatedSubject)circuit.CoolingSmartHomeControl).Function);
+        Assert.Equal(heatingFunction, LuxtronikFunction.MixingCircuit1Heating + ((ILuxtronikCircuitSubject)circuit).FunctionOffset);
         Assert.Equal($"Mixing circuit {index}", circuit.Title);
         Assert.Equal($"Mixing circuit {index} temperature", circuit.Temperature.Title);
     }
@@ -131,7 +131,7 @@ public class LuxtronikModelTests
         Assert.Equal("Heating circulation pump (HUP)", pump.Title);
         Assert.Null(pump.IsOn);
         Assert.Equal(LuxtronikGating.Firmware392, ((ILuxtronikGatedSubject)pump).MinimumFirmwareVersion);
-        Assert.Equal(LuxtronikFeature.None, ((ILuxtronikGatedSubject)pump).Feature);
+        Assert.Equal(LuxtronikFunction.None, ((ILuxtronikGatedSubject)pump).Function);
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public class LuxtronikModelTests
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
 
         // Act
-        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFeature> { LuxtronikFeature.Cooling, LuxtronikFeature.MixingCircuit2Cooling });
+        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFunction> { LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit2Cooling });
 
         // Assert
         Assert.NotNull(heatPump.Cooling);
@@ -196,17 +196,17 @@ public class LuxtronikModelTests
     }
 
     [Fact]
-    public void WhenFunctionsAreUpdatedWithTheSameFeaturesAgain_ThenTheExistingSubjectsAreKept()
+    public void WhenFunctionSubjectsAreUpdatedWithTheSameFunctionsAgain_ThenTheExistingSubjectsAreKept()
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
-        var activeFeatures = new HashSet<LuxtronikFeature> { LuxtronikFeature.Cooling, LuxtronikFeature.MixingCircuit2Cooling };
-        heatPump.UpdateFunctionSubjects(activeFeatures);
+        var activeFunctions = new HashSet<LuxtronikFunction> { LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit2Cooling };
+        heatPump.UpdateFunctionSubjects(activeFunctions);
         var cooling = heatPump.Cooling;
         var mixingCircuit2 = heatPump.MixingCircuit2;
 
         // Act
-        heatPump.UpdateFunctionSubjects(activeFeatures);
+        heatPump.UpdateFunctionSubjects(activeFunctions);
 
         // Assert
         Assert.Same(cooling, heatPump.Cooling);
@@ -214,14 +214,14 @@ public class LuxtronikModelTests
     }
 
     [Fact]
-    public void WhenNoOptionalFeatureIsActiveAnymore_ThenAllOptionalFunctionSubjectsAreRemoved()
+    public void WhenNoOptionalFunctionIsActiveAnymore_ThenAllOptionalFunctionSubjectsAreRemoved()
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
         heatPump.UpdateFunctionSubjects(null);
 
         // Act
-        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFeature>());
+        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFunction>());
 
         // Assert
         Assert.Null(heatPump.Cooling);
@@ -234,7 +234,7 @@ public class LuxtronikModelTests
     }
 
     [Fact]
-    public void WhenActiveFeaturesAreUnknown_ThenAllOptionalFunctionSubjectsExist()
+    public void WhenActiveFunctionsAreUnknown_ThenAllOptionalFunctionSubjectsExist()
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();

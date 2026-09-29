@@ -6,7 +6,7 @@ using Namotion.Interceptor.Modbus.Attributes;
 namespace Namotion.Devices.Luxtronik.Attributes;
 
 /// <summary>
-/// A Smart Home Interface register with its firmware and feature requirements; 0x7FFF and 0x7FFFFFFF map to <c>null</c>.
+/// A Smart Home Interface register with its firmware and function requirements; 0x7FFF and 0x7FFFFFFF map to <c>null</c>.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
 public abstract class LuxtronikRegisterAttribute : ModbusRegisterAttribute, ILuxtronikRegisterGate
@@ -29,9 +29,9 @@ public abstract class LuxtronikRegisterAttribute : ModbusRegisterAttribute, ILux
 
     /// <summary>
     /// Gets the controller function that must be configured for the register to be read;
-    /// <see cref="LuxtronikFeature.None"/> (the default) means no requirement.
+    /// <see cref="LuxtronikFunction.None"/> (the default) means no requirement.
     /// </summary>
-    public LuxtronikFeature Feature { get; init; } = LuxtronikFeature.None;
+    public LuxtronikFunction Function { get; init; } = LuxtronikFunction.None;
 
     Version? ILuxtronikRegisterGate.MinimumFirmwareVersion =>
         MinimumFirmware is null ? null : _minimumFirmwareVersion ??= Version.Parse(MinimumFirmware);

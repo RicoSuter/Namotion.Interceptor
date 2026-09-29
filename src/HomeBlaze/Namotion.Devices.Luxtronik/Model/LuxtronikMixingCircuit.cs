@@ -15,7 +15,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 [InterceptorSubject]
 public partial class LuxtronikMixingCircuit : ITitleProvider, IModbusBaseAddressProvider, ILuxtronikCircuitSubject
 {
-    private readonly int _featureOffset;
+    private readonly int _functionOffset;
 
     /// <summary>
     /// Initializes mixing circuit <paramref name="index"/>, from 1 to 3.
@@ -28,14 +28,14 @@ public partial class LuxtronikMixingCircuit : ITitleProvider, IModbusBaseAddress
         Index = index;
         Title = $"Mixing circuit {index}";
         BaseAddress = (index - 1) * 10;
-        _featureOffset = (index - 1) * 2;
-        var heatingFeature = LuxtronikFeature.MixingCircuit1Heating + _featureOffset;
-        var coolingFeature = heatingFeature + 1;
+        _functionOffset = (index - 1) * 2;
+        var heatingFunction = LuxtronikFunction.MixingCircuit1Heating + _functionOffset;
+        var coolingFunction = heatingFunction + 1;
 
         Temperature = new LuxtronikTemperatureSensor(10140 + BaseAddress, $"Mixing circuit {index} temperature");
         Pump = new LuxtronikPump(10350 + index, $"Mixing circuit {index} pump (FP{index})");
-        HeatingSmartHomeControl = new LuxtronikSmartHomeControl(10010 + BaseAddress, heatingFeature);
-        CoolingSmartHomeControl = new LuxtronikCoolingSmartHomeControl(10015 + BaseAddress, coolingFeature);
+        HeatingSmartHomeControl = new LuxtronikSmartHomeControl(10010 + BaseAddress, heatingFunction);
+        CoolingSmartHomeControl = new LuxtronikCoolingSmartHomeControl(10015 + BaseAddress, coolingFunction);
         Target = null;
         MinimumTarget = null;
         MaximumTarget = null;
@@ -52,7 +52,7 @@ public partial class LuxtronikMixingCircuit : ITitleProvider, IModbusBaseAddress
     /// <inheritdoc />
     public int BaseAddress { get; }
 
-    int ILuxtronikCircuitSubject.FeatureOffset => _featureOffset;
+    int ILuxtronikCircuitSubject.FunctionOffset => _functionOffset;
 
     /// <summary>
     /// Gets the flow target temperature of the circuit.
@@ -64,14 +64,14 @@ public partial class LuxtronikMixingCircuit : ITitleProvider, IModbusBaseAddress
     /// <summary>
     /// Gets the minimum flow temperature of the circuit, read while the circuit heats.
     /// </summary>
-    [LuxtronikInputRegister(10142, ModbusDataType.S16, Scale = 0.1, Feature = LuxtronikFeature.MixingCircuit1Heating)]
+    [LuxtronikInputRegister(10142, ModbusDataType.S16, Scale = 0.1, Function = LuxtronikFunction.MixingCircuit1Heating)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 2)]
     public partial decimal? MinimumTarget { get; internal set; }
 
     /// <summary>
     /// Gets the maximum flow temperature of the circuit, read while the circuit heats.
     /// </summary>
-    [LuxtronikInputRegister(10143, ModbusDataType.S16, Scale = 0.1, Feature = LuxtronikFeature.MixingCircuit1Heating)]
+    [LuxtronikInputRegister(10143, ModbusDataType.S16, Scale = 0.1, Function = LuxtronikFunction.MixingCircuit1Heating)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 3)]
     public partial decimal? MaximumTarget { get; internal set; }
 

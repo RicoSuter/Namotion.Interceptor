@@ -51,7 +51,7 @@ public class LuxtronikHeatPumpTests
             Assert.Equal(35.0m, heatPump.Heating.SmartHomeControl.Setpoint);
             Assert.Equal(28.0m, heatPump.MixingCircuit1!.HeatingSmartHomeControl.Setpoint);
             Assert.Equal(30000m, heatPump.PowerConsumptionLimit.Limit);
-            Assert.True(heatPump.Features.Heating);
+            Assert.True(heatPump.Functions.IsHeatingEnabled);
             Assert.NotNull(heatPump.Cooling);
             Assert.NotNull(heatPump.MixingCircuit3);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
@@ -107,7 +107,7 @@ public class LuxtronikHeatPumpTests
         using var server = new LuxtronikTestServer(new Version(3, 92, 3));
         server.Start();
         server.SeedTypicalValues();
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit1Heating);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater, LuxtronikFunction.MixingCircuit1Heating);
 
         // Act
         var (heatPump, source, recorder) = await StartAsync(server);
@@ -143,7 +143,7 @@ public class LuxtronikHeatPumpTests
         server.Start();
         server.SeedTypicalValues();
         server.SetInput<short>(10150, 215);
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.MixingCircuit2Cooling);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.MixingCircuit2Cooling);
 
         // Act
         var (heatPump, source, recorder) = await StartAsync(server);
@@ -192,7 +192,7 @@ public class LuxtronikHeatPumpTests
             Assert.Null(pool.ElectricalEnergy);
             Assert.NotNull(heatPump.Cooling);
             Assert.NotNull(heatPump.MixingCircuit3);
-            Assert.False(IsClaimed(heatPump.Features, nameof(LuxtronikFeatures.Heating)));
+            Assert.False(IsClaimed(heatPump.Functions, nameof(LuxtronikFunctions.IsHeatingEnabled)));
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
             Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
         }
@@ -204,14 +204,14 @@ public class LuxtronikHeatPumpTests
     }
 
     [Fact]
-    public async Task WhenFeatureReadIsBusyOnce_ThenDiscoveryRetriesAndGatesByFeature()
+    public async Task WhenFunctionReadIsBusyOnce_ThenDiscoveryRetriesAndGatesByFunction()
     {
         // Arrange
         using var server = new LuxtronikTestServer(new Version(3, 92, 3));
         server.Start();
         server.SeedTypicalValues();
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater);
-        server.RejectFeatureReads(1, ModbusExceptionCode.ServerDeviceBusy);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater);
+        server.RejectFunctionReads(1, ModbusExceptionCode.ServerDeviceBusy);
 
         // Act
         var (heatPump, source, recorder) = await StartAsync(server);
@@ -220,8 +220,8 @@ public class LuxtronikHeatPumpTests
             // Assert
             var error = Assert.IsType<ModbusResponseException>(source.Diagnostics.LastError);
             Assert.Equal((int)ModbusExceptionCode.ServerDeviceBusy, error.ExceptionCode);
-            Assert.True(IsClaimed(heatPump.Features, nameof(LuxtronikFeatures.Cooling)));
-            Assert.False(heatPump.Features.Cooling);
+            Assert.True(IsClaimed(heatPump.Functions, nameof(LuxtronikFunctions.IsCoolingEnabled)));
+            Assert.False(heatPump.Functions.IsCoolingEnabled);
             Assert.Null(heatPump.Cooling);
             Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
             Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);

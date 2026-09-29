@@ -3,7 +3,7 @@ namespace Namotion.Devices.Luxtronik.Enums;
 /// <summary>
 /// Controller functions that can be configured; the value is the offset of its discrete input from 10000.
 /// </summary>
-public enum LuxtronikFeature
+public enum LuxtronikFunction
 {
     None = -1,
     Heating = 0,

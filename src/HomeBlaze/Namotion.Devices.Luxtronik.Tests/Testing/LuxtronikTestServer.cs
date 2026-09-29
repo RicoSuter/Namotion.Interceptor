@@ -12,8 +12,8 @@ namespace Namotion.Devices.Luxtronik.Tests.Testing;
 internal sealed class LuxtronikTestServer : IDisposable
 {
     private const byte UnitId = 1;
-    private const int FeatureFlagsAddress = 10000;
-    private const int FeatureFlagCount = 12;
+    private const int FunctionFlagsAddress = 10000;
+    private const int FunctionFlagCount = 12;
 
     private static readonly Version Firmware392 = new(3, 92, 0);
     private static readonly Version Firmware3921 = new(3, 92, 1);
@@ -43,8 +43,8 @@ internal sealed class LuxtronikTestServer : IDisposable
     private readonly Version _firmware;
     private readonly bool _supportsDiscreteInputs;
     private readonly Lock _rejectionLock = new();
-    private int _pendingFeatureReadRejections;
-    private ModbusExceptionCode _featureReadRejectionCode;
+    private int _pendingFunctionReadRejections;
+    private ModbusExceptionCode _functionReadRejectionCode;
     private ModbusTcpServer? _server;
 
     public LuxtronikTestServer(Version firmware, bool supportsDiscreteInputs = true)
@@ -70,7 +70,7 @@ internal sealed class LuxtronikTestServer : IDisposable
         SetInput(10400, (ushort)_firmware.Major);
         SetInput(10401, (ushort)_firmware.Minor);
         SetInput(10402, (ushort)Math.Max(_firmware.Build, 0));
-        SetFeatures(Enum.GetValues<LuxtronikFeature>().Where(feature => feature != LuxtronikFeature.None).ToArray());
+        SetFunctions(Enum.GetValues<LuxtronikFunction>().Where(function => function != LuxtronikFunction.None).ToArray());
     }
 
     /// <summary>
@@ -124,28 +124,28 @@ internal sealed class LuxtronikTestServer : IDisposable
         }
     }
 
-    public void SetFeatures(params LuxtronikFeature[] configuredFeatures)
+    public void SetFunctions(params LuxtronikFunction[] activeFunctions)
     {
         var server = GetServer();
         lock (server.Lock)
         {
             var discreteInputs = server.GetDiscreteInputs(UnitId);
-            for (var index = 0; index < FeatureFlagCount; index++)
+            for (var index = 0; index < FunctionFlagCount; index++)
             {
-                discreteInputs.Set(FeatureFlagsAddress + index, configuredFeatures.Contains((LuxtronikFeature)index));
+                discreteInputs.Set(FunctionFlagsAddress + index, activeFunctions.Contains((LuxtronikFunction)index));
             }
         }
     }
 
     /// <summary>
-    /// Rejects the next <paramref name="count"/> reads of the feature flags with <paramref name="exceptionCode"/>.
+    /// Rejects the next <paramref name="count"/> reads of the function flags with <paramref name="exceptionCode"/>.
     /// </summary>
-    public void RejectFeatureReads(int count, ModbusExceptionCode exceptionCode)
+    public void RejectFunctionReads(int count, ModbusExceptionCode exceptionCode)
     {
         lock (_rejectionLock)
         {
-            _pendingFeatureReadRejections = count;
-            _featureReadRejectionCode = exceptionCode;
+            _pendingFunctionReadRejections = count;
+            _functionReadRejectionCode = exceptionCode;
         }
     }
 
@@ -159,10 +159,10 @@ internal sealed class LuxtronikTestServer : IDisposable
         {
             lock (_rejectionLock)
             {
-                if (_pendingFeatureReadRejections > 0)
+                if (_pendingFunctionReadRejections > 0)
                 {
-                    _pendingFeatureReadRejections--;
-                    return _featureReadRejectionCode;
+                    _pendingFunctionReadRejections--;
+                    return _functionReadRejectionCode;
                 }
             }
         }
@@ -172,7 +172,7 @@ internal sealed class LuxtronikTestServer : IDisposable
             ModbusFunctionCode.ReadInputRegisters => IsMapped(InputRanges, address, quantity),
             ModbusFunctionCode.ReadHoldingRegisters => IsMapped(HoldingRanges, address, quantity),
             ModbusFunctionCode.ReadDiscreteInputs => _supportsDiscreteInputs &&
-                address >= FeatureFlagsAddress && address + quantity <= FeatureFlagsAddress + FeatureFlagCount,
+                address >= FunctionFlagsAddress && address + quantity <= FunctionFlagsAddress + FunctionFlagCount,
             _ => false
         };
 

@@ -9,7 +9,7 @@ namespace Namotion.Devices.Luxtronik.Gating;
 /// </summary>
 internal static class LuxtronikGating
 {
-    public const int FeatureFlagCount = 12;
+    public const int FunctionFlagCount = 12;
 
     /// <summary>
     /// Gets firmware version 3.92.0, the gate of the registers added in that release.
@@ -18,42 +18,42 @@ internal static class LuxtronikGating
 
     /// <summary>
     /// Gets whether <paramref name="property"/> is read: its register gates and its subject's gate must all pass.
-    /// On an <see cref="ILuxtronikCircuitSubject"/>, register feature gates are shifted to the circuit's own feature.
+    /// On an <see cref="ILuxtronikCircuitSubject"/>, register function gates are shifted to the circuit's own function.
     /// </summary>
     public static bool IsSupported(
-        RegisteredSubjectProperty property, Version firmwareVersion, IReadOnlySet<LuxtronikFeature>? configuredFeatures)
+        RegisteredSubjectProperty property, Version firmwareVersion, IReadOnlySet<LuxtronikFunction>? activeFunctions)
     {
-        var featureOffset = property.Subject is ILuxtronikCircuitSubject circuit ? circuit.FeatureOffset : 0;
+        var functionOffset = property.Subject is ILuxtronikCircuitSubject circuit ? circuit.FunctionOffset : 0;
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is ILuxtronikRegisterGate gate &&
-                !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Feature, featureOffset), firmwareVersion, configuredFeatures))
+                !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Function, functionOffset), firmwareVersion, activeFunctions))
             {
                 return false;
             }
         }
 
         return property.Subject is not ILuxtronikGatedSubject subject ||
-            IsSupported(subject.MinimumFirmwareVersion, subject.Feature, firmwareVersion, configuredFeatures);
+            IsSupported(subject.MinimumFirmwareVersion, subject.Function, firmwareVersion, activeFunctions);
     }
 
     /// <summary>
     /// Gets whether a gate passes: the firmware is at least <paramref name="minimumFirmwareVersion"/>, and
-    /// <paramref name="feature"/> is active. <c>null</c> configured features means the controller does not
-    /// report them, so feature gates pass.
+    /// <paramref name="function"/> is active. <c>null</c> active functions means the controller does not
+    /// report them, so function gates pass.
     /// </summary>
     public static bool IsSupported(
         Version? minimumFirmwareVersion,
-        LuxtronikFeature feature,
+        LuxtronikFunction function,
         Version firmwareVersion,
-        IReadOnlySet<LuxtronikFeature>? configuredFeatures)
+        IReadOnlySet<LuxtronikFunction>? activeFunctions)
     {
         if (minimumFirmwareVersion is not null && firmwareVersion < minimumFirmwareVersion)
         {
             return false;
         }
 
-        return feature == LuxtronikFeature.None || configuredFeatures is null || configuredFeatures.Contains(feature);
+        return function == LuxtronikFunction.None || activeFunctions is null || activeFunctions.Contains(function);
     }
 
     /// <summary>
@@ -77,33 +77,33 @@ internal static class LuxtronikGating
         return false;
     }
 
-    private static LuxtronikFeature Shift(LuxtronikFeature feature, int offset)
-        => feature == LuxtronikFeature.None ? feature : feature + offset;
+    private static LuxtronikFunction Shift(LuxtronikFunction function, int offset)
+        => function == LuxtronikFunction.None ? function : function + offset;
 
     /// <summary>
-    /// Gets the functions whose flag is set; the flag index is the <see cref="LuxtronikFeature"/> value.
+    /// Gets the functions whose flag is set; the flag index is the <see cref="LuxtronikFunction"/> value.
     /// </summary>
-    public static HashSet<LuxtronikFeature> GetConfiguredFeatures(bool[] flags)
+    public static HashSet<LuxtronikFunction> GetActiveFunctions(bool[] flags)
     {
-        var features = new HashSet<LuxtronikFeature>();
-        for (var index = 0; index < Math.Min(flags.Length, FeatureFlagCount); index++)
+        var functions = new HashSet<LuxtronikFunction>();
+        for (var index = 0; index < Math.Min(flags.Length, FunctionFlagCount); index++)
         {
             if (flags[index])
             {
-                features.Add((LuxtronikFeature)index);
+                functions.Add((LuxtronikFunction)index);
             }
         }
 
-        return features;
+        return functions;
     }
 
     /// <summary>
-    /// Gets the set flags as a bit mask; the bit index is the <see cref="LuxtronikFeature"/> value.
+    /// Gets the set flags as a bit mask; the bit index is the <see cref="LuxtronikFunction"/> value.
     /// </summary>
-    public static int GetFeatureMask(ReadOnlySpan<bool> flags)
+    public static int GetFunctionMask(ReadOnlySpan<bool> flags)
     {
         var mask = 0;
-        for (var index = 0; index < Math.Min(flags.Length, FeatureFlagCount); index++)
+        for (var index = 0; index < Math.Min(flags.Length, FunctionFlagCount); index++)
         {
             if (flags[index])
             {
@@ -117,14 +117,14 @@ internal static class LuxtronikGating
     /// <summary>
     /// Gets the names of the functions whose bit is set in <paramref name="mask"/>, separated by commas.
     /// </summary>
-    public static string GetFeatureNames(int mask)
+    public static string GetFunctionNames(int mask)
     {
         var names = new List<string>();
-        for (var index = 0; index < FeatureFlagCount; index++)
+        for (var index = 0; index < FunctionFlagCount; index++)
         {
             if ((mask & (1 << index)) != 0)
             {
-                names.Add(((LuxtronikFeature)index).ToString());
+                names.Add(((LuxtronikFunction)index).ToString());
             }
         }
 

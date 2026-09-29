@@ -14,15 +14,15 @@ namespace Namotion.Devices.Luxtronik.Model;
 [InterceptorSubject]
 public partial class LuxtronikSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGatedSubject
 {
-    private readonly LuxtronikFeature _feature;
+    private readonly LuxtronikFunction _function;
 
     /// <summary>
-    /// Initializes a control block at <paramref name="baseAddress"/> whose registers require <paramref name="feature"/>.
+    /// Initializes a control block at <paramref name="baseAddress"/> whose registers require <paramref name="function"/>.
     /// </summary>
-    public LuxtronikSmartHomeControl(int baseAddress, LuxtronikFeature feature)
+    public LuxtronikSmartHomeControl(int baseAddress, LuxtronikFunction function)
     {
         BaseAddress = baseAddress;
-        _feature = feature;
+        _function = function;
         Mode = null;
         Setpoint = null;
         Offset = null;
@@ -62,5 +62,5 @@ public partial class LuxtronikSmartHomeControl : IModbusBaseAddressProvider, ILu
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => null;
 
-    LuxtronikFeature ILuxtronikGatedSubject.Feature => _feature;
+    LuxtronikFunction ILuxtronikGatedSubject.Function => _function;
 }

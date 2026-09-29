@@ -20,7 +20,7 @@ public partial class LuxtronikHeating
     {
         ExternalReturn = new LuxtronikTemperatureSensor(10102, "External return temperature");
         CirculationPump = new LuxtronikPump(10354, "Heating circulation pump (HUP)");
-        SmartHomeControl = new LuxtronikSmartHomeControl(10000, LuxtronikFeature.None);
+        SmartHomeControl = new LuxtronikSmartHomeControl(10000, LuxtronikFunction.None);
         OverallSmartHomeControl = new LuxtronikOverallSmartHomeControl();
         Status = null;
         ReturnTarget = null;

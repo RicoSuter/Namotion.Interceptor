@@ -24,37 +24,37 @@ public class LuxtronikGatingTests
         var minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(minimumFirmwareVersion, LuxtronikFeature.None, new Version(major, minor, patch), configuredFeatures: null);
+        var isSupported = LuxtronikGating.IsSupported(minimumFirmwareVersion, LuxtronikFunction.None, new Version(major, minor, patch), activeFunctions: null);
 
         // Assert
         Assert.Equal(expected, isSupported);
     }
 
     [Fact]
-    public void WhenFeatureIsNotConfigured_ThenItIsNotSupported()
+    public void WhenFunctionIsNotConfigured_ThenItIsNotSupported()
     {
         // Arrange
-        var configuredFeatures = new HashSet<LuxtronikFeature> { LuxtronikFeature.Heating };
+        var activeFunctions = new HashSet<LuxtronikFunction> { LuxtronikFunction.Heating };
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFeature.Pool, new Version(3, 92, 3), configuredFeatures);
+        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFunction.Pool, new Version(3, 92, 3), activeFunctions);
 
         // Assert
         Assert.False(isSupported);
     }
 
     [Fact]
-    public void WhenFeatureFlagsAreUnknown_ThenFeatureGatesAreIgnored()
+    public void WhenFunctionFlagsAreUnknown_ThenFunctionGatesAreIgnored()
     {
         // Act
-        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFeature.Pool, new Version(3, 92, 3), configuredFeatures: null);
+        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFunction.Pool, new Version(3, 92, 3), activeFunctions: null);
 
         // Assert
         Assert.True(isSupported);
     }
 
     [Fact]
-    public void WhenReadingFeatureFlags_ThenSetBitsBecomeConfiguredFeatures()
+    public void WhenReadingFunctionFlags_ThenSetBitsBecomeActiveFunctions()
     {
         // Arrange
         var flags = new bool[12];
@@ -63,16 +63,16 @@ public class LuxtronikGatingTests
         flags[6] = true;
 
         // Act
-        var features = LuxtronikGating.GetConfiguredFeatures(flags);
+        var functions = LuxtronikGating.GetActiveFunctions(flags);
 
         // Assert
         Assert.Equal(
-            new[] { LuxtronikFeature.Heating, LuxtronikFeature.Cooling, LuxtronikFeature.MixingCircuit1Heating },
-            features.OrderBy(feature => feature));
+            new[] { LuxtronikFunction.Heating, LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit1Heating },
+            functions.OrderBy(function => function));
     }
 
     [Fact]
-    public void WhenFeatureFlagsDiffer_ThenMaskDifferenceNamesTheChangedFeatures()
+    public void WhenFunctionFlagsDiffer_ThenMaskDifferenceNamesTheChangedFunctions()
     {
         // Arrange
         var previousFlags = new bool[12];
@@ -83,10 +83,10 @@ public class LuxtronikGatingTests
         currentFlags[2] = true;
 
         // Act
-        var changedMask = LuxtronikGating.GetFeatureMask(previousFlags) ^ LuxtronikGating.GetFeatureMask(currentFlags);
+        var changedMask = LuxtronikGating.GetFunctionMask(previousFlags) ^ LuxtronikGating.GetFunctionMask(currentFlags);
 
         // Assert
-        Assert.Equal("Cooling, MixingCircuit1Cooling", LuxtronikGating.GetFeatureNames(changedMask));
+        Assert.Equal("Cooling, MixingCircuit1Cooling", LuxtronikGating.GetFunctionNames(changedMask));
     }
 
     [Theory]
@@ -107,63 +107,63 @@ public class LuxtronikGatingTests
         }, propertyName);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(property, Version.Parse(firmware), configuredFeatures: null);
+        var isSupported = LuxtronikGating.IsSupported(property, Version.Parse(firmware), activeFunctions: null);
 
         // Assert
         Assert.Equal(expected, isSupported);
     }
 
     [Theory]
-    [InlineData(LuxtronikFeature.None, nameof(LuxtronikGatedTestSubject.FeatureGated), new[] { LuxtronikFeature.Cooling }, true)]
-    [InlineData(LuxtronikFeature.None, nameof(LuxtronikGatedTestSubject.FeatureGated), new[] { LuxtronikFeature.Heating }, false)]
-    [InlineData(LuxtronikFeature.Pool, nameof(LuxtronikGatedTestSubject.Ungated), new[] { LuxtronikFeature.Heating }, false)]
-    [InlineData(LuxtronikFeature.Pool, nameof(LuxtronikGatedTestSubject.FeatureGated), new[] { LuxtronikFeature.Cooling }, false)]
-    [InlineData(LuxtronikFeature.Pool, nameof(LuxtronikGatedTestSubject.FeatureGated), new[] { LuxtronikFeature.Cooling, LuxtronikFeature.Pool }, true)]
-    public void WhenCheckingPropertyFeature_ThenPropertyAndSubjectFeaturesMustBothBeConfigured(
-        LuxtronikFeature subjectFeature, string propertyName, LuxtronikFeature[] configuredFeatures, bool expected)
+    [InlineData(LuxtronikFunction.None, nameof(LuxtronikGatedTestSubject.FunctionGated), new[] { LuxtronikFunction.Cooling }, true)]
+    [InlineData(LuxtronikFunction.None, nameof(LuxtronikGatedTestSubject.FunctionGated), new[] { LuxtronikFunction.Heating }, false)]
+    [InlineData(LuxtronikFunction.Pool, nameof(LuxtronikGatedTestSubject.Ungated), new[] { LuxtronikFunction.Heating }, false)]
+    [InlineData(LuxtronikFunction.Pool, nameof(LuxtronikGatedTestSubject.FunctionGated), new[] { LuxtronikFunction.Cooling }, false)]
+    [InlineData(LuxtronikFunction.Pool, nameof(LuxtronikGatedTestSubject.FunctionGated), new[] { LuxtronikFunction.Cooling, LuxtronikFunction.Pool }, true)]
+    public void WhenCheckingPropertyFunction_ThenPropertyAndSubjectFunctionsMustBothBeActive(
+        LuxtronikFunction subjectFunction, string propertyName, LuxtronikFunction[] activeFunctions, bool expected)
     {
         // Arrange
-        var property = GetProperty(new LuxtronikGatedTestSubject(CreateContext()) { SubjectFeature = subjectFeature }, propertyName);
+        var property = GetProperty(new LuxtronikGatedTestSubject(CreateContext()) { SubjectFunction = subjectFunction }, propertyName);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), configuredFeatures.ToHashSet());
+        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), activeFunctions.ToHashSet());
 
         // Assert
         Assert.Equal(expected, isSupported);
     }
 
     [Theory]
-    [InlineData(0, new[] { LuxtronikFeature.MixingCircuit1Heating }, true)]
-    [InlineData(2, new[] { LuxtronikFeature.MixingCircuit2Heating }, true)]
-    [InlineData(2, new[] { LuxtronikFeature.MixingCircuit1Heating }, false)]
-    [InlineData(4, new[] { LuxtronikFeature.MixingCircuit3Heating }, true)]
-    [InlineData(4, new[] { LuxtronikFeature.MixingCircuit3Cooling }, false)]
-    public void WhenCircuitSubjectShiftsItsFeatures_ThenTheRegisterRequiresTheCircuitsOwnFlag(
-        int featureOffset, LuxtronikFeature[] configuredFeatures, bool expected)
+    [InlineData(0, new[] { LuxtronikFunction.MixingCircuit1Heating }, true)]
+    [InlineData(2, new[] { LuxtronikFunction.MixingCircuit2Heating }, true)]
+    [InlineData(2, new[] { LuxtronikFunction.MixingCircuit1Heating }, false)]
+    [InlineData(4, new[] { LuxtronikFunction.MixingCircuit3Heating }, true)]
+    [InlineData(4, new[] { LuxtronikFunction.MixingCircuit3Cooling }, false)]
+    public void WhenCircuitSubjectShiftsItsFunctions_ThenTheRegisterRequiresTheCircuitsOwnFlag(
+        int functionOffset, LuxtronikFunction[] activeFunctions, bool expected)
     {
         // Arrange
         var property = GetProperty(
-            new LuxtronikCircuitTestSubject(CreateContext()) { FeatureOffset = featureOffset },
+            new LuxtronikCircuitTestSubject(CreateContext()) { FunctionOffset = functionOffset },
             nameof(LuxtronikCircuitTestSubject.CircuitGated));
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), configuredFeatures.ToHashSet());
+        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), activeFunctions.ToHashSet());
 
         // Assert
         Assert.Equal(expected, isSupported);
     }
 
     [Fact]
-    public void WhenCircuitSubjectShiftsItsFeatures_ThenAnUngatedRegisterStaysUngated()
+    public void WhenCircuitSubjectShiftsItsFunctions_ThenAnUngatedRegisterStaysUngated()
     {
         // Arrange
         var property = GetProperty(
-            new LuxtronikCircuitTestSubject(CreateContext()) { FeatureOffset = 2 },
+            new LuxtronikCircuitTestSubject(CreateContext()) { FunctionOffset = 2 },
             nameof(LuxtronikCircuitTestSubject.Ungated));
 
         // Act
         var isSupported = LuxtronikGating.IsSupported(
-            property, new Version(3, 92, 3), new HashSet<LuxtronikFeature> { LuxtronikFeature.Heating });
+            property, new Version(3, 92, 3), new HashSet<LuxtronikFunction> { LuxtronikFunction.Heating });
 
         // Assert
         Assert.True(isSupported);

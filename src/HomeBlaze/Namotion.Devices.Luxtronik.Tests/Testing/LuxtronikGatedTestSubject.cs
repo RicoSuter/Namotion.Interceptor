@@ -13,12 +13,12 @@ public partial class LuxtronikGatedTestSubject : ILuxtronikGatedSubject
     {
         Ungated = null;
         FirmwareGated = null;
-        FeatureGated = null;
+        FunctionGated = null;
     }
 
     public Version? SubjectMinimumFirmwareVersion { get; init; }
 
-    public LuxtronikFeature SubjectFeature { get; init; } = LuxtronikFeature.None;
+    public LuxtronikFunction SubjectFunction { get; init; } = LuxtronikFunction.None;
 
     [LuxtronikInputRegister(0, ModbusDataType.U16)]
     public partial ushort? Ungated { get; set; }
@@ -26,10 +26,10 @@ public partial class LuxtronikGatedTestSubject : ILuxtronikGatedSubject
     [LuxtronikInputRegister(1, ModbusDataType.U16, MinimumFirmware = "3.93.0")]
     public partial ushort? FirmwareGated { get; set; }
 
-    [LuxtronikHoldingRegister(2, ModbusDataType.U16, Feature = LuxtronikFeature.Cooling)]
-    public partial ushort? FeatureGated { get; set; }
+    [LuxtronikHoldingRegister(2, ModbusDataType.U16, Function = LuxtronikFunction.Cooling)]
+    public partial ushort? FunctionGated { get; set; }
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => SubjectMinimumFirmwareVersion;
 
-    LuxtronikFeature ILuxtronikGatedSubject.Feature => SubjectFeature;
+    LuxtronikFunction ILuxtronikGatedSubject.Function => SubjectFunction;
 }

@@ -55,5 +55,5 @@ public partial class LuxtronikExtraHotWater : ILuxtronikGatedSubject
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
-    LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
+    LuxtronikFunction ILuxtronikGatedSubject.Function => LuxtronikFunction.None;
 }

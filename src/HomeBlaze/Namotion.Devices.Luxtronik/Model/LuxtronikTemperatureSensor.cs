@@ -43,5 +43,5 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
 
     Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => _minimumFirmwareVersion;
 
-    LuxtronikFeature ILuxtronikGatedSubject.Feature => LuxtronikFeature.None;
+    LuxtronikFunction ILuxtronikGatedSubject.Function => LuxtronikFunction.None;
 }

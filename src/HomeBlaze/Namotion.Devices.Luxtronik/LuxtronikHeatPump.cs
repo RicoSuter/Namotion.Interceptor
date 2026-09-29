@@ -99,7 +99,7 @@ public partial class LuxtronikHeatPump :
     /// Gets which functions are active; the optional function subjects follow these flags.
     /// </summary>
     [State(Position = 15)]
-    public partial LuxtronikFeatures Features { get; internal set; }
+    public partial LuxtronikFunctions Functions { get; internal set; }
 
     /// <summary>
     /// Gets heating.
@@ -199,7 +199,7 @@ public partial class LuxtronikHeatPump :
         Energy = new LuxtronikEnergy();
         SmartGrid = new LuxtronikSmartGrid();
         PowerConsumptionLimit = new LuxtronikPowerConsumptionLimit();
-        Features = new LuxtronikFeatures();
+        Functions = new LuxtronikFunctions();
         Heating = new LuxtronikHeating();
         HotWater = new LuxtronikHotWater();
         Cooling = null;

@@ -25,12 +25,12 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     // Protects the controller from a hand-edited configuration that would poll it continuously.
     private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
 
-    private const int UnknownFeatureMask = -1;
+    private const int UnknownFunctionMask = -1;
 
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
 
     // Written by the discovery on the source's thread, read by the status loop.
-    private int _discoveredFeatureMask = UnknownFeatureMask;
+    private int _discoveredFunctionMask = UnknownFunctionMask;
 
     /// <summary>
     /// Gets how often <see cref="DiscoverAsync"/> ran.
@@ -49,31 +49,31 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         new PropertyReference(this, nameof(SoftwareVersion))
             .SetValueFromSource(context.Source, null, null, firmwareVersion.ToString());
 
-        IReadOnlySet<LuxtronikFeature>? configuredFeatures = null;
-        var featureMask = UnknownFeatureMask;
+        IReadOnlySet<LuxtronikFunction>? activeFunctions = null;
+        var functionMask = UnknownFunctionMask;
         try
         {
-            var flags = await context.ReadDiscreteInputsAsync(Features.BaseAddress, LuxtronikGating.FeatureFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
-            configuredFeatures = LuxtronikGating.GetConfiguredFeatures(flags);
-            featureMask = LuxtronikGating.GetFeatureMask(flags);
+            var flags = await context.ReadDiscreteInputsAsync(Functions.BaseAddress, LuxtronikGating.FunctionFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
+            activeFunctions = LuxtronikGating.GetActiveFunctions(flags);
+            functionMask = LuxtronikGating.GetFunctionMask(flags);
         }
         catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
         {
             _logger.LogInformation(
                 exception,
-                "Luxtronik {HostAddress} does not report its configured functions (exception code {ExceptionCode}); values of unconfigured functions are shown as unavailable instead.",
+                "Luxtronik {HostAddress} does not report which functions are active (exception code {ExceptionCode}); values of inactive functions are shown as unavailable instead.",
                 HostAddress, exception.ExceptionCode);
         }
 
-        UpdateFunctionSubjects(configuredFeatures);
+        UpdateFunctionSubjects(activeFunctions);
 
         var registeredSubject = this.TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("The heat pump is not registered. Attach it to a subject graph with a registry.");
 
         foreach (var property in registeredSubject.GetAllProperties())
         {
-            var isUnreadableFeatureFlag = configuredFeatures is null && ReferenceEquals(property.Subject, Features);
-            if (isUnreadableFeatureFlag || !LuxtronikGating.IsSupported(property, firmwareVersion, configuredFeatures))
+            var isUnreadableFunctionFlag = activeFunctions is null && ReferenceEquals(property.Subject, Functions);
+            if (isUnreadableFunctionFlag || !LuxtronikGating.IsSupported(property, firmwareVersion, activeFunctions))
             {
                 context.ExcludeProperty(property.Reference);
 
@@ -85,41 +85,41 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             }
         }
 
-        Volatile.Write(ref _discoveredFeatureMask, featureMask);
+        Volatile.Write(ref _discoveredFunctionMask, functionMask);
         _logger.LogInformation("Luxtronik {HostAddress} runs firmware {FirmwareVersion}.", HostAddress, firmwareVersion);
     }
 
     /// <summary>
-    /// Creates the subjects of the active optional functions, keeps existing ones, and removes the inactive ones; all exist when <paramref name="activeFeatures"/> is unknown (<c>null</c>).
+    /// Creates the subjects of the active optional functions, keeps existing ones, and removes the inactive ones; all exist when <paramref name="activeFunctions"/> is unknown (<c>null</c>).
     /// </summary>
-    internal void UpdateFunctionSubjects(IReadOnlySet<LuxtronikFeature>? activeFeatures)
+    internal void UpdateFunctionSubjects(IReadOnlySet<LuxtronikFunction>? activeFunctions)
     {
-        Cooling = GetFunctionSubject(activeFeatures, LuxtronikFeature.Cooling, LuxtronikFeature.None,
+        Cooling = GetFunctionSubject(activeFunctions, LuxtronikFunction.Cooling, LuxtronikFunction.None,
             Cooling, static () => new LuxtronikCooling());
-        Pool = GetFunctionSubject(activeFeatures, LuxtronikFeature.Pool, LuxtronikFeature.None,
+        Pool = GetFunctionSubject(activeFunctions, LuxtronikFunction.Pool, LuxtronikFunction.None,
             Pool, static () => new LuxtronikPool());
-        Solar = GetFunctionSubject(activeFeatures, LuxtronikFeature.Solar, LuxtronikFeature.None,
+        Solar = GetFunctionSubject(activeFunctions, LuxtronikFunction.Solar, LuxtronikFunction.None,
             Solar, static () => new LuxtronikSolar());
-        RoomControl = GetFunctionSubject(activeFeatures, LuxtronikFeature.RoomControlUnit, LuxtronikFeature.None,
+        RoomControl = GetFunctionSubject(activeFunctions, LuxtronikFunction.RoomControlUnit, LuxtronikFunction.None,
             RoomControl, static () => new LuxtronikRoomControl());
-        MixingCircuit1 = GetFunctionSubject(activeFeatures, LuxtronikFeature.MixingCircuit1Heating, LuxtronikFeature.MixingCircuit1Cooling,
+        MixingCircuit1 = GetFunctionSubject(activeFunctions, LuxtronikFunction.MixingCircuit1Heating, LuxtronikFunction.MixingCircuit1Cooling,
             MixingCircuit1, static () => new LuxtronikMixingCircuit(1));
-        MixingCircuit2 = GetFunctionSubject(activeFeatures, LuxtronikFeature.MixingCircuit2Heating, LuxtronikFeature.MixingCircuit2Cooling,
+        MixingCircuit2 = GetFunctionSubject(activeFunctions, LuxtronikFunction.MixingCircuit2Heating, LuxtronikFunction.MixingCircuit2Cooling,
             MixingCircuit2, static () => new LuxtronikMixingCircuit(2));
-        MixingCircuit3 = GetFunctionSubject(activeFeatures, LuxtronikFeature.MixingCircuit3Heating, LuxtronikFeature.MixingCircuit3Cooling,
+        MixingCircuit3 = GetFunctionSubject(activeFunctions, LuxtronikFunction.MixingCircuit3Heating, LuxtronikFunction.MixingCircuit3Cooling,
             MixingCircuit3, static () => new LuxtronikMixingCircuit(3));
     }
 
-    // LuxtronikFeature.None is never active, so it serves as "no alternative".
+    // LuxtronikFunction.None is never active, so it serves as "no alternative".
     private static TSubject? GetFunctionSubject<TSubject>(
-        IReadOnlySet<LuxtronikFeature>? activeFeatures,
-        LuxtronikFeature feature,
-        LuxtronikFeature alternativeFeature,
+        IReadOnlySet<LuxtronikFunction>? activeFunctions,
+        LuxtronikFunction function,
+        LuxtronikFunction alternativeFunction,
         TSubject? current,
         Func<TSubject> create)
         where TSubject : class
     {
-        var isActive = activeFeatures is null || activeFeatures.Contains(feature) || activeFeatures.Contains(alternativeFeature);
+        var isActive = activeFunctions is null || activeFunctions.Contains(function) || activeFunctions.Contains(alternativeFunction);
         return isActive ? current ?? create() : null;
     }
 
@@ -218,7 +218,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         }
 
         // Discards the previous source's discovery, whose mismatch with the polled flags would restart this source again.
-        Volatile.Write(ref _discoveredFeatureMask, UnknownFeatureMask);
+        Volatile.Write(ref _discoveredFunctionMask, UnknownFunctionMask);
 
         var hasFailed = false;
         try
@@ -232,7 +232,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             while (!stoppingToken.IsCancellationRequested)
             {
                 UpdateStatus(source.Diagnostics);
-                if (HaveFeaturesChanged(hostAddress) ||
+                if (HaveFunctionsChanged(hostAddress) ||
                     await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false))
                 {
                     break;
@@ -262,20 +262,20 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     }
 
     /// <summary>
-    /// Gets whether the polled <see cref="Features"/> differ from the flags the last discovery read, which excluded the
+    /// Gets whether the polled <see cref="Functions"/> differ from the flags the last discovery read, which excluded the
     /// registers of the inactive functions. <c>false</c> until both are known.
     /// </summary>
-    private bool HaveFeaturesChanged(string hostAddress)
+    private bool HaveFunctionsChanged(string hostAddress)
     {
-        var discoveredMask = Volatile.Read(ref _discoveredFeatureMask);
-        if (discoveredMask == UnknownFeatureMask || Features.GetFeatureMask() is not { } polledMask || polledMask == discoveredMask)
+        var discoveredMask = Volatile.Read(ref _discoveredFunctionMask);
+        if (discoveredMask == UnknownFunctionMask || Functions.GetFunctionMask() is not { } polledMask || polledMask == discoveredMask)
         {
             return false;
         }
 
         _logger.LogInformation(
-            "Luxtronik {HostAddress} changed its active functions ({ChangedFeatures}); discovering its registers again.",
-            hostAddress, LuxtronikGating.GetFeatureNames(polledMask ^ discoveredMask));
+            "Luxtronik {HostAddress} changed its active functions ({ChangedFunctions}); discovering its registers again.",
+            hostAddress, LuxtronikGating.GetFunctionNames(polledMask ^ discoveredMask));
         return true;
     }
 

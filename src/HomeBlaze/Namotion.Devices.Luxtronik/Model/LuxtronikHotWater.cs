@@ -21,7 +21,7 @@ public partial class LuxtronikHotWater
         Temperature = new LuxtronikTemperatureSensor(10120, "Hot water temperature");
         LoadingPump = new LuxtronikPump(10355, "Hot water loading pump (BUP)");
         CirculationPump = new LuxtronikPump(10356, "Hot water circulation pump (ZIP)");
-        SmartHomeControl = new LuxtronikSmartHomeControl(10005, LuxtronikFeature.None);
+        SmartHomeControl = new LuxtronikSmartHomeControl(10005, LuxtronikFunction.None);
         ExtraHotWater = new LuxtronikExtraHotWater();
         Status = null;
         Target = null;

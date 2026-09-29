@@ -156,7 +156,7 @@ public class LuxtronikHeatPumpLifecycleTests
     }
 
     [Fact]
-    public async Task WhenFeaturesStayTheSame_ThenHeatPumpDoesNotDiscoverAgain()
+    public async Task WhenFunctionsStayTheSame_ThenHeatPumpDoesNotDiscoverAgain()
     {
         // Arrange
         using var server = new LuxtronikTestServer(new Version(3, 92, 3));
@@ -166,7 +166,7 @@ public class LuxtronikHeatPumpLifecycleTests
         await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.IsConnected && heatPump.Features.GetFeatureMask() is not null && heatPump.LastUpdated is not null,
+            () => heatPump.IsConnected && heatPump.Functions.GetFunctionMask() is not null && heatPump.LastUpdated is not null,
             WaitTimeout,
             message: "The heat pump should connect and read the flags.");
 
@@ -193,27 +193,27 @@ public class LuxtronikHeatPumpLifecycleTests
         server.Start();
         server.SeedTypicalValues();
         server.SetInput<ushort>(10006, (ushort)LuxtronikModeStatus.Running);
-        var allFeatures = Enum.GetValues<LuxtronikFeature>().Where(feature => feature != LuxtronikFeature.None).ToArray();
-        var withoutCooling = allFeatures.Where(feature => feature != LuxtronikFeature.Cooling).ToArray();
-        server.SetFeatures(withoutCooling);
+        var allFunctions = Enum.GetValues<LuxtronikFunction>().Where(function => function != LuxtronikFunction.None).ToArray();
+        var withoutCooling = allFunctions.Where(function => function != LuxtronikFunction.Cooling).ToArray();
+        server.SetFunctions(withoutCooling);
 
         await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.Features.Cooling == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
+            () => heatPump.Functions.IsCoolingEnabled == false && heatPump.Temperatures.Outside.Temperature == -4.5m,
             WaitTimeout,
             message: "The heat pump should read the flags without cooling.");
         Assert.Null(heatPump.Cooling);
 
         // Act
-        server.SetFeatures(allFeatures);
+        server.SetFunctions(allFunctions);
         await AsyncTestHelpers.WaitUntilAsync(
             () => heatPump.Cooling?.Status == LuxtronikModeStatus.Running,
             WaitTimeout,
             message: "Cooling should appear and read its status.");
         var cooling = heatPump.Cooling!;
         Assert.Equal(2, heatPump.DiscoveryCount);
-        server.SetFeatures(withoutCooling);
+        server.SetFunctions(withoutCooling);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
@@ -233,7 +233,7 @@ public class LuxtronikHeatPumpLifecycleTests
         server.SeedTypicalValues();
         server.SetInput<short>(10152, 200);
         server.SetInput<short>(10153, 450);
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater, LuxtronikFunction.MixingCircuit2Cooling);
 
         await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
         var heatPump = host.HeatPump;
@@ -245,7 +245,7 @@ public class LuxtronikHeatPumpLifecycleTests
         Assert.Null(circuit.MinimumTarget);
 
         // Act
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling, LuxtronikFeature.MixingCircuit2Heating);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater, LuxtronikFunction.MixingCircuit2Cooling, LuxtronikFunction.MixingCircuit2Heating);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
@@ -265,7 +265,7 @@ public class LuxtronikHeatPumpLifecycleTests
         server.SetInput<short>(10151, 350);
         server.SetInput<short>(10152, 200);
         server.SetInput<short>(10153, 450);
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling, LuxtronikFeature.MixingCircuit2Heating);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater, LuxtronikFunction.MixingCircuit2Cooling, LuxtronikFunction.MixingCircuit2Heating);
 
         await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
         var heatPump = host.HeatPump;
@@ -276,7 +276,7 @@ public class LuxtronikHeatPumpLifecycleTests
         var circuit = heatPump.MixingCircuit2!;
 
         // Act
-        server.SetFeatures(LuxtronikFeature.Heating, LuxtronikFeature.HotWater, LuxtronikFeature.MixingCircuit2Cooling);
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater, LuxtronikFunction.MixingCircuit2Cooling);
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
