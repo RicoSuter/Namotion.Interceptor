@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 
 namespace Namotion.Devices.Luxtronik.Tests;
@@ -20,12 +22,12 @@ public class LuxtronikRegisterDumpTests
         try
         {
             // Act
-            var dump = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", server.Port, dumpPath);
+            var dump = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", server.Port, dumpPath, TimeSpan.Zero);
 
             using var replayServer = new LuxtronikTestServer(firmware);
             replayServer.Start();
             replayServer.LoadDump(await File.ReadAllTextAsync(dumpPath));
-            var replay = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", replayServer.Port, replayPath);
+            var replay = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", replayServer.Port, replayPath, TimeSpan.Zero);
 
             // Assert
             Assert.Empty(dump.Failures);
@@ -64,7 +66,7 @@ public class LuxtronikRegisterDumpTests
         try
         {
             // Act
-            var dump = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", server.Port, dumpPath);
+            var dump = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", server.Port, dumpPath, TimeSpan.Zero);
 
             // Assert
             Assert.Contains("input 10109: exception response IllegalDataAddress", dump.Failures);
@@ -78,6 +80,55 @@ public class LuxtronikRegisterDumpTests
         finally
         {
             File.Delete(dumpPath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenControllerDropsEveryConnection_ThenTheDumpStopsAfterThreeTransportFailures()
+    {
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var acceptCancellation = new CancellationTokenSource();
+        var acceptLoop = CloseEveryConnectionAsync(listener, acceptCancellation.Token);
+        var dumpPath = CreateDumpPath();
+
+        try
+        {
+            // Act
+            var dump = await LuxtronikRegisterDump.CaptureAsync("127.0.0.1", port, dumpPath, TimeSpan.Zero);
+
+            // Assert
+            Assert.Equal(4, dump.Failures.Count);
+            Assert.StartsWith("input 10000: ", dump.Failures[0]);
+            Assert.StartsWith("input 10002: ", dump.Failures[1]);
+            Assert.StartsWith("input 10006: ", dump.Failures[2]);
+            Assert.Equal("aborted after 3 consecutive transport failures", dump.Failures[3]);
+            Assert.Empty(dump.InputRegisters);
+            Assert.Equal("not read", dump.UnmappedReadBehavior);
+            Assert.Contains("aborted after 3 consecutive transport failures", await File.ReadAllTextAsync(dumpPath));
+        }
+        finally
+        {
+            await acceptCancellation.CancelAsync();
+            await acceptLoop;
+            File.Delete(dumpPath);
+        }
+    }
+
+    private static async Task CloseEveryConnectionAsync(TcpListener listener, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The test is over.
         }
     }
 

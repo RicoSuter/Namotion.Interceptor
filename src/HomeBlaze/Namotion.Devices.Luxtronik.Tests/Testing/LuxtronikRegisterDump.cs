@@ -16,6 +16,7 @@ internal sealed class LuxtronikRegisterDump
     private const int FeatureFlagsAddress = 10000;
     private const int FeatureFlagCount = 12;
     private const int UnmappedInputAddress = 10001;
+    private const int MaximumConsecutiveTransportFailures = 3;
 
     // FluentModbus reports framing errors as this code; unlike a device rejection they leave the connection unusable.
     private const ModbusExceptionCode FramingErrorCode = (ModbusExceptionCode)255;
@@ -23,20 +24,23 @@ internal sealed class LuxtronikRegisterDump
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
 
     // Spaces the requests out so the dump adds as little load as possible to a controller that is running a heat pump.
-    private static readonly TimeSpan RequestPause = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan DefaultRequestPause = TimeSpan.FromMilliseconds(100);
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly string _host;
     private readonly int _port;
+    private readonly TimeSpan _requestPause;
     private TcpClient? _tcpClient;
     private ModbusTcpClient? _client;
     private bool _hasSentRequest;
+    private int _consecutiveTransportFailures;
 
-    private LuxtronikRegisterDump(string host, int port)
+    private LuxtronikRegisterDump(string host, int port, TimeSpan requestPause)
     {
         _host = host;
         _port = port;
+        _requestPause = requestPause;
     }
 
     public SortedDictionary<string, ushort> InputRegisters { get; } = new(StringComparer.Ordinal);
@@ -49,16 +53,27 @@ internal sealed class LuxtronikRegisterDump
 
     public string UnmappedReadBehavior { get; private set; } = "not read";
 
+    private bool IsAborted => _consecutiveTransportFailures >= MaximumConsecutiveTransportFailures;
+
     /// <summary>
     /// Reads every mapped block once, sequentially over one connection at a time, and writes the dump to
-    /// <paramref name="dumpPath"/>, also when the read fails part way.
+    /// <paramref name="dumpPath"/>, also when the read fails part way. Stops after three timeouts or connection
+    /// errors in a row.
     /// </summary>
-    public static async Task<LuxtronikRegisterDump> CaptureAsync(string host, int port, string dumpPath)
+    /// <param name="host">The controller's host name or IP address.</param>
+    /// <param name="port">The Modbus TCP port.</param>
+    /// <param name="dumpPath">The JSON file to write.</param>
+    /// <param name="requestPause">The pause before each request and reconnect; defaults to 100 ms.</param>
+    public static async Task<LuxtronikRegisterDump> CaptureAsync(string host, int port, string dumpPath, TimeSpan? requestPause = null)
     {
-        var dump = new LuxtronikRegisterDump(host, port);
+        var dump = new LuxtronikRegisterDump(host, port, requestPause ?? DefaultRequestPause);
         try
         {
             await dump.ReadAllAsync();
+            if (dump.IsAborted)
+            {
+                dump.Failures.Add($"aborted after {MaximumConsecutiveTransportFailures} consecutive transport failures");
+            }
         }
         finally
         {
@@ -75,6 +90,11 @@ internal sealed class LuxtronikRegisterDump
 
         foreach (var (start, end, _) in LuxtronikTestServer.InputRanges)
         {
+            if (IsAborted)
+            {
+                return;
+            }
+
             var data = await ReadBlockAsync($"input {start}",
                 (client, token) => client.ReadInputRegistersAsync(UnitId, (ushort)start, (ushort)(end - start + 1), token));
             AddRegisters(data, start, InputRegisters);
@@ -82,19 +102,28 @@ internal sealed class LuxtronikRegisterDump
 
         foreach (var (start, end, _) in LuxtronikTestServer.HoldingRanges)
         {
+            if (IsAborted)
+            {
+                return;
+            }
+
             var data = await ReadBlockAsync($"holding {start}",
                 (client, token) => client.ReadHoldingRegistersAsync(UnitId, (ushort)start, (ushort)(end - start + 1), token));
             AddRegisters(data, start, HoldingRegisters);
         }
 
+        if (IsAborted)
+        {
+            return;
+        }
+
         var bits = await ReadBlockAsync($"discrete {FeatureFlagsAddress}",
             (client, token) => client.ReadDiscreteInputsAsync(UnitId, FeatureFlagsAddress, FeatureFlagCount, token));
-        if (bits is not null)
+        AddDiscreteInputs(bits);
+
+        if (IsAborted)
         {
-            for (var index = 0; index < FeatureFlagCount; index++)
-            {
-                DiscreteInputs[FormatAddress(FeatureFlagsAddress + index)] = ((bits[index / 8] >> (index % 8)) & 1) != 0;
-            }
+            return;
         }
 
         // How the controller answers an unmapped read decides how the connector's split-on-failure behaves on it.
@@ -120,7 +149,7 @@ internal sealed class LuxtronikRegisterDump
     {
         if (_hasSentRequest)
         {
-            await Task.Delay(RequestPause);
+            await Task.Delay(_requestPause);
         }
 
         _hasSentRequest = true;
@@ -129,19 +158,30 @@ internal sealed class LuxtronikRegisterDump
         try
         {
             var data = await read(_client!, timeoutSource.Token);
+            _consecutiveTransportFailures = 0;
             return (data.ToArray(), null);
         }
-        catch (ModbusException exception) when (exception.ExceptionCode != FramingErrorCode)
+        catch (ModbusException exception) when (exception.ExceptionCode is not ModbusExceptionCode.OK and not FramingErrorCode)
         {
+            _consecutiveTransportFailures = 0;
             return (null, $"exception response {exception.ExceptionCode}");
         }
-        catch (Exception exception) when (exception is ModbusException or OperationCanceledException or TimeoutException or IOException)
+        catch (Exception exception) when (
+            exception is ModbusException or OperationCanceledException or TimeoutException or IOException ||
+            timeoutSource.IsCancellationRequested)
         {
+            // FluentModbus closes the stream when the timeout fires, which can surface as any exception type.
             var failure = timeoutSource.IsCancellationRequested || exception is TimeoutException
                 ? "timeout"
                 : $"error: {exception.Message}";
 
-            await ConnectAsync();
+            _consecutiveTransportFailures++;
+            if (!IsAborted)
+            {
+                await Task.Delay(_requestPause);
+                await ConnectAsync();
+            }
+
             return (null, failure);
         }
     }
@@ -176,6 +216,25 @@ internal sealed class LuxtronikRegisterDump
         _tcpClient?.Dispose();
         _client = null;
         _tcpClient = null;
+    }
+
+    private void AddDiscreteInputs(byte[]? bits)
+    {
+        if (bits is null)
+        {
+            return;
+        }
+
+        if (bits.Length * 8 < FeatureFlagCount)
+        {
+            Failures.Add($"discrete {FeatureFlagsAddress}: short response of {bits.Length} bytes");
+            return;
+        }
+
+        for (var index = 0; index < FeatureFlagCount; index++)
+        {
+            DiscreteInputs[FormatAddress(FeatureFlagsAddress + index)] = ((bits[index / 8] >> (index % 8)) & 1) != 0;
+        }
     }
 
     private string ToJson()
