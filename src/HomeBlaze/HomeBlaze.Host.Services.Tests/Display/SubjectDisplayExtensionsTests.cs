@@ -133,6 +133,21 @@ public class SubjectDisplayExtensionsTests
         // Assert
         Assert.Equal(nameof(ChildLabelItem), label);
     }
+
+    [Theory]
+    [InlineData("Living room", "living-room", "Living room (living-room)")]
+    [InlineData("Living room", 2, "Living room (2)")]
+    [InlineData("kitchen", "kitchen", "kitchen")]
+    [InlineData("Reference", null, "Reference")]
+    [InlineData("", "kitchen", "kitchen")]
+    public void WhenItemHasKey_ThenIdentifyingDisplayNameIncludesItOnce(string displayName, object? index, string expected)
+    {
+        // Act
+        var label = SubjectDisplayExtensions.GetIdentifyingDisplayName(displayName, index);
+
+        // Assert
+        Assert.Equal(expected, label);
+    }
 }
 
 [InterceptorSubject]

@@ -44,6 +44,19 @@ public static class SubjectDisplayExtensions
     }
 
     /// <summary>
+    /// Gets a label that identifies a collection or dictionary item: the display name followed by
+    /// the index or key in parentheses when they differ, else the display name.
+    /// </summary>
+    public static string GetIdentifyingDisplayName(string displayName, object? index)
+    {
+        var key = index?.ToString();
+        if (string.IsNullOrEmpty(key) || key == displayName)
+            return displayName;
+
+        return string.IsNullOrEmpty(displayName) ? key : $"{displayName} ({key})";
+    }
+
+    /// <summary>
     /// Gets the icon name for a subject (e.g., "Folder", "Article").
     /// This returns the semantic name, not the MudBlazor icon string.
     /// Use SubjectIconExtensions.GetIcon() in HomeBlaze.Host for MudBlazor resolution.
