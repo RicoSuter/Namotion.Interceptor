@@ -486,8 +486,8 @@ Read-only use cannot change the heat pump's behavior:
 
 Preconditions documented for the user (HomeBlaze device doc):
 
-- Enabling SHI is a service-menu setting (SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface). AIT reserves controller settings for authorized personnel; change only this setting.
-- Note the Smart Grid setting before enabling SHI. Keep Smart Grid (SG-Ready) off while SHI is in use: the manual says the two can influence each other.
+- Enabling SHI is a service-menu setting (SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface). AIT reserves controller settings for authorized personnel; change only this setting, apart from Smart Grid.
+- The manual (Teil 2, p. 47) asks to deactivate Smart Grid (SG-Ready) while SHI is used, because both can influence each other. Note the current setting first; if the installation relies on SG-Ready (PV or an energy manager on the SG contacts), decide which of the two to use before enabling SHI.
 - SHI has no read-only mode (only on or off) and Modbus TCP has no authentication, so any host reaching port 502 can write. Keep port 502 LAN-only and firewalled to trusted hosts; never forward it on the router, even though the manual mentions it. For extra safety, put a read-only Modbus proxy in front (evcc modbusproxy with `readonly: true` or `readonly: deny`).
 - Several clients may connect, but only one may write: two clients writing the same data point raise error 816, and SHI is disabled while it persists. Read-only HomeBlaze is not a writer, but written values reset 15 minutes after the master's last request and reads count as requests, so continuous polling can keep another client's last written values active.
 - First run: one client at a time, and check that "Empfangene Daten" keeps showing "---".

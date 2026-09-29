@@ -18,7 +18,9 @@ Reading does not change how the heat pump runs. Reads change no controller state
 
 ### Enabling the Smart Home Interface
 
-The SHI is switched on in the service menu: SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface. AIT reserves controller settings for authorised service personnel, so if you do this yourself, change only this one setting. Note the current Smart Grid (SG-Ready) setting before you start and leave it unchanged. The Luxtronik manual (Teil 2, p. 47) says that Smart Grid and the SHI can influence each other.
+The SHI is switched on in the service menu: SERVICE > Systemsteuerung > Konnektivität > Smart-Home-Interface. AIT reserves controller settings for authorised service personnel, so if you do this yourself, change only this one setting, apart from Smart Grid as described below.
+
+The Luxtronik manual (Teil 2, p. 47) asks to deactivate Smart Grid (SG-Ready) while the SHI is used, because both functions can influence each other. Note the current Smart Grid setting before you start. If the installation relies on SG-Ready (for example a PV system or an energy manager on the SG contacts), decide which of the two to use before enabling the SHI.
 
 Switch the SHI off again when you no longer need it.
 
