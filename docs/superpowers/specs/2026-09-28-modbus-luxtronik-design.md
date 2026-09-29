@@ -299,7 +299,7 @@ Protocol facts that shape the design:
 - Addresses are raw (no `3xxxx`/`4xxxx` prefix, no +1). Input, holding and discrete input addresses all start at 10000, in separate address spaces.
 - Unit ID 1 (default, configurable on the controller). Byte order and word order are both big endian, so 32-bit values are `HighWordFirst`.
 - Reading a non-existent register fails the whole request. Hence `MaximumRegisterGap = 0`, firmware gating and the split-on-failure fallback (4.9).
-- Since 3.92.0, a data point that exists but is not configured returns 0x7FFF (16-bit) or 0x7FFFFFFF (32-bit, per python-luxtronik `constants.py`; the official manual only mentions 32767 and the hardware dump confirms). All Luxtronik registers therefore use `NotAvailableValue = SignedMaximum`.
+- Since 3.92.0, a data point that exists but is not configured returns 0x7FFF (16-bit) or 0x7FFFFFFF (32-bit, per python-luxtronik `constants.py`; the official manual only mentions 32767; to be confirmed by the hardware dump). All Luxtronik registers therefore use `NotAvailableValue = SignedMaximum`.
 - Discrete inputs 10000 to 10011 report which operating modes and circuits are configured.
 - SHI values written by a master are volatile (RAM only) and reset after 15 minutes without a request. The controller shows SHI as "Standby" after 10 minutes without traffic. Reading never writes flash.
 - The hot water temperature (10120) reports the substitute value 75.0 °C on a sensor fault; documented, not filtered.
