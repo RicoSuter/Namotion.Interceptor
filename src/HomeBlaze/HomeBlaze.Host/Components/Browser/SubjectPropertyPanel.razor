@@ -122,7 +122,7 @@
                                 <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                             </div>
                         }
-                        <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
+                        <span style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
                         @if (childCount > 0)
                         {
                             <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
@@ -156,7 +156,7 @@
                                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
-                                    <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
+                                    <span style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
                                     @if (childCount > 0)
                                     {
                                         <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4">@childCount</MudChip>
@@ -377,15 +377,6 @@
     private string GetPropertyDisplayName(RegisteredSubjectProperty property)
     {
         return property.GetDisplayName();
-    }
-
-    private string GetSubjectDisplayName(SubjectPropertyChild child)
-    {
-        var subject = child.Subject;
-        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
-            return titleProvider.Title;
-
-        return subject?.ToString() ?? "n/a";
     }
 
     private int GetChildCount(SubjectPropertyChild child)
