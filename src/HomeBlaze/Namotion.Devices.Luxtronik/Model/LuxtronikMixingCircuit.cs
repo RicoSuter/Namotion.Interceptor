@@ -41,13 +41,13 @@ public partial class LuxtronikMixingCircuit : ITitleProvider
     public string? Title { get; }
 
     /// <summary>
-    /// Gets the measured circuit temperature.
+    /// Gets the measured flow temperature of the circuit.
     /// </summary>
     [State(Position = 1)]
     public partial LuxtronikTemperatureSensor Temperature { get; internal set; }
 
     /// <summary>
-    /// Gets the circuit target temperature and its limits.
+    /// Gets the circuit flow target temperature and its limits.
     /// </summary>
     [State(Position = 2)]
     public partial LuxtronikMixingCircuitSetpoints Setpoints { get; internal set; }

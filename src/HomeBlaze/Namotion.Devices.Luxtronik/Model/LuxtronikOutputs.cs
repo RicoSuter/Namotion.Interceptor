@@ -32,49 +32,49 @@ public partial class LuxtronikOutputs : IModbusBaseAddressProvider, ILuxtronikGa
     public int BaseAddress => 10350;
 
     /// <summary>
-    /// Gets whether the brine circulation pump output is on.
+    /// Gets whether the brine circulation pump output (BOSUP) is on.
     /// </summary>
     [LuxtronikInputRegister(0, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 1)]
     public partial bool? BrineCirculationPump { get; internal set; }
 
     /// <summary>
-    /// Gets whether the mixing circuit 1 pump output is on.
+    /// Gets whether the mixing circuit 1 circulation pump output (FP1) is on.
     /// </summary>
     [LuxtronikInputRegister(1, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 2)]
     public partial bool? MixingCircuit1Pump { get; internal set; }
 
     /// <summary>
-    /// Gets whether the mixing circuit 2 pump output is on.
+    /// Gets whether the mixing circuit 2 circulation pump output (FP2) is on.
     /// </summary>
     [LuxtronikInputRegister(2, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 3)]
     public partial bool? MixingCircuit2Pump { get; internal set; }
 
     /// <summary>
-    /// Gets whether the mixing circuit 3 pump output is on.
+    /// Gets whether the mixing circuit 3 circulation pump output (FP3) is on.
     /// </summary>
     [LuxtronikInputRegister(3, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 4)]
     public partial bool? MixingCircuit3Pump { get; internal set; }
 
     /// <summary>
-    /// Gets whether the heating circulation pump output is on.
+    /// Gets whether the heating circulation pump output (HUP) is on.
     /// </summary>
     [LuxtronikInputRegister(4, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 5)]
     public partial bool? HeatingCirculationPump { get; internal set; }
 
     /// <summary>
-    /// Gets whether the hot water circulation pump output is on.
+    /// Gets whether the hot water loading pump output (BUP) is on.
     /// </summary>
     [LuxtronikInputRegister(5, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 6)]
     public partial bool? HotWaterCirculationPump { get; internal set; }
 
     /// <summary>
-    /// Gets whether the circulation pump output is on.
+    /// Gets whether the hot water circulation pump output (ZIP) is on.
     /// </summary>
     [LuxtronikInputRegister(6, ModbusDataType.U16)]
     [State(IsDiscrete = true, Position = 7)]

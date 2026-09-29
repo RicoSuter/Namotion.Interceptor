@@ -107,21 +107,21 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
     public partial decimal? ReturnTarget { get; internal set; }
 
     /// <summary>
-    /// Gets the return temperature limit.
+    /// Gets the maximum return temperature.
     /// </summary>
     [LuxtronikInputRegister(3, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 21)]
     public partial decimal? ReturnLimit { get; internal set; }
 
     /// <summary>
-    /// Gets the minimum return target temperature.
+    /// Gets the minimum return temperature.
     /// </summary>
     [LuxtronikInputRegister(4, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 22)]
     public partial decimal? ReturnMinimumTarget { get; internal set; }
 
     /// <summary>
-    /// Gets the heating limit temperature.
+    /// Gets the heating limit: a return temperature above it counts as optional heating demand, below it as basic demand.
     /// </summary>
     [LuxtronikInputRegister(7, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 23)]
@@ -135,7 +135,7 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
     public partial decimal? MaximumFlow { get; internal set; }
 
     /// <summary>
-    /// Gets the calculated flow temperature.
+    /// Gets the calculated flow temperature, the return target plus the spread.
     /// </summary>
     [LuxtronikInputRegister(13, ModbusDataType.S16, Scale = 0.1, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.DegreeCelsius, Position = 25)]
@@ -163,7 +163,7 @@ public partial class LuxtronikTemperatures : IModbusBaseAddressProvider
     public partial decimal? HotWaterMaximum { get; internal set; }
 
     /// <summary>
-    /// Gets the hot water temperature limit.
+    /// Gets the hot water limit temperature; below it the heat pump ignores a soft power limit.
     /// </summary>
     [LuxtronikInputRegister(24, ModbusDataType.S16, Scale = 0.1)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 29)]

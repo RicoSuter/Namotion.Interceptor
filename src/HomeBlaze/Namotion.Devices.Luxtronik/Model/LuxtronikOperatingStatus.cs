@@ -91,14 +91,14 @@ public partial class LuxtronikOperatingStatus : IModbusBaseAddressProvider
     public partial LuxtronikBufferType? BufferType { get; internal set; }
 
     /// <summary>
-    /// Gets the compressor minimum off time.
+    /// Gets the minimum time the heat pump stays off before it may start again (cycling lock).
     /// </summary>
     [LuxtronikInputRegister(203, ModbusDataType.U16)]
     [State(Unit = StateUnit.Minute, Position = 9)]
     public partial int? MinimumOffTime { get; internal set; }
 
     /// <summary>
-    /// Gets the compressor minimum run time.
+    /// Gets the minimum time the heat pump runs once started.
     /// </summary>
     [LuxtronikInputRegister(204, ModbusDataType.U16)]
     [State(Unit = StateUnit.Minute, Position = 10)]
