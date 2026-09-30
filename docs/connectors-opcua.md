@@ -154,6 +154,8 @@ The OPC UA integration takes a snapshot of the object model at startup. Both cli
 - Does NOT update the OPC UA address space when subjects are attached
 - New subjects added after startup require a restart to appear in OPC UA
 
+Neither side follows [structural changes](connectors.md#structural-changes) yet: the client does not claim structural properties, and the server removes the nodes of a detached subject but creates none for an attached one.
+
 For side-specific cleanup behavior, see [Client Lifecycle](connectors-opcua-client.md#lifecycle) and [Server Lifecycle](connectors-opcua-server.md#lifecycle).
 
 ## Performance

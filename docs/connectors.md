@@ -23,7 +23,7 @@ A **source** represents an external authoritative system where the data originat
 
 **Examples**: OPC UA client connecting to a PLC, MQTT client subscribing to a broker, database client, REST API consumer
 
-**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens initially by scanning the subject graph during startup, and dynamically when the model changes structurally (subjects attached or detached via lifecycle events). Dynamic ownership changes require the external system to support adding and removing subscriptions at runtime. You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
+**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens by scanning the subject graph during startup, and ownership is released when a subject is detached. How a source follows subjects attached at runtime is described in [Structural Changes](#structural-changes). You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
 
 ### Data Flow
 
@@ -204,6 +204,18 @@ When a connector attempt ends, the change processor hands whatever it had buffer
 The cost is that a stop can block on an unreachable endpoint. Final delivery and the source retry handoff share one internal five-second safety bound, which cannot be configured per connector. Connectors stop one after another under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so the host timeout must leave enough time for every connector to complete or reach its internal bound.
 
 The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own. At final stop, every write still owned when that happens is counted as locally unconfirmed; the remote side may already have accepted it or may still accept it, so teardown delivery is at least once.
+
+### Structural Changes
+
+A **structural property** holds child subjects: a subject reference, a collection or a dictionary of subjects (`RegisteredSubjectProperty.CanContainSubjects`). A **structural change** is a write to one, which attaches or detaches subjects. A source follows structural changes through the same path as values:
+
+- **Claim structural properties.** A source claims the structural properties of the subjects it binds, next to their value properties, so their changes reach `WriteChangesAsync` through the change queue. A subtree bound later is claimed the same way, structural properties included.
+- **Handle both kinds in `WriteChangesAsync`.** A batch can mix structural and value changes and keeps their order, so a new subject's structure can be sent before its values. The source checks `CanContainSubjects` per change. For a structural change it binds the attached subtree and unbinds the detached one, and sends the change when the protocol can create or delete remote nodes. A source that cannot send structure only follows it and reports success; it never fails or warns about a structural change because it cannot write it.
+- **Authority is the same as for values.** For a source the remote side is authoritative: a local structural change is a request, and the structure applied by the next load or notification wins. For a server the local model is authoritative.
+- **Releasing stays synchronous.** `SourceOwnershipManager` releases the claims of a detaching subject while it detaches, before its change reaches the queue, so a source never writes into a removed subject.
+- **Identity is per connector.** How a remote node, topic or path maps to a subject instance is the protocol's decision. [Subject Updates](connectors-subject-updates.md) describes the path-based mapping for protocols without an identity of their own.
+
+Following structure requires the external system to support adding and removing subscriptions at runtime. A source whose remote structure is fixed for a session can bind on connect instead and restart when its structure has to change. Whether a built-in connector follows structural changes yet is stated in its own documentation.
 
 ### Monitoring Synchronization State
 
@@ -457,7 +469,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### SourceOwnershipManager
 
-Sources claim ownership of properties in two phases: initially inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and dynamically at runtime when subjects are attached to or detached from the object graph. The `SourceOwnershipManager` class simplifies this by handling:
+Sources claim ownership of properties inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and for subtrees bound later when they follow [structural changes](#structural-changes). The `SourceOwnershipManager` class simplifies this by handling:
 - Property ownership tracking (which properties this source is responsible for)
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
@@ -578,6 +590,7 @@ A server implementation typically handles:
 
 - **Starting the protocol server**: bind to a port, accept connections, restart on failure
 - **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Where in startup the processor is created decides what a client can miss: the OPC UA server creates it before the protocol server starts, so changes made during startup are captured, while the MQTT and WebSocket servers create it once theirs is already listening. Of the changes that are captured, those a later local commit superseded are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
+- **Publishing structural changes**: a server's change queue delivers [structural changes](#structural-changes) in order with values when its mapping includes the structural property. The local model is authoritative, so the server adds or removes what it exposes for the attached or detached subjects
 - **Handling inbound writes**: receive write requests from external clients and apply them to the local model (typically via `SetValueFromSource()` to prevent echo loops)
 - **Lifecycle cleanup**: release caches and subscriptions when subjects are detached from the object graph
 
