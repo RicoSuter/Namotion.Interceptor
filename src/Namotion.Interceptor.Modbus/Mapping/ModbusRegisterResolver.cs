@@ -1,4 +1,3 @@
-using System.Reflection;
 using Namotion.Interceptor.Modbus.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -52,14 +51,7 @@ internal static class ModbusRegisterResolver
     }
 
     private static byte? GetUnitId(IInterceptorSubject subject)
-    {
-        if (subject is IModbusUnitIdProvider provider)
-        {
-            return provider.UnitId;
-        }
-
-        return subject.GetType().GetCustomAttribute<ModbusUnitIdAttribute>(inherit: true)?.UnitId;
-    }
+        => subject is IModbusUnitIdProvider provider ? provider.UnitId : null;
 
     private static ModbusRegisterAttribute? GetRegisterAttribute(RegisteredSubjectProperty property, IInterceptorSubject root)
     {

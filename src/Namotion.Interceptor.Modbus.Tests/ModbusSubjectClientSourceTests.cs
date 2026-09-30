@@ -64,10 +64,11 @@ public partial class ModbusSubjectClientSourceTests
         }
     }
 
-    [ModbusUnitId(2)]
     [InterceptorSubject]
-    public partial class SecondUnit
+    public partial class SecondUnit : IModbusUnitIdProvider
     {
+        public byte UnitId => 2;
+
         [ModbusRegister(0, ModbusDataType.U16)]
         public partial int? Value { get; set; }
     }

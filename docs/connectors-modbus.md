@@ -72,7 +72,7 @@ Values convert as follows:
 - `NotAvailableValue` requires a nullable property and an integer data type, and is checked before scaling.
 - With `ScaleFactorProperty`, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes. A scale factor reading as its own `NotAvailableValue` is unknown, so its dependents are not updated until it is available again.
 
-A subject implementing `IModbusBaseAddressProvider` makes its addresses relative to `BaseAddress`, so one class can describe a repeated block. Base addresses are not inherited by child subjects. `IModbusUnitIdProvider` or `[ModbusUnitId]` sets the unit ID for a subject and its children, the interface taking precedence; otherwise `ModbusClientConfiguration.UnitId` applies. Both are read on every connect, when the connector builds its read plan.
+A subject implementing `IModbusBaseAddressProvider` makes its addresses relative to `BaseAddress`, so one class can describe a repeated block. Base addresses are not inherited by child subjects. `IModbusUnitIdProvider` sets the unit ID for a subject and its children, the nearest one taking precedence; otherwise `ModbusClientConfiguration.UnitId` applies. Base addresses and unit IDs are read on every connect, when the connector builds its read plan.
 
 Device libraries can derive from `ModbusRegisterAttribute` to preset values such as `AddressSpace` and `NotAvailableValue`. A property carries at most one register attribute, derived ones included.
 

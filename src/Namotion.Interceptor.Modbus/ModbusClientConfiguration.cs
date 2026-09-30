@@ -21,8 +21,8 @@ public sealed class ModbusClientConfiguration
     public int Port { get; init; } = 502;
 
     /// <summary>
-    /// Gets the unit ID used for registers of subjects without <see cref="IModbusUnitIdProvider"/> or
-    /// <see cref="Attributes.ModbusUnitIdAttribute"/> in their ancestry. Default is 1.
+    /// Gets the unit ID for registers of subjects with no <see cref="IModbusUnitIdProvider"/> on themselves or an ancestor.
+    /// Otherwise the nearest provider's unit ID applies. Default is 1.
     /// </summary>
     public byte UnitId { get; init; } = 1;
 

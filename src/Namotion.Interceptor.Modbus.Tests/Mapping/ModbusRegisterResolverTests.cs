@@ -34,24 +34,15 @@ public partial class ModbusRegisterResolverTests
         public partial int? Value { get; set; }
     }
 
-    [ModbusUnitId(7)]
     [InterceptorSubject]
-    public partial class ResolverUnit
+    public partial class ResolverUnit : IModbusUnitIdProvider
     {
+        public byte UnitId => 7;
+
         [ModbusRegister(0, ModbusDataType.U16)]
         public partial int? Value { get; set; }
 
         public partial ResolverChild? Nested { get; set; }
-    }
-
-    [ModbusUnitId(3)]
-    [InterceptorSubject]
-    public partial class ProviderWinsSubject : IModbusUnitIdProvider
-    {
-        public byte UnitId => 9;
-
-        [ModbusRegister(0, ModbusDataType.U16)]
-        public partial int? Value { get; set; }
     }
 
     [InterceptorSubject]
@@ -305,19 +296,6 @@ public partial class ModbusRegisterResolverTests
 
         // Assert
         Assert.DoesNotContain(bindings, binding => binding.Property.Name == nameof(ResolverRoot.Value));
-    }
-
-    [Fact]
-    public void WhenUnitIdProviderAndAttributeArePresent_ThenProviderWins()
-    {
-        // Arrange
-        var subject = new ProviderWinsSubject(CreateContext());
-
-        // Act
-        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
-
-        // Assert
-        Assert.Equal((byte)9, Assert.Single(bindings).UnitId);
     }
 
     [Fact]

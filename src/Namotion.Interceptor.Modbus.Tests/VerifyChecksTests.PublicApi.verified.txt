@@ -28,12 +28,6 @@ namespace Namotion.Interceptor.Modbus.Attributes
         public string? ScaleFactorProperty { get; init; }
         public Namotion.Interceptor.Modbus.ModbusWordOrder WordOrder { get; init; }
     }
-    [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=true)]
-    public sealed class ModbusUnitIdAttribute : System.Attribute
-    {
-        public ModbusUnitIdAttribute(byte unitId) { }
-        public byte UnitId { get; }
-    }
 }
 namespace Namotion.Interceptor.Modbus
 {
