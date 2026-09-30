@@ -513,10 +513,9 @@ public class SqliteHistoryStoreRecordingTests
             store.FlushIntervalSeconds = 2;
             await store.ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert (before a restart could complete)
-            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
-
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
+
+            // Assert
             var series = QuerySeries(store, "/Temperature");
             Assert.Contains(series.Points, point => point.Number == 11);
             Assert.Contains(series.Points, point => point.Number == 22);

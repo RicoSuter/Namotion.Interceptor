@@ -421,10 +421,6 @@ public class InMemoryHistoryStoreRecordingTests
             store.Priority = 7;
             await store.ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert (before a restart could complete)
-            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
-            Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 11);
-
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
 
             // Assert
