@@ -81,10 +81,10 @@ public class SqliteHistoryStoreRecordingTests
     /// <summary>
     /// Mutates <paramref name="propertyPath"/> to <paramref name="targetValue"/> and waits until a
     /// point with exactly that value is persisted under the canonical path. A warm-up phase re-applies
-    /// a distinct sentinel value until any point appears, which deterministically bridges the brief
-    /// startup gap before the change-queue subscription goes live (no fixed sleep). It then applies the
-    /// target value and polls until it lands. Every poll forces a flush through the internal test hook so
-    /// queued samples become queryable immediately instead of waiting for the interval flush.
+    /// a distinct sentinel value until any point appears, which waits without a fixed sleep until the
+    /// store's execution has built the engine (queries return an empty series before that). It then
+    /// applies the target value and polls until it lands. Every poll forces a flush through the internal
+    /// test hook so queued samples become queryable immediately instead of waiting for the interval flush.
     /// </summary>
     private static async Task<HistorySeries> RecordAndWaitForValueAsync(
         SqliteHistoryStoreSubject store, string propertyPath, Action<double> mutate, double targetValue)
@@ -101,7 +101,7 @@ public class SqliteHistoryStoreRecordingTests
             },
             message: $"Store never started recording under '{propertyPath}' (status='{store.Status}', recorded={store.RecordedCount}).");
 
-        // Now the subscription is live; apply the asserted value and wait for it specifically.
+        // Now the engine is recording; apply the asserted value and wait for it specifically.
         mutate(targetValue);
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
@@ -162,6 +162,36 @@ public class SqliteHistoryStoreRecordingTests
 
             // Assert
             Assert.Contains(series.Points, point => point.Number == 21.5);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenAPropertyIsWrittenRightAfterStartAsync_ThenItIsRecorded()
+    {
+        // Arrange: the write happens after the host start returns but before the execution has run.
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+
+        // Act
+        await hostedService.StartAsync(CancellationToken.None);
+        root.Temperature = 21.5;
+
+        // Assert
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    store.FlushNowAsync().GetAwaiter().GetResult();
+                    return QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5);
+                },
+                message: $"Value written right after StartAsync was not recorded (status='{store.Status}').");
         }
         finally
         {

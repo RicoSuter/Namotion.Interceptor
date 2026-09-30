@@ -25,7 +25,7 @@ namespace HomeBlaze.History.Sqlite;
 [Description("Persists [State] history to partitioned SQLite files (priority 50).")]
 [InterceptorSubject]
 public partial class SqliteHistoryStoreSubject :
-    BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
+    ChangeQueueBackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
 {
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
@@ -210,10 +210,28 @@ public partial class SqliteHistoryStoreSubject :
         return _engine?.FlushAsync(cancellationToken) ?? Task.CompletedTask;
     }
 
-    // BackgroundService
+    // ChangeQueueBackgroundService
 
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override ChangeQueueProcessor CreateProcessor()
+    {
+        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
+        // for it. Under the other rule a source-applied value does not retire an older commit, which is
+        // what keeps both points in the series.
+        return new ChangeQueueProcessor(
+            this,
+            ((IInterceptorSubject)this).Context,
+            HistoryChangeRecorder.IsEligible,
+            // Runs only inside ProcessAsync's processor.ProcessAsync, after _recorder is set.
+            (changes, _) => _recorder!.RecordBatch(changes),
+            ChangeDeliveryRule.SourceValuesMayBeStale,
+            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
+            maxQueueDepth: null,
+            logger: _logger);
+    }
+
+    /// <inheritdoc />
+    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
         if (!IsEnabled)
         {
@@ -254,24 +272,10 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The change-queue subscription is live from construction, before the first await. The
-        // coverage session starts only afterwards, so no change can fall inside claimed coverage
-        // without reaching the engine.
+        // The subscription has existed since StartAsync, so it precedes the coverage session and no change
+        // can fall inside claimed coverage without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
-
-        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
-        // for it. Under the other rule a source-applied value does not retire an older commit, which is
-        // what keeps both points in the series.
-        using var processor = new ChangeQueueProcessor(
-            this,
-            context,
-            HistoryChangeRecorder.IsEligible,
-            (changes, _) => recorder.RecordBatch(changes),
-            ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
 
         engine.BeginCoverageSession();
         _engine = engine;
@@ -351,7 +355,7 @@ public partial class SqliteHistoryStoreSubject :
     /// The flush interval actually used, clamped into a range <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
     /// accepts. The configured value reaches here from a settings form and from a hand-editable file, and
     /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which faults the
-    /// task that <c>ExecuteAsync</c> awaits in its finally and stops the whole host.
+    /// task that <c>ProcessAsync</c> awaits in its finally and stops the whole host.
     /// </summary>
     private TimeSpan EffectiveFlushInterval =>
         TimeSpan.FromSeconds(Math.Clamp(FlushIntervalSeconds, 1, (int)TimeSpan.FromDays(1).TotalSeconds));
@@ -401,9 +405,8 @@ public partial class SqliteHistoryStoreSubject :
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Size knobs (MaxAgeDays, MaxJsonSize, PartitionInterval, DatabasePath) and BufferTime and
-        // FlushInterval are read once when the engine and change-queue processor are built in ExecuteAsync.
-        // Like OpcUaServer, configuration changes take effect on the next start; the host restarts the
-        // background service to apply them.
+        // FlushInterval are read once per start. Like OpcUaServer, configuration changes take effect on the
+        // next start; the host restarts the background service to apply them.
         return Task.CompletedTask;
     }
 }
