@@ -151,6 +151,9 @@ internal sealed class SingleAttachmentHost<TService>
     /// </remarks>
     public void BeginRun()
     {
+        // Disposed here rather than in StopRunAsync, where a second stop's Cancel would throw. A start the
+        // previous run left pending only reads its token's cancelled state, which survives the dispose.
+        _runCancellation?.Dispose();
         _runCancellation = new CancellationTokenSource();
         _startupStart = _owner.IsEnabled ? StartAsync(_runCancellation.Token) : Task.CompletedTask;
     }

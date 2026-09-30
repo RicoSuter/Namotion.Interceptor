@@ -381,7 +381,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         {
             if (target.AppendIfOwnedAsync(handler, RunAsync) is null)
             {
-                LogIgnoredFault();
+                try
+                {
+                    LogIgnoredFault();
+                }
+                catch (Exception)
+                {
+                    // Outside the chain's catch-all, so a throwing log provider would fault this dropped continuation.
+                }
             }
         }
 
