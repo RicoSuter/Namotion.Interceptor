@@ -58,6 +58,7 @@ internal sealed class HostedServiceTarget
     private TargetSnapshot _snapshot = SettledSnapshot;
 
     private Exception? _fault;
+    private Exception? _startFault;
     private HostedServiceHandler? _owner;
     private IHostedService? _lastFactoryInstance;
     private bool _detached;
@@ -87,9 +88,31 @@ internal sealed class HostedServiceTarget
 
     public Exception? Fault => Volatile.Read(ref _fault);
 
+    /// <summary>
+    /// The exception from the last start that failed, or null. Cleared where <see cref="Fault"/> is and
+    /// written by no later transition, so a caller waiting on a start reads the outcome of that start
+    /// rather than of whatever ran after it: an execution fault lands on the same chain behind the
+    /// start and can be recorded before or after the caller's read.
+    /// </summary>
+    public Exception? StartFault => Volatile.Read(ref _startFault);
+
     public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
 
     public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
+
+    /// <summary>Records a failed start, as the target's fault and as the start's own outcome.</summary>
+    public void SetStartFault(Exception fault)
+    {
+        Volatile.Write(ref _startFault, fault);
+        Volatile.Write(ref _fault, fault);
+    }
+
+    /// <summary>Clears the fault and the start outcome together, which only a start past its guards does.</summary>
+    public void ClearFault()
+    {
+        Volatile.Write(ref _startFault, null);
+        Volatile.Write(ref _fault, null);
+    }
 
     /// <summary>Enters the start window, with nothing recorded yet.</summary>
     /// <remarks>

@@ -105,7 +105,10 @@ public static class InterceptorHostingExtensions
             await start.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        if (attachment.Fault is { } fault)
+        // The start's own outcome rather than Fault: an execution fault is a later transition on the
+        // same chain, and reading it here would turn a started instance into a failed attach or not,
+        // depending on which of the two landed first.
+        if (attachment.Target.StartFault is { } fault)
         {
             RemoveAttachment(subject, attachment);
 

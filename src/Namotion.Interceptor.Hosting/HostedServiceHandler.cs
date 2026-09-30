@@ -293,7 +293,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
             // Cleared after every guard, never before: a start that is gated out or skipped must not
             // drop a fault that a caller has not read yet.
-            target.SetFault(null);
+            target.ClearFault();
 
             try
             {
@@ -333,10 +333,15 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 }
 
                 target.CompleteStart(instance);
+
+                if (instance is BackgroundService { ExecuteTask: { } executeTask } backgroundService)
+                {
+                    ObserveExecution(subject, target, backgroundService, executeTask);
+                }
             }
             catch (Exception exception)
             {
-                target.SetFault(exception);
+                target.SetStartFault(exception);
                 Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
             }
             finally
@@ -349,6 +354,67 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         finally
         {
             ReleaseStartupHolds(startupHolds);
+        }
+    }
+
+    private static readonly Action<Task, object?> OnExecutionFaulted =
+        static (_, state) => ((ExecutionFaultObserver)state!).Append();
+
+    /// <summary>
+    /// Observes the execution a <see cref="BackgroundService"/> schedules from its start, which the
+    /// start itself never covers. A fault in it is recorded on the target and the instance is stopped,
+    /// so the target settles to <see cref="HostedServiceAttachmentState.Faulted"/> and the next context
+    /// attach retries it.
+    /// </summary>
+    private void ObserveExecution(
+        IInterceptorSubject subject, HostedServiceTarget target, BackgroundService instance, Task executeTask)
+    {
+        // Only a fault: a cancelled execution is a stop's doing, and one that ran to completion is no
+        // failure. Never synchronous, because the continuation takes the chain lock and the faulting
+        // thread may hold anything.
+        executeTask.ContinueWith(
+            OnExecutionFaulted,
+            new ExecutionFaultObserver(this, subject, target, instance, executeTask),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.DenyChildAttach,
+            TaskScheduler.Default);
+    }
+
+    /// <summary>The state of one execution's fault continuation, and the transition it appends.</summary>
+    private sealed class ExecutionFaultObserver(
+        HostedServiceHandler handler,
+        IInterceptorSubject subject,
+        HostedServiceTarget target,
+        BackgroundService instance,
+        Task executeTask)
+    {
+        /// <summary>
+        /// Appends the transition only while the handler still owns the target: after a release the
+        /// instance is stopped or another handler's, and a stop this handler no longer counts would
+        /// run past its own drain.
+        /// </summary>
+        public void Append() => _ = target.AppendIfOwnedAsync(handler, RunAsync);
+
+        private async Task RunAsync()
+        {
+            await handler._gate.WaitForOpenAsync().ConfigureAwait(false);
+
+            // The run that faulted must still be the one recorded: a subject is restarted in place on
+            // the same instance with a new execute task, and a stop ahead on the chain leaves Current
+            // null, so neither check on its own tells this run from the next.
+            if (!ReferenceEquals(target.Current, instance) || !ReferenceEquals(instance.ExecuteTask, executeTask))
+            {
+                return;
+            }
+
+            var exception = executeTask.Exception!;
+            var fault = exception.InnerExceptions.Count == 1 ? exception.InnerExceptions[0] : exception;
+
+            target.SetFault(fault);
+            handler.Logger?.LogError(fault, "Hosted service for subject {Subject} faulted while running.", subject);
+
+            await handler.CreateStopBody(subject, target, signal: null, waitFor: null, CancellationToken.None)()
+                .ConfigureAwait(false);
         }
     }
 
@@ -592,7 +658,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             .WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (target.Fault is { } fault)
+        if (target.StartFault is { } fault)
         {
             // Captured rather than rethrown, for the reason on AttachHostedServiceAsync.
             ExceptionDispatchInfo.Capture(fault).Throw();
