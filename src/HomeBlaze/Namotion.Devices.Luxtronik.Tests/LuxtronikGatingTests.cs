@@ -24,7 +24,7 @@ public class LuxtronikGatingTests
         var minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(minimumFirmwareVersion, LuxtronikFunction.None, new Version(major, minor, patch), activeFunctions: null);
+        var isSupported = LuxtronikGating.IsSupported(minimumFirmwareVersion, LuxtronikFunction.None, new Version(major, minor, patch), functionMask: null);
 
         // Assert
         Assert.Equal(expected, isSupported);
@@ -34,10 +34,10 @@ public class LuxtronikGatingTests
     public void WhenFunctionIsNotConfigured_ThenItIsNotSupported()
     {
         // Arrange
-        var activeFunctions = new HashSet<LuxtronikFunction> { LuxtronikFunction.Heating };
+        var functionMask = LuxtronikFunctionMask.Of(LuxtronikFunction.Heating);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFunction.Pool, new Version(3, 92, 3), activeFunctions);
+        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFunction.Pool, new Version(3, 92, 3), functionMask);
 
         // Assert
         Assert.False(isSupported);
@@ -47,7 +47,7 @@ public class LuxtronikGatingTests
     public void WhenFunctionFlagsAreUnknown_ThenFunctionGatesAreIgnored()
     {
         // Act
-        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFunction.Pool, new Version(3, 92, 3), activeFunctions: null);
+        var isSupported = LuxtronikGating.IsSupported(null, LuxtronikFunction.Pool, new Version(3, 92, 3), functionMask: null);
 
         // Assert
         Assert.True(isSupported);
@@ -63,12 +63,22 @@ public class LuxtronikGatingTests
         flags[6] = true;
 
         // Act
-        var functions = LuxtronikGating.GetActiveFunctions(flags);
+        var functionMask = LuxtronikGating.GetFunctionMask(flags);
 
         // Assert
         Assert.Equal(
             new[] { LuxtronikFunction.Heating, LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit1Heating },
-            functions.OrderBy(function => function));
+            Enum.GetValues<LuxtronikFunction>().Where(function => LuxtronikGating.IsActive(functionMask, function)));
+    }
+
+    [Fact]
+    public void WhenFunctionMaskIsUnknown_ThenEveryFunctionIsActive()
+    {
+        // Act
+        var isActive = Enum.GetValues<LuxtronikFunction>().All(function => LuxtronikGating.IsActive(null, function));
+
+        // Assert
+        Assert.True(isActive);
     }
 
     [Fact]
@@ -107,7 +117,7 @@ public class LuxtronikGatingTests
         }, propertyName);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(property, Version.Parse(firmware), activeFunctions: null);
+        var isSupported = LuxtronikGating.IsSupported(property, Version.Parse(firmware), functionMask: null);
 
         // Assert
         Assert.Equal(expected, isSupported);
@@ -126,7 +136,7 @@ public class LuxtronikGatingTests
         var property = GetProperty(new LuxtronikGatedTestSubject(CreateContext()) { SubjectFunction = subjectFunction }, propertyName);
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), activeFunctions.ToHashSet());
+        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), LuxtronikFunctionMask.Of(activeFunctions));
 
         // Assert
         Assert.Equal(expected, isSupported);
@@ -147,7 +157,7 @@ public class LuxtronikGatingTests
             nameof(LuxtronikCircuitTestSubject.CircuitGated));
 
         // Act
-        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), activeFunctions.ToHashSet());
+        var isSupported = LuxtronikGating.IsSupported(property, new Version(3, 92, 3), LuxtronikFunctionMask.Of(activeFunctions));
 
         // Assert
         Assert.Equal(expected, isSupported);
@@ -163,7 +173,7 @@ public class LuxtronikGatingTests
 
         // Act
         var isSupported = LuxtronikGating.IsSupported(
-            property, new Version(3, 92, 3), new HashSet<LuxtronikFunction> { LuxtronikFunction.Heating });
+            property, new Version(3, 92, 3), LuxtronikFunctionMask.Of(LuxtronikFunction.Heating));
 
         // Assert
         Assert.True(isSupported);

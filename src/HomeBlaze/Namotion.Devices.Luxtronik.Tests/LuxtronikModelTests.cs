@@ -183,7 +183,7 @@ public class LuxtronikModelTests
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
 
         // Act
-        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFunction> { LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit2Cooling });
+        heatPump.UpdateFunctionSubjects(LuxtronikFunctionMask.Of(LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit2Cooling));
 
         // Assert
         Assert.NotNull(heatPump.Cooling);
@@ -200,13 +200,13 @@ public class LuxtronikModelTests
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
-        var activeFunctions = new HashSet<LuxtronikFunction> { LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit2Cooling };
-        heatPump.UpdateFunctionSubjects(activeFunctions);
+        var functionMask = LuxtronikFunctionMask.Of(LuxtronikFunction.Cooling, LuxtronikFunction.MixingCircuit2Cooling);
+        heatPump.UpdateFunctionSubjects(functionMask);
         var cooling = heatPump.Cooling;
         var mixingCircuit2 = heatPump.MixingCircuit2;
 
         // Act
-        heatPump.UpdateFunctionSubjects(activeFunctions);
+        heatPump.UpdateFunctionSubjects(functionMask);
 
         // Assert
         Assert.Same(cooling, heatPump.Cooling);
@@ -221,7 +221,7 @@ public class LuxtronikModelTests
         heatPump.UpdateFunctionSubjects(null);
 
         // Act
-        heatPump.UpdateFunctionSubjects(new HashSet<LuxtronikFunction>());
+        heatPump.UpdateFunctionSubjects(LuxtronikFunctionMask.Of());
 
         // Assert
         Assert.Null(heatPump.Cooling);

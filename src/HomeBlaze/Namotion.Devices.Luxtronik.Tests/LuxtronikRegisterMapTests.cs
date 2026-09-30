@@ -153,7 +153,7 @@ public class LuxtronikRegisterMapTests
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
-        heatPump.UpdateFunctionSubjects(activeFunctions: null);
+        heatPump.UpdateFunctionSubjects(functionMask: null);
 
         // Act
         var actual = GetRegisters(heatPump.TryGetRegisteredSubject()!, string.Empty)
@@ -170,7 +170,7 @@ public class LuxtronikRegisterMapTests
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
-        heatPump.UpdateFunctionSubjects(activeFunctions: null);
+        heatPump.UpdateFunctionSubjects(functionMask: null);
 
         // Act
         var overlaps = GetRegisters(heatPump.TryGetRegisteredSubject()!, string.Empty)
@@ -213,12 +213,12 @@ public class LuxtronikRegisterMapTests
     // The effective firmware gate of the register and its subject, probed with the gating itself.
     private static string? GetMinimumFirmware(RegisteredSubjectProperty property)
     {
-        if (LuxtronikGating.IsSupported(property, new Version(3, 90, 1), activeFunctions: null))
+        if (LuxtronikGating.IsSupported(property, new Version(3, 90, 1), functionMask: null))
         {
             return null;
         }
 
-        return LuxtronikGating.IsSupported(property, new Version(3, 92, 0), activeFunctions: null) ? Fw392 : Fw3921;
+        return LuxtronikGating.IsSupported(property, new Version(3, 92, 0), functionMask: null) ? Fw392 : Fw3921;
     }
 
     private static string Format((string Path, ModbusAddressSpace AddressSpace, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function) register)

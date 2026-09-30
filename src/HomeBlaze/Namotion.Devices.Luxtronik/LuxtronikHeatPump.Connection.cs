@@ -49,17 +49,15 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         new PropertyReference(this, nameof(SoftwareVersion))
             .SetValueFromSource(context.Source, null, null, firmwareVersion.ToString());
 
-        IReadOnlySet<LuxtronikFunction>? activeFunctions = null;
-        var functionMask = UnknownFunctionMask;
+        int? functionMask = null;
         try
         {
             var flags = await context.ReadDiscreteInputsAsync(Functions.BaseAddress, LuxtronikGating.FunctionFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
-            activeFunctions = LuxtronikGating.GetActiveFunctions(flags);
             functionMask = LuxtronikGating.GetFunctionMask(flags);
 
             // Keeps the polled flags in step with the discovered ones even while the initial load fails, since a
             // mismatch makes the status loop restart the source.
-            Functions.SetFromSource(context.Source, functionMask);
+            Functions.SetFromSource(context.Source, functionMask.Value);
         }
         catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
         {
@@ -69,15 +67,15 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
                 HostAddress, exception.ExceptionCode);
         }
 
-        UpdateFunctionSubjects(activeFunctions);
+        UpdateFunctionSubjects(functionMask);
 
         var registeredSubject = this.TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("The heat pump is not registered. Attach it to a subject graph with a registry.");
 
         foreach (var property in registeredSubject.GetAllProperties())
         {
-            var isUnreadableFunctionFlag = activeFunctions is null && ReferenceEquals(property.Subject, Functions);
-            if (isUnreadableFunctionFlag || !LuxtronikGating.IsSupported(property, firmwareVersion, activeFunctions))
+            var isUnreadableFunctionFlag = functionMask is null && ReferenceEquals(property.Subject, Functions);
+            if (isUnreadableFunctionFlag || !LuxtronikGating.IsSupported(property, firmwareVersion, functionMask))
             {
                 context.ExcludeProperty(property.Reference);
 
@@ -89,41 +87,41 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             }
         }
 
-        Volatile.Write(ref _discoveredFunctionMask, functionMask);
+        Volatile.Write(ref _discoveredFunctionMask, functionMask ?? UnknownFunctionMask);
         _logger.LogInformation("Luxtronik {HostAddress} runs firmware {FirmwareVersion}.", HostAddress, firmwareVersion);
     }
 
     /// <summary>
-    /// Creates the subjects of the active optional functions, keeps existing ones, and removes the inactive ones; all exist when <paramref name="activeFunctions"/> is unknown (<c>null</c>).
+    /// Creates the subjects of the active optional functions, keeps existing ones, and removes the inactive ones; all exist when <paramref name="functionMask"/> is unknown (<c>null</c>).
     /// </summary>
-    internal void UpdateFunctionSubjects(IReadOnlySet<LuxtronikFunction>? activeFunctions)
+    internal void UpdateFunctionSubjects(int? functionMask)
     {
-        Cooling = GetFunctionSubject(activeFunctions, LuxtronikFunction.Cooling, LuxtronikFunction.None,
+        Cooling = GetFunctionSubject(functionMask, LuxtronikFunction.Cooling, LuxtronikFunction.None,
             Cooling, static () => new LuxtronikCooling());
-        Pool = GetFunctionSubject(activeFunctions, LuxtronikFunction.Pool, LuxtronikFunction.None,
+        Pool = GetFunctionSubject(functionMask, LuxtronikFunction.Pool, LuxtronikFunction.None,
             Pool, static () => new LuxtronikPool());
-        Solar = GetFunctionSubject(activeFunctions, LuxtronikFunction.Solar, LuxtronikFunction.None,
+        Solar = GetFunctionSubject(functionMask, LuxtronikFunction.Solar, LuxtronikFunction.None,
             Solar, static () => new LuxtronikSolar());
-        RoomControl = GetFunctionSubject(activeFunctions, LuxtronikFunction.RoomControlUnit, LuxtronikFunction.None,
+        RoomControl = GetFunctionSubject(functionMask, LuxtronikFunction.RoomControlUnit, LuxtronikFunction.None,
             RoomControl, static () => new LuxtronikRoomControl());
-        MixingCircuit1 = GetFunctionSubject(activeFunctions, LuxtronikFunction.MixingCircuit1Heating, LuxtronikFunction.MixingCircuit1Cooling,
+        MixingCircuit1 = GetFunctionSubject(functionMask, LuxtronikFunction.MixingCircuit1Heating, LuxtronikFunction.MixingCircuit1Cooling,
             MixingCircuit1, static () => new LuxtronikMixingCircuit(1));
-        MixingCircuit2 = GetFunctionSubject(activeFunctions, LuxtronikFunction.MixingCircuit2Heating, LuxtronikFunction.MixingCircuit2Cooling,
+        MixingCircuit2 = GetFunctionSubject(functionMask, LuxtronikFunction.MixingCircuit2Heating, LuxtronikFunction.MixingCircuit2Cooling,
             MixingCircuit2, static () => new LuxtronikMixingCircuit(2));
-        MixingCircuit3 = GetFunctionSubject(activeFunctions, LuxtronikFunction.MixingCircuit3Heating, LuxtronikFunction.MixingCircuit3Cooling,
+        MixingCircuit3 = GetFunctionSubject(functionMask, LuxtronikFunction.MixingCircuit3Heating, LuxtronikFunction.MixingCircuit3Cooling,
             MixingCircuit3, static () => new LuxtronikMixingCircuit(3));
     }
 
     // LuxtronikFunction.None is never active, so it serves as "no alternative".
     private static TSubject? GetFunctionSubject<TSubject>(
-        IReadOnlySet<LuxtronikFunction>? activeFunctions,
+        int? functionMask,
         LuxtronikFunction function,
         LuxtronikFunction alternativeFunction,
         TSubject? current,
         Func<TSubject> create)
         where TSubject : class
     {
-        var isActive = activeFunctions is null || activeFunctions.Contains(function) || activeFunctions.Contains(alternativeFunction);
+        var isActive = LuxtronikGating.IsActive(functionMask, function) || LuxtronikGating.IsActive(functionMask, alternativeFunction);
         return isActive ? current ?? create() : null;
     }
 

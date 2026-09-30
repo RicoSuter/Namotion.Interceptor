@@ -5,7 +5,8 @@ using Namotion.Interceptor.Registry.Abstractions;
 namespace Namotion.Devices.Luxtronik.Gating;
 
 /// <summary>
-/// Decides whether a register is read, from the controller firmware and its active functions.
+/// Decides whether a register is read, from the controller firmware and its active functions. Active functions are a
+/// bit mask indexed by <see cref="LuxtronikFunction"/>; <c>null</c> means the controller does not report them.
 /// </summary>
 internal static class LuxtronikGating
 {
@@ -20,41 +21,47 @@ internal static class LuxtronikGating
     /// Gets whether <paramref name="property"/> is read: its register gates and its subject's gate must all pass.
     /// On an <see cref="ILuxtronikCircuitSubject"/>, register function gates are shifted to the circuit's own function.
     /// </summary>
-    public static bool IsSupported(
-        RegisteredSubjectProperty property, Version firmwareVersion, IReadOnlySet<LuxtronikFunction>? activeFunctions)
+    public static bool IsSupported(RegisteredSubjectProperty property, Version firmwareVersion, int? functionMask)
     {
         var functionOffset = property.Subject is ILuxtronikCircuitSubject circuit ? circuit.FunctionOffset : 0;
         foreach (var attribute in property.ReflectionAttributes)
         {
             if (attribute is ILuxtronikRegisterGate gate &&
-                !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Function, functionOffset), firmwareVersion, activeFunctions))
+                !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Function, functionOffset), firmwareVersion, functionMask))
             {
                 return false;
             }
         }
 
         return property.Subject is not ILuxtronikGatedSubject subject ||
-            IsSupported(subject.MinimumFirmwareVersion, subject.Function, firmwareVersion, activeFunctions);
+            IsSupported(subject.MinimumFirmwareVersion, subject.Function, firmwareVersion, functionMask);
     }
 
     /// <summary>
     /// Gets whether a gate passes: the firmware is at least <paramref name="minimumFirmwareVersion"/>, and
-    /// <paramref name="function"/> is active. <c>null</c> active functions means the controller does not
-    /// report them, so function gates pass.
+    /// <paramref name="function"/> is <see cref="LuxtronikFunction.None"/> or active.
     /// </summary>
     public static bool IsSupported(
         Version? minimumFirmwareVersion,
         LuxtronikFunction function,
         Version firmwareVersion,
-        IReadOnlySet<LuxtronikFunction>? activeFunctions)
+        int? functionMask)
     {
         if (minimumFirmwareVersion is not null && firmwareVersion < minimumFirmwareVersion)
         {
             return false;
         }
 
-        return function == LuxtronikFunction.None || activeFunctions is null || activeFunctions.Contains(function);
+        return function == LuxtronikFunction.None || IsActive(functionMask, function);
     }
+
+    /// <summary>
+    /// Gets whether <paramref name="function"/> is active in <paramref name="functionMask"/>. Every function counts as
+    /// active while the mask is unknown (<c>null</c>); otherwise <see cref="LuxtronikFunction.None"/> never is.
+    /// </summary>
+    public static bool IsActive(int? functionMask, LuxtronikFunction function)
+        => functionMask is not { } mask ||
+            (function != LuxtronikFunction.None && (mask & (1 << (int)function)) != 0);
 
     /// <summary>
     /// Gets whether <paramref name="property"/> is a mapped register that can hold <c>null</c>.
@@ -79,23 +86,6 @@ internal static class LuxtronikGating
 
     private static LuxtronikFunction Shift(LuxtronikFunction function, int offset)
         => function == LuxtronikFunction.None ? function : function + offset;
-
-    /// <summary>
-    /// Gets the functions whose flag is set; the flag index is the <see cref="LuxtronikFunction"/> value.
-    /// </summary>
-    public static HashSet<LuxtronikFunction> GetActiveFunctions(bool[] flags)
-    {
-        var functions = new HashSet<LuxtronikFunction>();
-        for (var index = 0; index < Math.Min(flags.Length, FunctionFlagCount); index++)
-        {
-            if (flags[index])
-            {
-                functions.Add((LuxtronikFunction)index);
-            }
-        }
-
-        return functions;
-    }
 
     /// <summary>
     /// Gets the set flags as a bit mask; the bit index is the <see cref="LuxtronikFunction"/> value.
