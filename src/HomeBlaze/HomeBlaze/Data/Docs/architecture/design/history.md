@@ -154,7 +154,7 @@ A fixed limit of `100_000` bounds the samples waiting for durable persistence. T
 
 This policy keeps memory bounded, does not block the property-change hot path, and never claims completeness over lost changes.
 
-The subject constructs the engine, installs its change subscription, and only then calls `BeginCoverageSession`, so no change can fall inside claimed coverage without reaching the engine. During graceful shutdown SQLite performs a final bounded engine flush. This persists samples that already reached the engine, but `ChangeQueueProcessor` currently provides no contract for draining its coalescing queue when service cancellation begins.
+The subject installs its change subscription when the service starts, constructs the engine, and only then calls `BeginCoverageSession`, so no change can fall inside claimed coverage without reaching the engine. A change to a start-time setting, such as `BufferTimeMilliseconds`, restarts the store with a new subscription and engine session. During graceful shutdown and on such a restart SQLite performs a final bounded engine flush. This persists samples that already reached the engine, but `ChangeQueueProcessor` currently provides no contract for draining its coalescing queue when service cancellation begins.
 
 Retention removes complete partition files whose interval is older than `now - MaxAge`. It also removes or clamps coverage rows at that cutoff. Coverage does not depend on finding a sample near either boundary, so a quiet store remains honestly covered.
 

@@ -577,7 +577,7 @@ There is no server-specific base class. All three built-in servers derive from `
 A server implementation typically handles:
 
 - **Starting the protocol server**: bind to a port, accept connections, restart on failure
-- **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Where in startup the processor is created decides what a client can miss: the OPC UA server creates it before the protocol server starts, so changes made during startup are captured, while the MQTT and WebSocket servers create it once theirs is already listening. Of the changes that are captured, those a later local commit superseded are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
+- **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Where in startup the processor is created decides what a client can miss: the OPC UA and WebSocket servers create it before the protocol server accepts clients, so changes made during startup are captured, while the MQTT server creates it once its broker is already listening. Of the changes that are captured, those a later local commit superseded are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
 - **Handling inbound writes**: receive write requests from external clients and apply them to the local model (typically via `SetValueFromSource()` to prevent echo loops)
 - **Lifecycle cleanup**: release caches and subscriptions when subjects are detached from the object graph
 
@@ -587,7 +587,7 @@ All built-in servers (OPC UA, MQTT, WebSocket) follow the same structure:
 
 1. Extend `SubjectConnectorBase` for the hosting and diagnostics lifecycle, and override `RunAsync`
 2. Expose a sealed diagnostics type from the `Diagnostics` override, so callers reach the server's own numbers without a cast
-3. Create a `ChangeQueueProcessor` in `RunAsync` to subscribe to property changes. Only the OPC UA server does this before its protocol server starts accepting clients; MQTT and WebSocket create it once theirs is already listening, so changes made during their startup are not captured
+3. Create a `ChangeQueueProcessor` in `RunAsync` to subscribe to property changes. The OPC UA and WebSocket servers do this before their protocol server starts accepting clients; MQTT creates it once its broker is already listening, so changes made during its startup are not captured
 4. Accept incoming client connections and route write requests to the local model via `SetValueFromSource()`
 5. Use a retry/restart loop in `RunAsync` to recover from protocol failures
 
@@ -954,6 +954,28 @@ await processor.ProcessAsync(stoppingToken);
 ```
 
 `Register` allows one live registration at a time and throws while one is still held, so a restart that does not dispose the previous handle fails on every attempt. Dispose a scoped registration when its processor goes away; lifetime-long providers intentionally leave their returned handle undisposed. A buffer reports each drop through `AddDropped`; `ChangeQueueProcessor` invokes its optional `dropHandler` for bounded-queue overflow, ordinary write failure, and terminally unconfirmed delivery. Built-in connectors use `CreateDropReporter()` so a late report from an abandoned run cannot enter the next diagnostics epoch. Keeping drop counts in the metrics makes registration handover monotonic and exact without adding diagnostics work to successful queue operations. Skipping the registration altogether is silent for depth, while skipping drop reports leaves `TotalDropped` at 0. The `maxQueueDepth` argument of `ChangeQueueProcessor` is a bound on the buffered queue and must be either `null` for unbounded, which is what all three built-in servers pass, or positive; zero is rejected, because a bound has to leave room for at least one change. A server that wants no buffering at all passes a `bufferTime` of zero, which takes the immediate path and normally leaves that queue empty except for a cancelled delivery being handed to terminal accounting.
+
+### ChangeQueueBackgroundService
+
+A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It creates the `ChangeQueueProcessor` in `StartAsync`, so a change made after the host start returns is delivered, and disposes it on every exit path. Since .NET 10 a plain `BackgroundService` may run `ExecuteAsync` after `StartAsync` has returned, so building the processor there misses every change made in between. The embedded WebSocket change processor and the HomeBlaze history stores derive from it.
+
+```csharp
+public sealed class AuditService(IInterceptorSubjectContext context, ILogger<AuditService> logger)
+    : ChangeQueueBackgroundService
+{
+    protected override ChangeQueueProcessor CreateProcessor() => new(
+        this, context, _ => true, WriteAuditAsync,
+        ChangeDeliveryRule.SourceValuesMayBeStale, bufferTime: null, maxQueueDepth: null, logger);
+
+    protected override Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken) =>
+        processor.ProcessAsync(stoppingToken);
+
+    private ValueTask WriteAuditAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken) =>
+        ValueTask.CompletedTask;
+}
+```
+
+An audit sink records every change rather than holding a value that could fall behind the model, so the settled condition of `SourceValuesAreSettled` never holds for it (see `ChangeDeliveryRule`). State that `ProcessAsync` needs is set up there before draining the processor; changes made meanwhile wait in its queue. Call `RequestRestart()` to apply changed start-time configuration: the running `ProcessAsync` is cancelled, its processor disposed, and `ProcessAsync` runs again with a new processor from `CreateProcessor`. The class XML docs state the full contract, including that `CreateProcessor` must not block or perform I/O.
 
 ## Known Limitations
 

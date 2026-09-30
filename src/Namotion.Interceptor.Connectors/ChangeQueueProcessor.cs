@@ -11,6 +11,8 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>
 /// Processes property changes from a queue, buffering and merging them before writing.
 /// Used by both client sources and server background services.
+/// A hosted service consuming it should derive from <see cref="ChangeQueueBackgroundService"/>, which creates it
+/// before the host start returns.
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
