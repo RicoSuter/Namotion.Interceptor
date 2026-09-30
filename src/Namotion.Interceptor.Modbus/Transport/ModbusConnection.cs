@@ -4,8 +4,9 @@ using FluentModbus;
 namespace Namotion.Interceptor.Modbus.Transport;
 
 /// <summary>
-/// One Modbus TCP connection. <see cref="Dispose"/> may be called concurrently to abort an in-flight read; the other
-/// members are not thread-safe.
+/// One Modbus TCP connection serving one read at a time: a <see cref="ReadAsync"/> started while another is in flight
+/// throws <see cref="InvalidOperationException"/>. <see cref="Dispose"/> may be called concurrently to abort an
+/// in-flight read.
 /// </summary>
 internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
 {
@@ -20,6 +21,7 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
     // Reused by every request of this connection and replaced only after it fired.
     private CancellationTokenSource _timeoutSource = new();
     private int _disposed;
+    private int _isReading;
 
     private ModbusConnection(TcpClient tcpClient, ModbusTcpClient client, TimeSpan requestTimeout)
     {
@@ -53,13 +55,20 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
-        var timeoutSource = _timeoutSource;
-        timeoutSource.CancelAfter(_requestTimeout);
+        // FluentModbus shares one frame buffer and transaction ID per client, so overlapping reads would mix up responses.
+        if (Interlocked.CompareExchange(ref _isReading, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("A read is already in progress on this Modbus connection.");
+        }
 
-        var registration = cancellationToken.UnsafeRegister(
-            static state => ((CancellationTokenSource)state!).Cancel(), timeoutSource);
+        var timeoutSource = _timeoutSource;
+        var registration = default(CancellationTokenRegistration);
         try
         {
+            timeoutSource.CancelAfter(_requestTimeout);
+            registration = cancellationToken.UnsafeRegister(
+                static state => ((CancellationTokenSource)state!).Cancel(), timeoutSource);
+
             var token = timeoutSource.Token;
             return space switch
             {
@@ -88,6 +97,9 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
                 _timeoutSource = new CancellationTokenSource();
                 timeoutSource.Dispose();
             }
+
+            // Released last so the next read sees the replaced timeout source.
+            Volatile.Write(ref _isReading, 0);
         }
     }
 

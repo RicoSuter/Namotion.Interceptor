@@ -9,7 +9,8 @@ namespace Namotion.Interceptor.Modbus;
 /// Raw access to the connected device for <see cref="IModbusDiscovery.DiscoverAsync"/>. Only valid while it runs.
 /// </summary>
 /// <remarks>
-/// Not thread-safe: await each call before starting the next.
+/// Not thread-safe: await each call before starting the next. A read started while another is in flight throws
+/// <see cref="InvalidOperationException"/>.
 /// </remarks>
 public sealed class ModbusDiscoveryContext
 {

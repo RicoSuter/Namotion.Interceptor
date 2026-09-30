@@ -234,6 +234,53 @@ public class ModbusConnectionTests
     }
 
     [Fact]
+    public async Task WhenReadIsAlreadyInProgress_ThenASecondReadThrows()
+    {
+        // Arrange
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var requestReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource();
+        var serverTask = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            var stream = client.GetStream();
+            var request = new byte[12];
+            await stream.ReadExactlyAsync(request);
+            requestReceived.SetResult();
+            await release.Task;
+
+            // Echoed transaction ID, protocol ID 0, length 5, unit, function 3, 2 bytes, value 7.
+            await stream.WriteAsync(new byte[] { request[0], request[1], 0x00, 0x00, 0x00, 0x05, request[6], 0x03, 0x02, 0x00, 0x07 });
+        });
+        using var connection = await ModbusConnection.ConnectAsync("127.0.0.1", port, TimeSpan.FromSeconds(30), CancellationToken.None);
+
+        try
+        {
+            var firstRead = connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None);
+            await requestReceived.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Act
+            var secondRead = connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None);
+            var secondReadCompletedImmediately = secondRead.IsCompleted;
+            var exception = await Record.ExceptionAsync(() => secondRead);
+            release.TrySetResult();
+            var firstValue = (await firstRead.WaitAsync(TimeSpan.FromSeconds(10))).ToArray();
+
+            // Assert
+            Assert.True(secondReadCompletedImmediately);
+            Assert.IsType<InvalidOperationException>(exception);
+            Assert.Equal(new byte[] { 0x00, 0x07 }, firstValue);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await serverTask;
+        }
+    }
+
+    [Fact]
     public async Task WhenDisposed_ThenReadThrowsObjectDisposedException()
     {
         // Arrange
