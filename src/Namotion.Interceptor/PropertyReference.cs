@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor;
 
@@ -22,11 +23,28 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// cache would bloat every copy and force the struct to be mutable (see the readonly-struct
     /// declaration). The lookup is cheap, but hoist it to a local if you read it more than once in a hot path.
     /// </summary>
-    public SubjectPropertyMetadata Metadata =>
-        Subject.Properties.TryGetValue(Name, out var metadata) ? metadata :
-            throw new InvalidOperationException(
-                $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
-                $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
+    public SubjectPropertyMetadata Metadata
+    {
+        get
+        {
+            if (!Subject.Properties.TryGetValue(Name, out var metadata))
+            {
+                ThrowMetadataNotFound(Subject, Name);
+            }
+
+            return metadata;
+        }
+    }
+
+    // Kept out of the getter: an interpolated message there would zero stack on every call.
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowMetadataNotFound(IInterceptorSubject subject, string name)
+    {
+        throw new InvalidOperationException(
+            $"No metadata found for property '{name}' on {subject.GetType().Name}. " +
+            $"Available properties ({subject.Properties.Count}): [{string.Join(", ", subject.Properties.Keys)}]");
+    }
 
     public void SetPropertyData(string key, object? value)
     {
@@ -105,7 +123,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal long GetWriteTimestampTicks()
     {
-        return TryGetWriteState(out var state) ? Interlocked.Read(ref state.TimestampTicks) : 0;
+        return TryGetWriteState(out var state) ? Volatile.Read(ref state.TimestampTicks) : 0;
     }
 
     /// <summary>
@@ -143,13 +161,13 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     {
         if (TryGetWriteState(out var state))
         {
-            var nonSourceCommitRevision = Interlocked.Read(ref state.LastNonSourceCommitRevision);
+            var nonSourceCommitRevision = Volatile.Read(ref state.LastNonSourceCommitRevision);
 
             // Each commit advances exactly one of the two, so the last of any kind is their maximum, and
             // the source slot is read only when it can count. A stale read of either can only lower the
             // result, which delivers a redundant change rather than dropping a live one.
             commitRevision = includeSourceCommitsInRevision
-                ? Math.Max(nonSourceCommitRevision, Interlocked.Read(ref state.LastSourceCommitRevision))
+                ? Math.Max(nonSourceCommitRevision, Volatile.Read(ref state.LastSourceCommitRevision))
                 : nonSourceCommitRevision;
 
             publishedToAnySource = state.PublishedToAnySource;
@@ -229,15 +247,15 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     internal void SetWriteState(long timestamp, long revision, bool isFromSource)
     {
         var state = GetOrAddWriteState();
-        Interlocked.Exchange(ref state.TimestampTicks, timestamp);
+        Volatile.Write(ref state.TimestampTicks, timestamp);
 
         if (isFromSource)
         {
-            Interlocked.Exchange(ref state.LastSourceCommitRevision, revision);
+            Volatile.Write(ref state.LastSourceCommitRevision, revision);
         }
         else
         {
-            Interlocked.Exchange(ref state.LastNonSourceCommitRevision, revision);
+            Volatile.Write(ref state.LastNonSourceCommitRevision, revision);
         }
     }
 
@@ -248,7 +266,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteTimestamp(long timestamp)
     {
-        Interlocked.Exchange(ref GetOrAddWriteState().TimestampTicks, timestamp);
+        Volatile.Write(ref GetOrAddWriteState().TimestampTicks, timestamp);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

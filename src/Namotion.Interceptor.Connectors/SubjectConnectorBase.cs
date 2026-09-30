@@ -14,6 +14,8 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
 {
     private int _executionActive;
     private volatile ConnectorRunAttempt? _currentAttempt;
+    private CancellationTokenSource? _stoppingCts;
+    private Task? _executeTask;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectConnectorBase"/> class.
@@ -41,6 +43,9 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
     /// </summary>
     public abstract ConnectorDiagnostics Diagnostics { get; }
 
+    /// <inheritdoc />
+    public override Task? ExecuteTask => _executeTask;
+
     /// <summary>
     /// Runs the connector until cancellation. Replaces <see cref="ExecuteAsync"/>, which this class
     /// seals so that the diagnostics lifecycle is applied uniformly.
@@ -63,12 +68,40 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
 
         try
         {
-            return base.StartAsync(cancellationToken);
+            var previousStoppingCts = _stoppingCts;
+            _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            // Not in StopAsync: a timed-out stop leaves the execution running, and Dispose still cancels this source.
+            previousStoppingCts?.Dispose();
+
+            // Started inline instead of through BackgroundService, which since .NET 10 schedules the
+            // execution on the thread pool: a source must be subscribed to the change queue and a server
+            // bound before the host start returns, or writes made in between are lost.
+            _executeTask = ExecuteAsync(_stoppingCts.Token);
+            return _executeTask.IsCompleted ? _executeTask : Task.CompletedTask;
         }
         catch
         {
             Volatile.Write(ref _executionActive, 0);
             throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_executeTask is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _stoppingCts!.Cancel();
+        }
+        finally
+        {
+            await _executeTask.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
     }
 
@@ -111,9 +144,10 @@ public abstract class SubjectConnectorBase : BackgroundService, ISubjectConnecto
     /// <inheritdoc />
     public override void Dispose()
     {
-        // BackgroundService.Dispose cancels the token but does not await ExecuteAsync, so the finally
-        // above runs at an unspecified later time.
+        // Cancelling the token does not await ExecuteAsync, so the finally above runs at an
+        // unspecified later time.
         Metrics.MarkStopped();
+        _stoppingCts?.Cancel();
         base.Dispose();
     }
 

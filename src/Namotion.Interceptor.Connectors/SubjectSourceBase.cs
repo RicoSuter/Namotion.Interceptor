@@ -128,7 +128,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// <inheritdoc />
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        // Stopped is terminal, but the platform won't enforce it: BackgroundService.StartAsync
+        // Stopped is terminal, but the base class won't enforce it: SubjectConnectorBase.StartAsync
         // creates a fresh CancellationTokenSource each call, so a second StartAsync would run
         // ExecuteAsync again against an uncancelled token. Without this guard, a "restarted" source
         // would claim, load and apply live values while State stayed Stopped.

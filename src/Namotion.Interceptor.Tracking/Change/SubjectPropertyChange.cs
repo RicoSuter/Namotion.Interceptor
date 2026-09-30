@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change.Performance;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -107,16 +108,34 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TValue GetOldValue<TValue>() =>
-        TryGetValue(_oldValueStorage, _oldBoxedHolder, out TValue value)
-            ? value
-            : throw new InvalidCastException($"Old value of property '{Property.Name}' is of type '{_oldValueStorage.StoredType?.FullName ?? _oldBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
+    public TValue GetOldValue<TValue>()
+    {
+        if (!TryGetValue(_oldValueStorage, _oldBoxedHolder, out TValue value))
+        {
+            ThrowValueNotCastable("Old", Property.Name, _oldValueStorage.StoredType, _oldBoxedHolder, typeof(TValue));
+        }
+
+        return value;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TValue GetNewValue<TValue>() =>
-        TryGetValue(_newValueStorage, _newBoxedHolder, out TValue value)
-            ? value
-            : throw new InvalidCastException($"New value of property '{Property.Name}' is of type '{_newValueStorage.StoredType?.FullName ?? _newBoxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{typeof(TValue).FullName}'.");
+    public TValue GetNewValue<TValue>()
+    {
+        if (!TryGetValue(_newValueStorage, _newBoxedHolder, out TValue value))
+        {
+            ThrowValueNotCastable("New", Property.Name, _newValueStorage.StoredType, _newBoxedHolder, typeof(TValue));
+        }
+
+        return value;
+    }
+
+    // Kept out of the inlined getters: an interpolated message there would zero stack in every caller.
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowValueNotCastable(string valueKind, string propertyName, Type? storedType, object? boxedHolder, Type targetType)
+    {
+        throw new InvalidCastException($"{valueKind} value of property '{propertyName}' is of type '{storedType?.FullName ?? boxedHolder?.GetType().FullName ?? "null"}' and cannot be cast to '{targetType.FullName}'.");
+    }
 
     /// <summary>
     /// Reads the property's value now, rather than the value captured when this change was created.

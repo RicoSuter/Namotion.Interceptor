@@ -1,9 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <!-- Set to true to use local OPC UA project references (development), false for NuGet packages (production) -->
     <UseLocalOpcUaProjects>false</UseLocalOpcUaProjects>
   </PropertyGroup>
@@ -36,8 +33,8 @@
 
   <!-- NuGet package references for production -->
   <ItemGroup Condition="'$(UseLocalOpcUaProjects)' != 'true'">
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.378.145" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.145" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" />
   </ItemGroup>
 
   <ItemGroup>
