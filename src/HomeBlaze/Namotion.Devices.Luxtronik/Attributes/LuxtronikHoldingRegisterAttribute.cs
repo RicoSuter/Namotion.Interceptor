@@ -14,7 +14,7 @@ public sealed class LuxtronikHoldingRegisterAttribute : LuxtronikRegisterAttribu
     public LuxtronikHoldingRegisterAttribute(int address, ModbusDataType dataType)
         : base(address, dataType)
     {
-        Space = ModbusAddressSpace.HoldingRegister;
+        AddressSpace = ModbusAddressSpace.HoldingRegister;
         Access = ModbusAccess.ReadOnly;
     }
 }

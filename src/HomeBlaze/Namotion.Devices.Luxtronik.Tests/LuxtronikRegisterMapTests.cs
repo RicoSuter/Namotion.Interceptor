@@ -18,7 +18,7 @@ public class LuxtronikRegisterMapTests
     private const LuxtronikFunction Circuit = LuxtronikFunction.MixingCircuit1Heating;
 
     // Path, space, address, data type, scale, minimum firmware, register function gate. Source: SHI manual 83026900aDE.
-    private static readonly (string Path, ModbusAddressSpace Space, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function)[] ExpectedRegisters =
+    private static readonly (string Path, ModbusAddressSpace AddressSpace, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function)[] ExpectedRegisters =
     [
         ("OperatingStatus.HeatPumpStatus", ModbusAddressSpace.InputRegister, 10000, ModbusDataType.U16, 1, null, NoFunction),
         ("OperatingStatus.OperatingState", ModbusAddressSpace.InputRegister, 10002, ModbusDataType.U16, 1, null, NoFunction),
@@ -176,17 +176,17 @@ public class LuxtronikRegisterMapTests
         var overlaps = GetRegisters(heatPump.TryGetRegisteredSubject()!, string.Empty)
             .SelectMany(register => Enumerable
                 .Range(register.Address, register.DataType is ModbusDataType.U32 or ModbusDataType.S32 ? 2 : 1)
-                .Select(address => (register.Space, Address: address, register.Path)))
-            .GroupBy(word => (word.Space, word.Address))
+                .Select(address => (register.AddressSpace, Address: address, register.Path)))
+            .GroupBy(word => (word.AddressSpace, word.Address))
             .Where(group => group.Count() > 1)
-            .Select(group => $"{group.Key.Space} {group.Key.Address}: {string.Join(", ", group.Select(word => word.Path))}")
+            .Select(group => $"{group.Key.AddressSpace} {group.Key.Address}: {string.Join(", ", group.Select(word => word.Path))}")
             .ToList();
 
         // Assert
         Assert.Empty(overlaps);
     }
 
-    private static IEnumerable<(string Path, ModbusAddressSpace Space, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function)> GetRegisters(
+    private static IEnumerable<(string Path, ModbusAddressSpace AddressSpace, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function)> GetRegisters(
         RegisteredSubject subject, string prefix)
     {
         var baseAddress = subject.Subject is IModbusBaseAddressProvider provider ? provider.BaseAddress : 0;
@@ -196,7 +196,7 @@ public class LuxtronikRegisterMapTests
             if (property.ReflectionAttributes.OfType<ModbusRegisterAttribute>().FirstOrDefault() is { } attribute)
             {
                 var function = attribute is LuxtronikRegisterAttribute luxtronikAttribute ? luxtronikAttribute.Function : NoFunction;
-                yield return (path, attribute.Space, baseAddress + attribute.Address, attribute.DataType, attribute.Scale, GetMinimumFirmware(property), function);
+                yield return (path, attribute.AddressSpace, baseAddress + attribute.Address, attribute.DataType, attribute.Scale, GetMinimumFirmware(property), function);
             }
 
             var childRegisters = property.Children
@@ -221,7 +221,7 @@ public class LuxtronikRegisterMapTests
         return LuxtronikGating.IsSupported(property, new Version(3, 92, 0), activeFunctions: null) ? Fw392 : Fw3921;
     }
 
-    private static string Format((string Path, ModbusAddressSpace Space, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function) register)
+    private static string Format((string Path, ModbusAddressSpace AddressSpace, int Address, ModbusDataType DataType, double Scale, string? Firmware, LuxtronikFunction Function) register)
         => string.Create(CultureInfo.InvariantCulture,
-            $"{register.Path} {register.Space} {register.Address} {register.DataType} x{register.Scale} fw={register.Firmware ?? "any"} {register.Function}");
+            $"{register.Path} {register.AddressSpace} {register.Address} {register.DataType} x{register.Scale} fw={register.Firmware ?? "any"} {register.Function}");
 }

@@ -8,7 +8,7 @@ internal sealed class ModbusReadBatch
     public ModbusReadBatch(byte unitId, ModbusAddressSpace space, int startAddress, int count, ModbusRegisterBinding[] bindings)
     {
         UnitId = unitId;
-        Space = space;
+        AddressSpace = space;
         StartAddress = startAddress;
         Count = count;
         Bindings = bindings;
@@ -16,7 +16,7 @@ internal sealed class ModbusReadBatch
 
     public byte UnitId { get; }
 
-    public ModbusAddressSpace Space { get; }
+    public ModbusAddressSpace AddressSpace { get; }
 
     public int StartAddress { get; }
 

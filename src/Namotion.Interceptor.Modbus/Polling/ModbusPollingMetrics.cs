@@ -5,19 +5,19 @@ namespace Namotion.Interceptor.Modbus.Polling;
 internal sealed class ModbusPollingMetrics : IResettableMetrics
 {
     private long _totalPolls;
-    private long _failedBatches;
+    private long _totalFailedRequests;
     private long _lastPollDurationTicks;
     private long _lastPollTimeUtcTicks;
     private int _batchCount;
-    private int _unavailableProperties;
+    private int _unavailablePropertyCount;
 
     public long TotalPolls => Interlocked.Read(ref _totalPolls);
 
-    public long FailedBatches => Interlocked.Read(ref _failedBatches);
+    public long TotalFailedRequests => Interlocked.Read(ref _totalFailedRequests);
 
     public int BatchCount => Volatile.Read(ref _batchCount);
 
-    public int UnavailableProperties => Volatile.Read(ref _unavailableProperties);
+    public int UnavailablePropertyCount => Volatile.Read(ref _unavailablePropertyCount);
 
     public DateTimeOffset? LastPollTime
     {
@@ -39,12 +39,12 @@ internal sealed class ModbusPollingMetrics : IResettableMetrics
         Interlocked.Increment(ref _totalPolls);
     }
 
-    public void RecordFailedBatch() => Interlocked.Increment(ref _failedBatches);
+    public void RecordFailedRequest() => Interlocked.Increment(ref _totalFailedRequests);
 
-    public void SetPlan(int batchCount, int unavailableProperties)
+    public void SetPlan(int batchCount, int unavailablePropertyCount)
     {
         Volatile.Write(ref _batchCount, batchCount);
-        Volatile.Write(ref _unavailableProperties, unavailableProperties);
+        Volatile.Write(ref _unavailablePropertyCount, unavailablePropertyCount);
     }
 
     /// <summary>
@@ -53,6 +53,6 @@ internal sealed class ModbusPollingMetrics : IResettableMetrics
     public void Reset()
     {
         Interlocked.Exchange(ref _totalPolls, 0);
-        Interlocked.Exchange(ref _failedBatches, 0);
+        Interlocked.Exchange(ref _totalFailedRequests, 0);
     }
 }

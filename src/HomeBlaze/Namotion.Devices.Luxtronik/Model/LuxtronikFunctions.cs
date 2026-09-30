@@ -66,84 +66,84 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
     /// <summary>
     /// Gets whether the heating operating mode is switched on (not Aus).
     /// </summary>
-    [ModbusRegister(0, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(0, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 1)]
     public partial bool? IsHeatingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether the hot water operating mode is switched on (not Aus).
     /// </summary>
-    [ModbusRegister(1, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(1, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 2)]
     public partial bool? IsHotWaterEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether the cooling operating mode is switched on (Automatisch).
     /// </summary>
-    [ModbusRegister(2, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(2, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 3)]
     public partial bool? IsCoolingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether the pool operating mode is switched on (Automatisch).
     /// </summary>
-    [ModbusRegister(3, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(3, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 4)]
     public partial bool? IsPoolEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether solar is configured on the controller.
     /// </summary>
-    [ModbusRegister(4, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(4, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 5)]
     public partial bool? IsSolarConfigured { get; internal set; }
 
     /// <summary>
     /// Gets whether a room control unit is configured on the controller.
     /// </summary>
-    [ModbusRegister(5, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(5, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 6)]
     public partial bool? IsRoomControlUnitConfigured { get; internal set; }
 
     /// <summary>
     /// Gets whether mixing circuit 1 is configured for heating and the heating operating mode is switched on (not Aus).
     /// </summary>
-    [ModbusRegister(6, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(6, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 7)]
     public partial bool? IsMixingCircuit1HeatingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether mixing circuit 1 is configured for cooling and the cooling operating mode is switched on (Automatisch).
     /// </summary>
-    [ModbusRegister(7, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(7, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 8)]
     public partial bool? IsMixingCircuit1CoolingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether mixing circuit 2 is configured for heating and the heating operating mode is switched on (not Aus).
     /// </summary>
-    [ModbusRegister(8, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(8, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 9)]
     public partial bool? IsMixingCircuit2HeatingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether mixing circuit 2 is configured for cooling and the cooling operating mode is switched on (Automatisch).
     /// </summary>
-    [ModbusRegister(9, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(9, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 10)]
     public partial bool? IsMixingCircuit2CoolingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether mixing circuit 3 is configured for heating and the heating operating mode is switched on (not Aus).
     /// </summary>
-    [ModbusRegister(10, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(10, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 11)]
     public partial bool? IsMixingCircuit3HeatingEnabled { get; internal set; }
 
     /// <summary>
     /// Gets whether mixing circuit 3 is configured for cooling and the cooling operating mode is switched on (Automatisch).
     /// </summary>
-    [ModbusRegister(11, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+    [ModbusRegister(11, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
     [State(IsDiscrete = true, Position = 12)]
     public partial bool? IsMixingCircuit3CoolingEnabled { get; internal set; }
 }

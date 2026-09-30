@@ -18,7 +18,7 @@ internal sealed class ModbusPoller
     private readonly ILogger _logger;
 
     // Keyed by request rather than batch instance so a replan does not log a still failing request again.
-    private readonly HashSet<(byte UnitId, ModbusAddressSpace Space, int StartAddress, int Count)> _failingBatches = [];
+    private readonly HashSet<(byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count)> _failingBatches = [];
     private ModbusReadBatch[] _batches;
 
     public ModbusPoller(
@@ -31,7 +31,7 @@ internal sealed class ModbusPoller
         _metrics = metrics;
         _logger = logger;
         _batches = ModbusReadPlanner.Plan(_bindings, maximumRegisterGap);
-        _metrics.SetPlan(_batches.Length, unavailableProperties: 0);
+        _metrics.SetPlan(_batches.Length, unavailablePropertyCount: 0);
     }
 
     public IReadOnlyList<ModbusRegisterBinding> Bindings => _bindings;
@@ -69,7 +69,7 @@ internal sealed class ModbusPoller
         {
             try
             {
-                var data = await reader.ReadAsync(batch.UnitId, batch.Space, batch.StartAddress, batch.Count, cancellationToken).ConfigureAwait(false);
+                var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, batch.StartAddress, batch.Count, cancellationToken).ConfigureAwait(false);
 
                 // The reader may hand out a pooled buffer that its next read overwrites, so copy before reading on.
                 foreach (var binding in batch.Bindings)
@@ -80,13 +80,13 @@ internal sealed class ModbusPoller
                 if (_failingBatches.Count > 0 && _failingBatches.Remove(GetKey(batch)))
                 {
                     _logger.LogInformation(
-                        "Modbus read of {Space} {Address} (unit {UnitId}) succeeds again.",
-                        batch.Space, batch.StartAddress, batch.UnitId);
+                        "Modbus read of {AddressSpace} {Address} (unit {UnitId}) succeeds again.",
+                        batch.AddressSpace, batch.StartAddress, batch.UnitId);
                 }
             }
             catch (ModbusResponseException exception) when (exception.IsPermanentRejection && batch.Bindings.Length > 1)
             {
-                _metrics.RecordFailedBatch();
+                _metrics.RecordFailedRequest();
                 _failingBatches.Remove(GetKey(batch));
                 await ReadIndividuallyAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
                 isReplanRequired = true;
@@ -94,7 +94,7 @@ internal sealed class ModbusPoller
             catch (ModbusResponseException exception)
             {
                 // Skipped for this cycle only: its values keep their last value and the plan stays as it is.
-                _metrics.RecordFailedBatch();
+                _metrics.RecordFailedRequest();
                 LogFailedRequestOnce(GetKey(batch), batch.Bindings[0].Path, exception);
             }
         }
@@ -214,8 +214,8 @@ internal sealed class ModbusPoller
         if (_logger.IsEnabled(LogLevel.Debug))
         {
             _logger.LogDebug(batchException,
-                "Modbus read of {Count} {Space} from {Address} (unit {UnitId}) was rejected; reading its mappings one by one from now on.",
-                batch.Count, batch.Space, batch.StartAddress, batch.UnitId);
+                "Modbus read of {Count} {AddressSpace} from {Address} (unit {UnitId}) was rejected; reading its mappings one by one from now on.",
+                batch.Count, batch.AddressSpace, batch.StartAddress, batch.UnitId);
         }
 
         foreach (var binding in batch.Bindings)
@@ -225,20 +225,20 @@ internal sealed class ModbusPoller
             binding.IsIsolated = true;
             try
             {
-                var data = await reader.ReadAsync(binding.UnitId, binding.Space, binding.Address, binding.Count, cancellationToken).ConfigureAwait(false);
+                var data = await reader.ReadAsync(binding.UnitId, binding.AddressSpace, binding.Address, binding.Count, cancellationToken).ConfigureAwait(false);
                 CopyToBinding(binding, data.Span, binding.Address);
             }
             catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
             {
                 binding.IsUnavailable = true;
                 _logger.LogWarning(exception,
-                    "Modbus mapping {Path} ({Space} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
-                    binding.Path, binding.Space, binding.Address, binding.UnitId, exception.ExceptionCode);
+                    "Modbus mapping {Path} ({AddressSpace} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
+                    binding.Path, binding.AddressSpace, binding.Address, binding.UnitId, exception.ExceptionCode);
             }
             catch (ModbusResponseException exception)
             {
                 // Keyed like the request of its own this binding gets from the next cycle on.
-                LogFailedRequestOnce((binding.UnitId, binding.Space, binding.Address, binding.Count), binding.Path, exception);
+                LogFailedRequestOnce((binding.UnitId, binding.AddressSpace, binding.Address, binding.Count), binding.Path, exception);
             }
         }
     }
@@ -247,18 +247,18 @@ internal sealed class ModbusPoller
     /// Logs a failed request once until it succeeds again.
     /// </summary>
     private void LogFailedRequestOnce(
-        (byte UnitId, ModbusAddressSpace Space, int StartAddress, int Count) key, string firstPath, ModbusResponseException exception)
+        (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) key, string firstPath, ModbusResponseException exception)
     {
         if (_failingBatches.Add(key))
         {
             _logger.LogWarning(exception,
-                "Modbus read of {Count} {Space} from {Address} (unit {UnitId}, first mapping {Path}) failed with exception code {ExceptionCode}.",
-                key.Count, key.Space, key.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
+                "Modbus read of {Count} {AddressSpace} from {Address} (unit {UnitId}, first mapping {Path}) failed with exception code {ExceptionCode}.",
+                key.Count, key.AddressSpace, key.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
         }
     }
 
-    private static (byte UnitId, ModbusAddressSpace Space, int StartAddress, int Count) GetKey(ModbusReadBatch batch)
-        => (batch.UnitId, batch.Space, batch.StartAddress, batch.Count);
+    private static (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) GetKey(ModbusReadBatch batch)
+        => (batch.UnitId, batch.AddressSpace, batch.StartAddress, batch.Count);
 
     private static void CopyToBinding(ModbusRegisterBinding binding, ReadOnlySpan<byte> data, int startAddress)
     {

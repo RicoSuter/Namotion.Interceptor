@@ -31,7 +31,7 @@ public class ModbusRegisterAttribute : Attribute
     /// Gets the address space read from. The bit spaces require <see cref="ModbusDataType.Boolean"/>. Default is
     /// <see cref="ModbusAddressSpace.HoldingRegister"/>.
     /// </summary>
-    public ModbusAddressSpace Space { get; init; } = ModbusAddressSpace.HoldingRegister;
+    public ModbusAddressSpace AddressSpace { get; init; } = ModbusAddressSpace.HoldingRegister;
 
     /// <summary>
     /// Gets the register order of 32-bit values. Ignored for other types.

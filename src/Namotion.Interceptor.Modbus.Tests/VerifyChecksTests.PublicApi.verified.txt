@@ -20,12 +20,12 @@ namespace Namotion.Interceptor.Modbus.Attributes
         public ModbusRegisterAttribute(int address, Namotion.Interceptor.Modbus.ModbusDataType dataType) { }
         public Namotion.Interceptor.Modbus.ModbusAccess Access { get; init; }
         public int Address { get; }
+        public Namotion.Interceptor.Modbus.ModbusAddressSpace AddressSpace { get; init; }
         public Namotion.Interceptor.Modbus.ModbusDataType DataType { get; }
         public int Length { get; init; }
         public Namotion.Interceptor.Modbus.ModbusNotAvailableValue NotAvailableValue { get; init; }
         public double Scale { get; init; }
         public string? ScaleFactorProperty { get; init; }
-        public Namotion.Interceptor.Modbus.ModbusAddressSpace Space { get; init; }
         public Namotion.Interceptor.Modbus.ModbusWordOrder WordOrder { get; init; }
     }
     [System.AttributeUsage(System.AttributeTargets.Class, AllowMultiple=false, Inherited=true)]
@@ -111,11 +111,11 @@ namespace Namotion.Interceptor.Modbus
     public sealed class ModbusPollingDiagnostics
     {
         public int BatchCount { get; }
-        public long FailedBatches { get; }
         public System.TimeSpan? LastPollDuration { get; }
         public System.DateTimeOffset? LastPollTime { get; }
+        public long TotalFailedRequests { get; }
         public long TotalPolls { get; }
-        public int UnavailableProperties { get; }
+        public int UnavailablePropertyCount { get; }
     }
     public sealed class ModbusResponseException : System.Exception
     {

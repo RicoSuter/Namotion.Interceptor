@@ -37,13 +37,13 @@ public partial class ModbusSubjectClientSourceTests
         [ModbusRegister(1, ModbusDataType.U16)]
         public partial int? Counter { get; set; }
 
-        [ModbusRegister(10, ModbusDataType.U32, Space = ModbusAddressSpace.InputRegister)]
+        [ModbusRegister(10, ModbusDataType.U32, AddressSpace = ModbusAddressSpace.InputRegister)]
         public partial long? Energy { get; set; }
 
-        [ModbusRegister(3, ModbusDataType.Boolean, Space = ModbusAddressSpace.Coil)]
+        [ModbusRegister(3, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.Coil)]
         public partial bool? Pump { get; set; }
 
-        [ModbusRegister(1, ModbusDataType.Boolean, Space = ModbusAddressSpace.DiscreteInput)]
+        [ModbusRegister(1, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.DiscreteInput)]
         public partial bool? Alarm { get; set; }
 
         [ModbusRegister(20, ModbusDataType.U16)]
@@ -281,7 +281,7 @@ public partial class ModbusSubjectClientSourceTests
             // Assert
             Assert.Equal(21.5m, device.Temperature);
             Assert.Null(device.Counter);
-            Assert.Equal(1, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(1, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {

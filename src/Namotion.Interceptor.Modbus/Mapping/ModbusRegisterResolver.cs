@@ -108,9 +108,9 @@ internal static class ModbusRegisterResolver
             throw ModbusConfigurationException.ForMapping(path, $"Data type {attribute.DataType} is not defined.");
         }
 
-        if (!Enum.IsDefined(attribute.Space))
+        if (!Enum.IsDefined(attribute.AddressSpace))
         {
-            throw ModbusConfigurationException.ForMapping(path, $"Address space {attribute.Space} is not defined.");
+            throw ModbusConfigurationException.ForMapping(path, $"Address space {attribute.AddressSpace} is not defined.");
         }
 
         if (!Enum.IsDefined(attribute.WordOrder))
@@ -127,10 +127,10 @@ internal static class ModbusRegisterResolver
     private static void ValidateDataType(string path, ModbusRegisterAttribute attribute)
     {
         var dataType = attribute.DataType;
-        var isBitSpace = attribute.Space.IsBitSpace();
+        var isBitSpace = attribute.AddressSpace.IsBitSpace();
         if (isBitSpace && dataType != ModbusDataType.Boolean)
         {
-            throw ModbusConfigurationException.ForMapping(path, $"{attribute.Space} requires the Boolean data type.");
+            throw ModbusConfigurationException.ForMapping(path, $"{attribute.AddressSpace} requires the Boolean data type.");
         }
 
         if (!isBitSpace && dataType == ModbusDataType.Boolean)

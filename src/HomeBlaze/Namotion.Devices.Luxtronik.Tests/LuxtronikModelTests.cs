@@ -143,7 +143,7 @@ public class LuxtronikModelTests
         // Act
         var writableHoldingRegisters = registerProperties
             .Where(property => property.GetCustomAttribute<LuxtronikRegisterAttribute>() is
-                { Space: ModbusAddressSpace.HoldingRegister, Access: not ModbusAccess.ReadOnly })
+                { AddressSpace: ModbusAddressSpace.HoldingRegister, Access: not ModbusAccess.ReadOnly })
             .Select(GetDisplayName)
             .ToList();
 
@@ -154,7 +154,7 @@ public class LuxtronikModelTests
 
         // Assert
         Assert.Contains(registerProperties, property =>
-            property.GetCustomAttribute<LuxtronikRegisterAttribute>()?.Space == ModbusAddressSpace.HoldingRegister);
+            property.GetCustomAttribute<LuxtronikRegisterAttribute>()?.AddressSpace == ModbusAddressSpace.HoldingRegister);
         Assert.Empty(writableHoldingRegisters);
         Assert.Empty(publiclySettableProperties);
     }

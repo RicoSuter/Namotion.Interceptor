@@ -41,7 +41,7 @@ public sealed class ModbusPollingDiagnostics
     /// Gets the number of planned read requests answered with a Modbus exception response since the source started or the
     /// diagnostics were last reset. One-by-one re-reads of a rejected request and discovery reads are not counted.
     /// </summary>
-    public long FailedBatches => _metrics.FailedBatches;
+    public long TotalFailedRequests => _metrics.TotalFailedRequests;
 
     /// <summary>
     /// Gets the number of read requests per poll cycle.
@@ -51,7 +51,7 @@ public sealed class ModbusPollingDiagnostics
     /// <summary>
     /// Gets the number of mappings the device rejected, which are not read until the next connect.
     /// </summary>
-    public int UnavailableProperties => _metrics.UnavailableProperties;
+    public int UnavailablePropertyCount => _metrics.UnavailablePropertyCount;
 
     /// <summary>
     /// Gets the duration of the last completed poll cycle, or <c>null</c> before the first one.

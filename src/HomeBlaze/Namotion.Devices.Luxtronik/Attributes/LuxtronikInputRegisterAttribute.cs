@@ -14,6 +14,6 @@ public sealed class LuxtronikInputRegisterAttribute : LuxtronikRegisterAttribute
     public LuxtronikInputRegisterAttribute(int address, ModbusDataType dataType)
         : base(address, dataType)
     {
-        Space = ModbusAddressSpace.InputRegister;
+        AddressSpace = ModbusAddressSpace.InputRegister;
     }
 }

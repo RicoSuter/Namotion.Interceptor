@@ -22,10 +22,10 @@ Dependencies: [FluentModbus](https://github.com/Apollo3zehn/FluentModbus) (MIT)
 [InterceptorSubject]
 public partial class HeatMeter
 {
-    [ModbusRegister(0, ModbusDataType.S16, Space = ModbusAddressSpace.InputRegister, Scale = 0.1)]
+    [ModbusRegister(0, ModbusDataType.S16, AddressSpace = ModbusAddressSpace.InputRegister, Scale = 0.1)]
     public partial decimal? FlowTemperature { get; set; }
 
-    [ModbusRegister(10, ModbusDataType.U32, Space = ModbusAddressSpace.InputRegister)]
+    [ModbusRegister(10, ModbusDataType.U32, AddressSpace = ModbusAddressSpace.InputRegister)]
     public partial long? Energy { get; set; }
 }
 
@@ -53,7 +53,7 @@ To create a source for a subject at runtime, for example in a HomeBlaze device, 
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `Space` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
+| `AddressSpace` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
 | `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit values |
 | `Scale` | `1.0` | Static factor, requires a `float`, `double` or `decimal` property |
 | `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Mutually exclusive with `Scale`, and the named property must not be excluded |
@@ -74,7 +74,7 @@ Values convert as follows:
 
 A subject implementing `IModbusBaseAddressProvider` makes its addresses relative to `BaseAddress`, so one class can describe a repeated block. Base addresses are not inherited by child subjects. `IModbusUnitIdProvider` or `[ModbusUnitId]` sets the unit ID for a subject and its children, the interface taking precedence; otherwise `ModbusClientConfiguration.UnitId` applies. Both are read on every connect, when the connector builds its read plan.
 
-Device libraries can derive from `ModbusRegisterAttribute` to preset values such as `Space` and `NotAvailableValue`. A property carries at most one register attribute, derived ones included.
+Device libraries can derive from `ModbusRegisterAttribute` to preset values such as `AddressSpace` and `NotAvailableValue`. A property carries at most one register attribute, derived ones included.
 
 Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non-string) throw `ModbusConfigurationException` naming the property path when the source connects. The connect attempt fails and is retried after `RetryTime`.
 
@@ -89,7 +89,7 @@ Await every context call before the next one and before `DiscoverAsync` returns:
 A device library is a set of subject classes for one device family, with the connector underneath. The Luxtronik heat pump in `src/HomeBlaze/Namotion.Devices.Luxtronik` is a complete example.
 
 1. Model the device as subjects grouped by what a user looks for (functions, not register blocks), with plain properties for values and child subjects for components such as sensors.
-2. Derive a register attribute that presets what every register of the device shares, such as `Space` and `NotAvailableValue` (see Register Mapping).
+2. Derive a register attribute that presets what every register of the device shares, such as `AddressSpace` and `NotAvailableValue` (see Register Mapping).
 3. Give a subject that repeats at several addresses an `IModbusBaseAddressProvider`, and use absolute addresses everywhere else.
 4. Implement `IModbusDiscovery` on the root to read version and capability registers on every connect, exclude what the device does not provide (clearing values that an earlier connection read), and create or clear the child subjects of optional parts.
 5. Own the source in the device: create it with `CreateModbusClientSource`, restart it when the configuration or a capability read during polling changes, and map `Diagnostics` to the device status.
@@ -99,7 +99,7 @@ A device library is a set of subject classes for one device family, with the con
 [InterceptorSubject]
 public partial class Inverter : IModbusDiscovery
 {
-    [ModbusRegister(100, ModbusDataType.S32, Space = ModbusAddressSpace.InputRegister, NotAvailableValue = ModbusNotAvailableValue.SignedMinimum)]
+    [ModbusRegister(100, ModbusDataType.S32, AddressSpace = ModbusAddressSpace.InputRegister, NotAvailableValue = ModbusNotAvailableValue.SignedMinimum)]
     public partial decimal? Power { get; internal set; }
 
     public partial Battery? Battery { get; internal set; }
@@ -139,8 +139,8 @@ Mapped properties are owned by the source, so local changes reach it but are not
 
 ## Resilience
 
-- A request the device rejects as unsupported (exception code 1 illegal function, 2 illegal data address or 3 illegal data value) is re-read one mapping at a time in the same cycle. Its mappings keep being read one at a time until the next connect, so a rejected gap register or a device that rejects reads across block boundaries costs one failed request per connect, not one per cycle. Mappings that still fail alone with one of these codes are logged once, reported in `Diagnostics.Polling.UnavailableProperties` and skipped until the next connect. A mapping that fails alone with any other code stays isolated but is not marked unavailable.
-- A request answered with any other exception code (for example 4 server failure, 6 server busy or 10 and 11 gateway errors) is transient: it is skipped for that cycle, its mappings keep their last value and the read plan stays unchanged. It is logged once, counted in `Diagnostics.Polling.FailedBatches` and logged again when it succeeds.
+- A request the device rejects as unsupported (exception code 1 illegal function, 2 illegal data address or 3 illegal data value) is re-read one mapping at a time in the same cycle. Its mappings keep being read one at a time until the next connect, so a rejected gap register or a device that rejects reads across block boundaries costs one failed request per connect, not one per cycle. Mappings that still fail alone with one of these codes are logged once, reported in `Diagnostics.Polling.UnavailablePropertyCount` and skipped until the next connect. A mapping that fails alone with any other code stays isolated but is not marked unavailable.
+- A request answered with any other exception code (for example 4 server failure, 6 server busy or 10 and 11 gateway errors) is transient: it is skipped for that cycle, its mappings keep their last value and the read plan stays unchanged. It is logged once, counted in `Diagnostics.Polling.TotalFailedRequests` and logged again when it succeeds.
 - A mapping that already has a request of its own and is rejected, with any code, is logged once, read again every cycle and logged again when it succeeds.
 - A value that fails to convert (for example a scale factor exponent outside the `decimal` range) is logged and the property keeps its value.
 - An I/O error, a timeout or a malformed response closes the connection. The source reports `Synchronizing`, reconnects every `RetryTime`, runs discovery again, reloads all values and reports `Synchronized`.
@@ -155,9 +155,9 @@ Mapped properties are owned by the source, so local changes reach it but are not
 | Member | Meaning |
 |---|---|
 | `TotalPolls` | Completed poll cycles |
-| `FailedBatches` | Planned read requests answered with a Modbus exception response; one-by-one re-reads and discovery reads are not counted |
+| `TotalFailedRequests` | Planned read requests answered with a Modbus exception response; one-by-one re-reads and discovery reads are not counted |
 | `BatchCount` | Read requests per poll cycle |
-| `UnavailableProperties` | Mappings the device rejected, not read until the next connect |
+| `UnavailablePropertyCount` | Mappings the device rejected, not read until the next connect |
 | `LastPollDuration` | Duration of the last poll cycle, `null` before the first one |
 | `LastPollTime` | When the last poll cycle completed, `null` before the first one |
 

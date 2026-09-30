@@ -27,7 +27,7 @@ public partial class ModbusPollerTests
         [ModbusRegister(3, ModbusDataType.S16)]
         public partial short? Factor { get; set; }
 
-        [ModbusRegister(0, ModbusDataType.Boolean, Space = ModbusAddressSpace.Coil)]
+        [ModbusRegister(0, ModbusDataType.Boolean, AddressSpace = ModbusAddressSpace.Coil)]
         public partial bool? Pump { get; set; }
     }
 
@@ -304,10 +304,10 @@ public partial class ModbusPollerTests
         Assert.False(applied.ContainsKey("Second"));
         Assert.Equal(42, applied["First"]);
         Assert.Equal(12.3m, applied["Scaled"]);
-        Assert.Equal(1, metrics.UnavailableProperties);
-        Assert.Equal(1, metrics.FailedBatches);
+        Assert.Equal(1, metrics.UnavailablePropertyCount);
+        Assert.Equal(1, metrics.TotalFailedRequests);
         Assert.DoesNotContain(reader.Requests, request =>
-            request.Space == ModbusAddressSpace.HoldingRegister && request.Address <= 1 && request.Address + request.Count > 1);
+            request.AddressSpace == ModbusAddressSpace.HoldingRegister && request.Address <= 1 && request.Address + request.Count > 1);
     }
 
     [Fact]
@@ -324,8 +324,8 @@ public partial class ModbusPollerTests
         // Assert
         Assert.False(applied.ContainsKey("Pump"));
         Assert.Equal(42, applied["First"]);
-        Assert.Equal(1, metrics.FailedBatches);
-        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(1, metrics.TotalFailedRequests);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
     }
 
     [Theory]
@@ -359,9 +359,9 @@ public partial class ModbusPollerTests
         Assert.Equal(2, reader.Requests.Count);
         Assert.Equal(21.5m, recoveredCycle["Second"]);
         Assert.Equal(42, recoveredCycle["First"]);
-        Assert.Equal(2, metrics.FailedBatches);
+        Assert.Equal(2, metrics.TotalFailedRequests);
         Assert.Equal(2, metrics.BatchCount);
-        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
         Assert.Single(logger.Warnings);
     }
 
@@ -389,7 +389,7 @@ public partial class ModbusPollerTests
         // Assert
         Assert.Equal(5, Assert.Single(failedCycle).Value);
         Assert.Equal(6, Assert.Single(recoveredCycle).Value);
-        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
         Assert.Equal(2, metrics.BatchCount);
     }
 
@@ -410,8 +410,8 @@ public partial class ModbusPollerTests
         // Assert
         Assert.False(failedCycle.ContainsKey("Pump"));
         Assert.True(Assert.IsType<bool>(Assert.Single(recoveredCycle).Value));
-        Assert.Equal(1, metrics.FailedBatches);
-        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(1, metrics.TotalFailedRequests);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
     }
 
     [Fact]
@@ -436,7 +436,7 @@ public partial class ModbusPollerTests
 
         // Act & Assert
         await Assert.ThrowsAsync<IOException>(() => poller.ReadAsync(reader, CancellationToken.None));
-        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
     }
 
     [Fact]
@@ -463,9 +463,9 @@ public partial class ModbusPollerTests
         Assert.Equal(6, firstCycle["Second"]);
         Assert.Equal(2, reader.Requests.Count);
         Assert.All(reader.Requests, request => Assert.Equal(1, request.Count));
-        Assert.Equal(1, metrics.FailedBatches);
+        Assert.Equal(1, metrics.TotalFailedRequests);
         Assert.Equal(2, metrics.BatchCount);
-        Assert.Equal(0, metrics.UnavailableProperties);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
     }
 
     [Fact]
@@ -496,7 +496,7 @@ public partial class ModbusPollerTests
 
         // Assert
         Assert.Equal(0, metrics.TotalPolls);
-        Assert.Equal(0, metrics.FailedBatches);
+        Assert.Equal(0, metrics.TotalFailedRequests);
         Assert.Equal(2, metrics.BatchCount);
         Assert.NotNull(metrics.LastPollTime);
         Assert.NotNull(metrics.LastPollDuration);

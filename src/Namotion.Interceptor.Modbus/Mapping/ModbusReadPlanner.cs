@@ -36,7 +36,7 @@ internal static class ModbusReadPlanner
 
             if (CanShareRequest(previous, binding) &&
                 binding.Address - end <= maximumGap &&
-                mergedEnd - start <= GetLimit(binding.Space))
+                mergedEnd - start <= GetLimit(binding.AddressSpace))
             {
                 end = mergedEnd;
                 continue;
@@ -54,7 +54,7 @@ internal static class ModbusReadPlanner
 
     private static bool CanShareRequest(ModbusRegisterBinding previous, ModbusRegisterBinding binding)
         => binding.UnitId == previous.UnitId &&
-           binding.Space == previous.Space &&
+           binding.AddressSpace == previous.AddressSpace &&
            !binding.IsIsolated &&
            !previous.IsIsolated;
 
@@ -66,7 +66,7 @@ internal static class ModbusReadPlanner
     private static ModbusReadBatch CreateBatch(ModbusRegisterBinding[] sorted, int startIndex, int endIndex, int start, int end)
     {
         var first = sorted[startIndex];
-        return new ModbusReadBatch(first.UnitId, first.Space, start, end - start, sorted[startIndex..endIndex]);
+        return new ModbusReadBatch(first.UnitId, first.AddressSpace, start, end - start, sorted[startIndex..endIndex]);
     }
 
     private static int CompareBindings(ModbusRegisterBinding left, ModbusRegisterBinding right)
@@ -74,7 +74,7 @@ internal static class ModbusReadPlanner
         var result = left.UnitId.CompareTo(right.UnitId);
         if (result == 0)
         {
-            result = ((int)left.Space).CompareTo((int)right.Space);
+            result = ((int)left.AddressSpace).CompareTo((int)right.AddressSpace);
         }
 
         if (result == 0)

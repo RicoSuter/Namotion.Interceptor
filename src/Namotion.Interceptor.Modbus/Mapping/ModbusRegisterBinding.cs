@@ -20,7 +20,7 @@ internal sealed class ModbusRegisterBinding
         Attribute = attribute;
         Reader = reader;
         Count = ModbusRegisterCodec.GetRegisterCount(attribute.DataType, attribute.Length);
-        IsBitSpace = attribute.Space.IsBitSpace();
+        IsBitSpace = attribute.AddressSpace.IsBitSpace();
 
         var rawLength = IsBitSpace ? 1 : Count * 2;
         CurrentRaw = new byte[rawLength];
@@ -42,7 +42,7 @@ internal sealed class ModbusRegisterBinding
 
     public bool IsBitSpace { get; }
 
-    public ModbusAddressSpace Space => Attribute.Space;
+    public ModbusAddressSpace AddressSpace => Attribute.AddressSpace;
 
     public ModbusRegisterAttribute Attribute { get; }
 

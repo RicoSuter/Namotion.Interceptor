@@ -90,7 +90,7 @@ public class ModbusValueConvertersTests
     public void WhenDataTypeIsBoolean_ThenBitIsReturned()
     {
         // Act
-        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.Boolean) { Space = ModbusAddressSpace.Coil }, typeof(bool), [1]);
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.Boolean) { AddressSpace = ModbusAddressSpace.Coil }, typeof(bool), [1]);
 
         // Assert
         Assert.True(Assert.IsType<bool>(value));

@@ -54,8 +54,8 @@ public class LuxtronikHeatPumpTests
             Assert.True(heatPump.Functions.IsHeatingEnabled);
             Assert.NotNull(heatPump.Cooling);
             Assert.NotNull(heatPump.MixingCircuit3);
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
             Assert.True(heatPump.IsConnected);
             Assert.Equal(ServiceStatus.Running, heatPump.Status);
             Assert.Null(heatPump.StatusMessage);
@@ -90,8 +90,8 @@ public class LuxtronikHeatPumpTests
             Assert.False(IsClaimed(heatPump.Heating.SmartHomeControl, nameof(LuxtronikSmartHomeControl.Level)));
             Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikHeating.IsLocked)));
             Assert.True(IsClaimed(heatPump.Cooling!, nameof(LuxtronikCooling.IsLocked)));
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {
@@ -125,8 +125,8 @@ public class LuxtronikHeatPumpTests
             Assert.False(IsClaimed(circuit.CoolingSmartHomeControl, nameof(LuxtronikCoolingSmartHomeControl.Mode)));
             Assert.True(IsClaimed(heatPump.Temperatures.Outside, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.Equal(28.0m, circuit.HeatingSmartHomeControl.Setpoint);
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {
@@ -160,8 +160,8 @@ public class LuxtronikHeatPumpTests
             Assert.Null(heatPump.MixingCircuit1);
             Assert.Null(heatPump.MixingCircuit3);
             Assert.Equal(21.5m, circuit.Temperature.Temperature);
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {
@@ -193,8 +193,8 @@ public class LuxtronikHeatPumpTests
             Assert.NotNull(heatPump.Cooling);
             Assert.NotNull(heatPump.MixingCircuit3);
             Assert.False(IsClaimed(heatPump.Functions, nameof(LuxtronikFunctions.IsHeatingEnabled)));
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {
@@ -223,8 +223,8 @@ public class LuxtronikHeatPumpTests
             Assert.True(IsClaimed(heatPump.Functions, nameof(LuxtronikFunctions.IsCoolingEnabled)));
             Assert.False(heatPump.Functions.IsCoolingEnabled);
             Assert.Null(heatPump.Cooling);
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {
@@ -249,8 +249,8 @@ public class LuxtronikHeatPumpTests
         {
             // Assert
             Assert.Equal(isClaimed, IsClaimed(heatPump.RoomControl!, nameof(LuxtronikRoomControl.TemperatureSetpoint)));
-            Assert.Equal(0, source.Diagnostics.Polling.FailedBatches);
-            Assert.Equal(0, source.Diagnostics.Polling.UnavailableProperties);
+            Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {

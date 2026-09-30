@@ -12,7 +12,7 @@ internal sealed class ModbusTestServer : IDisposable
 {
     private readonly byte[] _unitIds;
     private readonly Lock _rejectionsLock = new();
-    private readonly List<(byte UnitId, ModbusAddressSpace Space, int Address, ModbusExceptionCode ExceptionCode)> _rejectedAddresses = [];
+    private readonly List<(byte UnitId, ModbusAddressSpace AddressSpace, int Address, ModbusExceptionCode ExceptionCode)> _rejectedAddresses = [];
     private readonly ConcurrentQueue<(byte UnitId, ModbusFunctionCode FunctionCode, int Address, int Quantity)> _requests = new();
     private ModbusTcpServer? _server;
 
@@ -121,7 +121,7 @@ internal sealed class ModbusTestServer : IDisposable
         {
             foreach (var rejected in _rejectedAddresses)
             {
-                if (rejected.UnitId == unitId && rejected.Space == space &&
+                if (rejected.UnitId == unitId && rejected.AddressSpace == space &&
                     rejected.Address >= address && rejected.Address < address + quantity)
                 {
                     return rejected.ExceptionCode;

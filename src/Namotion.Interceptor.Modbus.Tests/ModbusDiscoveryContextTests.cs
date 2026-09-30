@@ -74,7 +74,7 @@ public partial class ModbusDiscoveryContextTests
 
         // Assert
         Assert.Equal(new[] { true, false, false, false, false, false, false, false, false, true }, bits);
-        Assert.Equal(ModbusAddressSpace.Coil, Assert.Single(reader.Requests).Space);
+        Assert.Equal(ModbusAddressSpace.Coil, Assert.Single(reader.Requests).AddressSpace);
     }
 
     [Fact]

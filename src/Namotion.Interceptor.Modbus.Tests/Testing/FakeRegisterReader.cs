@@ -5,11 +5,11 @@ namespace Namotion.Interceptor.Modbus.Tests.Testing;
 
 internal sealed class FakeRegisterReader : IModbusRegisterReader
 {
-    private readonly Dictionary<(byte UnitId, ModbusAddressSpace Space, int Address), ushort> _registers = [];
-    private readonly Dictionary<(byte UnitId, ModbusAddressSpace Space, int Address), bool> _bits = [];
-    private readonly Dictionary<(byte UnitId, ModbusAddressSpace Space, int Address), int> _rejected = [];
+    private readonly Dictionary<(byte UnitId, ModbusAddressSpace AddressSpace, int Address), ushort> _registers = [];
+    private readonly Dictionary<(byte UnitId, ModbusAddressSpace AddressSpace, int Address), bool> _bits = [];
+    private readonly Dictionary<(byte UnitId, ModbusAddressSpace AddressSpace, int Address), int> _rejected = [];
 
-    public List<(byte UnitId, ModbusAddressSpace Space, int Address, int Count)> Requests { get; } = [];
+    public List<(byte UnitId, ModbusAddressSpace AddressSpace, int Address, int Count)> Requests { get; } = [];
 
     public Exception? ConnectionFailure { get; set; }
 

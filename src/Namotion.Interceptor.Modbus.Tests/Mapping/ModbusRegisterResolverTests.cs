@@ -30,7 +30,7 @@ public partial class ModbusRegisterResolverTests
     {
         public int BaseAddress { get; init; }
 
-        [ModbusRegister(5, ModbusDataType.U16, Space = ModbusAddressSpace.InputRegister)]
+        [ModbusRegister(5, ModbusDataType.U16, AddressSpace = ModbusAddressSpace.InputRegister)]
         public partial int? Value { get; set; }
     }
 
@@ -95,7 +95,7 @@ public partial class ModbusRegisterResolverTests
     [InterceptorSubject]
     public partial class IntegerInCoilSubject
     {
-        [ModbusRegister(0, ModbusDataType.U16, Space = ModbusAddressSpace.Coil)]
+        [ModbusRegister(0, ModbusDataType.U16, AddressSpace = ModbusAddressSpace.Coil)]
         public partial int? Value { get; set; }
     }
 
@@ -119,7 +119,7 @@ public partial class ModbusRegisterResolverTests
         public PresetRegisterAttribute(int address)
             : base(address, ModbusDataType.S16)
         {
-            Space = ModbusAddressSpace.InputRegister;
+            AddressSpace = ModbusAddressSpace.InputRegister;
             NotAvailableValue = ModbusNotAvailableValue.SignedMaximum;
         }
     }
@@ -165,7 +165,7 @@ public partial class ModbusRegisterResolverTests
     [InterceptorSubject]
     public partial class UndefinedSpaceSubject
     {
-        [ModbusRegister(0, ModbusDataType.U16, Space = (ModbusAddressSpace)99)]
+        [ModbusRegister(0, ModbusDataType.U16, AddressSpace = (ModbusAddressSpace)99)]
         public partial int? Value { get; set; }
     }
 
@@ -272,7 +272,7 @@ public partial class ModbusRegisterResolverTests
         var childBinding = Find(bindings, child, nameof(ResolverChild.Value));
         Assert.Equal((byte)1, childBinding.UnitId);
         Assert.Equal(105, childBinding.Address);
-        Assert.Equal(ModbusAddressSpace.InputRegister, childBinding.Space);
+        Assert.Equal(ModbusAddressSpace.InputRegister, childBinding.AddressSpace);
         Assert.Equal((byte)7, Find(bindings, unit, nameof(ResolverUnit.Value)).UnitId);
         var nestedBinding = Find(bindings, nested, nameof(ResolverChild.Value));
         Assert.Equal((byte)7, nestedBinding.UnitId);
@@ -332,7 +332,7 @@ public partial class ModbusRegisterResolverTests
         // Assert
         var binding = Assert.Single(bindings);
         Assert.Equal(4, binding.Address);
-        Assert.Equal(ModbusAddressSpace.InputRegister, binding.Space);
+        Assert.Equal(ModbusAddressSpace.InputRegister, binding.AddressSpace);
         Assert.Null(binding.Reader(new byte[] { 0x7F, 0xFF }, 0));
     }
 

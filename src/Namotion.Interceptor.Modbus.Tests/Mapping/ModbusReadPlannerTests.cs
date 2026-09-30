@@ -18,7 +18,7 @@ public partial class ModbusReadPlannerTests
         int address, ModbusDataType dataType = ModbusDataType.U16,
         ModbusAddressSpace space = ModbusAddressSpace.HoldingRegister, byte unitId = 1, int length = 0)
         => new(new PropertyReference(Subject, nameof(PlannerSubject.Value)), $"Value{address}", unitId, address,
-            new ModbusRegisterAttribute(address, dataType) { Space = space, Length = length }, static (_, _) => null);
+            new ModbusRegisterAttribute(address, dataType) { AddressSpace = space, Length = length }, static (_, _) => null);
 
     [Fact]
     public void WhenRegistersAreContiguous_ThenOneBatchCoversThem()
