@@ -998,9 +998,9 @@ public sealed class AuditService(IInterceptorSubjectContext context, ILogger<Aud
 Delivery:
 
 - Changes made after `StartAsync` returns are delivered.
-- Changes queued during a restart or a retry delay are delivered by the next processor, except a batch in progress when a fault occurs or when a run's final flush fails.
+- Changes queued during a restart or a retry delay are delivered by the next processor, collapsed to the newest value per property as on any start, except a batch in progress when a fault occurs or when a run's final flush fails.
 - While the service is idle (`ProcessAsync` returned without a restart pending), changes are not captured until a restart is served.
-- After three consecutive faults the subscription is released until a run ends without a fault; changes made in between are not captured.
+- From the third consecutive fault on, the subscription is released after each fault and the next run subscribes again; changes made during those retry delays are not captured.
 - On stop, undelivered changes are dropped.
 
 ## Known Limitations
