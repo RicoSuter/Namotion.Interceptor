@@ -11,7 +11,7 @@ internal class MyStromSwitchReport
     public decimal Ws { get; set; }
 
     [JsonPropertyName("relay")]
-    public bool Relay { get; set; }
+    public bool IsRelayOn { get; set; }
 
     [JsonPropertyName("temperature")]
     public decimal Temperature { get; set; }

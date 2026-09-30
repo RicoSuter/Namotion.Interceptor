@@ -1,6 +1,8 @@
-﻿using HotChocolate.Subscriptions;
+﻿using System.Threading.Channels;
+using HotChocolate.Subscriptions;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.GraphQL
 {
@@ -18,11 +20,18 @@ namespace Namotion.Interceptor.GraphQL
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await foreach (var changes in _subject
+            var changes = Channel.CreateUnbounded<SubjectPropertyChange>(
+                new UnboundedChannelOptions { SingleReader = true });
+
+            using var subscription = _subject
                 .Context
                 .GetPropertyChangeObservable()
-                .ToAsyncEnumerable()
-                .WithCancellation(stoppingToken))
+                .Subscribe(
+                    change => changes.Writer.TryWrite(change),
+                    exception => changes.Writer.TryComplete(exception),
+                    () => changes.Writer.TryComplete());
+
+            await foreach (var _ in changes.Reader.ReadAllAsync(stoppingToken))
             {
                 // TODO: Send only changes
                 await _sender.SendAsync(nameof(Subscription<TSubject>.Root), _subject, stoppingToken);

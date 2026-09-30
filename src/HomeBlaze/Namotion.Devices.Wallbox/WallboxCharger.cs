@@ -110,7 +110,7 @@ public partial class WallboxCharger : BackgroundService,
     // Eco-Smart
 
     [State(IsDiscrete = true, Position = 15)]
-    public partial bool? EcoSmartEnabled { get; internal set; }
+    public partial bool? IsEcoSmartEnabled { get; internal set; }
 
     [State(IsDiscrete = true, Position = 16)]
     public partial WallboxEcoSmartMode? EcoSmartMode { get; internal set; }
@@ -225,7 +225,7 @@ public partial class WallboxCharger : BackgroundService,
         TotalEnergyConsumed = null;
         EnergyPrice = null;
         Currency = null;
-        EcoSmartEnabled = null;
+        IsEcoSmartEnabled = null;
         EcoSmartMode = null;
         Model = null;
         ProductCode = null;
@@ -484,7 +484,7 @@ public partial class WallboxCharger : BackgroundService,
         // all other statuses (including future ones) fall back to API's Finished flag.
         IsPluggedIn = ChargerStatus is WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready
             ? false
-            : !status.Finished;
+            : !status.IsFinished;
 
         IsCharging = ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         ChargingPower = status.ChargingPowerInKw * 1000m;
@@ -530,9 +530,9 @@ public partial class WallboxCharger : BackgroundService,
         Currency = status.ConfigData?.Currency?.Symbol;
 
         // Eco-Smart
-        EcoSmartEnabled = status.ConfigData?.Ecosmart?.Enabled;
+        IsEcoSmartEnabled = status.ConfigData?.Ecosmart?.IsEnabled;
         EcoSmartMode = status.ConfigData?.Ecosmart is { } eco
-            ? eco.Enabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
+            ? eco.IsEnabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
             : null;
 
         // Device info
@@ -542,7 +542,7 @@ public partial class WallboxCharger : BackgroundService,
 
         // Software
         SoftwareVersion = status.ConfigData?.Software?.CurrentVersion;
-        AvailableSoftwareUpdate = status.ConfigData?.Software?.UpdateAvailable == true
+        AvailableSoftwareUpdate = status.ConfigData?.Software?.IsUpdateAvailable == true
             ? status.ConfigData.Software.LatestVersion
             : null;
 

@@ -208,8 +208,8 @@ internal class OpcUaSubjectLoader
             if (!processedBrowseNames.Add(browseName))
                 continue;
 
-            // Safety net for name collisions: a lifecycle handler from another source (e.g. HomeBlaze's
-            // [StateAttribute]) may have registered a registry attribute under the same key as a standard
+            // Safety net for name collisions: a lifecycle handler from another source (e.g. an application
+            // handler that turns a .NET attribute into a registry attribute) may have registered a registry attribute under the same key as a standard
             // OPC UA browse-name child (e.g. Server.ServerStatus.State). Skip rather than crash on
             // duplicate AddAttribute; the existing registration wins.
             if (property.TryGetAttribute(browseName) is not null)

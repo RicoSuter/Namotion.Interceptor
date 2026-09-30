@@ -82,9 +82,9 @@ public class ShellyDeviceComponentParsingTests
 
         // Assert
         Assert.Equal(2, device.Inputs.Length);
-        Assert.True(device.Inputs[0].State);
+        Assert.True(device.Inputs[0].IsActive);
         Assert.Null(device.Inputs[0].CountTotal);
-        Assert.False(device.Inputs[1].State);
+        Assert.False(device.Inputs[1].IsActive);
         Assert.Equal(42L, device.Inputs[1].CountTotal);
         Assert.Equal(1.5, device.Inputs[1].CountFrequency);
     }

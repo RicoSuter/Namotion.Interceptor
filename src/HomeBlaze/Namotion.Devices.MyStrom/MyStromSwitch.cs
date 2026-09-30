@@ -277,7 +277,7 @@ public partial class MyStromSwitch : BackgroundService,
         var report = await response.Content.ReadFromJsonAsync<MyStromSwitchReport>(cancellationToken);
         if (report != null)
         {
-            IsOn = report.Relay;
+            IsOn = report.IsRelayOn;
             MeasuredPower = Math.Round(report.Power, 1);
             MeasuredEnergyConsumed = Math.Round(report.EnergySinceBoot / 3600m, 2);
             Uptime = TimeSpan.FromSeconds(report.TimeSinceBoot);
