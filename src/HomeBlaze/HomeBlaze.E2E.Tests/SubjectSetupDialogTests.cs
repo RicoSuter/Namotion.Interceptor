@@ -312,4 +312,59 @@ public class SubjectSetupDialogTests
     }
 
     #endregion
+
+    #region Grid Tests
+
+    [Fact]
+    public async Task WhenHostedSubjectIsAddedToGridWithIsEnabledCleared_ThenItStartsDisabled()
+    {
+        // Creating the cell rewrites the page file in the test output directory, which later runs reuse.
+        var gridPagePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Grid.md");
+        var originalGridPage = await File.ReadAllBytesAsync(gridPagePath);
+        try
+        {
+            // Arrange
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Grid.md");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await editMenu.ClickAsync();
+            await page.GetByText("Inline").ClickAsync();
+
+            var emptyCell = page.Locator(".grid-cell.empty").First;
+            await Assertions.Expect(emptyCell).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            var cellIndex = await page.Locator(".grid-cell:not(.empty)").CountAsync();
+            await emptyCell.ClickAsync();
+
+            var wizard = page.Locator("[data-testid='create-subject-wizard']");
+            await Assertions.Expect(wizard).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await EnterNameAsync(page, "gridhistory");
+            await SelectTypeAsync(page, "type-card-inmemoryhistorystoresubject");
+
+            var isEnabledCheckBox = page.GetByLabel("Enabled (auto-start on application startup)");
+            await Assertions.Expect(isEnabledCheckBox).ToBeCheckedAsync(new() { Timeout = ElementVisibilityTimeout });
+            await isEnabledCheckBox.UncheckAsync();
+            await Assertions.Expect(isEnabledCheckBox).Not.ToBeCheckedAsync();
+
+            // Act
+            await page.Locator("[data-testid='create-button']").ClickAsync();
+            await Assertions.Expect(wizard).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Assert - the store reads IsEnabled once when it starts, so a start that saw the constructor
+            // default reports Running for good instead of Disabled.
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/Demo/Grid.md/grid/Cells/{cellIndex}/Child");
+            await Assertions.Expect(page.GetByText("In-Memory History").First)
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(page.GetByText("Status: Disabled"))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(gridPagePath, originalGridPage);
+        }
+    }
+
+    #endregion
 }
