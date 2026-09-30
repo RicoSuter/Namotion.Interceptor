@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -192,7 +193,9 @@ public class ChangeQueueBackgroundServiceTests
         // Arrange: the session ignores its cancellation, so the fault is thrown once the stop is under way.
         using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
-        using var service = new TestService(context) { IgnoreCancellation = true };
+        var logger = new CapturingLogger();
+        var failure = new InvalidOperationException("Processing failed.");
+        using var service = new TestService(context, logger) { IgnoreCancellation = true };
         await service.StartAsync(CancellationToken.None);
         var session = await service.Sessions.Reader.ReadAsync(timeout.Token);
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -201,13 +204,14 @@ public class ChangeQueueBackgroundServiceTests
         await cancelled.Task.WaitAsync(timeout.Token);
 
         // Act
-        service.Release.SetException(new InvalidOperationException("Processing failed."));
+        service.Release.SetException(failure);
         await stopping;
 
-        // Assert: the fault is still reported, but it does not fail the stop.
+        // Assert: the fault is logged without a retry delay, since no retry follows a stop.
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         Assert.True(context.GetService<PropertyChangeInterceptor>().IsIdle);
-        Assert.IsType<InvalidOperationException>(await service.Failures.Reader.ReadAsync(timeout.Token));
+        Assert.Same(failure, Assert.Single(logger.Entries).Exception);
+        Assert.False(service.Failures.Reader.TryRead(out _));
     }
 
     [Fact]
@@ -457,6 +461,50 @@ public class ChangeQueueBackgroundServiceTests
         Assert.Same(failure, entry.Exception);
         Assert.Equal(delay, Assert.Single(entry.State, pair => pair.Key == "RetryDelay").Value);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenProcessingFails_ThenTheRetryWaitsForTheDelay()
+    {
+        // Arrange: measured from before the start, so the retried session cannot appear earlier than the
+        // delay after the fault unless the wait was skipped.
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var delay = TimeSpan.FromMilliseconds(200);
+        using var service = new TestService(CreateContext()) { FirstFailure = new InvalidOperationException(), RetryDelay = delay };
+        var startedAt = Stopwatch.GetTimestamp();
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        var elapsed = Stopwatch.GetElapsedTime(startedAt);
+
+        // Assert: a lower bound only, so a slow runner cannot fail it.
+        Assert.True(elapsed >= delay - TimeSpan.FromMilliseconds(20), $"The retry ran after {elapsed} instead of waiting {delay}.");
+        Assert.Equal(2, service.Created.Count);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenGetRetryDelayReturnsANegativeDelay_ThenTheExecutionFaultsNamingIt()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var context = CreateContext();
+        var failure = new InvalidOperationException("Processing failed.");
+        using var service = new TestService(context) { FirstFailure = failure, RetryDelay = TimeSpan.FromSeconds(-1) };
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteTask!.WaitAsync(timeout.Token));
+
+        // Assert: the contract violation names the method and carries the fault it was asked about.
+        Assert.Contains("GetRetryDelay", exception.Message);
+        Assert.Same(failure, exception.InnerException);
+        Assert.Single(service.Created);
+        Assert.True(context.GetService<PropertyChangeInterceptor>().IsIdle);
+        await service.StopAsync(timeout.Token);
     }
 
     [Fact]

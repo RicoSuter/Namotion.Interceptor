@@ -209,7 +209,7 @@ public partial class InMemoryHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured once the processor has subscribed, whether from StartAsync or from a restart, so a change
+        // Captured once the processor has subscribed, from StartAsync, a restart or a retry, so a change
         // queued before the engine exists still falls inside coverage. Only the service's sequential session
         // flow reads it.
         _coverageStartedAt = DateTimeOffset.UtcNow;

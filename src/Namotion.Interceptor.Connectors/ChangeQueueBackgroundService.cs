@@ -54,11 +54,14 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         processor.ProcessAsync(stoppingToken);
 
     /// <summary>
-    /// Returns the delay before a new processor is created after <see cref="ProcessAsync"/> or a restart's
-    /// <see cref="CreateProcessor"/> throws, five seconds by default. Called after the failed processor is
-    /// disposed; the delay is waited unless a restart or stop comes first.
+    /// Returns the delay before a new processor is created after <see cref="ProcessAsync"/> or
+    /// <see cref="CreateProcessor"/> throws during execution, five seconds by default. Called after the failed
+    /// processor is disposed; the delay is waited unless a restart or stop comes first.
     /// </summary>
-    /// <returns>A nonnegative delay supported by <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.</returns>
+    /// <returns>
+    /// A nonnegative delay supported by <see cref="Task.Delay(TimeSpan, CancellationToken)"/>. A negative delay
+    /// faults the execution.
+    /// </returns>
     protected virtual TimeSpan GetRetryDelay(Exception exception) => TimeSpan.FromSeconds(5);
 
     /// <summary>
@@ -135,6 +138,12 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
             }
             catch (Exception exception)
             {
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogError(exception, "Change queue processing faulted while stopping.");
+                    return;
+                }
+
                 var delay = GetRetryDelay(exception);
                 if (delay < TimeSpan.Zero)
                 {
@@ -144,11 +153,6 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
                 }
 
                 _logger.LogError(exception, "Change queue processing faulted; retrying in {RetryDelay}.", delay);
-                if (stoppingToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
                 retryDelay = delay;
             }
             processor = null;

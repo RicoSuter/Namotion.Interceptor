@@ -146,7 +146,7 @@ public partial class SqliteHistoryStoreSubject :
     public partial DateTimeOffset? LastFlushUtc { get; set; }
 
     /// <summary>
-    /// Message of the last error encountered during flush or sweep, or null when healthy.
+    /// Message of the last error encountered during flush, sweep or processing, or null when healthy.
     /// </summary>
     [State]
     public partial string? LastError { get; set; }
@@ -247,7 +247,7 @@ public partial class SqliteHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured once the processor has subscribed, whether from StartAsync or from a restart, so a change
+        // Captured once the processor has subscribed, from StartAsync, a restart or a retry, so a change
         // queued before the engine exists still falls inside coverage. Only the service's sequential session
         // flow reads it.
         _coverageStartedAt = DateTimeOffset.UtcNow;
@@ -343,7 +343,7 @@ public partial class SqliteHistoryStoreSubject :
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Final history flush on stop or restart failed; pending samples were not persisted.");
+                _logger.LogError(exception, "Final history flush failed; pending samples were not persisted.");
             }
 
             RefreshMetrics(engine);
@@ -403,8 +403,8 @@ public partial class SqliteHistoryStoreSubject :
     /// <summary>
     /// The flush interval actually used, clamped into a range <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
     /// accepts. The configured value reaches here from a settings form and from a hand-editable file, and
-    /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which faults the
-    /// task that <c>ProcessAsync</c> awaits in its finally and ends the session.
+    /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which stops flushing
+    /// until the session ends and then surfaces as a fault.
     /// </summary>
     private TimeSpan EffectiveFlushInterval =>
         TimeSpan.FromSeconds(Math.Clamp(FlushIntervalSeconds, 1, (int)TimeSpan.FromDays(1).TotalSeconds));
