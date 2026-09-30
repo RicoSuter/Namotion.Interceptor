@@ -598,6 +598,38 @@ public class SqliteHistoryStoreRecordingTests
         }
     }
 
+    [Fact]
+    public async Task WhenProcessingFaults_ThenTheSessionEndsAndTheRetriedSessionRecords()
+    {
+        // Arrange: the first processor's filter throws on the first change, which faults its ProcessAsync.
+        var (context, root, _) = CreateGraph();
+        using var store = new FaultingHistoryStore();
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            root.Temperature = 1;
+            var (statusAtRetry, lastErrorAtRetry) = await store.StateAtRetry.Task.WaitAsync(timeout.Token);
+            var series = await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 21.5);
+
+            // Assert
+            Assert.Equal("Error", statusAtRetry);
+            Assert.Equal("Filter failed.", lastErrorAtRetry);
+            Assert.Contains(series.Points, point => point.Number == 21.5);
+            Assert.Equal("Running", store.Status);
+            Assert.Null(store.LastError);
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
     private sealed class GatedHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
     {
         public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
@@ -608,6 +640,38 @@ public class SqliteHistoryStoreRecordingTests
             Sessions.Writer.TryWrite(release);
             await release.Task.WaitAsync(stoppingToken);
             await base.ProcessAsync(processor, stoppingToken);
+        }
+    }
+
+    // The first processor is replaced by one whose filter throws, after the base captured the session's
+    // settings from it, so the retried session runs on the real processor.
+    private sealed class FaultingHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
+    {
+        private bool _faulted;
+
+        public TaskCompletionSource<(string Status, string? LastError)> StateAtRetry { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override ChangeQueueProcessor CreateProcessor()
+        {
+            var processor = base.CreateProcessor();
+            if (_faulted)
+            {
+                return processor;
+            }
+
+            _faulted = true;
+            processor.Dispose();
+            return new ChangeQueueProcessor(
+                this, ((IInterceptorSubject)this).Context, _ => throw new InvalidOperationException("Filter failed."),
+                (_, _) => ValueTask.CompletedTask, ChangeDeliveryRule.SourceValuesMayBeStale,
+                bufferTime: null, maxQueueDepth: null, NullLogger.Instance);
+        }
+
+        protected override TimeSpan GetRetryDelay(Exception exception)
+        {
+            StateAtRetry.TrySetResult((Status, LastError));
+            return TimeSpan.Zero;
         }
     }
 }

@@ -209,8 +209,9 @@ public partial class InMemoryHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured after subscribing, before StartAsync returns, so delayed engine creation does not
-        // put startup samples outside coverage. Only the service's sequential session flow reads it.
+        // Captured once the processor has subscribed, whether from StartAsync or from a restart, so a change
+        // queued before the engine exists still falls inside coverage. Only the service's sequential session
+        // flow reads it.
         _coverageStartedAt = DateTimeOffset.UtcNow;
         return processor;
     }
@@ -255,22 +256,32 @@ public partial class InMemoryHistoryStoreSubject :
 
         Status = "Running";
 
-        var sweepTask = RunSweepLoopAsync(engine, stoppingToken);
+        // The sweep loop ends with the session, so a processing fault surfaces to the service's retry
+        // instead of waiting behind a loop that only a stop or restart would end.
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var sweepTask = RunSweepLoopAsync(engine, session.Token);
+        var faulted = false;
         try
         {
-            await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+            await processor.ProcessAsync(session.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (session.IsCancellationRequested)
         {
+        }
+        catch (Exception)
+        {
+            faulted = true;
+            throw;
         }
         finally
         {
+            await session.CancelAsync().ConfigureAwait(false);
             await sweepTask.ConfigureAwait(false);
 
             // Stop claiming the live edge: the engine stays queryable, but it is no longer recording,
             // so coverage must end here rather than following the clock forever.
             engine.EndCoverageSession();
-            Status = "Stopped";
+            Status = faulted ? "Error" : "Stopped";
         }
     }
 
@@ -280,7 +291,17 @@ public partial class InMemoryHistoryStoreSubject :
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                engine.Sweep();
+                try
+                {
+                    engine.Sweep();
+                }
+                catch (Exception exception)
+                {
+                    // The samples stay in memory, so the next tick retries; ending the session instead would
+                    // discard them.
+                    _logger.LogError(exception, "Periodic history sweep failed; will retry on the next tick.");
+                }
+
                 RefreshMetrics(engine);
 
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);

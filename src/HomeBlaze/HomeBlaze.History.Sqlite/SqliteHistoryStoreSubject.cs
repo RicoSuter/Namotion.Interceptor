@@ -247,8 +247,9 @@ public partial class SqliteHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured after subscribing, before StartAsync returns, so delayed engine creation does not
-        // put startup samples outside coverage. Only the service's sequential session flow reads it.
+        // Captured once the processor has subscribed, whether from StartAsync or from a restart, so a change
+        // queued before the engine exists still falls inside coverage. Only the service's sequential session
+        // flow reads it.
         _coverageStartedAt = DateTimeOffset.UtcNow;
         return processor;
     }
@@ -311,20 +312,30 @@ public partial class SqliteHistoryStoreSubject :
         LastError = null;
         Status = "Running";
 
-        var flushTask = RunFlushLoopAsync(engine, stoppingToken);
+        // The flush loop ends with the session, so a processing fault surfaces to the service's retry
+        // instead of waiting behind a loop that only a stop or restart would end.
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var flushTask = RunFlushLoopAsync(engine, session.Token);
+        Exception? fault = null;
         try
         {
-            await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+            await processor.ProcessAsync(session.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (session.IsCancellationRequested)
         {
+        }
+        catch (Exception exception)
+        {
+            fault = exception;
+            throw;
         }
         finally
         {
+            await session.CancelAsync().ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
 
-            // Final flush on stop or restart. The token is already cancelled, so a fresh bounded one gives
-            // it a chance; on timeout the pending samples are lost, which the log below reports.
+            // Final flush on stop, restart or fault. The token is already cancelled, so a fresh bounded one
+            // gives it a chance; on timeout the pending samples are lost, which the log below reports.
             using var shutdownCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -342,7 +353,15 @@ public partial class SqliteHistoryStoreSubject :
             Volatile.Write(ref _engine, null);
             _recorder = null;
             engine.Dispose();
-            Status = "Stopped";
+            if (fault is null)
+            {
+                Status = "Stopped";
+            }
+            else
+            {
+                LastError = fault.Message;
+                Status = "Error";
+            }
         }
     }
 
@@ -385,7 +404,7 @@ public partial class SqliteHistoryStoreSubject :
     /// The flush interval actually used, clamped into a range <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
     /// accepts. The configured value reaches here from a settings form and from a hand-editable file, and
     /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which faults the
-    /// task that <c>ProcessAsync</c> awaits in its finally and stops the whole host.
+    /// task that <c>ProcessAsync</c> awaits in its finally and ends the session.
     /// </summary>
     private TimeSpan EffectiveFlushInterval =>
         TimeSpan.FromSeconds(Math.Clamp(FlushIntervalSeconds, 1, (int)TimeSpan.FromDays(1).TotalSeconds));
