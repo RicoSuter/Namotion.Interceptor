@@ -56,6 +56,10 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
             var flags = await context.ReadDiscreteInputsAsync(Functions.BaseAddress, LuxtronikGating.FunctionFlagCount, cancellationToken: cancellationToken).ConfigureAwait(false);
             activeFunctions = LuxtronikGating.GetActiveFunctions(flags);
             functionMask = LuxtronikGating.GetFunctionMask(flags);
+
+            // Keeps the polled flags in step with the discovered ones even while the initial load fails, since a
+            // mismatch makes the status loop restart the source.
+            Functions.SetFromSource(context.Source, functionMask);
         }
         catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
         {

@@ -1,3 +1,4 @@
+using FluentModbus;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -222,6 +223,53 @@ public class LuxtronikHeatPumpLifecycleTests
             message: "Cooling should be removed once its flag is clear.");
         Assert.False(new PropertyReference(cooling, nameof(LuxtronikCooling.Status)).TryGetSource(out _));
         Assert.Equal(3, heatPump.DiscoveryCount);
+    }
+
+    [Fact]
+    public async Task WhenFunctionsChangeWhileStoppedAndTheirPollFails_ThenTheHeatPumpDiscoversOnlyOnce()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+        server.SetFunctions(LuxtronikFunction.Heating, LuxtronikFunction.HotWater);
+
+        await using var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port);
+        var heatPump = host.HeatPump;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Functions.IsCoolingEnabled == false,
+            WaitTimeout,
+            message: "The heat pump should read the flags without cooling.");
+
+        server.Stop();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => !heatPump.IsConnected,
+            WaitTimeout,
+            message: "The heat pump should report the lost controller.");
+        var discoveryCount = heatPump.DiscoveryCount;
+
+        // Act
+        // The restarted server has every function active; only the discovery reads the flags, every poll of them fails.
+        server.RejectFunctionReads(int.MaxValue, ModbusExceptionCode.ServerDeviceBusy, allowedReads: 1);
+        server.Start();
+        server.SeedTypicalValues();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => heatPump.IsConnected && heatPump.Functions.IsCoolingEnabled == true && heatPump.Cooling is not null,
+            TimeSpan.FromSeconds(60),
+            message: "The discovered flags should be applied although their poll fails.");
+        for (var statusUpdate = 0; statusUpdate < 2; statusUpdate++)
+        {
+            var lastUpdated = heatPump.LastUpdated;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => heatPump.LastUpdated > lastUpdated,
+                WaitTimeout,
+                message: "The heat pump should keep polling.");
+        }
+
+        Assert.Equal(discoveryCount + 1, heatPump.DiscoveryCount);
+        Assert.True(heatPump.IsConnected);
     }
 
     [Fact]

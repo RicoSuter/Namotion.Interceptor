@@ -1,9 +1,12 @@
 // Register map: AIT SHI manual 83026900aDE.
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.Luxtronik.Gating;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Devices.Luxtronik.Model;
 
@@ -61,6 +64,27 @@ public partial class LuxtronikFunctions : IModbusBaseAddressProvider
         }
 
         return LuxtronikGating.GetFunctionMask(flags);
+    }
+
+    /// <summary>
+    /// Sets every flag from <paramref name="functionMask"/>, a bit mask indexed by <see cref="Enums.LuxtronikFunction"/>, as read by <paramref name="source"/>.
+    /// </summary>
+    internal void SetFromSource(ISubjectSource source, int functionMask)
+    {
+        ReadOnlySpan<string> propertyNames =
+        [
+            nameof(IsHeatingEnabled), nameof(IsHotWaterEnabled), nameof(IsCoolingEnabled), nameof(IsPoolEnabled),
+            nameof(IsSolarConfigured), nameof(IsRoomControlUnitConfigured),
+            nameof(IsMixingCircuit1HeatingEnabled), nameof(IsMixingCircuit1CoolingEnabled),
+            nameof(IsMixingCircuit2HeatingEnabled), nameof(IsMixingCircuit2CoolingEnabled),
+            nameof(IsMixingCircuit3HeatingEnabled), nameof(IsMixingCircuit3CoolingEnabled)
+        ];
+
+        for (var index = 0; index < propertyNames.Length; index++)
+        {
+            new PropertyReference(this, propertyNames[index])
+                .SetValueFromSource(source, null, null, (functionMask & (1 << index)) != 0);
+        }
     }
 
     /// <summary>

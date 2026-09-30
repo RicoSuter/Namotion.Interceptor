@@ -43,6 +43,7 @@ internal sealed class LuxtronikTestServer : IDisposable
     private readonly Version _firmware;
     private readonly bool _supportsDiscreteInputs;
     private readonly Lock _rejectionLock = new();
+    private int _allowedFunctionReads;
     private int _pendingFunctionReadRejections;
     private ModbusExceptionCode _functionReadRejectionCode;
     private ModbusTcpServer? _server;
@@ -138,12 +139,14 @@ internal sealed class LuxtronikTestServer : IDisposable
     }
 
     /// <summary>
-    /// Rejects the next <paramref name="count"/> reads of the function flags with <paramref name="exceptionCode"/>.
+    /// Rejects <paramref name="count"/> reads of the function flags with <paramref name="exceptionCode"/>, after letting
+    /// the next <paramref name="allowedReads"/> ones through.
     /// </summary>
-    public void RejectFunctionReads(int count, ModbusExceptionCode exceptionCode)
+    public void RejectFunctionReads(int count, ModbusExceptionCode exceptionCode, int allowedReads = 0)
     {
         lock (_rejectionLock)
         {
+            _allowedFunctionReads = allowedReads;
             _pendingFunctionReadRejections = count;
             _functionReadRejectionCode = exceptionCode;
         }
@@ -159,7 +162,11 @@ internal sealed class LuxtronikTestServer : IDisposable
         {
             lock (_rejectionLock)
             {
-                if (_pendingFunctionReadRejections > 0)
+                if (_allowedFunctionReads > 0)
+                {
+                    _allowedFunctionReads--;
+                }
+                else if (_pendingFunctionReadRejections > 0)
                 {
                     _pendingFunctionReadRejections--;
                     return _functionReadRejectionCode;
