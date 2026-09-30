@@ -23,7 +23,8 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <summary>
     /// Creates the processor that subscribes to property changes. Called from <see cref="StartAsync"/> on the
     /// host start path and from the execution on a restart, so it must not block or perform I/O; an exception
-    /// fails the start or, on a restart, faults the execution.
+    /// fails the start or, on a restart, faults the execution. A processor from an earlier start that no execution
+    /// took is disposed before this is called.
     /// </summary>
     protected abstract ChangeQueueProcessor CreateProcessor();
 
@@ -58,9 +59,13 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         // A request made while stopped is served by this fresh start.
         Interlocked.Exchange(ref _restartRequested, 0);
 
+        // Disposed before the next is created, so two subscriptions never overlap and a failed creation leaves none.
+        Interlocked.Exchange(ref _startProcessor, null)?.Dispose();
+
         // Not in ExecuteAsync: since .NET 10 it may run after StartAsync returns, and changes made in between
-        // would never reach the processor.
-        Interlocked.Exchange(ref _startProcessor, CreateProcessor())?.Dispose();
+        // would never reach the processor. Every other writer stores null, so this overwrites nothing, and the
+        // dispatch in base.StartAsync orders it before the execution takes it.
+        Volatile.Write(ref _startProcessor, CreateProcessor());
         return base.StartAsync(cancellationToken);
     }
 
@@ -68,6 +73,13 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var processor = Interlocked.Exchange(ref _startProcessor, null);
+        if (stoppingToken.IsCancellationRequested)
+        {
+            // A stop that outran the dispatch: processing would only start work to tear it down again.
+            processor?.Dispose();
+            return;
+        }
+
         while (processor is not null)
         {
             var wake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

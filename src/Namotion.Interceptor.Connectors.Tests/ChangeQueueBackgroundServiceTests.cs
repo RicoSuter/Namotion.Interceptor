@@ -124,12 +124,12 @@ public class ChangeQueueBackgroundServiceTests
     }
 
     [Fact]
-    public async Task WhenASecondStartFailsToCreateAProcessor_ThenTheFirstProcessorIsRetainedUntilDispose()
+    public async Task WhenASecondStartFailsToCreateAProcessor_ThenNoSubscriptionRemains()
     {
         // Arrange: the first start is cancelled, so its processor is never taken by an execution.
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
-        var service = new TestService(context);
+        using var service = new TestService(context);
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         await service.StartAsync(cancelled.Token);
@@ -137,12 +137,28 @@ public class ChangeQueueBackgroundServiceTests
 
         // Act
         var exception = await Record.ExceptionAsync(() => service.StartAsync(cancelled.Token));
-        var idleAfterFailedStart = interceptor.IsIdle;
-        service.Dispose();
 
         // Assert
         Assert.IsType<InvalidOperationException>(exception);
-        Assert.False(idleAfterFailedStart);
+        Assert.True(interceptor.IsIdle);
+    }
+
+    [Fact]
+    public async Task WhenTheExecutionStartsAfterTheStopWasRequested_ThenProcessAsyncIsNotCalled()
+    {
+        // Arrange: a cancelled start leaves the processor for an execution that the stop then outruns.
+        var context = CreateContext();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        using var service = new TestService(context);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await service.StartAsync(cancelled.Token);
+
+        // Act
+        await service.Execute(cancelled.Token);
+
+        // Assert
+        Assert.Null(service.ProcessedWith);
         Assert.True(interceptor.IsIdle);
     }
 
@@ -428,6 +444,8 @@ public class ChangeQueueBackgroundServiceTests
         public bool IgnoreCancellation { get; init; }
 
         public void Restart() => RequestRestart();
+
+        public Task Execute(CancellationToken stoppingToken) => ExecuteAsync(stoppingToken);
 
         protected override ChangeQueueProcessor CreateProcessor()
         {
