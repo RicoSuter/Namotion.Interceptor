@@ -178,6 +178,7 @@ Properties of subjects attached after the source connected are picked up on the 
 
 - No writes (function codes 5, 6, 15 and 16) yet; the connector only issues function codes 1 to 4.
 - No Modbus RTU and no Modbus server.
+- No [structural changes](connectors.md#structural-changes) during a session: the read plan follows the subject graph as it was at the last connect. A device library changes its structure in discovery and restarts the source when the device's configuration changes.
 
 ## References
 
