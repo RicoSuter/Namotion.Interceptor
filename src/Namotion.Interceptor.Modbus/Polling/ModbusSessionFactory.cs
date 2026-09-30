@@ -49,7 +49,7 @@ internal sealed class ModbusSessionFactory
             var bindings = ModbusRegisterResolver.Resolve(_subject, _configuration.UnitId, excludedProperties);
 
             var claimedBindings = ClaimOwnership(bindings, cancellationToken);
-            var poller = new ModbusPoller(claimedBindings, _configuration.MaximumRegisterGap, _metrics, _logger);
+            var poller = new ModbusPoller(claimedBindings, _configuration.MaximumRegisterGap, _source, _metrics, _logger);
 
             _logger.LogInformation(
                 "Connected to Modbus server at {Host}:{Port}: {PropertyCount} properties in {BatchCount} read requests per poll.",

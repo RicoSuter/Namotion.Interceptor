@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Mapping;
 using Namotion.Interceptor.Modbus.Transport;
 
@@ -14,6 +15,7 @@ internal sealed class ModbusPoller
     private readonly ModbusRegisterBinding[] _bindings;
     private readonly Dictionary<PropertyReference, ModbusRegisterBinding> _bindingsByProperty;
     private readonly int _maximumRegisterGap;
+    private readonly ISubjectSource _source;
     private readonly ModbusPollingMetrics _metrics;
     private readonly ILogger _logger;
 
@@ -23,11 +25,12 @@ internal sealed class ModbusPoller
 
     public ModbusPoller(
         IReadOnlyCollection<ModbusRegisterBinding> bindings, int maximumRegisterGap,
-        ModbusPollingMetrics metrics, ILogger logger)
+        ISubjectSource source, ModbusPollingMetrics metrics, ILogger logger)
     {
         _bindings = bindings.ToArray();
         _bindingsByProperty = _bindings.ToDictionary(binding => binding.Property, PropertyReference.Comparer);
         _maximumRegisterGap = maximumRegisterGap;
+        _source = source;
         _metrics = metrics;
         _logger = logger;
         _batches = ModbusReadPlanner.Plan(_bindings, maximumRegisterGap);
@@ -114,7 +117,7 @@ internal sealed class ModbusPoller
 
     /// <summary>
     /// Applies the bindings whose raw value changed, whose scale factor changed, or that were asked to be reapplied,
-    /// then remembers the current raw values.
+    /// then remembers the current raw values. Skips the bindings whose property the source no longer owns.
     /// </summary>
     public void ApplyChanges<TState>(TState state, Action<TState, PropertyReference, object?> apply)
     {
@@ -126,7 +129,7 @@ internal sealed class ModbusPoller
 
         foreach (var binding in _bindings)
         {
-            if (!ConsumeApplyRequirement(binding) || !TryGetScaleFactorExponent(binding.ScaleFactor, out var exponent))
+            if (!ConsumeApplyRequirement(binding) || !IsOwned(binding) || !TryGetScaleFactorExponent(binding.ScaleFactor, out var exponent))
             {
                 continue;
             }
@@ -173,6 +176,10 @@ internal sealed class ModbusPoller
         var isReapplyRequested = binding.ConsumeReapplyRequest();
         return binding.ChangedThisCycle || isReapplyRequested || isScaleFactorChanged;
     }
+
+    // Detaching a subject releases its claims while its bindings stay in the plan until the next connect.
+    private bool IsOwned(ModbusRegisterBinding binding)
+        => binding.Property.TryGetSource(out var owner) && ReferenceEquals(owner, _source);
 
     private static bool TryGetScaleFactorExponent(ModbusRegisterBinding? scaleFactor, out int exponent)
     {

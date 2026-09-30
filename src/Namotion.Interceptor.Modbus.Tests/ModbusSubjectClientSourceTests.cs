@@ -506,6 +506,74 @@ public partial class ModbusSubjectClientSourceTests
     }
 
     [Fact]
+    public async Task WhenChildSubjectIsDetachedWhilePolling_ThenItsValuesAreNoLongerWritten()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        server.SetHoldingRegister<ushort>(30, 9);
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.Discovered = new DiscoveredChild());
+        var child = device.Discovered;
+        var initialValue = child?.Value;
+        try
+        {
+            // Act
+            device.Discovered = null;
+            server.SetHoldingRegister<ushort>(30, 10);
+            var pollsAfterChange = source.Diagnostics.Polling.TotalPolls;
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= pollsAfterChange + 2, TimeSpan.FromSeconds(10),
+                message: "Polling should continue after the child is detached.");
+
+            // Assert
+            Assert.NotNull(child);
+            Assert.Equal(9, initialValue);
+            Assert.False(new PropertyReference(child, nameof(DiscoveredChild.Value)).TryGetSource(out _));
+            Assert.Equal(9, child.Value);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenDetachedPropertyIsClaimedByAnotherSource_ThenPollingDoesNotOverwriteIt()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        server.SetHoldingRegister<ushort>(30, 9);
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.Discovered = new DiscoveredChild());
+        var child = device.Discovered!;
+        var value = new PropertyReference(child, nameof(DiscoveredChild.Value));
+        var otherSource = new OwnerSource(child);
+        try
+        {
+            // Act
+            device.Discovered = null;
+            Assert.True(value.SetSource(otherSource));
+            child.Value = 5;
+            server.SetHoldingRegister<ushort>(30, 10);
+            var pollsAfterChange = source.Diagnostics.Polling.TotalPolls;
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= pollsAfterChange + 2, TimeSpan.FromSeconds(10),
+                message: "Polling should continue after the child is detached.");
+
+            // Assert
+            Assert.Equal(5, child.Value);
+            Assert.True(value.TryGetSource(out var owner));
+            Assert.Same(otherSource, owner);
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenSourceReconnects_ThenItIsOperationalBeforeItSynchronizes()
     {
         // Arrange

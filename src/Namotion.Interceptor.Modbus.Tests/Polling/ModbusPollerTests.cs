@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Attributes;
 using Namotion.Interceptor.Modbus.Mapping;
 using Namotion.Interceptor.Modbus.Polling;
@@ -75,7 +76,19 @@ public partial class ModbusPollerTests
         reader.SetRegister(2, 123);
         reader.SetRegister(3, unchecked((ushort)-1));
         reader.SetBit(0, true);
-        return (new ModbusPoller(bindings, 0, metrics, logger ?? NullLogger.Instance), reader, metrics);
+        return (CreatePoller(bindings, 0, metrics, logger ?? NullLogger.Instance), reader, metrics);
+    }
+
+    private static ModbusPoller CreatePoller(
+        List<ModbusRegisterBinding> bindings, int maximumRegisterGap, ModbusPollingMetrics metrics, ILogger logger)
+    {
+        var source = new OwnerSource(bindings[0].Property.Subject);
+        foreach (var binding in bindings)
+        {
+            Assert.True(binding.Property.SetSource(source));
+        }
+
+        return new ModbusPoller(bindings, maximumRegisterGap, source, metrics, logger);
     }
 
     private static Dictionary<string, object?> Apply(ModbusPoller poller)
@@ -83,6 +96,27 @@ public partial class ModbusPollerTests
         var applied = new Dictionary<string, object?>();
         poller.ApplyChanges(applied, static (state, property, value) => state[property.Name] = value);
         return applied;
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsReleased_ThenItsValueIsNoLongerApplied()
+    {
+        // Arrange
+        var (poller, reader, _) = Create();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        var first = poller.Bindings.Single(binding => binding.Property.Name == nameof(PollerSubject.First)).Property;
+        Assert.True(first.TryGetSource(out var source));
+        Assert.True(first.RemoveSource(source));
+        reader.SetRegister(0, 43);
+        reader.SetRegister(1, 216);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.Equal(21.6m, Assert.Single(applied).Value);
     }
 
     [Fact]
@@ -161,7 +195,7 @@ public partial class ModbusPollerTests
         // Arrange
         var subject = new SeparateScaleFactorSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
-        var poller = new ModbusPoller(bindings, 0, new ModbusPollingMetrics(), NullLogger.Instance);
+        var poller = CreatePoller(bindings, 0, new ModbusPollingMetrics(), NullLogger.Instance);
         var reader = new FakeRegisterReader();
         reader.SetRegister(0, unchecked((ushort)-1));
         reader.SetRegister(10, 123);
@@ -189,7 +223,7 @@ public partial class ModbusPollerTests
         // Arrange
         var subject = new NotAvailableScaleFactorSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
-        var poller = new ModbusPoller(bindings, 0, new ModbusPollingMetrics(), NullLogger.Instance);
+        var poller = CreatePoller(bindings, 0, new ModbusPollingMetrics(), NullLogger.Instance);
         var reader = new FakeRegisterReader();
         reader.SetRegister(0, unchecked((ushort)-1));
         reader.SetRegister(1, 123);
@@ -255,7 +289,7 @@ public partial class ModbusPollerTests
         var subject = new PollerSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
         var logger = new RecordingLogger();
-        var poller = new ModbusPoller(bindings, 0, new ModbusPollingMetrics(), logger);
+        var poller = CreatePoller(bindings, 0, new ModbusPollingMetrics(), logger);
         var reader = new FakeRegisterReader();
         reader.Reject(1);
         reader.Reject(0, ModbusAddressSpace.Coil, exceptionCode: 6);
@@ -376,7 +410,7 @@ public partial class ModbusPollerTests
         var subject = new GapSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
         var metrics = new ModbusPollingMetrics();
-        var poller = new ModbusPoller(bindings, maximumRegisterGap: 1, metrics, NullLogger.Instance);
+        var poller = CreatePoller(bindings, maximumRegisterGap: 1, metrics, NullLogger.Instance);
         var reader = new FakeRegisterReader();
         reader.SetRegister(0, 5);
         reader.SetRegister(2, 6);
@@ -450,7 +484,7 @@ public partial class ModbusPollerTests
         var subject = new GapSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
         var metrics = new ModbusPollingMetrics();
-        var poller = new ModbusPoller(bindings, maximumRegisterGap: 1, metrics, NullLogger.Instance);
+        var poller = CreatePoller(bindings, maximumRegisterGap: 1, metrics, NullLogger.Instance);
         var reader = new FakeRegisterReader();
         reader.SetRegister(0, 5);
         reader.SetRegister(2, 6);
