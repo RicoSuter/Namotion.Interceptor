@@ -44,6 +44,9 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     {
         DiscoveryCount++;
 
+        // A reconnect writes the new flags before publishing their mask, so the stale mask would restart the source meanwhile.
+        Volatile.Write(ref _discoveredFunctionMask, UnknownFunctionMask);
+
         var versionRegisters = await context.ReadInputRegistersAsync(FirmwareAddress, 3, cancellationToken: cancellationToken).ConfigureAwait(false);
         var firmwareVersion = new Version(versionRegisters[0], versionRegisters[1], versionRegisters[2]);
         new PropertyReference(this, nameof(SoftwareVersion))
@@ -270,7 +273,12 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     private bool HaveFunctionsChanged(string hostAddress)
     {
         var discoveredMask = Volatile.Read(ref _discoveredFunctionMask);
-        if (discoveredMask == UnknownFunctionMask || Functions.GetFunctionMask() is not { } polledMask || polledMask == discoveredMask)
+
+        // The final re-read drops a comparison against a mask a discovery replaced while the flags were read.
+        if (discoveredMask == UnknownFunctionMask ||
+            Functions.GetFunctionMask() is not { } polledMask ||
+            polledMask == discoveredMask ||
+            Volatile.Read(ref _discoveredFunctionMask) != discoveredMask)
         {
             return false;
         }
