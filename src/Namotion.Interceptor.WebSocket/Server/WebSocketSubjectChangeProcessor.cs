@@ -25,36 +25,27 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
     protected override ChangeQueueProcessor CreateProcessor() => _handler.CreateChangeQueueProcessor(_logger);
 
     /// <inheritdoc />
+    protected override TimeSpan? GetRetryDelay(Exception exception)
+    {
+        _logger.LogError(exception, "Change processor faulted, restarting in 5 seconds");
+        return TimeSpan.FromSeconds(5);
+    }
+
+    /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
-        ChangeQueueProcessor? next = processor;
-        while (!stoppingToken.IsCancellationRequested)
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var processorTask = processor.ProcessAsync(session.Token);
+        var heartbeatTask = _handler.RunHeartbeatLoopAsync(session.Token);
+
+        // When either task completes, cancel its sibling before observing both outcomes.
+        await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+        await session.CancelAsync().ConfigureAwait(false);
+        await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
+
+        if (!stoppingToken.IsCancellationRequested)
         {
-            try
-            {
-                using var changeQueueProcessor = next ?? CreateProcessor();
-                next = null;
-
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-
-                var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
-                var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
-
-                // When either task completes (normally or faulted), cancel the other
-                // to prevent Task.WhenAll from blocking forever.
-                await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
-                await linkedCts.CancelAsync().ConfigureAwait(false);
-                await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Change processor faulted, restarting in 5 seconds");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
-            }
+            RequestRestart();
         }
     }
 }

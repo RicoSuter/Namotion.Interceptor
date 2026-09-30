@@ -23,8 +23,8 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <summary>
     /// Creates the processor that subscribes to property changes. Called from <see cref="StartAsync"/> on the
     /// host start path and from the execution on a restart, so it must not block or perform I/O; an exception
-    /// fails the start or, on a restart, faults the execution. A processor from an earlier start that no execution
-    /// took is disposed before this is called.
+    /// fails the start or, during execution, is passed to <see cref="GetRetryDelay"/>. A processor from an
+    /// earlier start that no execution took is disposed before this is called.
     /// </summary>
     protected abstract ChangeQueueProcessor CreateProcessor();
 
@@ -35,18 +35,26 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <see cref="ChangeQueueProcessor.ProcessAsync"/> until the token is cancelled. Override it to set up state
     /// before draining, tear it down after, or run work alongside it. The processor is disposed when this returns.
     /// Returning before the cancellation leaves the service idle, without a processor, until a restart is
-    /// requested or it stops. An implementation that restarts processing itself may dispose the processor earlier
-    /// and use processors from <see cref="CreateProcessor"/>, which it then owns.
+    /// requested or it stops. The service owns the processor; implementations must not dispose it.
     /// </summary>
     protected virtual Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken) =>
         processor.ProcessAsync(stoppingToken);
+
+    /// <summary>
+    /// Returns the delay before retrying a failed processing session or processor creation during execution,
+    /// or null to propagate the failure. Called after the failed session's processor is disposed.
+    /// Initial creation failures always fail <see cref="StartAsync"/>. Expected stop and restart cancellation
+    /// does not call this method. A stop or restart interrupts the delay.
+    /// </summary>
+    /// <returns>A nonnegative delay supported by <see cref="Task.Delay(TimeSpan, CancellationToken)"/>, or null.</returns>
+    protected virtual TimeSpan? GetRetryDelay(Exception exception) => null;
 
     /// <summary>
     /// Cancels the token given to <see cref="ProcessAsync"/>, disposes its processor and runs
     /// <see cref="ProcessAsync"/> again with a new processor from <see cref="CreateProcessor"/>; a
     /// <see cref="ProcessAsync"/> that has already returned is run again the same way. Requests made before the
     /// restart begins coalesce into one, and a request made while the service is stopped is served by the next
-    /// start. An exception from <see cref="CreateProcessor"/> on the restart faults the execution.
+    /// start. Failures during the restart use <see cref="GetRetryDelay"/>.
     /// </summary>
     protected void RequestRestart()
     {
@@ -76,15 +84,19 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var processor = Interlocked.Exchange(ref _startProcessor, null);
-        if (stoppingToken.IsCancellationRequested)
+        if (processor is null)
         {
-            // A stop that outran the dispatch: processing would only start work to tear it down again.
-            processor?.Dispose();
             return;
         }
 
-        while (processor is not null)
+        while (true)
         {
+            if (stoppingToken.IsCancellationRequested)
+            {
+                processor?.Dispose();
+                return;
+            }
+
             var wake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using var stopRegistration = stoppingToken.UnsafeRegister(
                 static state => ((TaskCompletionSource)state!).TrySetResult(), wake);
@@ -96,27 +108,30 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
                 wake.TrySetResult();
             }
 
-            using (processor)
-            using (var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+            TimeSpan? retryDelay = null;
+            try
             {
-                var processing = ProcessAsync(processor, session.Token);
-                if (await Task.WhenAny(processing, wake.Task).ConfigureAwait(false) == wake.Task)
+                processor ??= CreateProcessor();
+                using (processor)
                 {
-                    await session.CancelAsync().ConfigureAwait(false);
-                }
-
-                try
-                {
-                    await processing.ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (session.IsCancellationRequested)
-                {
-                    // The session was ended by a restart or stop; an implementation may report that by throwing.
+                    await ProcessSessionAsync(processor, wake.Task, stoppingToken).ConfigureAwait(false);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+            {
+                retryDelay = GetRetryDelay(exception);
+                if (retryDelay is null)
+                {
+                    throw;
+                }
+            }
+            processor = null;
 
-            // Idles here after a ProcessAsync that returned on its own, such as a disabled store.
-            await wake.Task.ConfigureAwait(false);
+            await WaitForRestartAsync(wake.Task, retryDelay, stoppingToken).ConfigureAwait(false);
             if (stoppingToken.IsCancellationRequested)
             {
                 return;
@@ -124,8 +139,40 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
 
             // Consumed before the processor is created, so a request made from here on restarts once more.
             Interlocked.Exchange(ref _restartRequested, 0);
-            processor = CreateProcessor();
         }
+    }
+
+    private async Task ProcessSessionAsync(ChangeQueueProcessor processor, Task wake, CancellationToken stoppingToken)
+    {
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        try
+        {
+            var processing = ProcessAsync(processor, session.Token);
+            if (await Task.WhenAny(processing, wake).ConfigureAwait(false) == wake)
+            {
+                await session.CancelAsync().ConfigureAwait(false);
+            }
+            await processing.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (session.IsCancellationRequested)
+        {
+            // The session was ended by a restart or stop; an implementation may report that by throwing.
+        }
+    }
+
+    private static async Task WaitForRestartAsync(Task wake, TimeSpan? retryDelay, CancellationToken stoppingToken)
+    {
+        if (retryDelay is not { } delay)
+        {
+            // A normal return, such as a disabled store, stays idle until explicitly restarted.
+            await wake.ConfigureAwait(false);
+            return;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero, nameof(retryDelay));
+        using var delayCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        await Task.WhenAny(wake, Task.Delay(delay, delayCancellation.Token)).ConfigureAwait(false);
+        await delayCancellation.CancelAsync().ConfigureAwait(false);
     }
 
     /// <inheritdoc />
