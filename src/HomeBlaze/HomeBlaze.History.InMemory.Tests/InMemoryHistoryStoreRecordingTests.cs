@@ -329,4 +329,116 @@ public class InMemoryHistoryStoreRecordingTests
             await hostedService.StopAsync(CancellationToken.None);
         }
     }
+
+    [Fact]
+    public async Task WhenMaxPointsPerPropertyChangesAndConfigurationIsApplied_ThenNewSamplesUseTheNewCapacity()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.MaxPointsPerProperty = 2;
+            var appliedAt = DateTimeOffset.UtcNow;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await WaitForCoverageSessionStartedAtOrAfterAsync(store, appliedAt);
+
+            for (var target = 1; target <= 5; target++)
+            {
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, target);
+            }
+
+            // Assert
+            var series = QuerySeries(store, "/Temperature");
+            Assert.InRange(series.Points.Length, 1, 2);
+            Assert.Equal(5, series.Points[^1].Number);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenIsEnabledIsClearedAndApplied_ThenStatusBecomesDisabled()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Running",
+                message: "Store never reported Running after start.");
+
+            // Act
+            store.IsEnabled = false;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Disabled",
+                message: "Store never reported Disabled after IsEnabled was cleared and applied.");
+
+            // Assert
+            Assert.Equal("Disabled", store.Status);
+
+            store.IsEnabled = true;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Running",
+                message: "Store never reported Running after IsEnabled was set again and applied.");
+
+            var series = await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 42);
+            Assert.Contains(series.Points, point => point.Number == 42);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenOnlyPriorityChanges_ThenRecordedSamplesAreKept()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 11);
+            var coverageFrom = Assert.Single(store.CoverageRanges).From;
+
+            // Act
+            store.Priority = 7;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
+
+            // Assert
+            var series = QuerySeries(store, "/Temperature");
+            Assert.Contains(series.Points, point => point.Number == 11);
+            Assert.Contains(series.Points, point => point.Number == 22);
+            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Waits until the store reports a coverage session that began at or after <paramref name="instant"/>,
+    /// which is how a restart shows: the new engine starts its session once its subscription is live.
+    /// </summary>
+    private static Task WaitForCoverageSessionStartedAtOrAfterAsync(InMemoryHistoryStoreSubject store, DateTimeOffset instant) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => store.CoverageRanges is [var coverage] && coverage.From >= instant,
+            message: "Store never began a new coverage session after the configuration was applied.");
 }

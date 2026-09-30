@@ -31,6 +31,7 @@ public partial class InMemoryHistoryStoreSubject :
 
     private HistoryChangeRecorder? _recorder;
     private InMemoryHistoryStore? _engine;
+    private Settings? _settings;
 
     public InMemoryHistoryStoreSubject(ILogger<InMemoryHistoryStoreSubject> logger)
     {
@@ -183,6 +184,9 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     protected override ChangeQueueProcessor CreateProcessor()
     {
+        var settings = ReadSettings();
+        Volatile.Write(ref _settings, settings);
+
         // A recorder is not a sink that can fall behind the model, so the settled condition never holds
         // for it. Under the other rule a source-applied value does not retire an older commit, which is
         // what keeps both points in the series.
@@ -193,7 +197,7 @@ public partial class InMemoryHistoryStoreSubject :
             // Runs only inside ProcessAsync's processor.ProcessAsync, after _recorder is set.
             (changes, _) => _recorder!.RecordBatch(changes),
             ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
+            bufferTime: TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
     }
@@ -201,7 +205,8 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
-        if (!IsEnabled)
+        var settings = Volatile.Read(ref _settings)!;
+        if (!settings.IsEnabled)
         {
             Status = "Disabled";
             return;
@@ -219,13 +224,13 @@ public partial class InMemoryHistoryStoreSubject :
 
         var engine = new InMemoryHistoryStore(
             priority: Priority,
-            maxPointsPerProperty: MaxPointsPerProperty,
-            maxAge: TimeSpan.FromSeconds(MaxAgeSeconds),
-            maxJsonSize: MaxJsonSize,
+            maxPointsPerProperty: settings.MaxPointsPerProperty,
+            maxAge: TimeSpan.FromSeconds(settings.MaxAgeSeconds),
+            maxJsonSize: settings.MaxJsonSize,
             getUtcNow: () => DateTimeOffset.UtcNow);
 
-        // The subscription has existed since StartAsync, so it precedes the coverage session and no change
-        // can fall inside claimed coverage without reaching the engine.
+        // The processor subscribed when CreateProcessor built it, so the subscription precedes the coverage
+        // session and no change can fall inside claimed coverage without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
@@ -302,9 +307,19 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Size knobs (MaxPointsPerProperty, MaxAgeSeconds, MaxJsonSize) and BufferTime are read once per
-        // start. Like OpcUaServer, configuration changes take effect on the next start; the host restarts
-        // the background service to apply them.
+        // A restart discards the samples held in memory, so only a changed start-time setting restarts.
+        if (Volatile.Read(ref _settings) is { } started && started != ReadSettings())
+        {
+            RequestRestart();
+        }
+
         return Task.CompletedTask;
     }
+
+    private Settings ReadSettings() =>
+        new(IsEnabled, MaxAgeSeconds, MaxPointsPerProperty, MaxJsonSize, BufferTimeMilliseconds);
+
+    // Settings read once per start. Priority is not one: HistoryStoreMerger reads it live from this subject.
+    private sealed record Settings(
+        bool IsEnabled, int MaxAgeSeconds, int MaxPointsPerProperty, int MaxJsonSize, int BufferTimeMilliseconds);
 }
