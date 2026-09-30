@@ -637,8 +637,9 @@ public class ChangeQueueBackgroundServiceTests
         person.FirstName = "Restart";
         gate.Set();
 
-        // Assert
+        // Assert: the second processor was built on the first one's subscription.
         Assert.Equal("Restart", await service.Written.Reader.ReadAsync(timeout.Token));
+        Assert.Same(service.Subscriptions[0], service.Subscriptions[1]);
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
@@ -664,8 +665,9 @@ public class ChangeQueueBackgroundServiceTests
         person.FirstName = "Retry";
         service.Restart();
 
-        // Assert
+        // Assert: the retried processor was built on the failed one's subscription.
         Assert.Equal("Retry", await service.Written.Reader.ReadAsync(timeout.Token));
+        Assert.Same(service.Subscriptions[0], service.Subscriptions[1]);
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
@@ -706,6 +708,8 @@ public class ChangeQueueBackgroundServiceTests
         Assert.False(second.Idle);
         Assert.False(interceptor.IsIdle);
         Assert.Equal("Resubscribed", await service.Written.Reader.ReadAsync(timeout.Token));
+        Assert.Same(service.Subscriptions[0], service.Subscriptions[2]);
+        Assert.NotSame(service.Subscriptions[2], service.Subscriptions[3]);
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         Assert.True(interceptor.IsIdle);
@@ -747,6 +751,8 @@ public class ChangeQueueBackgroundServiceTests
 
         // Assert
         Assert.Equal("Kept", await service.Written.Reader.ReadAsync(timeout.Token));
+        Assert.Equal(6, service.Subscriptions.Count);
+        Assert.All(service.Subscriptions, subscription => Assert.Same(service.Subscriptions[0], subscription));
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
@@ -780,6 +786,7 @@ public class ChangeQueueBackgroundServiceTests
         private int _processingCount;
 
         public List<ChangeQueueProcessor> Created { get; } = [];
+        public List<PropertyChangeQueueSubscription> Subscriptions { get; } = [];
         public int CreationAttempts => Volatile.Read(ref _creationAttempts);
         public int CreationFailuresRemaining { get; set; }
         public Exception? Failure { get; init; }
@@ -832,6 +839,7 @@ public class ChangeQueueBackgroundServiceTests
                 ChangeDeliveryRule.SourceValuesAreSettled, bufferTime: null, maxQueueDepth: null,
                 NullLogger.Instance);
             Created.Add(processor);
+            Subscriptions.Add(subscription);
             return processor;
         }
 
