@@ -485,7 +485,7 @@ The stop body delays 50 ms before touching the instance. The start body used to 
 
 The hazard is caller side. The generated context constructor attaches the subject last, so `new Car(context) { Name = "x" }`, deserialization, and `AddSubject`'s `configure` on that constructor path all assign after the attach has fired and after the start has been appended. A scope is the constructing flow saying when it has finished, so a start captured in one waits for the answer. `AddSubject` and HomeBlaze's `ConfigurableSubjectSerializer` and `RootManager` all open one; a consumer writing `new Car(context) { Name = "x" }` by hand gets no protection unless they open one too, which [`docs/hosting.md`](../hosting.md#configuration-before-startup) states.
 
-What remains on the stop side is a mitigation with no mechanism behind it, kept because removing it is a behaviour change of its own rather than part of the scope's arrival. It passes `CancellationToken.None`, so shutdown waits it out per target.
+What remains on the stop side is a mitigation with no mechanism behind it, kept because removing it is a behaviour change of its own rather than part of the scope's arrival. It observes the stop's token, so once the shutdown deadline has passed a drain's stops skip it, while graph driven detaches, which pass `CancellationToken.None`, always wait it out.
 
 ## Startup Scopes
 

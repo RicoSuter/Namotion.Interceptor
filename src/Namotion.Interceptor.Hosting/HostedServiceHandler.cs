@@ -582,7 +582,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 // Below the return above, so a stop with nothing to do reports no window of its own.
                 target.BeginStop();
 
-                await Task.Delay(TransitionDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
+                // A cancelled token skips the delay, but the stop and the dispose below are still owed.
+                await Task.Delay(TransitionDelayMilliseconds, cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
                 try
                 {
