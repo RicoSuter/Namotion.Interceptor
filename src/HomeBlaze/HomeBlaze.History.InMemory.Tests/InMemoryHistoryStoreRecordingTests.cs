@@ -456,7 +456,7 @@ public class InMemoryHistoryStoreRecordingTests
     {
         // Arrange
         var (context, root, _) = CreateGraph();
-        using var store = new GatedHistoryStore();
+        using var store = new GatedHistoryStore { HoldSessions = true };
         ((IInterceptorSubject)store).Context.AddFallbackContext(context);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var queryFrom = DateTimeOffset.UtcNow;
@@ -507,7 +507,7 @@ public class InMemoryHistoryStoreRecordingTests
     {
         // Arrange: the first processor's filter throws on the first change, which faults its ProcessAsync.
         var (context, root, _) = CreateGraph();
-        using var store = new FaultingHistoryStore();
+        using var store = new GatedHistoryStore { FaultFirstProcessor = true };
         ((IInterceptorSubject)store).Context.AddFallbackContext(context);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await store.StartAsync(CancellationToken.None);
@@ -529,36 +529,96 @@ public class InMemoryHistoryStoreRecordingTests
         }
     }
 
-    private sealed class GatedHistoryStore() : InMemoryHistoryStoreSubject(NullLogger<InMemoryHistoryStoreSubject>.Instance)
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenWrittenWhileTheNextProcessorIsBeingCreated_ThenMergedQueriesIncludeTheSample(bool afterFault)
     {
-        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
-
-        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        // Arrange: the second CreateProcessor blocks before it runs, so the write lands after the first processor
+        // is gone and before the next session captures anything.
+        var (context, root, _) = CreateGraph();
+        using var gate = new ManualResetEventSlim();
+        using var store = new GatedHistoryStore { HoldSecondCreate = gate, FaultFirstProcessor = afterFault };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
         {
-            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            Sessions.Writer.TryWrite(release);
-            await release.Task.WaitAsync(stoppingToken);
-            await base.ProcessAsync(processor, stoppingToken);
+            if (!afterFault)
+            {
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+            }
+
+            var sessionEndRequestedAt = DateTimeOffset.UtcNow;
+            if (afterFault)
+            {
+                root.Temperature = 1;
+            }
+            else
+            {
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+            }
+            await store.SecondCreateEntered.Task.WaitAsync(timeout.Token);
+
+            // Act
+            root.Temperature = 21.5;
+            gate.Set();
+
+            // Assert: the new session serves the sample and claims its instant, and neither serves nor claims
+            // the previous session's.
+            var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow.AddMinutes(1));
+            var series = default(HistorySeries)!;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    series = new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token).GetAwaiter().GetResult();
+                    return series.Points.Any(point => point.Number == 21.5);
+                },
+                timeout: TimeSpan.FromSeconds(10),
+                message: "The sample written between two processors was not served.");
+            var point = Assert.Single(series.Points);
+            Assert.Equal(21.5, point.Number);
+            var coverage = Assert.Single(store.CoverageRanges);
+            Assert.True(coverage.From <= point.Timestamp, "coverage starts after the sample");
+            Assert.True(coverage.From >= sessionEndRequestedAt, "coverage claims the previous session");
+            Assert.DoesNotContain(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
+        }
+        finally
+        {
+            gate.Set();
+            await store.StopAsync(CancellationToken.None);
         }
     }
 
-    // The first processor is replaced by one whose filter throws, after the base captured the session's
-    // settings from it, so the retried session runs on the real processor.
-    private sealed class FaultingHistoryStore() : InMemoryHistoryStoreSubject(NullLogger<InMemoryHistoryStoreSubject>.Instance)
+    private sealed class GatedHistoryStore() : InMemoryHistoryStoreSubject(NullLogger<InMemoryHistoryStoreSubject>.Instance)
     {
-        private bool _faulted;
+        private int _creations;
 
+        public bool HoldSessions { get; init; }
+        public bool FaultFirstProcessor { get; init; }
+        public ManualResetEventSlim? HoldSecondCreate { get; init; }
+        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
+        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<string> StatusAtRetry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
         {
+            if (++_creations == 2 && HoldSecondCreate is not null)
+            {
+                SecondCreateEntered.SetResult();
+                HoldSecondCreate.Wait();
+            }
+
             var processor = base.CreateProcessor(subscription);
-            if (_faulted)
+            if (_creations > 1 || !FaultFirstProcessor)
             {
                 return processor;
             }
 
-            _faulted = true;
+            // Replaced by one whose filter throws, after the base captured the session's settings from it, so
+            // the retried session runs on the real processor.
             processor.Dispose();
             return new ChangeQueueProcessor(
                 this, subscription, _ => throw new InvalidOperationException("Filter failed."),
@@ -570,6 +630,18 @@ public class InMemoryHistoryStoreRecordingTests
         {
             StatusAtRetry.TrySetResult(Status);
             return TimeSpan.Zero;
+        }
+
+        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        {
+            if (HoldSessions)
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Sessions.Writer.TryWrite(release);
+                await release.Task.WaitAsync(stoppingToken);
+            }
+
+            await base.ProcessAsync(processor, stoppingToken);
         }
     }
 }

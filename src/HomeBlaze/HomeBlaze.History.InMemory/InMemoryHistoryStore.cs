@@ -77,12 +77,13 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     }
 
     /// <summary>
-    /// Freezes coverage at the last instant this store was recording. Nothing observes it after the
-    /// owner stops, so without this it keeps claiming "up to now" forever: at priority 100 the merger
-    /// would route the live edge here and get empty buckets instead of falling back to a durable store.
+    /// Freezes coverage at <paramref name="endedAt"/>, the last instant this store was recording. Nothing
+    /// observes it after the owner stops, so without this it keeps claiming "up to now" forever: at priority
+    /// 100 the merger would route the live edge here and get empty buckets instead of falling back to a
+    /// durable store.
     /// </summary>
-    internal void EndCoverageSession() =>
-        Interlocked.Exchange(ref _coverageEndUtcTicks, _getUtcNow().UtcTicks);
+    internal void EndCoverageSession(DateTimeOffset endedAt) =>
+        Interlocked.Exchange(ref _coverageEndUtcTicks, endedAt.UtcTicks);
 
     public int Priority { get; }
 

@@ -33,6 +33,10 @@ public partial class SqliteHistoryStoreSubject :
     private HistoryChangeRecorder? _recorder;
     private SqliteHistoryStore? _engine;
     private Settings? _settings;
+
+    // The instant from which the subscription holds every change no session has consumed yet, so the next
+    // session's coverage may start there. Only the service's sequential session flow touches these.
+    private PropertyChangeQueueSubscription? _subscription;
     private DateTimeOffset _coverageStartedAt;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
@@ -250,10 +254,14 @@ public partial class SqliteHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured once the subscription exists, from StartAsync, a restart or a retry, so a change queued
-        // before the engine exists still falls inside coverage. Only the service's sequential session flow
-        // reads it.
-        _coverageStartedAt = DateTimeOffset.UtcNow;
+        // A new subscription captures from now on; a kept one still holds everything since the previous
+        // session stopped consuming it, which is where the start was last set.
+        if (!ReferenceEquals(subscription, _subscription))
+        {
+            _subscription = subscription;
+            _coverageStartedAt = DateTimeOffset.UtcNow;
+        }
+
         return processor;
     }
 
@@ -336,6 +344,11 @@ public partial class SqliteHistoryStoreSubject :
         {
             await session.CancelAsync().ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
+
+            // The processor has stopped consuming, so every later change waits in the subscription for the
+            // next session, whose coverage starts here. Before the final flush, so that a successful flush
+            // reaches past this instant and the two sessions' coverage merges into one range.
+            _coverageStartedAt = DateTimeOffset.UtcNow;
 
             // Final flush on stop, restart or fault. The token is already cancelled, so a fresh bounded one
             // gives it a chance; on timeout the pending samples are lost, which the log below reports.

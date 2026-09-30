@@ -419,11 +419,12 @@ public class SqliteHistoryStoreRecordingTests
                 message: "Value 1 never reached the engine.");
 
             // Act
+            var appliedAt = DateTimeOffset.UtcNow;
             store.MaxJsonSize += 1;
             await store.ApplyConfigurationAsync(CancellationToken.None);
 
             // No forced flush while waiting: before the restart it would persist value 1 itself.
-            await WaitForSecondCoverageSessionAsync(store);
+            await WaitForCoverageToReachAsync(store, appliedAt);
 
             // Assert
             Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
@@ -436,9 +437,10 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
-    public async Task WhenRestarted_ThenCoverageDoesNotClaimTheRestartWindow()
+    public async Task WhenRestarted_ThenCoverageContinuesAcrossTheRestart()
     {
-        // Arrange
+        // Arrange: the subscription spans the restart and the files keep the earlier samples, so nothing is
+        // missing between the two sessions.
         var (context, root, _) = CreateGraph();
         var (store, databasePath) = CreateStore(context);
         var hostedService = (IHostedService)store;
@@ -446,19 +448,19 @@ public class SqliteHistoryStoreRecordingTests
         try
         {
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+            var coverageFrom = Assert.Single(store.CoverageRanges).From;
 
             // Act
+            var appliedAt = DateTimeOffset.UtcNow;
             store.MaxJsonSize += 1;
             await store.ApplyConfigurationAsync(CancellationToken.None);
-            await WaitForSecondCoverageSessionAsync(store);
+            await WaitForCoverageToReachAsync(store, appliedAt);
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 2);
 
             // Assert
-            var coverageRanges = store.CoverageRanges;
-            Assert.Equal(2, coverageRanges.Length);
-            Assert.True(
-                coverageRanges[0].To <= coverageRanges[1].From,
-                "the first session's coverage reaches into the second session");
+            var coverage = Assert.Single(store.CoverageRanges);
+            Assert.Equal(coverageFrom, coverage.From);
+            Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
         }
         finally
         {
@@ -532,13 +534,13 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     /// <summary>
-    /// Waits until the store reports two coverage ranges, which is how a restart on the same directory shows:
-    /// the first session's range is persisted when it ends, and the new session's range by its first flush.
+    /// Waits until the store's coverage reaches past <paramref name="instant"/>, which after a restart requested
+    /// at that instant is first done by the ending session's final flush.
     /// </summary>
-    private static Task WaitForSecondCoverageSessionAsync(SqliteHistoryStoreSubject store) =>
+    private static Task WaitForCoverageToReachAsync(SqliteHistoryStoreSubject store, DateTimeOffset instant) =>
         AsyncTestHelpers.WaitUntilAsync(
-            () => store.CoverageRanges.Length == 2,
-            message: "Store never began a second coverage session after the configuration was applied.");
+            () => store.CoverageRanges is [.., var last] && last.To > instant,
+            message: "Store coverage never reached past the restart.");
 
     [Theory]
     [InlineData(false, false)]
@@ -549,7 +551,7 @@ public class SqliteHistoryStoreRecordingTests
     {
         // Arrange
         var (context, root, _) = CreateGraph();
-        using var store = new GatedHistoryStore();
+        using var store = new GatedHistoryStore { HoldSessions = true };
         ((IInterceptorSubject)store).Context.AddFallbackContext(context);
         var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
         store.DatabasePath = databasePath;
@@ -604,7 +606,7 @@ public class SqliteHistoryStoreRecordingTests
     {
         // Arrange: the first processor's filter throws on the first change, which faults its ProcessAsync.
         var (context, root, _) = CreateGraph();
-        using var store = new FaultingHistoryStore();
+        using var store = new GatedHistoryStore { FaultFirstProcessor = true };
         ((IInterceptorSubject)store).Context.AddFallbackContext(context);
         var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
         store.DatabasePath = databasePath;
@@ -631,37 +633,96 @@ public class SqliteHistoryStoreRecordingTests
         }
     }
 
-    private sealed class GatedHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenWrittenWhileTheNextProcessorIsBeingCreated_ThenMergedQueriesIncludeTheSample(bool afterFault)
     {
-        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
-
-        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        // Arrange: the second CreateProcessor blocks before it runs, so the write lands after the first processor
+        // is gone and before the next session captures anything.
+        var (context, root, _) = CreateGraph();
+        using var gate = new ManualResetEventSlim();
+        using var store = new GatedHistoryStore { HoldSecondCreate = gate, FaultFirstProcessor = afterFault };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
         {
-            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            Sessions.Writer.TryWrite(release);
-            await release.Task.WaitAsync(stoppingToken);
-            await base.ProcessAsync(processor, stoppingToken);
+            if (!afterFault)
+            {
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+            }
+
+            if (afterFault)
+            {
+                root.Temperature = 1;
+            }
+            else
+            {
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+            }
+            await store.SecondCreateEntered.Task.WaitAsync(timeout.Token);
+
+            // Act
+            root.Temperature = 21.5;
+            gate.Set();
+
+            // Assert: the new session serves the sample, and one continuous range covers both sessions, so a
+            // sample persisted by the first is served too.
+            var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow.AddMinutes(1));
+            var series = default(HistorySeries)!;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    store.FlushNowAsync().GetAwaiter().GetResult();
+                    series = new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token).GetAwaiter().GetResult();
+                    return series.Points.Any(point => point.Number == 21.5);
+                },
+                timeout: TimeSpan.FromSeconds(10),
+                message: "The sample written between two processors was not served.");
+            Assert.Single(store.CoverageRanges);
+            Assert.Equal(!afterFault, series.Points.Any(point => point.Number == 1));
+        }
+        finally
+        {
+            gate.Set();
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
         }
     }
 
-    // The first processor is replaced by one whose filter throws, after the base captured the session's
-    // settings from it, so the retried session runs on the real processor.
-    private sealed class FaultingHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
+    private sealed class GatedHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
     {
-        private bool _faulted;
+        private int _creations;
 
+        public bool HoldSessions { get; init; }
+        public bool FaultFirstProcessor { get; init; }
+        public ManualResetEventSlim? HoldSecondCreate { get; init; }
+        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
+        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<(string Status, string? LastError)> StateAtRetry { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
         {
+            if (++_creations == 2 && HoldSecondCreate is not null)
+            {
+                SecondCreateEntered.SetResult();
+                HoldSecondCreate.Wait();
+            }
+
             var processor = base.CreateProcessor(subscription);
-            if (_faulted)
+            if (_creations > 1 || !FaultFirstProcessor)
             {
                 return processor;
             }
 
-            _faulted = true;
+            // Replaced by one whose filter throws, after the base captured the session's settings from it, so
+            // the retried session runs on the real processor.
             processor.Dispose();
             return new ChangeQueueProcessor(
                 this, subscription, _ => throw new InvalidOperationException("Filter failed."),
@@ -673,6 +734,18 @@ public class SqliteHistoryStoreRecordingTests
         {
             StateAtRetry.TrySetResult((Status, LastError));
             return TimeSpan.Zero;
+        }
+
+        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        {
+            if (HoldSessions)
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Sessions.Writer.TryWrite(release);
+                await release.Task.WaitAsync(stoppingToken);
+            }
+
+            await base.ProcessAsync(processor, stoppingToken);
         }
     }
 }

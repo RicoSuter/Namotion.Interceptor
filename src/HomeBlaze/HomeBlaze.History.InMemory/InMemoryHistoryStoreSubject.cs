@@ -33,6 +33,10 @@ public partial class InMemoryHistoryStoreSubject :
     private HistoryChangeRecorder? _recorder;
     private InMemoryHistoryStore? _engine;
     private Settings? _settings;
+
+    // The instant from which the subscription holds every change no session has consumed yet, so the next
+    // session's coverage may start there. Only the service's sequential session flow touches these.
+    private PropertyChangeQueueSubscription? _subscription;
     private DateTimeOffset _coverageStartedAt;
 
     public InMemoryHistoryStoreSubject(ILogger<InMemoryHistoryStoreSubject> logger)
@@ -212,10 +216,14 @@ public partial class InMemoryHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured once the subscription exists, from StartAsync, a restart or a retry, so a change queued
-        // before the engine exists still falls inside coverage. Only the service's sequential session flow
-        // reads it.
-        _coverageStartedAt = DateTimeOffset.UtcNow;
+        // A new subscription captures from now on; a kept one still holds everything since the previous
+        // session stopped consuming it, which is where the start was last set.
+        if (!ReferenceEquals(subscription, _subscription))
+        {
+            _subscription = subscription;
+            _coverageStartedAt = DateTimeOffset.UtcNow;
+        }
+
         return processor;
     }
 
@@ -281,9 +289,11 @@ public partial class InMemoryHistoryStoreSubject :
             await session.CancelAsync().ConfigureAwait(false);
             await sweepTask.ConfigureAwait(false);
 
-            // Stop claiming the live edge: the engine stays queryable, but it is no longer recording,
-            // so coverage must end here rather than following the clock forever.
-            engine.EndCoverageSession();
+            // The processor has stopped consuming, so every later change waits in the subscription for the
+            // next session, whose coverage starts where this one ends. The engine stays queryable, but it is
+            // no longer recording, so its coverage must end here rather than following the clock forever.
+            _coverageStartedAt = DateTimeOffset.UtcNow;
+            engine.EndCoverageSession(_coverageStartedAt);
             Status = faulted ? "Error" : "Stopped";
         }
     }
