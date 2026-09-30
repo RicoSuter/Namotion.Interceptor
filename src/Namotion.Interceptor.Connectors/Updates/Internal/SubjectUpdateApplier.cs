@@ -16,16 +16,22 @@ internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
 
-    public static void ApplyUpdate(
+    /// <returns>
+    /// <c>true</c> if every part of the update applied; <c>false</c> if a subject, collection item or
+    /// dictionary entry the update referenced could not be resolved and was dropped.
+    /// </returns>
+    public static bool ApplyUpdate(
         IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory subjectFactory,
         ChangeOrigin origin,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
+        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null,
+        ILogger? logger = null)
     {
         var context = ContextPool.Rent();
         List<(PropertyReference Property, Exception Exception)>? failures;
         List<(Type SubjectType, string PropertyName)>? droppedStructuralProperties;
+        IReadOnlyCollection<string>? droppedSubjectIds;
         Exception? detachFailure = null;
         try
         {
@@ -53,6 +59,7 @@ internal static class SubjectUpdateApplier
 
             failures = context.Failures;
             droppedStructuralProperties = context.DroppedStructuralProperties;
+            droppedSubjectIds = context.DroppedSubjectIds;
         }
         finally
         {
@@ -60,19 +67,30 @@ internal static class SubjectUpdateApplier
             ContextPool.Return(context);
         }
 
-        if (droppedStructuralProperties is not null)
+        if (droppedStructuralProperties is not null || droppedSubjectIds is not null)
         {
-            SubjectUpdateLog.TryGetWarningLogger(subject)?.LogWarning(
-                "Dropped the incoming structure of the properties {DroppedProperties} while applying an update to " +
-                "subject {SubjectType}. These properties have no setter, so the described children have nowhere to " +
-                "be stored. Give them a setter, or construct the children in the receiving model itself.",
-                SubjectUpdateLog.DescribeProperties(droppedStructuralProperties),
-                subject.GetType().FullName);
+            var warningLogger = SubjectUpdateLog.TryGetWarningLogger(subject, logger);
+            if (droppedStructuralProperties is not null)
+            {
+                warningLogger?.LogWarning(
+                    "Dropped the incoming structure of the properties {DroppedProperties} while applying an update to " +
+                    "subject {SubjectType}. These properties have no setter, so the described children have nowhere to " +
+                    "be stored. Give them a setter, or construct the children in the receiving model itself.",
+                    SubjectUpdateLog.DescribeProperties(droppedStructuralProperties),
+                    subject.GetType().FullName);
+            }
+
+            if (droppedSubjectIds is not null)
+            {
+                warningLogger?.LogWarning(
+                    "Dropped {Count} inbound subject update(s) from {Origin} because their subjects could not be resolved: {SubjectIds}.",
+                    droppedSubjectIds.Count, origin.Source ?? (object)"local", string.Join(", ", droppedSubjectIds));
+            }
         }
 
         if (failures is null)
         {
-            return;
+            return droppedSubjectIds is null;
         }
 
         // A single failure is rethrown as itself, with its original stack, for a caller that catches a

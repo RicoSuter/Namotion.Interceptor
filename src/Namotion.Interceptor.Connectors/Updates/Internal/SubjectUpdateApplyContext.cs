@@ -20,6 +20,7 @@ internal sealed class SubjectUpdateApplyContext
     private bool _areNamedSubjectIdsCollected;
     private List<(PropertyReference Property, Exception Exception)>? _failures;
     private List<(Type SubjectType, string PropertyName)>? _droppedStructuralProperties;
+    private HashSet<string>? _droppedSubjectIds;
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
@@ -288,7 +289,17 @@ internal sealed class SubjectUpdateApplyContext
     /// an inbound subject goes through here.
     /// </summary>
     public void RecordDroppedSubject(string subjectId)
-        => SubjectUpdateDiagnostics.RecordDroppedInboundSubjectUpdate();
+    {
+        SubjectUpdateDiagnostics.RecordDroppedInboundSubjectUpdate();
+        (_droppedSubjectIds ??= []).Add(subjectId);
+    }
+
+    /// <summary>
+    /// The subject IDs this apply could not resolve, or <c>null</c> when none was dropped. Distinct, because
+    /// one logically missing subject is reached from more than one site and a caller wants the subjects, not
+    /// the site count.
+    /// </summary>
+    public IReadOnlyCollection<string>? DroppedSubjectIds => _droppedSubjectIds;
 
     /// <summary>
     /// Records a property whose structure this model cannot store because it has no setter, and ignores the
@@ -335,6 +346,7 @@ internal sealed class SubjectUpdateApplyContext
         _areNamedSubjectIdsCollected = false;
         _failures = null;
         _droppedStructuralProperties = null;
+        _droppedSubjectIds = null;
         Subjects = null!;
         SubjectFactory = null!;
         Origin = default;

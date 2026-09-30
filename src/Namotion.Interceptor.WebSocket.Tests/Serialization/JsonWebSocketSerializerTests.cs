@@ -128,6 +128,40 @@ public class JsonWebSocketSerializerTests
     }
 
     [Fact]
+    public void WhenWelcomeJsonOmitsTheAcknowledgementCapability_ThenItDeserializesTheSameAsExplicitFalse()
+    {
+        // Arrange - crafted by hand rather than through SerializeMessage, because SerializeMessage
+        // always writes every property of WelcomePayload including a false one, so it can never produce
+        // an envelope that actually omits the field the way an older or foreign server's Welcome would.
+        const string envelopeWithoutField = "[1,{\"version\":1,\"format\":\"json\",\"sequence\":5}]";
+        var withoutFieldBytes = Encoding.UTF8.GetBytes(envelopeWithoutField);
+
+        var explicitFalse = new WelcomePayload
+        {
+            Version = 1,
+            Format = WebSocketFormat.Json,
+            Sequence = 5,
+            AcknowledgesAppliedUpdates = false
+        };
+        var explicitFalseBytes = _serializer.SerializeMessage(MessageType.Welcome, explicitFalse);
+
+        // Act
+        var (_, withoutFieldStart, withoutFieldLength) = _serializer.DeserializeMessageEnvelope(withoutFieldBytes);
+        var deserializedWithoutField = _serializer.Deserialize<WelcomePayload>(
+            withoutFieldBytes.AsSpan(withoutFieldStart, withoutFieldLength));
+
+        var (_, explicitFalseStart, explicitFalseLength) = _serializer.DeserializeMessageEnvelope(explicitFalseBytes);
+        var deserializedExplicitFalse = _serializer.Deserialize<WelcomePayload>(
+            explicitFalseBytes.AsSpan(explicitFalseStart, explicitFalseLength));
+
+        // Assert
+        Assert.False(deserializedWithoutField.AcknowledgesAppliedUpdates);
+        Assert.Equal(deserializedExplicitFalse.AcknowledgesAppliedUpdates, deserializedWithoutField.AcknowledgesAppliedUpdates);
+        Assert.Equal(deserializedExplicitFalse.Version, deserializedWithoutField.Version);
+        Assert.Equal(deserializedExplicitFalse.Sequence, deserializedWithoutField.Sequence);
+    }
+
+    [Fact]
     public void SubjectPropertyUpdate_Value_IsJsonElementAfterDeserialization()
     {
         // This test documents that Value is JsonElement after deserialization

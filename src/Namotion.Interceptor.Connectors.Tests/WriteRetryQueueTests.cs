@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Diagnostics;
@@ -561,7 +562,7 @@ public class WriteRetryQueueTests
         Assert.Equal(2, queue.PendingWriteCount);
         completeWrite.SetResult();
         var result = await flush;
-        var retained = queue.DrainForLocalReapply();
+        var retained = await queue.DrainForLocalReapplyAsync(CancellationToken.None);
 
         // Assert
         Assert.False(result);
@@ -569,6 +570,40 @@ public class WriteRetryQueueTests
         Assert.Equal(2, retained[0].GetOldValue<int>());
         Assert.Equal(3, retained[1].GetOldValue<int>());
         Assert.Equal(2, diagnostics.TotalDropped);
+    }
+
+    [Fact]
+    public async Task WhenEnqueueAtFrontOverflowsCapacity_ThenTheFrontEntriesAreDroppedFirstRatherThanTheBackOnes()
+    {
+        // Arrange: the queue already holds writes the gate parked during an outage. EnqueueAtFront then
+        // stands in for a reconnect's re-park, whose entries predate every one of those outage writes.
+        var queue = new WriteRetryQueue(5, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var sourceMock = new Mock<ISubjectSource>();
+
+        SubjectPropertyChange[]? writtenChanges = null;
+        sourceMock
+            .Setup(c => c.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                writtenChanges = changes.ToArray();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        // Act
+        queue.Enqueue(CreateChanges(3, startId: 10));       // outage writes 10, 11, 12
+        queue.EnqueueAtFront(CreateChanges(4, startId: 0)); // older in-flight entries 0, 1, 2, 3
+
+        // Assert - capacity 5 keeps all three outage writes and drops the two oldest in-flight entries,
+        // the reverse of what appending at the back (ranking the in-flight entries as newest) would do.
+        Assert.Equal(5, queue.PendingWriteCount);
+        await queue.FlushAsync(sourceMock.Object, CancellationToken.None);
+        Assert.NotNull(writtenChanges);
+        Assert.Equal(5, writtenChanges.Length);
+        Assert.Equal(2, writtenChanges[0].GetOldValue<int>());
+        Assert.Equal(3, writtenChanges[1].GetOldValue<int>());
+        Assert.Equal(10, writtenChanges[2].GetOldValue<int>());
+        Assert.Equal(11, writtenChanges[3].GetOldValue<int>());
+        Assert.Equal(12, writtenChanges[4].GetOldValue<int>());
     }
 
     [Fact]
@@ -666,10 +701,13 @@ public class WriteRetryQueueTests
 
         // Assert - only one should be running
         Assert.Equal(1, callCount);
+        Assert.True(queue.IsEmpty);
+        Assert.False(flush2.IsCompleted,
+            "The second flush must wait for the in-flight one even though the queue reads empty.");
 
         tcs.SetResult(); // Release the blocked flush
-        await flush1;
-        await flush2;
+        Assert.True(await flush1);
+        Assert.True(await flush2);
     }
 
     [Fact]
@@ -767,7 +805,7 @@ public class WriteRetryQueueTests
     }
     
     [Fact]
-    public void WhenDrainForLocalReapply_ThenReturnsAllItemsAndClearsQueue()
+    public async Task WhenDrainForLocalReapply_ThenReturnsAllItemsAndClearsQueue()
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
@@ -775,7 +813,7 @@ public class WriteRetryQueueTests
         Assert.Equal(5, queue.PendingWriteCount);
 
         // Act
-        var drained = queue.DrainForLocalReapply();
+        var drained = await queue.DrainForLocalReapplyAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(5, drained.Length);
@@ -784,17 +822,110 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public void WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
+    public async Task WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
     {
         // Arrange
         var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
 
         // Act
-        var drained = queue.DrainForLocalReapply();
+        var drained = await queue.DrainForLocalReapplyAsync(CancellationToken.None);
 
         // Assert
         Assert.Empty(drained);
         Assert.True(queue.IsEmpty);
+    }
+
+    [Fact]
+    public async Task WhenDrainForLocalReapplyRunsWhileAFlushIsInFlight_ThenTheDrainWaitsForTheFlush()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var (source, firstWriteStarted, releaseFirstWrite, _) = CreateSourceBlockingItsFirstWrite();
+        queue.Enqueue(CreateChanges(1));
+
+        // Act - the flush blocks inside the write, holding the flush semaphore
+        var flush = queue.FlushAsync(source.Object, CancellationToken.None);
+        await firstWriteStarted.Task;
+        var drainTask = queue.DrainForLocalReapplyAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(drainTask.IsCompleted, "The drain must wait for the in-flight flush to release the semaphore.");
+
+        releaseFirstWrite.SetResult();
+        await flush;
+        var drained = await drainTask;
+
+        // The flush already took the only item
+        Assert.Empty(drained);
+    }
+
+    [Fact]
+    public async Task WhenAWriteArrivesWhileTheIdleFlushIsSending_ThenItIsSentAfterTheDrainedBatch()
+    {
+        // Arrange - the idle flush has taken the parked write and blocks inside the send
+        var queue = new WriteRetryQueue(100, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var (source, firstWriteStarted, releaseFirstWrite, written) = CreateSourceBlockingItsFirstWrite();
+        var property = new PropertyReference(new Mock<IInterceptorSubject>().Object, "Property");
+        queue.Enqueue(new[] { SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 0, 1) });
+
+        var idleFlush = queue.FlushAsync(source.Object, CancellationToken.None);
+        await firstWriteStarted.Task;
+
+        // Act
+        var handlerWrite = queue.WriteAsync(
+            source.Object,
+            new[] { SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 1, 2) },
+            CancellationToken.None);
+
+        // Assert - the queue reads empty here, so only the flush gate can hold the newer write back
+        Assert.True(queue.IsEmpty);
+        Assert.False(handlerWrite.IsCompleted, "The write must wait for the in-flight drain to land.");
+        Assert.Empty(written);
+
+        releaseFirstWrite.SetResult();
+        Assert.True(await idleFlush);
+        await handlerWrite;
+        Assert.Equal(new[] { 1, 2 }, written.Select(change => change.GetNewValue<int>()));
+    }
+
+    /// <summary>
+    /// Creates a source whose first write blocks until released and which records every change once
+    /// its write has landed, in landing order.
+    /// </summary>
+    private static (Mock<ISubjectSource> Source, TaskCompletionSource FirstWriteStarted, TaskCompletionSource ReleaseFirstWrite, ConcurrentQueue<SubjectPropertyChange> Written)
+        CreateSourceBlockingItsFirstWrite()
+    {
+        var source = new Mock<ISubjectSource>();
+
+        // Opts out of the per-source write lock, which would otherwise order the writes on its own and
+        // hide a missing flush gate.
+        source.As<ISupportsConcurrentWrites>();
+
+        var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var written = new ConcurrentQueue<SubjectPropertyChange>();
+        var writeCount = 0;
+
+        source
+            .Setup(item => item.WriteChangesAsync(
+                It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                if (Interlocked.Increment(ref writeCount) == 1)
+                {
+                    firstWriteStarted.SetResult();
+                    await releaseFirstWrite.Task;
+                }
+
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change);
+                }
+
+                return WriteResult.Success;
+            });
+
+        return (source, firstWriteStarted, releaseFirstWrite, written);
     }
 
     private static SubjectPropertyChange CreateChange(int id)

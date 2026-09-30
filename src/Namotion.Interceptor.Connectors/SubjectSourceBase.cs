@@ -2,6 +2,8 @@ using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Connectors.Monitoring;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -35,6 +37,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     // wait on it after Dispose.
     private readonly SemaphoreSlim _synchronizedWake = new(0);
 
+    // Test seams: wake the idle flush without a state change, and read how many wakes it has not taken yet.
+    internal void WakeIdleFlush() => _synchronizedWake.Release();
+
+    internal int PendingIdleFlushWakes => _synchronizedWake.CurrentCount;
+
     // The state and its two timestamps are swapped as one value: in separate fields a reader can see
     // the new state beside the previous timestamp, and LastSynchronizedAt has to be visible before
     // State becomes Stopped.
@@ -46,7 +53,24 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
 
+    // The resume gate: even while outbound delivery is open, odd while a resume holds it, and then equal
+    // to that resume's epoch. While it is held, writes park in the retry queue, because the reconcile has
+    // not judged them against the peer's reloaded state yet and an older value could win over a newer one.
+    // The attempt loop and a connector's own reconnect loop can each have a resume open, and a later
+    // BeginResume takes the gate over, so every move is one compare-exchange to a higher value (overflow
+    // keeps parity) and an epoch matches the field only while it still owns the gate.
+    private int _resumeGate;
+
+    // Test seam between the enqueue and the second gate read in ParkChangesAsync. Always null in production.
+    internal Action? AfterResumeGateObserved { get; set; }
+
+    internal bool IsResumeGateHeld => (Volatile.Read(ref _resumeGate) & 1) == 1;
+
     internal WriteRetryQueue WriteRetryQueue { get; }
+
+    // Cached rather than allocated per call: passed to the retry queue from both connected-phase call
+    // sites as the level-triggered re-check on its batch loop.
+    private readonly Func<bool> _isResumeGateHeld;
 
     protected SubjectSourceBase(
         IInterceptorSubjectContext context,
@@ -77,6 +101,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         _context = context;
         _logger = logger;
+        _isResumeGateHeld = () => IsResumeGateHeld;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
         _retryTime = retryTime ?? TimeSpan.FromSeconds(10);
         ArgumentOutOfRangeException.ThrowIfNegative(writeRetryQueueSize);
@@ -248,6 +273,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // This also caps memory across repeated failed attempts.
                     DrainOwnedWritesToRetryQueue(subscription);
 
+                    // Held from here, so that a teardown flush the previous attempt abandoned parks rather
+                    // than sending pre-load values on the new connection.
+                    var resumeEpoch = BeginResume();
+
                     _propertyWriter.StartBuffering();
                     await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
@@ -277,14 +306,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
                     // Single reconcile point: send (model already holds it), restore (the load moved the
                     // model off it), drop (a later local write supersedes it).
-                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
+                    await CompleteResumeAsync(resumeEpoch, stoppingToken).ConfigureAwait(false);
 
                     // Connected phase reuses the source-lifetime subscription and does not own it.
                     using var processor = new ChangeQueueProcessor(
                         this,
                         subscription,
                         propertyReference => propertyReference.TryGetSource(out var source) && source == this,
-                        (changes, token) => WriteRetryQueue.WriteAsync(this, changes, token),
+                        WriteChangesViaRetryQueueAsync,
                         DeliveryRule,
                         _bufferTime,
                         maxQueueDepth: null,
@@ -376,7 +405,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     internal void DrainOwnedWritesToRetryQueue(PropertyChangeQueueSubscription subscription)
     {
+        // Resolved once rather than per change: the branch below that needs it is most of the
+        // subscription, on a drain that runs at every connect, reconnect and teardown.
+        var registry = _context.TryGetService<ISubjectRegistry>();
+
         List<SubjectPropertyChange>? owned = null;
+        var detachedDiscards = 0;
         while (subscription.TryDequeueImmediate(out var change))
         {
             if (ReferenceEquals(change.Origin.Source, this) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
@@ -389,7 +423,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             if (!(change.Property.TryGetSource(out var source) && source == this))
             {
-                continue; // not owned by this source
+                // The same branch discards changes this source never owned, which is most of the
+                // subscription, so only the detached case is reported: a subject that left the graph
+                // between capture and drain had its source cleared, which is indistinguishable from
+                // never having been owned unless the subject itself is checked.
+                if (registry?.TryGetRegisteredSubject(change.Property.Subject) is null)
+                {
+                    detachedDiscards++;
+                }
+
+                continue;
             }
 
             (owned ??= []).Add(change);
@@ -404,6 +447,40 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // to the number of writes.
             WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
         }
+
+        if (detachedDiscards > 0)
+        {
+            _logger.LogWarning(
+                "Discarded {Count} captured write(s) whose subject has detached from the graph, so they cannot be written to the source.",
+                detachedDiscards);
+        }
+    }
+
+    /// <summary>
+    /// Parks changes in the write retry queue, collapsed to one entry per property, so that the next
+    /// reconcile decides whether each is sent, restored or dropped.
+    /// </summary>
+    /// <param name="changes">The changes to park.</param>
+    /// <remarks>
+    /// For a connector that has to re-assert writes it sent but cannot prove were applied. Collapsing
+    /// first is what keeps the occupancy proportional to the number of properties written rather than
+    /// to the number of writes. When the retry queue is disabled, the changes are counted as dropped.
+    /// <para>
+    /// Parked entries are inserted at the front of the queue because they are always older than
+    /// anything already queued, such as a re-park after a reconnect: appending them at the back would
+    /// rank them as the newest entries, and the ring buffer would then evict the genuinely newer ones
+    /// ahead of them once it is over capacity.
+    /// </para>
+    /// </remarks>
+    protected void ParkChangesForRetry(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        if (changes.Length == 0)
+        {
+            return;
+        }
+
+        var collapsed = CollapsePerProperty(changes.ToArray()).ToArray();
+        WriteRetryQueue.EnqueueAtFront(collapsed);
     }
 
     /// <summary>
@@ -456,6 +533,31 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
+    /// Parks the batch while a resume holds the gate, and otherwise hands it to the retry queue's
+    /// owned-write path.
+    /// </summary>
+    private ValueTask WriteChangesViaRetryQueueAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken) =>
+        IsResumeGateHeld
+            ? ParkChangesAsync(changes, cancellationToken)
+            : WriteRetryQueue.WriteAsync(this, changes, cancellationToken, _isResumeGateHeld);
+
+    private async ValueTask ParkChangesAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        WriteRetryQueue.Enqueue(changes);
+
+        AfterResumeGateObserved?.Invoke();
+
+        if (!IsResumeGateHeld)
+        {
+            // The gate cleared while this batch was parked, possibly after the completing resume's last
+            // reconcile, so it is judged here rather than sent unjudged by the idle flush or a later write.
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Runs the idle flush: flushes the write retry queue every retry interval while the source is
     /// <see cref="SourceState.Synchronized"/> and each time it becomes so, until cancelled. An exception
     /// from one flush is logged and does not stop the next.
@@ -475,12 +577,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             {
                 await _synchronizedWake.WaitAsync(interval, cancellationToken).ConfigureAwait(false);
 
-                // Skipped during a reconnect inside the connector, which would fail every interval's flush;
-                // the wake on Synchronized covers it.
-                if (State == SourceState.Synchronized)
+                // Skipped during a reconnect inside the connector, which would fail every interval's flush,
+                // and while a resume holds the gate, because its reconcile judges the queue first.
+                if (State == SourceState.Synchronized && !IsResumeGateHeld)
                 {
                     // Ordered against the write handler's sends by the retry queue's flush gate.
-                    await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+                    await WriteRetryQueue.FlushAsync(this, cancellationToken, _isResumeGateHeld).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -513,9 +615,85 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
     }
 
+    /// <summary>
+    /// Suspends outbound delivery, parking writes in the retry queue, until the returned epoch is passed to
+    /// <see cref="CompleteResumeAsync"/> or <see cref="TryEndResume"/>. A later call takes the gate over.
+    /// </summary>
+    /// <remarks>
+    /// Call it when the connection loss is detected, before any reconnect delay, so that a flush racing
+    /// past the gate still targets the failed connection rather than the new one. Transactional commits
+    /// do not pass through the gate.
+    /// </remarks>
+    protected int BeginResume()
+    {
+        int current;
+        int epoch;
+        do
+        {
+            current = Volatile.Read(ref _resumeGate);
+            epoch = (current + 1) | 1;
+        }
+        while (Interlocked.CompareExchange(ref _resumeGate, epoch, current) != current);
+
+        return epoch;
+    }
+
+    /// <summary>
+    /// Re-opens outbound delivery if <paramref name="resumeEpoch"/> still owns the gate.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> if this call cleared the gate; <c>false</c> if a later resume owns it or it was already open.
+    /// </returns>
+    protected bool TryEndResume(int resumeEpoch)
+    {
+        // An even value never held the gate, and would match an open one.
+        if ((resumeEpoch & 1) == 0)
+        {
+            return false;
+        }
+
+        return Interlocked.CompareExchange(ref _resumeGate, resumeEpoch + 1, resumeEpoch) == resumeEpoch;
+    }
+
+    /// <summary>
+    /// Reconciles the parked writes against the state that was just loaded, then re-opens outbound
+    /// delivery if <paramref name="resumeEpoch"/> still owns the gate. Call it after the initial-state
+    /// load, never before.
+    /// </summary>
+    protected async Task CompleteResumeAsync(int resumeEpoch, CancellationToken cancellationToken)
+    {
+        // Skipped while another resume holds the gate, because that one judges the shared queue after its
+        // own load. An open gate is not skipped: nothing else would judge these entries.
+        var gate = Volatile.Read(ref _resumeGate);
+        var heldByAnotherResume = (gate & 1) == 1 && gate != resumeEpoch;
+        if ((resumeEpoch & 1) == 0 || heldByAnotherResume)
+        {
+            return;
+        }
+
+        bool clearedByThisResume;
+        try
+        {
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleared even when the reconcile throws, because a stuck gate parks every later write.
+            clearedByThisResume = TryEndResume(resumeEpoch);
+        }
+
+        // The reconcile's restores are local commits that a live processor can park again while the gate
+        // is still held, and nothing else would judge them. Only when this call cleared the gate, because
+        // otherwise a newer resume is judging the queue.
+        if (clearedByThisResume && !WriteRetryQueue.IsEmpty)
+        {
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
     {
-        var retryChanges = WriteRetryQueue.DrainForLocalReapply();
+        var retryChanges = await WriteRetryQueue.DrainForLocalReapplyAsync(cancellationToken).ConfigureAwait(false);
         if (retryChanges.Length == 0)
         {
             return;

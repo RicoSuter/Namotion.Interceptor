@@ -60,11 +60,24 @@ internal sealed class WriteRetryQueue : IDisposable
     /// This operation is thread-safe.
     /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
+        => Admit(changes, atFront: false);
+
+    /// <summary>
+    /// Inserts changes at the front of the queue, for entries older than anything already queued, and
+    /// reports any that the ring buffer then drops. Thread-safe via the same lock as <see cref="Enqueue"/>.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors the requeue of a failed flush: eviction always removes from the front, so inserting
+    /// older entries there is what makes the ring buffer drop them first when it is over capacity,
+    /// ahead of the newer entries already further back in the queue.
+    /// </remarks>
+    public void EnqueueAtFront(ReadOnlyMemory<SubjectPropertyChange> changes)
+        => Admit(changes, atFront: true);
+
+    private void Admit(ReadOnlyMemory<SubjectPropertyChange> changes, bool atFront)
     {
-        if (_maxQueueSize is 0)
+        if (RejectWhenDisabled(changes.Length))
         {
-            _metrics.AddDropped(changes.Length);
-            _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changes.Length);
             return;
         }
 
@@ -77,7 +90,7 @@ internal sealed class WriteRetryQueue : IDisposable
             }
             else
             {
-                _pendingWrites.AddRange(changes.Span);
+                _pendingWrites.InsertRange(atFront ? 0 : _pendingWrites.Count, changes.Span);
                 droppedCount = TrimToCapacity();
                 _ownedWriteCount += changes.Length - droppedCount;
                 Volatile.Write(ref _count, _pendingWrites.Count);
@@ -90,22 +103,55 @@ internal sealed class WriteRetryQueue : IDisposable
             return;
         }
 
-        if (droppedCount > 0)
+        ReportDropped(droppedCount);
+    }
+
+    /// <summary>
+    /// Drops <paramref name="changeCount"/> writes and reports them when the queue is disabled.
+    /// </summary>
+    /// <returns><c>true</c> when the queue is disabled and the writes were dropped.</returns>
+    private bool RejectWhenDisabled(int changeCount)
+    {
+        if (_maxQueueSize is not 0)
         {
-            _metrics.AddDropped(droppedCount);
-            _logger.LogWarning(
-                "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
-                droppedCount,
-                _maxQueueSize);
+            return false;
         }
+
+        _metrics.AddDropped(changeCount);
+        _logger.LogWarning("Write buffering is disabled. Dropping {Count} writes.", changeCount);
+        return true;
+    }
+
+    /// <summary>Reports the ring buffer having dropped <paramref name="droppedCount"/> oldest writes.</summary>
+    private void ReportDropped(int droppedCount)
+    {
+        if (droppedCount <= 0)
+        {
+            return;
+        }
+
+        _metrics.AddDropped(droppedCount);
+        _logger.LogWarning(
+            "Write queue at capacity, dropped {Count} oldest writes (queue size: {QueueSize}).",
+            droppedCount,
+            _maxQueueSize);
     }
 
     /// <summary>
     /// Flushes pending writes from the queue to the source.
     /// Returns true if flush succeeded (or queue was empty), false if flush failed.
     /// </summary>
+    /// <param name="source">The source to write the flushed batches to.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="isGateHeld">
+    /// Checked at the top of every batch iteration, not only once before this call: a flush that spans
+    /// several batches can otherwise straddle a reconnect that begins partway through it, sending
+    /// pre-outage values on the connection the reconcile has not yet judged them against. When it
+    /// returns true the batch just dequeued is put back rather than sent, and the flush stops. Pass
+    /// null for a caller, such as the reconcile, that must be able to flush while the gate is held.
+    /// </param>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken)
+    public async ValueTask<bool> FlushAsync(ISubjectSource source, CancellationToken cancellationToken, Func<bool>? isGateHeld = null)
     {
         if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -119,7 +165,7 @@ internal sealed class WriteRetryQueue : IDisposable
                 return true;
             }
 
-            return await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false);
+            return await FlushCoreAsync(source, cancellationToken, isGateHeld).ConfigureAwait(false);
         }
         finally
         {
@@ -131,11 +177,19 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Flushes older pending writes, then attempts the supplied writes while retaining exact ownership
     /// until they are confirmed, parked for retry, or counted as dropped.
     /// </summary>
+    /// <param name="source">The source to write to.</param>
+    /// <param name="changes">The writes to attempt after the older pending ones.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="isGateHeld">
+    /// Re-checked on the flush of the older pending writes the same way as on <see cref="FlushAsync"/>.
+    /// When that flush stops on it, the supplied writes are parked behind the older ones rather than sent.
+    /// </param>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     public async ValueTask WriteAsync(
         ISubjectSource source,
         ReadOnlyMemory<SubjectPropertyChange> changes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<bool>? isGateHeld = null)
     {
         var rejected = false;
         lock (_lock)
@@ -164,7 +218,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
         try
         {
-            if (!await FlushCoreAsync(source, cancellationToken).ConfigureAwait(false))
+            if (!await FlushCoreAsync(source, cancellationToken, isGateHeld).ConfigureAwait(false))
             {
                 _metrics.AddDropped(SettleWrite(changes.Span, changes.Length, append: true).Dropped);
                 return;
@@ -216,11 +270,18 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
-    private async ValueTask<bool> FlushCoreAsync(ISubjectSource source, CancellationToken cancellationToken)
+    private async ValueTask<bool> FlushCoreAsync(ISubjectSource source, CancellationToken cancellationToken, Func<bool>? isGateHeld)
     {
         var totalFlushed = 0;
         while (true)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                // Checked per batch, so an abandoned drain stops sending onto a connection the source has
+                // replaced. Reporting failure keeps the caller from sending its own batch ahead of the rest.
+                return false;
+            }
+
             int count;
             lock (_lock)
             {
@@ -239,6 +300,18 @@ internal sealed class WriteRetryQueue : IDisposable
                 _pendingWrites.CopyTo(0, _scratchBuffer, 0, count);
                 _pendingWrites.RemoveRange(0, count);
                 Volatile.Write(ref _count, _pendingWrites.Count);
+            }
+
+            if (isGateHeld?.Invoke() == true)
+            {
+                // The gate went up again after this flush started, most likely a reconnect that began
+                // between one batch and the next: the batch just dequeued has not been judged against the
+                // state the new connection is about to deliver, so it goes back rather than out. What the
+                // ring then evicts to make room for it is reported the same way Enqueue's own eviction is.
+                var requeue = SettleWrite(new ReadOnlySpan<SubjectPropertyChange>(_scratchBuffer, 0, count), count, append: false);
+                Array.Clear(_scratchBuffer, 0, count);
+                ReportDropped(requeue.Dropped);
+                return false;
             }
 
             var memory = new ReadOnlyMemory<SubjectPropertyChange>(_scratchBuffer, 0, count);
@@ -291,15 +364,34 @@ internal sealed class WriteRetryQueue : IDisposable
     /// Used on reconnection: instead of flushing stale changes to the server, the caller compares
     /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
     /// </summary>
-    public SubjectPropertyChange[] DrainForLocalReapply()
+    /// <remarks>
+    /// Takes the flush gate, because a flush that fails after this drain would requeue its batch unjudged
+    /// and move a property backwards. An empty queue is not skipped for the same reason: a batch can be
+    /// in flight.
+    /// </remarks>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    public async ValueTask<SubjectPropertyChange[]> DrainForLocalReapplyAsync(CancellationToken cancellationToken)
     {
-        lock (_lock)
+        // Cancelled: nothing to reapply.
+        if (!await TryEnterFlushAsync(cancellationToken).ConfigureAwait(false))
         {
-            var changes = _pendingWrites.ToArray();
-            _pendingWrites.Clear();
-            _ownedWriteCount -= changes.Length;
-            Volatile.Write(ref _count, 0);
-            return changes;
+            return [];
+        }
+
+        try
+        {
+            lock (_lock)
+            {
+                var changes = _pendingWrites.ToArray();
+                _pendingWrites.Clear();
+                _ownedWriteCount -= changes.Length;
+                Volatile.Write(ref _count, 0);
+                return changes;
+            }
+        }
+        finally
+        {
+            _flushSemaphore.Release();
         }
     }
 

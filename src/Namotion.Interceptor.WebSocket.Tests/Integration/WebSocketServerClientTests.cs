@@ -250,7 +250,7 @@ public class WebSocketServerClientTests
             (_, root) => root.Name = "Initial",
             port: portLease.Port);
 
-        // A long retry time leaves the delivery to the wake on Synchronized rather than the interval.
+        // A long retry time leaves the delivery to the reconnect's reconcile rather than the interval.
         await client.StartAsync(
             context => new TestRoot(context),
             port: portLease.Port,

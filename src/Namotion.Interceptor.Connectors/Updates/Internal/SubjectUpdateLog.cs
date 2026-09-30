@@ -11,11 +11,12 @@ internal static class SubjectUpdateLog
 
     /// <summary>
     /// The logger to report a warning about an update of <paramref name="rootSubject"/> through, or
-    /// <c>null</c> when nothing is listening for warnings.
+    /// <c>null</c> when nothing is listening for warnings: <paramref name="logger"/> when the caller passed
+    /// one, otherwise one created from the root subject's context's <see cref="ILoggerFactory"/>.
     /// </summary>
-    public static ILogger? TryGetWarningLogger(IInterceptorSubject rootSubject)
+    public static ILogger? TryGetWarningLogger(IInterceptorSubject rootSubject, ILogger? logger)
     {
-        var logger = rootSubject.Context.TryGetService<ILoggerFactory>()?.CreateLogger(LoggerCategory);
+        logger ??= rootSubject.Context.TryGetService<ILoggerFactory>()?.CreateLogger(LoggerCategory);
         return logger?.IsEnabled(LogLevel.Warning) == true ? logger : null;
     }
 
