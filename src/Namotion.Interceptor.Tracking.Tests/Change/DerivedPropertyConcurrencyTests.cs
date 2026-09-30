@@ -886,9 +886,12 @@ public class DerivedPropertyConcurrencyTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenAWriteHandsOffToARunningRecalculation_ThenTheCommittedAndPublishedTimestampIsTheHandOffWrite(bool ownerEvaluationThrows)
+    [InlineData(false, 1)]
+    [InlineData(true, 1)]
+    [InlineData(false, -1)]
+    [InlineData(true, -1)]
+    public async Task WhenAWriteHandsOffToARunningRecalculation_ThenTheCommittedAndPublishedTimestampIsTheHandOffWrite(
+        bool ownerEvaluationThrows, int handOffTimestampOffset)
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
@@ -901,7 +904,7 @@ public class DerivedPropertyConcurrencyTests
             .Subscribe(changes.Enqueue);
 
         var ownerTimestamp = new DateTimeOffset(2024, 1, 1, 0, 0, 2, TimeSpan.Zero);
-        var handOffTimestamp = ownerTimestamp.AddSeconds(1);
+        var handOffTimestamp = ownerTimestamp.AddSeconds(handOffTimestampOffset);
 
         // A throwing owner evaluation leaves the hand-off to the re-trigger in the finally,
         // a successful one to the stale-result retry before commit.
@@ -921,6 +924,11 @@ public class DerivedPropertyConcurrencyTests
             Assert.True(
                 subject.EvaluationEntered.Wait(TimeSpan.FromSeconds(10)),
                 "derived getter did not start");
+
+            using (SubjectChangeContext.WithChangedTimestamp(ownerTimestamp.AddSeconds(2)))
+            {
+                subject.First = 4;
+            }
 
             using (SubjectChangeContext.WithChangedTimestamp(handOffTimestamp))
             {
