@@ -1,6 +1,7 @@
 // Register map: AIT SHI manual 83026900aDE; firmware gates: python-luxtronik 02afea84bd5bf3ee87445de6f2a42b8029983169.
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.Luxtronik.Attributes;
+using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus;
 
@@ -20,9 +21,9 @@ public partial class LuxtronikTemperatures
         Flow = new LuxtronikTemperatureSensor(10105, "Flow temperature");
         Return = new LuxtronikTemperatureSensor(10100, "Return temperature");
         Outside = new LuxtronikTemperatureSensor(10108, "Outside temperature");
-        OutsideAverage = new LuxtronikTemperatureSensor(10109, "Outside average temperature", "3.92.0");
-        HeatSourceInlet = new LuxtronikTemperatureSensor(10110, "Heat source inlet temperature", "3.92.0");
-        HeatSourceOutlet = new LuxtronikTemperatureSensor(10111, "Heat source outlet temperature", "3.92.0");
+        OutsideAverage = new LuxtronikTemperatureSensor(10109, "Outside average temperature", LuxtronikGating.Firmware392);
+        HeatSourceInlet = new LuxtronikTemperatureSensor(10110, "Heat source inlet temperature", LuxtronikGating.Firmware392);
+        HeatSourceOutlet = new LuxtronikTemperatureSensor(10111, "Heat source outlet temperature", LuxtronikGating.Firmware392);
         MaximumFlowTemperature = null;
     }
 

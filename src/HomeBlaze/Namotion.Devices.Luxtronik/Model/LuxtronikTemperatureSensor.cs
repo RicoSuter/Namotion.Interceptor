@@ -19,13 +19,13 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
     private readonly Version? _minimumFirmwareVersion;
 
     /// <summary>
-    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmware"/>.
+    /// Initializes a sensor titled <paramref name="title"/> for the input register at <paramref name="address"/>, supported from <paramref name="minimumFirmwareVersion"/>, or every firmware when <c>null</c>.
     /// </summary>
-    public LuxtronikTemperatureSensor(int address, string title, string? minimumFirmware = null)
+    public LuxtronikTemperatureSensor(int address, string title, Version? minimumFirmwareVersion = null)
     {
         BaseAddress = address;
         Title = title;
-        _minimumFirmwareVersion = minimumFirmware is null ? null : Version.Parse(minimumFirmware);
+        _minimumFirmwareVersion = minimumFirmwareVersion;
         Temperature = null;
     }
 
