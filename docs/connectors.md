@@ -957,14 +957,16 @@ await processor.ProcessAsync(stoppingToken);
 
 ### ChangeQueueBackgroundService
 
-A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It subscribes before the host start returns, drains the changes, restarts on request and retries after a fault.
+A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It subscribes before the host start returns, drains the changes, restarts on request and retries after a fault, keeping the subscription across the processors it creates.
 
 ```csharp
 public sealed class AuditService(IInterceptorSubjectContext context, ILogger<AuditService> logger)
     : ChangeQueueBackgroundService(logger)
 {
-    protected override ChangeQueueProcessor CreateProcessor() => new(
-        this, context, _ => true, WriteAuditAsync,
+    protected override IInterceptorSubjectContext Context => context;
+
+    protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription) => new(
+        this, subscription, _ => true, WriteAuditAsync,
         ChangeDeliveryRule.SourceValuesMayBeStale, bufferTime: null, maxQueueDepth: null, logger);
 
     private ValueTask WriteAuditAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken) =>
@@ -974,10 +976,19 @@ public sealed class AuditService(IInterceptorSubjectContext context, ILogger<Aud
 
 | Member | Purpose |
 |---|---|
-| `CreateProcessor()` | Builds the `ChangeQueueProcessor` that subscribes to the changes (required). |
+| `Context` | The context whose changes the service subscribes to (required). |
+| `CreateProcessor(subscription)` | Builds the `ChangeQueueProcessor` on the service's subscription (required); a processor on any other subscription is rejected. |
 | `ProcessAsync(processor, token)` | Drains the processor; override it to set up state before draining, tear it down after, or run work alongside it. |
 | `GetRetryDelay(exception)` | The delay before a fault is retried with a new processor, five seconds by default. |
 | `RequestRestart()` | Replaces the processor, for example after start-time configuration changed. |
+
+Delivery:
+
+- Changes made after `StartAsync` returns are delivered.
+- Changes queued during a restart or a retry delay are delivered by the next processor, except a batch in progress when a fault occurs or when a run's final flush fails.
+- While the service is idle (`ProcessAsync` returned without a restart pending), changes are not captured until a restart is served.
+- After three consecutive faults the subscription is released until a run ends without a fault; changes made in between are not captured.
+- On stop, undelivered changes are dropped.
 
 ## Known Limitations
 
