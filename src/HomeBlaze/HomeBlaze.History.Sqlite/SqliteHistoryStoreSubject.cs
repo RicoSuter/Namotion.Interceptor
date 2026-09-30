@@ -35,8 +35,10 @@ public partial class SqliteHistoryStoreSubject :
     private Settings? _settings;
 
     // The instant from which the subscription holds every change no session has consumed yet, so the next
-    // session's coverage may start there. Only the service's sequential session flow touches these.
-    private PropertyChangeQueueSubscription? _subscription;
+    // session's coverage may start there. Only the service's sequential session flow touches these. The
+    // subscription is held weakly because it is only compared by identity, so one the service released is not
+    // pinned here with its undrained queue.
+    private WeakReference<PropertyChangeQueueSubscription>? _subscription;
     private DateTimeOffset _coverageStartedAt;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
@@ -255,10 +257,11 @@ public partial class SqliteHistoryStoreSubject :
             logger: _logger);
 
         // A new subscription captures from now on; a kept one still holds everything since the previous
-        // session stopped consuming it, which is where the start was last set.
-        if (!ReferenceEquals(subscription, _subscription))
+        // session stopped consuming it, which is where the start was last set, and delivers the newest value
+        // per property.
+        if (_subscription is null || !_subscription.TryGetTarget(out var previous) || !ReferenceEquals(subscription, previous))
         {
-            _subscription = subscription;
+            _subscription = new WeakReference<PropertyChangeQueueSubscription>(subscription);
             _coverageStartedAt = DateTimeOffset.UtcNow;
         }
 
