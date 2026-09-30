@@ -419,6 +419,10 @@ public class InMemoryHistoryStoreRecordingTests
             // Act
             store.Priority = 7;
             await store.ApplyConfigurationAsync(CancellationToken.None);
+
+            Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 11);
+            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
+
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
 
             // Assert
@@ -426,6 +430,36 @@ public class InMemoryHistoryStoreRecordingTests
             Assert.Contains(series.Points, point => point.Number == 11);
             Assert.Contains(series.Points, point => point.Number == 22);
             Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenIsEnabledIsClearedAndApplied_ThenTheStoreServesNoHistory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.IsEnabled = false;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Disabled",
+                message: "Store never reported Disabled after IsEnabled was cleared and applied.");
+
+            // Assert
+            Assert.Empty(store.CoverageRanges);
+            Assert.Empty(QuerySeries(store, "/Temperature").Points);
+            Assert.Equal(0, store.RecordedCount);
         }
         finally
         {

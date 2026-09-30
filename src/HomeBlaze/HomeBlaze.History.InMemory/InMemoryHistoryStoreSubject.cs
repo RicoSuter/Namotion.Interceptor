@@ -29,6 +29,8 @@ public partial class InMemoryHistoryStoreSubject :
 {
     private readonly ILogger<InMemoryHistoryStoreSubject> _logger;
 
+    private readonly Lock _settingsLock = new();
+
     private HistoryChangeRecorder? _recorder;
     private InMemoryHistoryStore? _engine;
     private Settings? _settings;
@@ -83,7 +85,7 @@ public partial class InMemoryHistoryStoreSubject :
     public partial int MaxJsonSize { get; set; }
 
     /// <summary>
-    /// Whether the store is enabled and should auto-start on application startup.
+    /// Whether the store records; applying a change takes effect immediately.
     /// </summary>
     [Configuration]
     public partial bool IsEnabled { get; set; }
@@ -109,7 +111,7 @@ public partial class InMemoryHistoryStoreSubject :
     public partial long OversizeCount { get; set; }
 
     /// <summary>
-    /// Cumulative number of samples evicted by age or capacity.
+    /// Number of samples evicted by age or capacity since start.
     /// </summary>
     [State]
     public partial long EvictedCount { get; set; }
@@ -148,7 +150,7 @@ public partial class InMemoryHistoryStoreSubject :
 
     /// <inheritdoc />
     public ImmutableArray<HistoryCoverage> CoverageRanges =>
-        _engine?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
+        Volatile.Read(ref _engine)?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => InMemoryHistoryStore.AllAggregations;
@@ -158,7 +160,8 @@ public partial class InMemoryHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine is null)
+        var engine = Volatile.Read(ref _engine);
+        if (engine is null)
         {
             return Task.FromResult(
                 new HistorySeries(
@@ -168,7 +171,7 @@ public partial class InMemoryHistoryStoreSubject :
                     ImmutableArray<HistoryCoverage>.Empty));
         }
 
-        return _engine.QueryAsync(query, cancellationToken);
+        return engine.QueryAsync(query, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -176,7 +179,7 @@ public partial class InMemoryHistoryStoreSubject :
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
+        return new ValueTask<HistoryPoint?>(Volatile.Read(ref _engine)?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
     // ChangeQueueBackgroundService
@@ -184,8 +187,12 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     protected override ChangeQueueProcessor CreateProcessor()
     {
-        var settings = ReadSettings();
-        Volatile.Write(ref _settings, settings);
+        Settings settings;
+        lock (_settingsLock)
+        {
+            settings = ReadSettings();
+            _settings = settings;
+        }
 
         // A recorder is not a sink that can fall behind the model, so the settled condition never holds
         // for it. Under the other rule a source-applied value does not retire an older commit, which is
@@ -205,9 +212,15 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
-        var settings = Volatile.Read(ref _settings)!;
+        Settings settings;
+        lock (_settingsLock)
+        {
+            settings = _settings!;
+        }
+
         if (!settings.IsEnabled)
         {
+            StopServing();
             Status = "Disabled";
             return;
         }
@@ -217,6 +230,7 @@ public partial class InMemoryHistoryStoreSubject :
         var resolver = context.TryGetService<ISubjectPathResolver>();
         if (resolver is null)
         {
+            StopServing();
             Status = "Error";
             _logger.LogError("No ISubjectPathResolver is registered in the context; cannot record history.");
             return;
@@ -235,7 +249,7 @@ public partial class InMemoryHistoryStoreSubject :
         _recorder = recorder;
 
         engine.BeginCoverageSession();
-        _engine = engine;
+        Volatile.Write(ref _engine, engine);
 
         Status = "Running";
 
@@ -279,6 +293,23 @@ public partial class InMemoryHistoryStoreSubject :
         }
     }
 
+    // A session that does not record serves nothing, like a store that started in that state; otherwise
+    // the previous session's samples would stay queryable after a restart into it.
+    private void StopServing()
+    {
+        Volatile.Write(ref _engine, null);
+        _recorder = null;
+
+        RecordedCount = 0;
+        OversizeCount = 0;
+        EvictedCount = 0;
+        TrackedPropertyCount = 0;
+        TotalSampleCount = 0;
+        EstimatedMemorySize = 0;
+        IncomingChangesPerSecond = 0;
+        RecordedChangesPerSecond = 0;
+    }
+
     private void RefreshMetrics(InMemoryHistoryStore engine)
     {
         RecordedCount = engine.RecordedCount;
@@ -307,10 +338,16 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // A restart discards the samples held in memory, so only a changed start-time setting restarts.
-        if (Volatile.Read(ref _settings) is { } started && started != ReadSettings())
+        // A restart discards the samples held in memory, so only a changed start-time setting restarts. Under
+        // the lock CreateProcessor holds while it reads and publishes, so an apply racing a restart either sees
+        // the settings that restart read or is read by it; outside it, a revert could compare against the
+        // stale settings and be lost.
+        lock (_settingsLock)
         {
-            RequestRestart();
+            if (_settings is { } started && started != ReadSettings())
+            {
+                RequestRestart();
+            }
         }
 
         return Task.CompletedTask;
