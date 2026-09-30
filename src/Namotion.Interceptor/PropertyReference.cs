@@ -127,6 +127,19 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
+    /// Gets the write timestamp as raw UTC ticks, or 0 if no timestamp has been set, under the subject's lock.
+    /// Called after a value read, it returns the timestamp of the write a terminal stored that value with, or
+    /// of a later write, whether or not the value read took the lock.
+    /// </summary>
+    internal long GetWriteTimestampTicksAfterValueRead()
+    {
+        lock (Subject.SyncRoot)
+        {
+            return GetWriteTimestampTicks();
+        }
+    }
+
+    /// <summary>
     /// Gets the revision of the last write to this property that reached a write terminal, and whether any
     /// sink has published its value. Returns false when no write state has been recorded at all, which is
     /// not the same as never written: marking a property published records state for it too, so a
@@ -204,10 +217,10 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         var propertyMetadata = Metadata;
         var value = propertyMetadata.GetValue?.Invoke(Subject);
 
-        // Read after the value: a terminal stores a value and its timestamp under the subject's lock, and
-        // the read terminal reads the value under it, so this finds that write's timestamp or a later one's.
-        // A derived getter reads its dependencies the same way, hence their timestamps count too.
-        var timestampTicks = GetWriteTimestampTicks();
+        // The subject's lock is not held across the getter, which runs read interceptors and user code. Taking
+        // it for the timestamp alone keeps the timestamp no older than the value's write, even when the value
+        // read did not lock.
+        var timestampTicks = GetWriteTimestampTicksAfterValueRead();
         if (propertyMetadata.IsDerived
             && TryGetPropertyData(DerivedDependenciesKey, out var data)
             && data is IDerivedPropertyDependencies dependencies)

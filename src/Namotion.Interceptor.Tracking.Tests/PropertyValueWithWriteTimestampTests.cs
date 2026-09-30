@@ -49,6 +49,10 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
     }
 
+    /// <summary>
+    /// An int is a type a read could take without the subject's lock, and a value read that skips the lock
+    /// fails this test unless the metadata read takes it, so the pairing must not rely on the read terminal.
+    /// </summary>
     [Fact]
     public async Task WhenWritesRunConcurrently_ThenMetadataNeverDescribesAnEarlierWrite()
     {
