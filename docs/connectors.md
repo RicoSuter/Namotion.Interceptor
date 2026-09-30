@@ -979,8 +979,6 @@ public sealed class AuditService(IInterceptorSubjectContext context, ILogger<Aud
 | `GetRetryDelay(exception)` | The delay before a fault is retried with a new processor, five seconds by default. |
 | `RequestRestart()` | Replaces the processor, for example after start-time configuration changed. |
 
-The class XML docs state the full contract.
-
 ## Known Limitations
 
 Cases where the local model and the external system can end up disagreeing, or where a write is lost without an error. Everything else about the write path converges and is described above. The reasoning behind the delivery rules lives in [docs/design/connector-delivery.md](design/connector-delivery.md).
