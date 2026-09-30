@@ -22,6 +22,12 @@ namespace Namotion.Interceptor.Registry;
 [RunsBefore(typeof(ParentTrackingHandler), typeof(ContextInheritanceHandler))]
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
+    /// <summary>
+    /// Tripwire: attaches whose subject ID was already held by a different subject, see
+    /// <see cref="SubjectRegistryDiagnostics.DuplicateSubjectIdAttaches"/>.
+    /// </summary>
+    internal static long DuplicateSubjectIdAttachCount;
+
     private static readonly ImmutableDictionary<IInterceptorSubject, RegisteredSubject> EmptyKnownSubjects =
         ImmutableDictionary.Create<IInterceptorSubject, RegisteredSubject>(ReferenceEqualityComparer.Instance);
 
@@ -119,6 +125,34 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     }
 
     /// <inheritdoc />
+    void ISubjectIdRegistryWriter.ReplaceSubjectId(IInterceptorSubject subject, string id)
+    {
+        lock (_knownSubjects)
+        {
+            if (_subjectIdToSubject.TryGetValue(id, out var existing) && !ReferenceEquals(existing, subject))
+            {
+                throw new InvalidOperationException(
+                    $"Subject ID '{id}' is already in use by a different subject.");
+            }
+
+            var oldId = subject.TryGetSubjectId();
+            if (oldId is not null &&
+                _subjectIdToSubject.TryGetValue(oldId, out var holder) && ReferenceEquals(holder, subject))
+            {
+                _subjectIdToSubject.Remove(oldId);
+            }
+
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public bool TryGetSubjectById(string subjectId, out IInterceptorSubject subject)
     {
         lock (_knownSubjects)
@@ -150,6 +184,14 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             || ReferenceEquals(existingSubject, change.Subject))
                         {
                             _subjectIdToSubject[subjectId] = change.Subject;
+                        }
+                        else
+                        {
+                            // The skip keeps the first subject reachable under the ID and leaves the
+                            // second one invisible to every ID lookup, so it is the last line of
+                            // defence against a fabricated duplicate. Count it, see
+                            // SubjectRegistryDiagnostics.DuplicateSubjectIdAttaches.
+                            Interlocked.Increment(ref DuplicateSubjectIdAttachCount);
                         }
                     }
                 }

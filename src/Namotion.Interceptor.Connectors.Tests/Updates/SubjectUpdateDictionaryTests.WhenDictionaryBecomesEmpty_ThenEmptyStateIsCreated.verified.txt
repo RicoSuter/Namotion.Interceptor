@@ -1,0 +1,11 @@
+﻿{
+  Root: SubjectId_1,
+  Subjects: {
+    SubjectId_1: {
+      Lookup: {
+        Kind: Dictionary,
+        Timestamp: DateTimeOffset_1
+      }
+    }
+  }
+}

@@ -35,6 +35,9 @@ internal sealed class ChangeMerger : IDisposable
     // the index trim only; the buffer shrink was ungated then, so its share was never measured.
     private const int NarrowBatchesBeforeTrim = 4;
 
+    // Up to this many changes, comparing every pair costs less than hashing each property.
+    private const int PairwiseRepeatCheckLimit = 8;
+
     // Per property: the slot of its surviving change, the arrival index that seeded that slot, and the
     // revision bounds seen so far. Bounds are running, not global, which is what lets one pass do the
     // work: the walk goes backwards, so the last extension on each side is the batch extremum.
@@ -51,6 +54,49 @@ internal sealed class ChangeMerger : IDisposable
     private SubjectPropertyChange[] _buffer = RentClearedBuffer(BufferMinimumSize);
     private int _count;
     private int _consecutiveNarrowBatches;
+
+    /// <summary>
+    /// Returns whether a property changes more than once in <paramref name="changes"/>, which a batch from a
+    /// change queue never does since it is merged already.
+    /// </summary>
+    /// <param name="changes">The batch to check.</param>
+    /// <param name="scratch">A set to reuse for a wide batch, left empty; one is allocated when it is null.</param>
+    internal static bool HasRepeatedProperty(ReadOnlySpan<SubjectPropertyChange> changes, HashSet<PropertyReference>? scratch)
+    {
+        if (changes.Length <= PairwiseRepeatCheckLimit)
+        {
+            for (var i = 1; i < changes.Length; i++)
+            {
+                for (var j = 0; j < i; j++)
+                {
+                    if (PropertyReference.Comparer.Equals(changes[i].Property, changes[j].Property))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        scratch ??= new HashSet<PropertyReference>(changes.Length, PropertyReference.Comparer);
+        try
+        {
+            foreach (var change in changes)
+            {
+                if (!scratch.Add(change.Property))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            scratch.Clear();
+        }
+    }
 
     /// <summary>
     /// Rents a buffer and clears it once. <see cref="ArrayPool{T}"/> hands out whatever the previous

@@ -13,8 +13,8 @@ public class SubjectUpdateIdentityTests
     public void WhenDistinctSubjectsCompareEqual_ThenTheirWireIdsAndValuesRemainDistinct(bool partial)
     {
         // Arrange
-        var first = new ValueEqualWireSubject { EqualityKey = "child", Value = 1 };
-        var second = new ValueEqualWireSubject { EqualityKey = "child", Value = 2 };
+        var first = new ValueEqualWireSubject { EqualityKey = "child" };
+        var second = new ValueEqualWireSubject { EqualityKey = "child" };
         var source = new ValueEqualWireSubject(InterceptorSubjectContext.Create().WithRegistry())
         {
             EqualityKey = "root",
@@ -24,6 +24,15 @@ public class SubjectUpdateIdentityTests
         {
             Children = [new ValueEqualWireSubject(), new ValueEqualWireSubject()]
         };
+        if (partial)
+        {
+            // A partial update addresses subjects by ID alone, so the target first holds the children
+            // under the IDs the source assigned to them.
+            target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance, ChangeOrigin.Local);
+        }
+
+        first.Value = 1;
+        second.Value = 2;
         SubjectPropertyChange[] changes =
         [
             SubjectPropertyChange.Create(new PropertyReference(first, nameof(ValueEqualWireSubject.Value)), ChangeOrigin.Local, DateTimeOffset.UtcNow, null, 0, 1),
@@ -37,9 +46,11 @@ public class SubjectUpdateIdentityTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local);
 
         // Assert
-        var items = update.Subjects[update.Root][nameof(ValueEqualWireSubject.Children)].Items!;
-        Assert.Equal(2, items.Count);
-        Assert.NotEqual(items[0].Id, items[1].Id);
+        var firstId = first.TryGetSubjectId()!;
+        var secondId = second.TryGetSubjectId()!;
+        Assert.NotEqual(firstId, secondId);
+        Assert.Equal(1, update.Subjects[firstId][nameof(ValueEqualWireSubject.Value)].Value);
+        Assert.Equal(2, update.Subjects[secondId][nameof(ValueEqualWireSubject.Value)].Value);
         Assert.Equal(1, target.Children[0].Value);
         Assert.Equal(2, target.Children[1].Value);
     }

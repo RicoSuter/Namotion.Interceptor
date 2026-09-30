@@ -603,6 +603,30 @@ public class ChangeMergerTests
     // reaches the trim, so it pins nothing.
     private const int NarrowBatchesBeforeTrim = 4;
 
+    [Theory]
+    [InlineData(2, true)]
+    [InlineData(2, false)]
+    [InlineData(20, true)]
+    [InlineData(20, false)]
+    public void WhenABatchIsCheckedForARepeatedProperty_ThenOnlyARepeatIsReported(int changeCount, bool hasRepeat)
+    {
+        // Arrange: the last change repeats the property of the first one, or gets a property of its own
+        var changes = CreateBatch(changeCount);
+        if (hasRepeat)
+        {
+            changes[^1] = CreateChange(changes[0].Property, "Old", "New", revision: changeCount + 1);
+        }
+
+        var scratch = new HashSet<PropertyReference>(PropertyReference.Comparer);
+
+        // Act
+        var result = ChangeMerger.HasRepeatedProperty(changes, scratch);
+
+        // Assert
+        Assert.Equal(hasRepeat, result);
+        Assert.Empty(scratch);
+    }
+
     private static SubjectPropertyChange[] CreateWideBatch(int changeCount, int distinctProperties)
     {
         var properties = new PropertyReference[distinctProperties];

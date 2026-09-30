@@ -16,6 +16,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [ThreadStatic]
     private static Stack<HashSet<IInterceptorSubject>>? _subjectHashSetPool;
 
+    private readonly LifecycleBatch _batch;
+
+    public LifecycleInterceptor()
+    {
+        _batch = new LifecycleBatch(this);
+    }
+
     /// <summary>
     /// Raised when a subject is attached to the object graph.
     /// Handlers must be exception-free and fast (invoked inside lock).
@@ -29,6 +36,88 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// Handlers must be exception-free and fast (invoked inside lock).
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
+
+    /// <summary>
+    /// Creates a batch scope for the calling thread, during which a subject losing its last property reference
+    /// on that thread stays attached and registered instead of being detached, so that a subject moved between
+    /// properties is never detached in between. When the thread's outermost scope is disposed, every such subject
+    /// that is still unreferenced is detached.
+    /// </summary>
+    /// <remarks>
+    /// Detaches caused by writes on other threads are not deferred. The scope can be disposed on any thread,
+    /// which closes it for the thread that created it. The removal of the last reference is reported at once,
+    /// without <see cref="SubjectLifecycleChange.IsContextDetach"/>. The detach itself is reported when the
+    /// outermost scope closes, with both <see cref="SubjectLifecycleChange.IsPropertyReferenceRemoved"/> and
+    /// <see cref="SubjectLifecycleChange.IsContextDetach"/> set, so handlers see that reference removal twice.
+    /// </remarks>
+    /// <param name="rootContext">The context that resolves the lifecycle handlers of the deferred detaches.</param>
+    /// <returns>The scope, which processes the deferred detaches when the thread's outermost one is disposed.</returns>
+    public IDisposable CreateBatchScope(IInterceptorSubjectContext rootContext)
+    {
+        lock (_attachedSubjects)
+        {
+            return _batch.Open(rootContext);
+        }
+    }
+
+    /// <summary>The lock that guards the attached subjects and the batch scopes.</summary>
+    internal object SyncRoot => _attachedSubjects;
+
+    internal void ProcessDeferredDetach(
+        IInterceptorSubject subject, PropertyReference property, object? index, IInterceptorSubjectContext resolveContext)
+    {
+        if (!_attachedSubjects.TryGetValue(subject, out var set) || !set.IsEmpty)
+        {
+            return;
+        }
+
+        _attachedSubjects.Remove(subject);
+        var children = DetachSubjectProperties(subject);
+
+        var count = subject.GetReferenceCount();
+        var change = new SubjectLifecycleChange
+        {
+            Subject = subject,
+            Property = property,
+            Index = index,
+            ReferenceCount = count,
+            IsPropertyReferenceRemoved = true,
+            IsContextDetach = true
+        };
+
+        try
+        {
+            SubjectDetaching?.Invoke(change);
+
+            if (subject is ILifecycleHandler subjectHandler)
+            {
+                subjectHandler.HandleLifecycleChange(change);
+            }
+
+            // The parent the reference was removed from may have left the graph since, and with it the
+            // services its context resolved, so the handlers come from the scope's root context.
+            var array = resolveContext.GetServices<ILifecycleHandler>();
+            for (var i = 0; i < array.Length; i++)
+            {
+                array[i].HandleLifecycleChange(change);
+            }
+
+            if (children is not null)
+            {
+                foreach (var child in children)
+                {
+                    DetachFromProperty(child.subject, resolveContext, child.property, child.index);
+                }
+            }
+        }
+        finally
+        {
+            if (children is not null)
+            {
+                ReturnList(children);
+            }
+        }
+    }
 
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
@@ -118,6 +207,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
         var isFirstAttach = !existed;
+        var endsDeferredDetach = existed && set.IsEmpty && _batch.IsDeferred(subject);
         if (!set.Add(property))
         {
             return;
@@ -131,7 +221,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsContextAttach = isFirstAttach,
-            IsPropertyReferenceAdded = true
+            IsPropertyReferenceAdded = true,
+            EndsDeferredDetach = endsDeferredDetach
         };
 
         var properties = subject.Properties.Keys;
@@ -209,14 +300,26 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
 
-        var isLastDetach = set.IsEmpty;
+        var references = set;
 
         // Collect children and clean up in a single pass over properties
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
-        if (isLastDetach)
+        var contextDetach = false;
+        if (references.IsEmpty)
         {
-            _attachedSubjects.Remove(subject);
-            children = DetachSubjectProperties(subject);
+            if (_batch.IsOpenOnCurrentThread)
+            {
+                // The empty entry stays, so the subject remains attached, and a reference added before the
+                // scope closes is not a first attach. The scope detaches it only if the entry is still empty.
+                _batch.DeferDetach(subject, property, index);
+            }
+            else
+            {
+                // Removing the entry invalidates the ref to set.
+                _attachedSubjects.Remove(subject);
+                children = DetachSubjectProperties(subject);
+                contextDetach = true;
+            }
         }
 
         var count = subject.DecrementReferenceCount();
@@ -227,10 +330,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             Index = index,
             ReferenceCount = count,
             IsPropertyReferenceRemoved = true,
-            IsContextDetach = isLastDetach
+            IsContextDetach = contextDetach,
+            References = references
         };
 
-        if (isLastDetach)
+        if (contextDetach)
         {
             SubjectDetaching?.Invoke(change);
         }

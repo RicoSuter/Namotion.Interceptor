@@ -286,4 +286,26 @@ public static class SubjectRegistryExtensions
                 $"Subject already has ID '{existingId}'; cannot reassign to '{id}'.");
         }
     }
+
+    /// <summary>
+    /// Assigns a subject ID in place of the one the subject has, updating the reverse index atomically when
+    /// a registry is configured.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="id">The subject ID to assign.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the ID is already in use by a different subject.</exception>
+    internal static void ReplaceSubjectId(this IInterceptorSubject subject, string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
+        if (writer is not null)
+        {
+            writer.ReplaceSubjectId(subject, id);
+            return;
+        }
+
+        HasSubjectIds = true;
+        subject.Data[(null, SubjectIdKey)] = id;
+    }
 }

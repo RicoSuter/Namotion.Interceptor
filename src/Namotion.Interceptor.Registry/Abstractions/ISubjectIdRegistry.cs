@@ -38,4 +38,13 @@ internal interface ISubjectIdRegistryWriter
     /// <param name="id">The subject ID to assign.</param>
     /// <exception cref="InvalidOperationException">Thrown when the subject already has a different ID, or when the ID is already in use by a different subject.</exception>
     void SetSubjectId(IInterceptorSubject subject, string id);
+
+    /// <summary>
+    /// Assigns a subject ID in place of the one the subject has, atomically updating both the subject's Data
+    /// store and the reverse index.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="id">The subject ID to assign.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the ID is already in use by a different subject.</exception>
+    void ReplaceSubjectId(IInterceptorSubject subject, string id);
 }

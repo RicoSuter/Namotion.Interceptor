@@ -1,23 +1,23 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       child: {
         Kind: Object,
         Timestamp: {Scrubbed},
-        Id: 2
+        Id: SubjectId_2
       },
       items: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Index: 1,
-            Id: 3
+            Id: SubjectId_3
+          },
+          {
+            Id: SubjectId_4
           }
-        ],
-        Count: 2
+        ]
       },
       name: {
         Kind: Value,
@@ -32,18 +32,7 @@
         }
       }
     },
-    2: {
-      child: {
-        Kind: Object
-      },
-      items: {
-        Kind: Collection,
-        Count: 0
-      },
-      lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+    SubjectId_2: {
       name: {
         Kind: Value,
         Value: NewChild,
@@ -54,26 +43,24 @@
           }
         }
       },
-      parent: {
-        Kind: Object,
-        Id: 1
-      },
       self: {
         Kind: Object
-      }
-    },
-    3: {
+      },
+      parent: {
+        Kind: Object,
+        Id: SubjectId_1
+      },
       child: {
         Kind: Object
       },
       items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+        Kind: Dictionary
+      }
+    },
+    SubjectId_4: {
       name: {
         Kind: Value,
         Value: NewItem,
@@ -84,13 +71,26 @@
           }
         }
       },
-      parent: {
-        Kind: Object,
-        Id: 1
-      },
       self: {
         Kind: Object
+      },
+      parent: {
+        Kind: Object,
+        Id: SubjectId_1
+      },
+      child: {
+        Kind: Object
+      },
+      items: {
+        Kind: Collection
+      },
+      lookup: {
+        Kind: Dictionary
       }
     }
-  }
+  },
+  CompleteSubjectIds: [
+    SubjectId_2,
+    SubjectId_4
+  ]
 }

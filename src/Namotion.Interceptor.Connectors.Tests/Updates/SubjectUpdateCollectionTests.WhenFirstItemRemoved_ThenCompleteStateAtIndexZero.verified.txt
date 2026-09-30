@@ -1,0 +1,16 @@
+﻿{
+  Root: SubjectId_1,
+  Subjects: {
+    SubjectId_1: {
+      Items: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_1,
+        Items: [
+          {
+            Id: SubjectId_2
+          }
+        ]
+      }
+    }
+  }
+}

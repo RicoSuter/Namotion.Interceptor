@@ -1,7 +1,8 @@
+using System.Collections;
+using System.Text.Json;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Validation;
 
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
@@ -103,28 +104,28 @@ public class SubjectUpdateApplyFailureTests
     {
         // Arrange
         var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var sourceChild = new Person(sourceContext) { FirstName = "Kid", LastName = "Child" };
         var source = new Person(sourceContext)
         {
             LastName = "Parent",
-            Children =
-            [
-                new Person(sourceContext) { FirstName = "TooLongForTheTarget", LastName = "Child" }
-            ]
+            Children = [sourceChild]
         };
 
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
 
-        // The target validates data annotations, so the child's over-long FirstName is refused
-        // while every other property of the same update is written.
-        var targetContext = InterceptorSubjectContext.Create().WithRegistry().WithDataAnnotationValidation();
+        // A created item is populated before it enters the graph, where no validation runs, so the child's
+        // FirstName is refused by giving it a value its declared type cannot hold, while every other
+        // property of the same update is written.
+        update.Subjects[sourceChild.GetOrAddSubjectId()][nameof(Person.FirstName)].Value = JsonSerializer.SerializeToElement(42);
+
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
         var target = new Person(targetContext);
 
         // Act
-        var exception = Assert.ThrowsAny<Exception>(
+        Assert.Throws<JsonException>(
             () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
 
         // Assert
-        Assert.Contains(nameof(Person.FirstName), exception.Message);
         Assert.Equal("Parent", target.LastName);
         var child = Assert.Single(target.Children);
         Assert.Equal("Child", child.LastName);
@@ -137,7 +138,7 @@ public class SubjectUpdateApplyFailureTests
         // Arrange
         // Pins the per-property boundary: a throw raised by the collection machinery itself, rather than
         // by an item's own property write, is contained at the Children property and does not cost the
-        // unrelated LastName sibling. It does still abandon the remaining items of that collection.
+        // unrelated LastName sibling. The collection keeps its previous items.
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var target = new Person(context);
 
@@ -158,9 +159,8 @@ public class SubjectUpdateApplyFailureTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Items =
                         [
-                            new SubjectPropertyItemUpdate { Index = 5, Id = "2" }
-                        ],
-                        Count = 1 // index 5 is out of bounds for a declared count of 1
+                            new SubjectPropertyItemUpdate { Id = "2" }
+                        ]
                     }
                 },
                 ["2"] = new()
@@ -176,10 +176,10 @@ public class SubjectUpdateApplyFailureTests
 
         // Act
         var exception = Assert.Throws<InvalidOperationException>(
-            () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+            () => target.ApplySubjectUpdate(update, new CollectionFailingSubjectFactory(), ChangeOrigin.Local));
 
         // Assert
-        Assert.Contains("out of bounds", exception.Message);
+        Assert.Equal(CollectionFailingSubjectFactory.FailureMessage, exception.Message);
         Assert.Equal("Parent", target.LastName);
         Assert.Empty(target.Children);
     }
@@ -202,6 +202,20 @@ public class SubjectUpdateApplyFailureTests
         // Act & Assert
         Assert.ThrowsAny<Exception>(
             () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance, ChangeOrigin.Local));
+    }
+
+    private sealed class CollectionFailingSubjectFactory : ISubjectFactory
+    {
+        public const string FailureMessage = "The collection could not be created.";
+
+        public IInterceptorSubject CreateSubject(Type type, IServiceProvider? serviceProvider) =>
+            DefaultSubjectFactory.Instance.CreateSubject(type, serviceProvider);
+
+        public IEnumerable<IInterceptorSubject?> CreateSubjectCollection(Type propertyType, params IEnumerable<IInterceptorSubject?> children) =>
+            throw new InvalidOperationException(FailureMessage);
+
+        public IDictionary CreateSubjectDictionary(Type propertyType, IDictionary<object, IInterceptorSubject> entries) =>
+            DefaultSubjectFactory.Instance.CreateSubjectDictionary(propertyType, entries);
     }
 
     /// <summary>

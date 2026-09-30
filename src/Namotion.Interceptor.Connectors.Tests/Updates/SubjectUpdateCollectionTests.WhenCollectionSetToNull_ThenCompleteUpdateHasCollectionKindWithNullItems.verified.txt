@@ -1,0 +1,34 @@
+﻿{
+  Root: SubjectId_1,
+  Subjects: {
+    SubjectId_1: {
+      Name: {
+        Kind: Value,
+        Value: Root,
+        Timestamp: DateTimeOffset_1,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Self: {
+        Kind: Object
+      },
+      Parent: {
+        Kind: Object
+      },
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_2
+      },
+      Lookup: {
+        Kind: Dictionary
+      }
+    }
+  }
+}

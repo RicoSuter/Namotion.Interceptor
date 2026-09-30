@@ -28,4 +28,16 @@ public readonly struct SubjectLifecycleChange
 
     /// <summary>True when the subject is leaving the graph.</summary>
     public bool IsContextDetach { get; init; }
+
+    /// <summary>
+    /// Gets the properties still referencing the subject after a removed property reference, as known to the
+    /// interceptor reporting the change.
+    /// </summary>
+    internal PropertyReferenceSet References { get; init; }
+
+    /// <summary>
+    /// Gets whether the added reference is the first after a batch scope deferred the detach of the subject,
+    /// so that the subject stayed attached without a reference in between.
+    /// </summary>
+    internal bool EndsDeferredDetach { get; init; }
 }

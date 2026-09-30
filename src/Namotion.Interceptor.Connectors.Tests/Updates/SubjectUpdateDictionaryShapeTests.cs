@@ -14,8 +14,11 @@ public class SubjectUpdateDictionaryShapeTests
         // Arrange
         var source = new Person(InterceptorSubjectContext.Create().WithRegistry());
         var target = new Person(InterceptorSubjectContext.Create().WithRegistry());
-        var sourceChildren = new LegacyDictionary<string, Person> { ["child"] = new Person { FirstName = "Ada" } };
+        var sourceChild = new Person { FirstName = "Ada" };
+        var sourceChildren = new LegacyDictionary<string, Person> { ["child"] = sourceChild };
         var targetChild = new Person { FirstName = "Old" };
+        // Existing entries are matched by subject ID, so the target's child carries the source child's ID.
+        targetChild.SetSubjectId(sourceChild.GetOrAddSubjectId());
         var targetChildren = new LegacyDictionary<string, Person> { ["child"] = targetChild };
         source.TryGetRegisteredSubject()!.AddProperty("RuntimeChildren", typeof(LegacyDictionary<string, Person>),
             _ => sourceChildren, (_, _) => { });
@@ -58,7 +61,7 @@ public class SubjectUpdateDictionaryShapeTests
         // Assert
         var propertyUpdate = update.Subjects[update.Root!]["RuntimeChildren"];
         Assert.Equal(SubjectPropertyUpdateKind.Dictionary, propertyUpdate.Kind);
-        Assert.Equal("child", Assert.Single(propertyUpdate.Items!).Index);
+        Assert.Equal("child", Assert.Single(propertyUpdate.Items!).Key);
         Assert.True(declaredType.IsInstanceOfType(targetChildren));
         Assert.Equal("Ada", Assert.IsType<Person>(targetChildren!["child"]).FirstName);
         Assert.Equal("child", Assert.Single(target.TryGetRegisteredProperty("RuntimeChildren")!.Children).Index);

@@ -1,236 +1,219 @@
 using System.Collections;
-using System.Text.Json;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
-/// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
-/// Handles structural operations (Insert, Remove, Move) and sparse property updates.
+/// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances. The items state the
+/// complete membership: a listed subject is resolved or created, and a member that is not listed is removed.
 /// </summary>
 internal static class SubjectItemsUpdateApplier
 {
-    /// <summary>
-    /// Applies a collection (array/list) update to a property.
-    /// </summary>
     internal static void ApplyCollectionUpdate(
-        IInterceptorSubject parent,
-        RegisteredSubjectProperty property,
+        PropertyReference property,
+        in SubjectPropertyMetadata metadata,
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = SubjectValueConvert.ToSubjectMutableList(property.GetValue());
-        var structureChanged = false;
-
-        // Apply structural operations in two phases:
-        // Phase 1: Remove and Insert operations (applied sequentially)
-        // Phase 2: Move operations (applied atomically using snapshot)
-        if (propertyUpdate.Operations is { Count: > 0 })
+        var itemType = metadata.Type.GetCollectionElementType();
+        if (metadata.SetValue is null)
         {
-            // Phase 1: Apply Remove and Insert operations sequentially
-            // Removes should be in descending order so they don't affect each other's indices
-            foreach (var operation in propertyUpdate.Operations)
-            {
-                var index = ConvertIndexToInt(operation.Index);
-                switch (operation.Action)
-                {
-                    case SubjectCollectionOperationType.Remove:
-                        if (index >= 0 && index < workingItems.Count)
-                        {
-                            workingItems.RemoveAt(index);
-                            structureChanged = true;
-                        }
-                        break;
+            ApplyToHeldMembers(property, propertyUpdate, IndexMembers(metadata.GetValue?.Invoke(property.Subject)),
+                keyType: null, itemType, context);
+            return;
+        }
 
-                    case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
-                        {
-                            var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
-                            if (index >= workingItems.Count)
-                                workingItems.Add(newItem);
-                            else
-                                workingItems.Insert(index, newItem);
-                            structureChanged = true;
-                        }
-                        break;
-                }
-            }
+        if (propertyUpdate.Items is not { } items)
+        {
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
+            return;
+        }
 
-            // Phase 2: Apply Move operations atomically using snapshot
-            // Move indices reference the state after removes/inserts, and moves are applied simultaneously
-            var hasMoves = propertyUpdate.Operations.Any(op => op.Action == SubjectCollectionOperationType.Move);
-            if (hasMoves)
+        var members = new (IInterceptorSubject Subject, string Id, bool IsCreated)[items.Count];
+        var memberCount = 0;
+        foreach (var itemUpdate in items)
+        {
+            if (TryResolveOrCreateMember(itemUpdate.Id, itemType, context, out var member))
             {
-                var snapshot = workingItems.ToArray();
-                foreach (var operation in propertyUpdate.Operations)
-                {
-                    if (operation is { Action: SubjectCollectionOperationType.Move, FromIndex: not null })
-                    {
-                        var toIndex = ConvertIndexToInt(operation.Index);
-                        var fromIndex = operation.FromIndex.Value;
-                        if (fromIndex >= 0 && fromIndex < snapshot.Length && toIndex >= 0 && toIndex < workingItems.Count)
-                        {
-                            workingItems[toIndex] = snapshot[fromIndex];
-                            structureChanged = true;
-                        }
-                    }
-                }
+                members[memberCount++] = member;
             }
         }
 
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
+        var subjects = new IInterceptorSubject[memberCount];
+        for (var i = 0; i < memberCount; i++)
         {
-            foreach (var collectionUpdate in propertyUpdate.Items)
+            subjects[i] = members[i].Subject;
+        }
+
+        context.SetPropertyValue(property, propertyUpdate.Timestamp,
+            context.SubjectFactory.CreateSubjectCollection(metadata.Type, subjects));
+
+        ApplyMemberPayloads(members, memberCount, context);
+    }
+
+    internal static void ApplyDictionaryUpdate(
+        PropertyReference property,
+        in SubjectPropertyMetadata metadata,
+        SubjectPropertyUpdate propertyUpdate,
+        SubjectUpdateApplyContext context)
+    {
+        var (keyType, itemType) = metadata.Type.GetDictionaryKeyAndValueTypes();
+        if (metadata.SetValue is null)
+        {
+            var heldValue = metadata.GetValue?.Invoke(property.Subject);
+            var heldMembers = heldValue is null ? null : SubjectValueConvert.ToSubjectDictionary(heldValue);
+            ApplyToHeldMembers(property, propertyUpdate, heldMembers, keyType, itemType, context);
+            return;
+        }
+
+        if (propertyUpdate.Items is not { } items)
+        {
+            context.SetPropertyValue(property, propertyUpdate.Timestamp, null);
+            return;
+        }
+
+        var entries = new Dictionary<object, IInterceptorSubject>(items.Count);
+        var members = new (IInterceptorSubject Subject, string Id, bool IsCreated)[items.Count];
+        var memberCount = 0;
+        foreach (var itemUpdate in items)
+        {
+            if (itemUpdate.Key is null)
             {
-                var index = ConvertIndexToInt(collectionUpdate.Index);
+                // An entry without a key cannot be placed, so it is lost until the next update carrying
+                // complete state for this dictionary.
+                context.RecordDroppedSubject(itemUpdate.Id);
+                continue;
+            }
 
-                // Validate index against declared count - if count is specified, index must be < count
-                if (propertyUpdate.Count.HasValue && index >= propertyUpdate.Count.Value)
-                {
-                    throw new InvalidOperationException(
-                        $"Invalid collection update: index {index} is out of bounds for declared count {propertyUpdate.Count.Value}. " +
-                        "The index in a sparse update must be less than the declared count.");
-                }
+            var key = DictionaryKeyConverter.Convert(itemUpdate.Key, keyType);
+            if (entries.ContainsKey(key))
+            {
+                throw new InvalidOperationException(
+                    $"The update lists the key '{itemUpdate.Key}' of dictionary property '{property.Name}' more than once.");
+            }
 
-                if (collectionUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collectionUpdate.Id, out var itemProps))
-                {
-                    if (index >= 0 && index < workingItems.Count)
-                    {
-                        // Update existing item
-                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
-                        }
-                    }
-                    else if (index >= 0 && index <= workingItems.Count)
-                    {
-                        // Create new item at append position (for complete updates rebuilding the collection)
-                        var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
-                        if (index >= workingItems.Count)
-                            workingItems.Add(newItem);
-                        else
-                            workingItems[index] = newItem;
-                        structureChanged = true;
-                    }
-                }
+            if (TryResolveOrCreateMember(itemUpdate.Id, itemType, context, out var member))
+            {
+                entries.Add(key, member.Subject);
+                members[memberCount++] = member;
             }
         }
 
-        if (structureChanged)
+        context.SetPropertyValue(property, propertyUpdate.Timestamp,
+            context.SubjectFactory.CreateSubjectDictionary(metadata.Type, entries));
+
+        ApplyMemberPayloads(members, memberCount, context);
+    }
+
+    /// <summary>
+    /// Resolves the subject an item names, or creates it populated, without entering it into the graph yet.
+    /// Returns <c>false</c> when it is unknown here and the update does not carry its complete state.
+    /// </summary>
+    private static bool TryResolveOrCreateMember(
+        string subjectId,
+        Type itemType,
+        SubjectUpdateApplyContext context,
+        out (IInterceptorSubject Subject, string Id, bool IsCreated) member)
+    {
+        if (SubjectUpdateApplier.ResolveSubject(subjectId, itemType, context) is { } existingSubject)
         {
-            var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
-            context.SetPropertyValue(property, propertyUpdate.Timestamp, collection);
+            member = (existingSubject, subjectId, false);
+            return true;
+        }
+
+        var createdSubject = context.TryCreateSubject(subjectId, itemType);
+        member = (createdSubject!, subjectId, true);
+        return createdSubject is not null;
+    }
+
+    /// <summary>
+    /// Applies the payloads of the members that already existed, which are only rooted once the container
+    /// holding them is written. Created members were populated before.
+    /// </summary>
+    private static void ApplyMemberPayloads(
+        (IInterceptorSubject Subject, string Id, bool IsCreated)[] members,
+        int memberCount,
+        SubjectUpdateApplyContext context)
+    {
+        for (var i = 0; i < memberCount; i++)
+        {
+            if (!members[i].IsCreated)
+            {
+                context.ApplySubjectPayload(members[i].Subject, members[i].Id);
+            }
         }
     }
 
     /// <summary>
-    /// Applies a dictionary update to a property.
+    /// Applies an update to a container this model cannot write: the subjects it holds take the payloads of
+    /// the members the update names at their position, adopting their IDs unless an ID names another subject
+    /// here. A membership that differs from the held one cannot be stored and is reported as dropped structure.
     /// </summary>
-    internal static void ApplyDictionaryUpdate(
-        IInterceptorSubject parent,
-        RegisteredSubjectProperty property,
+    private static void ApplyToHeldMembers(
+        PropertyReference property,
         SubjectPropertyUpdate propertyUpdate,
+        IDictionary? heldMembers,
+        Type? keyType,
+        Type itemType,
         SubjectUpdateApplyContext context)
     {
-        var targetKeyType = property.Type.GetDictionaryKeyAndValueTypes().Key;
-        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
-        var structureChanged = false;
-
-        var existingValue = property.GetValue();
-        if (existingValue is not null)
+        if (propertyUpdate.Items is not { } items)
         {
-            foreach (DictionaryEntry entry in SubjectValueConvert.ToSubjectDictionary(existingValue))
+            return;
+        }
+
+        var isHeld = (heldMembers?.Count ?? 0) == items.Count;
+        for (var i = 0; i < items.Count; i++)
+        {
+            var itemUpdate = items[i];
+            if (keyType is not null && itemUpdate.Key is null)
             {
-                if (entry.Value is IInterceptorSubject subject)
-                    workingDictionary[entry.Key] = subject;
+                // An entry without a key cannot be placed.
+                context.RecordDroppedSubject(itemUpdate.Id);
+                isHeld = false;
+                continue;
+            }
+
+            var key = keyType is null ? i : DictionaryKeyConverter.Convert(itemUpdate.Key!, keyType);
+            var heldMember = heldMembers?.Contains(key) == true ? heldMembers[key] as IInterceptorSubject : null;
+
+            if (!context.TryResolveSubject(itemUpdate.Id, out var subject) &&
+                heldMember is not null &&
+                context.TryAdoptSubject(itemUpdate.Id, heldMember))
+            {
+                subject = heldMember;
+            }
+
+            if (subject is null || !ReferenceEquals(subject, heldMember) || !itemType.IsInstanceOfType(subject))
+            {
+                isHeld = false;
+            }
+
+            if (subject is not null)
+            {
+                context.ApplySubjectPayload(subject, itemUpdate.Id);
             }
         }
 
-        // Apply structural operations
-        if (propertyUpdate.Operations is { Count: > 0 })
+        if (!isHeld)
         {
-            foreach (var operation in propertyUpdate.Operations)
-            {
-                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
-                switch (operation.Action)
-                {
-                    case SubjectCollectionOperationType.Remove:
-                        if (workingDictionary.Remove(key))
-                            structureChanged = true;
-                        break;
-
-                    case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
-                        {
-                            var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
-                            workingDictionary[key] = newItem;
-                            structureChanged = true;
-                        }
-                        break;
-                }
-            }
-        }
-
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
-        {
-            foreach (var collUpdate in propertyUpdate.Items)
-            {
-                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
-
-                if (collUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
-                {
-                    if (workingDictionary.TryGetValue(key, out var existing))
-                    {
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
-                        }
-                    }
-                    else
-                    {
-                        var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
-                        workingDictionary[key] = newItem;
-                        structureChanged = true;
-                    }
-                }
-            }
-        }
-
-        if (structureChanged)
-        {
-            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
-            context.SetPropertyValue(property, propertyUpdate.Timestamp, dictionary);
+            context.DropStructure(property, propertyUpdate);
         }
     }
 
-    private static int ConvertIndexToInt(object index) => index switch
+    private static IDictionary? IndexMembers(object? collection)
     {
-        int i => i,
-        JsonElement json => json.GetInt32(),
-        _ => Convert.ToInt32(index)
-    };
-
-    private static object ConvertDictionaryKey(object key, Type targetKeyType)
-        => DictionaryKeyConverter.Convert(key, targetKeyType);
-
-    private static IInterceptorSubject CreateAndApplyItem(
-        IInterceptorSubject parent,
-        RegisteredSubjectProperty property,
-        object indexOrKey,
-        string subjectId,
-        Dictionary<string, SubjectPropertyUpdate> properties,
-        SubjectUpdateApplyContext context)
-    {
-        var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
-        newItem.Context.AddFallbackContext(parent.Context);
-        if (context.TryMarkAsProcessed(subjectId))
+        if (collection is null)
         {
-            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+            return null;
         }
-        return newItem;
+
+        var members = SubjectValueConvert.ToSubjectList(collection);
+        var indexedMembers = new Dictionary<object, IInterceptorSubject>(members.Count);
+        for (var i = 0; i < members.Count; i++)
+        {
+            indexedMembers.Add(i, members[i]);
+        }
+
+        return indexedMembers;
     }
 }
