@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace HomeBlaze.OpcUa.Tests;
@@ -37,6 +38,30 @@ public class OpcUaServerTests
         Assert.Equal("Could not resolve subject at path: /NotInTheGraph", server.StatusMessage);
         Assert.Empty(server.GetHostedServiceAttachments());
         Assert.False(server.IsServerRunning);
+    }
+
+    [Fact]
+    public async Task WhenAnEnabledServerEntersTheGraph_ThenTheServerHoldIsTakenBeforeTheWrapperHoldIsReleased()
+    {
+        // Arrange
+        var holds = new StartupHoldRecorder();
+        await using var testHost = await OpcUaTestHost.StartAsync(
+            context => context.AddService<IStartupCompletionDeferrer>(holds));
+        await testHost.LoadRootAsync();
+        var server = testHost.CreateServer("/NotInTheGraph");
+
+        // Act
+        testHost.Container.Server = server;
+        await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Error);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => holds.Outstanding == 0,
+            message: "A startup hold was never released.");
+
+        // Assert
+        // The wrapper's own hold and the attached server's, which is taken when its start is queued and
+        // so whether or not that start then fails, as it does here against a path that does not resolve.
+        Assert.Equal(2, holds.Taken);
+        Assert.Equal(2, holds.TakenWhenFirstSettled);
     }
 
     [Fact]
@@ -221,10 +246,11 @@ public class OpcUaServerTests
             "/NotInTheGraph", isEnabled: false, rootLoadWaitTimeout: TimeSpan.FromMilliseconds(200));
         testHost.Container.Server = server;
 
-        // Enabling it before the run loop has read the flag would let the loop start a second time.
+        // Enabling it before the wrapper's own start has read the flag would start it a second time.
+        // The base start sets ExecuteTask after that read, so the task being there proves it happened.
         await AsyncTestHelpers.WaitUntilAsync(
             () => server.ExecuteTask is not null,
-            message: "The handler did not start the server's run loop.");
+            message: "The handler did not start the server.");
 
         // Act
         // The Start operation passes no token, and the start holds the attachment gate the stop needs
@@ -252,11 +278,11 @@ public class OpcUaServerTests
         var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
         testHost.Container.Server = server;
 
-        // Enabled only once the run loop is past its own start, so the reconfiguration below is the one
-        // start that runs.
+        // Enabled only once the wrapper's own start has read the flag, so the reconfiguration below is
+        // the one start that runs.
         await AsyncTestHelpers.WaitUntilAsync(
             () => server.ExecuteTask is not null,
-            message: "The handler did not start the server's run loop.");
+            message: "The handler did not start the server.");
         server.IsEnabled = true;
 
         using var cancellation = new CancellationTokenSource();
@@ -282,14 +308,14 @@ public class OpcUaServerTests
     private static async Task<(OpcUaServer Server, Task Start)> StartServerThatLeavesTheGraphWhileWaitingAsync(
         OpcUaTestHost testHost)
     {
-        // Disabled, so the run loop starts nothing itself and the start below comes from another caller.
+        // Disabled, so the wrapper starts nothing itself and the start below comes from another caller.
         var server = testHost.CreateServer("/NotInTheGraph", isEnabled: false);
         testHost.Container.Server = server;
 
-        // Leaving the graph before the handler has started the run loop would leave nothing to unwind.
+        // Leaving the graph before the handler has started the wrapper would leave nothing to unwind.
         await AsyncTestHelpers.WaitUntilAsync(
             () => server.ExecuteTask is not null,
-            message: "The handler did not start the server's run loop.");
+            message: "The handler did not start the server.");
 
         var start = server.StartAsync();
         await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Starting);

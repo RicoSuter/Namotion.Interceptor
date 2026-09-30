@@ -189,6 +189,17 @@ public partial class OpcUaServer
         IsEnabled = true;
     }
 
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        _attachmentHost.BeginRun();
+        return base.StartAsync(cancellationToken);
+    }
+
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        return _attachmentHost.StopRunAsync(base.StopAsync, cancellationToken);
+    }
+
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         return _attachmentHost.RunAsync(stoppingToken);

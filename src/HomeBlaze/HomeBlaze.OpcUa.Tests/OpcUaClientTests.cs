@@ -81,6 +81,29 @@ public class OpcUaClientTests
     }
 
     [Fact]
+    public async Task WhenAnEnabledClientEntersTheGraph_ThenTheSourceHoldIsTakenBeforeTheClientHoldIsReleased()
+    {
+        // Arrange
+        var holds = new StartupHoldRecorder();
+        await using var testHost = await OpcUaTestHost.StartAsync(
+            context => context.AddService<IStartupCompletionDeferrer>(holds));
+        var client = testHost.CreateClient();
+
+        // Act
+        testHost.Container.Client = client;
+        await OpcUaTestHost.WaitForRunningClientAsync(client);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => holds.Outstanding == 0,
+            message: "A startup hold was never released.");
+
+        // Assert
+        // The client's own hold and its source's. Settling in between is a startup completion wait
+        // passing while the source it waits for has not been attached yet.
+        Assert.Equal(2, holds.Taken);
+        Assert.Equal(2, holds.TakenWhenFirstSettled);
+    }
+
+    [Fact]
     public async Task WhenTheSubjectLeavesTheGraph_ThenTheUnwindKeepsTheAttachment()
     {
         // Arrange
@@ -378,9 +401,9 @@ public class OpcUaClientTests
         // fails leaves a tree behind that nothing is filling. Failing the write once it has committed
         // is the only seam into that window.
         //
-        // Armed before the client enters the graph, and the start left to the run loop rather than
-        // invoked here: the Start operation enables the client, which is what the loop reads, so a
-        // second start could run against a seam that has already spent itself and succeed.
+        // Armed before the client enters the graph, and the start left to the one the enabled client
+        // issues from its own start rather than invoked here: the Start operation would be a second
+        // start, which could run against a seam that has already spent itself and succeed.
         var failed = 0;
         testHost.WriteSeam.ArmAfterWrite((property, value) =>
         {
@@ -425,14 +448,14 @@ public class OpcUaClientTests
 
         var attachment = Assert.Single(client.GetHostedServiceAttachments());
 
-        // Disabled before the re-attach, so the run loop the re-attach restarts issues no start of its
+        // Disabled before the re-attach, so the wrapper start the re-attach runs issues no start of its
         // own. The poll is then the only thing that writes, and it is gated against the stop below.
         client.IsEnabled = false;
         await ReAttachWithAFailingFactoryAsync(testHost, client, attachment);
 
         // The fault only reaches the wrapper through a reconciliation, which the stop the unwind reported
         // short circuits until something asks for a start again. Lifting it by hand rather than through
-        // the Start operation, which would enable the client and hand the run loop a start.
+        // the Start operation, which would enable the client and start it.
         client.Status = ServiceStatus.Starting;
         await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Error);
         Assert.Equal(FactoryFailureMessage, client.StatusMessage);
@@ -682,9 +705,9 @@ public class OpcUaClientTests
         // The factory's first act is publishing the tree it is about to bind a source to, and the start
         // holds the gate across the whole attach, so holding it there holds the gate.
         //
-        // Armed before the client enters the graph, and the start left to the run loop rather than
-        // invoked here: the Start operation enables the client, which is what the loop reads, so a second
-        // start would queue on the gate and write Starting after the first one has reported Running.
+        // Armed before the client enters the graph, and the start left to the one the enabled client
+        // issues from its own start rather than invoked here: the Start operation would be a second
+        // start, which would queue on the gate and write Starting after the first one has reported Running.
         using var factoryReached = new ManualResetEventSlim();
         using var releaseFactory = new ManualResetEventSlim();
         var held = 0;
@@ -788,14 +811,14 @@ public class OpcUaClientTests
         // Arrange
         await using var testHost = await OpcUaTestHost.StartAsync();
 
-        // Disabled, so the run loop starts nothing itself and the start below comes from another caller.
+        // Disabled, so the wrapper starts nothing itself and the start below comes from another caller.
         var client = testHost.CreateClient(isEnabled: false);
         testHost.Container.Client = client;
 
-        // Leaving the graph before the handler has started the run loop would leave nothing to unwind.
+        // Leaving the graph before the handler has started the wrapper would leave nothing to unwind.
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.ExecuteTask is not null,
-            message: "The handler did not start the client's run loop.");
+            message: "The handler did not start the client.");
 
         // The factory runs on the attachment's chain and the unwind on the subject's, so holding the
         // factory keeps the start inside its attach, with the gate held, while the unwind reports

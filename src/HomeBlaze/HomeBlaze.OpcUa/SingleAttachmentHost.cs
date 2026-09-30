@@ -23,7 +23,7 @@ internal interface IAttachmentOwner<TService> : IInterceptorSubject
     /// <summary>The text behind <see cref="ServiceStatus.Error"/>, and null at every other status.</summary>
     string? StatusMessage { get; set; }
 
-    /// <summary>Whether a start is wanted, read by the run loop and after a configuration edit.</summary>
+    /// <summary>Whether a start is wanted, read when the wrapper starts and after a configuration edit.</summary>
     bool IsEnabled { get; }
 
     /// <summary>What the wrapper calls itself in its own log messages.</summary>
@@ -92,7 +92,7 @@ internal sealed class SingleAttachmentHost<TService>
     /// Serializes the start path, the stop path and the diagnostics poll against each other, and is
     /// what publishes <see cref="_attachment"/> between the threads that touch it. Held across the
     /// whole of each path, because the guard on the attachment spans the attach's own await. Never
-    /// waited for from the subject's own StopAsync or from the unwind in <see cref="RunAsync"/>, so it
+    /// waited for from the subject's own StopAsync or from the unwind in <see cref="StopRunAsync"/>, so it
     /// can never park inside the handler's stop transition for that subject.
     /// </summary>
     private readonly SemaphoreSlim _attachmentGate = new(1, 1);
@@ -119,6 +119,15 @@ internal sealed class SingleAttachmentHost<TService>
     /// </summary>
     private IHostedServiceAttachment<TService>? _attachment;
 
+    /// <summary>
+    /// Cancels the start <see cref="BeginRun"/> issued once the wrapper stops. A source of its own
+    /// because that start is issued before the base start creates the execution's stopping token.
+    /// </summary>
+    private CancellationTokenSource? _runCancellation;
+
+    /// <summary>The start <see cref="BeginRun"/> issued, which the run loop waits out before it polls.</summary>
+    private Task _startupStart = Task.CompletedTask;
+
     /// <remarks>
     /// <paramref name="pollInterval"/> is null for the default, and injectable because a suite that
     /// runs in seconds cannot reach the reconciled states on the production interval.
@@ -131,15 +140,29 @@ internal sealed class SingleAttachmentHost<TService>
     }
 
     /// <summary>
-    /// The wrapper's own background loop: the start it wants on startup, the diagnostics poll, and the
-    /// unwind that runs when the subject leaves the graph or the host shuts down.
+    /// Issues the start the wrapper wants on startup. Called from the wrapper's own StartAsync ahead of
+    /// the base call, which only schedules the run loop, so the attach is issued inside the wrapper's
+    /// start and the attachment's startup hold is taken before the wrapper's own is released.
+    /// </summary>
+    /// <remarks>
+    /// Not awaited there, so a start that has to wait for the gate or for
+    /// <see cref="IAttachmentOwner{TService}.WaitUntilStartableAsync"/> cannot hold up the wrapper's start.
+    /// Such a start takes its hold only once it gets past that wait.
+    /// </remarks>
+    public void BeginRun()
+    {
+        _runCancellation = new CancellationTokenSource();
+        _startupStart = _owner.IsEnabled ? StartAsync(_runCancellation.Token) : Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The wrapper's own background loop: the diagnostics poll, once the start <see cref="BeginRun"/>
+    /// issued has finished.
     /// </summary>
     public async Task RunAsync(CancellationToken stoppingToken)
     {
-        if (_owner.IsEnabled)
-        {
-            await StartAsync(stoppingToken);
-        }
+        // Never throws: the start reports every failure as a status.
+        await _startupStart;
 
         try
         {
@@ -152,11 +175,26 @@ internal sealed class SingleAttachmentHost<TService>
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
+    }
 
-        // Deliberately does NOT detach, and deliberately does not take the gate: this unwind runs inside
-        // the handler's own stop transition for this subject, and either one would wait on that
-        // transition. See docs/hosting.md#do-not-detach-from-your-own-stop-path. What the instance
-        // published is left alone for the same reason, and UpdateFromAttachment drops it instead.
+    /// <summary>
+    /// The wrapper's own stop: cancels the start <see cref="BeginRun"/> issued, runs
+    /// <paramref name="stopExecution"/>, the base stop that waits for the run loop, and reports the
+    /// wrapper stopped.
+    /// </summary>
+    public async Task StopRunAsync(Func<CancellationToken, Task> stopExecution, CancellationToken cancellationToken)
+    {
+        _runCancellation?.Cancel();
+        await stopExecution(cancellationToken);
+
+        // Deliberately does NOT detach, and deliberately does not take the gate: this runs inside the
+        // handler's own stop transition for this subject, and either one would wait on that transition.
+        // See docs/hosting.md#do-not-detach-from-your-own-stop-path. What the instance published is left
+        // alone for the same reason, and UpdateFromAttachment drops it instead.
+        //
+        // Here rather than at the end of the run loop: a stop that lands before the loop was scheduled
+        // cancels it without running it, and the start BeginRun issued would then leave a status that
+        // nothing ever reports stopped.
         ReportStopped();
     }
 
@@ -168,7 +206,7 @@ internal sealed class SingleAttachmentHost<TService>
     {
         await StopAsync(cancellationToken);
 
-        // Guarded here rather than left to the run loop's caller-side check: without it an edit that
+        // Guarded here as in BeginRun rather than left to the caller: without it an edit that
         // disables the wrapper stops it and starts it again in the same call.
         if (_owner.IsEnabled)
         {
@@ -210,8 +248,8 @@ internal sealed class SingleAttachmentHost<TService>
             }
 
             // The attachment survives a context detach, so on re-attach the handler re-invokes the
-            // factory itself. Without this guard a restarted run loop would attach a second instance
-            // alongside the one the handler just re-created.
+            // factory itself. Without this guard the wrapper's own start on that re-attach would attach
+            // a second instance alongside the one the handler just re-created.
             if (_attachment is null)
             {
                 // CancellationToken.None rather than the caller's token: the returned handle is the
