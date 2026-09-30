@@ -34,14 +34,13 @@ var builder = Host.CreateApplicationBuilder(args);
 var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
-    .WithRegistry()
-    .WithLifecycle();
+    .WithRegistry();
 
 builder.Services.AddSingleton(new HeatMeter(context));
 builder.Services.AddModbusSubjectClientSource<HeatMeter>("192.168.1.50");
 ```
 
-The context needs `WithRegistry()`, because the connector walks the subject tree when it connects, and `WithLifecycle()`, because the source claims the properties it reads. Without lifecycle tracking, resolving or creating the source throws `InvalidOperationException`; without the registry, every connect attempt fails with `InvalidOperationException`. The configuration is validated when the source is resolved or created and throws `ArgumentException` for a value out of range.
+The context needs `WithRegistry()`, because the connector walks the subject tree when it connects, and lifecycle tracking (added by `WithFullPropertyTracking()` or `WithRegistry()`), because the source claims the properties it reads. Without lifecycle tracking, resolving or creating the source throws `InvalidOperationException`; without the registry, every connect attempt fails with `InvalidOperationException`. The configuration is validated when the source is resolved or created and throws `ArgumentException` for a value out of range.
 
 Register a source with its own configuration through the `AddModbusSubjectClientSource(subjectSelector, configurationProvider)` overload, and several sources with `AddKeyedModbusSubjectClientSource`, which makes each one resolvable as a keyed `ModbusSubjectClientSource`. Only one unnamed source can be registered.
 
@@ -65,7 +64,7 @@ Addresses are raw protocol addresses, without the `3xxxx`/`4xxxx` documentation 
 
 Values convert as follows:
 
-- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums, including flags enums. Undefined enum values pass through.
+- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
 - Scaled values require a `float`, `double` or `decimal` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
 - F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
 - String reads two ASCII characters per register and trims trailing NUL and space characters.
@@ -110,6 +109,13 @@ public partial class Inverter : IModbusDiscovery
         Battery = batteryRegisters[0] != 0 ? Battery ?? new Battery() : null;
     }
 }
+
+[InterceptorSubject]
+public partial class Battery
+{
+    [ModbusRegister(201, ModbusDataType.U16, AddressSpace = ModbusAddressSpace.InputRegister, Scale = 0.1)]
+    public partial decimal? StateOfCharge { get; internal set; }
+}
 ```
 
 ## Configuration
@@ -119,7 +125,7 @@ public partial class Inverter : IModbusDiscovery
 | `Host` | required | Host name or IP address |
 | `Port` | 502 | TCP port, 1 to 65535 |
 | `UnitId` | 1 | Default unit ID |
-| `PollingInterval` | 2 s | Time between poll cycles |
+| `PollingInterval` | 2 s | Interval at which poll cycles start |
 | `RequestTimeout` | 5 s | Timeout of the TCP connect and of each request; a request timeout counts as a lost connection |
 | `RetryTime` | 10 s | Delay before reconnecting after a lost connection or a failed connect attempt |
 | `BufferTime` | 8 ms | Change queue buffer time |
@@ -131,11 +137,11 @@ The time spans must be positive (`BufferTime` may be zero) and at most `int.MaxV
 
 Mappings are grouped by unit ID and space, sorted by address and merged into requests of at most 125 registers or 2000 bits. With the default gap of 0 only contiguous mappings are merged, because many devices reject reads that touch unmapped addresses. Each cycle reads all requests first and then applies only values whose raw registers changed, so an unchanged cycle converts nothing and raises no change events. All values of a cycle share one timestamp, since Modbus carries none.
 
-The initial load reads every mapping once before the source reports `Synchronized`, so the model holds device values from then on.
+The initial load reads every mapping once (except those the device rejects) before the source reports `Synchronized`, so the model holds device values from then on.
 
 ## Local Writes
 
-Mapped properties are owned by the source, so local changes reach it but are not sent to the device. The source logs a warning once per property and connection and applies the device value again on the next poll, even when it did not change, so the model converges back to the device state.
+Mapped properties are owned by the source, so local changes reach it but are not sent to the device. The source logs a warning once per property and connection and applies the device value again on the next poll, even when it did not change, so the model converges back to the device state. A local write, including one made in a transaction, is reported to the change queue and to transactions as written, although nothing is sent; the next poll restores the device value.
 
 ## Resilience
 
@@ -175,6 +181,6 @@ Properties of subjects attached after the source connected are picked up on the 
 
 ## References
 
-- [Modbus Application Protocol Specification V1.1b3](https://modbus.org/docs/Modbus_Application_Protocol_V1_1b3.pdf)
-- [Modbus Messaging on TCP/IP Implementation Guide V1.0b](https://modbus.org/docs/Modbus_Messaging_Implementation_Guide_V1_0b.pdf)
+- [Modbus Application Protocol Specification V1.1b3](https://www.modbus.org/file/secure/modbusprotocolspecification.pdf)
+- [Modbus Messaging on TCP/IP Implementation Guide V1.0b](https://www.modbus.org/file/secure/messagingimplementationguide.pdf)
 - [FluentModbus](https://github.com/Apollo3zehn/FluentModbus)
