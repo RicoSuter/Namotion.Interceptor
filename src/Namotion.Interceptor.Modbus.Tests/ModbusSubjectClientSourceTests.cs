@@ -125,15 +125,24 @@ public partial class ModbusSubjectClientSourceTests
             logger ?? NullLogger.Instance);
 
     private static async Task<(TestDevice Device, ModbusSubjectClientSource Source, SourceStateRecorder Recorder)> StartAsync(
-        ModbusTestServer server, Action<TestDevice>? configure = null)
+        ModbusTestServer server, Action<TestDevice>? configure = null, ILogger? logger = null)
     {
         var device = CreateDevice(configure);
-        var source = CreateSource(device, server);
+        var source = CreateSource(device, server, logger);
 
         var recorder = SourceStateRecorder.SubscribeTo(source);
-        await source.StartAsync(CancellationToken.None);
-        await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should synchronize.", SourceState.Synchronized);
-        return (device, source, recorder);
+        try
+        {
+            await source.StartAsync(CancellationToken.None);
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should synchronize.", SourceState.Synchronized);
+            return (device, source, recorder);
+        }
+        catch
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+            throw;
+        }
     }
 
     [Fact]
@@ -209,6 +218,47 @@ public partial class ModbusSubjectClientSourceTests
             recorder.Dispose();
             await source.DisposeAsync();
         }
+    }
+
+    [Fact]
+    public async Task WhenPropertyIsWrittenLocallyAgain_ThenTheWarningIsLoggedOncePerConnection()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        var logger = new RecordingLogger();
+        var (device, source, recorder) = await StartAsync(server, logger: logger);
+        try
+        {
+            // Act
+            await WriteLocallyAndWaitForRestoreAsync(device, 998);
+            await WriteLocallyAndWaitForRestoreAsync(device, 999);
+            var warningsBeforeReconnect = CountWriteWarnings(logger);
+
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
+                SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
+            await WriteLocallyAndWaitForRestoreAsync(device, 999);
+
+            // Assert
+            Assert.Equal(1, warningsBeforeReconnect);
+            Assert.Equal(2, CountWriteWarnings(logger));
+        }
+        finally
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+        }
+
+        static async Task WriteLocallyAndWaitForRestoreAsync(TestDevice device, int value)
+        {
+            device.Counter = value;
+            await AsyncTestHelpers.WaitUntilAsync(() => device.Counter == 42, TimeSpan.FromSeconds(10), message: "The device value should be restored.");
+        }
+
+        static int CountWriteWarnings(RecordingLogger logger)
+            => logger.Warnings.Count(warning => warning.Contains(nameof(TestDevice.Counter)) && warning.Contains("cannot be written"));
     }
 
     [Fact]
@@ -426,26 +476,26 @@ public partial class ModbusSubjectClientSourceTests
             testDevice.Discovered = isChildActive.Value ? testDevice.Discovered ?? new DiscoveredChild() : null;
             return Task.CompletedTask;
         });
+        var child = device.Discovered;
+        var initialValue = child?.Value;
         try
         {
-            var child = Assert.IsType<DiscoveredChild>(device.Discovered);
-            Assert.Equal(9, child.Value);
-
             // Act
             isChildActive.Value = false;
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-
-            // Assert
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
                 SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
-            Assert.True(device.DiscoveryCount >= 2);
-            Assert.Null(device.Discovered);
-            Assert.False(new PropertyReference(child, nameof(DiscoveredChild.Value)).TryGetSource(out _));
-
             server.SetHoldingRegister<ushort>(30, 10);
             var pollsAfterChange = source.Diagnostics.Polling.TotalPolls;
             await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= pollsAfterChange + 2, TimeSpan.FromSeconds(10),
                 message: "Polling should continue after the child is removed.");
+
+            // Assert
+            Assert.NotNull(child);
+            Assert.Equal(9, initialValue);
+            Assert.True(device.DiscoveryCount >= 2);
+            Assert.Null(device.Discovered);
+            Assert.False(new PropertyReference(child, nameof(DiscoveredChild.Value)).TryGetSource(out _));
             Assert.Equal(9, child.Value);
         }
         finally
@@ -524,13 +574,14 @@ public partial class ModbusSubjectClientSourceTests
         SeedServer(server);
         var (device, source, recorder) = await StartAsync(server);
         var counter = new PropertyReference(device, nameof(TestDevice.Counter));
-        Assert.True(counter.TryGetSource(out _));
+        var wasClaimed = counter.TryGetSource(out _);
 
         // Act
         recorder.Dispose();
         await source.DisposeAsync();
 
         // Assert
+        Assert.True(wasClaimed);
         Assert.False(counter.TryGetSource(out _));
         Assert.False(source.Diagnostics.IsOperational);
     }
@@ -643,6 +694,7 @@ public partial class ModbusSubjectClientSourceTests
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
                 SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
             Assert.False(optional.TryGetSource(out _));
+            Assert.Equal(7, device.Optional);
             Assert.Equal(5, source.Diagnostics.ClaimedPropertyCount);
         }
         finally

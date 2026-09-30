@@ -60,6 +60,7 @@ public class ModbusConnectionTests
 
     [Theory]
     [InlineData(ModbusExceptionCode.IllegalFunction, true)]
+    [InlineData(ModbusExceptionCode.IllegalDataAddress, true)]
     [InlineData(ModbusExceptionCode.IllegalDataValue, true)]
     [InlineData(ModbusExceptionCode.ServerDeviceFailure, false)]
     [InlineData(ModbusExceptionCode.ServerDeviceBusy, false)]
