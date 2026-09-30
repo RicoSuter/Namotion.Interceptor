@@ -33,6 +33,7 @@ public partial class SqliteHistoryStoreSubject :
     private HistoryChangeRecorder? _recorder;
     private SqliteHistoryStore? _engine;
     private Settings? _settings;
+    private DateTimeOffset _coverageStartedAt;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
     {
@@ -234,7 +235,7 @@ public partial class SqliteHistoryStoreSubject :
         // A recorder is not a sink that can fall behind the model, so the settled condition never holds
         // for it. Under the other rule a source-applied value does not retire an older commit, which is
         // what keeps both points in the series.
-        return new ChangeQueueProcessor(
+        var processor = new ChangeQueueProcessor(
             this,
             ((IInterceptorSubject)this).Context,
             HistoryChangeRecorder.IsEligible,
@@ -244,6 +245,11 @@ public partial class SqliteHistoryStoreSubject :
             bufferTime: TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
+
+        // Captured after subscribing, before StartAsync returns, so delayed engine creation does not
+        // put startup samples outside coverage. Only the service's sequential session flow reads it.
+        _coverageStartedAt = DateTimeOffset.UtcNow;
+        return processor;
     }
 
     /// <inheritdoc />
@@ -296,7 +302,7 @@ public partial class SqliteHistoryStoreSubject :
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
-        engine.BeginCoverageSession();
+        engine.BeginCoverageSession(_coverageStartedAt);
         Volatile.Write(ref _engine, engine);
 
         _logger.LogInformation("Recording SQLite history to {Directory}.", directory);

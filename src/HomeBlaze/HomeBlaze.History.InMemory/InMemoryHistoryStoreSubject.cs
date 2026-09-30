@@ -33,6 +33,7 @@ public partial class InMemoryHistoryStoreSubject :
     private HistoryChangeRecorder? _recorder;
     private InMemoryHistoryStore? _engine;
     private Settings? _settings;
+    private DateTimeOffset _coverageStartedAt;
 
     public InMemoryHistoryStoreSubject(ILogger<InMemoryHistoryStoreSubject> logger)
     {
@@ -196,7 +197,7 @@ public partial class InMemoryHistoryStoreSubject :
         // A recorder is not a sink that can fall behind the model, so the settled condition never holds
         // for it. Under the other rule a source-applied value does not retire an older commit, which is
         // what keeps both points in the series.
-        return new ChangeQueueProcessor(
+        var processor = new ChangeQueueProcessor(
             this,
             ((IInterceptorSubject)this).Context,
             HistoryChangeRecorder.IsEligible,
@@ -206,6 +207,11 @@ public partial class InMemoryHistoryStoreSubject :
             bufferTime: TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
+
+        // Captured after subscribing, before StartAsync returns, so delayed engine creation does not
+        // put startup samples outside coverage. Only the service's sequential session flow reads it.
+        _coverageStartedAt = DateTimeOffset.UtcNow;
+        return processor;
     }
 
     /// <inheritdoc />
@@ -243,7 +249,7 @@ public partial class InMemoryHistoryStoreSubject :
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
-        engine.BeginCoverageSession();
+        engine.BeginCoverageSession(_coverageStartedAt);
         Volatile.Write(ref _engine, engine);
 
         Status = "Running";

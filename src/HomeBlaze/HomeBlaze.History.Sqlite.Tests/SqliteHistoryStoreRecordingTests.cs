@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+using Namotion.Interceptor.Connectors;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -536,4 +538,76 @@ public class SqliteHistoryStoreRecordingTests
         AsyncTestHelpers.WaitUntilAsync(
             () => store.CoverageRanges.Length == 2,
             message: "Store never began a second coverage session after the configuration was applied.");
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task WhenWrittenBeforeProcessingStarts_ThenHistoryQueriesIncludeTheSample(bool restart, bool heldValue)
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        using var store = new GatedHistoryStore();
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            var release = await store.Sessions.Reader.ReadAsync(timeout.Token);
+            if (restart)
+            {
+                release.SetResult();
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+                release = await store.Sessions.Reader.ReadAsync(timeout.Token);
+            }
+
+            // Act
+            root.Temperature = 21.5;
+            release.SetResult();
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                store.FlushNowAsync().GetAwaiter().GetResult();
+                return QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5);
+            });
+
+            // Assert
+            if (heldValue)
+            {
+                var recorded = Assert.Single(QuerySeries(store, "/Temperature").Points, point => point.Number == 21.5);
+                var sample = await store.GetSampleAtOrBeforeAsync("/Temperature", recorded.Timestamp, timeout.Token);
+                Assert.NotNull(sample);
+                Assert.Equal(21.5, sample.Number);
+            }
+            else
+            {
+                var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow);
+                var series = await new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token);
+                Assert.Contains(series.Points, point => point.Number == 21.5);
+            }
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    private sealed class GatedHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
+    {
+        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
+
+        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        {
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Sessions.Writer.TryWrite(release);
+            await release.Task.WaitAsync(stoppingToken);
+            await base.ProcessAsync(processor, stoppingToken);
+        }
+    }
 }

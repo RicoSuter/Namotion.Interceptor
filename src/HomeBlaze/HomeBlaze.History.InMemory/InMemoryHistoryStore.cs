@@ -67,13 +67,12 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     }
 
     /// <summary>
-    /// Restarts the coverage session at the current instant. The constructor already starts one, so
-    /// this only narrows what the store claims: the owner calls it once its change subscription is
-    /// live, so no change can fall inside claimed coverage without reaching this engine.
+    /// Starts coverage at the instant the owner's change subscription became active.
+    /// Call before recording or publishing the engine for queries.
     /// </summary>
-    internal void BeginCoverageSession()
+    internal void BeginCoverageSession(DateTimeOffset startedAt)
     {
-        Interlocked.Exchange(ref _startTimeUtcTicks, _getUtcNow().UtcTicks);
+        Interlocked.Exchange(ref _startTimeUtcTicks, startedAt.UtcTicks);
         Interlocked.Exchange(ref _coverageEndUtcTicks, 0);
     }
 
