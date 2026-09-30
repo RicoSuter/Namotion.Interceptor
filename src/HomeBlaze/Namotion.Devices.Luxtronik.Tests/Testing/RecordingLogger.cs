@@ -3,19 +3,19 @@ using Microsoft.Extensions.Logging;
 namespace Namotion.Devices.Luxtronik.Tests.Testing;
 
 /// <summary>
-/// Captures the warning messages logged through it, to assert on diagnostics.
+/// Captures the warning and error messages logged through it, to assert on diagnostics.
 /// </summary>
 internal sealed class RecordingLogger<T> : ILogger<T>
 {
-    private readonly List<string> _warnings = [];
+    private readonly List<string> _messages = [];
 
-    public IReadOnlyList<string> Warnings
+    public IReadOnlyList<string> WarningsAndErrors
     {
         get
         {
-            lock (_warnings)
+            lock (_messages)
             {
-                return _warnings.ToArray();
+                return _messages.ToArray();
             }
         }
     }
@@ -28,11 +28,11 @@ internal sealed class RecordingLogger<T> : ILogger<T>
         LogLevel logLevel, EventId eventId, TState state, Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
-        if (logLevel == LogLevel.Warning)
+        if (logLevel >= LogLevel.Warning)
         {
-            lock (_warnings)
+            lock (_messages)
             {
-                _warnings.Add(formatter(state, exception));
+                _messages.Add(formatter(state, exception));
             }
         }
     }

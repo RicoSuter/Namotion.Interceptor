@@ -58,7 +58,7 @@ public class LuxtronikHeatPumpLifecycleTests
     }
 
     [Fact]
-    public async Task WhenHostStops_ThenHeatPumpStopsWithoutWarnings()
+    public async Task WhenHostStops_ThenHeatPumpStopsWithoutWarningsOrErrors()
     {
         // Arrange
         using var server = new LuxtronikTestServer(new Version(3, 92, 3));
@@ -76,7 +76,7 @@ public class LuxtronikHeatPumpLifecycleTests
         await host.DisposeAsync();
 
         // Assert
-        Assert.Empty(logger.Warnings);
+        Assert.Empty(logger.WarningsAndErrors);
         Assert.Equal(ServiceStatus.Stopped, host.HeatPump.Status);
     }
 

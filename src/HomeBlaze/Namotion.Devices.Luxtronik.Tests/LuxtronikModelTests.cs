@@ -1,6 +1,8 @@
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Luxtronik.Attributes;
 using Namotion.Devices.Luxtronik.Enums;
 using Namotion.Devices.Luxtronik.Gating;
@@ -251,6 +253,56 @@ public class LuxtronikModelTests
         Assert.NotNull(heatPump.MixingCircuit2);
         Assert.NotNull(heatPump.MixingCircuit3);
     }
+
+    [Theory]
+    [InlineData(LuxtronikFunction.Heating)]
+    [InlineData(LuxtronikFunction.HotWater)]
+    [InlineData(LuxtronikFunction.Cooling)]
+    [InlineData(LuxtronikFunction.Pool)]
+    [InlineData(LuxtronikFunction.Solar)]
+    [InlineData(LuxtronikFunction.RoomControlUnit)]
+    [InlineData(LuxtronikFunction.MixingCircuit1Heating)]
+    [InlineData(LuxtronikFunction.MixingCircuit1Cooling)]
+    [InlineData(LuxtronikFunction.MixingCircuit2Heating)]
+    [InlineData(LuxtronikFunction.MixingCircuit2Cooling)]
+    [InlineData(LuxtronikFunction.MixingCircuit3Heating)]
+    [InlineData(LuxtronikFunction.MixingCircuit3Cooling)]
+    public void WhenOneFunctionFlagIsSetFromSource_ThenOnlyItsRegisterIsSetAndTheMaskRoundTrips(LuxtronikFunction function)
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+        using var source = CreateSource(heatPump);
+        var functionMask = LuxtronikFunctionMask.Of(function);
+
+        // Act
+        heatPump.Functions.SetFromSource(source, functionMask);
+
+        // Assert
+        Assert.Equal(functionMask, heatPump.Functions.GetFunctionMask());
+        var setProperty = Assert.Single(typeof(LuxtronikFunctions).GetProperties(),
+            property => property.GetValue(heatPump.Functions) is true);
+        Assert.Equal((int)function, setProperty.GetCustomAttribute<ModbusRegisterAttribute>()?.Address);
+    }
+
+    [Fact]
+    public void WhenMixedFunctionFlagsAreSetFromSource_ThenTheMaskRoundTrips()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+        using var source = CreateSource(heatPump);
+        var functionMask = LuxtronikFunctionMask.Of(
+            LuxtronikFunction.Heating, LuxtronikFunction.Pool, LuxtronikFunction.RoomControlUnit,
+            LuxtronikFunction.MixingCircuit1Cooling, LuxtronikFunction.MixingCircuit3Heating);
+
+        // Act
+        heatPump.Functions.SetFromSource(source, functionMask);
+
+        // Assert
+        Assert.Equal(functionMask, heatPump.Functions.GetFunctionMask());
+    }
+
+    private static ModbusSubjectClientSource CreateSource(LuxtronikHeatPump heatPump)
+        => heatPump.CreateModbusClientSource(new ModbusClientConfiguration { Host = "127.0.0.1" }, NullLogger.Instance);
 
     private static List<PropertyInfo> GetRegisterProperties()
         => typeof(LuxtronikRegisterAttribute).Assembly.GetTypes()
