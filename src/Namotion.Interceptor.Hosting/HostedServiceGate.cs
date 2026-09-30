@@ -4,14 +4,13 @@ internal enum HostedServiceGateState
 {
     NotStarted,
     Running,
-    Draining,
-    Drained
+    Draining
 }
 
 /// <summary>
 /// Startup and shutdown gate for hosted service transitions. The state only ever moves forward:
-/// NotStarted to Running to Draining to Drained, or NotStarted straight to Draining when a host is
-/// stopped without having started.
+/// NotStarted to Running to Draining, or NotStarted straight to Draining when a host is stopped
+/// without having started. Draining is final, so it also covers a drain that has returned.
 /// </summary>
 internal sealed class HostedServiceGate
 {
@@ -28,6 +27,20 @@ internal sealed class HostedServiceGate
             lock (_lock)
             {
                 return _state;
+            }
+        }
+    }
+
+    /// <summary>Whether the drain has begun.</summary>
+    public bool IsDraining
+    {
+        get
+        {
+            // A lock rather than a volatile read: the checks that write and then re-read the gate need
+            // a full fence between the two, which an acquire load does not give.
+            lock (_lock)
+            {
+                return _state == HostedServiceGateState.Draining;
             }
         }
     }
@@ -68,16 +81,6 @@ internal sealed class HostedServiceGate
         // does not leave transitions and their awaiters hanging forever.
         _opened.TrySetResult();
         _draining.TrySetResult();
-    }
-
-    public void CompleteDraining()
-    {
-        lock (_lock)
-        {
-            _state = HostedServiceGateState.Drained;
-        }
-
-        _opened.TrySetResult();
     }
 
     /// <summary>

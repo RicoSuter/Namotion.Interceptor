@@ -89,10 +89,9 @@ internal sealed class HostedServiceTarget
     public Exception? Fault => Volatile.Read(ref _fault);
 
     /// <summary>
-    /// The exception from the last start that failed, or null. Cleared where <see cref="Fault"/> is and
-    /// written by no later transition, so a caller waiting on a start reads the outcome of that start
-    /// rather than of whatever ran after it: an execution fault lands on the same chain behind the
-    /// start and can be recorded before or after the caller's read.
+    /// The exception from the last start that failed, or null. Written by no later transition, so a
+    /// caller waiting on a start reads that start's outcome even when an execution fault queued behind
+    /// it has already been recorded in <see cref="Fault"/>.
     /// </summary>
     public Exception? StartFault => Volatile.Read(ref _startFault);
 
@@ -116,10 +115,9 @@ internal sealed class HostedServiceTarget
 
     /// <summary>Enters the start window, with nothing recorded yet.</summary>
     /// <remarks>
-    /// One write, and each of the four transitions below has to stay one write. A reader takes the
-    /// instance and the phase in a single load, so a transition split back into two writes puts a state
-    /// that is neither the one before nor the one after between them, and nothing in the suite would
-    /// catch it: what makes this safe is the shape of the write rather than a test.
+    /// This and each transition below stay one write, which no test can pin: split into two, a reader
+    /// sees a state between them that is neither the one before nor the one after. See
+    /// docs/design/hosting-service-ownership.md#the-state-a-consumer-polls.
     /// </remarks>
     public void BeginStart() => Volatile.Write(ref _snapshot, StartingSnapshot);
 
@@ -133,11 +131,9 @@ internal sealed class HostedServiceTarget
     /// instance alone, because the write that recorded it already left the window.
     /// </summary>
     /// <remarks>
-    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition is load bearing as
-    /// the start body is written: <see cref="CompleteStart"/> replaces the snapshot with the one
-    /// holding the instance, and this runs afterwards in the same body, so settling unconditionally
-    /// would null an instance that has just started. Contrast <see cref="EndStop"/>, whose condition
-    /// guards against a later edit rather than against the body as it stands.
+    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition is load bearing: it
+    /// runs after <see cref="CompleteStart"/>, so settling unconditionally would null an instance that
+    /// has just started.
     /// </remarks>
     public void EndStart() => LeavePhase(TransitionPhase.Starting);
 
@@ -152,13 +148,9 @@ internal sealed class HostedServiceTarget
     /// Leaves the stop window, and leaves the snapshot alone for a stop body that never entered it.
     /// </summary>
     /// <remarks>
-    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition changes nothing for
-    /// the stop body as it stands: the one exit above the phase change is the return taken because the
-    /// target held no instance, the chain runs no other body meanwhile, so an unconditional settle
-    /// there would write the value already in the field. It is conditional so that this method is
-    /// correct on its own rather than on what precedes it, because a guard added above the instance
-    /// read later would otherwise make it a settle over a live instance and nothing would say so.
-    /// Contrast <see cref="EndStart"/>, whose condition is load bearing as the start body stands.
+    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition decides nothing for
+    /// the stop body as it stands, and is kept so that a guard added above its instance read cannot
+    /// turn this into a settle over a live instance.
     /// </remarks>
     public void EndStop() => LeavePhase(TransitionPhase.Stopping);
 
@@ -182,21 +174,16 @@ internal sealed class HostedServiceTarget
     /// disagree.
     /// </summary>
     /// <remarks>
-    /// Two steps of the precedence are not arbitrary. <see cref="HostedServiceAttachmentState.Removed"/>
-    /// outranks <see cref="HostedServiceAttachmentState.Faulted"/> because the mark is terminal for the
-    /// attachment while the fault is not: every start appended after it is refused, and the one start
-    /// that can still run, one queued ahead of the mark, clears the fault on its way past. Ranked the
-    /// other way a target nothing can attach to again would read as the recoverable one of the two.
+    /// <see cref="HostedServiceAttachmentState.Removed"/> outranks
+    /// <see cref="HostedServiceAttachmentState.Faulted"/> because the mark is terminal and the fault is
+    /// not, so ranked the other way an attachment nothing can start again reads as recoverable.
     /// <see cref="HostedServiceAttachmentState.Stopping"/> outranks
-    /// <see cref="HostedServiceAttachmentState.Removed"/> because an explicit detach marks detached and
-    /// then appends its stop, so both hold while that stop runs and "still shutting down" is the more
-    /// urgent of the two; it settles into <see cref="HostedServiceAttachmentState.Removed"/>.
+    /// <see cref="HostedServiceAttachmentState.Removed"/> because an explicit detach marks and then
+    /// stops, so both hold while that stop runs and it settles into Removed.
     /// </remarks>
     public HostedServiceAttachmentState GetState(out IHostedService? current)
     {
-        // The instance and the phase come out of this one load, which is what this method rests on:
-        // they are written together, so no transition can land between them. This is not the only
-        // load taken, and the other two below are not covered by that argument.
+        // The instance and the phase come out of this one load, so no transition can land between them.
         var snapshot = Volatile.Read(ref _snapshot);
         current = snapshot.Instance;
 
@@ -299,20 +286,6 @@ internal sealed class HostedServiceTarget
         }
     }
 
-    /// <summary>Appends a transition no drain waits for.</summary>
-    /// <remarks>
-    /// Test only. Every production append is attributed, or shutdown returns while the transition is
-    /// still about to touch a service provider the host is disposing, and the body keeps the appending
-    /// flow's ambient startup scope, which <see cref="RunAsync"/> clears only for an attributed one.
-    /// </remarks>
-    public Task AppendAsync(Func<Task> body)
-    {
-        lock (_chainLock)
-        {
-            return AppendCore(body, handler: null);
-        }
-    }
-
     /// <summary>
     /// Appends a transition only while <paramref name="handler"/> still owns the target, both decided
     /// under one acquisition of the chain lock. Returns null when ownership has moved on, in which case
@@ -388,12 +361,12 @@ internal sealed class HostedServiceTarget
         }
     }
 
-    private Task AppendCore(Func<Task> body, HostedServiceHandler? handler)
+    private Task AppendCore(Func<Task> body, HostedServiceHandler handler)
     {
         // Before the append, never after: on an already completed tail the continuation runs and
         // decrements before the next statement here executes, which takes the count negative. Nothing
         // between here and the append may throw, because a leaked increment never comes back.
-        handler?.EnterTransition();
+        handler.EnterTransition();
 
         // The lock the callers hold is required: "_tail = _tail.ContinueWith(...)" is a
         // read-modify-write, and two racing appenders lose an assignment and run both transitions
@@ -410,12 +383,12 @@ internal sealed class HostedServiceTarget
         return _tail;
     }
 
-    private async Task RunAsync(Func<Task> body, HostedServiceHandler? handler)
+    private async Task RunAsync(Func<Task> body, HostedServiceHandler handler)
     {
         // A body inherits the execution context of the flow that appended it, startup scope included.
         // A stop body does not wait for that scope, so an attach it makes would be captured by a scope
         // belonging to a caller it has nothing to do with and park until that caller closes it.
-        handler?.ClearAmbientStartupScope();
+        handler.ClearAmbientStartupScope();
 
         // Bodies never throw. A faulted tail would raise UnobservedTaskException for every dropped
         // fire and forget transition and would be retained until the target transitions again.
@@ -436,7 +409,7 @@ internal sealed class HostedServiceTarget
         {
             // In the finally rather than after the catch, which covers the body alone: the gate above
             // is inside the same count.
-            handler?.LeaveTransition();
+            handler.LeaveTransition();
         }
     }
 }

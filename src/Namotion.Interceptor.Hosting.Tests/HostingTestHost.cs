@@ -12,6 +12,12 @@ namespace Namotion.Interceptor.Hosting.Tests;
 internal static class HostingTestHost
 {
     /// <summary>
+    /// Attributes the drains below to a handler no host drains and no test counts, so a test's own
+    /// drain never shows in the in flight count of the handler under test.
+    /// </summary>
+    private static readonly HostedServiceHandler DrainHandler = new();
+
+    /// <summary>
     /// Waits for everything already queued on the target's chain to have run.
     /// </summary>
     /// <remarks>
@@ -19,7 +25,7 @@ internal static class HostingTestHost
     /// everything ahead of it has, which is what makes a read after it deterministic rather than timed.
     /// </remarks>
     public static Task DrainAsync(this HostedServiceTarget target)
-        => target.AppendAsync(() => Task.CompletedTask);
+        => target.AppendAsync(DrainHandler, () => Task.CompletedTask);
 
     /// <summary>
     /// Waits for everything already queued on the attachment's chain to have run. See

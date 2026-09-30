@@ -400,8 +400,8 @@ public class HostedServiceHandlerRaceTests
         // covers is the plain case: a stop queued before the snapshots is waited for. The two tests
         // that pin the write order itself, where a read falls between the writes, are below.
         //
-        // This replaced two tests that pinned the opposite: that a stop escaping the drain still ran at
-        // Drained. That state was reachable only through the defect the barrier closes.
+        // This replaced two tests that pinned the opposite: that a stop escaping the drain still ran
+        // after the drain returned. That was reachable only through the defect the barrier closes.
         var (host, context) = await HostingTestHost.StartAsync();
 
         var parent = new HostedParent(context);

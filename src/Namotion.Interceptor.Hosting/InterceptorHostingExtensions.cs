@@ -50,27 +50,7 @@ public static class InterceptorHostingExtensions
     public static IHostedServiceAttachment<T> AttachHostedService<T>(
         this IInterceptorSubject subject, Func<T> factory)
         where T : class, IHostedService
-    {
-        // Resolved before the add, because the lookup throws when the subject is reachable from two
-        // hosting contexts and that throw after the add leaves the caller holding no attachment and the
-        // subject holding a factory the next context attach starts. Resolved again when the first found
-        // none, because a context published between the two is otherwise missed by both sides. Nothing
-        // ahead of the add may read subject.Data: DataGatedSubject gates on the first read. See
-        // docs/design/hosting-service-ownership.md#an-attach-and-a-context-entry-are-the-same-two-facts-in-opposite-orders.
-        var handler = subject.Context.TryGetService<HostedServiceHandler>();
-        var attachment = AddAttachment(subject, factory);
-        handler ??= TryResolveHandlerAfterPublish(subject);
-
-        // Liveness before the take, because the take reads it: a subject that hosted nothing when it
-        // entered the graph has no entry, and this is the moment it earns one.
-        handler?.MarkLiveIfAttached(subject);
-
-        // The liveness read, the ownership take and the append have to be one step, which a caller
-        // cannot compose without reopening the window a concurrent context detach slips through.
-        handler?.TryTakeOwnershipAndStart(subject, attachment.Target);
-
-        return attachment;
-    }
+        => Attach(subject, factory, ensureStarted: false, out _, out _);
 
     /// <summary>
     /// Attaches a hosted service factory and waits for the instance to start. Transactional: when the
@@ -80,59 +60,32 @@ public static class InterceptorHostingExtensions
         this IInterceptorSubject subject, Func<T> factory, CancellationToken cancellationToken)
         where T : class, IHostedService
     {
-        // Resolved before the attachment is published, for the reason on the synchronous overload.
-        var handler = subject.Context.TryGetService<HostedServiceHandler>();
-
-        var attachment = AddAttachment(subject, factory);
-
-        // Resolved again for the reason on the synchronous overload.
-        handler ??= TryResolveHandlerAfterPublish(subject);
-
+        var attachment = Attach(subject, factory, ensureStarted: true, out var handler, out var start);
         if (handler is null)
         {
             // No handler means no context to bound the lifetime, so the factory is stored and nothing runs.
             return attachment;
         }
 
-        handler.EnsureStarted();
-
-        // Liveness before the take, for the reason on the synchronous overload.
-        handler.MarkLiveIfAttached(subject);
-
-        if (handler.TryTakeOwnershipAndStart(subject, attachment.Target) is { } start)
+        if (start is not null)
         {
             // The token bounds this wait only; the transition runs to completion either way.
             await start.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // The start's own outcome rather than Fault: an execution fault is a later transition on the
-        // same chain, and reading it here would turn a started instance into a failed attach or not,
-        // depending on which of the two landed first.
+        // The start's own outcome rather than Fault, for the reason on StartFault.
         if (attachment.Target.StartFault is { } fault)
         {
+            // Released rather than only retired, unlike an explicit detach, and the stop is appended
+            // rather than awaited: docs/design/hosting-service-ownership.md#a-faulted-awaited-attach-releases-instead.
             RemoveAttachment(subject, attachment);
-
-            // The removal above puts this target out of reach, so nothing retires before shutdown an
-            // ownership left installed here and a host that retries failed attaches leaks a subject per failure.
-            // Marked first, so a context attach that snapshotted this attachment before the removal
-            // cannot take the target in the gap.
-            attachment.Target.MarkDetached();
-
-            // The faulted start left no instance, but one queued behind it can, and the same completion
-            // releases that body and this caller. Appended rather than awaited: the chain orders it
-            // behind that start, while awaiting it would wedge on a startup scope this caller cannot
-            // close.
-            _ = handler.AppendStop(subject, attachment.Target, signal: null, waitFor: null, CancellationToken.None);
-
-            // Released rather than only retired, unlike an explicit detach: the removal above is what
-            // puts this target out of reach, so an ownership left installed is retired by nothing
-            // before the drain. Safe to release ahead of the stop, which reads Current and never Owner.
+            _ = MarkDetachedAndAppendStop(subject, attachment.Target, handler, CancellationToken.None);
             attachment.Target.ReleaseOwnership(handler);
 
             // Captured rather than rethrown: the fault was raised on the transition thread, and a plain
             // throw overwrites its stack trace with this one, which is the stack a user reads when a
             // failing subject aborts host startup.
-            ExceptionDispatchInfo.Capture(fault).Throw();
+            ExceptionDispatchInfo.Throw(fault);
         }
 
         return attachment;
@@ -143,64 +96,118 @@ public static class InterceptorHostingExtensions
     /// factory is removed, so a later context attach starts nothing.
     /// </summary>
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedServiceAttachment attachment)
-    {
-        // Resolved before the removal, for the reason on AttachHostedService. Here the throw would
-        // leave the instance running with no stop appended and nothing left to reach it through.
-        var handler = subject.Context.TryGetService<HostedServiceHandler>();
-
-        if (!RemoveAttachment(subject, attachment))
-        {
-            return false;
-        }
-
-        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-
-        // Marked before the stop is appended, and that order is the whole guard: an attach that has
-        // published this attachment but not yet appended its start either reads the mark and appends
-        // nothing, or appends ahead of the stop below, which then stops and disposes what it created.
-        target.MarkDetached();
-
-        handler?.AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
-
-        // Retired without releasing ownership, and that asymmetry is load bearing: a release here makes
-        // a start queued ahead of this detach read Owner as null and refuse, which leaves the stop above
-        // no instance to dispose. Without the retirement every attach and detach cycle keeps the target
-        // and its subject on the handler for the handler's whole life.
-        handler?.ForgetOwnership(target);
-        return true;
-    }
+        => Detach(subject, attachment, ensureStarted: false, CancellationToken.None, out _);
 
     /// <summary>Detaches a hosted service attachment and waits for the instance to stop and be disposed.</summary>
     public static async Task<bool> DetachHostedServiceAsync(
         this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
     {
-        // Resolved before the attachment is removed, for the reason on the synchronous overload.
-        var handler = subject.Context.TryGetService<HostedServiceHandler>();
-
-        if (!RemoveAttachment(subject, attachment))
+        if (!Detach(subject, attachment, ensureStarted: true, cancellationToken, out var stop))
         {
             return false;
         }
 
-        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        if (stop is not null)
+        {
+            await stop.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
 
-        // Marked before the stop is appended, for the reason on the synchronous overload.
-        target.MarkDetached();
+        return true;
+    }
+
+    /// <summary>
+    /// Adds the attachment and, when a handler is reachable, takes ownership and appends its start.
+    /// <paramref name="start"/> is null when nothing was appended.
+    /// </summary>
+    private static HostedServiceAttachment<T> Attach<T>(
+        IInterceptorSubject subject,
+        Func<T> factory,
+        bool ensureStarted,
+        out HostedServiceHandler? handler,
+        out Task? start)
+        where T : class, IHostedService
+    {
+        // Resolved before the add, because the lookup throws when the subject is reachable from two
+        // hosting contexts and that throw after the add leaves the caller holding no attachment and the
+        // subject holding a factory the next context attach starts. Resolved again when the first found
+        // none, because a context published between the two is otherwise missed by both sides. Nothing
+        // ahead of the add may read subject.Data: DataGatedSubject gates on the first read. See
+        // docs/design/hosting-service-ownership.md#an-attach-and-a-context-entry-are-the-same-two-facts-in-opposite-orders.
+        handler = subject.Context.TryGetService<HostedServiceHandler>();
+        var attachment = AddAttachment(subject, factory);
+        handler ??= TryResolveHandlerAfterPublish(subject);
 
         if (handler is null)
         {
-            return true;
+            start = null;
+            return attachment;
         }
 
-        handler.EnsureStarted();
-        var stop = handler.AppendStop(subject, target, signal: null, waitFor: null, cancellationToken);
+        if (ensureStarted)
+        {
+            handler.EnsureStarted();
+        }
 
-        // Retired without releasing ownership, and before the await so a cancelled wait cannot skip it.
-        // The reason for the asymmetry is on the synchronous overload.
-        handler.ForgetOwnership(target);
+        // Liveness before the take, because the take reads it: a subject that hosted nothing when it
+        // entered the graph has no entry, and this is the moment it earns one.
+        handler.MarkLiveIfAttached(subject);
 
-        await stop.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // The liveness read, the ownership take and the append have to be one step, which a caller
+        // cannot compose without reopening the window a concurrent context detach slips through.
+        start = handler.TryTakeOwnershipAndStart(subject, attachment.Target);
+        return attachment;
+    }
+
+    /// <summary>
+    /// Removes the attachment and appends the stop for its target. <paramref name="stop"/> is null when
+    /// no handler is reachable.
+    /// </summary>
+    private static bool Detach(
+        IInterceptorSubject subject,
+        IHostedServiceAttachment attachment,
+        bool ensureStarted,
+        CancellationToken cancellationToken,
+        out Task? stop)
+    {
+        // Resolved before the removal, for the reason on Attach. Here the throw would leave the instance
+        // running with no stop appended and nothing left to reach it through.
+        var handler = subject.Context.TryGetService<HostedServiceHandler>();
+
+        if (!RemoveAttachment(subject, attachment))
+        {
+            stop = null;
+            return false;
+        }
+
+        if (ensureStarted)
+        {
+            handler?.EnsureStarted();
+        }
+
+        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
+        stop = MarkDetachedAndAppendStop(subject, target, handler, cancellationToken);
+
+        // Retired without releasing, and that asymmetry is load bearing: a release makes a start queued
+        // ahead of this detach read Owner as null and refuse, which leaves the stop no instance to
+        // dispose. Without the retirement every attach and detach cycle keeps the target and its
+        // subject on the handler for the handler's whole life. Retired before a caller awaits the stop,
+        // so a cancelled wait cannot skip it.
+        handler?.ForgetOwnership(target);
         return true;
+    }
+
+    /// <summary>
+    /// Marks the target of an attachment already removed from the subject detached and appends its
+    /// stop. Returns the stop, or null without a handler.
+    /// </summary>
+    private static Task? MarkDetachedAndAppendStop(
+        IInterceptorSubject subject, HostedServiceTarget target, HostedServiceHandler? handler, CancellationToken cancellationToken)
+    {
+        // Marked before the stop is appended, and that order is the whole guard: an attach that has
+        // published this attachment but not yet appended its start either reads the mark and appends
+        // nothing, or appends ahead of the stop below, which then stops and disposes what it created.
+        target.MarkDetached();
+        return handler?.AppendStop(subject, target, signal: null, waitFor: null, cancellationToken);
     }
 
     /// <summary>

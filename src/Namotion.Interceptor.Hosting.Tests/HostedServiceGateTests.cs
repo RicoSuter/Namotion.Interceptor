@@ -27,7 +27,7 @@ public class HostedServiceGateTests
         // Act
         gate.EnsureStarted();
 
-        // Assert - a plain assignment here would reopen the shutdown race the fourth state closes
+        // Assert - a plain assignment here would reopen the shutdown race the Draining state closes
         Assert.Equal(HostedServiceGateState.Draining, gate.State);
     }
 
@@ -57,12 +57,8 @@ public class HostedServiceGateTests
         // Act
         gate.BeginDraining();
 
-        // Assert - awaited between the two calls, because CompleteDraining sets the same signal and
-        // would release the waiter whatever BeginDraining did.
+        // Assert
         await wait.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(HostedServiceGateState.Draining, gate.State);
-
-        gate.CompleteDraining();
-        Assert.Equal(HostedServiceGateState.Drained, gate.State);
     }
 }

@@ -50,8 +50,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     internal void SetLogger(ILogger logger) => _logger = logger;
 
-    private ILogger? Logger => _logger;
-
     // The gates below are test seams, null in production.
 
     /// <summary>Awaited in <see cref="StopAsync"/> after the drain begins, before the liveness clear.</summary>
@@ -95,7 +93,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void AttachSubject(IInterceptorSubject subject)
     {
-        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (_gate.IsDraining)
         {
             return;
         }
@@ -124,7 +122,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             TryTakeOwnershipAndStart(subject, ((IHostedServiceAttachmentTarget)attachment).Target);
         }
 
-        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (_gate.IsDraining)
         {
             // Re-read after the write: an entry that lands after the drain cleared the set roots the
             // subject on a dead handler for the rest of that handler's life.
@@ -134,8 +132,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     private void DetachSubject(IInterceptorSubject subject)
     {
-        // Read before allocating: a completion source per subject is 1.76 MB per detach of a 20,000
-        // subject graph. "Has ever hosted", not "hosts now", for the reason on that method.
+        // Read before allocating, because this runs for every subject a detach reaches. "Has ever
+        // hosted", not "hosts now", for the reason on that method.
         var everHosted = subject.TryGetHostedServiceAttachments(out var attachments);
         var subjectTarget = subject is IHostedService ? subject.TryGetSubjectTarget() : null;
         if (subjectTarget is null && !everHosted)
@@ -203,7 +201,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </remarks>
     internal Task? TryTakeOwnershipAndStart(IInterceptorSubject subject, HostedServiceTarget target)
     {
-        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (_gate.IsDraining)
         {
             // A draining or drained handler must not take ownership: a target left owned by a dead
             // handler makes every future handler over that subject lose the compare and exchange.
@@ -234,7 +232,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         OwnershipTakenGate?.Invoke();
 
-        if (ownershipTaken && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (ownershipTaken && _gate.IsDraining)
         {
             // Re-read after both writes: they landed while the gate still read Running, so the drain's
             // snapshot covers this target, and any later read may have been swept past.
@@ -263,26 +261,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         try
         {
             await _gate.WaitForOpenAsync().ConfigureAwait(false);
-            if (_gate.State != HostedServiceGateState.Running)
+            if (!MayStart(subject, target))
             {
-                // Inside the body, never at append time: a start queued when shutdown begins has to
-                // re-read, and a body skipped at append time would never run its signalling.
-                return;
-            }
-
-            // Two windows, and neither condition is redundant: an explicit detach retires the record
-            // without releasing, so only liveness refuses a body behind it, and a body that reads
-            // liveness after a later attach rebuilt it is refused only by ownership.
-            if (!_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
-            {
-                return;
-            }
-
-            if (target.Current is not null)
-            {
-                // One instance per target, in the body where the chain serializes the two starts.
-                // Ownership does not cover this: the owning handler sees a context attach per context
-                // and appends a start for each.
                 return;
             }
 
@@ -342,7 +322,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             catch (Exception exception)
             {
                 target.SetStartFault(exception);
-                Logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
+                _logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
             }
             finally
             {
@@ -404,8 +384,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         private async Task RunAsync()
         {
-            await handler._gate.WaitForOpenAsync().ConfigureAwait(false);
-
             // The run that ended must still be the one recorded: a subject is restarted in place on the
             // same instance with a new execute task, and a stop ahead on the chain leaves Current null,
             // so neither check on its own tells this run from the next. Every stop leaves Current
@@ -419,7 +397,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             var fault = ReadFault(executeTask);
 
             target.SetFault(fault);
-            handler.Logger?.LogError(fault, "Hosted service for subject {Subject} faulted while running.", subject);
+            handler._logger?.LogError(fault, "Hosted service for subject {Subject} faulted while running.", subject);
 
             await handler.CreateStopBody(subject, target, signal: null, waitFor: null, CancellationToken.None)()
                 .ConfigureAwait(false);
@@ -434,7 +412,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             if (executeTask.IsFaulted)
             {
                 var fault = ReadFault(executeTask);
-                handler.Logger?.LogDebug(
+                handler._logger?.LogDebug(
                     fault, "Hosted service for subject {Subject} faulted after it was stopped or restarted; ignored.", subject);
             }
         }
@@ -460,6 +438,25 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
     }
 
+    /// <summary>Whether a start body may still create an instance, read before the scope wait and after it.</summary>
+    private bool MayStart(IInterceptorSubject subject, HostedServiceTarget target)
+    {
+        // The gate inside the body, never at append time: a start queued when shutdown begins has to
+        // re-read, and a body skipped at append time would never run its signalling.
+        //
+        // Liveness and ownership are two windows, and neither is redundant: an explicit detach retires
+        // the record without releasing, so only liveness refuses a body behind it, and a body that
+        // reads liveness after a later attach rebuilt it is refused only by ownership.
+        //
+        // One instance per target, in the body where the chain serializes the two starts. Ownership does
+        // not cover this: the owning handler sees a context attach per context and appends a start for
+        // each.
+        return _gate.State == HostedServiceGateState.Running
+            && _liveSubjects.ContainsKey(subject)
+            && ReferenceEquals(target.Owner, this)
+            && target.Current is null;
+    }
+
     /// <summary>Waits for the startup scope this start was captured in and reports whether it may still run.</summary>
     /// <remarks>
     /// Every guard the caller read before this is re-read after it: a scope holds a start for as long
@@ -478,10 +475,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 .ConfigureAwait(false);
         }
 
-        return _gate.State == HostedServiceGateState.Running
-            && _liveSubjects.ContainsKey(subject)
-            && ReferenceEquals(target.Owner, this)
-            && target.Current is null;
+        return MayStart(subject, target);
     }
 
     /// <summary>Takes a completion hold on every deferrer reachable from <paramref name="context"/>.</summary>
@@ -511,7 +505,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 // One deferrer throwing must not abandon the holds already taken, and must not
                 // propagate: an attach runs under the lifecycle lock inside a property write, so the
                 // exception would surface at an unrelated assignment.
-                Logger?.LogError(exception, "Taking a startup completion hold threw and was ignored.");
+                _logger?.LogError(exception, "Taking a startup completion hold threw and was ignored.");
             }
         }
 
@@ -530,7 +524,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             {
                 // One deferrer throwing must not strand the others, for the same reason the release
                 // sits in a finally at all.
-                Logger?.LogError(exception, "Releasing a startup completion hold threw and was ignored.");
+                _logger?.LogError(exception, "Releasing a startup completion hold threw and was ignored.");
             }
         }
     }
@@ -574,8 +568,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     await waitFor.ConfigureAwait(false);
                 }
 
-                // Waited for, but not read: a stop runs at every state, Drained included, or one
-                // appended after the drain snapshotted everything never disposes its instance. The
+                // Waited for, but not read: a stop runs at every state, after the drain included, or
+                // one appended after the drain snapshotted everything never disposes its instance. The
                 // null check below is what makes a stop idempotent.
                 await _gate.WaitForOpenAsync().ConfigureAwait(false);
 
@@ -585,11 +579,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     return;
                 }
 
-                // One write, which takes the instance out of Current and enters the stop window
-                // together: as two the target would briefly hold no instance and raise no phase, and a
-                // poll landing there reads a settled state while this instance still holds its sessions,
-                // semaphores and subscriptions. Below the return above, so a stop with nothing to do
-                // reports no window of its own.
+                // Below the return above, so a stop with nothing to do reports no window of its own.
                 target.BeginStop();
 
                 await Task.Delay(TransitionDelayMilliseconds, CancellationToken.None).ConfigureAwait(false);
@@ -607,7 +597,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 catch (Exception exception)
                 {
                     target.SetFault(exception);
-                    Logger?.LogError(exception, "Failed to stop hosted service for subject {Subject}.", subject);
+                    _logger?.LogError(exception, "Failed to stop hosted service for subject {Subject}.", subject);
                 }
                 finally
                 {
@@ -622,8 +612,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             finally
             {
                 // Left ahead of the signal, so nothing ordered behind it reads this target still in
-                // its stop window. Only a subject stop carries a signal and no handle exposes a
-                // subject target's state, so no such reader exists yet.
+                // its stop window.
                 target.EndStop();
 
                 // Always signals, including on the gated-out and cancelled paths, or a paired
@@ -648,7 +637,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
         catch (Exception exception)
         {
-            Logger?.LogError(exception, "Failed to stop hosted service for subject {Subject} after its start failed.", subject);
+            _logger?.LogError(exception, "Failed to stop hosted service for subject {Subject} after its start failed.", subject);
         }
     }
 
@@ -670,7 +659,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         {
             // Contains as well as reports: the cleanup dispose in RunStartAsync runs inside a catch
             // that rethrows the start's own exception, and an escape from here skips that rethrow.
-            Logger?.LogError(exception, "Failed to dispose hosted service {Service}.", instance.ToString());
+            _logger?.LogError(exception, "Failed to dispose hosted service {Service}.", instance.ToString());
         }
     }
 
@@ -703,7 +692,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         if (target.StartFault is { } fault)
         {
             // Captured rather than rethrown, for the reason on AttachHostedServiceAsync.
-            ExceptionDispatchInfo.Capture(fault).Throw();
+            ExceptionDispatchInfo.Throw(fault);
         }
 
         // Read at all because the guards above cannot cover a drain beginning while this wait is
@@ -750,7 +739,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </remarks>
     internal void MarkLiveIfAttached(IInterceptorSubject subject)
     {
-        if (_gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (_gate.IsDraining)
         {
             return;
         }
@@ -770,7 +759,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             recorded = interceptors[index].TryRunWhileAttached(subject, record);
         }
 
-        if (recorded && _gate.State is HostedServiceGateState.Draining or HostedServiceGateState.Drained)
+        if (recorded && _gate.IsDraining)
         {
             // Re-read after the write, for the reason in AttachSubject.
             _liveSubjects.TryRemove(subject, out _);
@@ -869,7 +858,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         {
             // Logged rather than thrown, so the release above still runs: rethrowing would leave every
             // target owned by a dead handler and a second host over the same subjects starting nothing.
-            Logger?.LogWarning(
+            _logger?.LogWarning(
                 "Shutdown gave up waiting for {Count} hosted service transitions; they keep running unobserved.",
                 remaining);
         }
@@ -877,7 +866,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // The owned set is not cleared here. After the release loop the only entries left are installs
         // whose own gate re-read releases them, and clearing is what would make the set and the owner
         // field disagree for anything still in flight.
-        _gate.CompleteDraining();
     }
 
     /// <summary>

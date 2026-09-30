@@ -112,7 +112,6 @@ internal sealed class SingleAttachmentHost<TService>
     /// </summary>
     private int _stopGeneration;
 
-
     /// <summary>
     /// The single attachment the wrapper owns, or null when nothing is attached. Read and written only
     /// under <see cref="_attachmentGate"/>. Each attach builds its own instance, so a second one leaves
@@ -374,7 +373,6 @@ internal sealed class SingleAttachmentHost<TService>
             return;
         }
 
-
         // Read below the fault, not above it: a retry start clears the fault before it enters its start
         // window, so a reading taken above would still be settled for a fault this poll is about to act
         // on. Each drop takes its own reading immediately before dropping, so nothing but the branch
@@ -468,8 +466,6 @@ internal sealed class SingleAttachmentHost<TService>
             return true;
         }
     }
-
-
 
     /// <summary>
     /// Waits for the attachment gate. Returns false when the wait was cancelled, in which case the

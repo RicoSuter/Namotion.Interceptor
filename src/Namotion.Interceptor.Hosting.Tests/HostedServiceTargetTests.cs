@@ -55,12 +55,13 @@ public class HostedServiceTargetTests
     private static async Task<int> RunAppendRaceAsync()
     {
         var target = new HostedServiceTarget(factory: null, subject: null);
+        var handler = new HostedServiceHandler();
         var head = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var concurrent = 0;
         var maximumConcurrent = 0;
         var sync = new object();
 
-        var stall = target.AppendAsync(async () => await head.Task);
+        var stall = target.AppendAsync(handler, async () => await head.Task);
 
         async Task BodyAsync()
         {
@@ -91,7 +92,7 @@ public class HostedServiceTargetTests
             threads[slot] = new Thread(() =>
             {
                 barrier.SignalAndWait();
-                transitions[slot] = target.AppendAsync(BodyAsync);
+                transitions[slot] = target.AppendAsync(handler, BodyAsync);
             });
 
             threads[slot].Start();
@@ -118,11 +119,12 @@ public class HostedServiceTargetTests
         // Arrange - a faulted tail would raise UnobservedTaskException for every dropped fire and
         // forget transition, and the fault would surface nowhere at all.
         var target = new HostedServiceTarget(factory: null, subject: null);
+        var handler = new HostedServiceHandler();
         var secondRan = false;
 
         // Act
-        await target.AppendAsync(() => throw new InvalidOperationException("boom"));
-        await target.AppendAsync(() =>
+        await target.AppendAsync(handler, () => throw new InvalidOperationException("boom"));
+        await target.AppendAsync(handler, () =>
         {
             secondRan = true;
             return Task.CompletedTask;
@@ -141,13 +143,14 @@ public class HostedServiceTargetTests
         // the pool can be picked up by the very thread that appended once that thread parks on the
         // await below, which reads as inline execution without being it.
         var target = new HostedServiceTarget(factory: null, subject: null);
+        var handler = new HostedServiceHandler();
         var ranInline = false;
         Task? transition = null;
 
         var appendingThread = new Thread(() =>
         {
             var appendingThreadId = Environment.CurrentManagedThreadId;
-            transition = target.AppendAsync(() =>
+            transition = target.AppendAsync(handler, () =>
             {
                 ranInline = Environment.CurrentManagedThreadId == appendingThreadId;
                 return Task.CompletedTask;
@@ -168,13 +171,14 @@ public class HostedServiceTargetTests
     {
         // Arrange - the seam the ordering and race tests need, so they do not depend on timing
         var target = new HostedServiceTarget(factory: null, subject: null);
+        var handler = new HostedServiceHandler();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var ran = false;
 
         target.TransitionGate = () => release.Task;
 
         // Act
-        var transition = target.AppendAsync(() =>
+        var transition = target.AppendAsync(handler, () =>
         {
             ran = true;
             return Task.CompletedTask;
