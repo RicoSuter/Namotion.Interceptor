@@ -1,9 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <Nullable>enable</Nullable>
-        <ImplicitUsings>enable</ImplicitUsings>
-    </PropertyGroup>
     <ItemGroup>
         <!-- The dispatch planner is internal; its tests assert the bucket-count invariant the carry-threaded
              executor relies on to skip budget accounting. -->
