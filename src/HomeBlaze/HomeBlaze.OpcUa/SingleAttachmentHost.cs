@@ -219,15 +219,18 @@ internal sealed class SingleAttachmentHost<TService>
                 // only record of the attachment and the transition runs to completion whatever the
                 // token does, so a cancelled wait strands a live attachment with nothing pointing at
                 // it and lets the next start attach a second instance. Bounded: the instance is a
-                // BackgroundService whose StartAsync schedules its execution and returns at once, and a
-                // start appended during shutdown returns without creating anything.
+                // BackgroundService whose StartAsync returns at its first await, and a start appended
+                // during shutdown returns without creating anything.
                 var attachment = await _owner.AttachHostedServiceAsync(_owner.CreateInstance, CancellationToken.None);
-                if (attachment.Current is null)
+                if (attachment.Current is null && attachment.Fault is null)
                 {
-                    // No instance means nothing was started and nothing will be before a context
-                    // re-attach: the awaited overload appends nothing without a handler, outside the
-                    // graph or while draining, and throws rather than returning when a start faulted.
-                    // Dropped rather than kept, which would report Starting forever.
+                    // No instance and no fault: the awaited overload appended nothing, because there is
+                    // no handler, the subject is outside the graph or the host is draining, or a context
+                    // detach queued behind the start has already stopped it. A start that faulted throws
+                    // instead. Nothing starts before a context re-attach, so the attachment is dropped
+                    // rather than kept, which would report Starting forever. A run that faulted after its
+                    // start returned also leaves no instance, but it records the fault ahead of the stop
+                    // that clears Current, so it is kept and the reconciliation below reports it.
                     _owner.DetachHostedService(attachment);
 
                     TryCommitStatus(generation, ServiceStatus.Error, NotAttachedMessage);

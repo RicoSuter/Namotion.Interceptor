@@ -357,26 +357,27 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
     }
 
-    private static readonly Action<Task, object?> OnExecutionFaulted =
+    private static readonly Action<Task, object?> OnExecutionEnded =
         static (_, state) => ((ExecutionFaultObserver)state!).Append();
 
     /// <summary>
     /// Observes the execution a <see cref="BackgroundService"/> schedules from its start, which the
-    /// start itself never covers. A fault in it is recorded on the target and the instance is stopped,
-    /// so the target settles to <see cref="HostedServiceAttachmentState.Faulted"/> and the next context
-    /// attach retries it.
+    /// start itself never covers. A fault or a cancellation in it is recorded on the target and the
+    /// instance is stopped, so the target settles to <see cref="HostedServiceAttachmentState.Faulted"/>
+    /// and the next context attach retries it.
     /// </summary>
     private void ObserveExecution(
         IInterceptorSubject subject, HostedServiceTarget target, BackgroundService instance, Task executeTask)
     {
-        // Only a fault: a cancelled execution is a stop's doing, and one that ran to completion is no
-        // failure. Never synchronous, because the continuation takes the chain lock and the faulting
-        // thread may hold anything.
+        // A cancellation as well as a fault: an OperationCanceledException escaping the execution
+        // leaves it Canceled whether or not a stop asked for it, and the identity check in the body is
+        // what tells a stop's own cancellation apart. Never synchronous, because the continuation takes
+        // the chain lock and the completing thread may hold anything.
         executeTask.ContinueWith(
-            OnExecutionFaulted,
+            OnExecutionEnded,
             new ExecutionFaultObserver(this, subject, target, instance, executeTask),
             CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.DenyChildAttach,
+            TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.DenyChildAttach,
             TaskScheduler.Default);
     }
 
@@ -393,28 +394,69 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         /// instance is stopped or another handler's, and a stop this handler no longer counts would
         /// run past its own drain.
         /// </summary>
-        public void Append() => _ = target.AppendIfOwnedAsync(handler, RunAsync);
+        public void Append()
+        {
+            if (target.AppendIfOwnedAsync(handler, RunAsync) is null)
+            {
+                LogIgnoredFault();
+            }
+        }
 
         private async Task RunAsync()
         {
             await handler._gate.WaitForOpenAsync().ConfigureAwait(false);
 
-            // The run that faulted must still be the one recorded: a subject is restarted in place on
-            // the same instance with a new execute task, and a stop ahead on the chain leaves Current
-            // null, so neither check on its own tells this run from the next.
+            // The run that ended must still be the one recorded: a subject is restarted in place on the
+            // same instance with a new execute task, and a stop ahead on the chain leaves Current null,
+            // so neither check on its own tells this run from the next. Every stop leaves Current
+            // before it calls StopAsync, so a run its own stop cancelled never passes this.
             if (!ReferenceEquals(target.Current, instance) || !ReferenceEquals(instance.ExecuteTask, executeTask))
             {
+                LogIgnoredFault();
                 return;
             }
 
-            var exception = executeTask.Exception!;
-            var fault = exception.InnerExceptions.Count == 1 ? exception.InnerExceptions[0] : exception;
+            var fault = ReadFault(executeTask);
 
             target.SetFault(fault);
             handler.Logger?.LogError(fault, "Hosted service for subject {Subject} faulted while running.", subject);
 
             await handler.CreateStopBody(subject, target, signal: null, waitFor: null, CancellationToken.None)()
                 .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Logs the fault of a run that was already stopped or replaced, which also observes it. A
+        /// cancellation there is the stop's own and is not logged.
+        /// </summary>
+        private void LogIgnoredFault()
+        {
+            if (executeTask.IsFaulted)
+            {
+                var fault = ReadFault(executeTask);
+                handler.Logger?.LogDebug(
+                    fault, "Hosted service for subject {Subject} faulted after it was stopped or restarted; ignored.", subject);
+            }
+        }
+
+        private static Exception ReadFault(Task executeTask)
+        {
+            if (executeTask.Exception is { } exception)
+            {
+                return exception.InnerExceptions.Count == 1 ? exception.InnerExceptions[0] : exception;
+            }
+
+            // Canceled, where Exception is null and awaiting rethrows the exception the execution raised.
+            try
+            {
+                executeTask.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException cancellation)
+            {
+                return cancellation;
+            }
+
+            return new TaskCanceledException(executeTask);
         }
     }
 

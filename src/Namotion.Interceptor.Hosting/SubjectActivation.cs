@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Hosting;
 
@@ -14,6 +15,7 @@ internal sealed class SubjectActivation<T> : IHostedService
     private readonly IServiceProvider _serviceProvider;
 
     private IHostedService? _startedHere;
+    private volatile bool _isStopping;
 
     public SubjectActivation(IServiceProvider serviceProvider)
     {
@@ -37,6 +39,14 @@ internal sealed class SubjectActivation<T> : IHostedService
             // stop to a handler that never started it, leaving it running.
             _startedHere = hostedService;
             await hostedService.StartAsync(cancellationToken).ConfigureAwait(false);
+
+            if (hostedService is BackgroundService { ExecuteTask: { } executeTask })
+            {
+                // Resolved now: the execution can outlive the provider, which the host disposes after stopping.
+                var logger = _serviceProvider.GetService<ILogger<SubjectActivation<T>>>();
+                _ = ObserveExecutionAsync(subject, executeTask, logger);
+            }
+
             return;
         }
 
@@ -51,5 +61,32 @@ internal sealed class SubjectActivation<T> : IHostedService
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
-        => _startedHere?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+    {
+        _isStopping = true;
+        return _startedHere?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Logs an execution that ended other than by running to completion, which the generic host does
+    /// for the background services it starts and nothing does for one started here. A cancellation
+    /// after this activation's own stop is that stop's doing.
+    /// </summary>
+    /// <remarks>
+    /// Logs only. The host's <c>BackgroundServiceExceptionBehavior</c> lives on <c>HostOptions</c> in
+    /// Microsoft.Extensions.Hosting, which this library does not reference.
+    /// </remarks>
+    private async Task ObserveExecutionAsync(T subject, Task executeTask, ILogger? logger)
+    {
+        try
+        {
+            await executeTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_isStopping && executeTask.IsCanceled)
+        {
+        }
+        catch (Exception exception)
+        {
+            logger?.LogError(exception, "Hosted subject {Subject} faulted while running.", subject);
+        }
+    }
 }

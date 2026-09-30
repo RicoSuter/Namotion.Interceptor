@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Testing;
 
@@ -20,10 +21,9 @@ public class BackgroundServiceExecutionTests
     public async Task WhenAnAttachedExecutionFaultsAtOnce_ThenTheAttachmentSettlesToFaultedWithTheInstanceStoppedAndDisposed(
         bool attachIsAwaited)
     {
-        // Arrange - the fault is raised before the execution's first await, which is the timing that
-        // used to surface from StartAsync as a failed start. The start returns before the execution
-        // runs now, so the attachment reads Running first and the fault has to be observed afterwards,
-        // and the awaited attach returns rather than throws.
+        // Arrange - the fault is raised before the execution's first await. BackgroundService.StartAsync
+        // returns before the execution runs, so the attachment reads Running first, the fault is
+        // observed afterwards, and the awaited attach returns rather than throws.
         await HostingTestHost.RunAsync(async context =>
         {
             var person = new Person(context);
@@ -52,6 +52,110 @@ public class BackgroundServiceExecutionTests
             Assert.Equal(1, instance!.StopCount);
             Assert.True(instance.IsDisposed);
         });
+    }
+
+    [Fact]
+    public async Task WhenAnExecutionIsCancelledByItsOwnCode_ThenTheAttachmentSettlesToFaulted()
+    {
+        // Arrange - a cancellation no stop asked for, such as an HttpClient timeout escaping the
+        // execution, leaves the execute task Canceled rather than Faulted, and the service dead.
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var person = new Person(context);
+            var exception = new TaskCanceledException("request timed out");
+
+            // Act
+            var attachment = person.AttachHostedService(() => new ScriptedBackgroundService(async _ =>
+            {
+                await Task.Yield();
+                throw exception;
+            }));
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => attachment.GetState(out _) is HostedServiceAttachmentState.Faulted,
+                message: "The cancelled execution was never observed: the attachment did not settle to Faulted.");
+
+            Assert.Same(exception, attachment.Fault);
+            Assert.Null(attachment.Current);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAHostedSubjectsRunFaulted_ThenWaitingForItsStartReturnsFalseWithoutThrowing()
+    {
+        // Arrange - the start itself succeeded, so a wait for it must not rethrow the run's fault
+        await HostingTestHost.RunAsync(async context =>
+        {
+            var handler = context.TryGetService<HostedServiceHandler>()!;
+            var parent = new ScriptedHostedParent(context);
+            var subject = new ScriptedHostedSubject();
+            subject.Run = _ => throw new InvalidOperationException("execution failed");
+
+            parent.Child = subject;
+            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => target.GetState(out _) is HostedServiceAttachmentState.Faulted,
+                message: "The execution fault was never observed: the subject did not settle to Faulted.");
+            await target.DrainAsync();
+
+            // Act
+            var started = await handler.WaitForStartAsync(subject, CancellationToken.None);
+
+            // Assert
+            Assert.False(started);
+        });
+    }
+
+    [Fact]
+    public async Task WhenAnExecutionFaultsWhileItsStopTearsItDown_ThenTheFaultIsLoggedAtDebugAndNotRecorded()
+    {
+        // Arrange - the run fails on its way out of a stop the handler made, so the fault is the stop's
+        // side effect rather than a reason to settle to Faulted, and it is still logged.
+        var logs = new CapturingLoggerProvider();
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Logging.AddProvider(logs);
+        builder.Logging.SetMinimumLevel(LogLevel.Debug);
+        var context = HostingTestHost.CreateContext(builder);
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var person = new Person(context);
+            var exception = new InvalidOperationException("teardown failed");
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var attachment = person.AttachHostedService(() => new ScriptedBackgroundService(async stoppingToken =>
+            {
+                entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw exception;
+                }
+            }));
+            await entered.Task.WaitAsync(WaitTimeout);
+
+            // Act
+            await person.DetachHostedServiceAsync(attachment, CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => logs.Entries.Any(entry => entry.Level == LogLevel.Debug && ReferenceEquals(entry.Exception, exception)),
+                message: "The fault the stop's teardown raised was never logged.");
+
+            Assert.Null(attachment.Fault);
+            Assert.DoesNotContain(logs.Entries, entry => entry.Level >= LogLevel.Error);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
     }
 
     [Fact]
@@ -117,7 +221,11 @@ public class BackgroundServiceExecutionTests
             parent.Child = subject;
             await firstRunEntered.Task.WaitAsync(WaitTimeout);
 
+            // The execution can be entered before StartAsync has returned and assigned ExecuteTask, and
+            // the start still counts as in flight until its transition has finished, which the count
+            // below would otherwise take for the fault transition.
             var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+            await target.DrainAsync();
             var firstExecuteTask = subject.ExecuteTask!;
 
             // The second run parks until it is cancelled.

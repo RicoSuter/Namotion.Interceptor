@@ -1,9 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
@@ -87,6 +89,37 @@ public class AddSubjectTests
 
             // Assert
             Assert.Equal(1, subject.StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenThereIsNoHostingHandlerAndTheRunFaults_ThenTheFaultIsLogged()
+    {
+        // Arrange - with no handler the activation starts the subject itself and is the only thing that
+        // can see its execution, which the generic host does not know about.
+        var logs = new CapturingLoggerProvider();
+        var exception = new InvalidOperationException("execution failed");
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Logging.AddProvider(logs);
+        var context = InterceptorSubjectContext.Create().WithContextInheritance();
+        builder.Services.AddSingleton(context);
+        builder.Services.AddSubject<ScriptedHostedSubject>(subject => subject.Run = _ => throw exception);
+
+        var host = builder.Build();
+
+        try
+        {
+            // Act
+            await host.StartAsync();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => logs.Entries.Any(entry => entry.Level == LogLevel.Error && ReferenceEquals(entry.Exception, exception)),
+                message: "The fault of a subject the activation started itself was never logged.");
         }
         finally
         {
