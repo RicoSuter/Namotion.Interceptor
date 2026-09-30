@@ -367,8 +367,8 @@ public partial class SqliteHistoryStoreSubject :
 
             RefreshMetrics(engine);
 
-            // Cleared before the dispose: a disposed engine reopens its connections on the next read, so a
-            // query between sessions would hold files the next session writes, or files in an old directory.
+            // Cleared before the dispose, so a query between sessions finds no engine; one that already read it
+            // is answered empty by the disposed engine, which no longer opens files.
             Volatile.Write(ref _engine, null);
             _recorder = null;
             engine.Dispose();
