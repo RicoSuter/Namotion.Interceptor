@@ -108,7 +108,7 @@
     private string _subjectName = "";
 
     /// <summary>
-    /// Optional callback invoked before saving, to establish parent chain.
+    /// Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.
     /// </summary>
     [Parameter]
     public Action<IInterceptorSubject>? BeforeSave { get; set; }
@@ -192,13 +192,19 @@
         {
             try
             {
-                // Establish parent chain before saving (if callback provided)
+                // Attaching can start a hosted subject right away, and it reads its configuration once it
+                // starts, so the edits must be applied before BeforeSave attaches it.
+                if (_editPanel != null && !await _editPanel.ApplyChangesAsync(CancellationToken.None))
+                {
+                    return;
+                }
+
+                // Persisting finds its writer through the parents BeforeSave establishes.
                 BeforeSave?.Invoke(_createdSubject);
 
-                // Save the edit component changes
                 if (_editPanel != null)
                 {
-                    await _editPanel.SaveAsync(CancellationToken.None);
+                    await _editPanel.PersistAsync(CancellationToken.None);
                 }
 
                 MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, _subjectName)));
@@ -214,7 +220,7 @@
     /// Shows the create subject wizard and returns the result.
     /// </summary>
     /// <param name="dialogService">The dialog service.</param>
-    /// <param name="beforeSave">Optional callback invoked before saving, to establish parent chain.</param>
+    /// <param name="beforeSave">Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.</param>
     public static async Task<CreateSubjectResult?> ShowAsync(
         IDialogService dialogService,
         Action<IInterceptorSubject>? beforeSave = null)

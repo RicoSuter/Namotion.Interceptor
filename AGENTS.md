@@ -140,6 +140,7 @@ The library has specialized support for:
 - **Inline comments: the why a reader cannot derive.** Length is earned by preventing a plausible wrong edit, such as a lock discipline, a pooled buffer that must not be read after release, or an ordering constraint. It is not earned by defending a decision against alternatives, which belongs in the pull request or `docs/design/`. Never restate the line below.
 - **XML docs state the contract**, not the reasoning. `<remarks>` is for a caveat a caller must act on.
 - **One canonical location per concept**, cross-referenced. Three copies drift.
+- **No application references in the library.** Code, comments, tests and docs outside `src/HomeBlaze` never mention HomeBlaze; describe the scenario generically instead.
 
 ## Git Rules
 
