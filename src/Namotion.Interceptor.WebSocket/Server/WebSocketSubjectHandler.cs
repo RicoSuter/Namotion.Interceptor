@@ -396,20 +396,23 @@ public sealed class WebSocketSubjectHandler
         }
     }
 
+    // Safe only because inbound updates are applied under the originating connection rather than this
+    // handler, so none of them is skipped as our own echo and every superseding value is broadcast on.
+    // Applying them under this handler would break it.
+    private const ChangeDeliveryRule DeliveryRule = ChangeDeliveryRule.SourceValuesAreSettled;
+
     public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
         CreateChangeQueueProcessor(logger, dropHandler: null);
 
     internal ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger, Action<long>? dropHandler) =>
-        new(source: this, Context,
-            propertyFilter: propertyReference =>
-                propertyReference.TryGetRegisteredProperty() is { } property &&
-                (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
-            writeHandler: BroadcastChangesAsync,
-            // Safe only because inbound updates are applied under the originating connection rather than
-            // this handler, so none of them is skipped here as our own echo and every superseding value
-            // is broadcast on. Applying them under this handler would break it.
-            ChangeDeliveryRule.SourceValuesAreSettled,
-            BufferTime, null, logger, dropHandler);
+        new(source: this, Context, IsPropertyIncluded, BroadcastChangesAsync, DeliveryRule, BufferTime, null, logger, dropHandler);
+
+    internal ChangeQueueProcessor CreateChangeQueueProcessor(PropertyChangeQueueSubscription subscription, ILogger logger) =>
+        new(source: this, subscription, IsPropertyIncluded, BroadcastChangesAsync, DeliveryRule, BufferTime, null, logger);
+
+    private bool IsPropertyIncluded(PropertyReference propertyReference) =>
+        propertyReference.TryGetRegisteredProperty() is { } property &&
+        (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true);
 
     public async ValueTask CloseAllConnectionsAsync()
     {

@@ -10,6 +10,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.History.Sqlite.Tests;
@@ -652,9 +653,9 @@ public class SqliteHistoryStoreRecordingTests
         public TaskCompletionSource<(string Status, string? LastError)> StateAtRetry { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        protected override ChangeQueueProcessor CreateProcessor()
+        protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
         {
-            var processor = base.CreateProcessor();
+            var processor = base.CreateProcessor(subscription);
             if (_faulted)
             {
                 return processor;
@@ -663,7 +664,7 @@ public class SqliteHistoryStoreRecordingTests
             _faulted = true;
             processor.Dispose();
             return new ChangeQueueProcessor(
-                this, ((IInterceptorSubject)this).Context, _ => throw new InvalidOperationException("Filter failed."),
+                this, subscription, _ => throw new InvalidOperationException("Filter failed."),
                 (_, _) => ValueTask.CompletedTask, ChangeDeliveryRule.SourceValuesMayBeStale,
                 bufferTime: null, maxQueueDepth: null, NullLogger.Instance);
         }

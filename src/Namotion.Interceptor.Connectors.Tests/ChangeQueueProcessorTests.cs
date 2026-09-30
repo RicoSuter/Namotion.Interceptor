@@ -1262,6 +1262,7 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: false,
             completionHandler: _ =>
             {
                 completionReached.TrySetResult();
@@ -1325,6 +1326,7 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: false,
             completionHandler: _ =>
             {
                 completionReached.TrySetResult();
@@ -1667,6 +1669,7 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: false,
             terminalHandler: () => throw new TerminalHandlerException());
 
         try
@@ -1717,6 +1720,7 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: false,
             completionHandler: _ =>
             {
                 completionReached.TrySetResult();
@@ -1910,6 +1914,7 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: false,
             completionHandler: teardownToken =>
             {
                 completionCancellation.TrySetResult(teardownToken.IsCancellationRequested);
@@ -2092,6 +2097,7 @@ public class ChangeQueueProcessorTests
             maxQueueDepth: null,
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale,
+            writeHandlerOwnsChanges: false,
             terminalHandler: () =>
             {
                 Interlocked.Increment(ref terminalInvocationCount);

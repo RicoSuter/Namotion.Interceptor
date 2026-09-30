@@ -11,8 +11,8 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>
 /// Processes property changes from a queue, buffering and merging them before writing.
 /// Used by both client sources and server background services.
-/// A hosted service consuming it should derive from <see cref="ChangeQueueBackgroundService"/>, which creates it
-/// before the host start returns.
+/// A hosted service consuming it should derive from <see cref="ChangeQueueBackgroundService"/>, which subscribes
+/// before the host start returns and keeps that subscription across the processors it creates.
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
@@ -76,6 +76,11 @@ public class ChangeQueueProcessor : IDisposable
 
     private readonly PropertyChangeQueueSubscription _subscription;
     private readonly PropertyChangeQueueSubscription? _ownedSubscription;
+
+    /// <summary>
+    /// The subscription this processor consumes, owned or not.
+    /// </summary>
+    internal PropertyChangeQueueSubscription Subscription => _subscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
@@ -148,10 +153,33 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
+    /// <inheritdoc cref="ChangeQueueProcessor(object, IInterceptorSubjectContext, Func{PropertyReference, bool}, Func{ReadOnlyMemory{SubjectPropertyChange}, CancellationToken, ValueTask}, ChangeDeliveryRule, TimeSpan?, int?, ILogger, Action{long})"/>
     /// <summary>
-    /// Initializes the processor with an externally owned subscription. The caller keeps ownership:
-    /// <see cref="Dispose"/> does not dispose the subscription. Use this when the subscription must
-    /// outlive the processor, for example a source-lifetime subscription reused across reconnects.
+    /// Initializes the processor on <paramref name="subscription"/>, which the caller owns and keeps:
+    /// <see cref="Dispose"/> does not dispose it, so it can outlive the processor and be handed to the next one,
+    /// which then delivers the changes queued in between. The processor is the subscription's only consumer
+    /// while it runs.
+    /// </summary>
+    public ChangeQueueProcessor(
+        object? source,
+        PropertyChangeQueueSubscription subscription,
+        Func<PropertyReference, bool> propertyFilter,
+        Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        ChangeDeliveryRule deliveryRule,
+        TimeSpan? bufferTime,
+        int? maxQueueDepth,
+        ILogger logger,
+        Action<long>? dropHandler = null)
+        : this(
+            source, subscription, propertyFilter, writeHandler, deliveryRule, bufferTime, maxQueueDepth, logger,
+            writeHandlerOwnsChanges: false, dropHandler)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the processor with an externally owned subscription and the connector-internal delivery
+    /// hooks. The caller keeps ownership: <see cref="Dispose"/> does not dispose the subscription. The ownership
+    /// flag is required so that a call without the hooks resolves to the public constructor.
     /// </summary>
     internal ChangeQueueProcessor(
         object? source,
@@ -162,8 +190,8 @@ public class ChangeQueueProcessor : IDisposable
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger,
+        bool writeHandlerOwnsChanges,
         Action<long>? dropHandler = null,
-        bool writeHandlerOwnsChanges = false,
         Action? terminalHandler = null,
         Func<CancellationToken, ValueTask>? completionHandler = null)
     {

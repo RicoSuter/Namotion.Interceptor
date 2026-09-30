@@ -24,7 +24,8 @@ namespace Namotion.Interceptor.Connectors
     public abstract class ChangeQueueBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
     {
         protected ChangeQueueBackgroundService(Microsoft.Extensions.Logging.ILogger logger) { }
-        protected abstract Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateProcessor();
+        protected abstract Namotion.Interceptor.IInterceptorSubjectContext Context { get; }
+        protected abstract Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateProcessor(Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription subscription);
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         protected virtual System.TimeSpan GetRetryDelay(System.Exception exception) { }
@@ -36,6 +37,7 @@ namespace Namotion.Interceptor.Connectors
     public class ChangeQueueProcessor : System.IDisposable
     {
         public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger, System.Action<long>? dropHandler = null) { }
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription subscription, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, Namotion.Interceptor.Connectors.ChangeDeliveryRule deliveryRule, System.TimeSpan? bufferTime, int? maxQueueDepth, Microsoft.Extensions.Logging.ILogger logger, System.Action<long>? dropHandler = null) { }
         public long DropCount { get; }
         public int QueueDepth { get; }
         public void Dispose() { }

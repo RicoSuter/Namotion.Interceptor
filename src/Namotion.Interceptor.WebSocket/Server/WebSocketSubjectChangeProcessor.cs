@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.WebSocket.Server;
 
@@ -23,7 +24,11 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
     }
 
     /// <inheritdoc />
-    protected override ChangeQueueProcessor CreateProcessor() => _handler.CreateChangeQueueProcessor(_logger);
+    protected override IInterceptorSubjectContext Context => _handler.Context;
+
+    /// <inheritdoc />
+    protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription) =>
+        _handler.CreateChangeQueueProcessor(subscription, _logger);
 
     /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)

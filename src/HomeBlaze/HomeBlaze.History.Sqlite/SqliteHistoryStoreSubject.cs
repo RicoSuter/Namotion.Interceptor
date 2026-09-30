@@ -224,7 +224,10 @@ public partial class SqliteHistoryStoreSubject :
     // ChangeQueueBackgroundService
 
     /// <inheritdoc />
-    protected override ChangeQueueProcessor CreateProcessor()
+    protected override IInterceptorSubjectContext Context => ((IInterceptorSubject)this).Context;
+
+    /// <inheritdoc />
+    protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
     {
         Settings settings;
         lock (_settingsLock)
@@ -238,7 +241,7 @@ public partial class SqliteHistoryStoreSubject :
         // what keeps both points in the series.
         var processor = new ChangeQueueProcessor(
             this,
-            ((IInterceptorSubject)this).Context,
+            subscription,
             HistoryChangeRecorder.IsEligible,
             // Runs after ProcessAsync sets _recorder, but may outlive a session that ends by clearing it.
             (changes, _) => _recorder?.RecordBatch(changes) ?? default,
@@ -247,9 +250,9 @@ public partial class SqliteHistoryStoreSubject :
             maxQueueDepth: null,
             logger: _logger);
 
-        // Captured once the processor has subscribed, from StartAsync, a restart or a retry, so a change
-        // queued before the engine exists still falls inside coverage. Only the service's sequential session
-        // flow reads it.
+        // Captured once the subscription exists, from StartAsync, a restart or a retry, so a change queued
+        // before the engine exists still falls inside coverage. Only the service's sequential session flow
+        // reads it.
         _coverageStartedAt = DateTimeOffset.UtcNow;
         return processor;
     }
@@ -299,8 +302,8 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The processor subscribed when CreateProcessor built it, so the subscription precedes the coverage
-        // session and no change can fall inside claimed coverage without reaching the engine.
+        // The subscription precedes the coverage session, so no change can fall inside claimed coverage
+        // without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
