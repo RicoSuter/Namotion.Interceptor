@@ -105,8 +105,8 @@ public class RegisteredSubjectProperty
         ?? throw new InvalidOperationException("The property is not an attribute.");
     
     /// <summary>
-    /// Checks whether this property has child subjects, which can be either
-    /// a subject reference, a collection of subjects, or a dictionary of subjects.
+    /// Checks whether this is a structural property, one that holds child subjects: a subject reference,
+    /// a collection of subjects, or a dictionary of subjects.
     /// </summary>
     public bool CanContainSubjects
     {
