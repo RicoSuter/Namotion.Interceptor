@@ -321,9 +321,8 @@ public partial class SqliteHistoryStoreSubject :
         {
             await flushTask.ConfigureAwait(false);
 
-            // Final shutdown flush so the un-flushed tail is persisted. The stopping token is already
-            // cancelled here, so a fresh bounded token gives the flush a chance to complete (the engine
-            // keeps pending samples on failure, so a timeout simply leaves them for the next start).
+            // Final flush on stop or restart. The token is already cancelled, so a fresh bounded one gives
+            // it a chance; on timeout the pending samples are lost, which the log below reports.
             using var shutdownCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -331,7 +330,7 @@ public partial class SqliteHistoryStoreSubject :
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
+                _logger.LogError(exception, "Final history flush on stop or restart failed; pending samples were not persisted.");
             }
 
             RefreshMetrics(engine);

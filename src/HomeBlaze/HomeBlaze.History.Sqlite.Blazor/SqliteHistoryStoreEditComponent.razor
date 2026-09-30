@@ -9,7 +9,7 @@
 <MudForm>
     <MudCheckBox @bind-Value="_isEnabled"
                  @bind-Value:after="OnFieldChanged"
-                 Label="Enabled (auto-start on application startup)" />
+                 Label="Enabled" />
 
     <MudTextField @bind-Value="_databasePath"
                   @bind-Value:after="OnFieldChanged"

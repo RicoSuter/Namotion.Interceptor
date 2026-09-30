@@ -130,7 +130,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <inheritdoc />
     public override void Dispose()
     {
-        // A start cancelled before its execution ran leaves the processor here.
+        // A start not followed by a stop leaves the processor here if the execution has not taken it yet.
         base.Dispose();
         Interlocked.Exchange(ref _startProcessor, null)?.Dispose();
     }

@@ -402,8 +402,8 @@ public class SqliteHistoryStoreRecordingTests
         var (context, root, _) = CreateGraph();
         var (store, databasePath) = CreateStore(context);
 
-        // The default interval, so no periodic flush persists value 1 before the restart does.
-        store.FlushIntervalSeconds = 10;
+        // Long enough that no periodic flush persists value 1 before the restart does.
+        store.FlushIntervalSeconds = (int)TimeSpan.FromDays(1).TotalSeconds;
 
         var hostedService = (IHostedService)store;
         await hostedService.StartAsync(CancellationToken.None);
@@ -487,6 +487,40 @@ public class SqliteHistoryStoreRecordingTests
             Assert.Empty(store.CoverageRanges);
             Assert.Empty(QuerySeries(store, "/Temperature").Points);
             Assert.Equal(0, store.RecordedCount);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenOnlyPriorityAndFlushIntervalChange_ThenTheStoreDoesNotRestart()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 11);
+            var coverageFrom = Assert.Single(store.CoverageRanges).From;
+
+            // Act
+            store.Priority = 7;
+            store.FlushIntervalSeconds = 2;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert (before a restart could complete)
+            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
+
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
+            var series = QuerySeries(store, "/Temperature");
+            Assert.Contains(series.Points, point => point.Number == 11);
+            Assert.Contains(series.Points, point => point.Number == 22);
+            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
         }
         finally
         {
