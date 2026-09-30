@@ -11,23 +11,24 @@
           },
           {
             Index: 0
-          }
-        ],
-        Items: [
+          },
           {
+            Action: Insert,
             Index: 1,
-            Id: 3
+            Id: 4
           }
         ],
         Count: 2
       },
       father: {
         Kind: Object,
+        Mode: Replaced,
         Timestamp: {Scrubbed},
-        Id: 4
+        Id: 3
       },
       mother: {
         Kind: Object,
+        Mode: Replaced,
         Timestamp: {Scrubbed},
         Id: 2
       }
@@ -35,6 +36,7 @@
     2: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -74,6 +76,46 @@
     3: {
       children: {
         Kind: Collection,
+        Mode: Complete,
+        Count: 0
+      },
+      father: {
+        Kind: Object
+      },
+      firstName: {
+        Kind: Value,
+        Value: MyFather,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: MyFather 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Object
+      },
+      relationships: {
+        Kind: Value
+      }
+    },
+    4: {
+      children: {
+        Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -99,44 +141,6 @@
       fullName: {
         Kind: Value,
         Value: John 
-      },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Object
-      },
-      relationships: {
-        Kind: Value
-      }
-    },
-    4: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
-      father: {
-        Kind: Object
-      },
-      firstName: {
-        Kind: Value,
-        Value: MyFather,
-        Attributes: {
-          maxLength: {
-            Kind: Value,
-            Value: 123,
-            Attributes: {
-              unit: {
-                Kind: Value,
-                Value: Count
-              }
-            }
-          }
-        }
-      },
-      fullName: {
-        Kind: Value,
-        Value: MyFather 
       },
       lastName: {
         Kind: Value

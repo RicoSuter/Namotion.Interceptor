@@ -4,6 +4,7 @@
     1: {
       child: {
         Kind: Object,
+        Mode: Replaced,
         Timestamp: {Scrubbed},
         Id: 2
       },
@@ -38,10 +39,12 @@
       },
       items: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       lookup: {
         Kind: Dictionary,
+        Mode: Complete,
         Count: 0
       },
       name: {
@@ -68,10 +71,12 @@
       },
       items: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       lookup: {
         Kind: Dictionary,
+        Mode: Complete,
         Count: 0
       },
       name: {

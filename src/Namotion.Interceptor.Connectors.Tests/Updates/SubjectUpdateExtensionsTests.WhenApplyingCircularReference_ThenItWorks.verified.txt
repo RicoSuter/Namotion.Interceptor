@@ -9,10 +9,12 @@
       },
       Items: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       Lookup: {
         Kind: Dictionary,
+        Mode: Complete,
         Count: 0
       },
       Name: {
@@ -39,10 +41,12 @@
       },
       Items: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       Lookup: {
         Kind: Dictionary,
+        Mode: Complete,
         Count: 0
       },
       Name: {

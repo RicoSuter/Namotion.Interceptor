@@ -9,35 +9,30 @@
           {
             Action: Insert,
             Index: key2,
-            Id: 3
+            Id: 2
           }
         ],
         Items: [
           {
             Index: key1,
-            Id: 2
+            Id: 3
           }
         ],
         Count: 2
       }
     },
     2: {
-      Name: {
-        Kind: Value,
-        Value: Item1Updated,
-        Timestamp: DateTimeOffset_2
-      }
-    },
-    3: {
       Child: {
         Kind: Object
       },
       Items: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       Lookup: {
         Kind: Dictionary,
+        Mode: Complete,
         Count: 0
       },
       Name: {
@@ -55,6 +50,13 @@
       },
       Self: {
         Kind: Object
+      }
+    },
+    3: {
+      Name: {
+        Kind: Value,
+        Value: Item1Updated,
+        Timestamp: DateTimeOffset_2
       }
     }
   }

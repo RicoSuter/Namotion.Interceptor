@@ -4,6 +4,7 @@
     1: {
       father: {
         Kind: Object,
+        Mode: Replaced,
         Timestamp: {Scrubbed},
         Id: 2
       }
@@ -11,6 +12,7 @@
     2: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
