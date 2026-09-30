@@ -23,11 +23,11 @@ namespace Namotion.Interceptor.Connectors
     }
     public abstract class ChangeQueueBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
     {
-        protected ChangeQueueBackgroundService() { }
+        protected ChangeQueueBackgroundService(Microsoft.Extensions.Logging.ILogger logger) { }
         protected abstract Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateProcessor();
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
-        protected virtual System.TimeSpan? GetRetryDelay(System.Exception exception) { }
+        protected virtual System.TimeSpan GetRetryDelay(System.Exception exception) { }
         protected virtual System.Threading.Tasks.Task ProcessAsync(Namotion.Interceptor.Connectors.ChangeQueueProcessor processor, System.Threading.CancellationToken stoppingToken) { }
         protected void RequestRestart() { }
         public override sealed System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }

@@ -36,6 +36,7 @@ public partial class SqliteHistoryStoreSubject :
     private DateTimeOffset _coverageStartedAt;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
+        : base(logger)
     {
         _logger = logger;
 

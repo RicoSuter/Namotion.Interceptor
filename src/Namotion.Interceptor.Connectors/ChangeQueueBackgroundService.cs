@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -6,8 +7,9 @@ namespace Namotion.Interceptor.Connectors;
 /// A hosted service that consumes property changes through a <see cref="ChangeQueueProcessor"/>. The processor,
 /// and with it the change subscription, is created in <see cref="StartAsync"/>, so a change made after the host
 /// start returns is delivered even though the execution may run later. <see cref="RequestRestart"/> replaces the
-/// processor while the service runs. The service disposes the processors it created on every exit path,
-/// including a restart.
+/// processor while the service runs, and a fault is logged and retried with a new processor after
+/// <see cref="GetRetryDelay"/>. The service disposes the processors it created on every exit path, including a
+/// restart.
 /// </summary>
 /// <remarks>
 /// A further <see cref="StartAsync"/> is supported only once the previous <see cref="BackgroundService.ExecuteTask"/>
@@ -16,45 +18,55 @@ namespace Namotion.Interceptor.Connectors;
 /// </remarks>
 public abstract class ChangeQueueBackgroundService : BackgroundService
 {
+    private readonly ILogger _logger;
     private ChangeQueueProcessor? _startProcessor;
     private TaskCompletionSource? _restartWake;
     private int _restartRequested;
 
     /// <summary>
+    /// Initializes the service with the logger that receives each fault it retries.
+    /// </summary>
+    protected ChangeQueueBackgroundService(ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
+    }
+
+    /// <summary>
     /// Creates the processor that subscribes to property changes. Called from <see cref="StartAsync"/> on the
-    /// host start path and from the execution on a restart, so it must not block or perform I/O; an exception
-    /// fails the start or, during execution, is passed to <see cref="GetRetryDelay"/>. A processor from an
-    /// earlier start that no execution took is disposed before this is called.
+    /// host start path and from the execution on a restart or retry, so it must not block or perform I/O; an
+    /// exception fails the start or, during execution, is logged and retried after <see cref="GetRetryDelay"/>.
+    /// A processor from an earlier start that no execution took is disposed before this is called.
     /// </summary>
     protected abstract ChangeQueueProcessor CreateProcessor();
 
     /// <summary>
     /// Consumes the given processor until <paramref name="stoppingToken"/> is cancelled, which a stop and
     /// <see cref="RequestRestart"/> both do; an <see cref="OperationCanceledException"/> thrown after that
-    /// cancellation counts as a return. The default drains the processor with
-    /// <see cref="ChangeQueueProcessor.ProcessAsync"/> until the token is cancelled. Override it to set up state
-    /// before draining, tear it down after, or run work alongside it. The processor is disposed when this returns.
-    /// Returning before the cancellation leaves the service idle, without a processor, until a restart is
-    /// requested or it stops. The service owns the processor; implementations must not dispose it.
+    /// cancellation counts as a return. Any other exception is logged and retried after <see cref="GetRetryDelay"/>.
+    /// The default drains the processor with <see cref="ChangeQueueProcessor.ProcessAsync"/> until the token is
+    /// cancelled. Override it to set up state before draining, tear it down after, or run work alongside it. The
+    /// processor is disposed when this returns. Returning before the cancellation leaves the service idle, without
+    /// a processor, until a restart is requested or it stops. The service owns the processor; implementations must
+    /// not dispose it.
     /// </summary>
     protected virtual Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken) =>
         processor.ProcessAsync(stoppingToken);
 
     /// <summary>
-    /// Returns the delay before retrying a failed processing session or processor creation during execution,
-    /// or null to propagate the failure. Called after the failed session's processor is disposed.
-    /// Initial creation failures always fail <see cref="StartAsync"/>. Expected stop and restart cancellation
-    /// does not call this method. A stop or restart interrupts the delay.
+    /// Returns the delay before a new processor is created after <see cref="ProcessAsync"/> or a restart's
+    /// <see cref="CreateProcessor"/> throws, five seconds by default. Called after the failed processor is
+    /// disposed; the delay is waited unless a restart or stop comes first.
     /// </summary>
-    /// <returns>A nonnegative delay supported by <see cref="Task.Delay(TimeSpan, CancellationToken)"/>, or null.</returns>
-    protected virtual TimeSpan? GetRetryDelay(Exception exception) => null;
+    /// <returns>A nonnegative delay supported by <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.</returns>
+    protected virtual TimeSpan GetRetryDelay(Exception exception) => TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Cancels the token given to <see cref="ProcessAsync"/>, disposes its processor and runs
     /// <see cref="ProcessAsync"/> again with a new processor from <see cref="CreateProcessor"/>; a
     /// <see cref="ProcessAsync"/> that has already returned is run again the same way. Requests made before the
     /// restart begins coalesce into one, and a request made while the service is stopped is served by the next
-    /// start. Failures during the restart use <see cref="GetRetryDelay"/>.
+    /// start. A failure during the restart is logged and retried after <see cref="GetRetryDelay"/>.
     /// </summary>
     protected void RequestRestart()
     {
@@ -121,21 +133,27 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
             {
                 return;
             }
-            catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+            catch (Exception exception)
             {
-                retryDelay = GetRetryDelay(exception);
-                if (retryDelay is null)
+                var delay = GetRetryDelay(exception);
+                if (delay < TimeSpan.Zero)
                 {
-                    throw;
+                    throw new InvalidOperationException(
+                        $"{nameof(GetRetryDelay)} returned a negative delay ({delay}) for the fault in the inner exception.",
+                        exception);
                 }
+
+                _logger.LogError(exception, "Change queue processing faulted; retrying in {RetryDelay}.", delay);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                retryDelay = delay;
             }
             processor = null;
 
             await WaitForRestartAsync(wake.Task, retryDelay, stoppingToken).ConfigureAwait(false);
-            if (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
 
             // Consumed before the processor is created, so a request made from here on restarts once more.
             Interlocked.Exchange(ref _restartRequested, 0);
@@ -169,7 +187,6 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
             return;
         }
 
-        ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero, nameof(retryDelay));
         using var delayCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         await Task.WhenAny(wake, Task.Delay(delay, delayCancellation.Token)).ConfigureAwait(false);
         await delayCancellation.CancelAsync().ConfigureAwait(false);

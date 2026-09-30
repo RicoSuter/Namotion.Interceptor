@@ -16,6 +16,7 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
     public WebSocketSubjectChangeProcessor(
         WebSocketSubjectHandler handler,
         ILogger<WebSocketSubjectChangeProcessor> logger)
+        : base(logger)
     {
         _handler = handler;
         _logger = logger;
@@ -23,13 +24,6 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
 
     /// <inheritdoc />
     protected override ChangeQueueProcessor CreateProcessor() => _handler.CreateChangeQueueProcessor(_logger);
-
-    /// <inheritdoc />
-    protected override TimeSpan? GetRetryDelay(Exception exception)
-    {
-        _logger.LogError(exception, "Change processor faulted, restarting in 5 seconds");
-        return TimeSpan.FromSeconds(5);
-    }
 
     /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
@@ -42,10 +36,5 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
         await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
         await session.CancelAsync().ConfigureAwait(false);
         await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
-
-        if (!stoppingToken.IsCancellationRequested)
-        {
-            RequestRestart();
-        }
     }
 }

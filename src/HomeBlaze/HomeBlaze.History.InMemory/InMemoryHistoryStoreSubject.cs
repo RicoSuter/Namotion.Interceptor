@@ -36,6 +36,7 @@ public partial class InMemoryHistoryStoreSubject :
     private DateTimeOffset _coverageStartedAt;
 
     public InMemoryHistoryStoreSubject(ILogger<InMemoryHistoryStoreSubject> logger)
+        : base(logger)
     {
         _logger = logger;
 

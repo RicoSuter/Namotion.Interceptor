@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
@@ -120,8 +121,9 @@ public class ChangeQueueBackgroundServiceTests
         // Arrange: no PropertyChangeInterceptor in the context.
         using var service = new TestService(InterceptorSubjectContext.Create());
 
-        // Act & Assert
+        // Act & Assert: an initial creation failure is not retried.
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(CancellationToken.None));
+        Assert.False(service.Failures.Reader.TryRead(out _));
     }
 
     [Fact]
@@ -134,7 +136,7 @@ public class ChangeQueueBackgroundServiceTests
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         await service.StartAsync(cancelled.Token);
-        service.ThrowOnCreate = true;
+        service.CreationFailuresRemaining = 1;
 
         // Act
         var exception = await Record.ExceptionAsync(() => service.StartAsync(cancelled.Token));
@@ -177,10 +179,35 @@ public class ChangeQueueBackgroundServiceTests
         // Act
         await service.StopAsync(timeout.Token);
 
-        // Assert
+        // Assert: the cancellation is the session's end, not a fault.
         Assert.True(session.Token.IsCancellationRequested);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         Assert.True(interceptor.IsIdle);
+        Assert.False(service.Failures.Reader.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task WhenProcessAsyncFaultsAfterTheStopWasRequested_ThenTheExecutionCompletesSuccessfully()
+    {
+        // Arrange: the session ignores its cancellation, so the fault is thrown once the stop is under way.
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var context = CreateContext();
+        using var service = new TestService(context) { IgnoreCancellation = true };
+        await service.StartAsync(CancellationToken.None);
+        var session = await service.Sessions.Reader.ReadAsync(timeout.Token);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registration = session.Token.Register(() => cancelled.SetResult());
+        var stopping = service.StopAsync(timeout.Token);
+        await cancelled.Task.WaitAsync(timeout.Token);
+
+        // Act
+        service.Release.SetException(new InvalidOperationException("Processing failed."));
+        await stopping;
+
+        // Assert: the fault is still reported, but it does not fail the stop.
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+        Assert.True(context.GetService<PropertyChangeInterceptor>().IsIdle);
+        Assert.IsType<InvalidOperationException>(await service.Failures.Reader.ReadAsync(timeout.Token));
     }
 
     [Fact]
@@ -196,10 +223,11 @@ public class ChangeQueueBackgroundServiceTests
         service.Restart();
         var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
-        // Assert
+        // Assert: the restart cancellation is the session's end, not a fault.
         Assert.True(first.Token.IsCancellationRequested);
         Assert.Equal(2, service.Created.Count);
         Assert.Same(service.Created[1], second.Processor);
+        Assert.False(service.Failures.Reader.TryRead(out _));
         await Assert.ThrowsAsync<ObjectDisposedException>(() => first.Processor.ProcessAsync(CancellationToken.None));
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
@@ -222,9 +250,10 @@ public class ChangeQueueBackgroundServiceTests
         service.Restart();
         var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
-        // Assert
+        // Assert: a normal return is not a fault, so nothing was retried before the request.
         Assert.Equal(2, service.Created.Count);
         Assert.Same(service.Created[1], second.Processor);
+        Assert.False(service.Failures.Reader.TryRead(out _));
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
@@ -377,19 +406,134 @@ public class ChangeQueueBackgroundServiceTests
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
 
-    [Fact]
-    public async Task WhenProcessAsyncFaultsAndTheServiceIsStartedAgain_ThenARestartRequestIsServed()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task WhenProcessingFails_ThenRetryUsesANewProcessor(bool synchronous, bool unrelatedCancellation)
     {
-        // Arrange: the execution faults, a stale request arrives, then the service is stopped and started again.
+        // Arrange
         using var timeout = new CancellationTokenSource(TestTimeout);
-        using var service = new TestService(CreateContext());
+        Exception failure = unrelatedCancellation ? new OperationCanceledException() : new InvalidOperationException();
+        using var service = new TestService(CreateContext())
+        {
+            FirstFailure = failure,
+            ThrowSynchronously = synchronous
+        };
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
+
+        // Assert
+        Assert.NotSame(first.Processor, second.Processor);
+        Assert.Same(failure, await service.Failures.Reader.ReadAsync(timeout.Token));
+        Assert.True(service.DisposedBeforePolicy);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => first.Processor.ProcessAsync(CancellationToken.None));
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenProcessAsyncFaults_ThenTheFaultIsLoggedOnceWithTheDelay()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var logger = new CapturingLogger();
+        var failure = new InvalidOperationException("Processing failed.");
+        var delay = TimeSpan.FromMilliseconds(1);
+        using var service = new TestService(CreateContext(), logger) { FirstFailure = failure, RetryDelay = delay };
+
+        // Act
         await service.StartAsync(CancellationToken.None);
         await service.Sessions.Reader.ReadAsync(timeout.Token);
-        service.Release.SetException(new InvalidOperationException("Processing failed."));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteTask!);
-        service.Restart();
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
         await service.StopAsync(timeout.Token);
-        service.Release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Assert
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Same(failure, entry.Exception);
+        Assert.Equal(delay, Assert.Single(entry.State, pair => pair.Key == "RetryDelay").Value);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenCreateProcessorThrowsDuringARestart_ThenTheCreationIsRetried()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var context = CreateContext();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        using var service = new TestService(context);
+        await service.StartAsync(CancellationToken.None);
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
+        service.CreationFailuresRemaining = 1;
+
+        // Act
+        service.Restart();
+        var failure = await service.Failures.Reader.ReadAsync(timeout.Token);
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
+
+        // Assert: the failed creation left no subscription behind, and the retried creation was taken.
+        Assert.True(first.Token.IsCancellationRequested);
+        Assert.IsType<InvalidOperationException>(failure);
+        Assert.True(service.DisposedBeforePolicy);
+        Assert.Equal(3, service.CreationAttempts);
+        Assert.Equal(2, service.Created.Count);
+        Assert.Same(service.Created[1], second.Processor);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+        Assert.True(interceptor.IsIdle);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenBackoffIsInterrupted_ThenStopOrRestartCompletesPromptly(bool restart)
+    {
+        // Arrange: the backoff is far longer than the test, so only the interruption can end it.
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var context = CreateContext();
+        using var service = new TestService(context)
+        {
+            FirstFailure = new InvalidOperationException(),
+            RetryDelay = TimeSpan.FromHours(1)
+        };
+        await service.StartAsync(CancellationToken.None);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        await service.Failures.Reader.ReadAsync(timeout.Token);
+
+        // Act
+        if (restart)
+        {
+            service.Restart();
+            await service.Sessions.Reader.ReadAsync(timeout.Token);
+        }
+        await service.StopAsync(timeout.Token);
+
+        // Assert
+        Assert.Equal(restart ? 2 : 1, service.Created.Count);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+        Assert.True(context.GetService<PropertyChangeInterceptor>().IsIdle);
+    }
+
+    [Fact]
+    public async Task WhenStoppedDuringTheBackoffAndStartedAgain_ThenARestartRequestIsServed()
+    {
+        // Arrange: the first session faults and the service is stopped during the backoff, then started again.
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        using var service = new TestService(CreateContext())
+        {
+            FirstFailure = new InvalidOperationException("Processing failed."),
+            RetryDelay = TimeSpan.FromHours(1)
+        };
+        await service.StartAsync(CancellationToken.None);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        await service.Failures.Reader.ReadAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         await service.StartAsync(CancellationToken.None);
         var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
@@ -404,29 +548,6 @@ public class ChangeQueueBackgroundServiceTests
         await Assert.ThrowsAsync<ObjectDisposedException>(() => service.Created[0].ProcessAsync(CancellationToken.None));
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
-    }
-
-    [Fact]
-    public async Task WhenCreateProcessorThrowsDuringARestart_ThenTheExecutionFaults()
-    {
-        // Arrange
-        using var timeout = new CancellationTokenSource(TestTimeout);
-        var context = CreateContext();
-        var interceptor = context.GetService<PropertyChangeInterceptor>();
-        using var service = new TestService(context);
-        await service.StartAsync(CancellationToken.None);
-        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
-        service.ThrowOnCreate = true;
-
-        // Act
-        service.Restart();
-
-        // Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteTask!);
-        Assert.True(first.Token.IsCancellationRequested);
-        Assert.Single(service.Created);
-        Assert.True(interceptor.IsIdle);
-        await service.StopAsync(timeout.Token);
     }
 
     [Fact]
@@ -451,17 +572,27 @@ public class ChangeQueueBackgroundServiceTests
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create().WithFullPropertyTracking();
 
-    private sealed class TestService(IInterceptorSubjectContext context) : ChangeQueueBackgroundService
+    private sealed class TestService(IInterceptorSubjectContext context, ILogger? logger = null)
+        : ChangeQueueBackgroundService(logger ?? NullLogger.Instance)
     {
+        private int _creationAttempts;
+        private int _processingCount;
+
         public List<ChangeQueueProcessor> Created { get; } = [];
+        public int CreationAttempts => Volatile.Read(ref _creationAttempts);
+        public int CreationFailuresRemaining { get; set; }
+        public Exception? FirstFailure { get; init; }
+        public bool ThrowSynchronously { get; init; }
+        public TimeSpan RetryDelay { get; init; } = TimeSpan.Zero;
+        public bool IgnoreCancellation { get; init; }
+        public ManualResetEventSlim? HoldSecondCreate { get; init; }
         public TaskCompletionSource Release { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Channel<(ChangeQueueProcessor Processor, CancellationToken Token)> Sessions { get; } =
             Channel.CreateUnbounded<(ChangeQueueProcessor, CancellationToken)>();
-        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public ManualResetEventSlim? HoldSecondCreate { get; init; }
+        public Channel<Exception> Failures { get; } = Channel.CreateUnbounded<Exception>();
         public ChangeQueueProcessor? ProcessedWith { get; private set; }
-        public bool ThrowOnCreate { get; set; }
-        public bool IgnoreCancellation { get; init; }
+        public bool DisposedBeforePolicy { get; private set; }
 
         public void Restart() => RequestRestart();
 
@@ -469,8 +600,10 @@ public class ChangeQueueBackgroundServiceTests
 
         protected override ChangeQueueProcessor CreateProcessor()
         {
-            if (ThrowOnCreate)
+            Interlocked.Increment(ref _creationAttempts);
+            if (CreationFailuresRemaining > 0)
             {
+                CreationFailuresRemaining--;
                 throw new InvalidOperationException("Processor creation failed.");
             }
 
@@ -488,17 +621,36 @@ public class ChangeQueueBackgroundServiceTests
             return processor;
         }
 
+        // Records whether the failed processor's subscription was already gone when the delay was asked for.
+        protected override TimeSpan GetRetryDelay(Exception exception)
+        {
+            DisposedBeforePolicy = context.TryGetService<PropertyChangeInterceptor>()?.IsIdle ?? true;
+            Failures.Writer.TryWrite(exception);
+            return RetryDelay;
+        }
+
         // Throws OperationCanceledException on a restart or stop, which the base has to treat as the session's
-        // end; IgnoreCancellation holds the session open until Release completes instead.
-        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        // end; IgnoreCancellation holds the session open until Release completes instead. FirstFailure fails the
+        // first session, either before the method returns or through its task.
+        protected override Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
         {
             ProcessedWith = processor;
             Sessions.Writer.TryWrite((processor, stoppingToken));
-            await (IgnoreCancellation ? Release.Task : Release.Task.WaitAsync(stoppingToken));
+            if (Interlocked.Increment(ref _processingCount) == 1 && FirstFailure is { } failure)
+            {
+                if (ThrowSynchronously)
+                {
+                    throw failure;
+                }
+
+                return Task.FromException(failure);
+            }
+
+            return IgnoreCancellation ? Release.Task : Release.Task.WaitAsync(stoppingToken);
         }
     }
 
-    private sealed class DrainingService(IInterceptorSubjectContext context) : ChangeQueueBackgroundService
+    private sealed class DrainingService(IInterceptorSubjectContext context) : ChangeQueueBackgroundService(NullLogger.Instance)
     {
         public TaskCompletionSource Written { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -510,5 +662,22 @@ public class ChangeQueueBackgroundServiceTests
                 return ValueTask.CompletedTask;
             },
             ChangeDeliveryRule.SourceValuesMayBeStale, bufferTime: null, maxQueueDepth: null, NullLogger.Instance);
+    }
+
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<(LogLevel Level, Exception? Exception, IReadOnlyList<KeyValuePair<string, object?>> State)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (Entries)
+            {
+                Entries.Add((logLevel, exception, state as IReadOnlyList<KeyValuePair<string, object?>> ?? []));
+            }
+        }
     }
 }

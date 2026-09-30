@@ -957,11 +957,11 @@ await processor.ProcessAsync(stoppingToken);
 
 ### ChangeQueueBackgroundService
 
-A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It creates the `ChangeQueueProcessor` in `StartAsync`, so a change made after the host start returns is delivered, and disposes it on every exit path. Since .NET 10 a plain `BackgroundService` may run `ExecuteAsync` after `StartAsync` has returned, so building the processor there misses every change made in between. The embedded WebSocket change processor derives from it.
+A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It subscribes before the host start returns, drains the changes, restarts on request and retries after a fault.
 
 ```csharp
 public sealed class AuditService(IInterceptorSubjectContext context, ILogger<AuditService> logger)
-    : ChangeQueueBackgroundService
+    : ChangeQueueBackgroundService(logger)
 {
     protected override ChangeQueueProcessor CreateProcessor() => new(
         this, context, _ => true, WriteAuditAsync,
@@ -972,9 +972,14 @@ public sealed class AuditService(IInterceptorSubjectContext context, ILogger<Aud
 }
 ```
 
-An audit sink records every change rather than holding a value that could fall behind the model, so the settled condition of `SourceValuesAreSettled` never holds for it (see `ChangeDeliveryRule`). `ProcessAsync` drains the processor by default; override it only to set up state before draining, tear it down after, or run work alongside it. Changes made while that state is set up wait in the processor's queue. Call `RequestRestart()` to apply changed start-time configuration: the running `ProcessAsync` is cancelled, its processor disposed, and `ProcessAsync` runs again with a new processor from `CreateProcessor`. The class XML docs state the full contract, including that `CreateProcessor` must not block or perform I/O.
+| Member | Purpose |
+|---|---|
+| `CreateProcessor()` | Builds the `ChangeQueueProcessor` that subscribes to the changes (required). |
+| `ProcessAsync(processor, token)` | Drains the processor; override it to set up state before draining, tear it down after, or run work alongside it. |
+| `GetRetryDelay(exception)` | The delay before a fault is retried with a new processor, five seconds by default. |
+| `RequestRestart()` | Replaces the processor, for example after start-time configuration changed. |
 
-Normal completion leaves the service idle until `RequestRestart()` is called. Unexpected failures propagate by default. A consumer can override `GetRetryDelay(Exception)` to log the failure and return a nonnegative retry delay, or return `null` to propagate it. The base disposes the old processor before consulting the policy and creates a fresh processor after the delay. The policy also handles creation failures during execution; initial creation failures still fail `StartAsync`. Stop cancellation never retries, and an explicit restart interrupts the backoff. The embedded WebSocket service opts into a five-second delay. A retry resumes processing future changes; it does not replay changes missed while unsubscribed.
+The class XML docs state the full contract.
 
 ## Known Limitations
 
