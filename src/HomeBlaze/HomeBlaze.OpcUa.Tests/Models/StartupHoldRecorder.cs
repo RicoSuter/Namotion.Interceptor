@@ -52,7 +52,7 @@ internal sealed class StartupHoldRecorder : IStartupCompletionDeferrer
         }
     }
 
-    public IDisposable DeferCompletion()
+    public IDisposable DeferWaitCompletion()
     {
         lock (_lock)
         {

@@ -25,7 +25,7 @@ public sealed class ThrowingStartupDeferrer : IStartupCompletionDeferrer
     /// <summary>Disposals that reached this deferrer's hold, whether or not they threw.</summary>
     public int Released => Volatile.Read(ref _released);
 
-    public IDisposable DeferCompletion()
+    public IDisposable DeferWaitCompletion()
     {
         Interlocked.Increment(ref _taken);
 

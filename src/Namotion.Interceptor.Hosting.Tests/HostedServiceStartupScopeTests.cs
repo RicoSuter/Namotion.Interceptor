@@ -234,7 +234,7 @@ public class HostedServiceStartupScopeTests
             Handler = Assert.Single(_provider.GetServices<IHostedService>());
         }
 
-        public IDisposable DeferCompletion()
+        public IDisposable DeferWaitCompletion()
         {
             Interlocked.Increment(ref HoldsTaken);
             return new CompletionHold(() =>

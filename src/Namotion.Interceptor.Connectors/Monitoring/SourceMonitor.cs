@@ -248,6 +248,11 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// concurrent holders compose. Taking a hold blocks pending waits but never un-completes an
     /// already-completed one.
     /// </summary>
+    /// <remarks>
+    /// Satisfies the locking constraint of <see cref="IStartupCompletionDeferrer"/>: the take acquires
+    /// nothing, and the release takes _lock in the order this type already establishes through
+    /// <see cref="HandleLifecycleChange"/>.
+    /// </remarks>
     public IDisposable DeferWaitCompletion()
     {
         // Deliberately does not re-evaluate. The increment happens first, so IsBranchSynchronized
@@ -256,14 +261,6 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
         Interlocked.Increment(ref _registrationHolds);
         return new RegistrationHold(this);
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface. The interface's
-    /// locking constraint holds: the take acquires nothing, and the release takes _lock in the order this
-    /// type already establishes for itself through <see cref="HandleLifecycleChange"/>.
-    /// </remarks>
-    IDisposable IStartupCompletionDeferrer.DeferCompletion() => DeferWaitCompletion();
 
     private void ReleaseHold()
     {
