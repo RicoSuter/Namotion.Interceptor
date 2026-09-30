@@ -44,9 +44,8 @@ The rest of this README walks through each, then lists every package with a docu
 
 ## Requirements
 
-- **.NET 9.0** or later (extensions and integrations)
-- **.NET Standard 2.0** (core library only)
-- **C# 13** with partial properties support
+- **.NET 10.0** or later
+- **C# 14** (the .NET 10 default; partial properties need C# 13 or later)
 - IDE with source generator support (Visual Studio 2022, Rider, VS Code with C# extension)
 
 ## Installation

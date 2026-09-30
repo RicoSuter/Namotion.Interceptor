@@ -8,7 +8,7 @@ position: 1
 
 ## Prerequisites
 
-- .NET 9.0 SDK
+- .NET 10.0 SDK
 - A modern web browser
 
 ## Steps

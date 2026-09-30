@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>net9.0</TargetFramework>
-		<Nullable>enable</Nullable>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<!-- Set to true to use local MQTTnet project references (development), false for NuGet packages (production) -->
 		<UseLocalMqttProjects>false</UseLocalMqttProjects>
@@ -20,8 +18,8 @@
 
 	<!-- NuGet package references for production baseline -->
 	<ItemGroup Condition="'$(UseLocalMqttProjects)' != 'true'">
-		<PackageReference Include="MQTTnet" Version="5.1.0.1559" />
-		<PackageReference Include="MQTTnet.Server" Version="5.1.0.1559" />
+		<PackageReference Include="MQTTnet" />
+		<PackageReference Include="MQTTnet.Server" />
 	</ItemGroup>
 
 	<ItemGroup>

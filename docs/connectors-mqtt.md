@@ -390,6 +390,10 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 - Stale entries are detected and removed even if the detach event already fired
 - This ensures we never return stale data even with concurrent attach/detach
 
+## Known Limitations
+
+- **Client structural changes**: The client subscribes to the topics of the subject graph and claims their properties when it connects, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
+
 ## Performance
 
 The library includes optimizations:

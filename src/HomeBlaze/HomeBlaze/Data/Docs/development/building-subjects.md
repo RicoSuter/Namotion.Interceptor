@@ -601,8 +601,7 @@ The subject project should only depend on `Namotion.Interceptor` and optionally 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <LangVersion>preview</LangVersion>  <!-- Required for partial properties -->
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <!-- Core interception - required -->
@@ -614,7 +613,7 @@ The subject project should only depend on `Namotion.Interceptor` and optionally 
     <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
 
     <!-- Optional: For BackgroundService base class -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
   </ItemGroup>
 </Project>
 ```
@@ -632,7 +631,7 @@ Create a separate project for Blazor components that visualize or edit your subj
 ```xml
 <Project Sdk="Microsoft.NET.Sdk.Razor">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <!-- Reference your subject project -->

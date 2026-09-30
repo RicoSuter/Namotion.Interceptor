@@ -467,6 +467,8 @@ Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches 
 
 - **Snapshot lock during client connection**: When a new client connects, the server builds a full state snapshot under the same lock used for applying updates. This blocks incoming updates for the duration of the snapshot, which is proportional to graph size. This is acceptable because new-client connections are infrequent relative to the update rate, but could become a concern with very large subject graphs and frequent client reconnections.
 
+- **Client structural changes**: The client claims the value properties of the subject graph when it connects and does not follow [structural changes](connectors.md#structural-changes) after that. It applies the structure the server sends, but a local structural change is not sent to the server, and local writes to a subject attached after the connect, locally or by the server, are not sent until the next reconnect claims the current graph.
+
 - **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this. Sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
 
 ## Future Extensibility

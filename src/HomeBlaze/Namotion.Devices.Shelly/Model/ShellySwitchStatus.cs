@@ -14,7 +14,7 @@ internal class ShellySwitchStatus
     public string? Source { get; set; }
 
     [JsonPropertyName("output")]
-    public bool? Output { get; set; }
+    public bool? IsOutputOn { get; set; }
 
     [JsonPropertyName("apower")]
     public decimal? ActivePower { get; set; }

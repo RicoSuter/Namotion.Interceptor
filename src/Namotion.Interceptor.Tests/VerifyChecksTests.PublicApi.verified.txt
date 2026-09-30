@@ -3,7 +3,7 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Tracking")]
-[assembly: System.Runtime.Versioning.TargetFramework(".NETStandard,Version=v2.0", FrameworkDisplayName=".NET Standard 2.0")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Attributes
 {
     [System.AttributeUsage(System.AttributeTargets.Property, AllowMultiple=true)]
@@ -64,7 +64,7 @@ namespace Namotion.Interceptor
         System.Collections.Concurrent.ConcurrentDictionary<System.ValueTuple<string?, string>, object?> Data { get; }
         System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> Properties { get; }
         object SyncRoot { get; }
-        void AddProperties(System.Collections.Generic.IEnumerable<Namotion.Interceptor.SubjectPropertyMetadata> properties);
+        void AddProperties([System.Runtime.CompilerServices.ParamCollection] System.Collections.Generic.IEnumerable<Namotion.Interceptor.SubjectPropertyMetadata> properties);
     }
     public interface IInterceptorSubjectContext
     {

@@ -294,7 +294,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     }
 
     private readonly record struct OversizePlaceholder(
-        [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool Oversize,
+        [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool IsOversized,
         [property: System.Text.Json.Serialization.JsonPropertyName("size")] int Size);
 
     public void RecordMove(DateTimeOffset timestamp, string fromPath, string toPath)

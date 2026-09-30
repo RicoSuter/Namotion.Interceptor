@@ -36,7 +36,7 @@ public class HistoryStoreMergerTests
 
         // Assert
         Assert.Equal(new double?[] { 1d, 2d, 3d, 4d }, series.Points.Select(point => point.Number).ToArray());
-        Assert.False(series.Truncated);
+        Assert.False(series.IsTruncated);
         Assert.Single(older.ReceivedQueries);
         Assert.Single(newer.ReceivedQueries);
         Assert.Equal(At(0), older.ReceivedQueries[0].From);
@@ -137,7 +137,7 @@ public class HistoryStoreMergerTests
 
         // Assert
         Assert.Empty(series.Points);
-        Assert.False(series.Truncated);
+        Assert.False(series.IsTruncated);
         Assert.Equal("temp", series.PropertyPath);
     }
 
@@ -237,7 +237,7 @@ public class HistoryStoreMergerTests
         Assert.Equal(At(40), received.From);
         Assert.Equal(At(60), received.To);
         Assert.Equal(2, series.Points.Length);
-        Assert.True(series.Truncated);
+        Assert.True(series.IsTruncated);
     }
 
     [Fact]
@@ -340,7 +340,7 @@ public class HistoryStoreMergerTests
 
         // Assert: only the two newest points survive; truncated because the older segment was dropped.
         Assert.Equal(new double?[] { 3d, 4d }, series.Points.Select(point => point.Number).ToArray());
-        Assert.True(series.Truncated);
+        Assert.True(series.IsTruncated);
         Assert.Empty(older.ReceivedQueries);
     }
 
@@ -360,7 +360,7 @@ public class HistoryStoreMergerTests
 
         // Assert: newest two kept, truncated flagged.
         Assert.Equal(new double?[] { 2d, 3d }, series.Points.Select(point => point.Number).ToArray());
-        Assert.True(series.Truncated);
+        Assert.True(series.IsTruncated);
 
         // And coverage retreats to the oldest point actually returned. The store covers [0,60) and was
         // asked about all of it, but the sample at t=10 was dropped, so nothing in this result stands

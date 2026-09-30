@@ -206,9 +206,9 @@ public partial class InMemoryHistoryStoreSubject :
             maxJsonSize: MaxJsonSize,
             getUtcNow: () => DateTimeOffset.UtcNow);
 
-        // The change-queue subscription is live from construction, before the first await
-        // (BackgroundService.StartAsync returns at that point). The coverage session starts only
-        // afterwards, so no change can fall inside claimed coverage without reaching the engine.
+        // The change-queue subscription is live from construction, before the first await. The
+        // coverage session starts only afterwards, so no change can fall inside claimed coverage
+        // without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
