@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -428,6 +429,25 @@ public class ChangeQueueBackgroundServiceTests
         await service.StopAsync(timeout.Token);
     }
 
+    [Fact]
+    public async Task WhenProcessAsyncIsNotOverridden_ThenTheProcessorIsDrained()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var context = CreateContext();
+        var person = new Person(context);
+        using var service = new DrainingService(context);
+        await service.StartAsync(CancellationToken.None);
+
+        // Act
+        person.FirstName = "Changed";
+
+        // Assert
+        await service.Written.Task.WaitAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create().WithFullPropertyTracking();
 
@@ -476,5 +496,19 @@ public class ChangeQueueBackgroundServiceTests
             Sessions.Writer.TryWrite((processor, stoppingToken));
             await (IgnoreCancellation ? Release.Task : Release.Task.WaitAsync(stoppingToken));
         }
+    }
+
+    private sealed class DrainingService(IInterceptorSubjectContext context) : ChangeQueueBackgroundService
+    {
+        public TaskCompletionSource Written { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override ChangeQueueProcessor CreateProcessor() => new(
+            this, context, _ => true,
+            (_, _) =>
+            {
+                Written.TrySetResult();
+                return ValueTask.CompletedTask;
+            },
+            ChangeDeliveryRule.SourceValuesMayBeStale, bufferTime: null, maxQueueDepth: null, NullLogger.Instance);
     }
 }

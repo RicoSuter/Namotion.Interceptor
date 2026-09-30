@@ -967,15 +967,12 @@ public sealed class AuditService(IInterceptorSubjectContext context, ILogger<Aud
         this, context, _ => true, WriteAuditAsync,
         ChangeDeliveryRule.SourceValuesMayBeStale, bufferTime: null, maxQueueDepth: null, logger);
 
-    protected override Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken) =>
-        processor.ProcessAsync(stoppingToken);
-
     private ValueTask WriteAuditAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken) =>
         ValueTask.CompletedTask;
 }
 ```
 
-An audit sink records every change rather than holding a value that could fall behind the model, so the settled condition of `SourceValuesAreSettled` never holds for it (see `ChangeDeliveryRule`). State that `ProcessAsync` needs is set up there before draining the processor; changes made meanwhile wait in its queue. Call `RequestRestart()` to apply changed start-time configuration: the running `ProcessAsync` is cancelled, its processor disposed, and `ProcessAsync` runs again with a new processor from `CreateProcessor`. The class XML docs state the full contract, including that `CreateProcessor` must not block or perform I/O.
+An audit sink records every change rather than holding a value that could fall behind the model, so the settled condition of `SourceValuesAreSettled` never holds for it (see `ChangeDeliveryRule`). `ProcessAsync` drains the processor by default; override it only to set up state before draining, tear it down after, or run work alongside it. Changes made while that state is set up wait in the processor's queue. Call `RequestRestart()` to apply changed start-time configuration: the running `ProcessAsync` is cancelled, its processor disposed, and `ProcessAsync` runs again with a new processor from `CreateProcessor`. The class XML docs state the full contract, including that `CreateProcessor` must not block or perform I/O.
 
 ## Known Limitations
 

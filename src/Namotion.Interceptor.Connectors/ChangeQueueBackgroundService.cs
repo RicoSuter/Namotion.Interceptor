@@ -31,12 +31,15 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <summary>
     /// Consumes the given processor until <paramref name="stoppingToken"/> is cancelled, which a stop and
     /// <see cref="RequestRestart"/> both do; an <see cref="OperationCanceledException"/> thrown after that
-    /// cancellation counts as a return. The processor is disposed when this returns. Returning before the
-    /// cancellation leaves the service idle, without a processor, until a restart is requested or it stops. An
-    /// implementation that restarts processing itself may dispose the processor earlier and use processors from
-    /// <see cref="CreateProcessor"/>, which it then owns.
+    /// cancellation counts as a return. The default drains the processor with
+    /// <see cref="ChangeQueueProcessor.ProcessAsync"/> until the token is cancelled. Override it to set up state
+    /// before draining, tear it down after, or run work alongside it. The processor is disposed when this returns.
+    /// Returning before the cancellation leaves the service idle, without a processor, until a restart is
+    /// requested or it stops. An implementation that restarts processing itself may dispose the processor earlier
+    /// and use processors from <see cref="CreateProcessor"/>, which it then owns.
     /// </summary>
-    protected abstract Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken);
+    protected virtual Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken) =>
+        processor.ProcessAsync(stoppingToken);
 
     /// <summary>
     /// Cancels the token given to <see cref="ProcessAsync"/>, disposes its processor and runs
