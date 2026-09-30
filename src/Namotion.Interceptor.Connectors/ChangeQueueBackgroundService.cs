@@ -9,6 +9,11 @@ namespace Namotion.Interceptor.Connectors;
 /// processor while the service runs. The service disposes the processors it created on every exit path,
 /// including a restart.
 /// </summary>
+/// <remarks>
+/// A further <see cref="StartAsync"/> is supported only once the previous <see cref="BackgroundService.ExecuteTask"/>
+/// has completed. A <see cref="StopAsync"/> that returned because its cancellation token fired first does not
+/// guarantee that, and a restart requested after such a start may be lost.
+/// </remarks>
 public abstract class ChangeQueueBackgroundService : BackgroundService
 {
     private ChangeQueueProcessor? _startProcessor;
@@ -51,7 +56,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     public sealed override Task StartAsync(CancellationToken cancellationToken)
     {
         // A request made while stopped is served by this fresh start.
-        Volatile.Write(ref _restartRequested, 0);
+        Interlocked.Exchange(ref _restartRequested, 0);
 
         // Not in ExecuteAsync: since .NET 10 it may run after StartAsync returns, and changes made in between
         // would never reach the processor.

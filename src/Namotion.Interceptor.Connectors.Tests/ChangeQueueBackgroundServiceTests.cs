@@ -9,10 +9,14 @@ namespace Namotion.Interceptor.Connectors.Tests;
 
 public class ChangeQueueBackgroundServiceTests
 {
+    // Bounds waits that only a lost wake can prolong, so a regression fails the test instead of hanging it.
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task WhenStartAsyncReturns_ThenTheChangeSubscriptionExists()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
@@ -20,15 +24,18 @@ public class ChangeQueueBackgroundServiceTests
         // Act
         await service.StartAsync(CancellationToken.None);
 
-        // Assert
+        // Assert: the stop may outrun the dispatch of the execution, so it is cancelled or completed, never hung.
         Assert.False(interceptor.IsIdle);
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompleted);
+        Assert.True(interceptor.IsIdle);
     }
 
     [Fact]
     public async Task WhenProcessAsyncReturns_ThenTheProcessorIsDisposed()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
@@ -41,7 +48,8 @@ public class ChangeQueueBackgroundServiceTests
         // Assert
         Assert.NotNull(service.ProcessedWith);
         Assert.True(interceptor.IsIdle);
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
 
     [Fact]
@@ -142,14 +150,15 @@ public class ChangeQueueBackgroundServiceTests
     public async Task WhenStoppedDuringProcessing_ThenTheExecutionCompletesSuccessfully()
     {
         // Arrange: the double throws OperationCanceledException when its session token is cancelled.
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
         await service.StartAsync(CancellationToken.None);
-        var session = await service.Sessions.Reader.ReadAsync();
+        var session = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Act
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
 
         // Assert
         Assert.True(session.Token.IsCancellationRequested);
@@ -161,60 +170,65 @@ public class ChangeQueueBackgroundServiceTests
     public async Task WhenRestartIsRequested_ThenProcessAsyncRunsAgainWithANewProcessor()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         using var service = new TestService(CreateContext());
         await service.StartAsync(CancellationToken.None);
-        var first = await service.Sessions.Reader.ReadAsync();
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Act
         service.Restart();
-        var second = await service.Sessions.Reader.ReadAsync();
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Assert
         Assert.True(first.Token.IsCancellationRequested);
         Assert.Equal(2, service.Created.Count);
         Assert.Same(service.Created[1], second.Processor);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => first.Processor.ProcessAsync(CancellationToken.None));
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
 
     [Fact]
     public async Task WhenProcessAsyncReturnsEarly_ThenARestartRequestRunsItAgain()
     {
         // Arrange: the first session returns on its own, so the loop idles.
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
         await service.StartAsync(CancellationToken.None);
-        await service.Sessions.Reader.ReadAsync();
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
         service.Release.SetResult();
         await AsyncTestHelpers.WaitUntilAsync(() => interceptor.IsIdle);
 
         // Act
         service.Restart();
-        var second = await service.Sessions.Reader.ReadAsync();
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Assert
         Assert.Equal(2, service.Created.Count);
         Assert.Same(service.Created[1], second.Processor);
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
 
     [Fact]
     public async Task WhenStoppedWhileIdle_ThenExecuteCompletesAndEveryProcessorIsDisposed()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
         await service.StartAsync(CancellationToken.None);
-        await service.Sessions.Reader.ReadAsync();
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
         service.Restart();
-        await service.Sessions.Reader.ReadAsync();
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
         service.Release.SetResult();
         await AsyncTestHelpers.WaitUntilAsync(() => interceptor.IsIdle);
 
         // Act
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
 
         // Assert
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
@@ -229,30 +243,60 @@ public class ChangeQueueBackgroundServiceTests
     public async Task WhenRestartIsRequestedTwiceDuringASession_ThenTheRequestsCoalesce()
     {
         // Arrange: the session outlives its cancellation, so both requests land before the restart consumes them.
+        using var timeout = new CancellationTokenSource(TestTimeout);
         using var service = new TestService(CreateContext()) { IgnoreCancellation = true };
         await service.StartAsync(CancellationToken.None);
-        var first = await service.Sessions.Reader.ReadAsync();
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var registration = first.Token.Register(() => cancelled.SetResult());
 
         // Act
         service.Restart();
         service.Restart();
-        await cancelled.Task;
+        await cancelled.Task.WaitAsync(timeout.Token);
         service.Release.SetResult();
-        var second = await service.Sessions.Reader.ReadAsync();
-        await service.StopAsync(CancellationToken.None);
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
 
         // Assert
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         Assert.Equal(2, service.Created.Count);
         Assert.Same(service.Created[1], second.Processor);
         Assert.False(service.Sessions.Reader.TryRead(out _));
     }
 
     [Fact]
+    public async Task WhenRestartIsRequestedWhileTheNextProcessorIsBeingCreated_ThenItRestartsAgain()
+    {
+        // Arrange: the second CreateProcessor blocks, so the request lands after the first one was consumed and
+        // before the next session publishes its wake.
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        using var gate = new ManualResetEventSlim();
+        using var service = new TestService(CreateContext()) { HoldSecondCreate = gate };
+        await service.StartAsync(CancellationToken.None);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        service.Restart();
+        await service.SecondCreateEntered.Task.WaitAsync(timeout.Token);
+
+        // Act
+        service.Restart();
+        gate.Set();
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
+        var third = await service.Sessions.Reader.ReadAsync(timeout.Token);
+
+        // Assert
+        Assert.True(second.Token.IsCancellationRequested);
+        Assert.Equal(3, service.Created.Count);
+        Assert.Same(service.Created[2], third.Processor);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
     public async Task WhenRestartIsRequestedBeforeStart_ThenStartDoesNotRestart()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
@@ -260,13 +304,14 @@ public class ChangeQueueBackgroundServiceTests
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        var first = await service.Sessions.Reader.ReadAsync();
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
         service.Release.SetResult();
         await AsyncTestHelpers.WaitUntilAsync(() => interceptor.IsIdle);
 
         // Assert: a served request would have cancelled the first session before its processor was disposed.
         Assert.False(first.Token.IsCancellationRequested);
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         Assert.Single(service.Created);
         Assert.False(service.Sessions.Reader.TryRead(out _));
     }
@@ -275,10 +320,11 @@ public class ChangeQueueBackgroundServiceTests
     public async Task WhenRestartIsRequestedAfterStop_ThenNothingThrows()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         using var service = new TestService(CreateContext());
         await service.StartAsync(CancellationToken.None);
-        await service.Sessions.Reader.ReadAsync();
-        await service.StopAsync(CancellationToken.None);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
 
         // Act
         service.Restart();
@@ -293,60 +339,66 @@ public class ChangeQueueBackgroundServiceTests
     public async Task WhenRestartIsRequestedAfterAStopAndASecondStart_ThenTheRequestIsServed()
     {
         // Arrange: the same instance is stopped and started again, as a graph detach and reattach does.
+        using var timeout = new CancellationTokenSource(TestTimeout);
         using var service = new TestService(CreateContext());
         await service.StartAsync(CancellationToken.None);
-        await service.Sessions.Reader.ReadAsync();
-        await service.StopAsync(CancellationToken.None);
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
         await service.StartAsync(CancellationToken.None);
-        var second = await service.Sessions.Reader.ReadAsync();
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Act
         service.Restart();
-        var third = await service.Sessions.Reader.ReadAsync();
+        var third = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Assert
         Assert.True(second.Token.IsCancellationRequested);
         Assert.Equal(3, service.Created.Count);
         Assert.Same(service.Created[2], third.Processor);
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
 
     [Fact]
     public async Task WhenProcessAsyncFaultsAndTheServiceIsStartedAgain_ThenARestartRequestIsServed()
     {
         // Arrange: the execution faults, a stale request arrives, then the service is stopped and started again.
+        using var timeout = new CancellationTokenSource(TestTimeout);
         using var service = new TestService(CreateContext());
         await service.StartAsync(CancellationToken.None);
-        await service.Sessions.Reader.ReadAsync();
+        await service.Sessions.Reader.ReadAsync(timeout.Token);
         service.Release.SetException(new InvalidOperationException("Processing failed."));
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExecuteTask!);
         service.Restart();
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
         service.Release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await service.StartAsync(CancellationToken.None);
-        var second = await service.Sessions.Reader.ReadAsync();
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Act
         service.Restart();
-        var third = await service.Sessions.Reader.ReadAsync();
+        var third = await service.Sessions.Reader.ReadAsync(timeout.Token);
 
         // Assert
         Assert.True(second.Token.IsCancellationRequested);
         Assert.Equal(3, service.Created.Count);
         Assert.Same(service.Created[2], third.Processor);
         await Assert.ThrowsAsync<ObjectDisposedException>(() => service.Created[0].ProcessAsync(CancellationToken.None));
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
+        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
     }
 
     [Fact]
     public async Task WhenCreateProcessorThrowsDuringARestart_ThenTheExecutionFaults()
     {
         // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         using var service = new TestService(context);
         await service.StartAsync(CancellationToken.None);
-        var first = await service.Sessions.Reader.ReadAsync();
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
         service.ThrowOnCreate = true;
 
         // Act
@@ -357,7 +409,7 @@ public class ChangeQueueBackgroundServiceTests
         Assert.True(first.Token.IsCancellationRequested);
         Assert.Single(service.Created);
         Assert.True(interceptor.IsIdle);
-        await service.StopAsync(CancellationToken.None);
+        await service.StopAsync(timeout.Token);
     }
 
     private static IInterceptorSubjectContext CreateContext() =>
@@ -369,6 +421,8 @@ public class ChangeQueueBackgroundServiceTests
         public TaskCompletionSource Release { get; set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Channel<(ChangeQueueProcessor Processor, CancellationToken Token)> Sessions { get; } =
             Channel.CreateUnbounded<(ChangeQueueProcessor, CancellationToken)>();
+        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim? HoldSecondCreate { get; init; }
         public ChangeQueueProcessor? ProcessedWith { get; private set; }
         public bool ThrowOnCreate { get; set; }
         public bool IgnoreCancellation { get; init; }
@@ -380,6 +434,12 @@ public class ChangeQueueBackgroundServiceTests
             if (ThrowOnCreate)
             {
                 throw new InvalidOperationException("Processor creation failed.");
+            }
+
+            if (Created.Count == 1 && HoldSecondCreate is not null)
+            {
+                SecondCreateEntered.SetResult();
+                HoldSecondCreate.Wait();
             }
 
             var processor = new ChangeQueueProcessor(
