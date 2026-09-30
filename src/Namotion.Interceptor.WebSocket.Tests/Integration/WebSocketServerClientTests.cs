@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -232,6 +233,48 @@ public class WebSocketServerClientTests
             message: "Client should receive update after instant restart");
 
         _output.WriteLine($"Client received: {client.Root!.Name}");
+    }
+
+    [Fact]
+    public async Task WhenAWriteIsParkedWhileTheServerIsDown_ThenTheReconnectDeliversIt()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
+        // A long retry time leaves the delivery to the wake on Synchronized rather than the interval.
+        await client.StartAsync(
+            context => new TestRoot(context),
+            port: portLease.Port,
+            configureClient: configuration => configuration.RetryTime = TimeSpan.FromMinutes(1));
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Initial sync should complete");
+
+        // Act - written only after the client noticed the drop, because a write into a closing socket can
+        // succeed and then nothing parks.
+        await server.StopAsync();
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.State != SourceState.Synchronized,
+            message: "Client should notice the server is down before the write below.");
+        client.Root!.Name = "WrittenWhileDown";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Source!.Diagnostics.OutboundRetries.Depth > 0,
+            message: "The write should be parked while the server is down.");
+        await server.RestartAsync();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "WrittenWhileDown" && server.Root!.Name == "WrittenWhileDown",
+            timeout: TimeSpan.FromSeconds(30),
+            message: "The write parked during the outage should survive the reconnect on both sides");
     }
 
     [Fact]

@@ -31,6 +31,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     private readonly Lock _stateLock = new();
 
+    // Never disposed: it holds no handle unless AvailableWaitHandle is read, and the idle flush can still
+    // wait on it after Dispose.
+    private readonly SemaphoreSlim _synchronizedWake = new(0);
+
     // The state and its two timestamps are swapped as one value: in separate fields a reader can see
     // the new state beside the previous timestamp, and LastSynchronizedAt has to be visible before
     // State becomes Stopped.
@@ -306,7 +310,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     using var outboundRegistration = Metrics.OutboundChanges.Register(
                         () => processor.QueueDepth, capacity: null);
 
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    using var idleFlush = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    var idleFlushTask = RunIdleFlushAsync(idleFlush.Token);
+                    try
+                    {
+                        await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await StopIdleFlushAsync(idleFlush, idleFlushTask).ConfigureAwait(false);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -440,6 +453,64 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         }
 
         return collapsed;
+    }
+
+    /// <summary>
+    /// Runs the idle flush: flushes the write retry queue every retry interval while the source is
+    /// <see cref="SourceState.Synchronized"/> and each time it becomes so, until cancelled. An exception
+    /// from one flush is logged and does not stop the next.
+    /// </summary>
+    private async Task RunIdleFlushAsync(CancellationToken cancellationToken)
+    {
+        // Outside 1 ms to int.MaxValue ms the interval is off: WaitAsync truncates a sub-millisecond timeout
+        // to zero and completes synchronously, so this loop would never yield back to RunAsync, and it
+        // rejects a larger one.
+        var interval = _retryTime >= TimeSpan.FromMilliseconds(1) && _retryTime.TotalMilliseconds <= int.MaxValue
+            ? _retryTime
+            : Timeout.InfiniteTimeSpan;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _synchronizedWake.WaitAsync(interval, cancellationToken).ConfigureAwait(false);
+
+                // Skipped during a reconnect inside the connector, which would fail every interval's flush;
+                // the wake on Synchronized covers it.
+                if (State == SourceState.Synchronized)
+                {
+                    // Ordered against the write handler's sends by the retry queue's flush gate.
+                    await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "The idle flush of the write retry queue failed.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cancels the idle flush and waits up to the processor's teardown bound for it to stop, so that a
+    /// <see cref="WriteChangesAsync"/> ignoring its token cannot keep <see cref="RunAsync"/> from returning.
+    /// </summary>
+    private async Task StopIdleFlushAsync(CancellationTokenSource idleFlush, Task idleFlushTask)
+    {
+        await idleFlush.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await idleFlushTask.WaitAsync(ChangeQueueProcessor.TeardownFlushBound).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Gave up waiting after {Timeout} for the idle flush of the write retry queue to stop. A write " +
+                "handler that ignores cancellation may still complete it.",
+                ChangeQueueProcessor.TeardownFlushBound);
+        }
     }
 
     internal async Task ReconcileRetryQueueAsync(CancellationToken cancellationToken)
@@ -604,6 +675,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             var lastSynchronizedAt = newState == SourceState.Synchronized ? now : current.LastSynchronizedAt;
 
             Volatile.Write(ref _stateSnapshot, new SourceStateSnapshot(newState, now, lastSynchronizedAt));
+
+            if (newState == SourceState.Synchronized)
+            {
+                _synchronizedWake.Release();
+            }
 
             var handlers = StateChanged;
             if (handlers is not null)
