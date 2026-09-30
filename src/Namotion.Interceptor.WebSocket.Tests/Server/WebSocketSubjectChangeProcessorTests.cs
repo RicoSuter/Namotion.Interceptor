@@ -37,25 +37,24 @@ public class WebSocketSubjectChangeProcessorTests
     }
 
     [Fact]
-    public async Task WhenStartedWithACancelledToken_ThenDisposeReleasesTheStartSubscription()
+    public async Task WhenStartedWithACancelledTokenAndStopped_ThenTheStartSubscriptionIsReleased()
     {
         // Arrange: the processor subscribes inside StartAsync, and a cancelled execution never takes
         // that subscription over.
         var context = CreateContext();
         var propertyChangeInterceptor = context.GetService<PropertyChangeInterceptor>();
-        var processor = CreateProcessor(context);
+        using var processor = CreateProcessor(context);
 
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         await processor.StartAsync(cancelled.Token);
-        await processor.StopAsync(CancellationToken.None);
-        Assert.True(processor.ExecuteTask!.IsCompleted);
         Assert.False(propertyChangeInterceptor.IsIdle);
 
         // Act
-        processor.Dispose();
+        await processor.StopAsync(CancellationToken.None);
 
         // Assert
+        Assert.True(processor.ExecuteTask!.IsCompleted);
         Assert.True(propertyChangeInterceptor.IsIdle);
     }
 

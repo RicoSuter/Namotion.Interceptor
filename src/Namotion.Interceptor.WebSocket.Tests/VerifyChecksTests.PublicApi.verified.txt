@@ -161,12 +161,11 @@ namespace Namotion.Interceptor.WebSocket.Server
         public int ConnectionCount { get; }
         public long CurrentSequence { get; }
     }
-    public sealed class WebSocketSubjectChangeProcessor : Microsoft.Extensions.Hosting.BackgroundService
+    public sealed class WebSocketSubjectChangeProcessor : Namotion.Interceptor.Connectors.ChangeQueueBackgroundService
     {
         public WebSocketSubjectChangeProcessor(Namotion.Interceptor.WebSocket.Server.WebSocketSubjectHandler handler, Microsoft.Extensions.Logging.ILogger<Namotion.Interceptor.WebSocket.Server.WebSocketSubjectChangeProcessor> logger) { }
-        public override void Dispose() { }
-        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
-        public override System.Threading.Tasks.Task StartAsync(System.Threading.CancellationToken cancellationToken) { }
+        protected override Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateProcessor() { }
+        protected override System.Threading.Tasks.Task ProcessAsync(Namotion.Interceptor.Connectors.ChangeQueueProcessor processor, System.Threading.CancellationToken stoppingToken) { }
     }
     public sealed class WebSocketSubjectHandler
     {
