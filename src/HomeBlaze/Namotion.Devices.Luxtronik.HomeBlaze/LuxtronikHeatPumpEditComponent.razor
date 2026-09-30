@@ -60,12 +60,12 @@
     private string _name = string.Empty;
     private string? _hostAddress;
     private int _port = 502;
-    private double _pollingIntervalSeconds = 5;
+    private double _pollingIntervalSeconds = 30;
 
     private string _originalName = string.Empty;
     private string? _originalHostAddress;
     private int _originalPort = 502;
-    private double _originalPollingIntervalSeconds = 5;
+    private double _originalPollingIntervalSeconds = 30;
 
     private bool IsPollingIntervalValid => _pollingIntervalSeconds >= LuxtronikHeatPump.MinimumPollingIntervalSeconds;
 

@@ -90,7 +90,7 @@ public class LuxtronikHeatPumpDeviceTests
 
         // Assert
         Assert.Equal(502, heatPump.Port);
-        Assert.Equal(TimeSpan.FromSeconds(5), heatPump.PollingInterval);
+        Assert.Equal(TimeSpan.FromSeconds(30), heatPump.PollingInterval);
         Assert.Equal(10000, heatPump.Heating.SmartHomeControl.BaseAddress);
         Assert.Equal(10005, heatPump.HotWater.SmartHomeControl.BaseAddress);
         Assert.Null(heatPump.Cooling);
@@ -98,10 +98,10 @@ public class LuxtronikHeatPumpDeviceTests
     }
 
     [Theory]
-    [InlineData(0, 2000)]
-    [InlineData(100, 2000)]
-    [InlineData(2000, 2000)]
+    [InlineData(0, 10000)]
+    [InlineData(2000, 10000)]
     [InlineData(10000, 10000)]
+    [InlineData(30000, 30000)]
     public void WhenPollingIntervalIsConfigured_ThenTheSourcePollsNoFasterThanTheMinimum(int configuredMilliseconds, int expectedMilliseconds)
     {
         // Arrange

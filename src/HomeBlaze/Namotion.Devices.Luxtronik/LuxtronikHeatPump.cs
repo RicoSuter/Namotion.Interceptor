@@ -186,7 +186,7 @@ public partial class LuxtronikHeatPump :
         Name = string.Empty;
         HostAddress = null;
         Port = 502;
-        PollingInterval = TimeSpan.FromSeconds(5);
+        PollingInterval = TimeSpan.FromSeconds(30);
 
         IsConnected = false;
         Status = ServiceStatus.Stopped;

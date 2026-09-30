@@ -53,7 +53,7 @@ The controller shows the SHI as "Standby" after 10 minutes without requests and 
 | `Name` | string | "" | Display name |
 | `HostAddress` | string | - | Controller (or proxy) IP address or host name |
 | `Port` | int | 502 | Modbus TCP port |
-| `PollingInterval` | TimeSpan | 5 seconds | Time between reads; values below 2 seconds are raised to 2 seconds |
+| `PollingInterval` | TimeSpan | 30 seconds | Time between reads; values below 10 seconds are raised to 10 seconds |
 
 A configuration change restarts the connection.
 
@@ -115,7 +115,7 @@ The `SmartHomeControl` blocks show the setpoint configuration a smart home syste
   "name": "Heat Pump",
   "hostAddress": "192.168.1.50",
   "port": 502,
-  "pollingInterval": "00:00:05"
+  "pollingInterval": "00:00:30"
 }
 ```
 

@@ -22,6 +22,9 @@ public class LuxtronikHeatPumpLifecycleTests
 {
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
+    // Below the product minimum, so each test observes several polls within its wait timeouts.
+    private static readonly TimeSpan TestPollingInterval = TimeSpan.FromSeconds(2);
+
     [Fact]
     public async Task WhenControllerStopsAndRestarts_ThenHostedHeatPumpReportsErrorAndRecovers()
     {
@@ -418,7 +421,8 @@ public class LuxtronikHeatPumpLifecycleTests
             {
                 HostAddress = hostAddress,
                 Port = port,
-                PollingInterval = TimeSpan.FromSeconds(LuxtronikHeatPump.MinimumPollingIntervalSeconds)
+                MinimumPollingInterval = TestPollingInterval,
+                PollingInterval = TestPollingInterval
             };
 
             var host = new HostedHeatPump(provider, handler, heatPump);

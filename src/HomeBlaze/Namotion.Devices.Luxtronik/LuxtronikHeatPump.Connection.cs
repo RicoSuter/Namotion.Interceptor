@@ -20,10 +20,10 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     /// <summary>
     /// The minimum <see cref="PollingInterval"/> in seconds; shorter intervals are raised to it.
     /// </summary>
-    public const int MinimumPollingIntervalSeconds = 2;
+    public const int MinimumPollingIntervalSeconds = 10;
 
-    // Protects the controller from a hand-edited configuration that would poll it continuously.
-    private static readonly TimeSpan MinimumPollingInterval = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
+    // Protects the controller from a hand-edited configuration that would poll it continuously; only tests lower it.
+    internal TimeSpan MinimumPollingInterval { get; init; } = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
 
     private const int UnknownFunctionMask = -1;
 
@@ -193,7 +193,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
     }
 
     /// <summary>
-    /// Gets the configured <see cref="PollingInterval"/>, raised to <see cref="MinimumPollingIntervalSeconds"/>.
+    /// Gets the configured <see cref="PollingInterval"/>, raised to <see cref="MinimumPollingInterval"/>.
     /// </summary>
     internal TimeSpan GetEffectivePollingInterval()
     {
