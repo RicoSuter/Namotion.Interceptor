@@ -113,8 +113,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// </remarks>
     public DateTimeOffset? TryGetWriteTimestamp()
     {
-        var ticks = GetWriteTimestampTicks();
-        return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        return PropertyWriteState.ToTimestamp(GetWriteTimestampTicks());
     }
 
     /// <summary>
@@ -217,9 +216,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         var propertyMetadata = Metadata;
         var value = propertyMetadata.GetValue?.Invoke(Subject);
 
-        // The subject's lock is not held across the getter, which runs read interceptors and user code. Taking
-        // it for the timestamp alone keeps the timestamp no older than the value's write, even when the value
-        // read did not lock.
+        // Locked even when the value read was not: a terminal stores the value and the timestamp under this
+        // lock, which is what keeps the timestamp no older than a stored or derived-with-setter value's write.
         var timestampTicks = GetWriteTimestampTicksAfterValueRead();
         if (propertyMetadata.IsDerived
             && TryGetPropertyData(DerivedDependenciesKey, out var data)

@@ -22,6 +22,14 @@ internal sealed class PropertyWriteState
     internal long TimestampTicks;
 
     /// <summary>
+    /// Converts <see cref="TimestampTicks"/> to a UTC timestamp, or null when it is zero.
+    /// </summary>
+    internal static DateTimeOffset? ToTimestamp(long ticks)
+    {
+        return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+    }
+
+    /// <summary>
     /// The revision of the last write to this property that reached a terminal and did NOT come from a
     /// source.
     /// </summary>
