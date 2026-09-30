@@ -45,7 +45,7 @@ internal static class ModbusValueConverters
                 return static (raw, _) => raw[0] != 0 ? True : False;
 
             case ModbusDataType.F32:
-                return CreateFloatReader(attribute, targetType, propertyPath, attribute.WordOrder, isNullable, hasDynamicScale, isScaled);
+                return CreateFloatReader(attribute, targetType, propertyPath, isNullable, hasDynamicScale, isScaled);
 
             default:
                 return IsScalableTarget(targetType)
@@ -77,8 +77,9 @@ internal static class ModbusValueConverters
 
     private static ModbusValueReader CreateFloatReader(
         ModbusRegisterAttribute attribute, Type targetType, string propertyPath,
-        ModbusWordOrder wordOrder, bool isNullable, bool hasDynamicScale, bool isScaled)
+        bool isNullable, bool hasDynamicScale, bool isScaled)
     {
+        var wordOrder = attribute.WordOrder;
         var staticScale = attribute.Scale;
         if (targetType == typeof(float))
         {

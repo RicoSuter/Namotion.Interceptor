@@ -33,7 +33,6 @@ internal static class ModbusRegisterCodec
 
     public static long ReadInteger(ReadOnlySpan<byte> raw, ModbusDataType dataType, ModbusWordOrder wordOrder) => dataType switch
     {
-        ModbusDataType.Boolean => raw[0] != 0 ? 1 : 0,
         ModbusDataType.U16 => ReadU16(raw),
         ModbusDataType.S16 => (short)ReadU16(raw),
         ModbusDataType.U32 => ReadU32(raw, wordOrder),

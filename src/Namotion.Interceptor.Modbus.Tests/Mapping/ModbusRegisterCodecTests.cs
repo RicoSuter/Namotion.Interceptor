@@ -26,7 +26,6 @@ public class ModbusRegisterCodecTests
     [InlineData(ModbusDataType.S16, new byte[] { 0xFF, 0xFE }, -2L)]
     [InlineData(ModbusDataType.U32, new byte[] { 0xFF, 0xFF, 0xFF, 0xFE }, 4294967294L)]
     [InlineData(ModbusDataType.S32, new byte[] { 0xFF, 0xFF, 0xFF, 0xFE }, -2L)]
-    [InlineData(ModbusDataType.Boolean, new byte[] { 1 }, 1L)]
     public void WhenReadingInteger_ThenSignIsExtendedPerDataType(ModbusDataType dataType, byte[] raw, long expected)
     {
         // Act

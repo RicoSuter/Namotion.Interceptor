@@ -3,8 +3,8 @@ namespace Namotion.Interceptor.Modbus.Attributes;
 /// <summary>
 /// Maps a subject property to a Modbus register or bit. <see cref="Address"/> is relative to the declaring
 /// subject's <see cref="IModbusBaseAddressProvider.BaseAddress"/>, or absolute when the subject has none.
+/// Device libraries can derive from it to preset values.
 /// </summary>
-/// <remarks>Not sealed, so device libraries can derive attributes with preset values.</remarks>
 [AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
 public class ModbusRegisterAttribute : Attribute
 {
