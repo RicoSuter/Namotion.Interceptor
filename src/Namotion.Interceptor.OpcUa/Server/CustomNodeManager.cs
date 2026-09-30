@@ -394,9 +394,9 @@ internal class CustomNodeManager : CustomNodeManager2
 
         variableNode.Value = value;
 
-        if (metadata.WriteTimestamp.HasValue)
+        if (metadata.WriteTimestamp is { } writeTimestamp)
         {
-            variableNode.Timestamp = metadata.WriteTimestamp.Value.UtcDateTime;
+            variableNode.Timestamp = writeTimestamp.UtcDateTime;
         }
 
         // Assigning the value above leaves a pending change mask that nothing else clears, so the next
