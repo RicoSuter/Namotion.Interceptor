@@ -167,7 +167,7 @@ One connection per source, used by one request at a time: discovery, the initial
 
 ## Lifecycle
 
-Properties of subjects attached after the source connected are picked up on the next reconnect. Detached subjects release the ownership of their properties automatically, but stay in the read plan until the next connect. A property already owned by another source is logged and not read.
+Properties of subjects attached after the source connected are picked up on the next reconnect. Detached subjects release the ownership of their properties automatically, but stay in the read plan until the next connect. A property already owned by another source is logged and not read, and neither are the properties that use it as their scale factor.
 
 ## Limitations
 

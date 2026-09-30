@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using FluentModbus;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
@@ -80,6 +81,19 @@ public partial class ModbusSubjectClientSourceTests
         public partial int? Value { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class ScaledDevice
+    {
+        [ModbusRegister(40, ModbusDataType.U16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Scaled { get; set; }
+
+        [ModbusRegister(41, ModbusDataType.S16)]
+        public partial short? Factor { get; set; }
+
+        [ModbusRegister(42, ModbusDataType.U16)]
+        public partial int? Other { get; set; }
+    }
+
     private static void SeedServer(ModbusTestServer server)
     {
         server.SetHoldingRegister<short>(0, 215);
@@ -98,8 +112,8 @@ public partial class ModbusSubjectClientSourceTests
         return device;
     }
 
-    private static ModbusSubjectClientSource CreateSource(TestDevice device, ModbusTestServer server)
-        => device.CreateModbusClientSource(
+    private static ModbusSubjectClientSource CreateSource(IInterceptorSubject subject, ModbusTestServer server, ILogger? logger = null)
+        => subject.CreateModbusClientSource(
             new ModbusClientConfiguration
             {
                 Host = "127.0.0.1",
@@ -108,7 +122,7 @@ public partial class ModbusSubjectClientSourceTests
                 RetryTime = TimeSpan.FromMilliseconds(200),
                 RequestTimeout = TimeSpan.FromSeconds(2)
             },
-            NullLogger.Instance);
+            logger ?? NullLogger.Instance);
 
     private static async Task<(TestDevice Device, ModbusSubjectClientSource Source, SourceStateRecorder Recorder)> StartAsync(
         ModbusTestServer server, Action<TestDevice>? configure = null)
@@ -665,6 +679,47 @@ public partial class ModbusSubjectClientSourceTests
             Assert.DoesNotContain(server.Requests, request =>
                 request.FunctionCode == ModbusFunctionCode.ReadHoldingRegisters &&
                 request.Address <= 20 && request.Address + request.Quantity > 20);
+        }
+        finally
+        {
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenScaleFactorIsOwnedByAnotherSource_ThenItsDependentIsNeitherClaimedNorRead()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        server.SetHoldingRegister<ushort>(40, 123);
+        server.SetHoldingRegister<short>(41, -1);
+        server.SetHoldingRegister<ushort>(42, 7);
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var device = new ScaledDevice(context);
+        var factor = new PropertyReference(device, nameof(ScaledDevice.Factor));
+        var scaled = new PropertyReference(device, nameof(ScaledDevice.Scaled));
+        await using var otherSource = CreateSource(device, server);
+        Assert.True(factor.SetSource(otherSource));
+        var logger = new RecordingLogger();
+        var source = CreateSource(device, server, logger);
+        using var recorder = SourceStateRecorder.SubscribeTo(source);
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+            await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should synchronize.", SourceState.Synchronized);
+
+            // Assert
+            Assert.Equal(7, device.Other);
+            Assert.Null(device.Scaled);
+            Assert.False(scaled.TryGetSource(out _));
+            Assert.Equal(1, source.Diagnostics.ClaimedPropertyCount);
+            Assert.Single(logger.Errors, error =>
+                error.Contains(nameof(ScaledDevice.Scaled)) && error.Contains(nameof(ScaledDevice.Factor)));
+            Assert.DoesNotContain(server.Requests, request =>
+                request.FunctionCode == ModbusFunctionCode.ReadHoldingRegisters &&
+                request.Address <= 40 && request.Address + request.Quantity > 40);
         }
         finally
         {

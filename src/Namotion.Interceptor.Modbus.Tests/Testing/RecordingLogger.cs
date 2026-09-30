@@ -2,10 +2,33 @@ using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Modbus.Tests.Testing;
 
-/// <summary>Captures warning messages logged through it, to assert on diagnostics.</summary>
+/// <summary>Captures warning and error messages logged through it, to assert on diagnostics.</summary>
 internal sealed class RecordingLogger : ILogger
 {
-    public List<string> Warnings { get; } = [];
+    private readonly List<string> _warnings = [];
+    private readonly List<string> _errors = [];
+
+    public IReadOnlyList<string> Warnings
+    {
+        get
+        {
+            lock (_warnings)
+            {
+                return _warnings.ToArray();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> Errors
+    {
+        get
+        {
+            lock (_errors)
+            {
+                return _errors.ToArray();
+            }
+        }
+    }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -15,11 +38,18 @@ internal sealed class RecordingLogger : ILogger
         LogLevel logLevel, EventId eventId, TState state, Exception? exception,
         Func<TState, Exception?, string> formatter)
     {
-        if (logLevel == LogLevel.Warning)
+        var messages = logLevel switch
         {
-            lock (Warnings)
+            LogLevel.Warning => _warnings,
+            LogLevel.Error => _errors,
+            _ => null
+        };
+
+        if (messages is not null)
+        {
+            lock (messages)
             {
-                Warnings.Add(formatter(state, exception));
+                messages.Add(formatter(state, exception));
             }
         }
     }

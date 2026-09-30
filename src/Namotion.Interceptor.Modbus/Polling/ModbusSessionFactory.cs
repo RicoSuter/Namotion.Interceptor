@@ -33,8 +33,8 @@ internal sealed class ModbusSessionFactory
     }
 
     /// <summary>
-    /// Opens a session with fresh bindings. Claims every resolved property that no other source owns and
-    /// releases the previously claimed properties that are no longer resolved.
+    /// Opens a session with fresh bindings. Claims every resolved property that no other source owns and whose scale
+    /// factor, if any, is claimed too, and releases the previously claimed properties that are no longer resolved.
     /// </summary>
     /// <exception cref="ModbusConfigurationException">A mapping is invalid.</exception>
     public async Task<ModbusSession> OpenAsync(CancellationToken cancellationToken)
@@ -118,6 +118,8 @@ internal sealed class ModbusSessionFactory
             }
         }
 
+        DropBindingsWithUnclaimedScaleFactor(claimedBindings, claimedProperties);
+
         foreach (var property in _ownership.Properties)
         {
             if (!claimedProperties.Contains(property))
@@ -127,5 +129,33 @@ internal sealed class ModbusSessionFactory
         }
 
         return claimedBindings;
+    }
+
+    /// <summary>
+    /// Drops the bindings whose scale factor is not claimed, as their value could never be scaled.
+    /// </summary>
+    private void DropBindingsWithUnclaimedScaleFactor(
+        List<ModbusRegisterBinding> claimedBindings, HashSet<PropertyReference> claimedProperties)
+    {
+        // Repeated because a dropped binding can itself be the scale factor of another one.
+        bool isDropped;
+        do
+        {
+            isDropped = false;
+            for (var index = claimedBindings.Count - 1; index >= 0; index--)
+            {
+                var binding = claimedBindings[index];
+                if (binding.ScaleFactor is { } scaleFactor && !claimedProperties.Contains(scaleFactor.Property))
+                {
+                    claimedBindings.RemoveAt(index);
+                    claimedProperties.Remove(binding.Property);
+                    isDropped = true;
+                    _logger.LogError(
+                        "Property {PropertyPath} is not read from Modbus because its scale factor {ScaleFactorPath} is not.",
+                        binding.Path, scaleFactor.Path);
+                }
+            }
+        }
+        while (isDropped);
     }
 }
