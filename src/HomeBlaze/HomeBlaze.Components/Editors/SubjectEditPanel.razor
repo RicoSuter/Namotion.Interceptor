@@ -85,16 +85,20 @@
 
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
+        bool isApplied;
         try
         {
-            if (await ApplyChangesAsync(cancellationToken))
-            {
-                await PersistAsync(cancellationToken);
-            }
+            isApplied = await ApplyChangesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
             Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            return;
+        }
+
+        if (isApplied)
+        {
+            await PersistAsync(cancellationToken);
         }
     }
 
@@ -129,11 +133,9 @@
     }
 
     /// <summary>
-    /// Writes the subject's configuration to its storage and applies it.
+    /// Writes the configuration through the nearest IConfigurationWriter among the subject's parents,
+    /// else the root manager, and applies it.
     /// </summary>
-    /// <remarks>
-    /// The configuration writer is found through the subject's parents, so the subject must be attached first.
-    /// </remarks>
     public async Task PersistAsync(CancellationToken cancellationToken)
     {
         var subject = Subject;

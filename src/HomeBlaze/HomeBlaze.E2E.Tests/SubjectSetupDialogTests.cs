@@ -319,6 +319,8 @@ public class SubjectSetupDialogTests
     public async Task WhenHostedSubjectIsAddedToGridWithIsEnabledCleared_ThenItStartsDisabled()
     {
         // Creating the cell rewrites the page file in the test output directory, which later runs reuse.
+        // Restoring it only restores the file: file watching is off in testRoot.json, so the created
+        // (disabled) store stays in the live graph for the rest of the host's life.
         var gridPagePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Grid.md");
         var originalGridPage = await File.ReadAllBytesAsync(gridPagePath);
         try
