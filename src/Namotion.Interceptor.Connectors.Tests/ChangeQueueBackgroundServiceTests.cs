@@ -42,23 +42,40 @@ public class ChangeQueueBackgroundServiceTests
     }
 
     [Fact]
-    public async Task WhenStartedWithACancelledToken_ThenDisposeReleasesTheProcessor()
+    public async Task WhenStartedWithACancelledTokenAndStopped_ThenTheProcessorIsReleased()
     {
         // Arrange: a cancelled start never enters the execution, so the processor stays with the base.
+        var context = CreateContext();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        using var service = new TestService(context);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await service.StartAsync(cancelled.Token);
+
+        // Act
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(service.ProcessedWith);
+        Assert.True(interceptor.IsIdle);
+    }
+
+    [Fact]
+    public async Task WhenStartedWithACancelledTokenAndDisposed_ThenTheProcessorIsReleased()
+    {
+        // Arrange
         var context = CreateContext();
         var interceptor = context.GetService<PropertyChangeInterceptor>();
         var service = new TestService(context);
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         await service.StartAsync(cancelled.Token);
-        await service.StopAsync(CancellationToken.None);
-        Assert.Null(service.ProcessedWith);
-        Assert.False(interceptor.IsIdle);
 
         // Act
         service.Dispose();
 
         // Assert
+        Assert.Null(service.ProcessedWith);
         Assert.True(interceptor.IsIdle);
     }
 
@@ -79,7 +96,9 @@ public class ChangeQueueBackgroundServiceTests
 
         // Assert: the first processor was disposed, the second still holds the subscription.
         Assert.Equal(2, service.Created.Count);
-        Assert.Throws<ObjectDisposedException>(() => { first.ProcessAsync(CancellationToken.None).GetAwaiter().GetResult(); });
+        var processing = first.ProcessAsync(cancelled.Token);
+        Assert.True(processing.IsFaulted);
+        Assert.IsType<ObjectDisposedException>(processing.Exception!.InnerException);
         Assert.False(interceptor.IsIdle);
     }
 
@@ -93,6 +112,29 @@ public class ChangeQueueBackgroundServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.StartAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task WhenASecondStartFailsToCreateAProcessor_ThenTheFirstProcessorIsRetainedUntilDispose()
+    {
+        // Arrange: the first start is cancelled, so its processor is never taken by an execution.
+        var context = CreateContext();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var service = new TestService(context);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await service.StartAsync(cancelled.Token);
+        service.ThrowOnCreate = true;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => service.StartAsync(cancelled.Token));
+        var idleAfterFailedStart = interceptor.IsIdle;
+        service.Dispose();
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(exception);
+        Assert.False(idleAfterFailedStart);
+        Assert.True(interceptor.IsIdle);
+    }
+
     private static IInterceptorSubjectContext CreateContext() =>
         InterceptorSubjectContext.Create().WithFullPropertyTracking();
 
@@ -101,9 +143,15 @@ public class ChangeQueueBackgroundServiceTests
         public List<ChangeQueueProcessor> Created { get; } = [];
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ChangeQueueProcessor? ProcessedWith { get; private set; }
+        public bool ThrowOnCreate { get; set; }
 
         protected override ChangeQueueProcessor CreateProcessor()
         {
+            if (ThrowOnCreate)
+            {
+                throw new InvalidOperationException("Processor creation failed.");
+            }
+
             var processor = new ChangeQueueProcessor(
                 this, context, _ => true, (_, _) => ValueTask.CompletedTask,
                 ChangeDeliveryRule.SourceValuesAreSettled, bufferTime: null, maxQueueDepth: null,

@@ -13,8 +13,8 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     private ChangeQueueProcessor? _startProcessor;
 
     /// <summary>
-    /// Creates the processor that subscribes to property changes. Called from <see cref="StartAsync"/>; an
-    /// exception fails the start.
+    /// Creates the processor that subscribes to property changes. Called on the host start path on every
+    /// <see cref="StartAsync"/>, so it must not block or perform I/O; an exception fails the start.
     /// </summary>
     protected abstract ChangeQueueProcessor CreateProcessor();
 
@@ -46,6 +46,20 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         using (processor)
         {
             await ProcessAsync(processor, stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public sealed override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // A stop can outrun the dispatch of the execution, and a graph detach stops without disposing.
+            Interlocked.Exchange(ref _startProcessor, null)?.Dispose();
         }
     }
 
