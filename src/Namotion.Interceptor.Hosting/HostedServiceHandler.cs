@@ -64,9 +64,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     internal Action? LivenessWriteGate { get; set; }
 
-    /// <summary>Invoked inside the chain lock between the liveness read and the ownership take.</summary>
-    internal Action? LivenessReadGate { get; set; }
-
     /// <summary>Awaited in <see cref="StopAsync"/> between the owned snapshot and the stops it appends.</summary>
     internal Func<Task>? DrainAppendGate { get; set; }
 
@@ -152,31 +149,38 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
 
         // A handler stops what it owns and nothing else, or it disposes an instance another handler
-        // created and is running. Not readable from the transition body either, since ownership is
-        // released just below and the body would always see a stranger. Appended now and never
-        // deferred into another transition:
+        // created and is running. Decided inside the chain lock, with the append: read ahead of it, a
+        // release landing between the two lets the stop escape the drain's barrier or reach an instance
+        // the next owner has started since. Not readable from the transition body either, since
+        // ownership is released just below and the body would always see a stranger. Appended now and
+        // never deferred into another transition:
         // docs/design/hosting-service-ownership.md#why-a-composite-transition-is-wrong.
         TaskCompletionSource? subjectStopped = null;
-        if (subjectTarget is not null && ReferenceEquals(subjectTarget.Owner, this))
+        if (subjectTarget is not null)
         {
             // Allocated only when there is an attachment to order behind it: the signal exists to hold
             // the attachment stops until the subject's own stop returned, and nothing else reads it.
-            subjectStopped = attachments.IsEmpty
+            var signal = attachments.IsEmpty
                 ? null
                 : new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            AppendStop(subject, subjectTarget, subjectStopped, waitFor: null, CancellationToken.None);
+            // Handed on only for an accepted append, for the reason on AppendStopIfOwned.
+            if (AppendStopIfOwned(subject, subjectTarget, signal, waitFor: null, CancellationToken.None) is not null)
+            {
+                subjectStopped = signal;
+            }
         }
 
         foreach (var attachment in attachments)
         {
-            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-            if (ReferenceEquals(target.Owner, this))
-            {
-                // A null wait is the "nothing to order behind" case. The stop body skips it, so that
-                // case allocates no completed task to await.
-                AppendStop(subject, target, signal: null, waitFor: subjectStopped?.Task, CancellationToken.None);
-            }
+            // A null wait is the "nothing to order behind" case. The stop body skips it, so that case
+            // allocates no completed task to await.
+            _ = AppendStopIfOwned(
+                subject,
+                ((IHostedServiceAttachmentTarget)attachment).Target,
+                signal: null,
+                waitFor: subjectStopped?.Task,
+                CancellationToken.None);
         }
 
         // Released after the stops are appended, and never from inside a transition body: releasing
@@ -244,8 +248,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
             // After the stop, never before, for the reason on the context detach path, and only for an
             // ownership this call installed: an earlier attach's may be running, and undoing that one
-            // would pull it out of the set the drain is about to stop. Safe outside the chain lock only
-            // because a draining handler installs nothing for ReleaseOwnership to clobber.
+            // would pull it out of the set the drain is about to stop.
             target.ReleaseOwnership(this);
         }
 

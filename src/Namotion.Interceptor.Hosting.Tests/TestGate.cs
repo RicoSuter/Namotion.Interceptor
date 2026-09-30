@@ -128,10 +128,6 @@ internal static class TestGateExtensions
     public static TestGate HoldAtOwnershipTake(this HostedServiceHandler handler)
         => TestGate.ArmBlocking(gate => handler.OwnershipTakenGate = gate);
 
-    /// <summary>Holds a take inside the chain lock, between its liveness read and its exchange.</summary>
-    public static TestGate HoldAtLivenessRead(this HostedServiceHandler handler)
-        => TestGate.ArmBlocking(gate => handler.LivenessReadGate = gate);
-
     /// <summary>Holds a liveness write inside the graph mutation lock it is taken under.</summary>
     public static TestGate HoldAtLivenessWrite(this HostedServiceHandler handler)
         => TestGate.ArmBlocking(gate => handler.LivenessWriteGate = gate);

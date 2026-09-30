@@ -9,20 +9,13 @@ namespace Namotion.Interceptor.Hosting;
 /// </summary>
 internal sealed class HostedServiceTarget
 {
-    private readonly Lock _chainLock = new();
-
     /// <summary>
-    /// Pairs the ownership exchange with the handler's record of it, which are one fact: a release
-    /// landing between an install and its record nulls the owner, finds no record to retire, and leaves
-    /// one that no later release can ever match.
+    /// Guards the chain, the detach mark and the ownership exchange together with the handler's record
+    /// of it. A leaf lock: nothing held under it blocks or takes another lock, so a caller may hold
+    /// the lifecycle lock on the way in. Keep it that way, because a context detach takes it for every
+    /// target it enumerates while holding the lifecycle lock.
     /// </summary>
-    /// <remarks>
-    /// Its own lock rather than <c>_chainLock</c>. A context detach releases every attachment target it
-    /// enumerates, including ones whose chain lock a concurrent attach is holding, so releasing under
-    /// the chain lock deadlocks that pair. Nothing held here ever takes another lock, and the take
-    /// enters it while already holding <c>_chainLock</c>, so the one order is chain lock then this.
-    /// </remarks>
-    private readonly Lock _ownershipLock = new();
+    private readonly Lock _chainLock = new();
 
     /// <summary>Which transition owns the target right now, or none.</summary>
     private enum TransitionPhase
@@ -239,38 +232,53 @@ internal sealed class HostedServiceTarget
     /// </summary>
     /// <remarks>
     /// The record is written on the install only, so membership can be gained through nothing but a take
-    /// that has an undo behind it.
+    /// that has an undo behind it. Production takes through <see cref="TryTakeOwnershipAndAppendAsync"/>
+    /// only; this entry point is for tests that drive the exchange on its own.
     /// </remarks>
     public bool TryTakeOwnership(HostedServiceHandler handler, IInterceptorSubject subject, out bool ownershipTaken)
     {
-        lock (_ownershipLock)
+        lock (_chainLock)
         {
-            var previous = Interlocked.CompareExchange(ref _owner, handler, null);
-            ownershipTaken = previous is null;
-
-            if (ownershipTaken)
-            {
-                handler.RecordOwnership(this, subject);
-            }
-
-            return ownershipTaken || ReferenceEquals(previous, handler);
+            return TryTakeOwnershipCore(handler, subject, out ownershipTaken);
         }
     }
 
-    /// <summary>Releases an ownership this handler installed and retires its record.</summary>
+    /// <summary>
+    /// Releases an ownership this handler installed and retires its record. Under the chain lock, so a
+    /// take's liveness read and its exchange are one step against this: a take that lands after a
+    /// detach's release reads the liveness that detach cleared first, and one that lands before it is
+    /// the install the release matches.
+    /// </summary>
     /// <remarks>
     /// The record is retired only when the exchange matched, because the record and <c>_owner</c> are
     /// one fact: a release that matched nothing released nothing.
     /// </remarks>
     public void ReleaseOwnership(HostedServiceHandler handler)
     {
-        lock (_ownershipLock)
+        lock (_chainLock)
         {
             if (ReferenceEquals(Interlocked.CompareExchange(ref _owner, null, handler), handler))
             {
                 handler.ForgetOwnership(this);
             }
         }
+    }
+
+    /// <summary>
+    /// The exchange and the record under one acquisition, which the callers hold: a release landing
+    /// between them nulls the owner, finds no record to retire, and leaves one nothing can ever match.
+    /// </summary>
+    private bool TryTakeOwnershipCore(HostedServiceHandler handler, IInterceptorSubject subject, out bool ownershipTaken)
+    {
+        var previous = Interlocked.CompareExchange(ref _owner, handler, null);
+        ownershipTaken = previous is null;
+
+        if (ownershipTaken)
+        {
+            handler.RecordOwnership(this, subject);
+        }
+
+        return ownershipTaken || ReferenceEquals(previous, handler);
     }
 
     /// <summary>
@@ -330,28 +338,8 @@ internal sealed class HostedServiceTarget
                 return null;
             }
 
-            handler.LivenessReadGate?.Invoke();
-
-            if (!TryTakeOwnership(handler, subject, out ownershipTaken))
+            if (!TryTakeOwnershipCore(handler, subject, out ownershipTaken))
             {
-                return null;
-            }
-
-            if (!handler.IsLive(subject))
-            {
-                // A detach clears liveness, then reads Owner and releases, the last two outside this
-                // lock, so a take landing after that release is one it never saw and never releases.
-                //
-                // Undone inside the lock, not after it: ReleaseOwnership matches on the handler rather
-                // than on the take, so outside the lock the undo destroys an ownership a concurrent
-                // re-attach installed. Only for an ownership this call installed: an earlier take's is
-                // the detach's to release, having read Owner as non-null.
-                if (ownershipTaken)
-                {
-                    ReleaseOwnership(handler);
-                    ownershipTaken = false;
-                }
-
                 return null;
             }
 

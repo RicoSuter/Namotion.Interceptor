@@ -13,8 +13,8 @@ public class HostedServiceTargetTests
 
     /// <summary>
     /// Rounds of the take against release race. Each round is a thread pair, so this is the expensive
-    /// kind of round, and it is still not the place to economise: measured against a build without the
-    /// ownership lock, 2,000 rounds failed 8 of 8 runs at 90 ms each, and 200 rounds failed 2 of 8.
+    /// kind of round, and it is still not the place to economise: measured against a build whose take and
+    /// release held no lock, 2,000 rounds failed 8 of 8 runs at 90 ms each, and 200 rounds failed 2 of 8.
     /// </summary>
     private const int OwnershipRaceRounds = 2000;
 

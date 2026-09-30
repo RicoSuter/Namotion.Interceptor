@@ -35,69 +35,6 @@ public class HostedServiceHandlerRaceTests
     private static readonly TimeSpan DrainMustNotReturnWithin = TimeSpan.FromSeconds(1);
 
     [Fact]
-    public async Task WhenADetachReleasesOwnershipBeforeAnAttachTakesIt_ThenTheAttachUndoesItsOwnTake()
-    {
-        // Arrange - the take reads liveness and installs the owner inside the chain lock, while a
-        // context detach clears liveness, reads Owner and releases outside it. A take that lands after
-        // the detach read Owner as null is one nothing releases: the target stays owned by this handler
-        // and stays in its owned set, which roots the detached subject until shutdown and makes the
-        // next handler over that subject lose the compare and exchange for good.
-        await HostingTestHost.RunAsync(async context =>
-        {
-            var handler = context.TryGetService<HostedServiceHandler>()!;
-            var parent = new Parent(context);
-            var child = new Person();
-            parent.Child = child;
-
-            var attachment = child.AttachHostedService(() => new TrackedBackgroundService());
-            await attachment.DrainAsync();
-
-            // A second attachment, so the act below has a target whose ownership is still unclaimed at
-            // the moment the detach runs. The first one is what keeps the subject live until then.
-            var created = 0;
-
-            // Armed on the handler rather than on the target, because the target the act creates does
-            // not exist until the act runs. The first attachment above already took its ownership, so
-            // the next take to reach this seam is the one under test. It holds the second target's
-            // chain lock, which the detach below never needs: that target has no owner yet, so the
-            // detach appends no stop for it. A test whose detach must append on the held target would
-            // deadlock here.
-            using var take = handler.HoldAtLivenessRead();
-
-            HostedServiceTarget? secondTarget = null;
-            var attaching = Task.Run(() =>
-            {
-                var second = child.AttachHostedService(() =>
-                {
-                    Interlocked.Increment(ref created);
-                    return new TrackedBackgroundService();
-                });
-
-                secondTarget = ((IHostedServiceAttachmentTarget)second).Target;
-                return second;
-            });
-
-            await take.WaitUntilReachedAsync();
-
-            // Act - the whole detach runs while the take is held before its compare and exchange, so
-            // it clears liveness, reads Owner as null and releases nothing.
-            parent.Child = null;
-            take.Release();
-            await attaching.WaitAsync(TimeSpan.FromSeconds(30));
-
-            // Assert
-            Assert.False(handler.IsLive(child));
-            Assert.Null(secondTarget!.Owner);
-            Assert.False(handler.IsOwned(secondTarget!));
-
-            // Not discriminating on its own: the start body refuses on liveness whether or not the
-            // take was undone. Asserted because a leaked ownership that also started something is the
-            // worse of the two failures, and this separates them.
-            Assert.Equal(0, Volatile.Read(ref created));
-        });
-    }
-
-    [Fact]
     public async Task WhenAReAttachLandsWhileTheSubjectStopIsHeld_ThenAFreshInstanceRunsAndTheOldOneIsDisposed()
     {
         // Arrange - holding the subject's stop is what makes the re-attach provably land mid-stop.
@@ -1158,53 +1095,6 @@ public class HostedServiceHandlerRaceTests
         drain.Release();
         await stopping.WaitAsync(TimeSpan.FromSeconds(30));
 
-        Assert.Equal(1, subject.StartCount);
-        Assert.Equal(1, subject.StopCount);
-    }
-
-    [Fact]
-    public async Task WhenARepeatTakeFindsLivenessCleared_ThenItLeavesTheEarlierAttachAlone()
-    {
-        // Arrange - the "ownershipTaken" half of the liveness undo inside the chain lock, as distinct
-        // from its sibling on the gate undo. A repeat take installs nothing, so the owner and the record
-        // it finds belong to an earlier attach whose instance is running. Undoing those pulls the target
-        // out from under the drain's own append, which then reads a stranger and refuses, and the
-        // instance survives shutdown.
-        //
-        // The clear the second liveness read has to see is the drain's own, and the repeat take needs a
-        // target this handler already owns, which one subject visible from two hosting contexts gives.
-        var (host, firstContext, secondContext) = await HostingTestHost.StartWithTwoContextsAsync();
-
-        var subject = new CountingHostedSubject();
-        ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
-
-        var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
-        await target.DrainAsync();
-        Assert.Equal(1, subject.StartCount);
-
-        var handler = firstContext.TryGetService<HostedServiceHandler>()!;
-
-        // Armed only now, so the first attach's own take ran past it untouched. It fires inside the
-        // chain lock, between the take's first liveness read and its compare and exchange, which is
-        // where the drain's liveness clear has to land for the second read to see it.
-        using var take = handler.HoldAtLivenessRead();
-        using var drainAppend = handler.HoldAtDrainAppend();
-
-        // Act - the repeat take holds the chain lock, the drain clears liveness and snapshots what it
-        // owns underneath it, and only then does the take read liveness for the second time.
-        var attaching = Task.Run(() => ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext));
-        await take.WaitUntilReachedAsync();
-
-        var stopping = Task.Run(() => host.StopAsync());
-        await drainAppend.WaitUntilReachedAsync();
-
-        take.Release();
-        await attaching.WaitAsync(TimeSpan.FromSeconds(30));
-
-        drainAppend.Release();
-        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
-
-        // Assert
         Assert.Equal(1, subject.StartCount);
         Assert.Equal(1, subject.StopCount);
     }
