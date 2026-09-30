@@ -85,30 +85,64 @@
 
     public async Task SaveAsync(CancellationToken cancellationToken)
     {
+        bool isApplied;
+        try
+        {
+            isApplied = await ApplyChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving configuration: {ex.Message}", Severity.Error);
+            return;
+        }
+
+        if (isApplied)
+        {
+            await PersistAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Applies the buffered edits to the subject without persisting them.
+    /// </summary>
+    /// <returns>False when there is no subject or the edits are invalid, in which case nothing was applied.</returns>
+    public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
+    {
+        if (Subject == null) return false;
+
+        if (_editComponent != null)
+        {
+            if (!_editComponent.IsValid)
+            {
+                return false;
+            }
+
+            await _editComponent.SaveAsync(cancellationToken);
+        }
+        else
+        {
+            if (_propertiesEditor?.HasErrors == true)
+            {
+                return false;
+            }
+
+            _propertiesEditor?.ApplyChanges();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the configuration through the nearest IConfigurationWriter among the subject's parents,
+    /// else the root manager, and applies it.
+    /// </summary>
+    public async Task PersistAsync(CancellationToken cancellationToken)
+    {
         var subject = Subject;
         if (subject == null) return;
 
         try
         {
-            if (_editComponent != null)
-            {
-                if (!_editComponent.IsValid)
-                {
-                    return;
-                }
-
-                await _editComponent.SaveAsync(cancellationToken);
-            }
-            else
-            {
-                if (_propertiesEditor?.HasErrors == true)
-                {
-                    return;
-                }
-
-                _propertiesEditor?.ApplyChanges();
-            }
-
             if (subject is not IConfigurable)
             {
                 subject = subject.TryGetFirstParent<IConfigurable>() as IInterceptorSubject;
