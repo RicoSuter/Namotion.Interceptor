@@ -1,3 +1,4 @@
+@using global::HomeBlaze.Abstractions
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(LuxtronikHeatPump))]
 @implements ISubjectComponent
 
@@ -20,7 +21,7 @@
         @if (HeatPump is not null)
         {
             <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
-                @Value("Mode", GetDisplayName(HeatPump.OperatingStatus.OperatingState))
+                @Value("State", GetDisplayName(HeatPump.OperatingStatus.OperatingState))
                 @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "F1", "°C"))
                 @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "F1", "°C"))
                 @Value("Hot water", Format(HeatPump.HotWater.Temperature.Temperature, "F1", "°C"))
@@ -28,9 +29,9 @@
                 @Value("Thermal", Format(HeatPump.Energy.ThermalPower, "F0", "W"))
             </MudStack>
 
-            @if (HeatPump.OperatingStatus.ErrorNumber is > 0)
+            @if (HeatPump.StatusMessage is { } statusMessage)
             {
-                <MudAlert Severity="Severity.Error" Dense="true">Heat pump error @HeatPump.OperatingStatus.ErrorNumber</MudAlert>
+                <MudAlert Severity="@GetSeverity(HeatPump.Status)" Dense="true">@statusMessage</MudAlert>
             }
         }
     </MudStack>
@@ -44,6 +45,10 @@
 
     private static string? Format(decimal? value, string format, string unit) =>
         value is null ? null : $"{value.Value.ToString(format)} {unit}";
+
+    // While running, the status message only reports a controller error number.
+    private static Severity GetSeverity(ServiceStatus status) =>
+        status is ServiceStatus.Running or ServiceStatus.Error ? Severity.Error : Severity.Info;
 
     private static string? GetDisplayName(LuxtronikOperatingState? state) => state switch
     {
