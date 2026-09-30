@@ -3,7 +3,6 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -15,7 +14,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.History.InMemory;
 
 /// <summary>
-/// Priority-100 in-memory history store. A <see cref="BackgroundService"/> [InterceptorSubject]
+/// Priority-100 in-memory history store. A <see cref="ChangeQueueBackgroundService"/> [InterceptorSubject]
 /// that records recordable [State] scalar property changes into per-path ring buffers and answers
 /// raw and bucketed history queries through <see cref="IHistoryStore"/>. Storage concerns are delegated
 /// to the graph-free <see cref="InMemoryHistoryStore"/> engine; this subject owns the change-queue glue,
@@ -201,8 +200,8 @@ public partial class InMemoryHistoryStoreSubject :
             this,
             ((IInterceptorSubject)this).Context,
             HistoryChangeRecorder.IsEligible,
-            // Runs only inside ProcessAsync's processor.ProcessAsync, after _recorder is set.
-            (changes, _) => _recorder!.RecordBatch(changes),
+            // Runs after ProcessAsync sets _recorder, but may outlive a session that ends by clearing it.
+            (changes, _) => _recorder?.RecordBatch(changes) ?? default,
             ChangeDeliveryRule.SourceValuesMayBeStale,
             bufferTime: TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds),
             maxQueueDepth: null,
@@ -212,12 +211,8 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
-        Settings settings;
-        lock (_settingsLock)
-        {
-            settings = _settings!;
-        }
-
+        // Written by CreateProcessor on the flow that runs this, so no lock is needed.
+        var settings = _settings!;
         if (!settings.IsEnabled)
         {
             StopServing();
