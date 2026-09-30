@@ -160,5 +160,5 @@ public record HistoryPoint(DateTimeOffset Timestamp, double? Number, JsonElement
 public record HistorySeries(
     string PropertyPath,
     ImmutableArray<HistoryPoint> Points,
-    bool Truncated,
+    bool IsTruncated,
     ImmutableArray<HistoryCoverage> CoverageRanges);

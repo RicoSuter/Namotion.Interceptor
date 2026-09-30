@@ -38,7 +38,7 @@ internal class ChargerStatusResponse
     public int ChargingTime { get; set; }
 
     [JsonPropertyName("finished")]
-    public bool Finished { get; set; }
+    public bool IsFinished { get; set; }
 
     [JsonPropertyName("cost")]
     public decimal Cost { get; set; }

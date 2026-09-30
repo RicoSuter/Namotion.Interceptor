@@ -285,7 +285,7 @@ public static class HistoryStoreMerger
         foreach (var segment in served)
         {
             var result = segment.Result!;
-            if (result.Truncated)
+            if (result.IsTruncated)
             {
                 truncated = true;
             }
@@ -351,7 +351,7 @@ public static class HistoryStoreMerger
     private static HistoryCoverage? SegmentCoverage(PlannedSegment segment)
     {
         var result = segment.Result!;
-        if (!result.Truncated)
+        if (!result.IsTruncated)
         {
             return new HistoryCoverage(segment.From, segment.To);
         }

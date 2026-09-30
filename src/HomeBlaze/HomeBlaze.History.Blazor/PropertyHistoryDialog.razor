@@ -368,7 +368,7 @@
 
             _windowFrom = from;
             _windowTo = to;
-            _truncated = series.Truncated;
+            _truncated = series.IsTruncated;
 
             // A raw query truncates because the window genuinely holds more samples than the cap. A bucketed
             // one truncates because the range divided by the bucket exceeds it, which says nothing about how

@@ -434,7 +434,7 @@ public partial class ShellyDevice : BackgroundService,
                 var status = ordered[i].status;
                 var previousIsOn = Switches[i].IsOn;
 
-                Switches[i].IsOn = status.Output;
+                Switches[i].IsOn = status.IsOutputOn;
                 Switches[i].Source = status.Source;
                 Switches[i].MeasuredPower = status.ActivePower;
                 Switches[i].MeasuredEnergyConsumed = status.ActiveEnergy?.Total;
@@ -443,7 +443,7 @@ public partial class ShellyDevice : BackgroundService,
                 Switches[i].Temperature = status.Temperature?.TemperatureCelsius;
                 Switches[i].LastUpdated = DateTimeOffset.UtcNow;
 
-                if (previousIsOn != status.Output && status.Output != null)
+                if (previousIsOn != status.IsOutputOn && status.IsOutputOn != null)
                     Switches[i].PublishSwitchEvent();
             }
         }
@@ -455,7 +455,7 @@ public partial class ShellyDevice : BackgroundService,
                 if (sw == null) continue;
 
                 var previousIsOn = sw.IsOn;
-                if (status.Output != null) sw.IsOn = status.Output;
+                if (status.IsOutputOn != null) sw.IsOn = status.IsOutputOn;
                 if (status.Source != null) sw.Source = status.Source;
                 if (status.ActivePower != null) sw.MeasuredPower = status.ActivePower;
                 if (status.ActiveEnergy != null) sw.MeasuredEnergyConsumed = status.ActiveEnergy.Total;
@@ -498,7 +498,7 @@ public partial class ShellyDevice : BackgroundService,
                 Covers[i].LastDirection = status.LastDirection;
                 Covers[i].CurrentPosition = status.CurrentPosition;
                 Covers[i].ApiState = status.State;
-                Covers[i].IsCalibrating = status.PositionControl == false;
+                Covers[i].IsCalibrating = status.HasPositionControl == false;
                 Covers[i].LastUpdated = DateTimeOffset.UtcNow;
             }
         }
@@ -520,7 +520,7 @@ public partial class ShellyDevice : BackgroundService,
                 if (status.LastDirection != null) cover.LastDirection = status.LastDirection;
                 if (status.CurrentPosition != null) cover.CurrentPosition = status.CurrentPosition;
                 if (status.State != null) cover.ApiState = status.State;
-                if (status.PositionControl != null) cover.IsCalibrating = status.PositionControl == false;
+                if (status.HasPositionControl != null) cover.IsCalibrating = status.HasPositionControl == false;
                 cover.LastUpdated = DateTimeOffset.UtcNow;
             }
         }
@@ -543,7 +543,7 @@ public partial class ShellyDevice : BackgroundService,
             for (var i = 0; i < ordered.Count; i++)
             {
                 var status = ordered[i].status;
-                Inputs[i].State = status.State;
+                Inputs[i].IsActive = status.IsActive;
                 Inputs[i].CountTotal = status.Counts?.Total;
                 Inputs[i].CountFrequency = status.Frequency;
                 Inputs[i].LastUpdated = DateTimeOffset.UtcNow;
@@ -556,7 +556,7 @@ public partial class ShellyDevice : BackgroundService,
                 var input = Inputs.FirstOrDefault(inp => inp.Index == componentIndex);
                 if (input == null) continue;
 
-                if (status.State != null) input.State = status.State;
+                if (status.IsActive != null) input.IsActive = status.IsActive;
                 if (status.Counts != null) input.CountTotal = status.Counts.Total;
                 if (status.Frequency != null) input.CountFrequency = status.Frequency;
                 input.LastUpdated = DateTimeOffset.UtcNow;
