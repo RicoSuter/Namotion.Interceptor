@@ -227,9 +227,7 @@ else
 }
 ```
 
-Take the reading immediately before the decision it informs, not once at the top of a longer method. Anything in between, an intercepted property write above all, is long enough for a start to publish a whole tree into the gap.
-
-Read the fault first and the state after it, and take the state again immediately before anything irreversible you decide from it. A start clears the fault before it enters its start window, so a state read taken above the fault can be settled for a fault that is already being retried, and a poll has no synchronization with the start it races.
+Read the fault first and the state after it, and take the state immediately before the decision it informs, not once at the top of a longer method. A start clears the fault before it enters its start window, so a state read taken above the fault can be settled for a fault that is already being retried. Anything between the reading and the decision, an intercepted property write above all, is long enough for a start to publish a whole tree into the gap, and a poll has no synchronization with the start it races.
 
 `AttachHostedService` and `DetachHostedService` return once the transition has been queued rather than run, so neither result means "started" or "stopped". Queueing is not instant on the attach side: it takes the lifecycle lock to record liveness, so it blocks for as long as any graph move already holding that lock takes. Do not call it while holding a lock that a lifecycle handler could need, and do not call it from a hosted service's own dispose path. `Current`, `Fault` and `GetState` are how the outcome is observed. `DetachHostedService` returns false when the attachment was not on the subject, which is what a second detach of the same handle gets. The awaitable overloads wait for the transition instead:
 

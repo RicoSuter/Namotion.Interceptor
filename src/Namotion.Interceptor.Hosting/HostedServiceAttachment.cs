@@ -23,9 +23,8 @@ public interface IHostedServiceAttachment
     /// </summary>
     /// <remarks>
     /// The pair comes out of one load, which is why the state is not also exposed on its own: two reads
-    /// leave a transition free to land between them, and a caller that then discards what the instance
-    /// published acts on a pairing that never existed. Take the reading immediately before the decision
-    /// it informs, since anything in between widens the window it exists to close.
+    /// leave a transition free to land between them. When and in which order to read before acting is
+    /// in docs/hosting.md#reading-the-outcome.
     /// </remarks>
     HostedServiceAttachmentState GetState(out IHostedService? current);
 }

@@ -414,10 +414,8 @@ internal sealed class SingleAttachmentHost<TService>
             return;
         }
 
-        // Read below the fault, not above it: a retry start clears the fault before it enters its start
-        // window, so a reading taken above would still be settled for a fault this poll is about to act
-        // on. Each drop takes its own reading immediately before dropping, so nothing but the branch
-        // sits between the reading and the act it decides.
+        // The fault first, and each drop's reading immediately before that drop:
+        // docs/hosting.md#reading-the-outcome.
         var fault = attachment.Fault;
 
         if (fault is not null)
