@@ -142,6 +142,31 @@ public class InMemoryHistoryStoreRecordingTests
     }
 
     [Fact]
+    public async Task WhenAPropertyIsWrittenRightAfterStartAsync_ThenItIsRecorded()
+    {
+        // Arrange: the write happens after the host start returns but before the execution has run.
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+
+        // Act
+        await hostedService.StartAsync(CancellationToken.None);
+        root.Temperature = 21.5;
+
+        // Assert
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5),
+                message: $"Value written right after StartAsync was not recorded (recorded={store.RecordedCount}).");
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenChildStatePropertyMutated_ThenRecordedUnderChildCanonicalPath()
     {
         // Arrange

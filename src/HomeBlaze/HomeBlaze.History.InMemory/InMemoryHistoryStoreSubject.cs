@@ -25,7 +25,7 @@ namespace HomeBlaze.History.InMemory;
 [Description("Records recent [State] history in memory (priority 100).")]
 [InterceptorSubject]
 public partial class InMemoryHistoryStoreSubject :
-    BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
+    ChangeQueueBackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
 {
     private readonly ILogger<InMemoryHistoryStoreSubject> _logger;
 
@@ -178,10 +178,28 @@ public partial class InMemoryHistoryStoreSubject :
         return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
-    // BackgroundService
+    // ChangeQueueBackgroundService
 
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override ChangeQueueProcessor CreateProcessor()
+    {
+        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
+        // for it. Under the other rule a source-applied value does not retire an older commit, which is
+        // what keeps both points in the series.
+        return new ChangeQueueProcessor(
+            this,
+            ((IInterceptorSubject)this).Context,
+            HistoryChangeRecorder.IsEligible,
+            // Runs only inside ProcessAsync's processor.ProcessAsync, after _recorder is set.
+            (changes, _) => _recorder!.RecordBatch(changes),
+            ChangeDeliveryRule.SourceValuesMayBeStale,
+            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
+            maxQueueDepth: null,
+            logger: _logger);
+    }
+
+    /// <inheritdoc />
+    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
         if (!IsEnabled)
         {
@@ -206,24 +224,10 @@ public partial class InMemoryHistoryStoreSubject :
             maxJsonSize: MaxJsonSize,
             getUtcNow: () => DateTimeOffset.UtcNow);
 
-        // The change-queue subscription is live from construction, before the first await. The
-        // coverage session starts only afterwards, so no change can fall inside claimed coverage
-        // without reaching the engine.
+        // The subscription has existed since StartAsync, so it precedes the coverage session and no change
+        // can fall inside claimed coverage without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
-
-        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
-        // for it. Under the other rule a source-applied value does not retire an older commit, which is
-        // what keeps both points in the series.
-        using var processor = new ChangeQueueProcessor(
-            this,
-            context,
-            HistoryChangeRecorder.IsEligible,
-            (changes, _) => recorder.RecordBatch(changes),
-            ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
 
         engine.BeginCoverageSession();
         _engine = engine;
@@ -298,9 +302,9 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Size knobs (MaxPointsPerProperty, MaxAgeSeconds, MaxJsonSize) and BufferTime are read once when
-        // the engine and change-queue processor are built in ExecuteAsync. Like OpcUaServer, configuration
-        // changes take effect on the next start; the host restarts the background service to apply them.
+        // Size knobs (MaxPointsPerProperty, MaxAgeSeconds, MaxJsonSize) and BufferTime are read once per
+        // start. Like OpcUaServer, configuration changes take effect on the next start; the host restarts
+        // the background service to apply them.
         return Task.CompletedTask;
     }
 }
