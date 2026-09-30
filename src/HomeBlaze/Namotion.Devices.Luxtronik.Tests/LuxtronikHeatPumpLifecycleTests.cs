@@ -53,6 +53,29 @@ public class LuxtronikHeatPumpLifecycleTests
     }
 
     [Fact]
+    public async Task WhenHostStops_ThenHeatPumpStopsWithoutWarnings()
+    {
+        // Arrange
+        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
+        server.Start();
+        server.SeedTypicalValues();
+
+        var logger = new RecordingLogger<LuxtronikHeatPump>();
+        var host = await HostedHeatPump.StartAsync("127.0.0.1", server.Port, logger);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => host.HeatPump.IsConnected && host.HeatPump.Status == ServiceStatus.Running,
+            WaitTimeout,
+            message: "The hosted heat pump should connect.");
+
+        // Act
+        await host.DisposeAsync();
+
+        // Assert
+        Assert.Empty(logger.Warnings);
+        Assert.Equal(ServiceStatus.Stopped, host.HeatPump.Status);
+    }
+
+    [Fact]
     public async Task WhenPortChangesAndConfigurationIsApplied_ThenHeatPumpReadsTheNewController()
     {
         // Arrange
@@ -349,7 +372,7 @@ public class LuxtronikHeatPumpLifecycleTests
 
         public LuxtronikHeatPump HeatPump { get; }
 
-        public static async Task<HostedHeatPump> StartAsync(string? hostAddress, int port)
+        public static async Task<HostedHeatPump> StartAsync(string? hostAddress, int port, ILogger<LuxtronikHeatPump>? logger = null)
         {
             var services = new ServiceCollection()
                 .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -370,7 +393,7 @@ public class LuxtronikHeatPumpLifecycleTests
                 throw;
             }
 
-            var heatPump = new LuxtronikHeatPump(NullLogger<LuxtronikHeatPump>.Instance)
+            var heatPump = new LuxtronikHeatPump(logger ?? NullLogger<LuxtronikHeatPump>.Instance)
             {
                 HostAddress = hostAddress,
                 Port = port,

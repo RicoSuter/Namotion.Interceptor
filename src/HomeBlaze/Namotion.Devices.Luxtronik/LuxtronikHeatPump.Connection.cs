@@ -254,7 +254,7 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         }
         finally
         {
-            await ReleaseSourceAsync(source, hostAddress).ConfigureAwait(false);
+            await ReleaseSourceAsync(source, hostAddress, stoppingToken).ConfigureAwait(false);
         }
 
         if (hasFailed)
@@ -281,11 +281,15 @@ public partial class LuxtronikHeatPump : BackgroundService, IModbusDiscovery, IC
         return true;
     }
 
-    private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress)
+    private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress, CancellationToken stoppingToken)
     {
         try
         {
             await this.DetachHostedServiceAsync(source, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // The hosting refuses detaching while the host stops, and then stops the source itself.
         }
         catch (Exception exception)
         {
