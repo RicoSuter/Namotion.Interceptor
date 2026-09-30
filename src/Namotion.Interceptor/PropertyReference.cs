@@ -213,10 +213,10 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// <para>
     /// When writes to a derived property with a setter race, a late recalculation can stamp an older write's
     /// timestamp next to a newer write's value, which stays until the next write, and the derived properties
-    /// that depend on it inherit that timestamp. The change that recalculation publishes carries the same pair.
-    /// This covers a recalculation that runs after a newer write has settled, one that coalesces several writes
-    /// into a single pass, and, when the getter also reads other intercepted properties, one triggered by a write
-    /// to one of them.
+    /// that depend on it inherit that timestamp. The change stream can carry the same pair, from the older write's
+    /// own change or from the recalculation's. This covers a recalculation that runs after a newer write has
+    /// settled, one that coalesces several writes into a single pass, and, when the getter also reads other
+    /// intercepted properties, one triggered by a write to one of them.
     /// </para>
     /// </remarks>
     public object? GetValue(out PropertyValueMetadata metadata)
