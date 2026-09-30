@@ -99,7 +99,7 @@ public class SqliteHistoryStoreRecordingTests
                 var warmup = QuerySeries(store, propertyPath);
                 return warmup.Points.Length > 0;
             },
-            message: $"Store never started recording under '{propertyPath}' (status='{store.Status}', recorded={store.RecordedCount}).");
+            message: $"Store never started recording under '{propertyPath}'.");
 
         // Now the engine is recording; apply the asserted value and wait for it specifically.
         mutate(targetValue);
@@ -109,7 +109,7 @@ public class SqliteHistoryStoreRecordingTests
                 store.FlushNowAsync().GetAwaiter().GetResult();
                 return QuerySeries(store, propertyPath).Points.Any(point => point.Number == targetValue);
             },
-            message: $"Value {targetValue} not recorded under '{propertyPath}' (recorded={store.RecordedCount}).");
+            message: $"Value {targetValue} not recorded under '{propertyPath}'.");
 
         return QuerySeries(store, propertyPath);
     }
@@ -173,7 +173,7 @@ public class SqliteHistoryStoreRecordingTests
     [Fact]
     public async Task WhenAPropertyIsWrittenRightAfterStartAsync_ThenItIsRecorded()
     {
-        // Arrange: the write happens after the host start returns but before the execution has run.
+        // Arrange: the write happens right after the host start returns, typically before the execution has run.
         var (context, root, _) = CreateGraph();
         var (store, databasePath) = CreateStore(context);
         var hostedService = (IHostedService)store;
@@ -191,7 +191,7 @@ public class SqliteHistoryStoreRecordingTests
                     store.FlushNowAsync().GetAwaiter().GetResult();
                     return QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5);
                 },
-                message: $"Value written right after StartAsync was not recorded (status='{store.Status}').");
+                message: "Value written right after StartAsync was not recorded.");
         }
         finally
         {
