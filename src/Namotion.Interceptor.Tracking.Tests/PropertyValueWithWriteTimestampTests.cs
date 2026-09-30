@@ -63,16 +63,28 @@ public class PropertyValueWithWriteTimestampTests
         const int writes = 300_000;
         Write(subject, -1, FirstTimestamp.AddTicks(-1));
 
+        var reads = 0;
+        using var readerStarted = new ManualResetEventSlim(false);
         var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
         {
-            for (var index = 1; index <= writes; index++)
+            if (!readerStarted.Wait(WaitBudget))
             {
+                throw new TimeoutException("The reader did not start.");
+            }
+
+            // Keeps writing until the reader has read at least once, within a bound, so a descheduled reader
+            // cannot leave the test with nothing checked.
+            var index = 0;
+            while (index < writes || (Volatile.Read(ref reads) == 0 && index < writes * 10))
+            {
+                index++;
                 Write(subject, index, FirstTimestamp.AddTicks(index));
             }
         }, "writer");
 
         // Act
         var violations = 0;
+        readerStarted.Set();
         while (!writer.IsCompleted)
         {
             var value = (int)property.GetValue(out var metadata)!;
@@ -81,11 +93,14 @@ public class PropertyValueWithWriteTimestampTests
             {
                 violations++;
             }
+
+            Volatile.Write(ref reads, reads + 1);
         }
 
         await writer;
 
         // Assert
+        Assert.True(reads > 0, "The reader did not read while the writer ran.");
         Assert.Equal(0, violations);
     }
 
