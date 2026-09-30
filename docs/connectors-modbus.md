@@ -164,7 +164,7 @@ Mapped properties are owned by the source, so local changes reach it but are not
 | `BatchCount` | Read requests per poll cycle |
 | `UnavailablePropertyCount` | Mappings the device rejected, not read until the next connect |
 | `LastPollDuration` | Duration of the last poll cycle, `null` before the first one |
-| `LastPollTime` | When the last poll cycle that read at least one value completed, `null` before any did. A cycle whose every request the device answered with an exception response leaves it unchanged |
+| `LastPollTime` | Time of the last poll cycle that read a value, `null` before any did. A cycle that read no value, for example because every request failed or no mapping is claimed, leaves it unchanged |
 
 ## Thread Safety
 

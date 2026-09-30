@@ -38,8 +38,7 @@ internal sealed class ModbusPollingMetrics : IResettableMetrics
     }
 
     /// <summary>
-    /// Records a completed poll cycle. <paramref name="time"/> becomes the last poll time only when
-    /// <paramref name="hasReadData"/> is set, that is when at least one read request of the cycle returned data.
+    /// Records a completed poll cycle.
     /// </summary>
     public void RecordPoll(TimeSpan duration, DateTimeOffset time, bool hasReadData)
     {

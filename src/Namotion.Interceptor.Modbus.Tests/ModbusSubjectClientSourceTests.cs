@@ -683,16 +683,16 @@ public partial class ModbusSubjectClientSourceTests
             return Task.CompletedTask;
         });
         var optional = new PropertyReference(device, nameof(TestDevice.Optional));
+        var wasClaimed = optional.TryGetSource(out _);
         try
         {
-            Assert.True(optional.TryGetSource(out _));
-
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
-
-            // Assert
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
                 SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
+
+            // Assert
+            Assert.True(wasClaimed);
             Assert.False(optional.TryGetSource(out _));
             Assert.Equal(7, device.Optional);
             Assert.Equal(5, source.Diagnostics.ClaimedPropertyCount);

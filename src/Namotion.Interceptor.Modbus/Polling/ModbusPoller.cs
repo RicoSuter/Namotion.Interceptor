@@ -65,6 +65,7 @@ internal sealed class ModbusPoller
         }
 
         var isReplanRequired = false;
+        var hasReadData = false;
         foreach (var batch in _batches)
         {
             try
@@ -77,6 +78,8 @@ internal sealed class ModbusPoller
                     CopyToBinding(binding, data.Span, batch.StartAddress);
                 }
 
+                hasReadData = true;
+
                 if (_failingBatches.Count > 0 && _failingBatches.Remove(GetKey(batch)))
                 {
                     _logger.LogInformation(
@@ -88,7 +91,7 @@ internal sealed class ModbusPoller
             {
                 _metrics.RecordFailedRequest();
                 _failingBatches.Remove(GetKey(batch));
-                await HandlePermanentRejectionAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
+                hasReadData |= await HandlePermanentRejectionAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
                 isReplanRequired = true;
             }
             catch (ModbusResponseException exception)
@@ -106,7 +109,7 @@ internal sealed class ModbusPoller
             _metrics.SetPlan(_batches.Length, _bindings.Length - availableBindings.Length);
         }
 
-        _metrics.RecordPoll(Stopwatch.GetElapsedTime(startTimestamp), DateTimeOffset.UtcNow, HasReadData());
+        _metrics.RecordPoll(Stopwatch.GetElapsedTime(startTimestamp), DateTimeOffset.UtcNow, hasReadData);
     }
 
     /// <summary>
@@ -207,14 +210,15 @@ internal sealed class ModbusPoller
 
     /// <summary>
     /// Marks the binding of a rejected single-binding batch unavailable, or reads the bindings of a larger one one by one.
+    /// Returns whether any binding was read.
     /// </summary>
-    private Task HandlePermanentRejectionAsync(
+    private Task<bool> HandlePermanentRejectionAsync(
         IModbusRegisterReader reader, ModbusReadBatch batch, ModbusResponseException exception, CancellationToken cancellationToken)
     {
         if (batch.Bindings.Length == 1)
         {
             MarkUnavailable(batch.Bindings[0], exception);
-            return Task.CompletedTask;
+            return Task.FromResult(false);
         }
 
         return ReadIndividuallyAsync(reader, batch, exception, cancellationToken);
@@ -222,8 +226,9 @@ internal sealed class ModbusPoller
 
     /// <summary>
     /// Reads the bindings of a rejected batch one by one and isolates them until the next connect.
+    /// Returns whether any binding was read.
     /// </summary>
-    private async Task ReadIndividuallyAsync(
+    private async Task<bool> ReadIndividuallyAsync(
         IModbusRegisterReader reader, ModbusReadBatch batch, ModbusResponseException batchException, CancellationToken cancellationToken)
     {
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -233,6 +238,7 @@ internal sealed class ModbusPoller
                 batch.Count, batch.AddressSpace, batch.StartAddress, batch.UnitId);
         }
 
+        var hasReadData = false;
         foreach (var binding in batch.Bindings)
         {
             // Even when every binding reads fine alone (a rejected gap register, or a device rejecting
@@ -242,6 +248,7 @@ internal sealed class ModbusPoller
             {
                 var data = await reader.ReadAsync(binding.UnitId, binding.AddressSpace, binding.Address, binding.Count, cancellationToken).ConfigureAwait(false);
                 CopyToBinding(binding, data.Span, binding.Address);
+                hasReadData = true;
             }
             catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
             {
@@ -253,6 +260,8 @@ internal sealed class ModbusPoller
                 LogFailedRequestOnce((binding.UnitId, binding.AddressSpace, binding.Address, binding.Count), binding.Path, exception);
             }
         }
+
+        return hasReadData;
     }
 
     private void MarkUnavailable(ModbusRegisterBinding binding, ModbusResponseException exception)
@@ -275,19 +284,6 @@ internal sealed class ModbusPoller
                 "Modbus read of {Count} {AddressSpace} from {Address} (unit {UnitId}, first mapping {Path}) failed with exception code {ExceptionCode}.",
                 key.Count, key.AddressSpace, key.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
         }
-    }
-
-    private bool HasReadData()
-    {
-        foreach (var binding in _bindings)
-        {
-            if (binding.HasCurrent)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) GetKey(ModbusReadBatch batch)
