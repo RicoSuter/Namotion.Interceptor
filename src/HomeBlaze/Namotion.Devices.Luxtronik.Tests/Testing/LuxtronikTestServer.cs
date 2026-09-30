@@ -101,7 +101,7 @@ internal sealed class LuxtronikTestServer : IDisposable
         SetInput<ushort>(10301, 15);       // electrical power 1.5 kW
         SetInput<int>(10310, 123456);      // electrical energy 12345.6 kWh
         SetInput<int>(10320, 456789);      // thermal energy 45678.9 kWh
-        SetInput<uint>(10404, 12345);      // heat pump runtime hours
+        SetInput<uint>(10404, 12345);      // heat pump operating hours
         SetHolding<ushort>(10001, 350);    // heating setpoint 35.0 degrees
         SetHolding<ushort>(10011, 280);    // mixing circuit 1 heating setpoint 28.0 degrees
         SetHolding<ushort>(10041, 300);    // power limit 30.0 kW

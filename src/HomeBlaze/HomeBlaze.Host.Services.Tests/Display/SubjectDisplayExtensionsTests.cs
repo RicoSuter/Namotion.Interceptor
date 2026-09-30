@@ -91,7 +91,7 @@ public class SubjectDisplayExtensionsTests
             Items = [new ChildLabelItem { Title = "First" }, new ChildLabelItem()]
         };
         var property = parent.TryGetRegisteredSubject()!.TryGetProperty(nameof(ChildLabelParent.Items))!;
-        var child = property.Children.Single(c => Equals(c.Index, 1));
+        var child = property.Children.Single(child => Equals(child.Index, 1));
 
         // Act
         var label = property.GetChildDisplayName(child);
