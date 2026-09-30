@@ -376,6 +376,104 @@ public class PropertyValueWithWriteTimestampTests
     }
 
     /// <summary>
+    /// A derived-with-setter write recalculates after its terminal, so an older write's recalculation can run
+    /// after a newer write has settled. It then reads the newer value and must leave that write's timestamp in
+    /// place, for the property and for the derived property that depends on it.
+    /// </summary>
+    [Fact(Skip = "Known limit listed on PropertyReference.GetValue(out PropertyValueMetadata): the late recalculation stamps the older write's timestamp.")]
+    public async Task WhenOlderSetterWriteRecalculatesAfterANewerWriteSettled_ThenNewerWriteTimestampIsKept()
+    {
+        // Arrange
+        var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(parking);
+
+        var person = new DerivedSetterPerson(context);
+        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
+        var nicknameWithPrefix = person.GetPropertyReference(nameof(DerivedSetterPerson.NicknameWithPrefix));
+
+        parking.Armed = true;
+        var olderWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+            {
+                person.Nickname = "B";
+            }
+        }, "older writer");
+
+        Assert.True(parking.Committed.Wait(WaitBudget), "The older writer did not reach the parked commit.");
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
+        {
+            person.Nickname = "C";
+        }
+
+        parking.Release.Set();
+        await olderWriter.WaitAsync(WaitBudget);
+
+        var value = nickname.GetValue(out var metadata);
+        var prefixedValue = nicknameWithPrefix.GetValue(out var prefixedMetadata);
+
+        // Assert
+        Assert.Equal("C", value);
+        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
+        Assert.Equal(SecondTimestamp, nickname.TryGetWriteTimestamp());
+        Assert.Equal("Mr. C", prefixedValue);
+        Assert.Equal(SecondTimestamp, prefixedMetadata.WriteTimestamp);
+    }
+
+    /// <summary>
+    /// The older write's recalculation reads the newer value and publishes it with the older timestamp, and the
+    /// newer write's own recalculation, running last, stamps the newer timestamp again.
+    /// </summary>
+    [Fact]
+    public async Task WhenNewerSetterWriteCommitsBeforeAnOlderRecalculationEvaluates_ThenNewerWriteTimestampIsKept()
+    {
+        // Arrange
+        var olderParking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
+        var newerParking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(olderParking);
+        context.AddService<IWriteInterceptor>(newerParking);
+
+        var person = new DerivedSetterPerson(context);
+        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
+
+        olderParking.Armed = true;
+        var olderWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+            {
+                person.Nickname = "B";
+            }
+        }, "older writer");
+        Assert.True(olderParking.Committed.Wait(WaitBudget), "The older writer did not reach the parked commit.");
+
+        newerParking.Armed = true;
+        var newerWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
+            {
+                person.Nickname = "C";
+            }
+        }, "newer writer");
+        Assert.True(newerParking.Committed.Wait(WaitBudget), "The newer writer did not reach the parked commit.");
+
+        // Act
+        olderParking.Release.Set();
+        await olderWriter.WaitAsync(WaitBudget);
+        newerParking.Release.Set();
+        await newerWriter.WaitAsync(WaitBudget);
+
+        var value = nickname.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal("C", value);
+        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
+    }
+
+    /// <summary>
     /// A derived property over a field the interceptor cannot see is never recalculated, so its timestamp
     /// is the one from attach. The paired read still returns what the getter computes now.
     /// </summary>
@@ -528,7 +626,7 @@ public class PropertyValueWithWriteTimestampTests
         }
     }
 
-    // Once armed, parks the writer after the terminal has committed and before the derived handler recalculates.
+    // Once armed, parks the next writer after the terminal has committed and before the derived handler recalculates.
     [RunsAfter(typeof(DerivedPropertyChangeHandler))]
     private sealed class ParkingWriteInterceptor(string propertyName) : IWriteInterceptor
     {
@@ -544,6 +642,7 @@ public class PropertyValueWithWriteTimestampTests
 
             if (Armed && context.Property.Name == propertyName)
             {
+                Armed = false;
                 Committed.Set();
                 if (!Release.Wait(WaitBudget))
                 {
