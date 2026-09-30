@@ -29,7 +29,7 @@ internal readonly record struct RoutedRow(Row Row, bool IsOversized);
 /// original was dropped for being too large, with its measured size.
 /// </summary>
 internal readonly record struct OversizePlaceholder(
-    [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool IsOversize,
+    [property: System.Text.Json.Serialization.JsonPropertyName("$oversize")] bool IsOversized,
     [property: System.Text.Json.Serialization.JsonPropertyName("size")] int Size);
 
 /// <summary>
