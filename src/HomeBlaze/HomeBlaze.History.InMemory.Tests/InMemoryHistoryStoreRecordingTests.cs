@@ -70,14 +70,14 @@ public class InMemoryHistoryStoreRecordingTests
     /// <summary>
     /// Mutates <paramref name="propertyPath"/> to <paramref name="targetValue"/> and waits until a
     /// point with exactly that value is recorded under the canonical path. A warm-up phase re-applies
-    /// a distinct sentinel value until any point appears, which deterministically bridges the brief
-    /// startup gap before the change-queue subscription goes live (no fixed sleep). It then applies the
-    /// target value and polls until it lands, so the asserted value is never lost to the startup race.
+    /// a distinct sentinel value until any point appears, which waits without a fixed sleep until the
+    /// store's execution has built the engine (queries return an empty series before that). It then
+    /// applies the target value and polls until it lands.
     /// </summary>
     private static async Task<HistorySeries> RecordAndWaitForValueAsync(
         InMemoryHistoryStoreSubject store, string propertyPath, Action<double> mutate, double targetValue)
     {
-        // Warm-up: bridge the startup gap until the subscription is live and recording. Each iteration
+        // Warm-up: wait until the execution has built the engine and it is recording. Each iteration
         // uses a distinct negative value so the equality check never drops it as a no-op repeat. Driving
         // a new mutation on every poll is why this cannot be a plain WaitUntilAsync over a static condition;
         // the wait itself is expressed via WaitUntilAsync over the "any point landed" condition.
@@ -92,7 +92,7 @@ public class InMemoryHistoryStoreRecordingTests
             },
             message: $"Store never started recording under '{propertyPath}' (status='{store.Status}', recorded={store.RecordedCount}).");
 
-        // Now the subscription is live; apply the asserted value and wait for it specifically.
+        // Now the engine is recording; apply the asserted value and wait for it specifically.
         mutate(targetValue);
         await AsyncTestHelpers.WaitUntilAsync(
             () => QuerySeries(store, propertyPath).Points.Any(point => point.Number == targetValue),
@@ -158,7 +158,7 @@ public class InMemoryHistoryStoreRecordingTests
         {
             await AsyncTestHelpers.WaitUntilAsync(
                 () => QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5),
-                message: $"Value written right after StartAsync was not recorded (recorded={store.RecordedCount}).");
+                message: $"Value written right after StartAsync was not recorded (status='{store.Status}').");
         }
         finally
         {
