@@ -651,6 +651,29 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenStartedWithACancelledToken_ThenTheSourceStopsAndReleasesItsChangeSubscription()
+    {
+        // Arrange: a start with a cancelled token must still release the change subscription and
+        // publish Stopped.
+        var propertyChangeInterceptor = new PropertyChangeInterceptor();
+        var context = InterceptorSubjectContext.Create();
+        context.WithRegistry();
+        context.AddService(propertyChangeInterceptor);
+        var source = new TestSubjectSource(new Person(context), context, NullLogger.Instance);
+        Assert.True(propertyChangeInterceptor.IsIdle);
+
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        // Act
+        await source.StartAsync(cancelled.Token);
+
+        // Assert
+        Assert.Equal(SourceState.Stopped, source.State);
+        Assert.True(propertyChangeInterceptor.IsIdle);
+    }
+
+    [Fact]
     public async Task WhenContextHasNoPropertyChangeInterceptor_ThenSourceFailsFastWithActionableMessage()
     {
         // Arrange: without WithFullPropertyTracking/WithPropertyChangeSubscriptions the source cannot capture

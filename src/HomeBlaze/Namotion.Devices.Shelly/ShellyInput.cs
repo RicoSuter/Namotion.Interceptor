@@ -14,7 +14,7 @@ public partial class ShellyInput :
     internal int Index { get; }
 
     [State(IsDiscrete = true, Position = 100)]
-    public partial bool? State { get; internal set; }
+    public partial bool? IsActive { get; internal set; }
 
     [State(Position = 400)]
     public partial long? CountTotal { get; internal set; }
@@ -32,7 +32,7 @@ public partial class ShellyInput :
     public string IconName => CountTotal != null ? "Speed" : "Input";
 
     [Derived]
-    public string? IconColor => State == true ? "Success" : null;
+    public string? IconColor => IsActive == true ? "Success" : null;
 
     [Derived]
     public bool IsCounterInput => CountTotal != null;
@@ -40,7 +40,7 @@ public partial class ShellyInput :
     public ShellyInput(int index)
     {
         Index = index;
-        State = null;
+        IsActive = null;
         CountTotal = null;
         CountFrequency = null;
         LastUpdated = null;

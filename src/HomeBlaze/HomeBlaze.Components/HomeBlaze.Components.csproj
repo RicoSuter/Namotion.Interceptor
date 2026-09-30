@@ -1,11 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-    <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
-        <Nullable>enable</Nullable>
-        <ImplicitUsings>enable</ImplicitUsings>
-    </PropertyGroup>
-
 <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
@@ -17,10 +11,10 @@
         <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
-        <PackageReference Include="Excubo.Blazor.Diagrams" Version="4.1.*" />
-        <PackageReference Include="Markdig" Version="0.*" />
-        <PackageReference Include="MudBlazor" Version="9.2.*" />
-        <PackageReference Include="YamlDotNet" Version="16.*" />
+        <PackageReference Include="Excubo.Blazor.Diagrams" />
+        <PackageReference Include="Markdig" />
+        <PackageReference Include="MudBlazor" />
+        <PackageReference Include="YamlDotNet" />
     </ItemGroup>
 
 </Project>

@@ -243,9 +243,8 @@ internal static class SubjectCodeGenerator
             builder.AppendLine("            )");
         }
 
-        // Keep the first key to preserve precedence. GroupBy supports netstandard2.0 consumers; DistinctBy does not.
-        builder.AppendLine("            .GroupBy(pair => pair.Key)");
-        builder.AppendLine("            .Select(group => group.First())");
+        // DistinctBy keeps the first occurrence, which preserves precedence.
+        builder.AppendLine("            .DistinctBy(pair => pair.Key)");
         builder.AppendLine("            .ToFrozenDictionary();");
         builder.AppendLine();
     }
