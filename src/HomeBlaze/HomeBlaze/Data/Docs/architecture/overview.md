@@ -45,7 +45,7 @@ On top of the UNS, HomeBlaze builds a **knowledge graph** that extends live stat
 
 | Constraint | Description |
 |-----------|------------|
-| .NET 10+ with C# 13 preview | Required for partial properties and source generation |
+| .NET 10+ with C# 13 or later | Required for partial properties and source generation |
 | Namotion.Interceptor foundation | All subject tracking, change detection, and connector protocols build on the interceptor library |
 | WebSocket for inter-node sync | Instances communicate via the WebSocket connector (SubjectUpdate protocol) |
 | Same binary, config-driven roles | Node role (satellite, central, standby) is determined by loaded plugins and configuration |

@@ -56,7 +56,7 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `SessionCost` | Currency | Current session cost |
 | `TotalEnergyConsumed` | WattHour | Cumulative total energy |
 | `EnergyPrice` | Currency/kWh | Configured energy price |
-| `EcoSmartEnabled` | - | Whether Eco-Smart is enabled |
+| `IsEcoSmartEnabled` | - | Whether Eco-Smart is enabled |
 | `EcoSmartMode` | - | Current Eco-Smart mode |
 | `SoftwareVersion` | - | Charger firmware version |
 | `AvailableSoftwareUpdate` | - | Available firmware update |

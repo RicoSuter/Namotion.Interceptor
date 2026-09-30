@@ -163,7 +163,7 @@ public class InMemoryHistoryStoreCoreBucketedTests
             HistoryAggregations.Last, MaxPoints: 2));
 
         // Assert
-        Assert.True(series.Truncated);
+        Assert.True(series.IsTruncated);
         Assert.Equal(new double?[] { 4, 5 }, series.Points.Select(point => point.Number).ToArray());
     }
 

@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, GitHub Copi
 
 ## Overview
 
-Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# 13 partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
+Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
 
 ## Priorities
 
@@ -41,9 +41,9 @@ Always read [Benchmarking](docs/benchmarking.md) before running or interpreting 
 ## Architecture
 
 ### Core Components
-- **Core Library**: `Namotion.Interceptor` - Base interfaces and execution engine (.NET Standard 2.0)
+- **Core Library**: `Namotion.Interceptor` - Base interfaces and execution engine
 - **Source Generator**: `Namotion.Interceptor.Generator` - Compile-time code generation for `[InterceptorSubject]` classes
-- **Extension Libraries**: Tracking, Registry, Validation, Hosting, Sources, Dynamic (.NET 9.0)
+- **Extension Libraries**: Tracking, Registry, Validation, Hosting, Sources, Dynamic
 
 ### Key Design Patterns
 - **Chain of Responsibility**: `IReadInterceptor`/`IWriteInterceptor` middleware chain
@@ -67,7 +67,7 @@ docs/                                 # Feature and connector documentation
 
 ## Language Requirements
 
-This codebase requires **C# 13 preview features** for partial properties. The `[InterceptorSubject]` attribute triggers source generation that creates interception logic at compile-time.
+This codebase requires C# 13 or later for partial properties; .NET 10's default C# 14 covers it. The `[InterceptorSubject]` attribute triggers source generation that creates interception logic at compile-time.
 
 ### Basic Usage Pattern
 ```csharp
@@ -98,7 +98,7 @@ The library uses a fluent configuration API:
 ## Build Configuration
 
 - **Global Settings**: `Directory.Build.props` with nullable enabled, warnings as errors
-- **Target Frameworks**: .NET Standard 2.0 (core), .NET 9.0 (extensions)
+- **Target Frameworks**: `net10.0` for every project, set once in `src/Directory.Build.props`; the Generator assembly alone targets `netstandard2.0` because compilers built on .NET Framework load it. Package versions live in `src/Directory.Packages.props`.
 - **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.

@@ -83,9 +83,10 @@ public class HostedServiceHandlerTests
             var attachment = await person.AttachHostedServiceAsync(
                 () => new PersonBackgroundService(person), CancellationToken.None);
 
-            // Assert
+            // Assert - the instance is recorded once its StartAsync returned; its execution runs on
+            // another thread, so what it publishes is waited for rather than read at once.
             Assert.NotNull(attachment.Current);
-            Assert.Equal("John", person.FirstName);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
         });
     }
 
