@@ -6,7 +6,7 @@ internal sealed class ModbusPollingMetrics : IResettableMetrics
 {
     private long _totalPolls;
     private long _totalFailedRequests;
-    private long _lastPollDurationTicks;
+    private long _lastPollDurationTicks = -1;
     private long _lastPollTimeUtcTicks;
     private int _batchCount;
     private int _unavailablePropertyCount;
@@ -28,14 +28,27 @@ internal sealed class ModbusPollingMetrics : IResettableMetrics
         }
     }
 
-    public TimeSpan? LastPollDuration => LastPollTime is null
-        ? null
-        : TimeSpan.FromTicks(Interlocked.Read(ref _lastPollDurationTicks));
+    public TimeSpan? LastPollDuration
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastPollDurationTicks);
+            return ticks < 0 ? null : TimeSpan.FromTicks(ticks);
+        }
+    }
 
-    public void RecordPoll(TimeSpan duration, DateTimeOffset time)
+    /// <summary>
+    /// Records a completed poll cycle. <paramref name="time"/> becomes the last poll time only when
+    /// <paramref name="hasReadData"/> is set, that is when at least one read request of the cycle returned data.
+    /// </summary>
+    public void RecordPoll(TimeSpan duration, DateTimeOffset time, bool hasReadData)
     {
         Interlocked.Exchange(ref _lastPollDurationTicks, duration.Ticks);
-        Interlocked.Exchange(ref _lastPollTimeUtcTicks, time.UtcTicks);
+        if (hasReadData)
+        {
+            Interlocked.Exchange(ref _lastPollTimeUtcTicks, time.UtcTicks);
+        }
+
         Interlocked.Increment(ref _totalPolls);
     }
 

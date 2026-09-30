@@ -484,6 +484,31 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
+    public async Task WhenEveryRequestFailsTransiently_ThenLastPollTimeOnlyAdvancesWithACycleThatReadData()
+    {
+        // Arrange
+        var (poller, reader, metrics) = Create();
+        reader.Reject(0, exceptionCode: 6);
+        reader.Reject(0, ModbusAddressSpace.Coil, exceptionCode: 6);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var firstFailedCycleTime = metrics.LastPollTime;
+        reader.Accept(0, ModbusAddressSpace.Coil);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var partialCycleTime = metrics.LastPollTime;
+        reader.Reject(0, ModbusAddressSpace.Coil, exceptionCode: 6);
+        await poller.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.Null(firstFailedCycleTime);
+        Assert.NotNull(partialCycleTime);
+        Assert.Equal(partialCycleTime, metrics.LastPollTime);
+        Assert.NotNull(metrics.LastPollDuration);
+        Assert.Equal(3, metrics.TotalPolls);
+    }
+
+    [Fact]
     public async Task WhenMetricsAreReset_ThenCountersAreClearedAndGaugesAreKept()
     {
         // Arrange

@@ -16,7 +16,7 @@ public class ModbusClientDiagnosticsTests
         // Act
         pollingMetrics.SetPlan(batchCount: 3, unavailablePropertyCount: 1);
         pollingMetrics.RecordFailedRequest();
-        pollingMetrics.RecordPoll(TimeSpan.FromMilliseconds(12), time);
+        pollingMetrics.RecordPoll(TimeSpan.FromMilliseconds(12), time, hasReadData: true);
 
         // Assert
         Assert.Equal(1, diagnostics.Polling.TotalPolls);

@@ -106,7 +106,7 @@ internal sealed class ModbusPoller
             _metrics.SetPlan(_batches.Length, _bindings.Length - availableBindings.Length);
         }
 
-        _metrics.RecordPoll(Stopwatch.GetElapsedTime(startTimestamp), DateTimeOffset.UtcNow);
+        _metrics.RecordPoll(Stopwatch.GetElapsedTime(startTimestamp), DateTimeOffset.UtcNow, HasReadData());
     }
 
     /// <summary>
@@ -255,6 +255,19 @@ internal sealed class ModbusPoller
                 "Modbus read of {Count} {AddressSpace} from {Address} (unit {UnitId}, first mapping {Path}) failed with exception code {ExceptionCode}.",
                 key.Count, key.AddressSpace, key.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
         }
+    }
+
+    private bool HasReadData()
+    {
+        foreach (var binding in _bindings)
+        {
+            if (binding.HasCurrent)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) GetKey(ModbusReadBatch batch)

@@ -59,7 +59,8 @@ public sealed class ModbusPollingDiagnostics
     public TimeSpan? LastPollDuration => _metrics.LastPollDuration;
 
     /// <summary>
-    /// Gets when the last poll cycle completed, or <c>null</c> before the first one.
+    /// Gets when the last poll cycle that read at least one value completed, or <c>null</c> before any did. A cycle
+    /// whose every read request was answered with a Modbus exception response leaves it unchanged.
     /// </summary>
     public DateTimeOffset? LastPollTime => _metrics.LastPollTime;
 }
