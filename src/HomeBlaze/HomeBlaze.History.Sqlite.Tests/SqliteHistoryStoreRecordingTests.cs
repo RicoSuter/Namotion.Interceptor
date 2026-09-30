@@ -355,4 +355,152 @@ public class SqliteHistoryStoreRecordingTests
             DeleteDirectory(databasePath);
         }
     }
+
+    [Fact]
+    public async Task WhenDatabasePathChangesAndConfigurationIsApplied_ThenNewSamplesGoToTheNewDirectory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var newDatabasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.DatabasePath = newDatabasePath;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Directory.Exists(newDatabasePath) && Directory.EnumerateFiles(newDatabasePath).Any(),
+                message: "Store never opened the new database directory after the configuration was applied.");
+
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 2);
+            await store.FlushNowAsync();
+
+            // Assert
+            Assert.Contains(
+                Directory.EnumerateFiles(newDatabasePath, "*.db"),
+                file => Path.GetFileName(file) != "metadata.db");
+            var series = QuerySeries(store, "/Temperature");
+            Assert.Contains(series.Points, point => point.Number == 2);
+            Assert.DoesNotContain(series.Points, point => point.Number == 1);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+            DeleteDirectory(newDatabasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenRestarted_ThenSamplesBeforeTheRestartArePersisted()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+
+        // The default interval, so no periodic flush persists value 1 before the restart does.
+        store.FlushIntervalSeconds = 10;
+
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 0);
+            root.Temperature = 1;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.PendingSampleCount > 0,
+                message: "Value 1 never reached the engine.");
+
+            // Act
+            store.MaxJsonSize += 1;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+
+            // No forced flush while waiting: before the restart it would persist value 1 itself.
+            await WaitForSecondCoverageSessionAsync(store);
+
+            // Assert
+            Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenRestarted_ThenCoverageDoesNotClaimTheRestartWindow()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.MaxJsonSize += 1;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await WaitForSecondCoverageSessionAsync(store);
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 2);
+
+            // Assert
+            var coverageRanges = store.CoverageRanges;
+            Assert.Equal(2, coverageRanges.Length);
+            Assert.True(
+                coverageRanges[0].To <= coverageRanges[1].From,
+                "the first session's coverage reaches into the second session");
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenIsEnabledIsClearedAndApplied_ThenTheStoreServesNoHistory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.IsEnabled = false;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Disabled",
+                message: "Store never reported Disabled after IsEnabled was cleared and applied.");
+
+            // Assert
+            Assert.Empty(store.CoverageRanges);
+            Assert.Empty(QuerySeries(store, "/Temperature").Points);
+            Assert.Equal(0, store.RecordedCount);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// Waits until the store reports two coverage ranges, which is how a restart on the same directory shows:
+    /// the first session's range is persisted when it ends, and the new session's range by its first flush.
+    /// </summary>
+    private static Task WaitForSecondCoverageSessionAsync(SqliteHistoryStoreSubject store) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => store.CoverageRanges.Length == 2,
+            message: "Store never began a second coverage session after the configuration was applied.");
 }

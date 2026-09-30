@@ -29,8 +29,11 @@ public partial class SqliteHistoryStoreSubject :
 {
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
+    private readonly Lock _settingsLock = new();
+
     private HistoryChangeRecorder? _recorder;
     private SqliteHistoryStore? _engine;
+    private Settings? _settings;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
     {
@@ -98,7 +101,7 @@ public partial class SqliteHistoryStoreSubject :
     public partial int MaxJsonSize { get; set; }
 
     /// <summary>
-    /// Whether the store is enabled and should auto-start on application startup.
+    /// Whether the store records; applying a change takes effect immediately.
     /// </summary>
     [Configuration]
     public partial bool IsEnabled { get; set; }
@@ -130,7 +133,7 @@ public partial class SqliteHistoryStoreSubject :
     public partial int QueueDepth { get; set; }
 
     /// <summary>
-    /// Cumulative number of samples dropped after the pending persistence queue reached its limit.
+    /// Number of samples dropped since start after the pending persistence queue reached its limit.
     /// </summary>
     [State]
     public partial long DropCount { get; set; }
@@ -169,7 +172,7 @@ public partial class SqliteHistoryStoreSubject :
 
     /// <inheritdoc />
     public ImmutableArray<HistoryCoverage> CoverageRanges =>
-        _engine?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
+        Volatile.Read(ref _engine)?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => SqliteHistoryStore.AllAggregations;
@@ -179,7 +182,8 @@ public partial class SqliteHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine is null)
+        var engine = Volatile.Read(ref _engine);
+        if (engine is null)
         {
             return Task.FromResult(
                 new HistorySeries(
@@ -189,7 +193,7 @@ public partial class SqliteHistoryStoreSubject :
                     ImmutableArray<HistoryCoverage>.Empty));
         }
 
-        return _engine.QueryAsync(query, cancellationToken);
+        return engine.QueryAsync(query, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -197,7 +201,7 @@ public partial class SqliteHistoryStoreSubject :
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
+        return new ValueTask<HistoryPoint?>(Volatile.Read(ref _engine)?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
     /// <summary>
@@ -207,14 +211,27 @@ public partial class SqliteHistoryStoreSubject :
     /// </summary>
     internal Task FlushNowAsync(CancellationToken cancellationToken = default)
     {
-        return _engine?.FlushAsync(cancellationToken) ?? Task.CompletedTask;
+        return Volatile.Read(ref _engine)?.FlushAsync(cancellationToken) ?? Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Test-only hook: the number of samples the running engine holds but has not yet written, or zero
+    /// between sessions.
+    /// </summary>
+    internal int PendingSampleCount => Volatile.Read(ref _engine)?.QueueDepth ?? 0;
 
     // ChangeQueueBackgroundService
 
     /// <inheritdoc />
     protected override ChangeQueueProcessor CreateProcessor()
     {
+        Settings settings;
+        lock (_settingsLock)
+        {
+            settings = ReadSettings();
+            _settings = settings;
+        }
+
         // A recorder is not a sink that can fall behind the model, so the settled condition never holds
         // for it. Under the other rule a source-applied value does not retire an older commit, which is
         // what keeps both points in the series.
@@ -225,7 +242,7 @@ public partial class SqliteHistoryStoreSubject :
             // Runs only inside ProcessAsync's processor.ProcessAsync, after _recorder is set.
             (changes, _) => _recorder!.RecordBatch(changes),
             ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
+            bufferTime: TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds),
             maxQueueDepth: null,
             logger: _logger);
     }
@@ -233,7 +250,14 @@ public partial class SqliteHistoryStoreSubject :
     /// <inheritdoc />
     protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
     {
-        if (!IsEnabled)
+        Settings settings;
+        lock (_settingsLock)
+        {
+            settings = _settings!;
+        }
+
+        ResetMetrics();
+        if (!settings.IsEnabled)
         {
             Status = "Disabled";
             return;
@@ -250,7 +274,7 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
+        var directory = SqliteDatabaseLocation.Resolve(settings.DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
 
         SqliteHistoryStore engine;
         try
@@ -258,9 +282,9 @@ public partial class SqliteHistoryStoreSubject :
             engine = new SqliteHistoryStore(
                 priority: Priority,
                 databaseDirectory: directory,
-                partitionInterval: PartitionInterval,
-                maxAge: TimeSpan.FromDays(MaxAgeDays),
-                maxJsonSize: MaxJsonSize,
+                partitionInterval: settings.PartitionInterval,
+                maxAge: TimeSpan.FromDays(settings.MaxAgeDays),
+                maxJsonSize: settings.MaxJsonSize,
                 getUtcNow: () => DateTimeOffset.UtcNow,
                 logger: _logger);
         }
@@ -272,13 +296,13 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The subscription has existed since StartAsync, so it precedes the coverage session and no change
-        // can fall inside claimed coverage without reaching the engine.
+        // The processor subscribed when CreateProcessor built it, so the subscription precedes the coverage
+        // session and no change can fall inside claimed coverage without reaching the engine.
         var recorder = new HistoryChangeRecorder(engine, resolver);
         _recorder = recorder;
 
         engine.BeginCoverageSession();
-        _engine = engine;
+        Volatile.Write(ref _engine, engine);
 
         _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
 
@@ -311,6 +335,11 @@ public partial class SqliteHistoryStoreSubject :
             }
 
             RefreshMetrics(engine);
+
+            // Cleared before the dispose: a disposed engine reopens its connections on the next read, so a
+            // query between sessions would hold files the next session writes, or files in an old directory.
+            Volatile.Write(ref _engine, null);
+            _recorder = null;
             engine.Dispose();
             Status = "Stopped";
         }
@@ -360,6 +389,19 @@ public partial class SqliteHistoryStoreSubject :
     private TimeSpan EffectiveFlushInterval =>
         TimeSpan.FromSeconds(Math.Clamp(FlushIntervalSeconds, 1, (int)TimeSpan.FromDays(1).TotalSeconds));
 
+    private void ResetMetrics()
+    {
+        RecordedCount = 0;
+        OversizeCount = 0;
+        QueueDepth = 0;
+        DropCount = 0;
+        EstimatedStorageSize = 0;
+        LastFlushUtc = null;
+        LastError = null;
+        IncomingChangesPerSecond = 0;
+        RecordedChangesPerSecond = 0;
+    }
+
     private void RefreshMetrics(SqliteHistoryStore engine)
     {
         try
@@ -404,9 +446,31 @@ public partial class SqliteHistoryStoreSubject :
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Size knobs (MaxAgeDays, MaxJsonSize, PartitionInterval, DatabasePath) and BufferTime and
-        // FlushInterval are read once per start. Like OpcUaServer, configuration changes take effect on the
-        // next start; the host restarts the background service to apply them.
+        // Only a changed start-time setting restarts; the restart persists pending samples first. Under the
+        // lock CreateProcessor holds while it reads and publishes, so an apply racing a restart either sees
+        // the settings that restart read or is read by it; outside it, a revert could compare against the
+        // stale settings and be lost.
+        lock (_settingsLock)
+        {
+            if (_settings is { } started && started != ReadSettings())
+            {
+                RequestRestart();
+            }
+        }
+
         return Task.CompletedTask;
     }
+
+    private Settings ReadSettings() =>
+        new(IsEnabled, MaxAgeDays, PartitionInterval, DatabasePath, MaxJsonSize, BufferTimeMilliseconds);
+
+    // Settings read once per start. Priority is not one: HistoryStoreMerger reads it live from this subject.
+    // Neither is FlushIntervalSeconds: the flush loop re-reads it on every pass.
+    private sealed record Settings(
+        bool IsEnabled,
+        int MaxAgeDays,
+        PartitionInterval PartitionInterval,
+        string DatabasePath,
+        int MaxJsonSize,
+        int BufferTimeMilliseconds);
 }
