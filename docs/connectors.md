@@ -957,7 +957,7 @@ await processor.ProcessAsync(stoppingToken);
 
 ### ChangeQueueBackgroundService
 
-A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It creates the `ChangeQueueProcessor` in `StartAsync`, so a change made after the host start returns is delivered, and disposes it on every exit path. Since .NET 10 a plain `BackgroundService` may run `ExecuteAsync` after `StartAsync` has returned, so building the processor there misses every change made in between. The embedded WebSocket change processor and the HomeBlaze history stores derive from it.
+A hosted service that consumes property changes without being a connector derives from [`ChangeQueueBackgroundService`](../src/Namotion.Interceptor.Connectors/ChangeQueueBackgroundService.cs). It creates the `ChangeQueueProcessor` in `StartAsync`, so a change made after the host start returns is delivered, and disposes it on every exit path. Since .NET 10 a plain `BackgroundService` may run `ExecuteAsync` after `StartAsync` has returned, so building the processor there misses every change made in between. The embedded WebSocket change processor derives from it.
 
 ```csharp
 public sealed class AuditService(IInterceptorSubjectContext context, ILogger<AuditService> logger)
