@@ -9,7 +9,7 @@ namespace Namotion.Devices.Luxtronik.Attributes;
 /// A Smart Home Interface register with its firmware and function requirements; 0x7FFF and 0x7FFFFFFF map to <c>null</c>.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
-public abstract class LuxtronikRegisterAttribute : ModbusRegisterAttribute, ILuxtronikRegisterGate
+public abstract class LuxtronikRegisterAttribute : ModbusRegisterAttribute, ILuxtronikGate
 {
     private Version? _minimumFirmwareVersion;
 
@@ -33,6 +33,6 @@ public abstract class LuxtronikRegisterAttribute : ModbusRegisterAttribute, ILux
     /// </summary>
     public LuxtronikFunction Function { get; init; } = LuxtronikFunction.None;
 
-    Version? ILuxtronikRegisterGate.MinimumFirmwareVersion =>
+    Version? ILuxtronikGate.MinimumFirmwareVersion =>
         MinimumFirmware is null ? null : _minimumFirmwareVersion ??= Version.Parse(MinimumFirmware);
 }

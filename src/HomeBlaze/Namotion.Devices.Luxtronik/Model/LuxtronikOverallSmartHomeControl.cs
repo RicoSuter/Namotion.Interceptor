@@ -12,7 +12,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// The overall setpoint configuration (holding 10065 to 10067), firmware 3.92 and later: an offset or level for the heating circuit and all mixing circuits. The individual configurations apply only in mode Individual.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikOverallSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGatedSubject
+public partial class LuxtronikOverallSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGate
 {
     /// <summary>
     /// Initializes the registers as unknown (<c>null</c>) until they are read.
@@ -48,7 +48,7 @@ public partial class LuxtronikOverallSmartHomeControl : IModbusBaseAddressProvid
     [State(IsDiscrete = true, Position = 3)]
     public partial LuxtronikLevelMode? Level { get; internal set; }
 
-    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
+    Version? ILuxtronikGate.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
-    LuxtronikFunction ILuxtronikGatedSubject.Function => LuxtronikFunction.None;
+    LuxtronikFunction ILuxtronikGate.Function => LuxtronikFunction.None;
 }

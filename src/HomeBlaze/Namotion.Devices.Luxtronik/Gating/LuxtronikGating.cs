@@ -26,14 +26,14 @@ internal static class LuxtronikGating
         var functionOffset = property.Subject is ILuxtronikCircuitSubject circuit ? circuit.FunctionOffset : 0;
         foreach (var attribute in property.ReflectionAttributes)
         {
-            if (attribute is ILuxtronikRegisterGate gate &&
+            if (attribute is ILuxtronikGate gate &&
                 !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Function, functionOffset), firmwareVersion, functionMask))
             {
                 return false;
             }
         }
 
-        return property.Subject is not ILuxtronikGatedSubject subject ||
+        return property.Subject is not ILuxtronikGate subject ||
             IsSupported(subject.MinimumFirmwareVersion, subject.Function, firmwareVersion, functionMask);
     }
 

@@ -7,7 +7,7 @@ using Namotion.Interceptor.Modbus;
 namespace Namotion.Devices.Luxtronik.Tests.Testing;
 
 [InterceptorSubject]
-public partial class LuxtronikGatedTestSubject : ILuxtronikGatedSubject
+public partial class LuxtronikGatedTestSubject : ILuxtronikGate
 {
     public LuxtronikGatedTestSubject()
     {
@@ -29,7 +29,7 @@ public partial class LuxtronikGatedTestSubject : ILuxtronikGatedSubject
     [LuxtronikHoldingRegister(2, ModbusDataType.U16, Function = LuxtronikFunction.Cooling)]
     public partial ushort? FunctionGated { get; set; }
 
-    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => SubjectMinimumFirmwareVersion;
+    Version? ILuxtronikGate.MinimumFirmwareVersion => SubjectMinimumFirmwareVersion;
 
-    LuxtronikFunction ILuxtronikGatedSubject.Function => SubjectFunction;
+    LuxtronikFunction ILuxtronikGate.Function => SubjectFunction;
 }

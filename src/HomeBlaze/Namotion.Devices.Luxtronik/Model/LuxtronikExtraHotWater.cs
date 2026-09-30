@@ -12,7 +12,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// Extra hot water: the SHI request (holding 10071) and its state (inputs 10500 to 10502), firmware 3.92 and later.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikExtraHotWater : ILuxtronikGatedSubject
+public partial class LuxtronikExtraHotWater : ILuxtronikGate
 {
     /// <summary>
     /// Initializes the registers as unknown (<c>null</c>) until they are read.
@@ -53,7 +53,7 @@ public partial class LuxtronikExtraHotWater : ILuxtronikGatedSubject
     [State(Unit = StateUnit.Minute, Position = 4)]
     public partial int? RemainingDuration { get; internal set; }
 
-    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
+    Version? ILuxtronikGate.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
-    LuxtronikFunction ILuxtronikGatedSubject.Function => LuxtronikFunction.None;
+    LuxtronikFunction ILuxtronikGate.Function => LuxtronikFunction.None;
 }

@@ -12,7 +12,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// Smart Grid signals from the utility (inputs 10360 and 10361), firmware 3.92 and later.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronikGatedSubject
+public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronikGate
 {
     /// <summary>
     /// Initializes the registers as unknown (<c>null</c>) until they are read.
@@ -54,7 +54,7 @@ public partial class LuxtronikSmartGrid : IModbusBaseAddressProvider, ILuxtronik
         _ => null
     };
 
-    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
+    Version? ILuxtronikGate.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
-    LuxtronikFunction ILuxtronikGatedSubject.Function => LuxtronikFunction.None;
+    LuxtronikFunction ILuxtronikGate.Function => LuxtronikFunction.None;
 }

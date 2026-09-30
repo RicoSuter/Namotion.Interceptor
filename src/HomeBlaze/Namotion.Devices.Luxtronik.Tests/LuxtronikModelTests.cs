@@ -82,8 +82,8 @@ public class LuxtronikModelTests
         // Assert
         Assert.Equal(10108, temperatures.Outside.BaseAddress);
         Assert.Equal(10105, temperatures.Flow.BaseAddress);
-        Assert.Null(((ILuxtronikGatedSubject)temperatures.Outside).MinimumFirmwareVersion);
-        Assert.Equal(new Version(3, 92, 0), ((ILuxtronikGatedSubject)temperatures.HeatSourceInlet).MinimumFirmwareVersion);
+        Assert.Null(((ILuxtronikGate)temperatures.Outside).MinimumFirmwareVersion);
+        Assert.Equal(new Version(3, 92, 0), ((ILuxtronikGate)temperatures.HeatSourceInlet).MinimumFirmwareVersion);
         Assert.Equal("Outside temperature", temperatures.Outside.Title);
     }
 
@@ -103,8 +103,8 @@ public class LuxtronikModelTests
         Assert.Equal(pumpAddress, circuit.Pump.BaseAddress);
         Assert.Equal(10010 + baseAddress, circuit.HeatingSmartHomeControl.BaseAddress);
         Assert.Equal(10015 + baseAddress, circuit.CoolingSmartHomeControl.BaseAddress);
-        Assert.Equal(heatingFunction, ((ILuxtronikGatedSubject)circuit.HeatingSmartHomeControl).Function);
-        Assert.Equal(coolingFunction, ((ILuxtronikGatedSubject)circuit.CoolingSmartHomeControl).Function);
+        Assert.Equal(heatingFunction, ((ILuxtronikGate)circuit.HeatingSmartHomeControl).Function);
+        Assert.Equal(coolingFunction, ((ILuxtronikGate)circuit.CoolingSmartHomeControl).Function);
         Assert.Equal(heatingFunction, LuxtronikFunction.MixingCircuit1Heating + ((ILuxtronikCircuitSubject)circuit).FunctionOffset);
         Assert.Equal($"Mixing circuit {index}", circuit.Title);
         Assert.Equal($"Mixing circuit {index} temperature", circuit.Temperature.Title);
@@ -130,8 +130,8 @@ public class LuxtronikModelTests
         Assert.Equal(10354, pump.BaseAddress);
         Assert.Equal("Heating circulation pump (HUP)", pump.Title);
         Assert.Null(pump.IsOn);
-        Assert.Equal(LuxtronikGating.Firmware392, ((ILuxtronikGatedSubject)pump).MinimumFirmwareVersion);
-        Assert.Equal(LuxtronikFunction.None, ((ILuxtronikGatedSubject)pump).Function);
+        Assert.Equal(LuxtronikGating.Firmware392, ((ILuxtronikGate)pump).MinimumFirmwareVersion);
+        Assert.Equal(LuxtronikFunction.None, ((ILuxtronikGate)pump).Function);
     }
 
     [Fact]

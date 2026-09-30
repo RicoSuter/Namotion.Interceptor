@@ -12,7 +12,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// The setpoint configuration a smart home system sends over the SHI (manual: Sollwertkonfiguration; shown on the controller under Empfangene Daten): mode, setpoint, offset and level, reused at several holding addresses.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGatedSubject
+public partial class LuxtronikSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGate
 {
     private readonly LuxtronikFunction _function;
 
@@ -60,7 +60,7 @@ public partial class LuxtronikSmartHomeControl : IModbusBaseAddressProvider, ILu
     [State(IsDiscrete = true, Position = 4)]
     public partial LuxtronikLevelMode? Level { get; internal set; }
 
-    Version? ILuxtronikGatedSubject.MinimumFirmwareVersion => null;
+    Version? ILuxtronikGate.MinimumFirmwareVersion => null;
 
-    LuxtronikFunction ILuxtronikGatedSubject.Function => _function;
+    LuxtronikFunction ILuxtronikGate.Function => _function;
 }

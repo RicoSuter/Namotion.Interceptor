@@ -215,7 +215,7 @@ public class LuxtronikGatingTests
                 .Where(property => property.GetIndexParameters().Length == 0)
                 .Select(property => property.GetValue(subject))
                 .Prepend(subject))
-            .OfType<ILuxtronikGatedSubject>()
+            .OfType<ILuxtronikGate>()
             .ToList();
 
         // Assert
