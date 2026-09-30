@@ -84,11 +84,11 @@ internal sealed class ModbusPoller
                         batch.AddressSpace, batch.StartAddress, batch.UnitId);
                 }
             }
-            catch (ModbusResponseException exception) when (exception.IsPermanentRejection && batch.Bindings.Length > 1)
+            catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
             {
                 _metrics.RecordFailedRequest();
                 _failingBatches.Remove(GetKey(batch));
-                await ReadIndividuallyAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
+                await HandlePermanentRejectionAsync(reader, batch, exception, cancellationToken).ConfigureAwait(false);
                 isReplanRequired = true;
             }
             catch (ModbusResponseException exception)
@@ -206,6 +206,21 @@ internal sealed class ModbusPoller
     }
 
     /// <summary>
+    /// Marks the binding of a rejected single-binding batch unavailable, or reads the bindings of a larger one one by one.
+    /// </summary>
+    private Task HandlePermanentRejectionAsync(
+        IModbusRegisterReader reader, ModbusReadBatch batch, ModbusResponseException exception, CancellationToken cancellationToken)
+    {
+        if (batch.Bindings.Length == 1)
+        {
+            MarkUnavailable(batch.Bindings[0], exception);
+            return Task.CompletedTask;
+        }
+
+        return ReadIndividuallyAsync(reader, batch, exception, cancellationToken);
+    }
+
+    /// <summary>
     /// Reads the bindings of a rejected batch one by one and isolates them until the next connect.
     /// </summary>
     private async Task ReadIndividuallyAsync(
@@ -230,10 +245,7 @@ internal sealed class ModbusPoller
             }
             catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
             {
-                binding.IsUnavailable = true;
-                _logger.LogWarning(exception,
-                    "Modbus mapping {Path} ({AddressSpace} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
-                    binding.Path, binding.AddressSpace, binding.Address, binding.UnitId, exception.ExceptionCode);
+                MarkUnavailable(binding, exception);
             }
             catch (ModbusResponseException exception)
             {
@@ -241,6 +253,14 @@ internal sealed class ModbusPoller
                 LogFailedRequestOnce((binding.UnitId, binding.AddressSpace, binding.Address, binding.Count), binding.Path, exception);
             }
         }
+    }
+
+    private void MarkUnavailable(ModbusRegisterBinding binding, ModbusResponseException exception)
+    {
+        binding.IsUnavailable = true;
+        _logger.LogWarning(exception,
+            "Modbus mapping {Path} ({AddressSpace} {Address}, unit {UnitId}) was rejected with exception code {ExceptionCode} and is not read again until the next connect.",
+            binding.Path, binding.AddressSpace, binding.Address, binding.UnitId, exception.ExceptionCode);
     }
 
     /// <summary>

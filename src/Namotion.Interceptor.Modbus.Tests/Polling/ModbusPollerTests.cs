@@ -168,7 +168,7 @@ public partial class ModbusPollerTests
         await poller.ReadAsync(reader, CancellationToken.None);
         Apply(poller);
 
-        reader.Reject(10);
+        reader.Reject(10, exceptionCode: 6);
         reader.SetRegister(0, unchecked((ushort)-2));
         await poller.ReadAsync(reader, CancellationToken.None);
         var failedCycle = Apply(poller);
@@ -258,7 +258,7 @@ public partial class ModbusPollerTests
         var poller = new ModbusPoller(bindings, 0, new ModbusPollingMetrics(), logger);
         var reader = new FakeRegisterReader();
         reader.Reject(1);
-        reader.Reject(0, ModbusAddressSpace.Coil);
+        reader.Reject(0, ModbusAddressSpace.Coil, exceptionCode: 6);
         var batchesBeforeReplan = poller.Batches;
 
         // Act
@@ -311,7 +311,7 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
-    public async Task WhenSingleMappingBatchIsRejected_ThenFailedBatchIsCountedAndOthersContinue()
+    public async Task WhenSingleMappingBatchIsRejected_ThenItIsMarkedUnavailableAndOthersContinue()
     {
         // Arrange
         var (poller, reader, metrics) = Create();
@@ -320,12 +320,16 @@ public partial class ModbusPollerTests
         // Act
         await poller.ReadAsync(reader, CancellationToken.None);
         var applied = Apply(poller);
+        reader.Requests.Clear();
+        await poller.ReadAsync(reader, CancellationToken.None);
 
         // Assert
         Assert.False(applied.ContainsKey("Pump"));
         Assert.Equal(42, applied["First"]);
         Assert.Equal(1, metrics.TotalFailedRequests);
-        Assert.Equal(0, metrics.UnavailablePropertyCount);
+        Assert.Equal(1, metrics.UnavailablePropertyCount);
+        Assert.Equal(1, metrics.BatchCount);
+        Assert.DoesNotContain(reader.Requests, request => request.AddressSpace == ModbusAddressSpace.Coil);
     }
 
     [Theory]
@@ -513,7 +517,7 @@ public partial class ModbusPollerTests
     {
         // Arrange
         var (poller, reader, metrics) = Create();
-        reader.Reject(0, ModbusAddressSpace.Coil);
+        reader.Reject(0, ModbusAddressSpace.Coil, exceptionCode: 6);
         await poller.ReadAsync(reader, CancellationToken.None);
 
         // Act
