@@ -65,13 +65,14 @@ internal sealed class LuxtronikTestServer : IDisposable
         var server = new ModbusTcpServer(true);
         server.AddUnit(UnitId);
         server.RequestValidator = ValidateRequest;
-        server.Start(new IPEndPoint(IPAddress.Loopback, Port));
         _server = server;
 
+        // Seeded before listening, so a client connecting right away never reads firmware 0.0.0 or no functions.
         SetInput(10400, (ushort)_firmware.Major);
         SetInput(10401, (ushort)_firmware.Minor);
         SetInput(10402, (ushort)Math.Max(_firmware.Build, 0));
         SetFunctions(Enum.GetValues<LuxtronikFunction>().Where(function => function != LuxtronikFunction.None).ToArray());
+        server.Start(new IPEndPoint(IPAddress.Loopback, Port));
     }
 
     /// <summary>

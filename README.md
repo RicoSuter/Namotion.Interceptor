@@ -8,7 +8,7 @@ Namotion.Interceptor is a .NET library for building reactive applications with a
 
 Mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining reactive capabilities.
 
-The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, Modbus, WebSocket, ASP.NET Core, Blazor, GraphQL, and MCP. Typical use cases are IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
+The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, WebSocket, ASP.NET Core, Blazor, GraphQL, and MCP. Typical use cases are IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
 
 ![](features.png)
 

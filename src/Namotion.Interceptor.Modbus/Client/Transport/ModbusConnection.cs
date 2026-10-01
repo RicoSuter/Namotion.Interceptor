@@ -34,14 +34,20 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
         string host, int port, TimeSpan requestTimeout, CancellationToken cancellationToken)
     {
         var tcpClient = new TcpClient { NoDelay = true };
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(requestTimeout);
         try
         {
-            await tcpClient.ConnectAsync(host, port, cancellationToken).AsTask()
-                .WaitAsync(requestTimeout, cancellationToken).ConfigureAwait(false);
+            await tcpClient.ConnectAsync(host, port, timeoutSource.Token).ConfigureAwait(false);
 
             var client = new ModbusTcpClient();
             client.Initialize(tcpClient, ModbusEndianness.BigEndian);
             return new ModbusConnection(tcpClient, client, requestTimeout);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            tcpClient.Dispose();
+            throw new TimeoutException($"Connecting to {host}:{port} did not complete within {requestTimeout}.", exception);
         }
         catch
         {
@@ -110,9 +116,10 @@ internal sealed class ModbusConnection : IModbusRegisterReader, IDisposable
             return;
         }
 
-        // The timeout source is left to the in-flight read, which still resets or replaces it. It never creates a
-        // wait handle, so it holds nothing that needs disposing.
-        _client.Dispose();
+        // Closing the socket aborts an in-flight read. The Modbus client is deliberately not disposed: that returns its
+        // frame buffer to the shared ArrayPool while the read, or the caller copying its result, may still use it. The
+        // buffer is collected with the client instead. The timeout source is left to the in-flight read, which still
+        // resets or replaces it; it never creates a wait handle, so it holds nothing that needs disposing.
         _tcpClient.Dispose();
     }
 }

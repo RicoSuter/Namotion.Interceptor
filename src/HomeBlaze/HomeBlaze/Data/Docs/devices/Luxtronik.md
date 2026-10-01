@@ -53,7 +53,7 @@ The controller shows the SHI as "Standby" after 10 minutes without requests and 
 | `Name` | string | "" | Display name |
 | `HostAddress` | string | - | Controller (or proxy) IP address or host name |
 | `Port` | int | 502 | Modbus TCP port |
-| `PollingInterval` | TimeSpan | 30 seconds | Time between reads; values below 10 seconds are raised to 10 seconds |
+| `PollingInterval` | TimeSpan | 30 seconds | Time between reads; values below 10 seconds are raised to 10 seconds, values above 1 hour lowered to 1 hour |
 
 A configuration change restarts the connection.
 
@@ -66,7 +66,7 @@ A configuration change restarts the connection.
 | Running | Connected and polling | "Heat pump error N" when the controller reports error N, otherwise empty |
 | Error | The connection failed (stays set while reconnecting), or the configuration is invalid | The last error, or the configuration error |
 
-A controller error does not change `Status`: the connection is healthy, so it stays Running and the error number is shown in `StatusMessage`, which the widget displays.
+A controller error does not change `Status`: the connection is healthy, so it stays Running and the error number is shown in `StatusMessage`, which the widget displays. The status is refreshed every second, independent of the polling interval.
 
 ## State Properties
 
@@ -74,7 +74,7 @@ Temperatures are °C, temperature offsets K, power W, energy Wh, durations minut
 
 The model is grouped by function. Measured temperatures are child sensors (`ITemperatureSensor`) and pump outputs are child switches (`ISwitchState`, read only), each titled after what it measures or drives, such as "Return temperature" or "Hot water loading pump (BUP)"; targets, limits, states, locks, energy and operating hours are plain values.
 
-`Heating` and `HotWater` always exist. `Cooling`, `Pool`, `Solar`, `RoomControl` and `MixingCircuit1` to `MixingCircuit3` exist while their function is active on the controller (discrete inputs 10000 to 10011, shown under `Functions`); a mixing circuit exists while its heating or its cooling is active. The flags follow the operating modes for heating ("Aus" clears it), hot water ("Aus" clears it), cooling and pool (set only in "Automatisch") and the mixing circuits; solar and the room control unit reflect the configuration. The flags are read on every connect and polled with the other values, and when they change the device reconnects and discovers its values again, so a function appears or disappears within a few polling intervals.
+`Heating` and `HotWater` always exist. `Cooling`, `Pool`, `Solar`, `RoomControl` and `MixingCircuit1` to `MixingCircuit3` exist while their function is active on the controller (discrete inputs 10000 to 10011, shown under `Functions`); a mixing circuit exists while its heating or its cooling is active. The flags follow the operating modes for heating ("Aus" clears it), hot water ("Aus" clears it), cooling and pool (set only in "Automatisch") and the mixing circuits; solar and the room control unit reflect the configuration. The flags are read on every connect and polled with the other values, and when a flag other than heating or hot water changes, the device reconnects and discovers its values again, so a function appears or disappears within a few polling intervals. Heating and hot water always exist and gate no value, so their flags never cause a reconnect.
 
 On every connect the device also reads the firmware version and skips values the firmware does not provide. Values the controller reports as not available (0x7FFF or 0x7FFFFFFF) are shown empty.
 

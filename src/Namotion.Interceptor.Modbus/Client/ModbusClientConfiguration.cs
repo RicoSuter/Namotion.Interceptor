@@ -16,7 +16,7 @@ public sealed class ModbusClientConfiguration
     public required string Host { get; init; }
 
     /// <summary>
-    /// Gets the TCP port of the Modbus TCP server. Default is 502.
+    /// Gets the TCP port of the Modbus TCP server, 1 to 65535. Default is 502.
     /// </summary>
     public int Port { get; init; } = 502;
 
@@ -27,29 +27,32 @@ public sealed class ModbusClientConfiguration
     public byte UnitId { get; init; } = 1;
 
     /// <summary>
-    /// Gets the time between poll cycles. Default is 2 seconds.
+    /// Gets the interval at which poll cycles start, measured from the start of the previous one; greater than 0 and at
+    /// most 1 hour. Default is 2 seconds.
     /// </summary>
     public TimeSpan PollingInterval { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
-    /// Gets the timeout for connecting and for each request. A timeout is treated as a lost connection. Default is 5 seconds.
+    /// Gets the timeout for connecting and for each request, greater than 0 and at most 1 hour. A timeout is treated as a
+    /// lost connection. Default is 5 seconds.
     /// </summary>
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Gets the delay before reconnecting after a lost connection or a failed connect attempt, also used as the
-    /// retry time of the underlying subject source. Default is 10 seconds.
+    /// retry time of the underlying subject source; greater than 0 and at most 1 hour. Default is 10 seconds.
     /// </summary>
     public TimeSpan RetryTime { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Gets the time the change queue buffers changes before processing them. Default is 8 milliseconds.
+    /// Gets the time the change queue buffers changes before processing them, 0 to 1 hour. Default is 8 milliseconds.
     /// </summary>
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
     /// Gets how many unmapped registers or bits a read request may span to merge neighbouring mappings.
-    /// 0 reads strictly contiguous blocks, which is safe for devices that reject reads of unmapped addresses. Default is 0.
+    /// 0 reads strictly contiguous blocks, which is safe for devices that reject reads of unmapped addresses. 0 to 124.
+    /// Default is 0.
     /// </summary>
     public int MaximumRegisterGap { get; init; }
 

@@ -13,6 +13,13 @@ internal static class LuxtronikGating
     public const int FunctionFlagCount = 12;
 
     /// <summary>
+    /// Gets the function flags that change which registers are read or which subjects exist. Heating and hot water are
+    /// always present and gate no register, so a change of their flags needs no new discovery.
+    /// </summary>
+    public const int DiscoveryFunctionMask = ((1 << FunctionFlagCount) - 1) &
+        ~((1 << (int)LuxtronikFunction.Heating) | (1 << (int)LuxtronikFunction.HotWater));
+
+    /// <summary>
     /// Gets firmware version 3.92.0, the minimum firmware of the registers added in that release.
     /// </summary>
     public static readonly Version Firmware392 = new(3, 92, 0);

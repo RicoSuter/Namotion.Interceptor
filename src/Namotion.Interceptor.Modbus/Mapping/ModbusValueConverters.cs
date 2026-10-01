@@ -86,13 +86,13 @@ internal static class ModbusValueConverters
             return (raw, exponent) =>
             {
                 var value = ModbusRegisterCodec.ReadSingle(raw, wordOrder);
-                return isScaled ? (float)(value * GetDoubleScale(hasDynamicScale, staticScale, exponent)) : value;
+                return isScaled ? (float)ApplyDoubleScale(value, hasDynamicScale, staticScale, exponent) : value;
             };
         }
 
         if (targetType == typeof(double))
         {
-            return (raw, exponent) => ModbusRegisterCodec.ReadSingle(raw, wordOrder) * GetDoubleScale(hasDynamicScale, staticScale, exponent);
+            return (raw, exponent) => ApplyDoubleScale(ModbusRegisterCodec.ReadSingle(raw, wordOrder), hasDynamicScale, staticScale, exponent);
         }
 
         if (targetType == typeof(decimal))
@@ -134,12 +134,12 @@ internal static class ModbusValueConverters
         {
             return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDoubleScale(hasDynamicScale, staticScale, exponent);
+                : ApplyDoubleScale(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
         }
 
         return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
             ? null
-            : (float)(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDoubleScale(hasDynamicScale, staticScale, exponent));
+            : (float)ApplyDoubleScale(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
     }
 
     private static ModbusValueReader CreateUnscaledIntegerReader(
@@ -228,8 +228,16 @@ internal static class ModbusValueConverters
         _ => null
     };
 
-    private static double GetDoubleScale(bool hasDynamicScale, double staticScale, int exponent)
-        => hasDynamicScale ? Math.Pow(10, exponent) : staticScale;
+    // Divides for negative exponents: 10^-n is not exact in binary, so 3 * 0.1 would give 0.30000000000000004.
+    private static double ApplyDoubleScale(double value, bool hasDynamicScale, double staticScale, int exponent)
+    {
+        if (!hasDynamicScale)
+        {
+            return value * staticScale;
+        }
+
+        return exponent < 0 ? value / Math.Pow(10, -exponent) : value * Math.Pow(10, exponent);
+    }
 
     private static decimal GetDecimalScale(bool hasDynamicScale, decimal staticScale, int exponent)
     {

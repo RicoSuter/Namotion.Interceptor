@@ -213,7 +213,14 @@ public partial class ModbusSubjectClientSourceTests
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => device.Counter == 42, TimeSpan.FromSeconds(10), message: "The device value should be restored.");
+            var pollsAfterRestore = source.Diagnostics.Polling.TotalPolls;
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= pollsAfterRestore + 2, TimeSpan.FromSeconds(10),
+                message: "Polling should continue.");
             Assert.All(server.Requests, request => Assert.Contains(request.FunctionCode, ReadFunctionCodes));
+
+            // A failed write would park the change for retry or drop it; the read-only source reports success instead.
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.Depth);
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
         }
         finally
         {
@@ -440,22 +447,27 @@ public partial class ModbusSubjectClientSourceTests
     }
 
     [Fact]
-    public async Task WhenDisconnectFaultIsInjected_ThenSourceReconnectsAndRunsDiscoveryAgain()
+    public async Task WhenReconnectingAfterARegisterWasRejected_ThenItIsReadAgain()
     {
         // Arrange
         using var server = new ModbusTestServer();
         server.Start();
         SeedServer(server);
+        server.RejectAddress(ModbusAddressSpace.HoldingRegister, 1);
         var (device, source, recorder) = await StartAsync(server);
         try
         {
+            Assert.Equal(1, source.Diagnostics.Polling.UnavailablePropertyCount);
+            server.AcceptAllAddresses();
+
             // Act
             await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
 
             // Assert
             await recorder.WaitForStatesAsync(TimeSpan.FromSeconds(30), "The source should recover from the disconnect.",
                 SourceState.Synchronized, SourceState.Synchronizing, SourceState.Synchronized);
-            Assert.True(device.DiscoveryCount >= 2);
+            Assert.Equal(42, device.Counter);
+            Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
         }
         finally
         {
@@ -665,9 +677,19 @@ public partial class ModbusSubjectClientSourceTests
         SeedServer(server);
         var (device, source, recorder) = await StartAsync(server);
         var counter = new PropertyReference(device, nameof(TestDevice.Counter));
-        await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= 2, TimeSpan.FromSeconds(10), message: "Polling should start.");
-        var executeTask = source.ExecuteTask;
-        Assert.NotNull(executeTask);
+        Task? executeTask;
+        try
+        {
+            await AsyncTestHelpers.WaitUntilAsync(() => source.Diagnostics.Polling.TotalPolls >= 2, TimeSpan.FromSeconds(10), message: "Polling should start.");
+            executeTask = source.ExecuteTask;
+            Assert.NotNull(executeTask);
+        }
+        catch
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+            throw;
+        }
 
         // Act
         recorder.Dispose();
@@ -678,6 +700,48 @@ public partial class ModbusSubjectClientSourceTests
         Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
         await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
         await AsyncTestHelpers.WaitUntilAsync(() => server.ConnectionCount == 0, TimeSpan.FromSeconds(10), message: "The connection should be closed.");
+    }
+
+    [Fact]
+    public async Task WhenSourceIsDisposedDuringAReconnect_ThenClaimsAreReleasedAndTheConnectionIsClosed()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        SeedServer(server);
+        var logger = new RecordingLogger();
+        var reconnectDiscoveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (_, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = async (context, cancellationToken) =>
+        {
+            if (testDevice.DiscoveryCount > 1)
+            {
+                // The test server only notices a closed client that has sent a request.
+                await context.ReadHoldingRegistersAsync(0, 1, cancellationToken: cancellationToken);
+                reconnectDiscoveryStarted.TrySetResult();
+                // Blocks the reconnect inside discovery until the disposal cancels it.
+                await new TaskCompletionSource().Task.WaitAsync(cancellationToken);
+            }
+        }, logger);
+        try
+        {
+            await ((IFaultInjectable)source).InjectFaultAsync(FaultType.Disconnect, CancellationToken.None);
+            await reconnectDiscoveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        }
+        catch
+        {
+            recorder.Dispose();
+            await source.DisposeAsync();
+            throw;
+        }
+
+        // Act
+        recorder.Dispose();
+        await source.DisposeAsync();
+
+        // Assert
+        Assert.Equal(0, source.Diagnostics.ClaimedPropertyCount);
+        await AsyncTestHelpers.WaitUntilAsync(() => server.ConnectionCount == 0, TimeSpan.FromSeconds(10), message: "The connection should be closed.");
+        Assert.DoesNotContain(logger.Errors, error => error.Contains("owned by another source"));
     }
 
     [Fact]
@@ -718,16 +782,23 @@ public partial class ModbusSubjectClientSourceTests
         SeedServer(server);
 
         // Act
-        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = (_, _) =>
-            testDevice.DiscoveryCount == 1
-                ? Task.FromException(new InvalidOperationException("Discovery failed once."))
-                : Task.CompletedTask);
+        var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.OnDiscover = async (context, cancellationToken) =>
+        {
+            if (testDevice.DiscoveryCount == 1)
+            {
+                // The test server only notices a closed client that has sent a request.
+                await context.ReadHoldingRegistersAsync(0, 1, cancellationToken: cancellationToken);
+                throw new InvalidOperationException("Discovery failed once.");
+            }
+        });
         try
         {
             // Assert
             Assert.Equal(2, device.DiscoveryCount);
             Assert.Equal(42, device.Counter);
             Assert.IsType<InvalidOperationException>(source.Diagnostics.LastError);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.ConnectionCount == 1, TimeSpan.FromSeconds(10),
+                message: "The failed attempt's connection should be closed.");
         }
         finally
         {
@@ -783,7 +854,7 @@ public partial class ModbusSubjectClientSourceTests
         SeedServer(server);
         var device = CreateDevice();
         var optional = new PropertyReference(device, nameof(TestDevice.Optional));
-        await using var otherSource = CreateSource(device, server);
+        var otherSource = Mock.Of<ISubjectSource>();
         Assert.True(optional.SetSource(otherSource));
         var source = CreateSource(device, server);
         using var recorder = SourceStateRecorder.SubscribeTo(source);
@@ -821,7 +892,7 @@ public partial class ModbusSubjectClientSourceTests
         var device = new ScaledDevice(context);
         var factor = new PropertyReference(device, nameof(ScaledDevice.Factor));
         var scaled = new PropertyReference(device, nameof(ScaledDevice.Scaled));
-        await using var otherSource = CreateSource(device, server);
+        var otherSource = Mock.Of<ISubjectSource>();
         Assert.True(factor.SetSource(otherSource));
         var logger = new RecordingLogger();
         var source = CreateSource(device, server, logger);

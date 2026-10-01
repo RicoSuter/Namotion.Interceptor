@@ -106,6 +106,19 @@ public class ModbusRegisterCodecTests
     }
 
     [Fact]
+    public void WhenReadingStringWithBytesAfterANull_ThenTheyAreIgnored()
+    {
+        // Arrange
+        byte[] raw = [(byte)'A', (byte)'B', (byte)'C', 0, (byte)'x', (byte)'y'];
+
+        // Act
+        var value = ModbusRegisterCodec.ReadString(raw);
+
+        // Assert
+        Assert.Equal("ABC", value);
+    }
+
+    [Fact]
     public void WhenReadingStringOfOnlyNulls_ThenReturnsEmptyString()
     {
         // Arrange

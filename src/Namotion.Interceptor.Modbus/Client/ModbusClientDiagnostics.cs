@@ -33,7 +33,8 @@ public sealed class ModbusPollingDiagnostics
     }
 
     /// <summary>
-    /// Gets the number of completed poll cycles since the source started or the diagnostics were last reset.
+    /// Gets the number of completed poll cycles, including the initial load of every connect, since the source started
+    /// or the diagnostics were last reset.
     /// </summary>
     public long TotalPolls => _metrics.TotalPolls;
 
@@ -54,7 +55,7 @@ public sealed class ModbusPollingDiagnostics
     public int UnavailablePropertyCount => _metrics.UnavailablePropertyCount;
 
     /// <summary>
-    /// Gets the duration of the last completed poll cycle, or <c>null</c> before the first one.
+    /// Gets the duration of the last completed poll cycle or initial load, or <c>null</c> before the first one.
     /// </summary>
     public TimeSpan? LastPollDuration => _metrics.LastPollDuration;
 

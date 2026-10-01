@@ -25,11 +25,11 @@
     <MudNumericField Value="_pollingIntervalSeconds"
                      ValueChanged="@((double value) => { _pollingIntervalSeconds = value; OnFieldChanged(); })"
                      Label="Polling Interval (seconds)"
-                     HelperText="@($"At least {LuxtronikHeatPump.MinimumPollingIntervalSeconds} seconds")"
+                     HelperText="@($"Between {LuxtronikHeatPump.MinimumPollingIntervalSeconds} and {LuxtronikHeatPump.MaximumPollingIntervalSeconds} seconds")"
                      Error="@(!IsPollingIntervalValid)"
-                     ErrorText="@($"The polling interval must be at least {LuxtronikHeatPump.MinimumPollingIntervalSeconds} seconds")"
+                     ErrorText="@($"The polling interval must be between {LuxtronikHeatPump.MinimumPollingIntervalSeconds} and {LuxtronikHeatPump.MaximumPollingIntervalSeconds} seconds")"
                      Min="LuxtronikHeatPump.MinimumPollingIntervalSeconds"
-                     Max="300"
+                     Max="LuxtronikHeatPump.MaximumPollingIntervalSeconds"
                      Class="mt-4" />
 
     <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
@@ -67,7 +67,7 @@
     private int _originalPort = 502;
     private double _originalPollingIntervalSeconds = 30;
 
-    private bool IsPollingIntervalValid => _pollingIntervalSeconds >= LuxtronikHeatPump.MinimumPollingIntervalSeconds;
+    private bool IsPollingIntervalValid => _pollingIntervalSeconds is >= LuxtronikHeatPump.MinimumPollingIntervalSeconds and <= LuxtronikHeatPump.MaximumPollingIntervalSeconds;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
                            _port is >= 1 and <= 65535 &&

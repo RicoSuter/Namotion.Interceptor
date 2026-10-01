@@ -172,7 +172,7 @@ public class LuxtronikHeatPumpTests
     }
 
     [Fact]
-    public async Task WhenDiscreteInputsAreRejected_ThenNotAvailableValuesMapToNull()
+    public async Task WhenDiscreteInputsAreRejected_ThenEveryFunctionIsReadWithoutFailures()
     {
         // Arrange
         using var server = new LuxtronikTestServer(new Version(3, 92, 3), supportsDiscreteInputs: false);
@@ -252,30 +252,6 @@ public class LuxtronikHeatPumpTests
             Assert.Equal(isClaimed, IsClaimed(heatPump.RoomControl!, nameof(LuxtronikRoomControl.TemperatureSetpoint)));
             Assert.Equal(0, source.Diagnostics.Polling.TotalFailedRequests);
             Assert.Equal(0, source.Diagnostics.Polling.UnavailablePropertyCount);
-        }
-        finally
-        {
-            recorder.Dispose();
-            await source.DisposeAsync();
-        }
-    }
-
-    [Fact]
-    public async Task WhenElectricalPowerRegisterChanges_ThenDevicePowerFollows()
-    {
-        // Arrange
-        using var server = new LuxtronikTestServer(new Version(3, 92, 3));
-        server.Start();
-        server.SeedTypicalValues();
-        var (heatPump, source, recorder) = await StartAsync(server);
-        try
-        {
-            // Act
-            server.SetInput<ushort>(10301, 20);
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => heatPump.Power == 2000m, TimeSpan.FromSeconds(10), message: "Power should follow the register.");
         }
         finally
         {

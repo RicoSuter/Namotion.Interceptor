@@ -57,6 +57,65 @@ public class ModbusValueConvertersTests
     }
 
     [Fact]
+    public void WhenUsingNegativeDynamicScaleFactorIntoDouble_ThenResultHasNoBinaryRoundingError()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { ScaleFactorProperty = "Factor" },
+            typeof(double?), [0x00, 0x03], exponent: -1);
+
+        // Assert
+        Assert.Equal(0.3, value);
+    }
+
+    [Theory]
+    [InlineData(-2, 1.23f)]
+    [InlineData(1, 1230f)]
+    public void WhenUsingDynamicScaleFactorIntoFloat_ThenPowerOfTenIsApplied(int exponent, float expected)
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { ScaleFactorProperty = "Factor" },
+            typeof(float?), [0x00, 0x7B], exponent);
+
+        // Assert
+        Assert.Equal(expected, value);
+    }
+
+    [Theory]
+    [InlineData(ModbusDataType.S16, new byte[] { 0x00, 0xEA }, 23.4f)]
+    [InlineData(ModbusDataType.F32, new byte[] { 0x40, 0x20, 0x00, 0x00 }, 0.25f)]
+    public void WhenScalingIntoFloat_ThenStaticScaleIsApplied(ModbusDataType dataType, byte[] raw, float expected)
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, dataType) { Scale = 0.1 }, typeof(float), raw);
+
+        // Assert
+        Assert.Equal(expected, value);
+    }
+
+    [Fact]
+    public void WhenIntegerTargetsFloat_ThenValueIsConverted()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(float), [0x01, 0x02]);
+
+        // Assert
+        Assert.Equal(258f, value);
+    }
+
+    [Theory]
+    [InlineData(typeof(Mode?))]
+    [InlineData(typeof(bool?))]
+    public void WhenRawMatchesNotAvailableValueForEnumOrBool_ThenNullIsReturned(Type propertyType)
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum },
+            propertyType, [0xFF, 0xFF]);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
     public void WhenTargetIsEnum_ThenRawValueMapsToMember()
     {
         // Act

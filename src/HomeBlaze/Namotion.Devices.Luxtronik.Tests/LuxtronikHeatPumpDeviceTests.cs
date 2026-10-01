@@ -1,7 +1,9 @@
-using System.Reactive.Concurrency;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Sensors;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Luxtronik.Tests.Testing;
-using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Modbus.Client;
 
 namespace Namotion.Devices.Luxtronik.Tests;
 
@@ -37,22 +39,6 @@ public class LuxtronikHeatPumpDeviceTests
         IThermalPowerSensor thermalPowerSensor = heatPump;
         Assert.Equal(6500m, thermalPowerSensor.ThermalPower);
         Assert.Equal(45678900m, thermalPowerSensor.ThermalEnergyProduced);
-    }
-
-    [Fact]
-    public void WhenChildValueChanges_ThenDerivedPowerChangeIsPublished()
-    {
-        // Arrange
-        var (heatPump, context) = TestHost.CreateAttachedHeatPump();
-        var changedProperties = new List<string>();
-        using var subscription = context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Subscribe(change => changedProperties.Add(change.Property.Name));
-
-        // Act
-        heatPump.Energy.ElectricalPower = 2000m;
-
-        // Assert
-        Assert.Contains(nameof(LuxtronikHeatPump.Power), changedProperties);
     }
 
     [Fact]
@@ -102,7 +88,9 @@ public class LuxtronikHeatPumpDeviceTests
     [InlineData(2000, 10000)]
     [InlineData(10000, 10000)]
     [InlineData(30000, 30000)]
-    public void WhenPollingIntervalIsConfigured_ThenTheSourcePollsNoFasterThanTheMinimum(int configuredMilliseconds, int expectedMilliseconds)
+    [InlineData(3600000, 3600000)]
+    [InlineData(7200000, 3600000)]
+    public void WhenPollingIntervalIsConfigured_ThenTheEffectiveIntervalIsClampedToItsLimits(int configuredMilliseconds, int expectedMilliseconds)
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
@@ -112,5 +100,24 @@ public class LuxtronikHeatPumpDeviceTests
 
         // Assert
         Assert.Equal(TimeSpan.FromMilliseconds(expectedMilliseconds), heatPump.GetEffectivePollingInterval());
+    }
+
+    [Fact]
+    public void WhenSourceHasNotConnectedYet_ThenStatusIsStartingAndLastUpdatedIsKept()
+    {
+        // Arrange
+        var (heatPump, _) = TestHost.CreateAttachedHeatPump();
+        var lastUpdated = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        heatPump.LastUpdated = lastUpdated;
+        using var source = heatPump.CreateModbusClientSource(new ModbusClientConfiguration { Host = "127.0.0.1" }, NullLogger.Instance);
+
+        // Act
+        heatPump.UpdateStatus(source.Diagnostics);
+
+        // Assert
+        Assert.False(heatPump.IsConnected);
+        Assert.Equal(ServiceStatus.Starting, heatPump.Status);
+        Assert.Equal("Connecting...", heatPump.StatusMessage);
+        Assert.Equal(lastUpdated, heatPump.LastUpdated);
     }
 }

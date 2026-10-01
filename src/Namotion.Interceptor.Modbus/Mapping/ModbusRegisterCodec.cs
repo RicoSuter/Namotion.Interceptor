@@ -45,8 +45,10 @@ internal static class ModbusRegisterCodec
 
     public static string ReadString(ReadOnlySpan<byte> raw)
     {
-        var length = raw.Length;
-        while (length > 0 && raw[length - 1] is 0x00 or 0x20)
+        // A NUL ends the string; devices may leave stale bytes after it.
+        var terminator = raw.IndexOf((byte)0x00);
+        var length = terminator >= 0 ? terminator : raw.Length;
+        while (length > 0 && raw[length - 1] == 0x20)
         {
             length--;
         }

@@ -19,16 +19,6 @@ Dependencies: [FluentModbus](https://github.com/Apollo3zehn/FluentModbus) (MIT)
 ## Client Setup
 
 ```csharp
-[InterceptorSubject]
-public partial class HeatMeter
-{
-    [ModbusRegister(0, ModbusDataType.S16, AddressSpace = ModbusAddressSpace.InputRegister, Scale = 0.1)]
-    public partial decimal? FlowTemperature { get; set; }
-
-    [ModbusRegister(10, ModbusDataType.U32, AddressSpace = ModbusAddressSpace.InputRegister)]
-    public partial long? Energy { get; set; }
-}
-
 var builder = Host.CreateApplicationBuilder(args);
 
 var context = InterceptorSubjectContext
@@ -38,7 +28,19 @@ var context = InterceptorSubjectContext
 
 builder.Services.AddSingleton(new HeatMeter(context));
 builder.Services.AddModbusSubjectClientSource<HeatMeter>("192.168.1.50");
+
+[InterceptorSubject]
+public partial class HeatMeter
+{
+    [ModbusRegister(0, ModbusDataType.S16, AddressSpace = ModbusAddressSpace.InputRegister, Scale = 0.1)]
+    public partial decimal? FlowTemperature { get; set; }
+
+    [ModbusRegister(10, ModbusDataType.U32, AddressSpace = ModbusAddressSpace.InputRegister)]
+    public partial long? Energy { get; set; }
+}
 ```
+
+`ModbusRegister` lives in `Namotion.Interceptor.Modbus.Attributes`, the data types and the address and unit ID providers in `Namotion.Interceptor.Modbus`, and the client types (`ModbusClientConfiguration`, `ModbusSubjectClientSource`, `IModbusDiscovery`, `ModbusDiscoveryContext`) in `Namotion.Interceptor.Modbus.Client`. The registration extensions are in `Microsoft.Extensions.DependencyInjection`.
 
 The context needs `WithRegistry()`, because the connector walks the subject tree when it connects, and lifecycle tracking (added by `WithFullPropertyTracking()` or `WithRegistry()`), because the source claims the properties it reads. Without lifecycle tracking, resolving or creating the source throws `InvalidOperationException`; without the registry, every connect attempt fails with `InvalidOperationException`. The configuration is validated when the source is resolved or created and throws `ArgumentException` for a value out of range.
 
@@ -67,13 +69,13 @@ Values convert as follows:
 - Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
 - Scaled values require a `float`, `double` or `decimal` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
 - F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
-- String reads two ASCII characters per register and trims trailing NUL and space characters.
+- String reads two ASCII characters per register up to the first NUL and trims trailing spaces.
 - `NotAvailableValue` requires a nullable property and an integer data type, and is checked before scaling.
 - With `ScaleFactorProperty`, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes. A scale factor reading as its own `NotAvailableValue` is unknown, so its dependents are not updated until it is available again.
 
 A subject implementing `IModbusBaseAddressProvider` makes its addresses relative to `BaseAddress`, so one class can describe a repeated block. Base addresses are not inherited by child subjects. `IModbusUnitIdProvider` sets the unit ID for a subject and its children, the nearest one taking precedence; otherwise `ModbusClientConfiguration.UnitId` applies. Base addresses and unit IDs are read on every connect, when the connector builds its read plan.
 
-Device libraries can derive from `ModbusRegisterAttribute` to preset values such as `AddressSpace` and `NotAvailableValue`. A property carries at most one register attribute, derived ones included.
+Device libraries can derive from `ModbusRegisterAttribute` to preset values such as `AddressSpace` and `NotAvailableValue`. A property carries at most one register attribute, derived ones included. Mappings may overlap, so one register can back several properties, for example a status word read both as an enum and as a flag.
 
 Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non-string) throw `ModbusConfigurationException` naming the property path when the source connects. The connect attempt fails and is retried after `RetryTime`.
 
@@ -87,7 +89,7 @@ Await every context call before the next one and before `DiscoverAsync` returns:
 
 A device library is a set of subject classes for one device family, with the connector underneath.
 
-1. Model the device as subjects grouped by what a user looks for (functions, not register blocks), with plain properties for values and child subjects for components such as sensors.
+1. Model the device as subjects grouped by what a user looks for (functions, not register blocks), with plain properties for values and child subjects for components such as sensors. Keep the setters of mapped properties non-public (`internal set`): the connector is read-only, so a local write would only be reverted.
 2. Derive a register attribute that presets what every register of the device shares, such as `AddressSpace` and `NotAvailableValue` (see Register Mapping).
 3. Give a subject that repeats at several addresses an `IModbusBaseAddressProvider`, and use absolute addresses everywhere else.
 4. Implement `IModbusDiscovery` on the root to read version and capability registers on every connect, exclude what the device does not provide rather than probing it (clearing values that an earlier connection read), and create or clear the child subjects of optional parts.
@@ -165,11 +167,11 @@ The time spans must be positive (`BufferTime` may be zero) and at most 1 hour.
 
 Mappings are grouped by unit ID and space, sorted by address and merged into requests of at most 125 registers or 2000 bits. With the default gap of 0 only contiguous mappings are merged, because many devices reject reads that touch unmapped addresses. Each cycle reads all requests first and then applies only values whose raw registers changed, so an unchanged cycle converts nothing and raises no change events. All values of a cycle share one timestamp, since Modbus carries none.
 
-The initial load reads every mapping once (except those the device rejects) before the source reports `Synchronized`, so the model holds device values from then on.
+The initial load reads every mapping once before the source reports `Synchronized`. A mapping the device rejects, or whose request fails transiently during that load, keeps its previous value until it is read; `Synchronized` does not mean every mapping holds a current device value.
 
 ## Local Writes
 
-Mapped properties are owned by the source, so local changes reach it but are not sent to the device. The source logs a warning once per property and connection and applies the device value again on the next poll, even when it did not change, so the model converges back to the device state. A local write, including one made in a transaction, is reported to the change queue and to transactions as written, although nothing is sent; the next poll restores the device value.
+Mapped properties are owned by the source, so local changes reach it but are not sent to the device. The source logs a warning once per property and connection and applies the device value again the next time the mapping is read, even when it did not change, so the model converges back to the device state. A mapping that is not read (marked unavailable, its request failing, or its scale factor unknown) keeps the local value until it is read again. A local write, including one made in a transaction, is reported to the change queue and to transactions as written, although nothing is sent.
 
 ## Resilience
 
@@ -181,17 +183,17 @@ Mapped properties are owned by the source, so local changes reach it but are not
 
 ## Diagnostics
 
-`ModbusSubjectClientSource.Diagnostics` is a `ModbusClientDiagnostics`, which extends the shared model described in [Connector Diagnostics](connectors.md#connector-diagnostics). `IsOperational` is set once the connection is open and discovery ran, and drops when the connection is lost until a reconnect has opened the connection and run discovery again. In both cases it is set before the values are loaded, which `State` reports by reaching `Synchronized`. The claimed property count is measured, throughput is not.
+`ModbusSubjectClientSource.Diagnostics` is a `ModbusClientDiagnostics`, which extends the shared model described in [Connector Diagnostics](connectors.md#connector-diagnostics). `IsOperational` is `null` until the first connect has opened the connection, run discovery and resolved the mappings, and `true` from then on. It drops to `false` when the connection is lost, until a reconnect has done the same again. In both cases it is set before the values are loaded, which `State` reports by reaching `Synchronized`. The claimed property count is measured, throughput is not.
 
 `Polling` adds:
 
 | Member | Meaning |
 |---|---|
-| `TotalPolls` | Completed poll cycles |
+| `TotalPolls` | Completed poll cycles, including the initial load of every connect |
 | `TotalFailedRequests` | Planned read requests answered with a Modbus exception response; one-by-one re-reads and discovery reads are not counted |
 | `BatchCount` | Read requests per poll cycle |
 | `UnavailablePropertyCount` | Mappings the device rejected, not read until the next connect |
-| `LastPollDuration` | Duration of the last poll cycle, `null` before the first one |
+| `LastPollDuration` | Duration of the last poll cycle or initial load, `null` before the first one |
 | `LastPollTime` | Time of the last poll cycle that read a value, `null` before any did. A cycle that read no value, for example because every request failed or no mapping is claimed, leaves it unchanged |
 
 ## Thread Safety

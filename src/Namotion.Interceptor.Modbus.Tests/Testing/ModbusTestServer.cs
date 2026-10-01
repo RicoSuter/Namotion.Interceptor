@@ -98,6 +98,14 @@ internal sealed class ModbusTestServer : IDisposable
         }
     }
 
+    public void AcceptAllAddresses()
+    {
+        lock (_rejectionsLock)
+        {
+            _rejectedAddresses.Clear();
+        }
+    }
+
     public void Dispose() => Stop();
 
     private ModbusTcpServer GetServer() => _server ?? throw new InvalidOperationException("The test server is not started.");

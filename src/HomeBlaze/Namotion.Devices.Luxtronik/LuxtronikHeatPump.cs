@@ -40,7 +40,15 @@ public partial class LuxtronikHeatPump :
     /// </summary>
     public const int MinimumPollingIntervalSeconds = 10;
 
+    /// <summary>
+    /// The maximum <see cref="PollingInterval"/> in seconds; longer intervals are lowered to it.
+    /// </summary>
+    public const int MaximumPollingIntervalSeconds = 3600;
+
     private const int UnknownFunctionMask = -1;
+
+    // Decoupled from the polling interval so a (re)connect or a lost connection shows within a second.
+    private static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(1);
 
     private readonly ILogger<LuxtronikHeatPump> _logger;
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
@@ -66,7 +74,8 @@ public partial class LuxtronikHeatPump :
     public partial int Port { get; set; }
 
     /// <summary>
-    /// Gets or sets the interval between reads of the controller. Values below <see cref="MinimumPollingIntervalSeconds"/> are raised to it.
+    /// Gets or sets the interval between reads of the controller. Values below <see cref="MinimumPollingIntervalSeconds"/> are
+    /// raised to it, values above <see cref="MaximumPollingIntervalSeconds"/> lowered to it.
     /// </summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
@@ -318,12 +327,13 @@ public partial class LuxtronikHeatPump :
     }
 
     /// <summary>
-    /// Gets the configured <see cref="PollingInterval"/>, raised to <see cref="MinimumPollingInterval"/>.
+    /// Gets the configured <see cref="PollingInterval"/>, raised to <see cref="MinimumPollingInterval"/> and lowered to
+    /// <see cref="MaximumPollingIntervalSeconds"/>.
     /// </summary>
     internal TimeSpan GetEffectivePollingInterval()
     {
-        var pollingInterval = PollingInterval;
-        return pollingInterval < MinimumPollingInterval ? MinimumPollingInterval : pollingInterval;
+        var maximum = TimeSpan.FromSeconds(MaximumPollingIntervalSeconds);
+        return TimeSpan.FromTicks(Math.Clamp(PollingInterval.Ticks, MinimumPollingInterval.Ticks, maximum.Ticks));
     }
 
     private async Task RunSourceAsync(string hostAddress, CancellationToken stoppingToken)
@@ -363,7 +373,7 @@ public partial class LuxtronikHeatPump :
             {
                 UpdateStatus(source.Diagnostics);
                 if (HaveFunctionsChanged(hostAddress) ||
-                    await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false))
+                    await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
                 {
                     break;
                 }
@@ -392,25 +402,29 @@ public partial class LuxtronikHeatPump :
     }
 
     /// <summary>
-    /// Gets whether the polled <see cref="Functions"/> differ from the flags the last discovery read, which excluded the
-    /// registers of the inactive functions. <c>false</c> until both are known.
+    /// Gets whether the polled <see cref="Functions"/> differ, in a flag of <see cref="LuxtronikGating.DiscoveryFunctionMask"/>,
+    /// from the flags the last discovery read, which excluded the registers of the inactive functions. <c>false</c> until
+    /// both are known.
     /// </summary>
     private bool HaveFunctionsChanged(string hostAddress)
     {
         var discoveredMask = Volatile.Read(ref _discoveredFunctionMask);
 
+        if (discoveredMask == UnknownFunctionMask || Functions.GetFunctionMask() is not { } polledMask)
+        {
+            return false;
+        }
+
         // The final re-read drops a comparison against a mask a discovery replaced while the flags were read.
-        if (discoveredMask == UnknownFunctionMask ||
-            Functions.GetFunctionMask() is not { } polledMask ||
-            polledMask == discoveredMask ||
-            Volatile.Read(ref _discoveredFunctionMask) != discoveredMask)
+        var changedMask = (polledMask ^ discoveredMask) & LuxtronikGating.DiscoveryFunctionMask;
+        if (changedMask == 0 || Volatile.Read(ref _discoveredFunctionMask) != discoveredMask)
         {
             return false;
         }
 
         _logger.LogInformation(
             "Luxtronik {HostAddress} changed its active functions ({ChangedFunctions}); discovering its registers again.",
-            hostAddress, LuxtronikGating.GetFunctionNames(polledMask ^ discoveredMask));
+            hostAddress, LuxtronikGating.GetFunctionNames(changedMask));
         return true;
     }
 

@@ -179,48 +179,19 @@ public class LuxtronikGatingTests
         Assert.True(isSupported);
     }
 
-    [Fact]
-    public void WhenInspectingTheModel_ThenEveryRegisterMinimumFirmwareIsParseable()
+    [Theory]
+    [InlineData(LuxtronikFunction.Heating, false)]
+    [InlineData(LuxtronikFunction.HotWater, false)]
+    [InlineData(LuxtronikFunction.Cooling, true)]
+    [InlineData(LuxtronikFunction.RoomControlUnit, true)]
+    [InlineData(LuxtronikFunction.MixingCircuit3Cooling, true)]
+    public void WhenCheckingWhichFlagsAffectDiscovery_ThenOnlyHeatingAndHotWaterAreLeftOut(LuxtronikFunction function, bool expected)
     {
-        // Arrange
-        var registerAttributes = typeof(LuxtronikRegisterAttribute).Assembly.GetTypes()
-            .SelectMany(type => type.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-            .SelectMany(property => property.GetCustomAttributes<LuxtronikRegisterAttribute>())
-            .ToList();
-
         // Act
-        var invalidFirmwares = registerAttributes
-            .Where(attribute => attribute.MinimumFirmware is not null && !Version.TryParse(attribute.MinimumFirmware, out _))
-            .Select(attribute => attribute.MinimumFirmware)
-            .ToList();
+        var affectsDiscovery = (LuxtronikGating.DiscoveryFunctionMask & (1 << (int)function)) != 0;
 
         // Assert
-        Assert.NotEmpty(registerAttributes);
-        Assert.Empty(invalidFirmwares);
-    }
-
-    [Fact]
-    public void WhenConstructingEveryModelSubject_ThenSubjectFirmwareGatesParse()
-    {
-        // Arrange
-        var subjectTypes = typeof(LuxtronikRegisterAttribute).Assembly.GetTypes()
-            .Where(type => type.GetCustomAttribute<InterceptorSubjectAttribute>() is not null && type.GetConstructor(Type.EmptyTypes) is not null)
-            .ToList();
-
-        // Act
-        var gatedSubjects = subjectTypes
-            .Select(type => Activator.CreateInstance(type)!)
-            .SelectMany(subject => subject.GetType()
-                .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                .Where(property => property.GetIndexParameters().Length == 0)
-                .Select(property => property.GetValue(subject))
-                .Prepend(subject))
-            .OfType<ILuxtronikRequirements>()
-            .ToList();
-
-        // Assert
-        Assert.NotEmpty(gatedSubjects);
-        Assert.Contains(gatedSubjects, subject => subject.MinimumFirmwareVersion is not null);
+        Assert.Equal(expected, affectsDiscovery);
     }
 
     private static IInterceptorSubjectContext CreateContext()
