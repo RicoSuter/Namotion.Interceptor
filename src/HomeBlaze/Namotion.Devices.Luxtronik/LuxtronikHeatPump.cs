@@ -434,17 +434,16 @@ public partial class LuxtronikHeatPump :
     /// </summary>
     private bool TryMirrorAttachment(IHostedServiceAttachment<ModbusSubjectClientSource> attachment, out Exception? failure)
     {
+        // The fault first and the state after it: docs/hosting.md#reading-the-outcome.
+        var fault = attachment.Fault;
         var state = attachment.GetState(out var source);
         if (source is not null)
         {
             // Source diagnostics are not tracked properties, so they are mirrored into this device's state.
             UpdateStatus(source.Diagnostics);
         }
-        // Decided by the state, which reads the fault only beside a settled snapshot, so a start that has cleared the
-        // fault but not yet entered its start window reads Stopped. The fault is read again for its message only, and
-        // a retry that clears it in between reads as no failure.
-        else if (state is HostedServiceAttachmentState.Faulted &&
-                 attachment.Fault is { } fault &&
+        else if (fault is not null &&
+                 state is not HostedServiceAttachmentState.Starting &&
                  !ReferenceEquals(fault, _faultBeforeStart))
         {
             failure = fault;
