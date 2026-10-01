@@ -153,7 +153,7 @@ public class LuxtronikRegisterMapTests
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
-        heatPump.UpdateFunctionSubjects(functionMask: null);
+        LuxtronikDiscovery.UpdateFunctionSubjects(heatPump, functionMask: null);
 
         // Act
         var actual = GetRegisters(heatPump.TryGetRegisteredSubject()!, string.Empty)
@@ -170,7 +170,7 @@ public class LuxtronikRegisterMapTests
     {
         // Arrange
         var (heatPump, _) = TestHost.CreateAttachedHeatPump();
-        heatPump.UpdateFunctionSubjects(functionMask: null);
+        LuxtronikDiscovery.UpdateFunctionSubjects(heatPump, functionMask: null);
 
         // Act
         var overlaps = GetRegisters(heatPump.TryGetRegisteredSubject()!, string.Empty)
