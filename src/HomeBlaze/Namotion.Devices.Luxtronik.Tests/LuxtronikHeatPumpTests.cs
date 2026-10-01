@@ -9,6 +9,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Modbus;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Luxtronik.Tests;

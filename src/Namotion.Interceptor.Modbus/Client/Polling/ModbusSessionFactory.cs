@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Mapping;
-using Namotion.Interceptor.Modbus.Transport;
+using Namotion.Interceptor.Modbus.Client.Transport;
 
-namespace Namotion.Interceptor.Modbus.Polling;
+namespace Namotion.Interceptor.Modbus.Client.Polling;
 
 /// <summary>
 /// Opens sessions for a source: connects, runs the root subject's discovery, resolves and claims the mapped

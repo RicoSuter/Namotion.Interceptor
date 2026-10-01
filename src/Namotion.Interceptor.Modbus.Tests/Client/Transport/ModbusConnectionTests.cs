@@ -1,10 +1,11 @@
+using Namotion.Interceptor.Modbus.Client;
 using System.Net;
 using System.Net.Sockets;
 using FluentModbus;
 using Namotion.Interceptor.Modbus.Tests.Testing;
-using Namotion.Interceptor.Modbus.Transport;
+using Namotion.Interceptor.Modbus.Client.Transport;
 
-namespace Namotion.Interceptor.Modbus.Tests.Transport;
+namespace Namotion.Interceptor.Modbus.Tests.Client.Transport;
 
 [Trait("Category", "Integration")]
 [Collection(ModbusIntegrationCollection.Name)]

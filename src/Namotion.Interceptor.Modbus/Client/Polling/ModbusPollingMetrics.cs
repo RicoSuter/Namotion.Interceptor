@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Connectors.Diagnostics;
 
-namespace Namotion.Interceptor.Modbus.Polling;
+namespace Namotion.Interceptor.Modbus.Client.Polling;
 
 internal sealed class ModbusPollingMetrics : IResettableMetrics
 {

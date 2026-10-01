@@ -1,7 +1,8 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Modbus.Tests.Testing;
 
-namespace Namotion.Interceptor.Modbus.Tests;
+namespace Namotion.Interceptor.Modbus.Tests.Client;
 
 public partial class ModbusDiscoveryContextTests
 {

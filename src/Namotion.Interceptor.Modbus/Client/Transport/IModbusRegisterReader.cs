@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Modbus.Transport;
+namespace Namotion.Interceptor.Modbus.Client.Transport;
 
 internal interface IModbusRegisterReader
 {

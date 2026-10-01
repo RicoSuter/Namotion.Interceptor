@@ -1,6 +1,6 @@
 using Namotion.Interceptor.Modbus.Mapping;
 
-namespace Namotion.Interceptor.Modbus;
+namespace Namotion.Interceptor.Modbus.Client;
 
 /// <summary>
 /// Configuration of a Modbus TCP client source.

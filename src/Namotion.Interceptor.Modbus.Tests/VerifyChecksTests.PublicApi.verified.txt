@@ -5,11 +5,11 @@ namespace Microsoft.Extensions.DependencyInjection
 {
     public static class ModbusSubjectExtensions
     {
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedModbusSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Modbus.ModbusClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddModbusSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Modbus.ModbusClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedModbusSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Modbus.Client.ModbusClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddModbusSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.Modbus.Client.ModbusClientConfiguration> configurationProvider) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddModbusSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string host, int port = 502)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
-        public static Namotion.Interceptor.Modbus.ModbusSubjectClientSource CreateModbusClientSource(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Modbus.ModbusClientConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
+        public static Namotion.Interceptor.Modbus.Client.ModbusSubjectClientSource CreateModbusClientSource(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Modbus.Client.ModbusClientConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
     }
 }
 namespace Namotion.Interceptor.Modbus.Attributes
@@ -29,31 +29,11 @@ namespace Namotion.Interceptor.Modbus.Attributes
         public Namotion.Interceptor.Modbus.ModbusWordOrder WordOrder { get; init; }
     }
 }
-namespace Namotion.Interceptor.Modbus
+namespace Namotion.Interceptor.Modbus.Client
 {
-    public interface IModbusBaseAddressProvider
-    {
-        int BaseAddress { get; }
-    }
     public interface IModbusDiscovery
     {
-        System.Threading.Tasks.Task DiscoverAsync(Namotion.Interceptor.Modbus.ModbusDiscoveryContext context, System.Threading.CancellationToken cancellationToken);
-    }
-    public interface IModbusUnitIdProvider
-    {
-        byte UnitId { get; }
-    }
-    public enum ModbusAccess
-    {
-        ReadWrite = 0,
-        ReadOnly = 1,
-    }
-    public enum ModbusAddressSpace
-    {
-        HoldingRegister = 0,
-        InputRegister = 1,
-        Coil = 2,
-        DiscreteInput = 3,
+        System.Threading.Tasks.Task DiscoverAsync(Namotion.Interceptor.Modbus.Client.ModbusDiscoveryContext context, System.Threading.CancellationToken cancellationToken);
     }
     public sealed class ModbusClientConfiguration
     {
@@ -70,21 +50,7 @@ namespace Namotion.Interceptor.Modbus
     }
     public sealed class ModbusClientDiagnostics : Namotion.Interceptor.Connectors.Diagnostics.SourceDiagnostics
     {
-        public Namotion.Interceptor.Modbus.ModbusPollingDiagnostics Polling { get; }
-    }
-    public sealed class ModbusConfigurationException : System.Exception
-    {
-        public ModbusConfigurationException(string message) { }
-    }
-    public enum ModbusDataType
-    {
-        Boolean = 0,
-        U16 = 1,
-        S16 = 2,
-        U32 = 3,
-        S32 = 4,
-        F32 = 5,
-        String = 6,
+        public Namotion.Interceptor.Modbus.Client.ModbusPollingDiagnostics Polling { get; }
     }
     public sealed class ModbusDiscoveryContext
     {
@@ -94,13 +60,6 @@ namespace Namotion.Interceptor.Modbus
         public System.Threading.Tasks.Task<bool[]> ReadDiscreteInputsAsync(int address, int count, byte? unitId = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<ushort[]> ReadHoldingRegistersAsync(int address, int count, byte? unitId = default, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task<ushort[]> ReadInputRegistersAsync(int address, int count, byte? unitId = default, System.Threading.CancellationToken cancellationToken = default) { }
-    }
-    public enum ModbusNotAvailableValue
-    {
-        None = 0,
-        SignedMaximum = 1,
-        SignedMinimum = 2,
-        UnsignedMaximum = 3,
     }
     public sealed class ModbusPollingDiagnostics
     {
@@ -119,13 +78,57 @@ namespace Namotion.Interceptor.Modbus
     public sealed class ModbusSubjectClientSource : Namotion.Interceptor.Connectors.SubjectSourceBase, Namotion.Interceptor.Connectors.IFaultInjectable, System.IAsyncDisposable
     {
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
-        public virtual Namotion.Interceptor.Modbus.ModbusClientDiagnostics Diagnostics { get; }
+        public virtual Namotion.Interceptor.Modbus.Client.ModbusClientDiagnostics Diagnostics { get; }
         public override Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
         public override void Dispose() { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         public override System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken) { }
         protected override System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken) { }
         public override System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken) { }
+    }
+}
+namespace Namotion.Interceptor.Modbus
+{
+    public interface IModbusBaseAddressProvider
+    {
+        int BaseAddress { get; }
+    }
+    public interface IModbusUnitIdProvider
+    {
+        byte UnitId { get; }
+    }
+    public enum ModbusAccess
+    {
+        ReadWrite = 0,
+        ReadOnly = 1,
+    }
+    public enum ModbusAddressSpace
+    {
+        HoldingRegister = 0,
+        InputRegister = 1,
+        Coil = 2,
+        DiscreteInput = 3,
+    }
+    public sealed class ModbusConfigurationException : System.Exception
+    {
+        public ModbusConfigurationException(string message) { }
+    }
+    public enum ModbusDataType
+    {
+        Boolean = 0,
+        U16 = 1,
+        S16 = 2,
+        U32 = 3,
+        S32 = 4,
+        F32 = 5,
+        String = 6,
+    }
+    public enum ModbusNotAvailableValue
+    {
+        None = 0,
+        SignedMaximum = 1,
+        SignedMinimum = 2,
+        UnsignedMaximum = 3,
     }
     public enum ModbusWordOrder
     {

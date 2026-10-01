@@ -1,4 +1,6 @@
-namespace Namotion.Interceptor.Modbus.Tests;
+using Namotion.Interceptor.Modbus.Client;
+
+namespace Namotion.Interceptor.Modbus.Tests.Client;
 
 public class ModbusClientConfigurationTests
 {

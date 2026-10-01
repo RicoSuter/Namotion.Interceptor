@@ -1,7 +1,8 @@
 using Namotion.Interceptor.Connectors.Diagnostics;
-using Namotion.Interceptor.Modbus.Polling;
+using Namotion.Interceptor.Modbus.Client;
+using Namotion.Interceptor.Modbus.Client.Polling;
 
-namespace Namotion.Interceptor.Modbus.Tests;
+namespace Namotion.Interceptor.Modbus.Tests.Client;
 
 public class ModbusClientDiagnosticsTests
 {

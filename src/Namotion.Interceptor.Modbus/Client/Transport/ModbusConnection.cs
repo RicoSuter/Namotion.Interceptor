@@ -1,7 +1,7 @@
 using System.Net.Sockets;
 using FluentModbus;
 
-namespace Namotion.Interceptor.Modbus.Transport;
+namespace Namotion.Interceptor.Modbus.Client.Transport;
 
 /// <summary>
 /// One Modbus TCP connection serving one read at a time: a <see cref="ReadAsync"/> started while another is in flight

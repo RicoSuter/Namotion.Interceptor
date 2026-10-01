@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Mapping;
-using Namotion.Interceptor.Modbus.Transport;
+using Namotion.Interceptor.Modbus.Client.Transport;
 
-namespace Namotion.Interceptor.Modbus;
+namespace Namotion.Interceptor.Modbus.Client;
 
 /// <summary>
 /// Raw access to the connected device for <see cref="IModbusDiscovery.DiscoverAsync"/>. Only valid while it runs.

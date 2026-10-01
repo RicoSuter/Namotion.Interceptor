@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Modbus.Attributes;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 

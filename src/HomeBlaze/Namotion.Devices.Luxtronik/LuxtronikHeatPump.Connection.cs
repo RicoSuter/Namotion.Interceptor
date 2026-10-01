@@ -8,6 +8,7 @@ using Namotion.Devices.Luxtronik.Model;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Modbus;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 

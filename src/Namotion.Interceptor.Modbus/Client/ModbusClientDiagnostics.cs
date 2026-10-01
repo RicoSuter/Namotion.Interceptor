@@ -1,7 +1,7 @@
 using Namotion.Interceptor.Connectors.Diagnostics;
-using Namotion.Interceptor.Modbus.Polling;
+using Namotion.Interceptor.Modbus.Client.Polling;
 
-namespace Namotion.Interceptor.Modbus;
+namespace Namotion.Interceptor.Modbus.Client;
 
 /// <summary>
 /// What a Modbus client source reports about its connection and polling.

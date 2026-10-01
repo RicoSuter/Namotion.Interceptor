@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Modbus;
+namespace Namotion.Interceptor.Modbus.Client;
 
 /// <summary>
 /// Implemented by a source's root subject to inspect the device on every connect (first connect and each

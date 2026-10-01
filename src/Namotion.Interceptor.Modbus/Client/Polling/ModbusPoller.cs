@@ -2,9 +2,9 @@ using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Mapping;
-using Namotion.Interceptor.Modbus.Transport;
+using Namotion.Interceptor.Modbus.Client.Transport;
 
-namespace Namotion.Interceptor.Modbus.Polling;
+namespace Namotion.Interceptor.Modbus.Client.Polling;
 
 /// <summary>
 /// Runs the read cycle of one connection. Not thread-safe except <see cref="RequestReapply"/>: the source calls

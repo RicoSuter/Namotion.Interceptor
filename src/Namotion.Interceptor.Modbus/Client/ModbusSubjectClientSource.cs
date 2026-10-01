@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Modbus.Polling;
+using Namotion.Interceptor.Modbus.Client.Polling;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.Modbus;
+namespace Namotion.Interceptor.Modbus.Client;
 
 /// <summary>
 /// Polls Modbus TCP registers into the subject properties mapped with

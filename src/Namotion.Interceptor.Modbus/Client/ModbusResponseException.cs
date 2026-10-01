@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.Modbus;
+namespace Namotion.Interceptor.Modbus.Client;
 
 /// <summary>
 /// Thrown when a device answers a request with a Modbus exception response, for example

@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Modbus.Client;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using FluentModbus;
@@ -13,7 +14,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.Modbus.Tests;
+namespace Namotion.Interceptor.Modbus.Tests.Client;
 
 [Trait("Category", "Integration")]
 [Collection(ModbusIntegrationCollection.Name)]

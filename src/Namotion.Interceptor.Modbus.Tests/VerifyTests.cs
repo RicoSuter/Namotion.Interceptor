@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Modbus.Client;
 using PublicApiGenerator;
 
 namespace Namotion.Interceptor.Modbus.Tests;

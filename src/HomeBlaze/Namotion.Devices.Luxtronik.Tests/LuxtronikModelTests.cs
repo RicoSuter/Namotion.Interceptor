@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Modbus.Client;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices;

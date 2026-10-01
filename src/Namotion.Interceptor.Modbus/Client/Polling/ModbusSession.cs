@@ -1,6 +1,6 @@
-using Namotion.Interceptor.Modbus.Transport;
+using Namotion.Interceptor.Modbus.Client.Transport;
 
-namespace Namotion.Interceptor.Modbus.Polling;
+namespace Namotion.Interceptor.Modbus.Client.Polling;
 
 /// <summary>
 /// One connection together with the read plan built for it on connect. <see cref="Dispose"/> may be called
