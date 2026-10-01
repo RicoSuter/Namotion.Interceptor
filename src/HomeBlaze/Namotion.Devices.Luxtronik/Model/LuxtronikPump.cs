@@ -14,7 +14,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// One pump output (inputs 10350 to 10356), firmware 3.92 and later. Its <see cref="BaseAddress"/> is the input register address itself.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikPump : ISwitchState, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGate
+public partial class LuxtronikPump : ISwitchState, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikRequirements
 {
     /// <summary>
     /// Initializes a pump titled <paramref name="title"/> for the input register at <paramref name="address"/>.
@@ -37,7 +37,7 @@ public partial class LuxtronikPump : ISwitchState, ITitleProvider, IModbusBaseAd
     [State(IsDiscrete = true)]
     public partial bool? IsOn { get; internal set; }
 
-    Version? ILuxtronikGate.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
+    Version? ILuxtronikRequirements.MinimumFirmwareVersion => LuxtronikGating.Firmware392;
 
-    LuxtronikFunction ILuxtronikGate.Function => LuxtronikFunction.None;
+    LuxtronikFunction ILuxtronikRequirements.RequiredFunction => LuxtronikFunction.None;
 }

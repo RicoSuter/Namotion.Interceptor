@@ -64,14 +64,14 @@ public partial class LuxtronikMixingCircuit : ITitleProvider, IModbusBaseAddress
     /// <summary>
     /// Gets the minimum flow temperature of the circuit, read while the circuit heats.
     /// </summary>
-    [LuxtronikInputRegister(10142, ModbusDataType.S16, Scale = 0.1, Function = LuxtronikFunction.MixingCircuit1Heating)]
+    [LuxtronikInputRegister(10142, ModbusDataType.S16, Scale = 0.1, RequiredFunction = LuxtronikFunction.MixingCircuit1Heating)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 2)]
     public partial decimal? MinimumTarget { get; internal set; }
 
     /// <summary>
     /// Gets the maximum flow temperature of the circuit, read while the circuit heats.
     /// </summary>
-    [LuxtronikInputRegister(10143, ModbusDataType.S16, Scale = 0.1, Function = LuxtronikFunction.MixingCircuit1Heating)]
+    [LuxtronikInputRegister(10143, ModbusDataType.S16, Scale = 0.1, RequiredFunction = LuxtronikFunction.MixingCircuit1Heating)]
     [State(Unit = StateUnit.DegreeCelsius, Position = 3)]
     public partial decimal? MaximumTarget { get; internal set; }
 

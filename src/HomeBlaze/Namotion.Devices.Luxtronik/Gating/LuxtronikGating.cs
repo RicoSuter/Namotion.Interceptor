@@ -13,32 +13,32 @@ internal static class LuxtronikGating
     public const int FunctionFlagCount = 12;
 
     /// <summary>
-    /// Gets firmware version 3.92.0, the gate of the registers added in that release.
+    /// Gets firmware version 3.92.0, the minimum firmware of the registers added in that release.
     /// </summary>
     public static readonly Version Firmware392 = new(3, 92, 0);
 
     /// <summary>
-    /// Gets whether <paramref name="property"/> is read: its register gates and its subject's gate must all pass.
-    /// On an <see cref="ILuxtronikCircuitSubject"/>, register function gates are shifted to the circuit's own function.
+    /// Gets whether <paramref name="property"/> is read: the requirements of its register and of its subject must all be met.
+    /// On an <see cref="ILuxtronikCircuitSubject"/>, required register functions are shifted to the circuit's own function.
     /// </summary>
     public static bool IsSupported(RegisteredSubjectProperty property, Version firmwareVersion, int? functionMask)
     {
         var functionOffset = property.Subject is ILuxtronikCircuitSubject circuit ? circuit.FunctionOffset : 0;
         foreach (var attribute in property.ReflectionAttributes)
         {
-            if (attribute is ILuxtronikGate gate &&
-                !IsSupported(gate.MinimumFirmwareVersion, Shift(gate.Function, functionOffset), firmwareVersion, functionMask))
+            if (attribute is ILuxtronikRequirements requirements &&
+                !IsSupported(requirements.MinimumFirmwareVersion, Shift(requirements.RequiredFunction, functionOffset), firmwareVersion, functionMask))
             {
                 return false;
             }
         }
 
-        return property.Subject is not ILuxtronikGate subject ||
-            IsSupported(subject.MinimumFirmwareVersion, subject.Function, firmwareVersion, functionMask);
+        return property.Subject is not ILuxtronikRequirements subject ||
+            IsSupported(subject.MinimumFirmwareVersion, subject.RequiredFunction, firmwareVersion, functionMask);
     }
 
     /// <summary>
-    /// Gets whether a gate passes: the firmware is at least <paramref name="minimumFirmwareVersion"/>, and
+    /// Gets whether requirements are met: the firmware is at least <paramref name="minimumFirmwareVersion"/>, and
     /// <paramref name="function"/> is <see cref="LuxtronikFunction.None"/> or active.
     /// </summary>
     public static bool IsSupported(

@@ -17,7 +17,7 @@ public partial class LuxtronikCircuitTestSubject : ILuxtronikCircuitSubject
 
     public int FunctionOffset { get; init; }
 
-    [LuxtronikInputRegister(0, ModbusDataType.U16, Function = LuxtronikFunction.MixingCircuit1Heating)]
+    [LuxtronikInputRegister(0, ModbusDataType.U16, RequiredFunction = LuxtronikFunction.MixingCircuit1Heating)]
     public partial ushort? CircuitGated { get; set; }
 
     [LuxtronikInputRegister(1, ModbusDataType.U16)]

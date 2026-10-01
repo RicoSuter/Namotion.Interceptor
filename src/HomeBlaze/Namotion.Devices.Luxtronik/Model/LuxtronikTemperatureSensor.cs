@@ -14,7 +14,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// One measured temperature. Its <see cref="BaseAddress"/> is the input register address itself.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikGate
+public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProvider, IModbusBaseAddressProvider, ILuxtronikRequirements
 {
     private readonly Version? _minimumFirmwareVersion;
 
@@ -41,7 +41,7 @@ public partial class LuxtronikTemperatureSensor : ITemperatureSensor, ITitleProv
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    Version? ILuxtronikGate.MinimumFirmwareVersion => _minimumFirmwareVersion;
+    Version? ILuxtronikRequirements.MinimumFirmwareVersion => _minimumFirmwareVersion;
 
-    LuxtronikFunction ILuxtronikGate.Function => LuxtronikFunction.None;
+    LuxtronikFunction ILuxtronikRequirements.RequiredFunction => LuxtronikFunction.None;
 }

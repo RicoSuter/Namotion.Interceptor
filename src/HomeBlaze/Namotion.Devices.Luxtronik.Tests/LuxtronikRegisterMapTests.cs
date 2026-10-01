@@ -195,7 +195,7 @@ public class LuxtronikRegisterMapTests
             var path = prefix + property.Name;
             if (property.ReflectionAttributes.OfType<ModbusRegisterAttribute>().FirstOrDefault() is { } attribute)
             {
-                var function = attribute is LuxtronikRegisterAttribute luxtronikAttribute ? luxtronikAttribute.Function : NoFunction;
+                var function = attribute is LuxtronikRegisterAttribute luxtronikAttribute ? luxtronikAttribute.RequiredFunction : NoFunction;
                 yield return (path, attribute.AddressSpace, baseAddress + attribute.Address, attribute.DataType, attribute.Scale, GetMinimumFirmware(property), function);
             }
 

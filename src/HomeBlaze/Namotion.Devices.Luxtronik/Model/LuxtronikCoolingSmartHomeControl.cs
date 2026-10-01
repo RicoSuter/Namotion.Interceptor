@@ -12,7 +12,7 @@ namespace Namotion.Devices.Luxtronik.Model;
 /// The cooling setpoint configuration of a mixing circuit sent over the SHI: mode, setpoint and offset.
 /// </summary>
 [InterceptorSubject]
-public partial class LuxtronikCoolingSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikGate
+public partial class LuxtronikCoolingSmartHomeControl : IModbusBaseAddressProvider, ILuxtronikRequirements
 {
     private readonly LuxtronikFunction _function;
 
@@ -52,7 +52,7 @@ public partial class LuxtronikCoolingSmartHomeControl : IModbusBaseAddressProvid
     [State(Unit = StateUnit.Kelvin, Position = 3)]
     public partial decimal? Offset { get; internal set; }
 
-    Version? ILuxtronikGate.MinimumFirmwareVersion => null;
+    Version? ILuxtronikRequirements.MinimumFirmwareVersion => null;
 
-    LuxtronikFunction ILuxtronikGate.Function => _function;
+    LuxtronikFunction ILuxtronikRequirements.RequiredFunction => _function;
 }
