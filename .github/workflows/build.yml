@@ -293,7 +293,6 @@ jobs:
           if-no-files-found: warn
 
   test-modbus-integration:
-    name: test-modbus-luxtronik-integration
     timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: changes

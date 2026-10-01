@@ -44,7 +44,7 @@ The context needs `WithRegistry()`, because the connector walks the subject tree
 
 Register a source with its own configuration through the `AddModbusSubjectClientSource(subjectSelector, configurationProvider)` overload, and several sources with `AddKeyedModbusSubjectClientSource`, which makes each one resolvable as a keyed `ModbusSubjectClientSource`. Only one unnamed source can be registered.
 
-To create a source for a subject at runtime, for example in a HomeBlaze device, use `subject.CreateModbusClientSource(configuration, logger)`, start it as a hosted service (for example with `AttachHostedServiceAsync`) and dispose it when done.
+To create a source for a subject at runtime, for example in a device subject that owns its connection, use `subject.CreateModbusClientSource(configuration, logger)`, start it as a hosted service (for example with `AttachHostedServiceAsync`) and dispose it when done.
 
 ## Register Mapping
 
@@ -85,21 +85,31 @@ Await every context call before the next one and before `DiscoverAsync` returns:
 
 ## Building a Device Library
 
-A device library is a set of subject classes for one device family, with the connector underneath. The Luxtronik heat pump in `src/HomeBlaze/Namotion.Devices.Luxtronik` is a complete example.
+A device library is a set of subject classes for one device family, with the connector underneath.
 
 1. Model the device as subjects grouped by what a user looks for (functions, not register blocks), with plain properties for values and child subjects for components such as sensors.
 2. Derive a register attribute that presets what every register of the device shares, such as `AddressSpace` and `NotAvailableValue` (see Register Mapping).
 3. Give a subject that repeats at several addresses an `IModbusBaseAddressProvider`, and use absolute addresses everywhere else.
 4. Implement `IModbusDiscovery` on the root to read version and capability registers on every connect, exclude what the device does not provide rather than probing it (clearing values that an earlier connection read), and create or clear the child subjects of optional parts.
 5. Own the source in the device: create it with `CreateModbusClientSource`, restart it when the configuration or a capability read during polling changes, and map `Diagnostics` to the device status.
-6. Test against an in-process FluentModbus `ModbusTcpServer` whose `RequestValidator` rejects unmapped addresses like the real device (the Luxtronik tests' `LuxtronikTestServer` is an example).
+6. Test against an in-process FluentModbus `ModbusTcpServer` whose `RequestValidator` rejects unmapped addresses like the real device.
 
 ```csharp
 [InterceptorSubject]
 public partial class Inverter : IModbusDiscovery
 {
+    public Inverter()
+    {
+        StringInput1 = new StringInput(baseAddress: 300);
+        StringInput2 = new StringInput(baseAddress: 320);
+    }
+
     [ModbusRegister(100, ModbusDataType.S32, AddressSpace = ModbusAddressSpace.InputRegister, NotAvailableValue = ModbusNotAvailableValue.SignedMinimum)]
     public partial decimal? Power { get; internal set; }
+
+    public partial StringInput StringInput1 { get; internal set; }
+
+    public partial StringInput StringInput2 { get; internal set; }
 
     public partial Battery? Battery { get; internal set; }
 
@@ -108,6 +118,24 @@ public partial class Inverter : IModbusDiscovery
         var batteryRegisters = await context.ReadInputRegistersAsync(200, 1, cancellationToken: cancellationToken);
         Battery = batteryRegisters[0] != 0 ? Battery ?? new Battery() : null;
     }
+}
+
+// One class for both inputs: register 0 reads 300 for the first input and 320 for the second.
+[InterceptorSubject]
+public partial class StringInput : IModbusBaseAddressProvider
+{
+    public StringInput(int baseAddress)
+    {
+        BaseAddress = baseAddress;
+    }
+
+    public int BaseAddress { get; }
+
+    [ModbusRegister(0, ModbusDataType.U16, AddressSpace = ModbusAddressSpace.InputRegister, Scale = 0.1)]
+    public partial decimal? Voltage { get; internal set; }
+
+    [ModbusRegister(1, ModbusDataType.U16, AddressSpace = ModbusAddressSpace.InputRegister, Scale = 0.01)]
+    public partial decimal? Current { get; internal set; }
 }
 
 [InterceptorSubject]

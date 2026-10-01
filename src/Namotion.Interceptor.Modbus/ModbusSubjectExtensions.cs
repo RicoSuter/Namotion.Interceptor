@@ -55,6 +55,7 @@ public static class ModbusSubjectExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(subjectSelector);
         ArgumentNullException.ThrowIfNull(configurationProvider);
+
         if (services.Any(descriptor => descriptor.ServiceType == typeof(ModbusSubjectClientSource) && descriptor.ServiceKey is null))
         {
             throw new InvalidOperationException(
@@ -83,6 +84,7 @@ public static class ModbusSubjectExtensions
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(subjectSelector);
         ArgumentNullException.ThrowIfNull(configurationProvider);
+
         if (services.Any(descriptor => descriptor.ServiceType == typeof(ModbusSubjectClientSource) && name.Equals(descriptor.ServiceKey)))
         {
             throw new InvalidOperationException($"A ModbusSubjectClientSource with name '{name}' is already registered.");
