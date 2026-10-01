@@ -326,7 +326,7 @@ Four rules have consequences:
 - A scope nobody disposes holds its starts until the host shuts down.
 - `DeferHostedServiceStartup()` returns null on a context without hosting support, and `using` accepts that.
 
-`AddSubject<T>()` and HomeBlaze's configuration loading already wrap their own construction this way, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Startup Scopes](design/hosting-service-ownership.md#startup-scopes).
+`AddSubject<T>()` already wraps its own construction this way, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Startup Scopes](design/hosting-service-ownership.md#startup-scopes).
 
 ## Deferred Starts and Startup Completion
 

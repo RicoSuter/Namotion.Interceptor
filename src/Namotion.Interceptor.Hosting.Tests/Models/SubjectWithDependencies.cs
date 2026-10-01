@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Hosting.Tests.Models;
 
 /// <summary>
 /// A subject whose only declared constructor takes dependencies, so the generator emits no
-/// (IInterceptorSubjectContext) constructor. This is the shape every HomeBlaze device has.
+/// (IInterceptorSubjectContext) constructor, which is the usual shape of a device subject that takes services.
 /// </summary>
 [InterceptorSubject]
 public partial class SubjectWithDependencies : BackgroundService
