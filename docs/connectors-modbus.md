@@ -46,7 +46,7 @@ The context needs `WithRegistry()`, because the connector walks the subject tree
 
 Register a source with its own configuration through the `AddModbusSubjectClientSource(subjectSelector, configurationProvider)` overload, and several sources with `AddKeyedModbusSubjectClientSource`, which makes each one resolvable as a keyed `ModbusSubjectClientSource`. Only one unnamed source can be registered.
 
-To create a source for a subject at runtime, for example in a device subject that owns its connection, use `subject.CreateModbusClientSource(configuration, logger)`, start it as a hosted service (for example with `AttachHostedServiceAsync`) and dispose it when done.
+To create a source for a subject at runtime, for example in a device subject that owns its connection, attach a factory with `subject.AttachHostedService(() => subject.CreateModbusClientSource(configuration, logger))`. The hosting handler then starts the source while the subject is in the graph and stops and disposes it when the subject leaves or the attachment is detached, so the device never disposes it itself (see [Hosting](hosting.md#factory-attachment)). A source created and started directly, outside an attachment, must be disposed by its owner.
 
 ## Register Mapping
 

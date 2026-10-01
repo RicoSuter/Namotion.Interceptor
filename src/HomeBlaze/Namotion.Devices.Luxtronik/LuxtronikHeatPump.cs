@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -55,6 +56,20 @@ public partial class LuxtronikHeatPump :
 
     // Written by the discovery on the source's thread, read by the status loop.
     private int _discoveredFunctionMask = UnknownFunctionMask;
+
+    /// <summary>
+    /// The source attachment, or null while none is wanted. Touched only by this subject's own start and run
+    /// loop, which the hosting handler serializes. Kept across a stop: the attachment survives the subject
+    /// leaving the graph, and the handler re-creates its source on re-entry, so a restarted run loop must
+    /// reuse it rather than attach a second source beside that one.
+    /// </summary>
+    private IHostedServiceAttachment<ModbusSubjectClientSource>? _attachment;
+
+    /// <summary>
+    /// The fault the attachment carried out of the graph. It stays recorded until the handler's restart on re-entry
+    /// clears it, and until then it describes the source before the stop rather than the one being started.
+    /// </summary>
+    private Exception? _faultBeforeStart;
 
     // Protects the controller from a hand-edited configuration that would poll it continuously; only tests lower it.
     internal TimeSpan MinimumPollingInterval { get; init; } = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
@@ -280,6 +295,34 @@ public partial class LuxtronikHeatPump :
         return Task.CompletedTask;
     }
 
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Attached here rather than from the run loop: the base start only schedules the loop, so an attach
+        // issued there takes its startup completion hold after this subject's own hold was released, and a
+        // startup completion wait could pass in between against a tree whose source is not attached yet.
+        _faultBeforeStart = _attachment?.Fault;
+        if (_attachment is null && !string.IsNullOrWhiteSpace(HostAddress) && TryValidateConfiguration(out _))
+        {
+            _attachment = AttachSource();
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Deliberately does not detach: this runs inside the handler's stop transition for this subject, and the
+        // source's stop is ordered behind it, so a detach awaited here would wait on itself. The handler stops and
+        // disposes the source once this returns. See docs/hosting.md#do-not-detach-from-your-own-stop-path.
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+
+        // Here rather than at the tail of the run loop: a stop that lands before the base start has scheduled the
+        // loop cancels it without running it.
+        IsConnected = false;
+        Status = ServiceStatus.Stopped;
+        StatusMessage = null;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -287,6 +330,12 @@ public partial class LuxtronikHeatPump :
             var hostAddress = HostAddress;
             if (string.IsNullOrWhiteSpace(hostAddress))
             {
+                if (_attachment is { } attachment)
+                {
+                    // Re-created by the handler on re-entry, from an address cleared while the subject was out of the graph.
+                    await DetachSourceAsync(attachment, stoppingToken).ConfigureAwait(false);
+                }
+
                 Status = ServiceStatus.Stopped;
                 StatusMessage = "No host address configured";
                 await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
@@ -295,10 +344,6 @@ public partial class LuxtronikHeatPump :
 
             await RunSourceAsync(hostAddress, stoppingToken).ConfigureAwait(false);
         }
-
-        IsConnected = false;
-        Status = ServiceStatus.Stopped;
-        StatusMessage = null;
     }
 
     /// <summary>
@@ -336,68 +381,128 @@ public partial class LuxtronikHeatPump :
         return TimeSpan.FromTicks(Math.Clamp(PollingInterval.Ticks, MinimumPollingInterval.Ticks, maximum.Ticks));
     }
 
+    /// <summary>
+    /// Runs the attached source until a configuration edit, a function change or a failure asks for a new one, then
+    /// detaches it so that the next one never polls beside it. Returns without detaching when the subject stops.
+    /// </summary>
     private async Task RunSourceAsync(string hostAddress, CancellationToken stoppingToken)
     {
         // Captured once, so a configuration edit applies only through the restart it signals.
         var pollingInterval = GetEffectivePollingInterval();
 
-        ModbusSubjectClientSource source;
-        try
+        if (_attachment is null && !TryValidateConfiguration(out var configurationError))
         {
-            source = this.CreateModbusClientSource(
-                new ModbusClientConfiguration { Host = hostAddress, Port = Port, PollingInterval = pollingInterval },
-                _logger);
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
-            _logger.LogError(exception, "Luxtronik heat pump {HostAddress} has an invalid configuration.", hostAddress);
+            _logger.LogError(configurationError, "Luxtronik heat pump {HostAddress} has an invalid configuration.", hostAddress);
             Status = ServiceStatus.Error;
-            StatusMessage = exception.Message;
+            StatusMessage = configurationError.Message;
             await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
             return;
         }
 
-        // Discards the previous source's discovery, whose mismatch with the polled flags would restart this source again.
-        Volatile.Write(ref _discoveredFunctionMask, UnknownFunctionMask);
+        var attachment = _attachment ??= AttachSource();
 
-        var hasFailed = false;
-        try
+        Exception? failure = null;
+        while (!stoppingToken.IsCancellationRequested && TryMirrorAttachment(attachment, out failure))
         {
-            Status = ServiceStatus.Starting;
-            StatusMessage = "Connecting...";
-
-            await this.AttachHostedServiceAsync(source, stoppingToken).ConfigureAwait(false);
-
-            // Source diagnostics are not tracked properties, so they are mirrored into this device's state.
-            while (!stoppingToken.IsCancellationRequested)
+            if (HaveFunctionsChanged(hostAddress) ||
+                await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
             {
-                UpdateStatus(source.Diagnostics);
-                if (HaveFunctionsChanged(hostAddress) ||
-                    await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
-                {
-                    break;
-                }
+                break;
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+
+        if (stoppingToken.IsCancellationRequested)
         {
-            // Stopping: the source is released below.
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Luxtronik heat pump {HostAddress} failed.", hostAddress);
-            Status = ServiceStatus.Error;
-            StatusMessage = exception.Message;
-            hasFailed = true;
-        }
-        finally
-        {
-            await ReleaseSourceAsync(source, hostAddress, stoppingToken).ConfigureAwait(false);
+            // The handler stops and disposes the source behind this subject's own stop, which this unwind is part of.
+            return;
         }
 
-        if (hasFailed)
+        await DetachSourceAsync(attachment, stoppingToken).ConfigureAwait(false);
+
+        if (failure is not null)
         {
+            _logger.LogError(failure, "Luxtronik heat pump {HostAddress} failed.", hostAddress);
+            Status = ServiceStatus.Error;
+            StatusMessage = failure.Message;
             await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Mirrors what the attachment holds into this device's state, and returns false with the fault once the handler
+    /// has recorded one that no start is retrying.
+    /// </summary>
+    private bool TryMirrorAttachment(IHostedServiceAttachment<ModbusSubjectClientSource> attachment, out Exception? failure)
+    {
+        var state = attachment.GetState(out var source);
+        if (source is not null)
+        {
+            // Source diagnostics are not tracked properties, so they are mirrored into this device's state.
+            UpdateStatus(source.Diagnostics);
+        }
+        // Decided by the state, which reads the fault only beside a settled snapshot, so a start that has cleared the
+        // fault but not yet entered its start window reads Stopped. The fault is read again for its message only, and
+        // a retry that clears it in between reads as no failure.
+        else if (state is HostedServiceAttachmentState.Faulted &&
+                 attachment.Fault is { } fault &&
+                 !ReferenceEquals(fault, _faultBeforeStart))
+        {
+            failure = fault;
+            return false;
+        }
+        else
+        {
+            IsConnected = false;
+            Status = ServiceStatus.Starting;
+            StatusMessage = "Connecting...";
+        }
+
+        failure = null;
+        return true;
+    }
+
+    private IHostedServiceAttachment<ModbusSubjectClientSource> AttachSource()
+    {
+        // Discards the previous source's discovery, whose mismatch with the polled flags would restart this source again.
+        Volatile.Write(ref _discoveredFunctionMask, UnknownFunctionMask);
+        return this.AttachHostedService(CreateSource);
+    }
+
+    /// <summary>
+    /// Builds the source for the attachment. Reads the configuration when invoked rather than capturing it at attach
+    /// time, because the handler invokes it again when the subject re-enters the graph.
+    /// </summary>
+    private ModbusSubjectClientSource CreateSource()
+    {
+        return this.CreateModbusClientSource(CreateConfiguration(), _logger);
+    }
+
+    private ModbusClientConfiguration CreateConfiguration()
+    {
+        return new ModbusClientConfiguration
+        {
+            Host = HostAddress ?? string.Empty,
+            Port = Port,
+            PollingInterval = GetEffectivePollingInterval()
+        };
+    }
+
+    /// <summary>
+    /// Validates the configuration before a source is attached, so that one only an edit can fix is reported at once
+    /// rather than as a fault of the attachment.
+    /// </summary>
+    private bool TryValidateConfiguration([NotNullWhen(false)] out ArgumentException? error)
+    {
+        try
+        {
+            CreateConfiguration().Validate();
+            error = null;
+            return true;
+        }
+        catch (ArgumentException exception)
+        {
+            error = exception;
+            return false;
         }
     }
 
@@ -428,28 +533,29 @@ public partial class LuxtronikHeatPump :
         return true;
     }
 
-    private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress, CancellationToken stoppingToken)
+    /// <summary>
+    /// Detaches the source and waits for the handler to stop and dispose it. Called from the run loop only, never
+    /// from the unwind on <paramref name="stoppingToken"/>, which runs inside this subject's own stop.
+    /// </summary>
+    private async Task DetachSourceAsync(
+        IHostedServiceAttachment<ModbusSubjectClientSource> attachment, CancellationToken stoppingToken)
     {
+        // Cleared ahead of the call: the detach removes the attachment before its wait begins and the stop runs
+        // whatever the token does, so the handle is spent on every path below. The stopping token rather than none: a
+        // subject stop landing meanwhile orders this source's stop behind its own, and an unbounded wait here would
+        // then wait on itself. A cancelled token also cuts the source's own stop short; its dispose still waits for it.
+        _attachment = null;
         try
         {
-            await this.DetachHostedServiceAsync(source, CancellationToken.None).ConfigureAwait(false);
+            await this.DetachHostedServiceAsync(attachment, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // The hosting refuses detaching while the host stops, and then stops the source itself.
+            // The handler finishes the stop on its own.
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "Failed to detach the Modbus source of {HostAddress}.", hostAddress);
-        }
-
-        try
-        {
-            await source.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to dispose the Modbus source of {HostAddress}.", hostAddress);
+            _logger.LogWarning(exception, "Failed to detach the Modbus source of {HeatPump}.", Title);
         }
 
         IsConnected = false;

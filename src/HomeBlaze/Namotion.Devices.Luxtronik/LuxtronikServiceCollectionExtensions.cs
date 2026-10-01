@@ -10,12 +10,12 @@ namespace Namotion.Devices.Luxtronik;
 public static class LuxtronikServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers a <see cref="LuxtronikHeatPump"/> as a singleton and hosted service, as
-    /// <see cref="HostedSubjectServiceCollectionExtensions.AddHostedSubject{T}"/> does.
+    /// Registers a <see cref="LuxtronikHeatPump"/> as a singleton attached to the context at host start, as
+    /// <see cref="SubjectServiceCollectionExtensions.AddSubject{T}"/> does.
     /// </summary>
     public static IServiceCollection AddLuxtronikHeatPump(
         this IServiceCollection services,
         Action<LuxtronikHeatPump>? configure = null,
         Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
-        => services.AddHostedSubject(configure, contextResolver);
+        => services.AddSubject(configure, contextResolver);
 }
