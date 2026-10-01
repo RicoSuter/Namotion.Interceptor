@@ -404,31 +404,6 @@ public class ChangeQueueBackgroundServiceTests
         Assert.Single(service.Created);
     }
 
-    [Fact]
-    public async Task WhenRestartIsRequestedAfterAStopAndASecondStart_ThenTheRequestIsServed()
-    {
-        // Arrange: the same instance is stopped and started again, as a graph detach and reattach does.
-        using var timeout = new CancellationTokenSource(TestTimeout);
-        using var service = new TestService(CreateContext());
-        await service.StartAsync(CancellationToken.None);
-        await service.Sessions.Reader.ReadAsync(timeout.Token);
-        await service.StopAsync(timeout.Token);
-        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
-        await service.StartAsync(CancellationToken.None);
-        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
-
-        // Act
-        service.Restart();
-        var third = await service.Sessions.Reader.ReadAsync(timeout.Token);
-
-        // Assert
-        Assert.True(second.Token.IsCancellationRequested);
-        Assert.Equal(3, service.Created.Count);
-        Assert.Same(service.Created[2], third.Processor);
-        await service.StopAsync(timeout.Token);
-        Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
-    }
-
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -774,6 +749,32 @@ public class ChangeQueueBackgroundServiceTests
         await service.Written.Task.WaitAsync(timeout.Token);
         await service.StopAsync(timeout.Token);
         Assert.True(service.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenRestartIsRequestedBetweenStartAndExecution_ThenTheFirstSessionIsRestarted()
+    {
+        // Arrange: a cancelled start keeps the execution from running, so the request lands after the start's
+        // processor was created and before the execution publishes its first wake.
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        using var stopping = new CancellationTokenSource();
+        using var service = new TestService(CreateContext());
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await service.StartAsync(cancelled.Token);
+        service.Restart();
+
+        // Act
+        var execution = service.Execute(stopping.Token);
+        var first = await service.Sessions.Reader.ReadAsync(timeout.Token);
+        var second = await service.Sessions.Reader.ReadAsync(timeout.Token);
+
+        // Assert: the start's processor may predate the request, so it is replaced.
+        Assert.True(first.Token.IsCancellationRequested);
+        Assert.Equal(2, service.Created.Count);
+        Assert.Same(service.Created[1], second.Processor);
+        await stopping.CancelAsync();
+        await execution.WaitAsync(timeout.Token);
     }
 
     private static IInterceptorSubjectContext CreateContext() =>

@@ -37,7 +37,7 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
         var processorTask = processor.ProcessAsync(session.Token);
         var heartbeatTask = _handler.RunHeartbeatLoopAsync(session.Token);
 
-        // When either task completes, cancel its sibling before observing both outcomes.
+        // Cancel the sibling first, or WhenAll below waits on it forever.
         await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
         await session.CancelAsync().ConfigureAwait(false);
         await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);

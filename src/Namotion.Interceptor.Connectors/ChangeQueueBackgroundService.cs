@@ -254,7 +254,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     {
         if (retryDelay is not { } delay)
         {
-            // A normal return, such as a disabled store, stays idle until explicitly restarted.
+            // A normal return stays idle until explicitly restarted; nothing would consume a new processor.
             await wake.ConfigureAwait(false);
             return;
         }

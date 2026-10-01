@@ -153,13 +153,17 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    /// <inheritdoc cref="ChangeQueueProcessor(object, IInterceptorSubjectContext, Func{PropertyReference, bool}, Func{ReadOnlyMemory{SubjectPropertyChange}, CancellationToken, ValueTask}, ChangeDeliveryRule, TimeSpan?, int?, ILogger, Action{long})"/>
+    // CS1573 asks for a tag per parameter once one is present; the others are inherited below, which the
+    // compiler does not expand.
+#pragma warning disable CS1573
+    /// <inheritdoc cref="ChangeQueueProcessor(object, IInterceptorSubjectContext, Func{PropertyReference, bool}, Func{ReadOnlyMemory{SubjectPropertyChange}, CancellationToken, ValueTask}, ChangeDeliveryRule, TimeSpan?, int?, ILogger, Action{long})" path="/param[@name!='context']|/exception"/>
     /// <summary>
-    /// Initializes the processor on <paramref name="subscription"/>, which the caller owns and keeps:
-    /// <see cref="Dispose"/> does not dispose it, so it can outlive the processor and be handed to the next one,
-    /// which then delivers the changes queued in between. The processor is the subscription's only consumer
-    /// while it runs.
+    /// Initializes the processor on a subscription the caller owns and keeps. The processor is the
+    /// subscription's only consumer while it runs.
     /// </summary>
+    /// <param name="subscription">The subscription to consume. <see cref="Dispose"/> does not dispose it, so it
+    /// can outlive the processor and be handed to the next one, which then delivers the changes queued in
+    /// between.</param>
     public ChangeQueueProcessor(
         object? source,
         PropertyChangeQueueSubscription subscription,
@@ -175,6 +179,7 @@ public class ChangeQueueProcessor : IDisposable
             writeHandlerOwnsChanges: false, dropHandler)
     {
     }
+#pragma warning restore CS1573
 
     /// <summary>
     /// Initializes the processor with an externally owned subscription and the connector-internal delivery
