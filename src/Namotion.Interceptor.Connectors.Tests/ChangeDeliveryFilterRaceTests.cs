@@ -24,73 +24,46 @@ public class ChangeDeliveryFilterRaceTests
     public async Task WhenAConfirmationCommitsWhileTheFlushIsMarkingTheFirstPublish_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
     {
         // Arrange
-        var gate = new DataLookupGate();
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        var subject = new GatedSubject(context, gate);
-        var source = new object();
-        var sourceWrites = new ConcurrentQueue<(string Property, string? Value)>();
-        using var processor = CreateProcessor(context, source, sourceWrites, rule);
-        using var cancellation = new CancellationTokenSource();
-        var processing = processor.ProcessAsync(cancellation.Token);
-        var property = new PropertyReference(subject, nameof(GatedSubject.Value));
+        await using var race = await Race.StartAsync(rule);
+        var gate = race.Gate;
+        var subject = race.Subject;
 
-        try
+        // Act
+        // The flush parks after reading the revision of the local write and before setting the flag.
+        gate.Arm(lookup: 2, park: true);
+        subject.Value = "L";
+        Assert.True(gate.Reached.Wait(StepTimeout), "The flush never reached the published mark.");
+        Assert.Contains("ChangeMerger.", gate.ReachingStack);
+
+        // Whether the flush parked inside the subject lock decides whether the transaction can commit
+        // before the mark, so ask the lock rather than infer it from thread state.
+        var flushHoldsSubjectLock = !Monitor.TryEnter(subject.SyncRoot);
+        if (!flushHoldsSubjectLock)
         {
-            await WaitUntilProcessingAsync(subject, sourceWrites);
-
-            // Act
-            // The flush parks after reading the revision of the local write and before setting the flag.
-            gate.Arm(lookup: 2, park: true);
-            subject.Value = "L";
-            Assert.True(gate.Reached.Wait(StepTimeout), "The flush never reached the published mark.");
-            Assert.Contains("ChangeDeliveryFilter.TryAcceptForDelivery", gate.ReachingStack);
-
-            // Whether the flush parked inside the subject lock decides whether the transaction can commit
-            // before the mark, so ask the lock rather than infer it from thread state.
-            var flushHoldsSubjectLock = !Monitor.TryEnter(subject.SyncRoot);
-            if (!flushHoldsSubjectLock)
-            {
-                Monitor.Exit(subject.SyncRoot);
-            }
-
-            // A transaction writes to the source first, then applies locally as a confirmation.
-            sourceWrites.Enqueue((nameof(GatedSubject.Value), "T"));
-            var transactionApply = new Thread(() =>
-            {
-                using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "T"))
-                {
-                    subject.Value = "T";
-                }
-            })
-            {
-                IsBackground = true
-            };
-            transactionApply.Start();
-
-            if (!flushHoldsSubjectLock)
-            {
-                // Nothing orders the commit after the mark, so let the dequeue judge the confirmation first.
-                Assert.True(transactionApply.Join(StepTimeout), "The confirmation never committed.");
-                CommitFenceConfirmation(subject, source);
-                Assert.True(gate.FenceJudged.Wait(StepTimeout), "The dequeue loop never judged the fence confirmation.");
-            }
-
-            gate.Release.Set();
-            Assert.True(transactionApply.Join(StepTimeout), "The confirmation never committed.");
-
-            subject.Tail = "Tail";
-            await AsyncTestHelpers.WaitUntilAsync(() => sourceWrites.Any(write => write is (nameof(GatedSubject.Tail), "Tail")));
+            Monitor.Exit(subject.SyncRoot);
         }
-        finally
+
+        // A transaction writes to the source first, then applies locally as a confirmation.
+        race.SourceWrites.Enqueue((nameof(GatedSubject.Value), "T"));
+        var transactionApply = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(
+            () => race.CommitConfirmation(nameof(GatedSubject.Value), "T"));
+
+        if (!flushHoldsSubjectLock)
         {
-            gate.Release.Set();
-            await cancellation.CancelAsync();
-            try { await processing; } catch (OperationCanceledException) { /* expected */ }
+            // Nothing orders the commit after the mark, so let the dequeue judge the confirmation first. Not
+            // awaited: the fence has to be committed from the arming thread, which the gate ignores.
+            Assert.True(SpinWait.SpinUntil(() => transactionApply.IsCompleted, StepTimeout), "The confirmation never committed.");
+            race.CommitConfirmation(nameof(GatedSubject.Other), "Fence");
+            Assert.True(gate.FenceJudged.Wait(StepTimeout), "The dequeue loop never judged the fence confirmation.");
         }
+
+        gate.Release.Set();
+        await transactionApply.WaitAsync(StepTimeout);
+        await race.DeliverTailAsync("Tail");
 
         // Assert
         Assert.Equal("T", subject.Value);
-        Assert.Equal(subject.Value, sourceWrites.Last(write => write.Property == nameof(GatedSubject.Value)).Value);
+        Assert.Equal(subject.Value, race.SourceWrites.Last(write => write.Property == nameof(GatedSubject.Value)).Value);
     }
 
     [Theory]
@@ -99,114 +72,136 @@ public class ChangeDeliveryFilterRaceTests
     public async Task WhenAConfirmationCommitsBetweenTheFlushRevisionReadAndTheFirstPublishLock_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
     {
         // Arrange
-        var gate = new DataLookupGate();
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
-        var subject = new GatedSubject(context, gate);
-        var source = new object();
-        var sourceWrites = new ConcurrentQueue<(string Property, string? Value)>();
-        using var processor = CreateProcessor(context, source, sourceWrites, rule);
-        using var cancellation = new CancellationTokenSource();
-        var processing = processor.ProcessAsync(cancellation.Token);
-        var property = new PropertyReference(subject, nameof(GatedSubject.Value));
+        await using var race = await Race.StartAsync(rule);
+        var gate = race.Gate;
+        var subject = race.Subject;
 
+        // Act
+        // Synchronous waits only while the monitor is held: an await could resume on another thread.
+        gate.Arm(lookup: 1, park: false);
+        Monitor.Enter(subject.SyncRoot);
+        var contentionBefore = Monitor.LockContentionCount;
         try
         {
-            await WaitUntilProcessingAsync(subject, sourceWrites);
+            subject.Value = "L";
 
-            // Act
-            // Synchronous waits only while the monitor is held: an await could resume on another thread.
-            gate.Arm(lookup: 1, park: false);
-            Monitor.Enter(subject.SyncRoot);
-            var contentionBefore = Monitor.LockContentionCount;
-            try
-            {
-                subject.Value = "L";
+            // The flush reads the revision of the local write lock-free, then waits for the subject lock.
+            Assert.True(gate.Reached.Wait(StepTimeout), "The flush never read the revision.");
+            Assert.Contains("ChangeMerger.", gate.ReachingStack);
+            Assert.True(
+                SpinWait.SpinUntil(
+                    () => (gate.ReachingThread!.ThreadState & ThreadState.WaitSleepJoin) != 0 && Monitor.LockContentionCount > contentionBefore,
+                    StepTimeout),
+                "The flush never waited for the subject lock.");
 
-                // The flush reads the revision of the local write lock-free, then waits for the subject lock.
-                Assert.True(gate.Reached.Wait(StepTimeout), "The flush never read the revision.");
-                Assert.Contains("ChangeDeliveryFilter.TryAcceptForDelivery", gate.ReachingStack);
-                Assert.True(
-                    SpinWait.SpinUntil(
-                        () => (gate.ReachingThread!.ThreadState & ThreadState.WaitSleepJoin) != 0 && Monitor.LockContentionCount > contentionBefore,
-                        StepTimeout),
-                    "The flush never waited for the subject lock.");
-
-                // The transaction writes to the source, then commits reentrantly while the flush waits, and
-                // the dequeue judges its confirmation before the flag is set.
-                sourceWrites.Enqueue((nameof(GatedSubject.Value), "T"));
-                using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(source), "T"))
-                {
-                    subject.Value = "T";
-                }
-
-                CommitFenceConfirmation(subject, source);
-                Assert.True(gate.FenceJudged.Wait(StepTimeout), "The dequeue loop never judged the fence confirmation.");
-            }
-            finally
-            {
-                Monitor.Exit(subject.SyncRoot);
-            }
-
-            subject.Tail = "Tail";
-            await AsyncTestHelpers.WaitUntilAsync(() => sourceWrites.Any(write => write is (nameof(GatedSubject.Tail), "Tail")));
+            // The transaction writes to the source, then commits reentrantly while the flush waits, and
+            // the dequeue judges its confirmation before the flag is set.
+            race.SourceWrites.Enqueue((nameof(GatedSubject.Value), "T"));
+            race.CommitConfirmation(nameof(GatedSubject.Value), "T");
+            race.CommitConfirmation(nameof(GatedSubject.Other), "Fence");
+            Assert.True(gate.FenceJudged.Wait(StepTimeout), "The dequeue loop never judged the fence confirmation.");
         }
         finally
         {
-            gate.Release.Set();
-            await cancellation.CancelAsync();
-            try { await processing; } catch (OperationCanceledException) { /* expected */ }
+            Monitor.Exit(subject.SyncRoot);
         }
+
+        await race.DeliverTailAsync("Tail");
 
         // Assert
         Assert.Equal("T", subject.Value);
-        Assert.Equal(subject.Value, sourceWrites.Last(write => write.Property == nameof(GatedSubject.Value)).Value);
-    }
-
-    private static ChangeQueueProcessor CreateProcessor(
-        IInterceptorSubjectContext context,
-        object source,
-        ConcurrentQueue<(string Property, string? Value)> sourceWrites,
-        ChangeDeliveryRule rule)
-    {
-        return new ChangeQueueProcessor(
-            source: source,
-            context: context,
-            propertyFilter: _ => true,
-            writeHandler: (changes, _) =>
-            {
-                foreach (var change in changes.ToArray())
-                {
-                    sourceWrites.Enqueue((change.Property.Name, change.GetNewValue<string?>()));
-                }
-
-                return ValueTask.CompletedTask;
-            },
-            deliveryRule: rule,
-            bufferTime: TimeSpan.FromMilliseconds(10),
-            maxQueueDepth: null,
-            logger: NullLogger.Instance);
+        Assert.Equal(subject.Value, race.SourceWrites.Last(write => write.Property == nameof(GatedSubject.Value)).Value);
     }
 
     /// <summary>
-    /// Waits for a delivery, so the changes under test are not counted as queued before the processor started,
-    /// which adds a write-state lookup on the dequeue thread.
+    /// A gated subject with a running processor that records what reaches the source.
     /// </summary>
-    private static async Task WaitUntilProcessingAsync(GatedSubject subject, ConcurrentQueue<(string Property, string? Value)> sourceWrites)
+    private sealed class Race : IAsyncDisposable
     {
-        subject.Tail = "Started";
-        await AsyncTestHelpers.WaitUntilAsync(() => sourceWrites.Any(write => write.Property == nameof(GatedSubject.Tail)));
-    }
+        private readonly ChangeQueueProcessor _processor;
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly Task _processing;
+        private readonly object _source = new();
 
-    /// <summary>
-    /// A confirmation on another property, queued behind the one under test. The dequeue loop judging it
-    /// proves it has already judged everything before it.
-    /// </summary>
-    private static void CommitFenceConfirmation(GatedSubject subject, object source)
-    {
-        var fence = new PropertyReference(subject, nameof(GatedSubject.Other));
-        using (PendingOrigin.Set(fence, ChangeOrigin.Confirmed(source), "Fence"))
+        private Race(ChangeDeliveryRule rule)
         {
-            subject.Other = "Fence";
+            var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+            Subject = new GatedSubject(context, Gate);
+            _processor = new ChangeQueueProcessor(
+                source: _source,
+                context: context,
+                propertyFilter: _ => true,
+                writeHandler: (changes, _) =>
+                {
+                    foreach (var change in changes.ToArray())
+                    {
+                        SourceWrites.Enqueue((change.Property.Name, change.GetNewValue<string?>()));
+                    }
+
+                    return ValueTask.CompletedTask;
+                },
+                deliveryRule: rule,
+                bufferTime: TimeSpan.FromMilliseconds(10),
+                maxQueueDepth: null,
+                logger: NullLogger.Instance);
+            _processing = _processor.ProcessAsync(_cancellation.Token);
+        }
+
+        public DataLookupGate Gate { get; } = new();
+
+        public GatedSubject Subject { get; }
+
+        public ConcurrentQueue<(string Property, string? Value)> SourceWrites { get; } = new();
+
+        /// <summary>
+        /// Starts processing and waits for a first delivery, so the changes under test are not counted as
+        /// queued before the processor started, which adds a write-state lookup on the dequeue thread.
+        /// </summary>
+        public static async Task<Race> StartAsync(ChangeDeliveryRule rule)
+        {
+            var race = new Race(rule);
+            try
+            {
+                await race.DeliverTailAsync("Started");
+                return race;
+            }
+            catch
+            {
+                await race.DisposeAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Applies a value locally as this source's transaction confirmation.
+        /// </summary>
+        public void CommitConfirmation(string propertyName, string value)
+        {
+            var property = new PropertyReference(Subject, propertyName);
+            using (PendingOrigin.Set(property, ChangeOrigin.Confirmed(_source), value))
+            {
+                property.Metadata.SetValue!(Subject, value);
+            }
+        }
+
+        /// <summary>
+        /// Writes the tail marker and waits until it reaches the source, which orders every earlier write.
+        /// </summary>
+        public async Task DeliverTailAsync(string value)
+        {
+            Subject.Tail = value;
+            await AsyncTestHelpers.WaitUntilAsync(() => SourceWrites.Any(write => write == (nameof(GatedSubject.Tail), value)));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Gate.Release.Set();
+            await _cancellation.CancelAsync();
+            try { await _processing; } catch (OperationCanceledException) { /* expected */ }
+
+            _processor.Dispose();
+            _cancellation.Dispose();
+            Gate.Dispose();
         }
     }
 
@@ -215,12 +210,12 @@ public class ChangeDeliveryFilterRaceTests
     /// <see cref="GatedSubject.Value"/> made by one thread other than the arming thread, and signals when
     /// such a thread looks up the write state of <see cref="GatedSubject.Other"/>.
     /// </summary>
-    private sealed class DataLookupGate : IEqualityComparer<(string? property, string key)>
+    private sealed class DataLookupGate : IEqualityComparer<(string? property, string key)>, IDisposable
     {
         private readonly ThreadLocal<int> _lookups = new();
         private volatile int _armedLookup;
         private volatile bool _park;
-        private volatile int _excludedThreadId = -1;
+        private volatile int _excludedThreadId;
 
         public ManualResetEventSlim Reached { get; } = new();
 
@@ -243,9 +238,7 @@ public class ChangeDeliveryFilterRaceTests
 
         public int GetHashCode((string? property, string key) obj)
         {
-            if (obj.key == WriteStateKey &&
-                _excludedThreadId != -1 &&
-                Environment.CurrentManagedThreadId != _excludedThreadId)
+            if (obj.key == WriteStateKey && Environment.CurrentManagedThreadId != _excludedThreadId)
             {
                 var armedLookup = _armedLookup;
                 if (obj.property == nameof(GatedSubject.Value) && armedLookup != 0 && ++_lookups.Value == armedLookup)
@@ -267,6 +260,14 @@ public class ChangeDeliveryFilterRaceTests
 
             return obj.GetHashCode();
         }
+
+        public void Dispose()
+        {
+            _lookups.Dispose();
+            Reached.Dispose();
+            Release.Dispose();
+            FenceJudged.Dispose();
+        }
     }
 
     /// <summary>
@@ -283,7 +284,6 @@ public class ChangeDeliveryFilterRaceTests
             }.ToFrozenDictionary();
 
         private IInterceptorExecutor? _executor;
-        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
         private string? _value;
         private string? _other;
         private string? _tail;
@@ -300,7 +300,7 @@ public class ChangeDeliveryFilterRaceTests
 
         IInterceptorSubjectContext IInterceptorSubject.Context => InterceptorExecutor.GetOrCreate(ref _executor, this);
 
-        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => _properties ?? DefaultProperties;
+        public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties => DefaultProperties;
 
         public string? Value
         {
@@ -320,15 +320,7 @@ public class ChangeDeliveryFilterRaceTests
             set => _executor!.SetPropertyValue(nameof(Tail), value, _tail, static (o, v) => ((GatedSubject)o)._tail = v);
         }
 
-        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
-        {
-            lock (SyncRoot)
-            {
-                _properties = Properties
-                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                    .ToFrozenDictionary();
-            }
-        }
+        public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties) => throw new NotSupportedException();
 
         private static SubjectPropertyMetadata Create(string name, Func<IInterceptorSubject, object?> getValue, Action<IInterceptorSubject, object?> setValue)
         {
