@@ -108,9 +108,10 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         // would never reach the subscription. Every other writer stores null, so this overwrites nothing, and the
         // dispatch in base.StartAsync orders it before the execution takes it.
         var subscription = Context.CreatePropertyChangeQueueSubscription();
+        ChangeQueueProcessor processor;
         try
         {
-            Volatile.Write(ref _startProcessor, CreateProcessorOn(subscription));
+            processor = CreateProcessorOn(subscription);
         }
         catch
         {
@@ -118,7 +119,16 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
             throw;
         }
 
-        return base.StartAsync(cancellationToken);
+        Volatile.Write(ref _startProcessor, processor);
+        try
+        {
+            return base.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            ReleaseStart();
+            throw;
+        }
     }
 
     /// <inheritdoc />
