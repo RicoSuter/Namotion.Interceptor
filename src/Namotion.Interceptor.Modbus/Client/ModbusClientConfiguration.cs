@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Modbus.Client;
 public sealed class ModbusClientConfiguration
 {
     private const int MaximumRegisterGapLimit = ModbusReadPlanner.MaximumRegistersPerRequest - 1;
-    private static readonly TimeSpan MaximumDelay = TimeSpan.FromMilliseconds(int.MaxValue);
+    private static readonly TimeSpan MaximumDelay = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// Gets the host name or IP address of the Modbus TCP server.

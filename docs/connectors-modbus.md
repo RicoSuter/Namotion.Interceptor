@@ -159,7 +159,7 @@ public partial class Battery
 | `BufferTime` | 8 ms | Change queue buffer time |
 | `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbours, 0 to 124 |
 
-The time spans must be positive (`BufferTime` may be zero) and at most `int.MaxValue` milliseconds.
+The time spans must be positive (`BufferTime` may be zero) and at most 10 minutes.
 
 ## Batching and Polling
 
