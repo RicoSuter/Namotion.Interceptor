@@ -11,8 +11,8 @@ namespace Namotion.Interceptor.Connectors;
 /// delivered even though the execution may run later, and it outlives the processors: <see cref="RequestRestart"/>
 /// and a retry after a fault run <see cref="ProcessAsync"/> again with a new processor from
 /// <see cref="CreateProcessor"/> on the same subscription, so changes made in between are delivered by that
-/// processor, collapsed to the newest value per property as on any start. The subscription is released while the
-/// service is idle, after each fault from the third consecutive one on (the next run subscribes again), and on
+/// processor, which skips a change a later write superseded as at any start. The subscription is released while
+/// the service is idle, after each fault from the third consecutive one on (the next run subscribes again), and on
 /// stop, where undelivered changes are dropped. The service disposes the processors it
 /// created on every exit path, including a restart.
 /// </summary>

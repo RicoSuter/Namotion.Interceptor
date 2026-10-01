@@ -22,7 +22,7 @@ public sealed class HistorySessionCoverage
     /// <summary>
     /// Records the subscription the next session's processor consumes. A new subscription captures from now
     /// on; a kept one still holds everything since <see cref="EndSession"/> was last called, which the next
-    /// session delivers collapsed to the newest value per property.
+    /// session delivers except a change a later write superseded.
     /// </summary>
     public void Track(PropertyChangeQueueSubscription subscription)
     {

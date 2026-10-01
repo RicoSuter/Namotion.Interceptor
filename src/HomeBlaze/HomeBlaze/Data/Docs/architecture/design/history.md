@@ -99,7 +99,7 @@ A range means:
 
 > The store was actively collecting its configured history stream throughout this interval and detected no loss.
 
-The configured stream coalesces repeated updates to the same property within `BufferTimeMilliseconds`, keeping the oldest old value and newest new value. It is a time-series sampling policy, not an audit log of every setter invocation. A configuration restart or a fault retry keeps the change subscription, so the changes queued while no processor ran are delivered to the next session collapsed to the newest value per property: across such a restart the coalescing window is the restart's duration rather than `BufferTimeMilliseconds`. After that policy is applied, no sample for a property inside a covered interval means that the property did not change. Coverage is intentionally store-wide and all-or-nothing. Per-property coverage would make routing and correctness dependent on a large and continuously changing metadata set.
+The configured stream coalesces repeated updates to the same property within `BufferTimeMilliseconds`, keeping the oldest old value and newest new value. It is a time-series sampling policy, not an audit log of every setter invocation. A configuration restart or a fault retry keeps the change subscription, so the changes queued while no processor ran are delivered to the next session, which skips a change a later write superseded as at any processor start. After that policy is applied, no sample for a property inside a covered interval means that the property did not change. Coverage is intentionally store-wide and all-or-nothing. Per-property coverage would make routing and correctness dependent on a large and continuously changing metadata set.
 
 Ranges are necessary because continuity can be lost independently of retention:
 
@@ -116,7 +116,7 @@ Each store subject is a `ChangeQueueBackgroundService`, and every run of its pro
 
 - `IsEnabled` applies immediately when the configuration is applied. A disabled store serves nothing: no coverage, no samples, zeroed metrics.
 - A change to another start-time setting restarts the store on its kept subscription. SQLite keeps serving the files it wrote across the restart. The in-memory store replaces its engine, so its earlier samples are gone and its coverage starts at the restart.
-- A processing fault ends the session and sets `Status` to `Error`. The service retries after its retry delay, five seconds, on the same subscription, and from the third consecutive fault on it releases the subscription until the next run, which creates a gap.
+- A processing fault ends the session and sets `Status` to `Error`. The service retries after its retry delay, five seconds, on the same subscription, and from the third consecutive fault on it releases the subscription until the next run, which creates a gap. The change being processed when the fault occurs is already dequeued and lost, yet it falls inside the session's coverage.
 - SQLite serves nothing between sessions: during a restart and during a retry backoff its engine is disposed, and the next session reopens the files. The in-memory store keeps serving the ended session's samples with frozen coverage until the next session replaces them.
 
 ### In-memory coverage
