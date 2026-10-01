@@ -20,6 +20,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
+                    context.ReportMutated();
                     // Plain increment, no Interlocked: the enclosing lock is the subject's SyncRoot and the
                     // executor belongs to that subject, so the increment is exclusive. The lock half is
                     // lexically enclosing and therefore compiler-guaranteed; the executor-owns-subject half
@@ -51,6 +52,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
+                    context.ReportMutated();
                     // See the zero-interceptor terminal above for why the property is hoisted, why the
                     // increment needs no Interlocked, and what the assert covers that the lock does not.
                     Debug.Assert(ReferenceEquals(context.Executor.Subject, subject),

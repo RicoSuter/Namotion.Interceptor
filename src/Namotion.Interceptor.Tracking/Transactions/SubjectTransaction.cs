@@ -391,19 +391,13 @@ public sealed class SubjectTransaction : IDisposable
             {
                 ThrowIfConflictsDetected(changes.Span);
 
-                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null);
+                var (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude: null, _failureHandling);
 
                 if (applyFailed.Count > 0)
                 {
-                    if (_failureHandling == TransactionFailureHandling.Rollback)
-                    {
-                        var (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
-                        failure = CreateFailureException([], SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed), SubjectPropertyChangeOperations.Concat(applyErrors, revertErrors));
-                    }
-                    else
-                    {
-                        failure = CreateFailureException(applied, applyFailed, applyErrors);
-                    }
+                    failure = _failureHandling == TransactionFailureHandling.Rollback
+                        ? CreateFailureException([], applyFailed, applyErrors)
+                        : CreateFailureException(applied, applyFailed, applyErrors);
                 }
             }
 
@@ -512,37 +506,34 @@ public sealed class SubjectTransaction : IDisposable
         IReadOnlyList<SubjectPropertyChange> applied;
         IReadOnlyList<SubjectPropertyChange> applyFailed;
         IReadOnlyList<Exception> applyErrors;
-        IReadOnlyList<SubjectPropertyChange> revertFailed = [];
-        IReadOnlyList<Exception> revertErrors = [];
         using (EnterCommitModelAccess())
         {
-            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude);
-            if (applyFailed.Count > 0 && _failureHandling == TransactionFailureHandling.Rollback)
-            {
-                (revertFailed, revertErrors) = SubjectPropertyChangeOperations.RevertLocalChanges(applied);
-            }
+            (applied, applyFailed, applyErrors) = SubjectPropertyChangeOperations.ApplyLocalChanges(changes.Span, exclude, _failureHandling);
         }
 
         if (applyFailed.Count > 0)
         {
             if (_failureHandling == TransactionFailureHandling.Rollback)
             {
-                // All-or-nothing: revert local applies, then the source writes.
+                // All-or-nothing: ApplyLocalChanges already compensated the local mutations, so only the
+                // source writes remain to revert.
                 var sourceRevert = await RevertSourceWritesSafelyAsync(writer, written, revertState, cancellationToken).ConfigureAwait(false);
-                // The no-source local changes were applied then reverted; under all-or-nothing they did not
+                // The no-source local changes were applied then compensated; under all-or-nothing they did not
                 // commit, so report them as failed too (consistent with the source-write-failure branch and
                 // the documented Rollback contract). Exclude source-bound changes (in 'written'; failedSource
-                // is empty on this branch) and anything already reported as an apply/revert failure.
+                // is empty on this branch) and anything already reported as an apply failure.
                 var rolledBackLocals = SubjectPropertyChangeOperations.ExcludeByProperty(
-                    changes.Span, written, SubjectPropertyChangeOperations.Concat(applyFailed, revertFailed));
+                    changes.Span, written, applyFailed);
                 return CreateFailureException(
                     [],
-                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, revertFailed, sourceRevert.Failed),
-                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, revertErrors, sourceRevert.Errors));
+                    SubjectPropertyChangeOperations.Concat(failedSource, applyFailed, rolledBackLocals, sourceRevert.Failed),
+                    SubjectPropertyChangeOperations.Concat(sourceErrors, applyErrors, sourceRevert.Errors));
             }
 
             // BestEffort: keep source == model for failed-apply properties by reverting only the
-            // source writes whose property failed to apply (matched by Property equality).
+            // source writes whose property failed to apply (matched by Property equality). The model side
+            // of that equality relies on ApplyLocalChanges having restored the failed-apply mutations; a
+            // compensation failure there is already reported in applyErrors.
             var toRevert = SubjectPropertyChangeOperations.IntersectByProperty(applyFailed, written);
             var bestEffortRevert = await RevertSourceWritesSafelyAsync(writer, toRevert, revertState, cancellationToken).ConfigureAwait(false);
             return CreateFailureException(
@@ -802,7 +793,7 @@ public sealed class SubjectTransaction : IDisposable
         var message = _failureHandling switch
         {
             TransactionFailureHandling.BestEffort => "One or more changes failed. Successful changes have been applied.",
-            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the local model.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted; rollback failures are reported in the errors.",
             _ => "One or more changes failed."
         };
 
