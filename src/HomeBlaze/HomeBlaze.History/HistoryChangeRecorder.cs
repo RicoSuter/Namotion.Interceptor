@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.History.Abstractions;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
@@ -45,6 +46,32 @@ public sealed class HistoryChangeRecorder(IHistoryRecorder engine, ISubjectPathR
     /// </summary>
     public static bool IsEligible(PropertyReference propertyReference) =>
         propertyReference.TryGetRegisteredProperty() is { } registered && registered.HasHistory();
+
+    /// <summary>
+    /// Creates a store session's change queue processor on <paramref name="subscription"/>, which the caller
+    /// owns: eligible changes are queued, and each flushed batch is recorded with the recorder
+    /// <paramref name="recorder"/> returns at that time, or dropped while it returns null.
+    /// </summary>
+    public static ChangeQueueProcessor CreateProcessor(
+        object source,
+        PropertyChangeQueueSubscription subscription,
+        Func<HistoryChangeRecorder?> recorder,
+        TimeSpan bufferTime,
+        ILogger logger)
+    {
+        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
+        // for it. Under the other rule a source-applied value does not retire an older commit, which is
+        // what keeps both points in the series.
+        return new ChangeQueueProcessor(
+            source,
+            subscription,
+            IsEligible,
+            (changes, _) => recorder()?.RecordBatch(changes) ?? default,
+            ChangeDeliveryRule.SourceValuesMayBeStale,
+            bufferTime,
+            maxQueueDepth: null,
+            logger);
+    }
 
     /// <summary>
     /// Resolves and records one flushed batch of changes.

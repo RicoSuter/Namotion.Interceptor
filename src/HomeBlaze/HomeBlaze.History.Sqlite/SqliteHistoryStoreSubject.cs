@@ -29,17 +29,11 @@ public partial class SqliteHistoryStoreSubject :
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
     private readonly Lock _settingsLock = new();
+    private readonly HistorySessionCoverage _sessionCoverage = new();
 
     private HistoryChangeRecorder? _recorder;
     private SqliteHistoryStore? _engine;
     private Settings? _settings;
-
-    // The instant from which the subscription holds every change no session has consumed yet, so the next
-    // session's coverage may start there. Only the service's sequential session flow touches these. The
-    // subscription is held weakly because it is only compared by identity, so one the service released is not
-    // pinned here with its undrained queue.
-    private WeakReference<PropertyChangeQueueSubscription>? _subscription;
-    private DateTimeOffset _coverageStartedAt;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
         : base(logger)
@@ -249,29 +243,11 @@ public partial class SqliteHistoryStoreSubject :
             _settings = settings;
         }
 
-        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
-        // for it. Under the other rule a source-applied value does not retire an older commit, which is
-        // what keeps both points in the series.
-        var processor = new ChangeQueueProcessor(
-            this,
-            subscription,
-            HistoryChangeRecorder.IsEligible,
-            // Runs after ProcessAsync sets _recorder, but may outlive a session that ends by clearing it.
-            (changes, _) => _recorder?.RecordBatch(changes) ?? default,
-            ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
-
-        // A new subscription captures from now on; a kept one still holds everything since the previous
-        // session stopped consuming it, which is where the start was last set, and delivers the newest value
-        // per property.
-        if (_subscription is null || !_subscription.TryGetTarget(out var previous) || !ReferenceEquals(subscription, previous))
-        {
-            _subscription = new WeakReference<PropertyChangeQueueSubscription>(subscription);
-            _coverageStartedAt = DateTimeOffset.UtcNow;
-        }
-
+        // The recorder is read per batch: it is set once ProcessAsync has the engine, and a processor may
+        // outlive a session that ends by clearing it.
+        var processor = HistoryChangeRecorder.CreateProcessor(
+            this, subscription, () => _recorder, TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds), _logger);
+        _sessionCoverage.Track(subscription);
         return processor;
     }
 
@@ -322,7 +298,7 @@ public partial class SqliteHistoryStoreSubject :
 
         // The subscription precedes the coverage session, which precedes recording, so no change can fall
         // inside claimed coverage without reaching the engine, and none reaches it before the session began.
-        engine.BeginCoverageSession(_coverageStartedAt);
+        engine.BeginCoverageSession(_sessionCoverage.StartsAt);
         _recorder = new HistoryChangeRecorder(engine, resolver);
         Volatile.Write(ref _engine, engine);
 
@@ -354,7 +330,7 @@ public partial class SqliteHistoryStoreSubject :
             // consuming, so every later change waits in the subscription for the next session, whose coverage
             // starts here. Before the final flush, so that a successful flush reaches past this instant and
             // the two sessions' coverage merges into one range.
-            _coverageStartedAt = DateTimeOffset.UtcNow;
+            _sessionCoverage.EndSession();
             await session.CancelAsync().ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
 
