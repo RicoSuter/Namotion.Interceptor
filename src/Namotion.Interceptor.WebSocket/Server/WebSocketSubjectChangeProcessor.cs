@@ -31,9 +31,9 @@ public sealed class WebSocketSubjectChangeProcessor : ChangeQueueBackgroundServi
         _handler.CreateChangeQueueProcessor(subscription, _logger);
 
     /// <inheritdoc />
-    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
     {
-        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var processorTask = processor.ProcessAsync(session.Token);
         var heartbeatTask = _handler.RunHeartbeatLoopAsync(session.Token);
 

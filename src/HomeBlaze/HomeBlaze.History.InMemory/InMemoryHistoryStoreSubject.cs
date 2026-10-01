@@ -207,7 +207,7 @@ public partial class InMemoryHistoryStoreSubject :
     }
 
     /// <inheritdoc />
-    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
     {
         // Written by CreateProcessor on the flow that runs this, so no lock is needed.
         var settings = _settings!;
@@ -246,7 +246,7 @@ public partial class InMemoryHistoryStoreSubject :
 
         // The sweep loop ends with the session, so a processing fault surfaces to the service's retry
         // instead of waiting behind a loop that only a stop or restart would end.
-        using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var sweepTask = RunSweepLoopAsync(engine, session.Token);
         var faulted = false;
         try

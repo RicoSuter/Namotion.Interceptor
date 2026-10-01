@@ -856,10 +856,10 @@ public class ChangeQueueBackgroundServiceTests
         // end; IgnoreCancellation holds the session open until Release completes instead, and Drain runs the
         // processor. Failure fails each session listed in FailingSessions, either before the method returns or
         // through its task.
-        protected override Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        protected override Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
         {
             ProcessedWith = processor;
-            Sessions.Writer.TryWrite((processor, stoppingToken));
+            Sessions.Writer.TryWrite((processor, cancellationToken));
             if (FailingSessions.Contains(Interlocked.Increment(ref _processingCount)) && Failure is { } failure)
             {
                 if (ThrowSynchronously)
@@ -872,10 +872,10 @@ public class ChangeQueueBackgroundServiceTests
 
             if (Drain)
             {
-                return processor.ProcessAsync(stoppingToken);
+                return processor.ProcessAsync(cancellationToken);
             }
 
-            return IgnoreCancellation ? Release.Task : Release.Task.WaitAsync(stoppingToken);
+            return IgnoreCancellation ? Release.Task : Release.Task.WaitAsync(cancellationToken);
         }
     }
 

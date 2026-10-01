@@ -57,7 +57,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     protected abstract ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription);
 
     /// <summary>
-    /// Consumes the given processor until <paramref name="stoppingToken"/> is cancelled, which a stop and
+    /// Consumes the given processor until <paramref name="cancellationToken"/> is cancelled, which a stop and
     /// <see cref="RequestRestart"/> both do; an <see cref="OperationCanceledException"/> thrown after that
     /// cancellation counts as a return. Any other exception is logged and retried after <see cref="GetRetryDelay"/>.
     /// The default drains the processor with <see cref="ChangeQueueProcessor.ProcessAsync"/> until the token is
@@ -66,8 +66,8 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// a processor or a subscription, until a restart is requested or it stops. The service owns the processor;
     /// implementations must not dispose it.
     /// </summary>
-    protected virtual Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken) =>
-        processor.ProcessAsync(stoppingToken);
+    protected virtual Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken) =>
+        processor.ProcessAsync(cancellationToken);
 
     /// <summary>
     /// Returns the delay before a new processor is created after <see cref="ProcessAsync"/> or

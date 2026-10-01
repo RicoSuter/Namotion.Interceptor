@@ -721,16 +721,16 @@ public class SqliteHistoryStoreRecordingTests
             return TimeSpan.Zero;
         }
 
-        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken stoppingToken)
+        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
         {
             if (HoldSessions)
             {
                 var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 Sessions.Writer.TryWrite(release);
-                await release.Task.WaitAsync(stoppingToken);
+                await release.Task.WaitAsync(cancellationToken);
             }
 
-            await base.ProcessAsync(processor, stoppingToken);
+            await base.ProcessAsync(processor, cancellationToken);
         }
     }
 }
