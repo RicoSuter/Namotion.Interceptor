@@ -8,6 +8,7 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.Hosting" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="Moq" />
         <PackageReference Include="PublicApiGenerator" />
         <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
         <PackageReference Include="Verify.Xunit" />

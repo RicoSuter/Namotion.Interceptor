@@ -4,6 +4,7 @@ using FluentModbus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Monitoring;
@@ -550,7 +551,7 @@ public partial class ModbusSubjectClientSourceTests
         var (device, source, recorder) = await StartAsync(server, testDevice => testDevice.Discovered = new DiscoveredChild());
         var child = device.Discovered!;
         var value = new PropertyReference(child, nameof(DiscoveredChild.Value));
-        var otherSource = new OwnerSource(child);
+        var otherSource = Mock.Of<ISubjectSource>();
         try
         {
             // Act

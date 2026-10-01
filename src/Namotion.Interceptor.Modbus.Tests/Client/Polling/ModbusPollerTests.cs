@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Attributes;
@@ -83,7 +84,7 @@ public partial class ModbusPollerTests
     private static ModbusPoller CreatePoller(
         List<ModbusRegisterBinding> bindings, int maximumRegisterGap, ModbusPollingMetrics metrics, ILogger logger)
     {
-        var source = new OwnerSource(bindings[0].Property.Subject);
+        var source = Mock.Of<ISubjectSource>();
         foreach (var binding in bindings)
         {
             Assert.True(binding.Property.SetSource(source));
