@@ -7,24 +7,20 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// A hosted service that consumes property changes through a <see cref="ChangeQueueProcessor"/>. The change
-/// subscription is created in <see cref="StartAsync"/>, so a change made after the host start returns is
-/// delivered even though the execution may run later, and it outlives the processors: <see cref="RequestRestart"/>
-/// and a retry after a fault run <see cref="ProcessAsync"/> again with a new processor from
-/// <see cref="CreateProcessor"/> on the same subscription, so changes made in between are delivered by that
-/// processor, which skips a change a later write superseded as at any start. The subscription is released while
-/// the service is idle, after each fault from the third consecutive one on (the next run subscribes again), and on
-/// stop, where undelivered changes are dropped. The service disposes the processors it
-/// created on every exit path, including a restart.
+/// subscription is created in <see cref="StartAsync"/>, so a change made after the host start returns is delivered
+/// even if the execution runs later. A restart or a retry after a fault runs <see cref="ProcessAsync"/> again with a
+/// new processor on the same subscription, which delivers the changes made in between except those a later write
+/// superseded. The subscription is released while the service is idle, after each fault from the third consecutive
+/// one on (the next run subscribes again), and on stop, where undelivered changes are dropped.
 /// </summary>
 /// <remarks>
-/// A further <see cref="StartAsync"/> is supported only once the previous <see cref="BackgroundService.ExecuteTask"/>
-/// has completed. A <see cref="StopAsync"/> that returned because its cancellation token fired first does not
-/// guarantee that, and a restart requested after such a start may be lost.
+/// Calling <see cref="StartAsync"/> while the previous <see cref="BackgroundService.ExecuteTask"/> is still running,
+/// as it can be after a <see cref="StopAsync"/> ended by its cancellation token, is unsupported: a restart requested
+/// afterwards may be lost, and the extra subscription and processor may stay unused until stop or dispose.
 /// </remarks>
 public abstract class ChangeQueueBackgroundService : BackgroundService
 {
-    // Bounds what accumulates during a persistent fault: the subscription is released once this many runs
-    // have faulted in a row and is created again for the next run.
+    // Bounds what accumulates in the subscription while runs keep faulting.
     private const int FaultsBeforeRelease = 3;
 
     private readonly ILogger _logger;
@@ -47,24 +43,21 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     protected abstract IInterceptorSubjectContext Context { get; }
 
     /// <summary>
-    /// Creates the processor that consumes <paramref name="subscription"/>, which the service owns and keeps
-    /// across restarts and retries; build it with the <see cref="ChangeQueueProcessor"/> constructor that takes a
-    /// subscription. A processor on any other subscription is rejected. Called from <see cref="StartAsync"/> on
-    /// the host start path and from the execution on a restart or retry, so it must not block or perform I/O; an
-    /// exception fails the start or, during execution, is logged and retried after <see cref="GetRetryDelay"/>.
-    /// The previous processor is disposed before this is called.
+    /// Creates the processor that consumes <paramref name="subscription"/>, which the service owns, using the
+    /// <see cref="ChangeQueueProcessor"/> constructor that takes a subscription; a processor on any other
+    /// subscription is rejected. Called from <see cref="StartAsync"/> and, after the previous processor is disposed,
+    /// on each restart or retry, so it must not block or perform I/O. An exception fails the start or, during
+    /// execution, is logged and retried after <see cref="GetRetryDelay"/>.
     /// </summary>
     protected abstract ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription);
 
     /// <summary>
-    /// Consumes the given processor until <paramref name="cancellationToken"/> is cancelled, which a stop and
-    /// <see cref="RequestRestart"/> both do; an <see cref="OperationCanceledException"/> thrown after that
-    /// cancellation counts as a return. Any other exception is logged and retried after <see cref="GetRetryDelay"/>.
-    /// The default drains the processor with <see cref="ChangeQueueProcessor.ProcessAsync"/> until the token is
-    /// cancelled. Override it to set up state before draining, tear it down after, or run work alongside it. The
-    /// processor is disposed when this returns. Returning before the cancellation leaves the service idle, without
-    /// a processor or a subscription, until a restart is requested or it stops. The service owns the processor;
-    /// implementations must not dispose it.
+    /// Consumes <paramref name="processor"/> until <paramref name="cancellationToken"/> is cancelled by a stop or
+    /// <see cref="RequestRestart"/>; an <see cref="OperationCanceledException"/> after that cancellation counts as a
+    /// return. Any other exception is logged and retried after <see cref="GetRetryDelay"/>. Returning before the
+    /// cancellation leaves the service idle, without a processor or a subscription, until a restart is requested or
+    /// it stops. The service owns the processor and disposes it when this returns; implementations must not dispose
+    /// it. The default drains it with <see cref="ChangeQueueProcessor.ProcessAsync"/>.
     /// </summary>
     protected virtual Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken) =>
         processor.ProcessAsync(cancellationToken);
@@ -72,7 +65,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <summary>
     /// Returns the delay before a new processor is created after <see cref="ProcessAsync"/> or
     /// <see cref="CreateProcessor"/> throws during execution, five seconds by default. Called after the failed
-    /// processor is disposed; the delay is waited unless a restart or stop comes first.
+    /// processor is disposed; a restart or stop ends the delay early.
     /// </summary>
     /// <returns>
     /// A nonnegative delay supported by <see cref="Task.Delay(TimeSpan, CancellationToken)"/>. A negative delay
@@ -81,16 +74,15 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     protected virtual TimeSpan GetRetryDelay(Exception exception) => TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Cancels the token given to <see cref="ProcessAsync"/>, disposes its processor and runs
-    /// <see cref="ProcessAsync"/> again with a new processor from <see cref="CreateProcessor"/>; a
-    /// <see cref="ProcessAsync"/> that has already returned is run again the same way. Requests made before the
-    /// restart begins coalesce into one, and a request made while the service is stopped is served by the next
-    /// start. A failure during the restart is logged and retried after <see cref="GetRetryDelay"/>.
+    /// Cancels the token given to <see cref="ProcessAsync"/>, or wakes the service if it has returned, and runs
+    /// <see cref="ProcessAsync"/> again with a new processor. Requests made before the restart begins coalesce into
+    /// one. A request made while the service is stopped has no further effect, since the next start creates a new
+    /// processor anyway. A failure during the restart is logged and retried after <see cref="GetRetryDelay"/>.
     /// </summary>
     protected void RequestRestart()
     {
-        // Full fence before the wake is read, mirroring the publish order in ExecuteAsync: a request that races
-        // the publish is then either seen by the flag check there or completes the published wake here.
+        // Full fence before the wake is read, paired with ExecuteAsync's publish then flag read: a racing request is
+        // seen by one of the two sides.
         Interlocked.Exchange(ref _restartRequested, 1);
         Volatile.Read(ref _restartWake)?.TrySetResult();
     }
@@ -98,15 +90,13 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <inheritdoc />
     public sealed override Task StartAsync(CancellationToken cancellationToken)
     {
-        // A request made while stopped is served by this fresh start.
         Interlocked.Exchange(ref _restartRequested, 0);
 
-        // Released before the next is created, so two subscriptions never overlap and a failed creation leaves none.
+        // Before the next is created, so a failed creation leaves no subscription.
         ReleaseStart();
 
-        // Not in ExecuteAsync: since .NET 10 it may run after StartAsync returns, and changes made in between
-        // would never reach the subscription. Every other writer stores null, so this overwrites nothing, and the
-        // dispatch in base.StartAsync orders it before the execution takes it.
+        // Not in ExecuteAsync: since .NET 10 it may run after StartAsync returns and would miss changes made in
+        // between.
         var subscription = Context.CreatePropertyChangeQueueSubscription();
         ChangeQueueProcessor processor;
         try
@@ -119,6 +109,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
             throw;
         }
 
+        // Must precede base.StartAsync, whose dispatch orders it before the execution takes it.
         Volatile.Write(ref _startProcessor, processor);
         try
         {
@@ -206,13 +197,13 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
 
                 if (retryDelay is null && !wake.Task.IsCompleted)
                 {
-                    // Idle until a restart: nothing would drain the subscription, so nothing may accumulate in it.
+                    // Idle: nothing drains the subscription, so it must not accumulate changes.
                     Release(ref subscription);
                 }
 
                 await WaitForRestartAsync(wake.Task, retryDelay, stoppingToken).ConfigureAwait(false);
 
-                // Consumed before the processor is created, so a request made from here on restarts once more.
+                // Cleared before the next processor is created, so a later request restarts again.
                 Interlocked.Exchange(ref _restartRequested, 0);
             }
         }
@@ -227,7 +218,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         var processor = CreateProcessor(subscription);
         if (!ReferenceEquals(processor.Subscription, subscription))
         {
-            // Nothing would drain the service's subscription, so it would grow without bound.
+            // Nothing would drain the service's subscription.
             processor.Dispose();
             throw new InvalidOperationException(
                 $"{nameof(CreateProcessor)} must build the processor on the subscription it is given.");
@@ -256,7 +247,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         }
         catch (OperationCanceledException) when (session.IsCancellationRequested)
         {
-            // The session was ended by a restart or stop; an implementation may report that by throwing.
+            // Ended by a restart or stop.
         }
     }
 
@@ -264,7 +255,6 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     {
         if (retryDelay is not { } delay)
         {
-            // A normal return stays idle until explicitly restarted; nothing would consume a new processor.
             await wake.ConfigureAwait(false);
             return;
         }
@@ -283,7 +273,7 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
         }
         finally
         {
-            // A stop can outrun the dispatch of the execution, and a graph detach stops without disposing.
+            // The execution may not have taken the processor yet, and a stop is not always followed by a dispose.
             ReleaseStart();
         }
     }
@@ -291,12 +281,11 @@ public abstract class ChangeQueueBackgroundService : BackgroundService
     /// <inheritdoc />
     public override void Dispose()
     {
-        // A start not followed by a stop leaves the processor here if the execution has not taken it yet.
         base.Dispose();
         ReleaseStart();
     }
 
-    // The processor left by a start that no execution took, together with the subscription it was built on.
+    // Releases the processor a start left that no execution took, with its subscription.
     private void ReleaseStart()
     {
         if (Interlocked.Exchange(ref _startProcessor, null) is { } processor)
