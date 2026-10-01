@@ -61,3 +61,31 @@ public class RecordingLogger : ILogger
 /// A <see cref="RecordingLogger"/> for code that takes an <see cref="ILogger{TCategoryName}"/>.
 /// </summary>
 public sealed class RecordingLogger<T> : RecordingLogger, ILogger<T>;
+
+/// <summary>
+/// Hands out the same <see cref="RecordingLogger"/> for every category, for code that creates its loggers through a provider.
+/// </summary>
+public sealed class RecordingLoggerProvider(RecordingLogger logger) : ILoggerProvider
+{
+    public ILogger CreateLogger(string categoryName) => logger;
+
+    public void Dispose()
+    {
+    }
+}
+
+/// <summary>
+/// Hands out the same <see cref="RecordingLogger"/> for every category, for code that resolves an <see cref="ILoggerFactory"/>.
+/// </summary>
+public sealed class RecordingLoggerFactory(RecordingLogger logger) : ILoggerFactory
+{
+    public ILogger CreateLogger(string categoryName) => logger;
+
+    public void AddProvider(ILoggerProvider provider)
+    {
+    }
+
+    public void Dispose()
+    {
+    }
+}
