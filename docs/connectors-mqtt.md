@@ -2,6 +2,8 @@
 
 The `Namotion.Interceptor.Mqtt` package provides integration between Namotion.Interceptor and MQTT (Message Queuing Telemetry Transport), enabling bidirectional synchronization between C# objects and MQTT brokers. It supports both client and server modes.
 
+Dependencies: [MQTTnet](https://github.com/dotnet/MQTTnet) (MIT)
+
 ## Key Features
 
 - Bidirectional synchronization between C# objects and MQTT topics

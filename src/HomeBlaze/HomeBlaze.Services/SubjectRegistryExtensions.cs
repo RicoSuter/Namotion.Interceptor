@@ -73,7 +73,7 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets the display name for a property (from StateMetadata or camelCase split).
+    /// Gets the display name for a property: its <see cref="StateMetadata"/> title, else the property name.
     /// </summary>
     public static string GetDisplayName(this RegisteredSubjectProperty property)
     {

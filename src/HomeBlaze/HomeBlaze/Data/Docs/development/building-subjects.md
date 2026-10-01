@@ -124,16 +124,25 @@ public enum StateUnit
     Lumen,             // 800 lm
     Lux,               // 500 lx
     Meter,             // 1.5 m
+    Kilometer,         // 12.3 km
     Millimeter,        // 10 mm
     MillimeterPerHour, // 5 mm/h
     Kilobyte,          // 1024 KB
     KilobytePerSecond, // 100 KB/s
     MegabitPerSecond,  // 100 Mbps
+    LiterPerHour,      // 50 L/h
     KilowattHour,      // 500 kWh
     Milliampere,       // 100 mA
-    LiterPerHour,      // 50 L/h
     Currency,          // $10.00
-    HexColor           // #FF0000
+    HexColor,          // #FF0000
+    MeterPerSecond,    // 3.2 m/s
+    Hectopascal,       // 1013 hPa
+    Degree,            // 270° (angles such as wind direction)
+    UvIndex,           // 5 UV
+    Byte,              // 512 B
+    Kelvin,            // 1.5 K (temperature differences)
+    Minute,            // 30 min
+    Hour               // 1234 h
 }
 ```
 

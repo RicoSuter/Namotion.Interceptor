@@ -153,6 +153,9 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     {
         if (TryGetWriteState(out var state))
         {
+            // Flag first: another sink can mark between the two reads, and a flag seen set must not pair
+            // with a revision read before the commit that preceded the mark.
+            publishedToAnySource = state.PublishedToAnySource;
             var nonSourceCommitRevision = Volatile.Read(ref state.LastNonSourceCommitRevision);
 
             // Each commit advances exactly one of the two, so the last of any kind is their maximum, and
@@ -162,7 +165,6 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
                 ? Math.Max(nonSourceCommitRevision, Volatile.Read(ref state.LastSourceCommitRevision))
                 : nonSourceCommitRevision;
 
-            publishedToAnySource = state.PublishedToAnySource;
             return true;
         }
 

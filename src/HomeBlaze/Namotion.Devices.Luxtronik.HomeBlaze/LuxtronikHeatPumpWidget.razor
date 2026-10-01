@@ -1,0 +1,71 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(LuxtronikHeatPump))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.HeatPump" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(HeatPump?.Title ?? "Luxtronik Heat Pump")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(HeatPump?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(HeatPump?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (HeatPump is not null)
+        {
+            <MudStack Row="true" Spacing="4" Wrap="Wrap.Wrap">
+                @Value("State", GetDisplayName(HeatPump.OperatingStatus.OperatingState))
+                @Value("Outside", Format(HeatPump.Temperatures.Outside.Temperature, "F1", "°C"))
+                @Value("Flow", Format(HeatPump.Temperatures.Flow.Temperature, "F1", "°C"))
+                @Value("Hot water", Format(HeatPump.HotWater.Temperature.Temperature, "F1", "°C"))
+                @Value("Electrical", Format(HeatPump.Energy.ElectricalPower, "F0", "W"))
+                @Value("Thermal", Format(HeatPump.Energy.ThermalPower, "F0", "W"))
+            </MudStack>
+
+            @if (HeatPump.StatusMessage is { } statusMessage)
+            {
+                <MudAlert Severity="@GetSeverity(HeatPump.Status)" Dense="true">@statusMessage</MudAlert>
+            }
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private LuxtronikHeatPump? HeatPump => Subject as LuxtronikHeatPump;
+
+    private static string? Format(decimal? value, string format, string unit) =>
+        value is null ? null : $"{value.Value.ToString(format)} {unit}";
+
+    // While running, the status message only reports a controller error number.
+    private static Severity GetSeverity(ServiceStatus status) =>
+        status is ServiceStatus.Running or ServiceStatus.Error ? Severity.Error : Severity.Info;
+
+    private static string? GetDisplayName(LuxtronikOperatingState? state) => state switch
+    {
+        null => null,
+        LuxtronikOperatingState.Heating => "Heating",
+        LuxtronikOperatingState.HotWater => "Hot water",
+        LuxtronikOperatingState.PoolOrSolar => "Pool or solar",
+        LuxtronikOperatingState.UtilityLockout => "Utility lockout",
+        LuxtronikOperatingState.Defrost => "Defrost",
+        LuxtronikOperatingState.NoRequest => "No request",
+        LuxtronikOperatingState.HeatingExternalSource => "Heating (external source)",
+        LuxtronikOperatingState.Cooling => "Cooling",
+        _ => state.ToString()
+    };
+
+    private static RenderFragment Value(string caption, string? value) =>
+        @<MudStack>
+            <MudText Typo="Typo.caption">@caption</MudText>
+            <MudText Typo="Typo.h5">@(value ?? "-")</MudText>
+        </MudStack>;
+}
