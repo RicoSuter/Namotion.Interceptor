@@ -199,6 +199,9 @@ public static class StateUnitExtensions
         StateUnit.Hectopascal => ("hPa", true),
         StateUnit.UvIndex => ("UV", true),
         StateUnit.HexColor => ("hex", true),
+        StateUnit.Kelvin => ("K", true),
+        StateUnit.Minute => ("min", true),
+        StateUnit.Hour => ("h", true),
         _ => null
     };
 

@@ -57,6 +57,9 @@ public class StateUnitExtensionsTests
     [InlineData(StateUnit.KilobytePerSecond, 500, "500 kB/s")]
     [InlineData(StateUnit.Volt, 230, "230 V")]
     [InlineData(StateUnit.DegreeCelsius, 23.5, "23.5°C")]
+    [InlineData(StateUnit.Kelvin, 1.5, "1.5 K")]
+    [InlineData(StateUnit.Minute, 30, "30 min")]
+    [InlineData(StateUnit.Hour, 1234, "1234 h")]
     public void WhenFormatWithUnit_ThenAutoScalesCorrectly(StateUnit unit, double value, string expected)
     {
         // Act

@@ -2,6 +2,8 @@
 
 The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket communication for synchronizing subject graphs between .NET servers and clients. It's optimized for industrial, digital twin, and IoT scenarios.
 
+Dependencies: [Microsoft.IO.RecyclableMemoryStream](https://github.com/microsoft/Microsoft.IO.RecyclableMemoryStream) (MIT)
+
 ## Key Features
 
 - Bidirectional synchronization between server and clients

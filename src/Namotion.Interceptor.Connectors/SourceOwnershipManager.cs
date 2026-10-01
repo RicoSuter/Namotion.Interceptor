@@ -82,13 +82,14 @@ public class SourceOwnershipManager : IDisposable
     /// <param name="property">The property to claim.</param>
     /// <returns>
     /// <c>true</c> if the property was successfully claimed or already owned by this source;
-    /// <c>false</c> if the property is already owned by a different source.
+    /// <c>false</c> if the property is already owned by a different source or this manager is disposed.
     /// </returns>
     public bool ClaimSource(PropertyReference property)
     {
         lock (_lock)
         {
-            if (!property.SetSource(_source))
+            // Checked under the lock: Dispose sets the flag before it takes the lock to release every claim.
+            if (Volatile.Read(ref _disposed) == 1 || !property.SetSource(_source))
             {
                 return false;
             }

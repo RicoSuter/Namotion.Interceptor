@@ -99,40 +99,42 @@
         }
 
         @* Child Collections *@
-        @foreach (var property in GetChildProperties())
+        @foreach (var section in GetChildSections())
         {
-            var children = GetVisibleChildren(property);
-            @if (children.Length == 1 && property.IsSubjectReference)
+            @if (section.CollectionProperty is null)
             {
-                @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-top: 0; padding-bottom: 0">
-                    @{
-                        var child = children[0];
+                @* Consecutive single child references share one list *@
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-bottom: 0">
+                    @foreach (var (property, child) in section.SingleChildren)
+                    {
                         var isSelected = child.Subject == SelectedChild;
                         var childCount = GetChildCount(child);
+
+                        <MudListItem Value="@child.Subject"
+                                     OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
+                                     Icon="@GetSubjectIcon(child.Subject)"
+                                     IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                     Class="@(isSelected ? "mud-primary-text" : "")">
+                            @if (isSelected)
+                            {
+                                <div style="float: right; line-height: 0">
+                                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
+                                </div>
+                            }
+                            <span style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
+                            @if (childCount > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
+                            }
+                        </MudListItem>
+                        <MudDivider />
                     }
-                    <MudListItem Value="@child.Subject"
-                                 OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
-                                 Icon="@GetSubjectIcon(child.Subject)"
-                                 IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
-                                 Class="@(isSelected ? "mud-primary-text" : "")">
-                        @if (isSelected)
-                        {
-                            <div style="float: right; line-height: 0">
-                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
-                            </div>
-                        }
-                        <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
-                        @if (childCount > 0)
-                        {
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
-                        }
-                    </MudListItem>
-                    <MudDivider />
                 </MudList>
             }
-            else if (children.Length >= 1)
+            else
             {
+                var property = section.CollectionProperty;
+                var children = section.CollectionChildren;
                 <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" HeaderClass="px-4">
                     <TitleContent>
                         @GetPropertyDisplayName(property)
@@ -156,10 +158,10 @@
                                             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
-                                    <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
+                                    <span style="word-break: break-word;">@property.GetChildDisplayName(child)</span>
                                     @if (childCount > 0)
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4">@childCount</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4 my-0">@childCount</MudChip>
                                     }
                                 </MudListItem>
                                 <MudDivider />
@@ -298,6 +300,38 @@
             .OrderBy(p => p.GetDisplayPosition());
     }
 
+    private List<ChildSection> GetChildSections()
+    {
+        var sections = new List<ChildSection>();
+        List<(RegisteredSubjectProperty, SubjectPropertyChild)>? singleChildren = null;
+        foreach (var property in GetChildProperties())
+        {
+            var children = GetVisibleChildren(property);
+            if (children.Length == 1 && property.IsSubjectReference)
+            {
+                if (singleChildren is null)
+                {
+                    singleChildren = [];
+                    sections.Add(new ChildSection(singleChildren, null, []));
+                }
+
+                singleChildren.Add((property, children[0]));
+            }
+            else if (children.Length >= 1)
+            {
+                singleChildren = null;
+                sections.Add(new ChildSection([], property, children));
+            }
+        }
+
+        return sections;
+    }
+
+    private sealed record ChildSection(
+        List<(RegisteredSubjectProperty Property, SubjectPropertyChild Child)> SingleChildren,
+        RegisteredSubjectProperty? CollectionProperty,
+        SubjectPropertyChild[] CollectionChildren);
+
     private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
     {
         return property.Children
@@ -377,15 +411,6 @@
     private string GetPropertyDisplayName(RegisteredSubjectProperty property)
     {
         return property.GetDisplayName();
-    }
-
-    private string GetSubjectDisplayName(SubjectPropertyChild child)
-    {
-        var subject = child.Subject;
-        if (subject is ITitleProvider titleProvider && !string.IsNullOrEmpty(titleProvider.Title))
-            return titleProvider.Title;
-
-        return subject?.ToString() ?? "n/a";
     }
 
     private int GetChildCount(SubjectPropertyChild child)

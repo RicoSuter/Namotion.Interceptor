@@ -1,6 +1,7 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.History.Sqlite.Tests;
 
@@ -361,7 +362,7 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         // rather than as a fault. It stays silent by design for now -- see the coverage-precision
         // follow-up -- so at least say so.
         var now = Base;
-        var logger = new CapturingLogger();
+        var logger = new RecordingLogger();
         using var store = NewStore(() => now, maxPendingSamples: 1, logger: logger);
 
         store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
@@ -384,26 +385,7 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         now = Base.AddSeconds(20);
         await store.FlushAsync(CancellationToken.None);
         Assert.NotEmpty(store.CoverageRanges);
-        Assert.Contains(logger.Information, message => message.Contains("recovered"));
-    }
-
-    private sealed class CapturingLogger : ILogger
-    {
-        public List<string> Errors { get; } = [];
-
-        public List<string> Information { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            var target = logLevel == LogLevel.Error ? Errors : Information;
-            target.Add(formatter(state, exception));
-        }
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Information && entry.Message.Contains("recovered"));
     }
 
     private SqliteHistoryStore NewStore(

@@ -22,6 +22,8 @@ using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
 using Namotion.Devices.Ecowitt;
 using Namotion.Devices.Ecowitt.HomeBlaze;
+using Namotion.Devices.Luxtronik;
+using Namotion.Devices.Luxtronik.HomeBlaze;
 using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
@@ -86,10 +88,12 @@ typeProvider
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
-    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject).Assembly) // HomeBlaze.History.InMemory
-    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)               // HomeBlaze.History.InMemory.Blazor
-    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)     // HomeBlaze.History.Sqlite
-    .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly);               // HomeBlaze.History.Sqlite.Blazor
+    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject).Assembly)   // HomeBlaze.History.InMemory
+    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)                        // HomeBlaze.History.InMemory.Blazor
+    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)       // HomeBlaze.History.Sqlite
+    .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
+    .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
+    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly);                                 // Namotion.Devices.Luxtronik.HomeBlaze
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
