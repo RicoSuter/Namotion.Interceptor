@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
+using System.Runtime.ExceptionServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
@@ -332,7 +333,22 @@ public partial class SqliteHistoryStoreSubject :
             // the two sessions' coverage merges into one range.
             _sessionCoverage.EndSession();
             await session.CancelAsync().ConfigureAwait(false);
-            await flushTask.ConfigureAwait(false);
+
+            // The teardown below must run even when the flush loop faulted, or the engine would stay open.
+            ExceptionDispatchInfo? flushFault = null;
+            try
+            {
+                await flushTask.ConfigureAwait(false);
+            }
+            catch (Exception exception) when (fault is null)
+            {
+                flushFault = ExceptionDispatchInfo.Capture(exception);
+                fault = exception;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "History flush loop faulted while the session was ending after a processing fault.");
+            }
 
             // Final flush on stop, restart or fault. The token is already cancelled, so a fresh bounded one
             // gives it a chance; on timeout the pending samples are lost, which the log below reports.
@@ -362,6 +378,9 @@ public partial class SqliteHistoryStoreSubject :
                 LastError = fault.Message;
                 Status = "Error";
             }
+
+            // Surfaces as the session's fault, so the service logs it and retries.
+            flushFault?.Throw();
         }
     }
 

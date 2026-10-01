@@ -269,8 +269,19 @@ public partial class InMemoryHistoryStoreSubject :
             // the clock forever.
             engine.EndCoverageSession(_sessionCoverage.EndSession());
             await session.CancelAsync().ConfigureAwait(false);
-            await sweepTask.ConfigureAwait(false);
-            Status = faulted ? "Error" : "Stopped";
+            try
+            {
+                await sweepTask.ConfigureAwait(false);
+            }
+            catch (Exception) when (!faulted)
+            {
+                faulted = true;
+                throw;
+            }
+            finally
+            {
+                Status = faulted ? "Error" : "Stopped";
+            }
         }
     }
 
