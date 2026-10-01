@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Modbus.Client;
 using System.Reflection;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices;
@@ -11,6 +10,7 @@ using Namotion.Devices.Luxtronik.Model;
 using Namotion.Devices.Luxtronik.Tests.Testing;
 using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
+using Namotion.Interceptor.Modbus.Client;
 
 namespace Namotion.Devices.Luxtronik.Tests;
 

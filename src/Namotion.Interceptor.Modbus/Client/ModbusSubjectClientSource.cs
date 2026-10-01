@@ -13,7 +13,6 @@ namespace Namotion.Interceptor.Modbus.Client;
 /// </summary>
 public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjectable, IAsyncDisposable
 {
-    private readonly IInterceptorSubject _subject;
     private readonly ModbusClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -30,7 +29,7 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
     {
         configuration.Validate();
 
-        _subject = subject;
+        RootSubject = subject;
         _configuration = configuration;
         _logger = logger;
         _ownership = new SourceOwnershipManager(this);
@@ -44,7 +43,7 @@ public sealed class ModbusSubjectClientSource : SubjectSourceBase, IFaultInjecta
     }
 
     /// <inheritdoc />
-    public override IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject { get; }
 
     /// <summary>
     /// Gets what this source reports about its connection and polling.

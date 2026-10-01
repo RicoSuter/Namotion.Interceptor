@@ -1,5 +1,5 @@
-using Namotion.Interceptor.Modbus.Client;
 using System.Buffers.Binary;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Modbus.Client.Transport;
 
 namespace Namotion.Interceptor.Modbus.Tests.Testing;

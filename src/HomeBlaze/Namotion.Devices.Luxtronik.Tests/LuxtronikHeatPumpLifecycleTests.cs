@@ -79,7 +79,8 @@ public class LuxtronikHeatPumpLifecycleTests
         await host.DisposeAsync();
 
         // Assert
-        Assert.Empty(logger.WarningsAndErrors);
+        Assert.Empty(logger.Warnings);
+        Assert.Empty(logger.Errors);
         Assert.Equal(ServiceStatus.Stopped, host.HeatPump.Status);
     }
 

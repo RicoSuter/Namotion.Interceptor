@@ -3,10 +3,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Modbus.Attributes;
-using Namotion.Interceptor.Modbus.Mapping;
 using Namotion.Interceptor.Modbus.Client.Polling;
+using Namotion.Interceptor.Modbus.Mapping;
 using Namotion.Interceptor.Modbus.Tests.Testing;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Modbus.Tests.Client.Polling;

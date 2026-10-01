@@ -1,4 +1,3 @@
-using Namotion.Interceptor.Modbus.Client;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using FluentModbus;
@@ -9,6 +8,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Monitoring;
 using Namotion.Interceptor.Modbus.Attributes;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Modbus.Tests.Testing;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;

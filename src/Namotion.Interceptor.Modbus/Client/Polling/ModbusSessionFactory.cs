@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.Modbus.Mapping;
 using Namotion.Interceptor.Modbus.Client.Transport;
+using Namotion.Interceptor.Modbus.Mapping;
 
 namespace Namotion.Interceptor.Modbus.Client.Polling;
 

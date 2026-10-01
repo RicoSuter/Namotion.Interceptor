@@ -1,9 +1,9 @@
-using Namotion.Interceptor.Modbus.Client;
 using System.Net;
 using System.Net.Sockets;
 using FluentModbus;
-using Namotion.Interceptor.Modbus.Tests.Testing;
+using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Modbus.Client.Transport;
+using Namotion.Interceptor.Modbus.Tests.Testing;
 
 namespace Namotion.Interceptor.Modbus.Tests.Client.Transport;
 
