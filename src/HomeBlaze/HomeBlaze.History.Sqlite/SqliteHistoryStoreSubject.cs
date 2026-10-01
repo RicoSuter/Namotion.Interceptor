@@ -213,12 +213,19 @@ public partial class SqliteHistoryStoreSubject :
 
     /// <summary>
     /// Test-only hook that forces the engine to flush its pending samples immediately, so queued
-    /// changes become queryable without waiting for the interval flush. Returns a completed task
-    /// (no-op) before the engine is built.
+    /// changes become queryable without waiting for the interval flush. A no-op before the engine is
+    /// built and when the engine it found was disposed by its session's end in the meantime.
     /// </summary>
-    internal Task FlushNowAsync(CancellationToken cancellationToken = default)
+    internal async Task FlushNowAsync(CancellationToken cancellationToken = default)
     {
-        return Volatile.Read(ref _engine)?.FlushAsync(cancellationToken) ?? Task.CompletedTask;
+        try
+        {
+            await (Volatile.Read(ref _engine)?.FlushAsync(cancellationToken) ?? Task.CompletedTask).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // A poll across a session end; the next one finds the next engine or none.
+        }
     }
 
     /// <summary>
@@ -313,12 +320,10 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The subscription precedes the coverage session, so no change can fall inside claimed coverage
-        // without reaching the engine.
-        var recorder = new HistoryChangeRecorder(engine, resolver);
-        _recorder = recorder;
-
+        // The subscription precedes the coverage session, which precedes recording, so no change can fall
+        // inside claimed coverage without reaching the engine, and none reaches it before the session began.
         engine.BeginCoverageSession(_coverageStartedAt);
+        _recorder = new HistoryChangeRecorder(engine, resolver);
         Volatile.Write(ref _engine, engine);
 
         _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
@@ -345,13 +350,13 @@ public partial class SqliteHistoryStoreSubject :
         }
         finally
         {
+            // Before the waits below, where a flush in progress can take seconds: the processor has stopped
+            // consuming, so every later change waits in the subscription for the next session, whose coverage
+            // starts here. Before the final flush, so that a successful flush reaches past this instant and
+            // the two sessions' coverage merges into one range.
+            _coverageStartedAt = DateTimeOffset.UtcNow;
             await session.CancelAsync().ConfigureAwait(false);
             await flushTask.ConfigureAwait(false);
-
-            // The processor has stopped consuming, so every later change waits in the subscription for the
-            // next session, whose coverage starts here. Before the final flush, so that a successful flush
-            // reaches past this instant and the two sessions' coverage merges into one range.
-            _coverageStartedAt = DateTimeOffset.UtcNow;
 
             // Final flush on stop, restart or fault. The token is already cancelled, so a fresh bounded one
             // gives it a chance; on timeout the pending samples are lost, which the log below reports.

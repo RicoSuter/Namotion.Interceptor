@@ -60,6 +60,22 @@ public sealed class SqliteHistoryStoreCoreRawTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenDisposed_ThenFlushAsyncThrowsInsteadOfReopeningTheFiles()
+    {
+        // Arrange: a sample pending in a partition no file exists for yet.
+        var core = NewCore(Base.AddSeconds(10));
+        core.Record("/a/Value", Base.AddSeconds(1), 1.5d, typeof(double));
+        core.Dispose();
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => core.FlushAsync(CancellationToken.None));
+
+        // Assert
+        Assert.IsType<ObjectDisposedException>(exception);
+        Assert.Equal(["metadata.db"], Directory.EnumerateFiles(_directory, "*.db").Select(file => Path.GetFileName(file)).ToArray());
+    }
+
+    [Fact]
     public async Task WhenNotYetFlushed_ThenQueryReturnsEmpty()
     {
         // Arrange - flushed data only; pending samples are InMemory's responsibility at the live edge

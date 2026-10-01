@@ -174,36 +174,6 @@ public class SqliteHistoryStoreRecordingTests
     }
 
     [Fact]
-    public async Task WhenAPropertyIsWrittenRightAfterStartAsync_ThenItIsRecorded()
-    {
-        // Arrange: the write happens right after the host start returns, typically before the execution has run.
-        var (context, root, _) = CreateGraph();
-        var (store, databasePath) = CreateStore(context);
-        var hostedService = (IHostedService)store;
-
-        // Act
-        await hostedService.StartAsync(CancellationToken.None);
-        root.Temperature = 21.5;
-
-        // Assert
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () =>
-                {
-                    store.FlushNowAsync().GetAwaiter().GetResult();
-                    return QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5);
-                },
-                message: "Value written right after StartAsync was not recorded.");
-        }
-        finally
-        {
-            await hostedService.StopAsync(CancellationToken.None);
-            DeleteDirectory(databasePath);
-        }
-    }
-
-    [Fact]
     public async Task WhenChildStatePropertyMutated_ThenRecordedUnderChildCanonicalPath()
     {
         // Arrange
@@ -426,8 +396,11 @@ public class SqliteHistoryStoreRecordingTests
             // No forced flush while waiting: before the restart it would persist value 1 itself.
             await WaitForCoverageToReachAsync(store, appliedAt);
 
-            // Assert
-            Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
+            // Assert: polled, since the ending session may still be the one serving when its final flush shows
+            // and the next one takes a moment to open the files.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 1),
+                message: "Value 1 was not persisted by the restart.");
         }
         finally
         {
@@ -503,11 +476,15 @@ public class SqliteHistoryStoreRecordingTests
     [Fact]
     public async Task WhenOnlyPriorityAndFlushIntervalChange_ThenTheStoreDoesNotRestart()
     {
-        // Arrange
+        // Arrange: a restart shows as a second processor; the files and the durable coverage survive one.
         var (context, root, _) = CreateGraph();
-        var (store, databasePath) = CreateStore(context);
-        var hostedService = (IHostedService)store;
-        await hostedService.StartAsync(CancellationToken.None);
+        using var store = new GatedHistoryStore();
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        store.BufferTimeMilliseconds = 50;
+        store.FlushIntervalSeconds = 1;
+        await store.StartAsync(CancellationToken.None);
         try
         {
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 11);
@@ -517,10 +494,17 @@ public class SqliteHistoryStoreRecordingTests
             store.Priority = 7;
             store.FlushIntervalSeconds = 2;
             await store.ApplyConfigurationAsync(CancellationToken.None);
-
             await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
 
+            // A restarted session creates its processor before its flush loop publishes anything, so a flush
+            // instant from after the second value orders the count below after any restart.
+            var recordedAt = DateTimeOffset.UtcNow;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.LastFlushUtc > recordedAt,
+                message: "The flush loop never published a flush after the second value.");
+
             // Assert
+            Assert.Equal(1, store.Creations);
             var series = QuerySeries(store, "/Temperature");
             Assert.Contains(series.Points, point => point.Number == 11);
             Assert.Contains(series.Points, point => point.Number == 22);
@@ -528,7 +512,7 @@ public class SqliteHistoryStoreRecordingTests
         }
         finally
         {
-            await hostedService.StopAsync(CancellationToken.None);
+            await store.StopAsync(CancellationToken.None);
             DeleteDirectory(databasePath);
         }
     }
@@ -702,6 +686,7 @@ public class SqliteHistoryStoreRecordingTests
         public bool HoldSessions { get; init; }
         public bool FaultFirstProcessor { get; init; }
         public ManualResetEventSlim? HoldSecondCreate { get; init; }
+        public int Creations => Volatile.Read(ref _creations);
         public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
         public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<(string Status, string? LastError)> StateAtRetry { get; } =

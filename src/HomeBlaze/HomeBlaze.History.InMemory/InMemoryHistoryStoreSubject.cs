@@ -260,12 +260,10 @@ public partial class InMemoryHistoryStoreSubject :
             maxJsonSize: settings.MaxJsonSize,
             getUtcNow: () => DateTimeOffset.UtcNow);
 
-        // The subscription precedes the coverage session, so no change can fall inside claimed coverage
-        // without reaching the engine.
-        var recorder = new HistoryChangeRecorder(engine, resolver);
-        _recorder = recorder;
-
+        // The subscription precedes the coverage session, which precedes recording, so no change can fall
+        // inside claimed coverage without reaching the engine, and none reaches it before the session began.
         engine.BeginCoverageSession(_coverageStartedAt);
+        _recorder = new HistoryChangeRecorder(engine, resolver);
         Volatile.Write(ref _engine, engine);
 
         Status = "Running";
@@ -289,14 +287,14 @@ public partial class InMemoryHistoryStoreSubject :
         }
         finally
         {
-            await session.CancelAsync().ConfigureAwait(false);
-            await sweepTask.ConfigureAwait(false);
-
-            // The processor has stopped consuming, so every later change waits in the subscription for the
-            // next session, whose coverage starts where this one ends. The engine stays queryable, but it is
-            // no longer recording, so its coverage must end here rather than following the clock forever.
+            // Before the waits below: the processor has stopped consuming, so every later change waits in the
+            // subscription for the next session, whose coverage starts where this one ends. The engine stays
+            // queryable, but it is no longer recording, so its coverage must end here rather than following
+            // the clock forever.
             _coverageStartedAt = DateTimeOffset.UtcNow;
             engine.EndCoverageSession(_coverageStartedAt);
+            await session.CancelAsync().ConfigureAwait(false);
+            await sweepTask.ConfigureAwait(false);
             Status = faulted ? "Error" : "Stopped";
         }
     }

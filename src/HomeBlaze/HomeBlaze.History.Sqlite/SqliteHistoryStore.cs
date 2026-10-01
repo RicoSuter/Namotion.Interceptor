@@ -82,8 +82,8 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private readonly object _connectionLock = new();
     private readonly Dictionary<string, SqliteConnection> _connections = new(StringComparer.Ordinal);
 
-    // Guarded by _connectionLock. A read that reached the engine before its owner dropped it must not
-    // reopen connections after Dispose, because nothing would close them again.
+    // Guarded by _connectionLock. A read or flush that reached the engine before its owner dropped it must
+    // not reopen connections after Dispose, because nothing would close them again.
     private bool _disposed;
 
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
@@ -852,6 +852,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SqliteHistoryStore));
+            }
+
             if (_connections.TryGetValue(key, out var existing))
             {
                 return existing;
@@ -911,6 +916,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SqliteHistoryStore));
+            }
+
             if (_connections.TryGetValue(MetadataKey, out var existing))
             {
                 return existing;
