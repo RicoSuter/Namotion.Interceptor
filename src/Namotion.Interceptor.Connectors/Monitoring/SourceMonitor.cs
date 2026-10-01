@@ -253,7 +253,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     /// nothing, and the release takes _lock in the order this type already establishes through
     /// <see cref="HandleLifecycleChange"/>.
     /// </remarks>
-    public IDisposable DeferWaitCompletion()
+    public IDisposable DeferCompletion()
     {
         // Deliberately does not re-evaluate. The increment happens first, so IsBranchSynchronized
         // returns false on its registration check for every wait before it walks anything: a pass

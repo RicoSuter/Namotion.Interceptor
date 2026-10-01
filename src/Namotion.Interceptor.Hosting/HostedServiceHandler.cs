@@ -507,7 +507,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         {
             try
             {
-                holds[taken] = deferrer.DeferWaitCompletion();
+                holds[taken] = deferrer.DeferCompletion();
                 taken++;
             }
             catch (Exception exception)

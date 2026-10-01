@@ -190,7 +190,7 @@ public class NestedAttachTests
     public async Task WhenADeferrerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndEveryHoldIsReleased()
     {
         // Arrange - the one shape that really does re-enter AttachSubject. The handler calls
-        // DeferWaitCompletion synchronously from inside TryTakeOwnershipAndStart, which is inside the
+        // DeferCompletion synchronously from inside TryTakeOwnershipAndStart, which is inside the
         // container's own AttachSubject, so a deferrer that assigns the child raises the child's
         // context attach from there. The child's whole attach, its liveness write, its ownership take
         // and its appended start, therefore runs before the container has taken its own target.

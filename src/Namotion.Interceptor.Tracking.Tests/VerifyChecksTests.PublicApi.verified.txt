@@ -105,7 +105,7 @@ namespace Namotion.Interceptor.Tracking
 {
     public interface IStartupCompletionDeferrer
     {
-        System.IDisposable DeferWaitCompletion();
+        System.IDisposable DeferCompletion();
     }
     public static class InterceptorSubjectContextExtensions
     {

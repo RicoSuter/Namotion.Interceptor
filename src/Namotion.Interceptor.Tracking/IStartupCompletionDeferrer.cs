@@ -31,5 +31,5 @@ public interface IStartupCompletionDeferrer
     /// <summary>
     /// Holds completion open until the returned handle is disposed.
     /// </summary>
-    IDisposable DeferWaitCompletion();
+    IDisposable DeferCompletion();
 }

@@ -22,7 +22,7 @@ public sealed class CallbackStartupDeferrer : IStartupCompletionDeferrer
     /// <summary>Holds taken so far, which tells "released again" apart from "never taken".</summary>
     public int Taken => Volatile.Read(ref _taken);
 
-    public IDisposable DeferWaitCompletion()
+    public IDisposable DeferCompletion()
     {
         Interlocked.Increment(ref _outstanding);
         Interlocked.Increment(ref _taken);
