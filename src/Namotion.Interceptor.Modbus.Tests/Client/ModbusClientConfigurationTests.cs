@@ -29,10 +29,10 @@ public class ModbusClientConfigurationTests
         new ModbusClientConfiguration { Host = "host", RequestTimeout = TimeSpan.Zero },
         new ModbusClientConfiguration { Host = "host", RetryTime = TimeSpan.Zero },
         new ModbusClientConfiguration { Host = "host", BufferTime = TimeSpan.FromMilliseconds(-1) },
-        new ModbusClientConfiguration { Host = "host", PollingInterval = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1) },
-        new ModbusClientConfiguration { Host = "host", RequestTimeout = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1) },
-        new ModbusClientConfiguration { Host = "host", RetryTime = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1) },
-        new ModbusClientConfiguration { Host = "host", BufferTime = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1) },
+        new ModbusClientConfiguration { Host = "host", PollingInterval = TimeSpan.FromHours(1) + TimeSpan.FromTicks(1) },
+        new ModbusClientConfiguration { Host = "host", RequestTimeout = TimeSpan.FromHours(1) + TimeSpan.FromTicks(1) },
+        new ModbusClientConfiguration { Host = "host", RetryTime = TimeSpan.FromHours(1) + TimeSpan.FromTicks(1) },
+        new ModbusClientConfiguration { Host = "host", BufferTime = TimeSpan.FromHours(1) + TimeSpan.FromTicks(1) },
         new ModbusClientConfiguration { Host = "host", MaximumRegisterGap = -1 },
         new ModbusClientConfiguration { Host = "host", MaximumRegisterGap = 125 },
     };
@@ -41,7 +41,7 @@ public class ModbusClientConfigurationTests
     public void WhenDelaysAreAtTheirLimits_ThenValidationPasses()
     {
         // Arrange
-        var maximumDelay = TimeSpan.FromMinutes(10);
+        var maximumDelay = TimeSpan.FromHours(1);
         var configuration = new ModbusClientConfiguration
         {
             Host = "host",
