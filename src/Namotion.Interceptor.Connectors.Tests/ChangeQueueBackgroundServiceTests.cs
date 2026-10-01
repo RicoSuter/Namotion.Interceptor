@@ -94,6 +94,30 @@ public class ChangeQueueBackgroundServiceTests
     }
 
     [Fact]
+    public async Task WhenDisposedDuringProcessing_ThenTheExecutionEndsAndReleasesTheSubscription()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TestTimeout);
+        var context = CreateContext();
+        var interceptor = context.GetService<PropertyChangeInterceptor>();
+        var service = new TestService(context);
+        await service.StartAsync(CancellationToken.None);
+        var session = await service.Sessions.Reader.ReadAsync(timeout.Token);
+
+        // Act
+        service.Dispose();
+        await service.ExecuteTask!.WaitAsync(timeout.Token);
+
+        // Assert
+        Assert.True(session.Token.IsCancellationRequested);
+        Assert.True(service.ExecuteTask.IsCompletedSuccessfully);
+        Assert.True(interceptor.IsIdle);
+        Assert.Same(session.Processor, Assert.Single(service.Created));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => session.Processor.ProcessAsync(CancellationToken.None));
+        Assert.False(service.Failures.Reader.TryRead(out _));
+    }
+
+    [Fact]
     public async Task WhenStartedTwiceWithoutExecution_ThenTheFirstProcessorIsDisposed()
     {
         // Arrange
