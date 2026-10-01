@@ -308,8 +308,8 @@ public partial class SqliteHistoryStoreSubject :
         LastError = null;
         Status = "Running";
 
-        // The flush loop ends with the session, so a processing fault surfaces to the service's retry
-        // instead of waiting behind a loop that only a stop or restart would end.
+        // The flush loop ends with the session, so a processing fault reaches the service's retry without
+        // waiting for a stop or restart.
         using var session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var flushTask = RunFlushLoopAsync(engine, session.Token);
         Exception? fault = null;
@@ -327,10 +327,8 @@ public partial class SqliteHistoryStoreSubject :
         }
         finally
         {
-            // Before the waits below, where a flush in progress can take seconds: the processor has stopped
-            // consuming, so every later change waits in the subscription for the next session, whose coverage
-            // starts here. Before the final flush, so that a successful flush reaches past this instant and
-            // the two sessions' coverage merges into one range.
+            // Before the waits below, see EndSession, and before the final flush, so a successful flush reaches
+            // past this instant and the two sessions' coverage merges into one range.
             _sessionCoverage.EndSession();
             await session.CancelAsync().ConfigureAwait(false);
 
@@ -486,9 +484,8 @@ public partial class SqliteHistoryStoreSubject :
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Only a changed start-time setting restarts; the restart persists pending samples first. Under the
-        // lock CreateProcessor holds while it reads and publishes, so an apply racing a restart either sees
-        // the settings that restart read or is read by it; outside it, a revert could compare against the
-        // stale settings and be lost.
+        // lock CreateProcessor reads and publishes the settings in, or a revert racing a restart could compare
+        // against stale settings and be lost.
         lock (_settingsLock)
         {
             if (_settings is { } started && started != ReadSettings())

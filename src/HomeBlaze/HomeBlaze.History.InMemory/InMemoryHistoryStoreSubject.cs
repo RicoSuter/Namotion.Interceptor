@@ -244,8 +244,8 @@ public partial class InMemoryHistoryStoreSubject :
 
         Status = "Running";
 
-        // The sweep loop ends with the session, so a processing fault surfaces to the service's retry
-        // instead of waiting behind a loop that only a stop or restart would end.
+        // The sweep loop ends with the session, so a processing fault reaches the service's retry without
+        // waiting for a stop or restart.
         using var session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var sweepTask = RunSweepLoopAsync(engine, session.Token);
         var faulted = false;
@@ -263,10 +263,8 @@ public partial class InMemoryHistoryStoreSubject :
         }
         finally
         {
-            // Before the waits below: the processor has stopped consuming, so every later change waits in the
-            // subscription for the next session, whose coverage starts where this one ends. The engine stays
-            // queryable, but it is no longer recording, so its coverage must end here rather than following
-            // the clock forever.
+            // Before the waits below, see EndSession. The engine stays queryable but no longer records, so its
+            // coverage must end here rather than follow the clock.
             engine.EndCoverageSession(_sessionCoverage.EndSession());
             await session.CancelAsync().ConfigureAwait(false);
             try
@@ -362,9 +360,8 @@ public partial class InMemoryHistoryStoreSubject :
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // A restart discards the samples held in memory, so only a changed start-time setting restarts. Under
-        // the lock CreateProcessor holds while it reads and publishes, so an apply racing a restart either sees
-        // the settings that restart read or is read by it; outside it, a revert could compare against the
-        // stale settings and be lost.
+        // the lock CreateProcessor reads and publishes the settings in, or a revert racing a restart could
+        // compare against stale settings and be lost.
         lock (_settingsLock)
         {
             if (_settings is { } started && started != ReadSettings())
