@@ -153,17 +153,39 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    // CS1573 asks for a tag per parameter once one is present; the others are inherited below, which the
-    // compiler does not expand.
-#pragma warning disable CS1573
-    /// <inheritdoc cref="ChangeQueueProcessor(object, IInterceptorSubjectContext, Func{PropertyReference, bool}, Func{ReadOnlyMemory{SubjectPropertyChange}, CancellationToken, ValueTask}, ChangeDeliveryRule, TimeSpan?, int?, ILogger, Action{long})" path="/param[@name!='context']|/exception"/>
     /// <summary>
     /// Initializes the processor on a subscription the caller owns and keeps. The processor is the
     /// subscription's only consumer while it runs.
     /// </summary>
-    /// <param name="subscription">The subscription to consume. <see cref="Dispose"/> does not dispose it, so it
-    /// can outlive the processor and be handed to the next one, which then delivers the changes queued in
-    /// between.</param>
+    /// <param name="source">Source to ignore (to prevent update loops).</param>
+    /// <param name="subscription">The subscription to consume. The caller owns it: <see cref="Dispose"/> does not
+    /// dispose it, so it can outlive the processor and be handed to the next one, which then delivers the changes
+    /// queued in between.</param>
+    /// <param name="propertyFilter">Filter to determine if a property change should be included.
+    /// The <see cref="PropertyReference"/> may not have a registered property (e.g., when the subject
+    /// is momentarily unregistered due to a concurrent structural mutation). Callers should handle
+    /// this case explicitly, typically by resolving via <c>TryGetRegisteredProperty()</c> and
+    /// returning <c>false</c> when null.</param>
+    /// <param name="writeHandler">Handler to write batched changes.</param>
+    /// <param name="deliveryRule">Which commits may supersede a change this processor is about to
+    /// write; see <see cref="ChangeDeliveryRule"/> for the condition that decides it. Deliberately
+    /// has no default: picking the wrong one is silent and its damage is permanent, so every connector
+    /// states which it is.</param>
+    /// <param name="bufferTime">Time to buffer changes before flushing.</param>
+    /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
+    /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
+    /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
+    /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="dropHandler">Optional handler invoked when bounded-queue overflow, an ordinary
+    /// write failure, or terminal delivery closure drops changes. Terminal closure reporting may be
+    /// dispatched asynchronously. Use this to report the count to queue diagnostics without adding
+    /// work to successful enqueue or dequeue operations.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
+    /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
+    /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
+    /// <paramref name="maxQueueDepth"/> is zero or negative and <paramref name="bufferTime"/> is
+    /// greater than zero, since a bound has to leave room for at least one change.</exception>
     public ChangeQueueProcessor(
         object? source,
         PropertyChangeQueueSubscription subscription,
@@ -179,7 +201,6 @@ public class ChangeQueueProcessor : IDisposable
             writeHandlerOwnsChanges: false, dropHandler)
     {
     }
-#pragma warning restore CS1573
 
     /// <summary>
     /// Initializes the processor with an externally owned subscription and the connector-internal delivery
