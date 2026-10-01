@@ -51,6 +51,7 @@ Per-device documentation and setup guides.
 
 - [Ecowitt](devices/Ecowitt.md) — Ecowitt weather station gateways (GW1000/GW2000 family)
 - [GPIO](devices/Gpio.md) — Raspberry Pi / Linux GPIO with optional MCP3008 and ADS1115 ADCs
+- [Luxtronik](devices/Luxtronik.md): Luxtronik 2.1 heat pumps (Alpha Innotec, Novelan) via the Smart Home Interface, read only
 - [myStrom](devices/MyStrom.md) — myStrom WiFi switches with power metering
 - [Philips Hue](devices/PhilipsHue.md) — Hue Bridge: lights, rooms, motion and button sensors
 - [Shelly](devices/Shelly.md) — Shelly Gen2+ devices via the RPC API

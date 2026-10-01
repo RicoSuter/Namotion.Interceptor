@@ -14,6 +14,7 @@ In practice, sources act as network clients and servers act as network servers, 
 - [WebSocket](connectors-websocket.md) - Bidirectional WebSocket protocol for real-time synchronization
 - [MQTT](connectors-mqtt.md) - MQTT client/server integration for IoT scenarios
 - [OPC UA](connectors-opcua.md) - OPC UA client/server integration for industrial automation ([Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md) | [Mapping](connectors-opcua-mapping.md))
+- [Modbus](connectors-modbus.md) - Read-only Modbus TCP client that polls device registers
 - [Subject Updates](connectors-subject-updates.md) - Wire format for serializing subject state
 - [Source Monitoring](connectors-monitoring.md) - Synchronization state, waits, and the source event stream
 
@@ -23,7 +24,7 @@ A **source** represents an external authoritative system where the data originat
 
 **Examples**: OPC UA client connecting to a PLC, MQTT client subscribing to a broker, database client, REST API consumer
 
-**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens initially by scanning the subject graph during startup, and dynamically when the model changes structurally (subjects attached or detached via lifecycle events). Dynamic ownership changes require the external system to support adding and removing subscriptions at runtime. You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
+**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens by scanning the subject graph during startup, and ownership is released when a subject is detached. How a source follows subjects attached at runtime is described in [Structural Changes](#structural-changes). You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
 
 ### Data Flow
 
@@ -205,6 +206,18 @@ The cost is that a stop can block on an unreachable endpoint. Final delivery and
 
 The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own. At final stop, every write still owned when that happens is counted as locally unconfirmed; the remote side may already have accepted it or may still accept it, so teardown delivery is at least once.
 
+### Structural Changes
+
+A **structural property** holds child subjects: a subject reference, a collection or a dictionary of subjects (`RegisteredSubjectProperty.CanContainSubjects`). A **structural change** is a write to one, which attaches or detaches subjects. A source follows structural changes through the same path as values:
+
+- **Claim structural properties.** A source claims the structural properties of the subjects it binds, next to their value properties, so their changes reach `WriteChangesAsync` through the change queue. A subtree bound later is claimed the same way, structural properties included.
+- **Handle both kinds in `WriteChangesAsync`.** A batch can mix structural and value changes and keeps their order, so a new subject's structure can be sent before its values. The source checks `CanContainSubjects` per change. For a structural change it binds the attached subtree and unbinds the detached one, and sends the change when the protocol can create or delete remote nodes. It reads the children with `GetCurrentValue` and compares them with what it has bound, rather than using `GetOldValue` and `GetNewValue`: deliveries can arrive out of commit order, and merging and supersession combine or drop the changes in between. A source that cannot send structure only follows it and reports success; it never fails or warns about a structural change because it cannot write it.
+- **Authority is the same as for values.** For a source the remote side is authoritative: a local structural change is a request, and the structure applied by the next load or notification wins. For a server the local model is authoritative.
+- **Releasing stays synchronous.** `SourceOwnershipManager` releases the claims of a detaching subject while it detaches, before its change reaches the queue, so a source never writes into a removed subject.
+- **Identity is per connector.** How a remote node, topic or path maps to a subject instance is the protocol's decision. [Subject Updates](connectors-subject-updates.md) describes the path-based mapping for protocols without an identity of their own.
+
+Following structure requires the external system to support adding and removing subscriptions at runtime. A source whose remote structure is fixed for a session can bind on connect instead and restart when its structure has to change. Whether a built-in connector follows structural changes yet is stated in its own documentation.
+
 ### Monitoring Synchronization State
 
 Every source reports whether it is connecting, synchronized, or stopped, through a per-tree registry, a typed event stream, and an awaitable wait. Add `WithSourceMonitoring()` to the context recipe to enable it:
@@ -301,7 +314,7 @@ The `SourceMetrics` instance is the writable side and stays private to the sourc
 
 A direct source may register `ClaimedPropertyCount`; registering it is required only when the source must expose a non-null ownership count. A registered gauge can measure zero, while an unregistered gauge remains `null`. A direct source must register all queue gauges it owns: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
 
-Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the terminal handling of any liveness the derived source has published. **Publishing liveness is the derived class's job**: the base never calls `MarkOperational()` or `MarkNotOperational()`, because each protocol becomes usable or unavailable at different points and those points are what `IsOperational` means for that connector. Calling either method opts the source into liveness reporting. A simple source that calls neither exposes `IsOperational == null` for as long as it runs, while its `State` can still reach `Synchronized`, and `false` once it stops. The three in-tree clients show where to put the calls: the MQTT client reports serving once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each reports the explicit down value from the path that detects the loss.
+Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the terminal handling of any liveness the derived source has published. **Publishing liveness is the derived class's job**: the base never calls `MarkOperational()` or `MarkNotOperational()`, because each protocol becomes usable or unavailable at different points and those points are what `IsOperational` means for that connector. Calling either method opts the source into liveness reporting. A simple source that calls neither exposes `IsOperational == null` for as long as it runs, while its `State` can still reach `Synchronized`, and `false` once it stops. Call `MarkOperational()` where the protocol becomes usable and `MarkNotOperational()` from the path that detects the loss; each connector's page states where that is for it.
 
 `StateChangeTime` and `LastSynchronizedAt` are both required, and neither can answer the other's question. `StateChangeTime` moves on every transition, so read with `State` it says how long the current state has lasted: `Synchronizing` plus T reads as stale since T. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it says whether a good period ever began, and it cannot say when synchronization was lost.
 
@@ -420,7 +433,7 @@ builder.Services.AddMqttSubjectClientSource<Sensor>(
 
 #### BackgroundTaskLifetime
 
-`BackgroundTaskLifetime` manages a background task tied to the listen lifetime. It creates a linked `CancellationTokenSource`, spawns the task, and on disposal cancels the token, awaits the task, and then invokes an optional cleanup callback. All built-in sources (OPC UA, MQTT, WebSocket) use it for their monitor/health-check loops.
+`BackgroundTaskLifetime` manages a background task tied to the listen lifetime. It creates a linked `CancellationTokenSource`, spawns the task, and on disposal cancels the token, awaits the task, and then invokes an optional cleanup callback. All built-in sources (OPC UA, MQTT, WebSocket, Modbus) use it for their monitor, health-check or poll loops.
 
 ```csharp
 return BackgroundTaskLifetime.Start(
@@ -457,7 +470,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### SourceOwnershipManager
 
-Sources claim ownership of properties in two phases: initially inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and dynamically at runtime when subjects are attached to or detached from the object graph. The `SourceOwnershipManager` class simplifies this by handling:
+Sources claim ownership of properties inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and for subtrees bound later when they follow [structural changes](#structural-changes). The `SourceOwnershipManager` class simplifies this by handling:
 - Property ownership tracking (which properties this source is responsible for)
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
@@ -578,6 +591,7 @@ A server implementation typically handles:
 
 - **Starting the protocol server**: bind to a port, accept connections, restart on failure
 - **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Where in startup the processor is created decides what a client can miss: the OPC UA server creates it before the protocol server starts, so changes made during startup are captured, while the MQTT and WebSocket servers create it once theirs is already listening. Of the changes that are captured, those a later local commit superseded are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
+- **Publishing structural changes**: a server's change queue delivers [structural changes](#structural-changes) in order with values when its mapping includes the structural property. The local model is authoritative, so the server adds or removes what it exposes for the attached or detached subjects
 - **Handling inbound writes**: receive write requests from external clients and apply them to the local model (typically via `SetValueFromSource()` to prevent echo loops)
 - **Lifecycle cleanup**: release caches and subscriptions when subjects are detached from the object graph
 
@@ -939,7 +953,7 @@ What a server author must implement:
 
 A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
 
-A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and runs each restart-loop iteration through `RunAttemptAsync`, which gives the iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. `InjectFaultAsync` kills through `ForceKillCurrentAttemptAsync`. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [MQTT server](../src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServer.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), [WebSocket server](../src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectServer.cs) and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) all take that route. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
+A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and runs each restart-loop iteration through `RunAttemptAsync`, which gives the iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. `InjectFaultAsync` kills through `ForceKillCurrentAttemptAsync`. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [MQTT server](../src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServer.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), [WebSocket server](../src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectServer.cs) and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) all take that route. The [Modbus client](../src/Namotion.Interceptor.Modbus/Client/ModbusSubjectClientSource.cs) takes it too, although the Connector Tester has no Modbus profile yet. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
 
 The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
 

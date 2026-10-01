@@ -790,7 +790,7 @@ public class OpcUaSubjectLoaderTests
     [Fact]
     public async Task WhenAttributeAlreadyRegisteredByExternalSource_ThenDynamicAttributeIsSkippedWithoutCrash()
     {
-        // Arrange: simulate the HomeBlaze ServerStatus@State crash. A lifecycle handler from
+        // Arrange: simulate the ServerStatus@State duplicate-key crash. A lifecycle handler from
         // another source registers a registry attribute (here: "State") on a property *before*
         // the OPC UA loader browses the server. The browse then returns a same-named dynamic
         // Variable child, which the loader's second pass would normally try to AddAttribute,
