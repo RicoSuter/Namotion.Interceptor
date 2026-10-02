@@ -41,7 +41,8 @@ public interface IHistoryStore
     /// Gets the most recent sample at or before <paramref name="asOf"/> for the property path
     /// (following move chains), or null if none. The result is coverage-scoped: null when
     /// <paramref name="asOf"/> is not covered, and never a sample older than the start of the
-    /// coverage range containing <paramref name="asOf"/>. Used by TimeWeightedAverage integration
+    /// coverage range containing <paramref name="asOf"/>. Coverage ranges are half-open, so an
+    /// <paramref name="asOf"/> exactly at a range's end is not covered. Used by TimeWeightedAverage integration
     /// and Last LOCF gap-fill.
     /// </summary>
     ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(

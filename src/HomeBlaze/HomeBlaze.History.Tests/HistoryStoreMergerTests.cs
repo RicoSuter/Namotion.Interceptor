@@ -433,11 +433,11 @@ public class HistoryStoreMergerTests
     public async Task WhenLastChangePredatesLiveWindow_ThenHeldValueShowsAtLiveEdge()
     {
         // Arrange: a stable property changed at minute 5 and never again. The persistent store holds
-        // that sample and covers [0,40). The live store covers [40,60) but holds nothing (evicted).
+        // that sample and covers [0,45). The live store covers [40,60) but holds nothing (evicted).
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            CurrentCoverage = new HistoryCoverage(At(0), At(40))
+            CurrentCoverage = new HistoryCoverage(At(0), At(45))
         }.AddSample(At(5), 42);
         var live = new FakeHistoryStore
         {
@@ -566,9 +566,9 @@ public class HistoryStoreMergerTests
     [Fact]
     public async Task WhenASegmentEndsUncoveredNextToTheNextSegment_ThenTheCarryIsResolvedAgain()
     {
-        // Arrange: 7 is held when the query starts at 10. Bucket [20,30) is a 5/5 tie, so the high
-        // store owns [10,30) although its coverage ends at 25. The value held at 30 is unknown to it,
-        // so the next segment must not inherit 7.
+        // Arrange: 7 is held when the query starts at 10. In bucket [20,30) only the high store covers
+        // the start, so under Last it owns [10,30) although its coverage ends at 25. The value held at
+        // 30 is unknown to it, so the next segment must not inherit 7.
         var high = new FakeHistoryStore
         {
             Priority = 100,
@@ -640,12 +640,12 @@ public class HistoryStoreMergerTests
         // a numeric one, without rendering a spurious gap.
         //
         // Arrange: a string-valued property changed at minute 5 and never again. The persistent store
-        // holds that Json sample and covers [0,40); the live store covers [40,60) but holds nothing.
+        // holds that Json sample and covers [0,45); the live store covers [40,60) but holds nothing.
         var held = JsonSerializer.SerializeToElement("active");
         var persistent = new FakeHistoryStore
         {
             Priority = 50,
-            CurrentCoverage = new HistoryCoverage(At(0), At(40))
+            CurrentCoverage = new HistoryCoverage(At(0), At(45))
         }.AddJsonSample(At(5), held);
         var live = new FakeHistoryStore
         {

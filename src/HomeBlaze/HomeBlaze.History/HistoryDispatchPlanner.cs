@@ -71,6 +71,8 @@ internal static class HistoryDispatchPlanner
         var bucket = query.Bucket!.Value;
         var segments = new List<PlannedSegment>();
         var isAlwaysAvailable = HistoryAggregations.AlwaysAvailable.Contains(query.Aggregation);
+        var preferStartCovering =
+            query.Aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
 
         StoreCoverageSnapshot? currentOwner = null;
         DateTimeOffset segmentStart = default;
@@ -86,7 +88,7 @@ internal static class HistoryDispatchPlanner
             // partly uncovered and the sub-query could aggregate samples from after To.
             var clippedEnd = bucketEnd < query.To ? bucketEnd : query.To;
             var ownedRange = new HistoryCoverage(bucketStart, clippedEnd);
-            var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, ownedRange);
+            var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, preferStartCovering, ownedRange);
 
             if (currentOwner is { } current && owner is { } next && ReferenceEquals(current.Store, next.Store))
             {
@@ -122,15 +124,15 @@ internal static class HistoryDispatchPlanner
         new(owner.Store, from, to, bucketCount,
             HistoryCoverage.CoverageStartAt(owner.CoverageRanges, to.AddTicks(-1)), owner.CoverageRanges);
 
-    // One owner per bucket, never a split: a store covering the whole bucket wins by priority, else a
-    // partial store covering the bucket start, else any partial store. Within a tier the store covering
-    // most of the bucket wins, with ties going to priority because the stores arrive ordered. A store
-    // covering the start can carry the held value into the bucket; one whose coverage starts inside it
-    // cannot, so preferring it by size alone blanked Last and TimeWeightedAverage at the live edge.
+    // One owner per bucket, never a split: a store covering the whole bucket wins by priority, else the
+    // partial store covering most of it, ties going to priority because the stores arrive ordered. With
+    // preferStartCovering, a partial store covering the bucket start beats any that does not, because
+    // only it can carry the held value into the bucket.
     private static StoreCoverageSnapshot? FindOwner(
         IReadOnlyList<StoreCoverageSnapshot> stores,
         string aggregation,
         bool isAlwaysAvailable,
+        bool preferStartCovering,
         HistoryCoverage bucket)
     {
         var length = bucket.To - bucket.From;
@@ -152,7 +154,8 @@ internal static class HistoryDispatchPlanner
                 return snapshot;
             }
 
-            if (HistoryCoverage.CoverageStartAt(snapshot.CoverageRanges, bucket.From) is not null)
+            if (preferStartCovering &&
+                HistoryCoverage.CoverageStartAt(snapshot.CoverageRanges, bucket.From) is not null)
             {
                 if (covered > startCoveringCovered)
                 {

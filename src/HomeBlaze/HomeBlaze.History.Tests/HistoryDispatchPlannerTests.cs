@@ -9,9 +9,10 @@ public sealed class HistoryDispatchPlannerTests
 
     private static DateTimeOffset At(int minutes) => Origin.AddMinutes(minutes);
 
-    private static HistoryQuery TenMinuteQuery(int fromMinutes, int toMinutes) =>
+    private static HistoryQuery TenMinuteQuery(
+        int fromMinutes, int toMinutes, string aggregation = HistoryAggregations.Last) =>
         new("/Sensor/Temperature", At(fromMinutes), At(toMinutes), TimeSpan.FromMinutes(10),
-            HistoryAggregations.Last, MaxPoints: 100);
+            aggregation, MaxPoints: 100);
 
     private static IReadOnlyList<PlannedSegment> Plan(HistoryQuery query, params FakeHistoryStore[] stores) =>
         HistoryDispatchPlanner.PlanBucketed(
@@ -70,7 +71,21 @@ public sealed class HistoryDispatchPlannerTests
     {
         // Arrange
         var high = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(8), At(10)) };
-        var low = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(At(0), At(7)) };
+        var low = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(At(1), At(7)) };
+
+        // Act
+        var segments = Plan(TenMinuteQuery(0, 10), high, low);
+
+        // Assert
+        Assert.Same(low, Assert.Single(segments).Store);
+    }
+
+    [Fact]
+    public void WhenSeveralPartialStoresCoverTheBucketStart_ThenTheLargestOverlapWins()
+    {
+        // Arrange
+        var high = new FakeHistoryStore { Priority = 100, CurrentCoverage = new HistoryCoverage(At(0), At(2)) };
+        var low = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(At(0), At(6)) };
 
         // Act
         var segments = Plan(TenMinuteQuery(0, 10), high, low);
@@ -93,8 +108,13 @@ public sealed class HistoryDispatchPlannerTests
         Assert.Same(high, Assert.Single(segments).Store);
     }
 
-    [Fact]
-    public void WhenALargerPartialStartsInsideTheBucket_ThenTheStoreCoveringTheStartWins()
+    [Theory]
+    [InlineData(HistoryAggregations.Maximum, false)]
+    [InlineData(HistoryAggregations.SampleAverage, false)]
+    [InlineData(HistoryAggregations.Last, true)]
+    [InlineData(HistoryAggregations.TimeWeightedAverage, true)]
+    public void WhenOnlyTheSmallerPartialCoversTheBucketStart_ThenOnlyCarryDependentAggregationsPreferIt(
+        string aggregation, bool expectStartCovering)
     {
         // Arrange - the live edge: a short-lived store covers the last six minutes, the persistent
         // store covers the bucket start up to its last flush.
@@ -102,10 +122,10 @@ public sealed class HistoryDispatchPlannerTests
         var persistent = new FakeHistoryStore { Priority = 50, CurrentCoverage = new HistoryCoverage(At(0), At(3)) };
 
         // Act
-        var segments = Plan(TenMinuteQuery(0, 10), live, persistent);
+        var segments = Plan(TenMinuteQuery(0, 10, aggregation), live, persistent);
 
         // Assert
-        Assert.Same(persistent, Assert.Single(segments).Store);
+        Assert.Same(expectStartCovering ? persistent : live, Assert.Single(segments).Store);
     }
 
     [Fact]
