@@ -25,8 +25,10 @@ _startFault           Exception?               the exception from the last faile
 _owner                HostedServiceHandler?    the handler that claimed this target
 _lastFactoryInstance  IHostedService?          the instance the previous factory call returned, kept for the life of the attachment
 _detached             bool                     set by an explicit detach, refuses every start appended after it and none already queued
+_stopSignal           TaskCompletionSource?    subject targets only: the completion of the stop that ends the current ownership, reset on every install
+_stopSignalOwner      HostedServiceHandler?    the handler _stopSignal was created for
 _tail                 Task                     the transition chain
-_chainLock            Lock                     guards _tail, _detached, and the owner exchange together with the handler's record of it
+_chainLock            Lock                     guards _tail, _detached, _stopSignal, and the owner exchange together with the handler's record of it
 TransitionGate        Func<Task>?              test seam awaited at the top of every body, null in production
 ChainLockGate         Action?                  test seam invoked inside _chainLock between the take and the append, null in production
 ```
@@ -37,6 +39,7 @@ The fields are synchronized differently, and each difference is deliberate:
 - `Owner` uses `Volatile.Read` and is never written with `Volatile.Write`. Its only writers, `TryTakeOwnership` and `ReleaseOwnership`, run under `_chainLock` and go through `Interlocked.CompareExchange`, which carries the fence and decides which of two racing handlers claims the target. See [Ownership](#ownership).
 - `_lastFactoryInstance` is neither volatile nor locked and never cleared; both reasons are on `HostedServiceTarget.TryRecordFactoryInstance`.
 - `_detached` is written and read under `_chainLock`, which pairs it with the append (see [Refusing a start for an attachment a detach already removed](#refusing-a-start-for-an-attachment-a-detach-already-removed)). `GetState` reads it outside the lock, deliberately, so polling never queues behind an append; that read is why the field is volatile.
+- `_stopSignal` is created, handed out and reset under `_chainLock` only, in the same acquisition as the append or the install it belongs with (see [The subject stop signal](#the-subject-stop-signal)).
 
 `IsHandlerOwnedInstance` is simply `Factory is not null`, and it is the whole disposal policy: the handler created the instance if and only if it invoked a factory to get it, so it disposes attachment instances and never disposes a subject.
 
@@ -112,16 +115,27 @@ Instance A, the one running before the detach, is never disposed. Instance B, th
 
 So `DetachSubject` appends immediately, under `lock (_attachedSubjects)`, to every affected chain:
 
-- a stop on the subject's chain if the subject is an `IHostedService` this handler owns, which sets a `subjectStopped` completion in a `finally`, so cancellation and failure release it too;
-- for each attachment this handler owns, a stop on that attachment's own chain that first awaits `subjectStopped`, then takes the instance out of `Current`, stops it and disposes it.
+- a stop on the subject's chain if the subject is an `IHostedService` this handler owns, which sets the subject target's stop signal in a `finally`, so cancellation and failure release it too;
+- for each attachment this handler owns, a stop on that attachment's own chain that first awaits that signal, then takes the instance out of `Current`, stops it and disposes it.
 
-`subjectStopped` is allocated only when the subject has a target of its own **and** at least one attachment to order behind it, and handed to the attachment stops only when the subject's own append was accepted. Nothing is allocated for a subject that hosts neither, which is essentially every subject in a detaching graph.
+The signal lives on the subject target rather than in this method, because the shutdown path and the gate re-read's undo need the same ordering from code that does not run inside one method call (see [The subject stop signal](#the-subject-stop-signal)). Nothing is allocated for a subject that hosts nothing, which is essentially every subject in a detaching graph.
 
 Ordering holds because both appends happen under the lifecycle lock, so any later re-attach queues behind them on the same chains. The wait is acyclic, **provided the subject's stop does not itself wait on an attachment chain**; that proviso is [deadlock shape 3](#3-a-subject-that-detaches-its-own-attachment-while-unwinding). Shutdown builds the same shape from its own code in `StopAsync` rather than calling this path, so a change to one does not reach the other.
 
 Context attach is the mirror image, also under the lock: a start on the subject's chain if it is an `IHostedService`, and a create and start on each attachment's chain.
 
-### What `subjectStopped` actually means
+### The subject stop signal
+
+`HostedServiceTarget._stopSignal` is the completion of the stop that ends a subject target's current ownership, and every attachment stop that must run behind that stop awaits it. It is created by whichever of two sides needs it first, under one acquisition of the subject target's `_chainLock` with the operation that needs it:
+
+- **A subject stop append** (`AppendSubjectStopAsync`, `AppendSubjectStopIfOwnedAsync`) takes the current signal or creates it, and the stop body sets it in its `finally`. The choice and the append are one lock acquisition, so an attachment stop asking in between is handed the signal that stop will set. A refused append leaves the signal alone.
+- **An attachment stop being appended** asks through `GetStopToAwait(handler)`. It is handed the current signal when the asking handler is the one it was created for and it is not yet set; otherwise, while the asking handler owns the subject target and has appended no stop for this ownership, a fresh one that handler's coming stop will take; otherwise null, and the attachment stop waits for nothing.
+
+A signal created on the asking side is set because **every ownership of a subject target ends with a stop appended by its owner ahead of the release**: a context detach appends and then releases, the drain appends in its first loop and releases after its wait, and the gate re-read's undo appends and then releases. The owner is the only handler the signal is ever created for or handed to, so no handler waits on a stop appended by another, whose gate it does not control. A fault stop run from the execution observer sets nothing, because it ends no ownership; the owner's eventual stop finds `Current` null, returns at once and sets the signal then.
+
+The signal is reset on every install, under the same lock. The stop that ends the previous ownership captured its signal at its own append, which is queued ahead of the start the install appends, so the attachments ordered behind that stop still release when it runs, and a stop of the earlier ownership can never release the attachments of the later one. Two stops appended for one ownership, a drain's and a context detach's, share the signal: the first to run is the one that finds the instance, and the second returns at once and sets it again, which `TrySetResult` makes harmless.
+
+### What the signal actually means
 
 It means "the subject's stop returned", which equals "`ExecuteAsync` unwound" only when the stop is not cancelled: `BackgroundService.StopAsync` awaits its execute task with `ConfigureAwaitOptions.SuppressThrowing`, so on a cancelled token it returns while `ExecuteAsync` is still running. Graph driven detaches pass `CancellationToken.None` and get the strong reading; host shutdown passes the stopping token and gets the weak one. Forcing the strong reading at shutdown would mean ignoring `ShutdownTimeout`.
 
@@ -232,7 +246,7 @@ The tests for this window gate the subject's first `Data` read through `Models/D
 
 **Stops are never refused by the gate at append time, and a start's gating decision is re-read in the body.**
 
-`AppendStop` reads no gate state at all. A stop short circuited at append time would have no body, therefore no `finally`, therefore would never set its `subjectStopped`, so the paired attachment stop would park forever and wedge that chain.
+`AppendStop` reads no gate state at all. A stop short circuited at append time would have no body, therefore no `finally`, therefore would never set its stop signal, so the paired attachment stop would park forever and wedge that chain.
 
 Starts are refused at append time, by `AttachSubject` and by `TryTakeOwnershipAndStart`, and those refusals are about bookkeeping rather than work: a draining handler must not install itself as owner of a target it can never start, nor record a subject as live, because a target left owned by a dead handler makes every future handler lose the exchange. Whether the start's **work** runs is decided again in the body, because a start already queued when shutdown begins only becomes a no-op if it re-reads the state when it runs. A gated out transition still runs its signalling and bookkeeping and skips only the user visible work.
 
@@ -312,7 +326,7 @@ The precedence has two deliberate rankings. `Faulted` is not terminal, because a
 1. `BeginDraining`, which stops new targets being taken and releases parked waiters.
 2. Clear `_liveSubjects`, which also stops `WaitForStartAsync` appending an empty transition behind the drain's own stop.
 3. Snapshot `_owned`.
-4. Append stops for that snapshot in the same per subject shape a context detach uses: a stop carrying a `subjectStopped` signal for every subject target, then a stop for every attachment target that awaits its own subject's signal when that subject was in the snapshot. Each append is refused unless this handler still owns the target, decided inside the chain lock.
+4. Append stops for that snapshot in the same per subject shape a context detach uses: a stop for every subject target first, then a stop for every attachment target that awaits [its subject's stop signal](#the-subject-stop-signal) when this handler has one pending for that subject. Each append is refused unless this handler still owns the target, decided inside the chain lock.
 5. Wait for `_inFlight` to reach zero, bounded by the host's stopping token.
 6. Release ownership of every target in the snapshot.
 7. Wait for `_inFlight` to reach zero again.
@@ -340,11 +354,13 @@ A completion source has to cope with the count already being zero when the drain
 
 The drain snapshots `_owned` holding nothing and appends afterwards, so ownership can move in between. `HostedServiceTarget.AppendIfOwnedAsync` therefore reads `Owner` and appends under one acquisition of the chain lock. Without it, a subject that leaves host 1's graph and joins host 2's before host 1's drain reaches its append has host 2's instance stopped and disposed by host 1.
 
-Because the append can be refused, **`subjectStopped` is recorded only for an accepted one**. A refused append has no body and no `finally`, so an attachment stop handed that signal would park on it, stay counted, and burn the whole shutdown deadline.
+Because the append can be refused, **a refused subject stop touches no signal, and an attachment stop is only ever handed a signal of its own handler's**. A refused append has no body and no `finally`, so an attachment stop handed a signal nothing sets would park on it, stay counted, and burn the whole shutdown deadline. What guarantees every handed out signal is set is in [The subject stop signal](#the-subject-stop-signal).
 
 The same lock orders the drain against a take in flight: a drain that snapshots while a take holds the chain lock queues behind it and reads the ownership the take installed, so its stop lands behind the start. What that protects is the ownership: a repeat take that lands as the drain begins must leave the earlier install alone, or the drain's own append reads a stranger, refuses, and the running instance survives shutdown. That is the `ownershipTaken` guard on the gate re-read's undo.
 
 **The gate re-read's undo appends a stop rather than only retiring the record.** The re-read fires after the start has been appended, and that start's body can have read `Running` a moment before `BeginDraining` and be past every guard. Retiring the record alone hides the instance it creates from any later snapshot, with ownership released so no detach can reach it either. The appended stop lands behind the committed start, and the count carries it.
+
+**The undo of an attachment take waits for its subject's stop like every other attachment stop.** The undo releases the target, so the drain's own ordered append for it is refused, and the undo's stop is the only one that chain gets. It can be appended before the drain has appended the subject's stop, which is why the subject target's signal exists on the asking side: the undo asks the subject target, is handed the signal the subject's coming stop will take, and its stop waits there. Left unordered, an attachment attached to a running subject as the drain begins is disposed while that subject is still inside its own stop. `WhenTheGateReReadUndoesAnAttachmentTakeOnARunningSubject_ThenItsStopWaitsForTheSubjectsStop` pins it. The undo of a subject take needs nothing extra: its stop takes the signal like any subject stop, and attachment stops appended afterwards, by the same context attach or by the drain, wait on it.
 
 ### Cost
 
@@ -405,12 +421,12 @@ The same cycle across two chains rather than one.
 
 ### 3. A subject that detaches its own attachment while unwinding
 
-The subject's stop transition waits on the unwind, the unwind waits on the attachment chain, and the attachment chain's head waits on `subjectStopped`, which only the blocked subject transition can set:
+The subject's stop transition waits on the unwind, the unwind waits on the attachment chain, and the attachment chain's head waits on the subject's stop signal, which only the blocked subject transition can set:
 
-1. The subject leaves the graph. `DetachSubject` appends the subject's stop, carrying `subjectStopped`, and appends the attachment's stop, which first awaits `subjectStopped`.
+1. The subject leaves the graph. `DetachSubject` appends the subject's stop, which takes the signal, and appends the attachment's stop, which first awaits it.
 2. The subject's stop runs. `BackgroundService.StopAsync` awaits the execute task, and `ExecuteAsync` unwinds into a helper that awaits `DetachHostedServiceAsync` for the attachment.
 3. That call appends its own stop to the attachment's chain, behind the stop from step 1, and awaits it.
-4. The attachment's chain head is still awaiting `subjectStopped`, which is set in the `finally` of the subject's stop, which cannot finish because it is still inside step 2.
+4. The attachment's chain head is still awaiting the signal, which is set in the `finally` of the subject's stop, which cannot finish because it is still inside step 2.
 
 It is the shape any `BackgroundService` subject that owns a restartable attachment reaches for when it releases that attachment as its run loop unwinds, which is why such a subject's own stop should only cancel what it started, wait for its run loop and report itself stopped. The rule is stated in [the user documentation](../hosting.md#do-not-detach-from-your-own-stop-path), and `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard. A wedged chain is unbounded in damage but bounded in blast radius: shutdown gives up on it at `ShutdownTimeout` and every other chain drains normally.
 
@@ -454,7 +470,6 @@ Each of these leaves the suite green when removed or changed. They are listed so
 - **The `Volatile` qualifiers on `_snapshot`, `_fault`, `_startFault` and `_detached`.** x64 already orders the loads and stores; what they prevent is the JIT keeping a polled read in a register and reordering on weaker memory models.
 - **The `Interlocked.MemoryBarrier` in `TryResolveHandlerAfterPublish`.** The reordering needs two threads and a machine that takes it; the gated tests drive both sides on one thread.
 - **The in flight increment for a stop on a target an explicit detach retired.** The drain's snapshot does not contain that target, so only the append's own increment holds the stop inside the barrier.
-- **The shutdown map's reference comparer.** Two value equal subjects sharing one stop signal is an ordering violation with no event to observe; `WhenTwoValueEqualSubjectsAreHosted_ThenDetachingOneLeavesTheOtherLive` pins only the liveness half.
 - **A stop appended for a target this handler never took**, which only `DetachHostedService` can produce, landing after the drain's second wait. Benign today because two reachable hosting contexts make the lookup throw, so the appending handler is the draining one. Reasoned, not demonstrated.
 - **Not clearing `_owned` at the end of the drain.** An equivalent mutant as far as anything can observe.
 - **`AttachHostedServiceAsync` reading `StartFault` rather than `Fault`.** Nothing parks the caller between its start and the fault transition. The `WaitForStartAsync` half is pinned by `BackgroundServiceExecutionTests.WhenAHostedSubjectsRunFaulted_ThenWaitingForItsStartReturnsFalseWithoutThrowing`.

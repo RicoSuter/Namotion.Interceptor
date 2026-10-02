@@ -28,9 +28,10 @@ public class HostedServiceHandlerRaceTests
     private const int ChainLockRaceRounds = 4;
 
     /// <summary>
-    /// How long a drain is watched for a return it must not make. "Did not happen" has no event to
-    /// wait on, so this is the one timed observation in the suite; too short only weakens it, and a
-    /// drain held on a lock cannot return however long it is watched.
+    /// How long a drain is watched for a return it must not make, or a held stop for an instance it
+    /// must not reach. "Did not happen" has no event to wait on, so this is the one timed observation
+    /// in the suite; too short only weakens it, and a transition held on a lock or a signal cannot get
+    /// past it however long it is watched.
     /// </summary>
     private static readonly TimeSpan DrainMustNotReturnWithin = TimeSpan.FromSeconds(1);
 
@@ -1213,6 +1214,71 @@ public class HostedServiceHandlerRaceTests
                 ", ",
                 created.ToArray().Select(i => $"started={i.IsStarted} stopped={i.IsStopped} disposed={i.IsDisposed}")));
 
+        Assert.Null(attachment.Current);
+    }
+
+    [Fact]
+    public async Task WhenTheGateReReadUndoesAnAttachmentTakeOnARunningSubject_ThenItsStopWaitsForTheSubjectsStop()
+    {
+        // Arrange - the undo's stop is appended by the attaching thread, outside the drain's own per
+        // subject shape, and its release makes the drain's ordered append for the same target refuse.
+        // Left unordered, that stop disposes the attachment while the subject it belongs to is still
+        // inside its own StopAsync, which is the ordering the shutdown path promises to keep. Three
+        // seams drive it: OwnershipTakenGate parks the attaching thread between its take and its
+        // re-read, DrainAppendGate holds the drain between its snapshot and its appends so the undo
+        // provably lands between them, and the subject's stop hold makes the window observable.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        var parent = new HostedParent(context);
+        var child = new CountingHostedSubject();
+        parent.Child = child;
+        await AsyncTestHelpers.WaitUntilAsync(() => child.StartCount == 1);
+
+        var instance = new TrackedBackgroundService();
+        using var take = handler.HoldAtOwnershipTake();
+
+        var attaching = Task.Run(() => child.AttachHostedService(() => instance));
+        await take.WaitUntilReachedAsync();
+
+        // The start is appended ahead of the seam and the host is running, so the instance is up
+        // before the drain begins: a start the drain skips would leave nothing to dispose.
+        await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
+
+        using var subjectStop = child.HoldAtStop();
+        using var attachmentStop = instance.HoldAtStop();
+        using var snapshot = handler.HoldAtDrainAppend();
+
+        var stopping = Task.Run(() => host.StopAsync());
+        await snapshot.WaitUntilReachedAsync();
+
+        // Act - the appending thread reads Draining, appends the undo's stop and releases the target,
+        // all before the drain appends its own stops.
+        take.Release();
+        var attachment = await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        snapshot.Release();
+
+        await subjectStop.WaitUntilReachedAsync();
+
+        // Assert - the subject is held inside its stop, so an attachment stop that waits for it cannot
+        // reach the instance however long it is watched.
+        var stoppedUnderneathTheSubject =
+            await Task.WhenAny(attachmentStop.Reached, Task.Delay(DrainMustNotReturnWithin)) == attachmentStop.Reached;
+
+        Assert.False(
+            stoppedUnderneathTheSubject,
+            "The undo's stop reached the attachment while its subject was still inside its own stop.");
+
+        Assert.NotNull(attachment.Current);
+
+        subjectStop.Release();
+        await attachmentStop.WaitUntilReachedAsync();
+        attachmentStop.Release();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(1, child.StopCount);
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
         Assert.Null(attachment.Current);
     }
 

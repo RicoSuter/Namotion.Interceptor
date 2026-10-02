@@ -56,6 +56,18 @@ internal sealed class HostedServiceTarget
     private IHostedService? _lastFactoryInstance;
     private bool _detached;
 
+    /// <summary>
+    /// For a subject target, the completion of the stop that ends the current ownership, which the
+    /// stops of the subject's attachments await. Created by whichever comes first, the owner's own
+    /// stop append or one of its attachment stops asking to wait for it, and set by every subject stop
+    /// body appended while it is current. Guarded by <see cref="_chainLock"/>; reset on every install,
+    /// so a stop from an earlier ownership cannot release the attachments of a later one.
+    /// </summary>
+    private TaskCompletionSource? _stopSignal;
+
+    /// <summary>The owner <see cref="_stopSignal"/> was created for, so no other handler's stops wait on it.</summary>
+    private HostedServiceHandler? _stopSignalOwner;
+
     public HostedServiceTarget(Func<IHostedService>? factory, IHostedService? subject)
     {
         Factory = factory;
@@ -248,9 +260,79 @@ internal sealed class HostedServiceTarget
         if (ownershipTaken)
         {
             handler.RecordOwnership(this, subject);
+
+            // A new ownership ends with a stop of its own. The previous signal stays with the stop
+            // that captured it at its append, which is queued ahead of the start this install appends.
+            _stopSignal = null;
+            _stopSignalOwner = null;
         }
 
         return ownershipTaken || ReferenceEquals(previous, handler);
+    }
+
+    /// <summary>
+    /// Appends a stop for a subject target and hands the body the signal it must set when it has run,
+    /// chosen under the same lock acquisition as the append so an attachment stop asking for it in
+    /// between is handed the signal this stop will set.
+    /// </summary>
+    public Task AppendSubjectStopAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
+    {
+        lock (_chainLock)
+        {
+            return AppendCore(createBody(TakeStopSignalCore(handler)), handler);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="AppendSubjectStopAsync"/>, appended only while <paramref name="handler"/> still owns
+    /// the target, as on <see cref="AppendIfOwnedAsync"/>. A refused append leaves the signal alone.
+    /// </summary>
+    public Task? AppendSubjectStopIfOwnedAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
+    {
+        lock (_chainLock)
+        {
+            return ReferenceEquals(Owner, handler) ? AppendCore(createBody(TakeStopSignalCore(handler)), handler) : null;
+        }
+    }
+
+    /// <summary>
+    /// The stop of this subject that an attachment stop appended by <paramref name="handler"/> has to
+    /// wait for, or null when there is none: the stop <paramref name="handler"/> has appended for the
+    /// current ownership and that has not finished, or, while it owns the target and has appended none,
+    /// the one it is going to append. Null once that stop has finished and when the ownership is
+    /// another handler's, so the wait is never on a stop this handler is not going to append.
+    /// </summary>
+    /// <remarks>
+    /// The signal is created here only for the owner, because every ownership ends with a stop appended
+    /// by its owner ahead of the release, which is what guarantees a signal created here is set:
+    /// docs/design/hosting-service-ownership.md#the-subject-stop-signal.
+    /// </remarks>
+    public Task? GetStopToAwait(HostedServiceHandler handler)
+    {
+        lock (_chainLock)
+        {
+            if (_stopSignal is { } signal)
+            {
+                return ReferenceEquals(_stopSignalOwner, handler) && !signal.Task.IsCompleted ? signal.Task : null;
+            }
+
+            return ReferenceEquals(_owner, handler) ? TakeStopSignalCore(handler).Task : null;
+        }
+    }
+
+    /// <summary>
+    /// The current ownership's signal, created on first use. Every caller is the owner: the stop
+    /// appends check ownership or undo this handler's own take, and the wait asks only for the owner.
+    /// </summary>
+    private TaskCompletionSource TakeStopSignalCore(HostedServiceHandler handler)
+    {
+        if (_stopSignal is null)
+        {
+            _stopSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _stopSignalOwner = handler;
+        }
+
+        return _stopSignal;
     }
 
     /// <summary>
