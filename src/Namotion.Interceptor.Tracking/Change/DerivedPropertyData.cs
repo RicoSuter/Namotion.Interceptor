@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Tracking.Change;
@@ -8,7 +9,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// to minimize dictionary lookups (one lookup instead of separate lookups
 /// for UsedByProperties, RequiredProperties, and LastKnownValue).
 /// </summary>
-internal sealed class DerivedPropertyData
+internal sealed class DerivedPropertyData : IDerivedPropertyDependencies
 {
     /// <summary>
     /// Dependencies: Which properties this derived property depends on.
@@ -105,6 +106,46 @@ internal sealed class DerivedPropertyData
 
             return array.AsSpan(0, Math.Min(_requiredPropertyCount, array.Length));
         }
+    }
+
+    /// <inheritdoc />
+    public long GetLatestDependencyWriteTimestampTicks() => ReadLatestDependencyWriteTimestampTicks(this);
+
+    private static long ReadLatestDependencyWriteTimestampTicks(DerivedPropertyData data)
+    {
+        // The dependency buffer is rewritten in place under the lock the handler takes on each instance, so
+        // it is copied under that lock. Each timestamp is then read under its subject's lock with no other
+        // lock held, which keeps this read from adding a lock order. A dependency that is derived itself is
+        // not followed: the stored properties its getter read were recorded into this list directly.
+        PropertyReference[] dependencies;
+        int count;
+        lock (data)
+        {
+            var span = data.RequiredPropertiesSpan;
+            count = span.Length;
+            if (count == 0)
+            {
+                return 0;
+            }
+
+            dependencies = ArrayPool<PropertyReference>.Shared.Rent(count);
+            span.CopyTo(dependencies);
+        }
+
+        var latest = 0L;
+        foreach (ref readonly var dependency in dependencies.AsSpan(0, count))
+        {
+            var ticks = dependency.GetWriteTimestampTicksAfterValueRead();
+            if (ticks > latest)
+            {
+                latest = ticks;
+            }
+        }
+
+        // Cleared so the pool does not keep the dependencies' subjects alive.
+        dependencies.AsSpan(0, count).Clear();
+        ArrayPool<PropertyReference>.Shared.Return(dependencies);
+        return latest;
     }
 
     /// <summary>

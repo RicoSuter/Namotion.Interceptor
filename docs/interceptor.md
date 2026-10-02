@@ -172,6 +172,10 @@ var name = person.Name
   "John"
 ```
 
+### Concurrent Reads and Writes
+
+A read never observes a half-written value, whatever the property's type. Each read is a separate observation, though: two property reads, or a value and its write timestamp read one after the other, can come from different writes, in either order. When you need a value together with its timestamp, take both from a change notification, which carries them for one write apart from the derived-property race listed in the remarks referenced below, or call `property.GetValue(out var metadata)` on a `PropertyReference`, which returns the value together with the metadata of the write that produced it, such as `metadata.WriteTimestamp`. It holds no lock while read interceptors run, and under concurrent writes the metadata of a stored property may describe a later write than the value's, never an earlier one. The XML remarks of `PropertyReference.GetValue(out PropertyValueMetadata)` list every case this does not cover, among them derived properties, transactions and properties that are not intercepted. No read returns several properties from one consistent state.
+
 ### Implementing an Interceptor
 
 Each interceptor can:
