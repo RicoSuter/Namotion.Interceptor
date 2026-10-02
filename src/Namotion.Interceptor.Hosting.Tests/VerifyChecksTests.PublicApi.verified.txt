@@ -32,8 +32,13 @@ namespace Namotion.Interceptor.Hosting
     {
         void ConfigureContext(Namotion.Interceptor.IInterceptorSubjectContext context);
     }
+    public interface ISubjectHostedServiceFactory
+    {
+        Microsoft.Extensions.Hosting.IHostedService CreateHostedService(System.IServiceProvider serviceProvider);
+    }
     public static class InterceptorHostingExtensions
     {
+        public static Namotion.Interceptor.Hosting.IHostedServiceAttachment? ActivateHostedService(this Namotion.Interceptor.IInterceptorSubject subject, System.IServiceProvider serviceProvider) { }
         public static Namotion.Interceptor.Hosting.IHostedServiceAttachment<T> AttachHostedService<T>(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<T> factory)
             where T :  class, Microsoft.Extensions.Hosting.IHostedService { }
         public static System.Threading.Tasks.Task<Namotion.Interceptor.Hosting.IHostedServiceAttachment<T>> AttachHostedServiceAsync<T>(this Namotion.Interceptor.IInterceptorSubject subject, System.Func<T> factory, System.Threading.CancellationToken cancellationToken)
@@ -46,6 +51,7 @@ namespace Namotion.Interceptor.Hosting
     {
         public static Namotion.Interceptor.Hosting.HostedServiceStartupScope? DeferHostedServiceStartup(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithHostedServices(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection) { }
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithHostedServices(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, bool activateSubjectHostedServices) { }
     }
     public static class SubjectServiceCollectionExtensions
     {

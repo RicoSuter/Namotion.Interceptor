@@ -57,21 +57,22 @@ internal sealed class HostedServiceTarget
     private bool _detached;
 
     /// <summary>
-    /// For a subject target, the completion of the stop that ends the current ownership, which the
-    /// stops of the subject's attachments await. Created by whichever comes first, the owner's own
-    /// stop append or one of its attachment stops asking to wait for it, and set by every subject stop
-    /// body appended while it is current. Guarded by <see cref="_chainLock"/>; reset on every install,
-    /// so a stop from an earlier ownership cannot release the attachments of a later one.
+    /// For a target that <see cref="CarriesStopSignal"/>, the completion of the stop that ends the
+    /// current ownership, which the stops ordered behind it await. Created by whichever comes first,
+    /// the owner's own stop append or one of those stops asking to wait for it, and set by every stop
+    /// body appended on this target while it is current. Guarded by <see cref="_chainLock"/>; reset on
+    /// every install, so a stop from an earlier ownership cannot release the stops of a later one.
     /// </summary>
     private TaskCompletionSource? _stopSignal;
 
     /// <summary>The owner <see cref="_stopSignal"/> was created for, so no other handler's stops wait on it.</summary>
     private HostedServiceHandler? _stopSignalOwner;
 
-    public HostedServiceTarget(Func<IHostedService>? factory, IHostedService? subject)
+    public HostedServiceTarget(Func<IHostedService>? factory, IHostedService? subject, bool isActivation = false)
     {
         Factory = factory;
         Subject = subject;
+        IsActivation = isActivation;
     }
 
     /// <summary>The factory for an attachment, or null when this target is a subject.</summary>
@@ -79,6 +80,19 @@ internal sealed class HostedServiceTarget
 
     /// <summary>The subject when this target is a subject, or null when it is an attachment.</summary>
     public IHostedService? Subject { get; }
+
+    /// <summary>
+    /// True when this attachment is the activation of an <see cref="ISubjectHostedServiceFactory"/>
+    /// subject. Fixed at construction, so every stop appended on it is routed the same way whatever
+    /// the subject's activation slot holds at the time.
+    /// </summary>
+    public bool IsActivation { get; }
+
+    /// <summary>
+    /// Whether the stops of other targets are ordered behind this one's, which is what its stops take
+    /// the stop signal for: a subject target and an activation target.
+    /// </summary>
+    public bool CarriesStopSignal => Subject is not null || IsActivation;
 
     /// <summary>True when the handler created the current instance, so it owns its disposal.</summary>
     public bool IsHandlerOwnedInstance => Factory is not null;
@@ -101,6 +115,12 @@ internal sealed class HostedServiceTarget
     public Exception? StartFault => Volatile.Read(ref _startFault);
 
     public HostedServiceHandler? Owner => Volatile.Read(ref _owner);
+
+    /// <summary>
+    /// Whether <see cref="MarkDetached"/> has run, after which no start appended is accepted. Read
+    /// outside the chain lock, like the read in <see cref="GetState"/> and for the same reason.
+    /// </summary>
+    public bool IsDetached => Volatile.Read(ref _detached);
 
     public void SetFault(Exception? fault) => Volatile.Write(ref _fault, fault);
 
@@ -271,12 +291,12 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// Appends a stop for a subject target while <paramref name="handler"/> still owns it, as on
-    /// <see cref="AppendIfOwnedAsync"/>, and hands the body the signal it must set when it has run,
-    /// chosen under the same lock acquisition as the append so an attachment stop asking for it in
+    /// Appends a stop for a target that <see cref="CarriesStopSignal"/> while <paramref name="handler"/>
+    /// still owns it, as on <see cref="AppendIfOwnedAsync"/>, and hands the body the signal it must set
+    /// when it has run, chosen under the same lock acquisition as the append so a stop asking for it in
     /// between is handed the signal this stop will set. A refused append leaves the signal alone.
     /// </summary>
-    public Task? AppendSubjectStopIfOwnedAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
+    public Task? AppendStopWithSignalIfOwnedAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
     {
         lock (_chainLock)
         {
@@ -285,16 +305,16 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// The stop of this subject that an attachment stop appended by <paramref name="handler"/> has to
-    /// wait for, or null when there is none: the stop <paramref name="handler"/> has appended for the
-    /// current ownership and that has not finished, or, while it owns the target and has appended none,
-    /// the one it is going to append. Null once that stop has finished and when the ownership is
-    /// another handler's, so the wait is never on a stop this handler is not going to append.
+    /// The stop of this target that a stop appended by <paramref name="handler"/> and ordered behind
+    /// it has to wait for, or null when there is none: the stop <paramref name="handler"/> has appended
+    /// for the current ownership and that has not finished, or, while it owns the target and has
+    /// appended none, the one it is going to append. Null once that stop has finished and when the
+    /// ownership is another handler's, so the wait is never on a stop this handler is not going to append.
     /// </summary>
     /// <remarks>
     /// The signal is created here only for the owner, because every ownership ends with a stop appended
     /// by its owner ahead of the release, which is what guarantees a signal created here is set:
-    /// docs/design/hosting-service-ownership.md#the-subject-stop-signal.
+    /// docs/design/hosting-service-ownership.md#the-stop-signal.
     /// </remarks>
     public Task? GetStopToAwait(HostedServiceHandler handler)
     {
