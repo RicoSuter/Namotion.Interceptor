@@ -143,11 +143,6 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // only one of them owns it.
         _liveSubjects.TryRemove(subject, out _);
 
-        if (subjectTarget is null && attachments.IsEmpty)
-        {
-            return;
-        }
-
         // A handler stops what it owns and nothing else, or it disposes an instance another handler
         // created and is running. Decided inside the chain lock, with the append: read ahead of it, a
         // release landing between the two lets the stop escape the drain's barrier or reach an instance
