@@ -425,7 +425,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     private bool MayStart(IInterceptorSubject subject, HostedServiceTarget target)
     {
         // Four guards, none covered by another, each re-read here because the append happened earlier:
-        // docs/design/hosting-service-ownership.md#the-read-inside-the-start-body.
+        // docs/design/hosting-service-ownership.md#the-read-inside-the-start-body. The last one is what
+        // stops the owning handler's second start for a subject reachable from two contexts:
+        // docs/design/hosting-service-ownership.md#ownership-is-not-what-makes-two-contexts-over-one-subject-benign.
         return _gate.State == HostedServiceGateState.Running
             && _liveSubjects.ContainsKey(subject)
             && ReferenceEquals(target.Owner, this)
@@ -590,8 +592,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 // its stop window.
                 target.EndStop();
 
-                // Always signals, including on the gated-out and cancelled paths, or a paired
-                // attachment stop parks forever on a signal that is never set.
+                // Always signals, including on the cancelled path, or an attachment stop ordered behind
+                // this one parks forever on a signal that is never set.
                 signal?.TrySetResult();
             }
         };
