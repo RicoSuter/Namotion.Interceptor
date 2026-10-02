@@ -56,6 +56,10 @@ public static class InterceptorHostingExtensions
     /// Attaches a hosted service factory and waits for the instance to start. Transactional: when the
     /// start faults, the attachment is removed before the exception propagates.
     /// </summary>
+    /// <remarks>
+    /// The token bounds the wait and not the start, which runs to completion. A wait cancelled before
+    /// the start faulted leaves the attachment on the subject with its fault recorded.
+    /// </remarks>
     public static async Task<IHostedServiceAttachment<T>> AttachHostedServiceAsync<T>(
         this IInterceptorSubject subject, Func<T> factory, CancellationToken cancellationToken)
         where T : class, IHostedService
@@ -98,7 +102,11 @@ public static class InterceptorHostingExtensions
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedServiceAttachment attachment)
         => Detach(subject, attachment, ensureStarted: false, CancellationToken.None, out _);
 
-    /// <summary>Detaches a hosted service attachment and waits for the instance to stop and be disposed.</summary>
+    /// <summary>
+    /// Detaches a hosted service attachment and waits for the instance to stop and be disposed. The
+    /// token is handed to the instance's own <c>StopAsync</c> as well as bounding the wait, so a
+    /// cancelled token cuts the stop short; the instance is disposed either way.
+    /// </summary>
     public static async Task<bool> DetachHostedServiceAsync(
         this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
     {
@@ -201,7 +209,7 @@ public static class InterceptorHostingExtensions
         // published this attachment but not yet appended its start either reads the mark and appends
         // nothing, or appends ahead of the stop below, which then stops and disposes what it created.
         target.MarkDetached();
-        return handler?.AppendStop(subject, target, signal: null, waitFor: null, cancellationToken);
+        return handler?.AppendStop(subject, target, waitFor: null, cancellationToken);
     }
 
     /// <summary>
@@ -255,6 +263,11 @@ public static class InterceptorHostingExtensions
             _ => null,
             (_, value) =>
             {
+                // Reset on every run: the dictionary re-invokes this delegate when its swap loses, and
+                // a rerun that no longer finds the attachment must not report the previous run's find,
+                // or two concurrent detaches of one handle both return true.
+                removed = false;
+
                 if (value is not ImmutableArray<IHostedServiceAttachment> attachments || !attachments.Contains(attachment))
                 {
                     return value;

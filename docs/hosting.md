@@ -41,7 +41,7 @@ Without it, a subject one level below the root still starts, because the graph w
 - **The descent stops at level one.** Inheritance is what gives a child the parent's context, and it is that assignment which walks the child's own children into the graph. Without it nothing below the first level is ever attached, so nothing below the first level is ever started.
 - **Attaching to a subject already in the graph resolves no handler.** `AttachHostedService` looks the handler up on `subject.Context`. A child that never inherited the parent's context resolves nothing there, so the factory is stored and no instance is created.
 
-Starts and stops queued before the host starts run once it does. Each managed service has its own queue, so its own starts and stops never overlap, while unrelated services run concurrently. The one ordering guarantee across services is the one that matters for cleanup: when a subject leaves the graph, its own stop runs before the stops of the services attached to it.
+Starts and stops queued before the host starts run once it does, or once an [awaited attach or detach](#factory-attachment) opens the handler earlier. Each managed service has its own queue, so its own starts and stops never overlap, while unrelated services run concurrently. The one ordering guarantee across services is the one that matters for cleanup: when a subject leaves the graph, its own stop runs before the stops of the services attached to it.
 
 ## Which Pattern When
 
@@ -253,9 +253,11 @@ await person.DetachHostedServiceAsync(attachment, cancellationToken);
 // The instance has stopped, and has been disposed when it is disposable.
 ```
 
-`AttachHostedServiceAsync` is transactional for its own transition: when that start faults, the attachment is removed before the exception propagates, so a `catch` block is never left owning an invisible attachment. When a context attach had already queued a create for the same attachment, the caller awaits the second transition rather than the first. A graph driven start that faults keeps the attachment with `Current` null and `Fault` set, so the next context attach retries it. So does an execution that faults after its start returned, whichever attach path started it: only the start's own outcome makes the awaited attach throw.
+`AttachHostedServiceAsync` is transactional for its own transition: when that start faults, the attachment is removed before the exception propagates, so a `catch` block is never left owning an invisible attachment. That holds only for a caller that was still waiting: a wait cancelled before the start faulted throws on the token, and a start that faults afterwards leaves the attachment on the subject with `Current` null and `Fault` set. When a context attach had already queued a create for the same attachment, the caller awaits the second transition rather than the first. A graph driven start that faults keeps the attachment with `Current` null and `Fault` set, so the next context attach retries it. So does an execution that faults after its start returned, whichever attach path started it: only the start's own outcome makes the awaited attach throw.
 
-The cancellation token bounds the wait, not the work. A cancelled await leaves the transition running to completion, so a caller that gives up waiting still ends with a started instance rather than a half started one.
+Both awaited overloads open the handler if the host has not started yet, since awaiting is an explicit request for the service to be running, and that releases every start already queued on the context, not only the one awaited. The fire and forget overloads and graph driven starts wait for the host.
+
+The two overloads treat the cancellation token differently. On the attach side it bounds the wait, not the work: a cancelled await leaves the start running to completion, so a caller that gives up waiting still ends with a started instance rather than a half started one. On the detach side it reaches the work: the token is handed to the instance's own `StopAsync`, as `IHostedService` defines it, so a cancelled token cuts the graceful stop short, and the instance is disposed either way.
 
 `GetHostedServiceAttachments()` returns an immutable snapshot of a subject's attachments.
 
