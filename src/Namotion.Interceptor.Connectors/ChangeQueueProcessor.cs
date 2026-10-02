@@ -302,8 +302,6 @@ public class ChangeQueueProcessor : IDisposable
     {
         try
         {
-            // Connect-window staleness is positional: changes arriving after this snapshot are steady state.
-            var queuedBeforeStart = _subscription.Count;
             using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
             var flushTask = periodicTimer is not null
@@ -347,12 +345,6 @@ public class ChangeQueueProcessor : IDisposable
             {
                 while (_subscription.TryDequeue(out var change, processingToken))
                 {
-                    var wasQueuedBeforeStart = queuedBeforeStart > 0;
-                    if (wasQueuedBeforeStart)
-                    {
-                        queuedBeforeStart--;
-                    }
-
                     if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
                     {
                         continue;
@@ -363,23 +355,13 @@ public class ChangeQueueProcessor : IDisposable
                         continue;
                     }
 
-                    if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
-                    {
-                        continue;
-                    }
-
                     if (periodicTimer is null)
                     {
-                        // Client changes preserve every intermediate value without a merge. Servers must
-                        // still avoid serving a value that their subject has already superseded.
-                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesAreSettled &&
-                            !ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
+                        // Enqueue order is not commit order, so a change dequeued after a newer commit to
+                        // its property would leave the sink on the older value.
+                        if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
                         {
                             continue;
-                        }
-                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesMayBeStale)
-                        {
-                            ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
                         }
 
                         _immediateBuffer[0] = change;

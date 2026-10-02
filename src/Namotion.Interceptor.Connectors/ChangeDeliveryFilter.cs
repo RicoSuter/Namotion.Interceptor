@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors;
 internal static class ChangeDeliveryFilter
 {
     /// <summary>
-    /// Decides a survivor on the flush path and marks it published, in one property data lookup once the
+    /// Decides a change about to be written and marks it published, in one property data lookup once the
     /// property has been published, because this runs per delivered change.
     /// </summary>
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeDeliveryRule rule)

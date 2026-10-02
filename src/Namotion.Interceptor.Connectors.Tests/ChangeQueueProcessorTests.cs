@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
@@ -653,6 +655,104 @@ public class ChangeQueueProcessorTests
     }
 
     /// <summary>
+    /// A change is enqueued after its commit and outside the subject lock, so a writer preempted between
+    /// the two enqueues an older commit after a newer one. Sending it last would leave the source on the
+    /// older value and the subject on the newer one, with nothing to correct it.
+    /// </summary>
+    [Fact]
+    public async Task WhenAnOlderCommitIsEnqueuedAfterANewerOneWithoutBuffering_ThenTheSourceEndsAtTheNewerValue()
+    {
+        // Arrange
+        using var interceptor = new PauseAfterCommitInterceptor("Older");
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        context.AddService<IWriteInterceptor>(interceptor);
+
+        var subject = new Person(context);
+        var written = new ConcurrentQueue<(string Property, string? Value)>();
+
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            context: context,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue((change.Property.Name, change.GetNewValue<string>()));
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.Zero,
+            maxQueueDepth: null,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource(TestTimeout);
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        subject.FirstName = "Warmup";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains((nameof(Person.FirstName), "Warmup")));
+
+        // Act: the older write commits and is held before it can enqueue.
+        var olderWrite = Task.Run(() => subject.FirstName = "Older");
+        Assert.True(interceptor.Committed.Wait(TestTimeout), "the older write should commit");
+
+        subject.FirstName = "Newer";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains((nameof(Person.FirstName), "Newer")));
+
+        interceptor.Release.Set();
+        await olderWrite.WaitAsync(TestTimeout);
+
+        // The dequeue loop is FIFO, so seeing this proves the older change ahead of it was decided.
+        subject.LastName = "Fence";
+        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains((nameof(Person.LastName), "Fence")));
+
+        // Assert
+        Assert.Equal("Newer", subject.FirstName);
+        Assert.Equal(subject.FirstName, written.Last(entry => entry.Property == nameof(Person.FirstName)).Value);
+
+        // Cleanup
+        await cancellation.CancelAsync();
+        try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    /// <summary>
+    /// Runs inside the change publisher, so it returns to it only once released: the write is committed
+    /// but its change not yet enqueued.
+    /// </summary>
+    [RunsAfter(typeof(PropertyChangeInterceptor))]
+    private sealed class PauseAfterCommitInterceptor(string pausedValue) : IWriteInterceptor, IDisposable
+    {
+        public ManualResetEventSlim Committed { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            next(ref context);
+
+            if (Equals(context.NewValue, pausedValue))
+            {
+                Committed.Set();
+                if (!Release.Wait(TestTimeout))
+                {
+                    throw new TimeoutException("The paused write was never released.");
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Committed.Dispose();
+            Release.Dispose();
+        }
+    }
+
+    /// <summary>
     /// A transaction writes to the source itself and then applies locally, and that apply arrives as a
     /// confirmation. If a write of ours landed on the source in between, the source is left holding the
     /// older commit while the subject holds the confirmed one, and nothing would ever correct it.
@@ -1003,12 +1103,11 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenSteadyStateChangesCarryOldTimestamps_ThenEveryChangeIsWritten()
+    public async Task WhenAChangeIsSupersededByTheTimeItIsDequeued_ThenItIsSkippedByCommitOrderNotTimestamp()
     {
-        // Arrange: steady-state changes may carry application-provided timestamps far in
-        // the past (device source timestamps, WithChangedTimestamp scopes). Connect-time
-        // classification is positional, not timestamp-based, so such changes must never
-        // be staleness-checked or dropped, even when the model has already moved on.
+        // Arrange: changes may carry application-provided timestamps far in the past (device source
+        // timestamps, WithChangedTimestamp scopes), so supersession must follow commit order. Here the
+        // superseded change carries the newest timestamp and the current one an old timestamp.
         var context = InterceptorSubjectContext.Create();
         context.WithRegistry();
         context.WithPropertyChangeSubscriptions();
@@ -1048,21 +1147,21 @@ public class ChangeQueueProcessorTests
         }
         await firstWriteReceived.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // ...so these two queue up as steady-state while the model moves on to "v3".
-        // A timestamp-based classification would wrongly drop "v2" as superseded.
+        // ...so these two queue up behind it while the model moves on to "v3".
+        subject.FirstName = "v2";
         using (SubjectChangeContext.WithChangedTimestamp(oldTimestamp))
         {
-            subject.FirstName = "v2";
             subject.FirstName = "v3";
         }
         allowFurtherWrites.TrySetResult();
 
+        // The immediate path delivers in queue order, so once "v3" arrived, "v2" was already decided.
         await AsyncTestHelpers.WaitUntilAsync(
-            () => receivedValues.Count == 3,
-            message: "All three changes should be written on the immediate path");
+            () => receivedValues.Contains("v3"),
+            message: "The current value should be written");
 
         // Assert
-        Assert.Equal(["v1", "v2", "v3"], receivedValues.ToArray());
+        Assert.Equal(["v1", "v3"], receivedValues.ToArray());
 
         // Cleanup
         await cancellation.CancelAsync();
