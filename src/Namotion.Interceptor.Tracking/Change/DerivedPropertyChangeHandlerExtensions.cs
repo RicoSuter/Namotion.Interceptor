@@ -46,14 +46,12 @@ public static class DerivedPropertyChangeHandlerExtensions
             return;
         }
 
-        // Pass storage timestamp as both storage and raw. For positive and no scope this is a
-        // positive value that seeds the dependent context's cache directly. For null scope it
-        // is 0 (the cache's uninitialized sentinel), which makes the dependent's terminal
-        // write lazy-resolve once; the resolved value then threads through any further
-        // cascade dependents via WriteTimestampRaw, so every change event from this recalc
-        // still shares a single publishing time (verified by mock-now tests in this file).
-        var storageTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
-        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, storageTimestamp, storageTimestamp);
+        // Resolved into the raw encoding as a write's lazy resolve would, the negated capture time under a
+        // null scope included. It is resolved here rather than left 0 for the publishing write to resolve,
+        // because a recalculation handed off to another thread publishes under that thread's scope.
+        var changedTimestamp = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        var rawTimestamp = changedTimestamp > 0 ? changedTimestamp : -SubjectChangeContext.CaptureTimestamp();
+        DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, rawTimestamp);
     }
 
     /// <summary>

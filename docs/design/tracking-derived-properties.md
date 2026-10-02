@@ -261,9 +261,11 @@ RecalculateDerivedProperty(FullName, timestamp)
   lock(data)
     if data.IsRecalculating:
       data.RecalculationNeeded = true            // signal the in-progress recalculation
+      data.TriggerRawTimestamp = timestamp       // the owner commits the last hand-off's timestamp
       return
     if !data.IsAttached → return
     data.IsRecalculating = true
+    data.TriggerRawTimestamp = timestamp
     oldValue = data.LastKnownValue
 
   // Outer loop: handles post-notification RecalculationNeeded without recursion.
@@ -288,7 +290,7 @@ RecalculateDerivedProperty(FullName, timestamp)
             continue                             // discard stale result, re-evaluate
           data.LastKnownValue = newValue
           sequence = ++data.RecalculationSequence
-          SetWriteTimestamp(timestamp)
+          SetWriteTimestamp(max(data.TriggerRawTimestamp, 0))  // the notification publishes the raw value
           break
 
       // Deliver notification while IsRecalculating is still true.
@@ -306,16 +308,20 @@ RecalculateDerivedProperty(FullName, timestamp)
   finally:
     // Clear IsRecalculating. If a write set RecalculationNeeded in the gap
     // between the outer loop's return and this finally, re-trigger to avoid
-    // losing the signal. RecalculationNeeded is cleared before the re-trigger
-    // to prevent unbounded recursion when the getter throws (Phase 3 never
-    // runs to clear it, so the flag would persist across every re-trigger).
+    // losing the signal. The re-trigger keeps ownership, so a writer cannot take
+    // it in between and receive this older trigger's timestamp as a hand-off.
+    // RecalculationNeeded is cleared before the re-trigger to prevent unbounded
+    // recursion when the getter throws (Phase 3 never runs to clear it, so the
+    // flag would persist across every re-trigger).
     lock(data)
       needsRetrigger = data.RecalculationNeeded && data.IsAttached
       if needsRetrigger:
         data.RecalculationNeeded = false
-      data.IsRecalculating = false
+        oldValue = data.LastKnownValue
+      else:
+        data.IsRecalculating = false
     if needsRetrigger:
-      RecalculateDerivedProperty(FullName, timestamp)  // re-enter safely
+      run the try block again as the owner       // re-enter safely
 ```
 
 ```
@@ -331,9 +337,11 @@ NotifyDerivedPropertyChanged(derivedProperty, data, sequence, newValue, oldValue
 The getter is evaluated inside `EvaluateAndStabilize` **without holding `lock(data)`** (when `callerHoldsLock` is false). The lock is acquired only briefly for `UpdateDependencies`. If the getter throws (typically during concurrent state transitions), the exception is caught and `LastKnownValue` remains unchanged. The concurrent writer's `WriteProperty` cascade will re-trigger recalculation with consistent state.
 
 The `RecalculationNeeded` flag is set under `lock(data)` by three sources when `IsRecalculating` is true:
-- **Concurrent `RecalculateDerivedProperty`**: Another write triggered recalculation but the current one is in progress, so the concurrent call bails and signals the flag.
+- **Concurrent `RecalculateDerivedProperty`**: Another write triggered recalculation but the current one is in progress, so the concurrent call bails and signals the flag. It also hands off its timestamps, and the owner commits those of the last hand-off, whose write its next evaluation already reflects. The last hand-off wins rather than the latest timestamp, because timestamps are not monotonic (source timestamps, `WithChangedTimestamp` scopes) and a serial execution would also stamp the last write's. A write hands off only after its change is dispatched, so two writes can hand off in the opposite order from the one they landed in, and then the earlier write's timestamp is committed.
 - **`AttachProperty`**: The property is being reattached while recalculation is in progress, so the evaluation result may be stale.
 - **`DetachProperty`**: The property is being detached while recalculation is in progress, so the evaluation result is invalid.
+
+Attach and detach carry no dependency write, so they leave the handed-off timestamps unchanged.
 
 Phase 3 checks the flag before committing. If set, the stale result is discarded and the inner loop re-evaluates with fresh state. Because `IsRecalculating` stays true during notification delivery, any concurrent write sets `RecalculationNeeded` and bails, and the outer loop picks it up after notification completes and re-evaluates with the latest state.
 
@@ -341,7 +349,7 @@ The generation check inside `EvaluateAndStabilize` avoids re-evaluation when dep
 
 Key details of the change notification:
 - **Notifications outside lock but inside `IsRecalculating`**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` and `RaisePropertyChanged` without holding `lock(data)` (preventing deadlock with `lock(_attachedSubjects)`), but while `IsRecalculating` is still true. This serializes notification delivery with recalculation, so no concurrent recalculation (and thus no competing notification) can start during delivery. Two additional guards provide defense-in-depth: a `RecalculationSequence` check and a `ReferenceEquals` check on `LastKnownValue`. See the "Deadlock prevention" section for details.
-- **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation, ensuring consistent timestamps within a mutation context. This also holds under an explicit-null scope (`WithChangedTimestamp(null)`): storage remains the never-written sentinel, but trigger and cascade dependents share a single captured publishing time so change events stay consistent.
+- **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation (the last handed-off write when recalculations overlap, see [Algorithm](#algorithm)), ensuring consistent timestamps within a mutation context. This also holds under an explicit-null scope (`WithChangedTimestamp(null)`): storage remains the never-written sentinel, but trigger and cascade dependents share a single captured publishing time so change events stay consistent.
 - **Local origin by default**: Origin is stamped per write and nothing inherits it, so the recalculation notification publishes with a `Local` origin without any scope. The local model computed the value and no source confirmed it, so the change flows to bound sources like any local write.
 - **`NoOpWriteDelegate`**: Since derived properties have no backing field, the write delegate is a no-op (`static (_, _) => { }`). The call to `SetPropertyValueWithInterception` exists solely to fire the change notification through the interceptor chain (observable, queue, etc.) with the correct old and new values.
 - **`IRaisePropertyChanged`**: If the subject implements `IRaisePropertyChanged`, `RaisePropertyChanged` is called to support standard `INotifyPropertyChanged` data binding.

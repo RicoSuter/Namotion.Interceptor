@@ -165,25 +165,20 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var rawTimestamp = context.WriteTimestampRaw;
-            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
+            RecalculateDerivedProperty(ref property, context.WriteTimestampRaw);
         }
 
         var usedByProperties = data.GetUsedByProperties();
         if (usedByProperties.Length > 0)
         {
-            // Thread the trigger's resolved timestamp into each dependent's context, skipping a
-            // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
-            var rawTimestamp = context.WriteTimestampRaw;
-            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
-            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
+            // Thread the trigger's resolved timestamp into each dependent's context, skipping a scope push.
+            RecalculateDependents(usedByProperties, context.Property, context.WriteTimestampRaw);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long rawTimestamp)
     {
         for (var i = 0; i < usedByProperties.Length; i++)
         {
@@ -195,7 +190,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 continue;
             }
 
-            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
+            RecalculateDerivedProperty(ref dependent, rawTimestamp);
         }
     }
 
@@ -206,7 +201,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long rawTimestamp)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -218,7 +213,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             if (data.IsRecalculating)
             {
+                // Overwrite, never keep the larger value: see TriggerRawTimestamp.
                 data.RecalculationNeeded = true;
+                data.TriggerRawTimestamp = rawTimestamp;
                 return;
             }
 
@@ -228,9 +225,18 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             data.IsRecalculating = true;
+            data.TriggerRawTimestamp = rawTimestamp;
             oldValue = data.LastKnownValue;
         }
 
+        RecalculateAsOwner(ref derivedProperty, data, oldValue);
+    }
+
+    /// <summary>
+    /// Runs the recalculation loop. Requires recalculation ownership and releases it on exit.
+    /// </summary>
+    private static void RecalculateAsOwner(ref PropertyReference derivedProperty, DerivedPropertyData data, object? oldValue)
+    {
         // Outer loop handles the post-notification RecalculationNeeded check without recursion,
         // preventing stack overflow under sustained concurrent writes.
         // The try-finally at this level ensures IsRecalculating is always cleared on exit.
@@ -241,7 +247,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
             {
-                if (!TryEvaluateAndCommit(data, ref derivedProperty, storageTimestamp, out var newValue, out var sequence))
+                if (!TryEvaluateAndCommit(data, ref derivedProperty, out var newValue, out var sequence, out var rawTimestamp))
                 {
                     return;
                 }
@@ -270,9 +276,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
         finally
         {
-            // Atomically clear IsRecalculating. If a write set RecalculationNeeded
+            // Atomically release ownership. If a write set RecalculationNeeded
             // in the gap between the outer loop's return-check and this finally,
             // we must re-trigger so the derived property reflects the latest state.
+            // The re-trigger keeps ownership rather than re-acquiring it: a writer that took
+            // ownership in between would otherwise receive this older trigger's timestamps as a hand-off.
             // RecalculationNeeded is cleared before the re-trigger to prevent unbounded
             // recursion when the getter consistently throws: without clearing, the flag
             // persists (Phase 3 never runs to clear it), causing each re-trigger's
@@ -284,31 +292,36 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 if (needsRetrigger)
                 {
                     data.RecalculationNeeded = false;
+                    oldValue = data.LastKnownValue;
                 }
-
-                data.IsRecalculating = false;
+                else
+                {
+                    data.IsRecalculating = false;
+                }
             }
 
             if (needsRetrigger)
             {
-                RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
+                RecalculateAsOwner(ref derivedProperty, data, oldValue);
             }
         }
     }
 
     /// <summary>
-    /// Evaluates without holding lock(data), retries stale results, and commits the value and timestamp under lock.
+    /// Evaluates without holding lock(data), retries stale results, and commits the value and the latest trigger's
+    /// timestamp under lock, returning that trigger's raw timestamp for publishing.
     /// Requires recalculation ownership. Returns false if evaluation throws or the property is detached.
     /// </summary>
     private static bool TryEvaluateAndCommit(
         DerivedPropertyData data,
         ref PropertyReference derivedProperty,
-        long storageTimestamp,
         out object? newValue,
-        out long sequence)
+        out long sequence,
+        out long rawTimestamp)
     {
         newValue = null;
         sequence = 0;
+        rawTimestamp = 0;
 
         while (true)
         {
@@ -341,7 +354,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                 data.LastKnownValue = newValue;
                 sequence = ++data.RecalculationSequence;
-                derivedProperty.SetWriteTimestamp(storageTimestamp);
+                rawTimestamp = data.TriggerRawTimestamp;
+                derivedProperty.SetWriteTimestamp(rawTimestamp > 0 ? rawTimestamp : 0);
                 return true;
             }
         }
