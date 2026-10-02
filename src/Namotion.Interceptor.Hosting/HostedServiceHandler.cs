@@ -42,9 +42,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     private int _inFlight;
 
     /// <summary>
-    /// Set once by the service provider factory that hands this handler to the host. Volatile because
-    /// the readers are transition and attaching threads with no ordering against that one, and a stale
-    /// null here silently drops the errors this logger exists to report.
+    /// Set once by the service provider factory. Volatile because the readers have no ordering against
+    /// that write, and a stale null silently drops the errors this logger exists to report.
     /// </summary>
     private volatile ILogger? _logger;
 
@@ -143,12 +142,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // only one of them owns it.
         _liveSubjects.TryRemove(subject, out _);
 
-        // A handler stops what it owns and nothing else, or it disposes an instance another handler
-        // created and is running. Decided inside the chain lock, with the append: read ahead of it, a
-        // release landing between the two lets the stop escape the drain's barrier or reach an instance
-        // the next owner has started since. Not readable from the transition body either, since
-        // ownership is released just below and the body would always see a stranger. Appended now and
-        // never deferred into another transition:
+        // Stops only what this handler owns, decided with the append under the chain lock: ahead of
+        // it, a release in between lets the stop escape the drain or reach a stranger's instance; in
+        // the body, the release below has already run. Appended now, never deferred into a transition:
         // docs/design/hosting-service-ownership.md#why-a-composite-transition-is-wrong.
         TaskCompletionSource? subjectStopped = null;
         if (subjectTarget is not null)
@@ -168,8 +164,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         foreach (var attachment in attachments)
         {
-            // A null wait is the "nothing to order behind" case. The stop body skips it, so that case
-            // allocates no completed task to await.
+            // Null rather than a completed task, so the "nothing to order behind" case awaits nothing.
             _ = AppendStopIfOwned(
                 subject,
                 ((IHostedServiceAttachmentTarget)attachment).Target,
@@ -178,9 +173,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 CancellationToken.None);
         }
 
-        // Released after the stops are appended, and never from inside a transition body: releasing
-        // from the body would clobber ownership a re-attach has already retaken, and the re-attach's
-        // start would then no-op itself. Releasing a target this handler does not own is a no-op.
+        // After the stops are appended and never from a body:
+        // docs/design/hosting-service-ownership.md#ownership-is-released-on-context-detach-and-on-drain.
         subjectTarget?.ReleaseOwnership(this);
         foreach (var attachment in attachments)
         {
@@ -202,15 +196,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         if (_gate.IsDraining)
         {
-            // A draining or drained handler must not take ownership: a target left owned by a dead
-            // handler makes every future handler over that subject lose the compare and exchange.
-            // Read here as well as after the append, so the drained case installs no owner at all.
+            // Read here as well as after the append, so a drained handler installs no owner at all.
             return null;
         }
 
-        // Taken before the append, never inside the body: a subsystem that treats "the graph has
-        // finished starting" as a completion point would otherwise pass it while this start is still
-        // queued.
+        // Before the append, never inside the body, or "the graph has finished starting" is reachable
+        // while this start is still queued.
         var startupHolds = TakeStartupHolds(subject.Context);
 
         // Read in the appending flow, which is the one that opened it. The body runs later and, on the
@@ -233,17 +224,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         if (ownershipTaken && _gate.IsDraining)
         {
-            // Re-read after both writes: they landed while the gate still read Running, so the drain's
-            // snapshot covers this target, and any later read may have been swept past.
-            //
-            // A stop, not a plain retirement of the record: the start appended just above may already
-            // be past every one of its guards and committed to creating an instance, which a retirement
-            // would hide from every later snapshot. The stop is behind it on the same chain.
+            // Undoes a take the drain's snapshot may have missed, and only one this call installed. A
+            // stop rather than a bare retirement, because the start above may already be committed:
+            // docs/design/hosting-service-ownership.md#why-the-ownership-decision-is-inside-the-chain-lock.
             AppendStop(subject, target, signal: null, waitFor: null, CancellationToken.None);
-
-            // After the stop, never before, for the reason on the context detach path, and only for an
-            // ownership this call installed: an earlier attach's may be running, and undoing that one
-            // would pull it out of the set the drain is about to stop.
             target.ReleaseOwnership(this);
         }
 
@@ -347,10 +331,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     private void ObserveExecution(
         IInterceptorSubject subject, HostedServiceTarget target, BackgroundService instance, Task executeTask)
     {
-        // A cancellation as well as a fault: an OperationCanceledException escaping the execution
-        // leaves it Canceled whether or not a stop asked for it, and the identity check in the body is
-        // what tells a stop's own cancellation apart. Never synchronous, because the continuation takes
-        // the chain lock and the completing thread may hold anything.
+        // A cancellation as well as a fault, since the execution is Canceled whether or not a stop asked
+        // for it. Never synchronous: the continuation takes the chain lock on a thread that may hold anything.
         executeTask.ContinueWith(
             OnExecutionEnded,
             new ExecutionFaultObserver(this, subject, target, instance, executeTask),
@@ -389,10 +371,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         private async Task RunAsync()
         {
-            // The run that ended must still be the one recorded: a subject is restarted in place on the
-            // same instance with a new execute task, and a stop ahead on the chain leaves Current null,
-            // so neither check on its own tells this run from the next. Every stop leaves Current
-            // before it calls StopAsync, so a run its own stop cancelled never passes this.
+            // Both checks: a subject restarts in place on the same instance with a new execute task, and
+            // every stop leaves Current before StopAsync, so a run its own stop cancelled never passes.
             if (!ReferenceEquals(target.Current, instance) || !ReferenceEquals(instance.ExecuteTask, executeTask))
             {
                 LogIgnoredFault();
@@ -446,29 +426,18 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// <summary>Whether a start body may still create an instance, read before the scope wait and after it.</summary>
     private bool MayStart(IInterceptorSubject subject, HostedServiceTarget target)
     {
-        // The gate inside the body, never at append time: a start queued when shutdown begins has to
-        // re-read, and a body skipped at append time would never run its signalling.
-        //
-        // Liveness and ownership are two windows, and neither is redundant: an explicit detach retires
-        // the record without releasing, so only liveness refuses a body behind it, and a body that
-        // reads liveness after a later attach rebuilt it is refused only by ownership.
-        //
-        // One instance per target, in the body where the chain serializes the two starts. Ownership does
-        // not cover this: the owning handler sees a context attach per context and appends a start for
-        // each.
+        // Four guards, none covered by another, each re-read here because the append happened earlier:
+        // docs/design/hosting-service-ownership.md#the-read-inside-the-start-body.
         return _gate.State == HostedServiceGateState.Running
             && _liveSubjects.ContainsKey(subject)
             && ReferenceEquals(target.Owner, this)
             && target.Current is null;
     }
 
-    /// <summary>Waits for the startup scope this start was captured in and reports whether it may still run.</summary>
-    /// <remarks>
-    /// Every guard the caller read before this is re-read after it: a scope holds a start for as long
-    /// as its flow stays open, and the subject can leave the graph in that time. The drain releases the
-    /// wait as well as the scope does, or a scope nobody disposes would hold the drain's barrier for
-    /// the whole shutdown deadline.
-    /// </remarks>
+    /// <summary>
+    /// Waits for the startup scope this start was captured in, or for the drain, and re-reads every
+    /// guard afterwards, because the subject can leave the graph while the scope is open.
+    /// </summary>
     private async Task<bool> WaitForConfigurationAsync(
         IInterceptorSubject subject, HostedServiceTarget target, HostedServiceStartupScope startupScope)
     {
@@ -625,13 +594,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         };
 
     /// <summary>
-    /// Stops an instance whose own start threw, reporting a failure here rather than raising it.
+    /// Stops an instance whose own start threw. Contains its own failure for the reason on
+    /// <see cref="DisposeInstanceAsync"/>.
     /// </summary>
-    /// <remarks>
-    /// Contains its own failure for the reason on <see cref="DisposeInstanceAsync"/>: this runs inside a
-    /// catch that rethrows the start's exception, which is the one a caller waits for, and an escape
-    /// from here would replace it and skip the dispose behind it.
-    /// </remarks>
     private async Task StopFailedStartAsync(IHostedService instance, IInterceptorSubject subject)
     {
         try
@@ -676,9 +641,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     internal async Task<bool> WaitForStartAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        // Reads the target and never creates one, and never takes ownership: a drain releases only
-        // what its own snapshot held, so a claim taken here would never be released and the next
-        // handler over the same subject would lose the compare and exchange forever.
+        // Never creates a target and never takes ownership: a claim taken here would never be released.
         var target = subject.TryGetSubjectTarget();
         if (target is null || !_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
         {
@@ -705,17 +668,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
 
-    /// <summary>
-    /// Records a target this handler installed itself as the owner of, so its drain can stop and
-    /// release it. Written from the take, on the install only: a repeat take finds a record an earlier
-    /// take made, and undoing that one would pull a running instance out of the drain's snapshot.
-    /// </summary>
+    /// <summary>Records a target this handler installed itself as the owner of, so its drain can stop and release it.</summary>
     internal void RecordOwnership(HostedServiceTarget target, IInterceptorSubject subject) => _owned[target] = subject;
 
-    /// <summary>
-    /// Retires a target's record. Called by the release, and by an explicit detach, which stops a
-    /// target without releasing it and inherits the rule that it must still retire the record.
-    /// </summary>
+    /// <summary>Retires a target's record. Called by the release, and by an explicit detach, which stops without releasing.</summary>
     internal void ForgetOwnership(HostedServiceTarget target) => _owned.TryRemove(target, out _);
 
     internal void EnterTransition() => Interlocked.Increment(ref _inFlight);
@@ -866,9 +822,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 remaining);
         }
 
-        // The owned set is not cleared here. After the release loop the only entries left are installs
-        // whose own gate re-read releases them, and clearing is what would make the set and the owner
-        // field disagree for anything still in flight.
+        // The owned set is not cleared: what is left belongs to installs whose own gate re-read releases them.
     }
 
     /// <summary>

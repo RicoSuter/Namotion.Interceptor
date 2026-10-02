@@ -127,12 +127,9 @@ public static class InterceptorHostingExtensions
         out Task? start)
         where T : class, IHostedService
     {
-        // Resolved before the add, because the lookup throws when the subject is reachable from two
-        // hosting contexts and that throw after the add leaves the caller holding no attachment and the
-        // subject holding a factory the next context attach starts. Resolved again when the first found
-        // none, because a context published between the two is otherwise missed by both sides. Nothing
-        // ahead of the add may read subject.Data: DataGatedSubject gates on the first read. See
+        // Resolved before the add and again after it, for the reasons in
         // docs/design/hosting-service-ownership.md#an-attach-and-a-context-entry-are-the-same-two-facts-in-opposite-orders.
+        // Nothing ahead of the add may read subject.Data: DataGatedSubject gates on the first read.
         handler = subject.Context.TryGetService<HostedServiceHandler>();
         var attachment = AddAttachment(subject, factory);
         handler ??= TryResolveHandlerAfterPublish(subject);
@@ -187,11 +184,8 @@ public static class InterceptorHostingExtensions
         var target = ((IHostedServiceAttachmentTarget)attachment).Target;
         stop = MarkDetachedAndAppendStop(subject, target, handler, cancellationToken);
 
-        // Retired without releasing, and that asymmetry is load bearing: a release makes a start queued
-        // ahead of this detach read Owner as null and refuse, which leaves the stop no instance to
-        // dispose. Without the retirement every attach and detach cycle keeps the target and its
-        // subject on the handler for the handler's whole life. Retired before a caller awaits the stop,
-        // so a cancelled wait cannot skip it.
+        // Retired without releasing, and before a caller awaits the stop so a cancelled wait cannot skip it:
+        // docs/design/hosting-service-ownership.md#an-explicit-detach-retires-the-record-without-releasing-ownership.
         handler?.ForgetOwnership(target);
         return true;
     }

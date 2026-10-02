@@ -120,14 +120,9 @@ internal sealed class HostedServiceTarget
         => Volatile.Write(ref _snapshot, new TargetSnapshot(instance, TransitionPhase.None));
 
     /// <summary>
-    /// Leaves the start window for a start that recorded nothing, and leaves a start that recorded its
-    /// instance alone, because the write that recorded it already left the window.
+    /// Leaves the start window for a start that recorded nothing. The condition is load bearing: this
+    /// runs after <see cref="CompleteStart"/>, so settling unconditionally would null a started instance.
     /// </summary>
-    /// <remarks>
-    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition is load bearing: it
-    /// runs after <see cref="CompleteStart"/>, so settling unconditionally would null an instance that
-    /// has just started.
-    /// </remarks>
     public void EndStart() => LeavePhase(TransitionPhase.Starting);
 
     /// <summary>
@@ -138,13 +133,9 @@ internal sealed class HostedServiceTarget
     public void BeginStop() => Volatile.Write(ref _snapshot, StoppingSnapshot);
 
     /// <summary>
-    /// Leaves the stop window, and leaves the snapshot alone for a stop body that never entered it.
+    /// Leaves the stop window. The condition decides nothing today and is kept so a guard added above
+    /// the stop's instance read cannot turn this into a settle over a live instance.
     /// </summary>
-    /// <remarks>
-    /// Stays one write, for the reason on <see cref="BeginStart"/>. The condition decides nothing for
-    /// the stop body as it stands, and is kept so that a guard added above its instance read cannot
-    /// turn this into a settle over a live instance.
-    /// </remarks>
     public void EndStop() => LeavePhase(TransitionPhase.Stopping);
 
     /// <summary>
@@ -162,18 +153,9 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// The state and the instance it was derived from, out of one snapshot load, so a caller cannot read
-    /// a state that disagrees with the instance it then acts on. Derived rather than stored, so
-    /// <see cref="HostedServiceAttachmentState.Running"/> and a non null <see cref="Current"/> can never
-    /// disagree.
+    /// a state that disagrees with the instance it then acts on. The precedence is deliberate:
+    /// docs/design/hosting-service-ownership.md#the-state-a-consumer-polls.
     /// </summary>
-    /// <remarks>
-    /// <see cref="HostedServiceAttachmentState.Removed"/> outranks
-    /// <see cref="HostedServiceAttachmentState.Faulted"/> because the mark is terminal and the fault is
-    /// not, so ranked the other way an attachment nothing can start again reads as recoverable.
-    /// <see cref="HostedServiceAttachmentState.Stopping"/> outranks
-    /// <see cref="HostedServiceAttachmentState.Removed"/> because an explicit detach marks and then
-    /// stops, so both hold while that stop runs and it settles into Removed.
-    /// </remarks>
     public HostedServiceAttachmentState GetState(out IHostedService? current)
     {
         // The instance and the phase come out of this one load, so no transition can land between them.
@@ -183,13 +165,9 @@ internal sealed class HostedServiceTarget
         return snapshot.Instance is not null ? HostedServiceAttachmentState.Running
             : snapshot.Phase is TransitionPhase.Starting ? HostedServiceAttachmentState.Starting
             : snapshot.Phase is TransitionPhase.Stopping ? HostedServiceAttachmentState.Stopping
-            // The two loads below run only on a settled snapshot, so neither can contradict a
-            // transition in flight: between them they choose among Removed, Faulted and Stopped,
-            // and a reading that is one moment old is one of those three rather than a phase.
-            //
-            // Read outside _chainLock, unlike everywhere else: a poll must not queue behind an append,
-            // and the mark is one way, so the worst a racing read can do is report the state one
-            // moment older.
+            // Only on a settled snapshot, so neither load below can contradict a transition in flight.
+            // The mark is read outside _chainLock so a poll never queues behind an append; it is one
+            // way, so the worst a racing read does is report the state one moment older.
             : Volatile.Read(ref _detached) ? HostedServiceAttachmentState.Removed
             : Fault is not null ? HostedServiceAttachmentState.Faulted
             : HostedServiceAttachmentState.Stopped;
@@ -231,9 +209,8 @@ internal sealed class HostedServiceTarget
     /// its own take but must leave an earlier one alone needs.
     /// </summary>
     /// <remarks>
-    /// The record is written on the install only, so membership can be gained through nothing but a take
-    /// that has an undo behind it. Production takes through <see cref="TryTakeOwnershipAndAppendAsync"/>
-    /// only; this entry point is for tests that drive the exchange on its own.
+    /// Production takes through <see cref="TryTakeOwnershipAndAppendAsync"/> only; this entry point is
+    /// for tests that drive the exchange on its own.
     /// </remarks>
     public bool TryTakeOwnership(HostedServiceHandler handler, IInterceptorSubject subject, out bool ownershipTaken)
     {
@@ -245,14 +222,9 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// Releases an ownership this handler installed and retires its record. Under the chain lock, so a
-    /// take's liveness read and its exchange are one step against this: a take that lands after a
-    /// detach's release reads the liveness that detach cleared first, and one that lands before it is
-    /// the install the release matches.
+    /// take's liveness read and its exchange are one step against this release:
+    /// docs/design/hosting-service-ownership.md#ownership.
     /// </summary>
-    /// <remarks>
-    /// The record is retired only when the exchange matched, because the record and <c>_owner</c> are
-    /// one fact: a release that matched nothing released nothing.
-    /// </remarks>
     public void ReleaseOwnership(HostedServiceHandler handler)
     {
         lock (_chainLock)
@@ -297,12 +269,9 @@ internal sealed class HostedServiceTarget
     /// <summary>
     /// Appends a transition only while <paramref name="handler"/> still owns the target, both decided
     /// under one acquisition of the chain lock. Returns null when ownership has moved on, in which case
-    /// nothing was appended.
+    /// nothing was appended. Why the decision is inside the lock:
+    /// docs/design/hosting-service-ownership.md#why-the-ownership-decision-is-inside-the-chain-lock.
     /// </summary>
-    /// <remarks>
-    /// The drain snapshots what it owns while holding nothing and appends afterwards, so deciding
-    /// outside this lock lets one host's drain stop and dispose an instance a second host started.
-    /// </remarks>
     public Task? AppendIfOwnedAsync(HostedServiceHandler handler, Func<Task> body)
     {
         lock (_chainLock)
@@ -318,9 +287,7 @@ internal sealed class HostedServiceTarget
     /// ownership was taken. <paramref name="ownershipTaken"/> is as on <see cref="TryTakeOwnership"/>.
     /// </summary>
     /// <remarks>
-    /// The three steps must stay under one acquisition. Splitting them deadlocks a start against the
-    /// stops a context detach appends under this same lock, and leaves a start able to outlive an
-    /// explicit detach. Worked through in
+    /// The three steps must stay under one acquisition:
     /// docs/design/hosting-service-ownership.md#the-read-inside-the-chain-lock.
     /// </remarks>
     public Task? TryTakeOwnershipAndAppendAsync(
