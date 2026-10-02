@@ -172,4 +172,23 @@ public class RawAndStructuralParityTests
         Assert.Equal(30d, atTen!.Number!.Value, 6);
         Assert.Null(beforeFirst);
     }
+
+    [Theory]
+    [MemberData(nameof(ParityStores.Stores), MemberType = typeof(ParityStores))]
+    public async Task WhenGetSampleAtOrBeforeIsAtTheCoverageEnd_ThenItIsNull(ParityStoreFactory factory)
+    {
+        // Arrange
+        using var store = factory.Create();
+        store.Record("/a/Value", Base.AddSeconds(1), 10d, typeof(double));
+        await store.FlushAsync();
+        var coverageEnd = store.CoverageRanges[^1].To;
+
+        // Act
+        var justBeforeEnd = store.GetSampleAtOrBefore("/a/Value", coverageEnd.AddTicks(-1));
+        var atEnd = store.GetSampleAtOrBefore("/a/Value", coverageEnd);
+
+        // Assert - coverage is half-open, so its end is not covered.
+        Assert.Equal(10d, justBeforeEnd!.Number!.Value, 6);
+        Assert.Null(atEnd);
+    }
 }

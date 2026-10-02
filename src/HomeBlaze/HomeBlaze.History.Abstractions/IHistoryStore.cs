@@ -39,7 +39,9 @@ public interface IHistoryStore
 
     /// <summary>
     /// Gets the most recent sample at or before <paramref name="asOf"/> for the property path
-    /// (following move chains), or null if none. Used by TimeWeightedAverage integration
+    /// (following move chains), or null if none. The result is coverage-scoped: null when
+    /// <paramref name="asOf"/> is not covered, and never a sample older than the start of the
+    /// coverage range containing <paramref name="asOf"/>. Used by TimeWeightedAverage integration
     /// and Last LOCF gap-fill.
     /// </summary>
     ValueTask<HistoryPoint?> GetSampleAtOrBeforeAsync(
@@ -99,6 +101,50 @@ public readonly record struct HistoryCoverage(DateTimeOffset From, DateTimeOffse
             .Select(range => range.Intersect(window))
             .Where(range => range is not null)
             .Select(range => range!.Value));
+
+    /// <summary>
+    /// Returns how much of <paramref name="window"/> the normalized <paramref name="ranges"/> cover.
+    /// </summary>
+    public static TimeSpan CoveredDuration(ImmutableArray<HistoryCoverage> ranges, HistoryCoverage window)
+    {
+        var covered = TimeSpan.Zero;
+        foreach (var range in ranges)
+        {
+            if (range.From >= window.To)
+            {
+                break;
+            }
+
+            if (range.Intersect(window) is { } overlap)
+            {
+                covered += overlap.To - overlap.From;
+            }
+        }
+
+        return covered;
+    }
+
+    /// <summary>
+    /// Returns the start of the range in the normalized <paramref name="ranges"/> that contains
+    /// <paramref name="instant"/>, or null when no range contains it.
+    /// </summary>
+    public static DateTimeOffset? CoverageStartAt(ImmutableArray<HistoryCoverage> ranges, DateTimeOffset instant)
+    {
+        foreach (var range in ranges)
+        {
+            if (range.From > instant)
+            {
+                break;
+            }
+
+            if (instant < range.To)
+            {
+                return range.From;
+            }
+        }
+
+        return null;
+    }
 }
 
 /// <summary>

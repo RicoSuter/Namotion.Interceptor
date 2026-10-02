@@ -299,13 +299,96 @@ public class PropertyHistoryChartModelTests
         };
 
         // Act
-        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points);
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, singlePointWidth: null, points[^1].Timestamp);
 
         // Assert
         Assert.Equal(2, runs.Count);
-        Assert.Single(runs[0]);
+        Assert.Equal(new[] { t, t.AddSeconds(10) }, runs[0].Select(point => point.Timestamp));
+        Assert.All(runs[0], point => Assert.Equal(1d, point.Number));
         Assert.Equal(2, runs[1].Count);
         Assert.Equal(3d, runs[1][0].Number);
+    }
+
+    [Fact]
+    public void WhenARawSinglePointIsLastInTheSeries_ThenItHoldsToTheWindowEnd()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 4d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, singlePointWidth: null, start.AddHours(1));
+
+        // Assert
+        var heldRun = Assert.Single(runs);
+        Assert.Equal(new[] { start, start.AddHours(1) }, heldRun.Select(point => point.Timestamp));
+        Assert.All(heldRun, point => Assert.Equal(4d, point.Number));
+    }
+
+    [Fact]
+    public void WhenARunHasASinglePoint_ThenItIsWidenedIntoAFlatSegment()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 4d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddHours(1));
+
+        // Assert
+        var widenedRun = Assert.Single(runs);
+        Assert.Equal(new[] { start, start.AddMinutes(10) }, widenedRun.Select(point => point.Timestamp));
+        Assert.All(widenedRun, point => Assert.Equal(4d, point.Number));
+    }
+
+    [Fact]
+    public void WhenASinglePointIsNearTheWindowEnd_ThenTheSegmentStopsAtTheEnd()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 4d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddMinutes(3));
+
+        // Assert
+        Assert.Equal(start.AddMinutes(3), Assert.Single(runs)[^1].Timestamp);
+    }
+
+    [Fact]
+    public void WhenASinglePointIsFollowedByANullPointWithinTheWidth_ThenTheSegmentStopsAtTheNullPoint()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points =
+        [
+            new HistoryPoint(start, 4d, null),
+            new HistoryPoint(start.AddMinutes(2), null, null),
+            new HistoryPoint(start.AddMinutes(20), 5d, null),
+            new HistoryPoint(start.AddMinutes(21), 6d, null)
+        ];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddHours(1));
+
+        // Assert
+        Assert.Equal(2, runs.Count);
+        Assert.Equal(new[] { start, start.AddMinutes(2) }, runs[0].Select(point => point.Timestamp));
+        Assert.All(runs[0], point => Assert.Equal(4d, point.Number));
+    }
+
+    [Fact]
+    public void WhenARunHasSeveralPoints_ThenItIsNotWidened()
+    {
+        // Arrange
+        var start = new DateTimeOffset(2026, 6, 22, 12, 0, 0, TimeSpan.Zero);
+        HistoryPoint[] points = [new HistoryPoint(start, 1d, null), new HistoryPoint(start.AddMinutes(1), 2d, null)];
+
+        // Act
+        var runs = PropertyHistoryChartModel.SplitIntoGapRuns(points, TimeSpan.FromMinutes(10), start.AddHours(1));
+
+        // Assert
+        Assert.Equal(points, Assert.Single(runs));
     }
 
     [Fact]

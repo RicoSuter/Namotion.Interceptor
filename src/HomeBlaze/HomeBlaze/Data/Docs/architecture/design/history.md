@@ -202,14 +202,16 @@ Empty bucket behavior is:
 
 | Aggregation | Empty bucket |
 |---|---|
-| `Count` | `0` |
+| `Count` | `0`, or null when the bucket is only partly covered |
 | `Last` | carried value, or null when unknown |
 | `TimeWeightedAverage` | carried value integrated over known duration, or null when unknown |
 | Other aggregations | null |
 
-Bucketed merger results include the complete newest bucket grid, subject to `MaxPoints`. Planning and store aggregation start at the first bucket that can appear in that output, so a multi-year request with a small point budget does not enumerate every older bucket. Uncovered buckets are explicit null points. This lets the chart render gaps without guessing whether an omitted point means no data or truncation.
+Bucketed merger results include the complete newest bucket grid, subject to `MaxPoints`. Planning and store aggregation start at the first bucket that can appear in that output, so a multi-year request with a small point budget does not enumerate every older bucket. Buckets that no store covers at all are explicit null points. This lets the chart render gaps without guessing whether an omitted point means no data or truncation.
 
-Direct store queries apply the same coverage rule. A bucket that is not fully contained in one of that store's ranges is null and clears carried state, so `Last` and `TimeWeightedAverage` never synthesize values through a restart or drop gap.
+Direct store queries apply the same coverage rule. A bucket is measured over `[bucket start, min(bucket end, To))` intersected with that store's coverage. A bucket with no covered part is null and clears carried state. A partly covered bucket is aggregated over its covered part: `Count` and `Sum` are null because they would underreport, and every other aggregation uses only the covered samples and covered time. Ending at `To` is not a coverage gap, so the newest bucket keeps `Count` and `Sum`.
+
+A held value never crosses a coverage gap, inside a bucket or between buckets. It is unknown at every coverage start until the first sample after it, and it is cleared at every coverage end, so `Last` and `TimeWeightedAverage` never synthesize values through a restart or drop gap. When `MaxPoints` clips older buckets, the store's coverage-scoped look-back at the clipped boundary replaces any `CarrySeed`, and a null look-back clears it.
 
 Numeric aggregations on JSON properties throw `HistoryAggregationNotSupportedException`. Aggregation identifiers are PascalCase strings so stores can add capabilities without changing a closed enum:
 
@@ -230,13 +232,13 @@ Numeric aggregations on JSON properties throw `HistoryAggregationNotSupportedExc
 The merger orders stores by descending priority and snapshots coverage once. It uses two planners:
 
 - Raw queries use coverage subtraction. Higher-priority ranges claim their overlap first and lower-priority stores fill uncovered pieces.
-- Bucketed queries assign each bucket to one highest-priority store that both covers the bucket and supports the aggregation. A bucket is never split across stores, avoiding invalid combinations such as an average of averages. The newest bucket is clipped to the end of the requested range for both purposes, so it is still served when the range ends mid-bucket and its point never aggregates samples from after that end.
+- Bucketed queries assign each bucket to one store that supports the aggregation: the highest-priority store covering the whole bucket, otherwise a store covering the bucket start (it can carry the held value into the bucket), otherwise any store covering part of it. Within each tier the store covering most of the bucket wins, with ties going to priority. A bucket is never split across stores, avoiding invalid combinations such as an average of averages. The newest bucket is clipped to the end of the requested range for both purposes, so it is still served when the range ends mid-bucket and its point never aggregates samples from after that end.
 
-Consecutive buckets with the same owner become one store query. Coverage gaps break segments even when the same store owns both sides.
+Consecutive buckets with the same owner become one store query. A bucket that no store covers at all breaks the segment; a gap inside an owned bucket does not, because the store applies the partial-bucket rule itself.
 
 Point budgets favor the newest data. Non-carry queries execute newest-first with the remaining budget. Carry-dependent queries first select the newest segments that fit, then execute those segments oldest-to-newest to thread state correctly.
 
-For `Last` and `TimeWeightedAverage`, the merger resolves a value held at the start of each contiguous served region. It threads that value across adjacent segments. It does not carry across an uncovered interval. After each segment it asks for the last raw event rather than using an aggregate point as the next carry.
+For `Last` and `TimeWeightedAverage`, the merger resolves a value held at the start of each contiguous served region. It threads that value across adjacent segments. It does not carry across an uncovered interval. After each segment it asks for the last raw event rather than using an aggregate point as the next carry. The carry is threaded into the next segment only while the previous owner's coverage reaches the boundary; otherwise it is resolved again at the next segment's start. When the owner's coverage restarts inside a segment and no event follows the restart, the carry is cleared.
 
 Query errors propagate. A failed store must not look like an empty store.
 
@@ -250,9 +252,9 @@ For each bucket:
 sum(value * known duration) / sum(known duration)
 ```
 
-An explicit null event clears the held value. Unknown intervals contribute to neither the numerator nor the denominator. A later numeric event establishes a known value again.
+An explicit null event clears the held value. Unknown intervals contribute to neither the numerator nor the denominator. A later numeric event establishes a known value again. A bucket's integral spans its measured part (see [Query semantics](#query-semantics)), so it ends at `To` when the range ends inside it.
 
-In-memory integrates directly over its ordered buffer. SQLite streams one ascending event sequence across move legs and partition files. It keeps only the pending prior event plus bucket partials, so sample memory is constant and it does not use SQLite `ATTACH`. This also avoids SQLite's attached-database limit for long queries.
+In-memory integrates directly over its ordered buffer. SQLite streams one ascending event sequence across move legs and partition files, reading only covered windows, and the ordered event scan integrates the held value itself, one coverage window at a time. It keeps only the pending prior event plus bucket partials, so sample memory is constant and it does not use SQLite `ATTACH`. This also avoids SQLite's attached-database limit for long queries.
 
 The parity test suite feeds identical cases to both engines. Any future TimescaleDB fast path must preserve the same explicit-null and carry semantics.
 
@@ -306,7 +308,7 @@ The parity test suite feeds identical cases to both engines. Any future Timescal
 
 The history subjects implement `ITitleProvider` and render as "In-Memory History" and "SQLite History".
 
-The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, and type-aware aggregation choices. Numeric properties render as a line chart, split at explicit null gaps.
+The property history dialog is available for eligible `[State]` properties when at least one store exists. It supports preset and custom ranges, raw or bucketed queries, and type-aware aggregation choices. Numeric properties render as a line chart, split at explicit null gaps. A run with a single point is drawn as a flat segment so it stays visible: one bucket wide for a bucketed query, held until the next point for raw samples, and never past the window end.
 
 ### State timeline
 
@@ -367,7 +369,9 @@ Queries should send the relevant range predicate to PostgreSQL rather than loadi
 - The in-memory store loses all data on restart.
 - Move detection cannot discover moves that occurred while HomeBlaze was stopped.
 - Per-property time resolution is bounded by the change queue's coalescing interval.
-- When the requested bucket size exceeds `InMemory.MaxAge`, the rightmost bucket can omit up to a persistent store's `FlushInterval` of samples. Raise `MaxAgeSeconds` for a pixel-perfect live edge.
+- When the requested bucket size exceeds `InMemory.MaxAge`, no store covers the whole newest bucket, so it is served partially, usually by the persistent store, whose coverage covers the bucket start but ends at its last flush. It omits the samples outside that store's coverage and its `Count` and `Sum` are null. Raise `MaxAgeSeconds` for a complete live edge.
+- For a value that has not changed within `InMemory.MaxAge`, `Last` and `TimeWeightedAverage` can be briefly null at the live edge: right after a bucket boundary, until the persistent store flushes past it. The held value is not looked up across stores.
+- No sample is recorded when recording resumes, so after a restart a property shows no value until it next changes.
 - Subject-bearing state, full graph snapshots, `Rate`, `Delta`, `StateDuration`, interpolation, compression, and continuous aggregates are future work.
 
 The planned snapshot layer stores periodic compressed whole-graph snapshots and reconstructs a requested time by finding the nearest prior snapshot and replaying scalar, structural, and move events. Planned MCP tools are `get_snapshot` and capped `get_snapshots`.
