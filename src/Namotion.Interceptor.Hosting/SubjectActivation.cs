@@ -1,53 +1,79 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
-/// Forces construction of a DI registered subject at host start. A singleton nobody resolves is never
-/// built, never attached to its context and never started, and <see cref="IHostedService"/> is the
-/// only hook the generic host offers for forcing that construction.
+/// Forces construction of a DI registered subject at host start and runs it. A singleton nobody
+/// resolves is never built, and <see cref="IHostedService"/> is the only hook the generic host offers
+/// for forcing that construction.
 /// </summary>
-internal sealed class SubjectActivation<T> : IHostedService
+internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, IDisposable
     where T : class, IInterceptorSubject
 {
+    /// <summary>
+    /// The longest disposal waits for the stop of a host that was never stopped: five seconds, after
+    /// which disposal returns and a stop still running continues unobserved.
+    /// </summary>
+    // Bounded, because the generic host disposes without stopping after a failed start, and a stuck
+    // stop must not hang the provider's disposal.
+    private static readonly TimeSpan DisposeStopTimeout = TimeSpan.FromSeconds(5);
+
     private readonly IServiceProvider _serviceProvider;
+    private readonly SubjectRegistration<T> _registration;
 
-    private IHostedService? _startedHere;
-    private volatile bool _isStopping;
+    /// <summary>
+    /// The host this activation started, the registration's private host for the instance or one for a
+    /// caller registered instance. Assigned before its start, so a stop after a failed start returns
+    /// the teardown that start already ran.
+    /// </summary>
+    private SubjectHost? _startedHost;
 
-    public SubjectActivation(IServiceProvider serviceProvider)
+    public SubjectActivation(IServiceProvider serviceProvider, SubjectRegistration<T> registration)
     {
         _serviceProvider = serviceProvider;
+        _registration = registration;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Resolving constructs and attaches the subject, which makes the handler append its start.
-        var subject = _serviceProvider.GetRequiredService<T>();
-        if (subject is not IHostedService hostedService)
+        var subject = _registration.Resolve(_serviceProvider);
+        var isCreatedInstance = _registration.TryGetCreatedInstance(subject, out var host);
+        if (host is not null)
         {
+            _startedHost = host;
+            await host.StartAsync(subjectToAttach: null, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
+        if (handler is null && !isCreatedInstance && _registration.IsSelfContained)
+        {
+            // The caller registered the instance themselves and it is in no hosting graph, so it gets
+            // the private host an instance this registration constructs gets, whatever it hosts.
+            var callerInstanceHost = new SubjectHost(_serviceProvider);
+            _startedHost = callerInstanceHost;
+            await callerInstanceHost.StartAsync(subject, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (subject is not IHostedService)
+        {
+            return;
+        }
+
         if (handler is null)
         {
-            // Recorded rather than resolved again in StopAsync: the subject can gain a hosting
-            // context between start and stop, and a stop that resolved a handler now would hand the
-            // stop to a handler that never started it, leaving it running.
-            _startedHere = hostedService;
-            await hostedService.StartAsync(cancellationToken).ConfigureAwait(false);
-
-            if (hostedService is BackgroundService { ExecuteTask: { } executeTask })
+            if (isCreatedInstance)
             {
-                // Resolved now: the execution can outlive the provider, which the host disposes after stopping.
-                var logger = _serviceProvider.GetService<ILogger<SubjectActivation<T>>>();
-                _ = ObserveExecutionAsync(subject, executeTask, logger);
+                throw new InvalidOperationException(
+                    $"{typeof(T).Name} is registered against a context without hosting, so nothing would run it. " +
+                    "Call WithHostedServices() on that context, or register it without a context resolver to run it in a context of its own.");
             }
 
-            return;
+            throw new InvalidOperationException(
+                $"The {typeof(T).Name} instance registered in dependency injection was not constructed by AddSubject, " +
+                "so the context resolver was not applied to it, and it is in no hosting graph, so nothing would run it. " +
+                "Attach it to a context with WithHostedServices(), or let AddSubject construct it.");
         }
 
         // Opens the gate before awaiting, so a handler registered after this activation cannot
@@ -55,38 +81,43 @@ internal sealed class SubjectActivation<T> : IHostedService
         handler.EnsureStarted();
 
         // A false result is deliberately not a fallback into starting the subject here: another
-        // handler owning it would make that a second instance, and a draining handler would make it
-        // something nothing stops.
+        // handler owning it would make that a second instance.
         await handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
+        => _startedHost?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+
+    /// <summary>Stops the host this activation started, a no-op once it has been stopped.</summary>
+    /// <remarks>
+    /// After a failed host start, the container disposes the subject singleton before disposing this
+    /// activation. A subject that is itself disposable (a <see cref="BackgroundService"/>, for instance)
+    /// may then be stopped only after its own dispose has already run, and the handler may log a
+    /// spurious execution fault for it. Normal shutdown, where the container stops this activation
+    /// before disposing the subject, is unaffected.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
     {
-        _isStopping = true;
-        return _startedHere?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+        if (_startedHost is not { } host)
+        {
+            return;
+        }
+
+        using var timeout = new CancellationTokenSource(DisposeStopTimeout);
+
+        // The token bounds a first stop; the wait bounds a stop already running without a deadline,
+        // whose task a later StopAsync returns. Suppressed rather than thrown: when this disposal's own
+        // call is the first stop, a fault outside the handler's logging is swallowed because disposal
+        // has no caller to report it to.
+        await host.StopAsync(timeout.Token)
+            .WaitAsync(timeout.Token)
+            .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
     /// <summary>
-    /// Logs an execution that ended other than by running to completion, which the generic host does
-    /// for the background services it starts and nothing does for one started here. A cancellation
-    /// after this activation's own stop is that stop's doing.
+    /// The synchronous form, for a provider disposed synchronously, which otherwise throws on a service
+    /// that is only asynchronously disposable.
     /// </summary>
-    /// <remarks>
-    /// Logs only. The host's <c>BackgroundServiceExceptionBehavior</c> lives on <c>HostOptions</c> in
-    /// Microsoft.Extensions.Hosting, which this library does not reference.
-    /// </remarks>
-    private async Task ObserveExecutionAsync(T subject, Task executeTask, ILogger? logger)
-    {
-        try
-        {
-            await executeTask.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (_isStopping && executeTask.IsCanceled)
-        {
-        }
-        catch (Exception exception)
-        {
-            logger?.LogError(exception, "Hosted subject {Subject} faulted while running.", subject);
-        }
-    }
+    /// <remarks>See <see cref="DisposeAsync"/> for the disposal ordering hazard this is subject to.</remarks>
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 }

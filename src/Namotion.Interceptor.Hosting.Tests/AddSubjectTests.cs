@@ -1,11 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
@@ -22,7 +20,8 @@ public class AddSubjectTests
         var builder = HostingTestHost.CreateBuilder();
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<PersonWithBackgroundService>();
+        builder.Services.AddSubject<PersonWithBackgroundService>(
+            contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         var host = builder.Build();
         await host.StartAsync();
@@ -49,7 +48,8 @@ public class AddSubjectTests
         var builder = HostingTestHost.CreateBuilder();
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<SubjectWithDependencies>();
+        builder.Services.AddSubject<SubjectWithDependencies>(
+            contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         var host = builder.Build();
         await host.StartAsync();
@@ -63,63 +63,6 @@ public class AddSubjectTests
             var registry = context.GetService<ISubjectRegistry>();
             Assert.Contains(registry.KnownSubjects, known => ReferenceEquals(known.Key, subject));
             Assert.Equal(1, subject.StartCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
-
-    [Fact]
-    public async Task WhenThereIsNoHostingHandler_ThenTheActivationStartsTheSubjectItself()
-    {
-        // Arrange
-        var builder = HostingTestHost.CreateBuilder();
-        var context = InterceptorSubjectContext.Create().WithContextInheritance();
-        builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<SubjectWithDependencies>();
-
-        var host = builder.Build();
-        await host.StartAsync();
-
-        try
-        {
-            // Act
-            var subject = host.Services.GetRequiredService<SubjectWithDependencies>();
-
-            // Assert
-            Assert.Equal(1, subject.StartCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
-
-    [Fact]
-    public async Task WhenThereIsNoHostingHandlerAndTheRunFaults_ThenTheFaultIsLogged()
-    {
-        // Arrange - with no handler the activation starts the subject itself and is the only thing that
-        // can see its execution, which the generic host does not know about.
-        var logs = new CapturingLoggerProvider();
-        var exception = new InvalidOperationException("execution failed");
-        var builder = HostingTestHost.CreateBuilder();
-        builder.Logging.AddProvider(logs);
-        var context = InterceptorSubjectContext.Create().WithContextInheritance();
-        builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<ScriptedHostedSubject>(subject => subject.Run = _ => throw exception);
-
-        var host = builder.Build();
-
-        try
-        {
-            // Act
-            await host.StartAsync();
-
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => logs.Entries.Any(entry => entry.Level == LogLevel.Error && ReferenceEquals(entry.Exception, exception)),
-                message: "The fault of a subject the activation started itself was never logged.");
         }
         finally
         {
@@ -170,7 +113,8 @@ public class AddSubjectTests
 
         var contextHolder = new IInterceptorSubjectContext[1];
         builder.Services.AddSingleton(_ => contextHolder[0]!);
-        builder.Services.AddSubject<SubjectWithDependencies>();
+        builder.Services.AddSubject<SubjectWithDependencies>(
+            contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         contextHolder[0] = InterceptorSubjectContext
             .Create()
@@ -215,7 +159,7 @@ public class AddSubjectTests
             configureEntered.Set();
             releaseConfigure.Wait(WaitTimeout);
             subject.Name = "configured";
-        });
+        }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         var host = builder.Build();
 
@@ -250,7 +194,8 @@ public class AddSubjectTests
         var builder = HostingTestHost.CreateBuilder();
         var context = CreateContextWithRegistry(builder);
         builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<SubjectIgnoringContextParameter>();
+        builder.Services.AddSubject<SubjectIgnoringContextParameter>(
+            contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         var host = builder.Build();
         await host.StartAsync();
@@ -292,7 +237,7 @@ public class AddSubjectTests
             configureEntered.Set();
             releaseConfigure.Wait(WaitTimeout);
             subject.Name = "configured";
-        });
+        }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         var host = builder.Build();
 
@@ -332,7 +277,9 @@ public class AddSubjectTests
         builder.Services.AddSingleton(context);
 
         Person? constructedSubject = null;
-        builder.Services.AddSubject<Person>(subject => constructedSubject = subject);
+        builder.Services.AddSubject<Person>(
+            subject => constructedSubject = subject,
+            contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 
         var host = builder.Build();
 
@@ -381,109 +328,6 @@ public class AddSubjectTests
                 registeredContext.GetService<ISubjectRegistry>().KnownSubjects,
                 known => ReferenceEquals(known.Key, subject));
 
-            Assert.Equal(1, subject.StartCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
-
-    [Fact]
-    public async Task WhenTheContextResolverReturnsNullAndTheGeneratedConstructorTakesOne_ThenItIsStillAttached()
-    {
-        // Arrange - a null result means this method attaches nothing, and that is all it means. The
-        // subject is then built by ActivatorUtilities, which picks the generated constructor taking a
-        // context because dependency injection can supply one, and that constructor attaches it.
-        // Pinned because the opposite reading is the natural one, and because the shape below reaches
-        // the opposite outcome from the same call.
-        var builder = HostingTestHost.CreateBuilder();
-        var context = CreateContextWithRegistry(builder);
-        builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<PersonWithBackgroundService>(contextResolver: _ => null);
-
-        var host = builder.Build();
-        await host.StartAsync();
-
-        try
-        {
-            // Act
-            var subject = host.Services.GetRequiredService<PersonWithBackgroundService>();
-
-            // Assert
-            Assert.Contains(
-                context.GetService<ISubjectRegistry>().KnownSubjects,
-                known => ReferenceEquals(known.Key, subject));
-
-            Assert.Equal(1, subject.StartCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
-
-    [Fact]
-    public async Task WhenTheContextResolverReturnsNullAndTheConstructorIgnoresTheContext_ThenItIsUnattached()
-    {
-        // Arrange - the same call as the test above, on the constructor shape the subject guidelines
-        // teach. It takes the context and discards it, so the attach this method performs is the only
-        // one there is, and a null result skips it. Two shapes, one call, opposite outcomes: that is
-        // the wart the parameter documentation now spells out rather than the two tests disagreeing.
-        var builder = HostingTestHost.CreateBuilder();
-        var context = CreateContextWithRegistry(builder);
-        builder.Services.AddSingleton(context);
-        builder.Services.AddSubject<SubjectIgnoringContextParameter>(contextResolver: _ => null);
-
-        var host = builder.Build();
-        await host.StartAsync();
-
-        try
-        {
-            // Act
-            var subject = host.Services.GetRequiredService<SubjectIgnoringContextParameter>();
-
-            // Assert - unattached, and started by the activation rather than by the handler, which is
-            // what the fallback at that call site exists for.
-            Assert.DoesNotContain(
-                context.GetService<ISubjectRegistry>().KnownSubjects,
-                known => ReferenceEquals(known.Key, subject));
-
-            Assert.Equal(1, subject.StartCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
-
-    [Fact]
-    public async Task WhenNoContextIsRegisteredAtAll_ThenTheSubjectIsUnattachedAndTheActivationStartsIt()
-    {
-        // Arrange - the shape that does keep a subject away from a context: leave it unregistered, so
-        // neither the resolver's fallback nor ActivatorUtilities can reach it. It still starts, because
-        // an unattached subject has no handler in its own context and the activation is the fallback
-        // for exactly that, which is what stops "no context" from silently meaning "never runs".
-        var builder = HostingTestHost.CreateBuilder();
-        var context = CreateContextWithRegistry(builder);
-        builder.Services.AddSubject<PersonWithBackgroundService>();
-
-        var host = builder.Build();
-        await host.StartAsync();
-
-        try
-        {
-            // Act
-            var subject = host.Services.GetRequiredService<PersonWithBackgroundService>();
-
-            // Assert - unattached in both senses: not in the registered context's graph, and its own
-            // context reaching no handler, which is what makes the activation the only thing that
-            // could have started it.
-            Assert.DoesNotContain(
-                context.GetService<ISubjectRegistry>().KnownSubjects,
-                known => ReferenceEquals(known.Key, subject));
-
-            Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
             Assert.Equal(1, subject.StartCount);
         }
         finally

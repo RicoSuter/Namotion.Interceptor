@@ -9,6 +9,6 @@ public static class ShellyServiceCollectionExtensions
     public static IServiceCollection AddShellyDevice(
         this IServiceCollection services,
         Action<ShellyDevice>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
         => services.AddSubject(configure, contextResolver);
 }

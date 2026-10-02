@@ -6,10 +6,8 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 public class HostedSubjectConfigurationTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenHostedSubjectHasAConfigurationCallback_ThenItsServiceStartsAfterConfiguration(bool resolverReturnsNull)
+    [Fact]
+    public async Task WhenHostedSubjectHasAConfigurationCallback_ThenItsServiceStartsAfterConfiguration()
     {
         // Arrange
         var services = new ServiceCollection().AddLogging();
@@ -20,7 +18,7 @@ public class HostedSubjectConfigurationTests
         {
             handler.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
             subject.Configuration = "configured";
-        }, contextResolver: resolverReturnsNull ? _ => null : null);
+        }, contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
         await using var provider = services.BuildServiceProvider();
 
         try

@@ -8,91 +8,102 @@ namespace Namotion.Interceptor.Hosting;
 public static class SubjectServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the subject as a singleton and constructs it at host start, attaching it to the
-    /// context. When the subject is an <see cref="Microsoft.Extensions.Hosting.IHostedService"/> and
-    /// the context has hosting enabled, the context starts it.
+    /// Registers the subject as a singleton, constructs it at host start and runs it: a subject that is
+    /// a hosted service is started, and host start waits for that start and fails on its fault.
     /// </summary>
     /// <remarks>
-    /// One instance per type; a second call throws. The subject is constructed and configured inside a
-    /// startup scope, so it is fully configured before anything can start it, whichever constructor
-    /// shape it has. The three shapes are compared in docs/hosting.md#addsubjectt.
+    /// Without <paramref name="contextResolver"/> the subject runs in a context of its own, with
+    /// property tracking, lifecycle, hosting and whatever
+    /// <see cref="ISubjectContextConfigurator.ConfigureContext"/> adds, ignores any context registered
+    /// in dependency injection, and is stopped and detached from that context at host stop. With it, the
+    /// subject joins the resolved context, and host start throws when that context has no hosting while
+    /// the subject is a hosted service. One registration per type; use
+    /// <see cref="AddKeyedSubject{T}"/> for several. If <typeparamref name="T"/> is already registered,
+    /// neither <paramref name="configure"/> nor the context applies to that instance: the hosting
+    /// context it is already in runs it, and when it is in none, it runs in a context of its own
+    /// without a resolver and host start throws with one.
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
     /// <param name="services">The service collection.</param>
-    /// <param name="configure">Optional callback applied to the instance after construction.</param>
-    /// <param name="contextResolver">
-    /// Optional resolver for the context this method attaches the subject to. When the resolver itself
-    /// is null that context is taken from dependency injection instead.
-    /// <para>
-    /// A resolver that returns null makes this method attach nothing, which is not the same as the
-    /// subject ending up with no context. What decides that is the constructor
-    /// <see cref="ActivatorUtilities"/> picks: a generated <c>T(IInterceptorSubjectContext)</c>
-    /// constructor attaches the context dependency injection supplies, so the subject is attached
-    /// anyway, while a constructor that takes the context and ignores it, or takes none at all, leaves
-    /// it unattached. To keep every shape away from a context, do not register one.
-    /// </para></param>
+    /// <param name="configure">Optional callback applied to the instance after construction, before anything can start it.</param>
+    /// <param name="contextResolver">Optional resolver for a shared context the subject joins.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddSubject<T>(
         this IServiceCollection services,
         Action<T>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        where T : class, IInterceptorSubject
+        => AddSubjectCore(services, serviceKey: null, configure, contextResolver);
+
+    /// <summary>
+    /// Registers the subject as a keyed singleton. Same modes as <see cref="AddSubject{T}"/>, each
+    /// self-contained registration in a context of its own; one registration per type and key. A null
+    /// <paramref name="serviceKey"/> registers it unkeyed, as <see cref="AddSubject{T}"/> does.
+    /// </summary>
+    /// <typeparam name="T">The subject type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="serviceKey">The service key.</param>
+    /// <param name="configure">Optional callback applied to the instance after construction, before anything can start it.</param>
+    /// <param name="contextResolver">Optional resolver for a shared context the subject joins.</param>
+    /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="serviceKey"/> is <see cref="KeyedService.AnyKey"/>.</exception>
+    public static IServiceCollection AddKeyedSubject<T>(
+        this IServiceCollection services,
+        object? serviceKey,
+        Action<T>? configure = null,
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
         where T : class, IInterceptorSubject
     {
-        GuardDuplicateRegistration<T>(services);
-
-        var contextFactory = TryCreateContextFactory<T>();
-
-        services.TryAddSingleton<T>(serviceProvider =>
+        if (Equals(serviceKey, KeyedService.AnyKey))
         {
-            var context = contextResolver is not null
-                ? contextResolver(serviceProvider)
-                : serviceProvider.GetService<IInterceptorSubjectContext>();
+            throw new ArgumentException("A subject cannot be registered under KeyedService.AnyKey.", nameof(serviceKey));
+        }
 
-            // Held across construction as well as configuration, because a generated context
-            // constructor attaches the subject before this factory regains control. Taken from
-            // dependency injection when the resolver declined one, which the constructor may still get.
-            using var startup = (context ?? serviceProvider.GetService<IInterceptorSubjectContext>())
-                ?.DeferHostedServiceStartup();
+        return AddSubjectCore(services, serviceKey, configure, contextResolver);
+    }
 
-            // The factory is the decision, not a reflection query: reflection answers the looser
-            // question of whether a constructor mentions the type, not whether it can be called with it.
-            var instance = context is not null && contextFactory is not null
-                ? (T)contextFactory(serviceProvider, [context])
-                : ActivatorUtilities.CreateInstance<T>(serviceProvider);
+    private static IServiceCollection AddSubjectCore<T>(
+        IServiceCollection services,
+        object? serviceKey,
+        Action<T>? configure,
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver)
+        where T : class, IInterceptorSubject
+    {
+        GuardDuplicateRegistration<T>(services, serviceKey);
 
-            // Ahead of the attach below as well as inside the scope, so the shape whose first attach is
-            // that one is configured without depending on the scope at all.
-            configure?.Invoke(instance);
+        var registration = new SubjectRegistration<T>(serviceKey, configure, contextResolver, TryCreateContextFactory<T>());
+        if (serviceKey is null)
+        {
+            services.AddSingleton(registration);
+            services.TryAddSingleton<T>(registration.Create);
+        }
+        else
+        {
+            services.AddKeyedSingleton(serviceKey, registration);
+            services.TryAddKeyedSingleton<T>(serviceKey, (serviceProvider, _) => registration.Create(serviceProvider));
+        }
 
-            // Also for the shape that takes the context and ignores it, which is otherwise unattached.
-            if (context is not null)
-            {
-                instance.Context.AddFallbackContext(context);
-            }
-
-            return instance;
-        });
-
-        services.AddHostedService<SubjectActivation<T>>();
-
+        // A factory registration, not AddHostedService, which dedupes on implementation type and would
+        // drop every registration of T after the first.
+        services.AddSingleton<IHostedService>(serviceProvider => new SubjectActivation<T>(serviceProvider, registration));
         return services;
     }
 
     /// <summary>
-    /// Throws on a second registration of the same type. Keyed on the activation rather than on
-    /// <typeparamref name="T"/>, so a caller who registered the type themselves is not caught.
+    /// Throws on a second registration of the same type and key. Keyed on the registration rather than
+    /// on <typeparamref name="T"/>, so a caller who registered the type themselves is not caught.
     /// </summary>
-    private static void GuardDuplicateRegistration<T>(IServiceCollection services)
+    private static void GuardDuplicateRegistration<T>(IServiceCollection services, object? serviceKey)
         where T : class, IInterceptorSubject
     {
         if (services.Any(descriptor =>
-                descriptor.ServiceType == typeof(IHostedService) &&
-                descriptor.ImplementationType == typeof(SubjectActivation<T>)))
+                descriptor.ServiceType == typeof(SubjectRegistration<T>) &&
+                descriptor.IsKeyedService == (serviceKey is not null) &&
+                Equals(descriptor.ServiceKey, serviceKey)))
         {
-            throw new InvalidOperationException(
-                $"{typeof(T).Name} is already registered with AddSubject. Register it once. To run " +
-                "several instances of one subject type, construct them and attach them to the object " +
-                "graph rather than registering each one.");
+            throw new InvalidOperationException(serviceKey is null
+                ? $"{typeof(T).Name} is already registered with AddSubject. Use AddKeyedSubject to register several instances."
+                : $"{typeof(T).Name} is already registered with AddKeyedSubject under the key '{serviceKey}'.");
         }
     }
 

@@ -9,6 +9,6 @@ public static class WallboxServiceCollectionExtensions
     public static IServiceCollection AddWallboxCharger(
         this IServiceCollection services,
         Action<WallboxCharger>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
         => services.AddSubject(configure, contextResolver);
 }
