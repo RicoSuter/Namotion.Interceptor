@@ -30,6 +30,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// </summary>
     public event Action<SubjectLifecycleChange>? SubjectDetaching;
 
+    internal bool IsLockHeldByCurrentThread => Monitor.IsEntered(_attachedSubjects);
+
     public void AttachSubjectToContext(IInterceptorSubject subject)
     {
         var collectedSubjects = GetList();
