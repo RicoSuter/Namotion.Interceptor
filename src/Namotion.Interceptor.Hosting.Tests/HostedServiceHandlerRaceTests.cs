@@ -1345,6 +1345,65 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
+    public async Task WhenTheGateReReadUndoesAnAttachmentTakeOnAnActivatedSubject_ThenItsStopWaitsForTheActivationsStop()
+    {
+        // Arrange - the same undo as above on a subject that is not a hosted service itself but has an
+        // activated one, so the only stop the undo's stop can be ordered behind is the activation's.
+        // The undo asks the activation slot for its signal before the drain has enqueued that
+        // slot's stop, so this pins that the signal is created on the asking side there too.
+        var (host, context) = await HostingTestHost.StartAsync();
+        var handler = context.TryGetService<HostedServiceHandler>()!;
+
+        GatedStopService? service = null;
+        var subject = new ActivatableSubject { ServiceFactory = _ => service = new GatedStopService() };
+        ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
+        var activation = Assert.Single(subject.GetHostedServiceAttachments());
+        await AsyncTestHelpers.WaitUntilAsync(() => activation.GetState(out _) == HostedServiceAttachmentState.Running);
+
+        var instance = new TrackedBackgroundService();
+        using var take = handler.HoldAtOwnershipTake();
+
+        var attaching = Task.Run(() => subject.AttachHostedService(() => instance));
+        await take.WaitUntilReachedAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted);
+
+        using var attachmentStop = instance.HoldAtStop();
+        using var snapshot = handler.HoldAtDrainEnqueue();
+
+        var stopping = Task.Run(() => host.StopAsync());
+        await snapshot.WaitUntilReachedAsync();
+
+        // Act - the enqueuing thread reads Draining, enqueues the undo's stop and releases the slot,
+        // all before the drain enqueues its own stops.
+        take.Release();
+        var attachment = await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+        snapshot.Release();
+
+        await service!.StopEntered.Task;
+
+        // Assert - the activated service is held inside its stop, so an attachment stop that waits
+        // for it cannot reach the instance however long it is watched.
+        var stoppedUnderneathTheActivation =
+            await Task.WhenAny(attachmentStop.Reached, Task.Delay(DrainMustNotReturnWithin)) == attachmentStop.Reached;
+
+        Assert.False(
+            stoppedUnderneathTheActivation,
+            "The undo's stop reached the attachment while the subject's activated service was still inside its own stop.");
+
+        Assert.NotNull(attachment.Current);
+
+        service.StopRelease.SetResult();
+        await attachmentStop.WaitUntilReachedAsync();
+        attachmentStop.Release();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(service.IsDisposed);
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+        Assert.Null(attachment.Current);
+    }
+
+    [Fact]
     public async Task WhenAFaultedAwaitedAttachReleasesASlotWhoseQueuedStartIsCommitted_ThenThatStartsInstanceIsStoppedAndDisposed()
     {
         // Arrange - the awaited attach publishes its attachment before it waits, so a start can be
