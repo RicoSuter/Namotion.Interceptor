@@ -15,7 +15,7 @@ A **subject** is an intercepted object in the HomeBlaze object graph. Subjects c
 - Have **state** properties that display in the UI
 - Have **derived** properties that auto-update when dependencies change
 - Implement interfaces for display metadata (title, icon)
-- Run background tasks via `BackgroundService`
+- Run background tasks via `BackgroundService`, or have a hosted service of their own (devices)
 
 ## Minimal Subject
 
@@ -447,6 +447,18 @@ public partial class Motor : BackgroundService
 - Starts `BackgroundService` subjects when loaded
 - Stops them gracefully on shutdown
 - Handles cancellation via `stoppingToken`
+
+### Devices: a Subject With a Service
+
+A device implements `ISubjectHostedServiceFactory` instead of extending `BackgroundService`: the subject is data, and its polling runs in an internal service the subject creates. That is what lets a device mirrored from another HomeBlaze instance through a connector stay passive, its values written by the connector, while the same type polls the hardware where it is local. `Namotion.Devices.MyStrom` is the reference implementation, and [Subject Guidelines](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/subject-guidelines.md#implementing-hosted-subjects-for-di) has the pattern and its rules.
+
+HomeBlaze's context opts out of automatic activation, because it holds local and mirrored devices side by side, so a device's service runs only once its creator activates it. HomeBlaze activates every device it loads or creates:
+
+- from configuration JSON, at any depth, so configured child subjects need nothing
+- from files mapped to a subject type by their extension
+- from the setup dialog, once the user saves; a caller that only reads the configuration and discards the instance passes `activateHostedService: false` to `SubjectSetupDialog.ShowAsync`
+
+Code that creates a device itself activates it with `subject.ActivateHostedService(serviceProvider)` once it is configured. That includes a device's service creating child devices that have a service. [Hosting](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/hosting.md#a-subject-with-a-service) covers who activates and the rest of the semantics.
 
 ## Property Attributes
 
