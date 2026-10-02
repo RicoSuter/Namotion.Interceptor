@@ -476,9 +476,9 @@ public partial class ShellyDevice
 
 1. **ActivatorUtilities resolution**: When the subject is instantiated via DI (e.g., through `AddSubject`), `ActivatorUtilities.CreateInstance` resolves all constructor parameters from the service provider. Services like `IHttpClientFactory`, `ILogger<T>`, and any other registered services are injected automatically.
 
-2. **Interaction with AddSubject**: `AddSubject<T>` applies the context unconditionally after construction, so the subject is attached regardless of its constructor shape. A constructor taking an `IInterceptorSubjectContext` is still used when one exists, but it confers no advantage: a subject with only DI parameters is attached just the same. The `contextResolver` parameter allows overriding which context is provided, and returning null from it registers the subject without a context.
+2. **Interaction with AddSubject**: `AddSubject<T>` applies its context unconditionally after construction, a context of its own or the one `contextResolver` returns (see [Hosting](hosting.md#addsubjectt)), so the subject is attached regardless of its constructor shape. A constructor taking an `IInterceptorSubjectContext` is still used when one exists, but it confers no advantage: a subject with only DI parameters is attached just the same.
 
-   `configure` always runs before the attach `AddSubject` itself performs, and a startup scope spans construction and `configure`, so on every constructor shape the subject is fully configured before anything can start it. What differs is interception: a generated context constructor attaches during construction, so `configure` runs against an attached subject and its assignments are intercepted and tracked, while every shape that does not attach during construction, including one that declares an `IInterceptorSubjectContext` parameter and never attaches with it, is still unattached when `configure` runs and those assignments are not intercepted. See [Hosting](hosting.md#addsubjectt) for the full picture.
+   `configure` always runs before the attach `AddSubject` itself performs, so on every constructor shape the subject is fully configured before anything can start it. Without a `contextResolver` the subject is constructed and configured before it joins any context, so those assignments are never intercepted. With one, a startup scope spans construction and `configure`, and what differs is interception: a generated context constructor attaches during construction, so `configure` runs against an attached subject and its assignments are intercepted and tracked, while every shape that does not attach during construction, including one that declares an `IInterceptorSubjectContext` parameter and never attaches with it, is still unattached when `configure` runs and those assignments are not intercepted. See [Hosting](hosting.md#addsubjectt) for the full picture.
 
 ### Examples in the Codebase
 
@@ -490,11 +490,13 @@ public partial class ShellyDevice
 
 > See [Hosting](hosting.md) for foundational concepts on hosted subjects and the hosting lifecycle.
 
-When creating a subject library that extends `BackgroundService`, provide a DI extension method using `AddSubject<T>` from `Namotion.Interceptor.Hosting`.
+When creating a subject library whose subject extends `BackgroundService`, provide DI extension methods over `AddSubject<T>` and `AddKeyedSubject<T>` from `Namotion.Interceptor.Hosting`.
 
-`AddSubject<T>` registers the subject as a singleton, constructs it at host start and attaches it to the context. One instance per type: calling `AddShellyDevice()` twice throws, because the second call's `configure` and `contextResolver` could not take effect. To run several instances of one type, construct them yourself and attach them to the object graph rather than registering them, which is what an application managing devices from configuration does. When that context has hosting enabled, the handler on it starts the subject because the subject entered the graph, and host startup waits for that start. When the resolved context has no hosting handler, `AddSubject<T>` starts an `IHostedService` subject itself and stops that same instance at host shutdown, so the subject runs either way. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
+`AddSubject<T>` registers the subject as a singleton, constructs it at host start and runs it. Without a `contextResolver` it runs in a context of its own, with property tracking, lifecycle and hosting; a subject that needs more there, for example the registry, implements `ISubjectContextConfigurator`. With one, it joins the resolved context, which must have hosting, and the handler on it starts the subject because the subject entered the graph. Host startup waits for that start either way. One registration per type and key: calling the library's `AddX()` twice throws, because the second call's `configure` and `contextResolver` could not take effect, and `AddKeyedSubject<T>` registers several instances of one type, each in a context of its own when no resolver is given. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
 
 ### DI Extension Method
+
+A library may provide an `AddX` and `AddKeyedX` pair over `AddSubject<T>` and `AddKeyedSubject<T>`, passing `contextResolver` through so the caller picks the mode:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -506,18 +508,22 @@ namespace MyLibrary;
 public static class MySubjectServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers MySubject and attaches it to the interceptor context.
+    /// Registers MySubject and runs it. Without <paramref name="contextResolver"/> it runs in a
+    /// context of its own; with it, it joins the resolved context, which must have hosting.
     /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="configure">Optional callback to configure the subject.</param>
-    /// <param name="contextResolver">
-    /// Optional context resolver. When null, the context is resolved from DI.
-    /// </param>
     public static IServiceCollection AddMySubject(
         this IServiceCollection services,
         Action<MySubject>? configure = null,
-        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
         => services.AddSubject(configure, contextResolver);
+
+    /// <summary>Registers one of several MySubject instances under a key. See <see cref="AddMySubject"/>.</summary>
+    public static IServiceCollection AddKeyedMySubject(
+        this IServiceCollection services,
+        object? serviceKey,
+        Action<MySubject>? configure = null,
+        Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
+        => services.AddKeyedSubject(serviceKey, configure, contextResolver);
 }
 ```
 
@@ -543,11 +549,18 @@ services.AddMySubject(subject =>
     subject.Name = "Sensor 1";
     subject.PollingInterval = TimeSpan.FromSeconds(5);
 });
+
+// Several, each in a context of its own
+services.AddKeyedMySubject("living-room", subject => subject.Name = "Sensor 1");
+services.AddKeyedMySubject("bedroom", subject => subject.Name = "Sensor 2");
+
+// In a shared context the application owns, which must have hosting
+services.AddMySubject(contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
 ```
 
 ### Context Support (Optional)
 
-No constructor parameter is needed for the context. `AddSubject` applies the resolved context after construction, so a subject whose constructor takes only DI services is attached just the same:
+No constructor parameter is needed for the context. `AddSubject` applies its context after construction, so a subject with a parameterless constructor, or one taking only DI services, is attached just the same:
 
 ```csharp
 public MySubject(IMyDriver driver, ILogger<MySubject> logger)
@@ -559,7 +572,7 @@ public MySubject(IMyDriver driver, ILogger<MySubject> logger)
 
 Declare an `IInterceptorSubjectContext` parameter only when the constructor genuinely needs the context, for example to build child subjects.
 
-What changes if it does is what gets intercepted, not what a start can see. The generated context constructor attaches the subject itself, so by the time `AddSubject` runs `configure` the subject is already in the graph and its assignments are intercepted and tracked. Without such a constructor `AddSubject` attaches after `configure`, so those assignments are not intercepted. No start observes a half written subject either way, because `AddSubject` holds a startup scope across construction and `configure`. A constructor that declares the parameter but never calls `AddFallbackContext` with it behaves like one that never declared it.
+What changes if it does is what gets intercepted, not what a start can see, and only with a `contextResolver`: without one, `AddSubject` constructs the subject detached whatever its shape. The generated context constructor attaches the subject itself, so by the time `AddSubject` runs `configure` the subject is already in the graph and its assignments are intercepted and tracked. Without such a constructor `AddSubject` attaches after `configure`, so those assignments are not intercepted. No start observes a half written subject either way, because `AddSubject` holds a startup scope across construction and `configure` on a shared context. A constructor that declares the parameter but never calls `AddFallbackContext` with it behaves like one that never declared it. Without a `contextResolver` the constructor receives an empty placeholder context that is removed after `configure`, so use it only to build children, and read services through the subject's own context once it is attached.
 
 ### Restart Contract
 

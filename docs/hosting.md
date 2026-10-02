@@ -48,7 +48,7 @@ Starts and stops queued before the host starts run once it does. Each managed se
 | You have | Use |
 |---|---|
 | A subject with no constructor dependencies, and you want the instance during configuration | Construct it and register the instance |
-| A subject whose constructor dependencies only exist after `builder.Build()` | `services.AddSubject<T>()` |
+| A subject whose constructor dependencies only exist after `builder.Build()`, or a subject that should run from dependency injection, in a context of its own by default | `services.AddSubject<T>()` |
 | A service that should run for as long as a subject is in the graph | Factory attachment |
 | A subject whose own purpose is a background loop | Let the subject implement `BackgroundService` |
 
@@ -86,24 +86,37 @@ builder.Services.AddSubject<WeatherStation>(station =>
 });
 ```
 
-It registers `T` as a singleton, forces its construction at host start, and attaches it to the context resolved from the container (or from the optional `contextResolver`). The context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`, so a subject with only injected dependencies is attached just the same.
+It registers `T` as a singleton, forces its construction at host start and runs it: a subject that implements `IHostedService` is started, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. A plain subject is only constructed and attached. Where the subject runs depends on `contextResolver`:
 
-If `T` also implements `IHostedService`, the handler starts it as usual, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. `AddSubject<T>()` also serves plain subjects that only need to exist and be attached at startup.
+- **Without a resolver** it runs in a context of its own, with property tracking, lifecycle, hosting and whatever the subject adds with [`ISubjectContextConfigurator`](#configuring-a-context-of-its-own), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
+- **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject is a hosted service.
 
-Three sharp edges:
+Either way the context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`, so a subject with only injected dependencies is attached just the same.
 
-- One instance per type. A second `AddSubject<T>()` for the same `T` throws, because its `configure` and `contextResolver` could not take effect. To run several instances of one type, construct them and attach them to the object graph rather than registering each one.
-- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure`.
-- When the resolved context has no hosting handler, because `WithHostedServices()` was never called on it or because `contextResolver` returned null, there is nothing to hand the subject to. `AddSubject<T>()` then starts an `IHostedService` subject itself at host start and stops that same instance at host shutdown. It never disposes it, and it logs an execution that faults or is cancelled by anything but that stop, without stopping the application. **Such a subject must not then be put into a hosting enabled graph.** The self start is invisible to the handler, which records nothing on the target, so a handler that later owns that subject sees no instance and starts it a second time. On a `BackgroundService` the second start replaces the first execute task and its cancellation source, orphaning a loop that no shutdown can reach. Resolve it by enabling hosting on the context the subject is registered against, so the activation hands the start to the handler instead of running it.
+`AddKeyedSubject<T>(key)` registers one of several instances of a type as a keyed singleton, with the same two modes. Without a resolver each key runs in a context of its own:
 
-`configure` always runs before the attach `AddSubject` performs, and construction and `configure` both run inside a [startup scope](#configuration-before-startup) on the resolved context, so the subject is fully configured before anything can start it. What still differs between the shapes is whether those assignments are intercepted:
+```csharp
+builder.Services.AddKeyedSubject<WeatherStation>("roof", station => station.PollingInterval = TimeSpan.FromSeconds(5));
+builder.Services.AddKeyedSubject<WeatherStation>("garden");
+```
+
+Two sharp edges:
+
+- One registration per type, or per type and key. A second registration of the same `T` and key throws, because its `configure` and `contextResolver` could not take effect.
+- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. When it is in none, it runs in a context of its own without a resolver, and host startup throws with one.
+
+`configure` always runs before the attach `AddSubject` performs, so the subject is fully configured before anything can start it. Without a resolver the subject is constructed and configured before it joins any context, so on every constructor shape the assignments in `configure` are not intercepted and not tracked. With a resolver, construction and `configure` both run inside a [startup scope](#configuration-before-startup) on the resolved context, and what differs between the shapes is whether those assignments are intercepted:
 
 - **`T` has no constructor taking a context**, or it declares the documented `MySubject(IInterceptorSubjectContext? context = null)` parameter and never attaches with it. Nothing is attached while `configure` runs, so its assignments are not intercepted and not tracked.
 - **Construction attaches the subject**, which is what the generated context constructor does. `configure` runs against an attached subject, so its assignments are intercepted and tracked.
 
+#### Configuring a context of its own
+
+A subject that needs more in the context it runs in alone, for example the registry, implements `ISubjectContextConfigurator`. Its `ConfigureContext` runs once per such context, after the subject is constructed and configured and before it joins the context, which already has property tracking and lifecycle and gets hosting afterwards, so the implementation must not add hosting. It is never called for a shared context: whoever owns that context decides what it contains.
+
 #### What it costs at host startup
 
-`AddSubject<T>()` registers one hosted activation per type, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations, at whatever each subject's own `StartAsync` takes. A registered type that is a plain subject waits for no start and adds nothing.
+`AddSubject<T>()` registers one hosted activation per registration, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations, at whatever each subject's own `StartAsync` takes. A registered type that is a plain subject waits for no start and adds nothing.
 
 Let the host start its services concurrently to get the waits overlapping:
 
@@ -322,11 +335,11 @@ Attaching still takes effect immediately, so the subject joins the graph and is 
 Four rules have consequences:
 
 - Do not await a captured service's start, or its detach, inside its own block. Both wait for that start, which cannot run until the block exits.
-- Do not start the host inside a block. `AddSubject<T>()` opens a scope of its own inside yours, so a subject registered that way waits for yours, and host startup waits for that subject. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang.
+- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a scope of its own inside yours, so its subject waits for yours, and host startup waits for that subject. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a context of its own and opens no scope, so your scope neither delays nor blocks it.
 - A scope nobody disposes holds its starts until the host shuts down.
 - `DeferHostedServiceStartup()` returns null on a context without hosting support, and `using` accepts that.
 
-`AddSubject<T>()` already wraps its own construction this way, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Startup Scopes](design/hosting-service-ownership.md#startup-scopes).
+`AddSubject<T>()` already wraps its own construction this way with a resolver, and without one configures the subject before it joins any context, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Startup Scopes](design/hosting-service-ownership.md#startup-scopes).
 
 ## Deferred Starts and Startup Completion
 
