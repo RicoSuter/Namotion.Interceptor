@@ -10,9 +10,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Luxtronik.Gating;
 using Namotion.Devices.Luxtronik.Model;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Modbus.Client;
+using Namotion.Interceptor.Registry;
 
 namespace Namotion.Devices.Luxtronik;
 
@@ -25,6 +27,7 @@ namespace Namotion.Devices.Luxtronik;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class LuxtronikHeatPump :
     BackgroundService,
+    ISubjectContextConfigurator,
     IModbusDiscovery,
     IConfigurable,
     IPowerSensor,
@@ -574,6 +577,12 @@ public partial class LuxtronikHeatPump :
         {
             return false;
         }
+    }
+
+    void ISubjectContextConfigurator.ConfigureContext(IInterceptorSubjectContext context)
+    {
+        // The discovery and the register resolver read the registry, so running alone needs one too.
+        context.WithRegistry();
     }
 
     public override void Dispose()
