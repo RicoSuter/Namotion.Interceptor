@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Serialization;
@@ -14,14 +15,21 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
+/// - Activates the hosted service of every ISubjectHostedServiceFactory subject it deserializes, at any depth, when constructed with a service provider
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
     private readonly TypeProvider _typeProvider;
+    private readonly IServiceProvider? _serviceProvider;
 
-    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider)
+    /// <summary>
+    /// Creates a resolver that, when <paramref name="serviceProvider"/> is given, activates with it the
+    /// hosted service of every <see cref="ISubjectHostedServiceFactory"/> subject it deserializes.
+    /// </summary>
+    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider, IServiceProvider? serviceProvider = null)
     {
         _typeProvider = typeProvider;
+        _serviceProvider = serviceProvider;
     }
 
     public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
@@ -48,9 +56,24 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
             }
         }
 
-        // Filter [Configuration] properties for all object types
         if (typeInfo.Kind == JsonTypeInfoKind.Object)
         {
+            if (_serviceProvider is { } serviceProvider &&
+                typeof(ISubjectHostedServiceFactory).IsAssignableFrom(type) &&
+                typeof(IInterceptorSubject).IsAssignableFrom(type))
+            {
+                // OnDeserialized runs once the object's properties are populated, so the service the
+                // activation creates reads configured values. Chained, because the default resolver
+                // puts a type's IJsonOnDeserialized callback here.
+                var onDeserialized = typeInfo.OnDeserialized;
+                typeInfo.OnDeserialized = subject =>
+                {
+                    onDeserialized?.Invoke(subject);
+                    ((IInterceptorSubject)subject).ActivateHostedService(serviceProvider);
+                };
+            }
+
+            // Filter [Configuration] properties for all object types
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;

@@ -305,8 +305,8 @@ else
         if (File == null || _editor == null)
             return;
 
-        // Open the SubjectSetupDialog
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
+        // The instance is only serialized into the markdown, which creates and activates its own on reload.
+        var result = await SubjectSetupDialog.ShowAsync(DialogService, activateHostedService: false);
         if (result == null)
             return;
 

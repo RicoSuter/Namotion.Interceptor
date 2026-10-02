@@ -1,6 +1,7 @@
 @using System.ComponentModel
 @using System.Reflection
 @using HomeBlaze.Components.Editors
+@using Namotion.Interceptor.Hosting
 
 @inject SubjectTypeRegistry TypeRegistry
 @inject SubjectFactory SubjectFactory
@@ -113,6 +114,13 @@
     [Parameter]
     public Action<IInterceptorSubject>? BeforeSave { get; set; }
 
+    /// <summary>
+    /// Whether the caller keeps the created subject, so its hosted service is activated on save. False
+    /// when the caller only reads the subject's configuration and discards the instance.
+    /// </summary>
+    [Parameter]
+    public bool ActivateHostedService { get; set; }
+
     // TODO: Invalidate cache when types can be dynamically loaded
     private Dictionary<string, List<Type>>? _groupedTypes;
 
@@ -190,6 +198,7 @@
     {
         if (_createdSubject != null && !string.IsNullOrWhiteSpace(_subjectName))
         {
+            IHostedServiceAttachment? activation = null;
             try
             {
                 // Attaching can start a hosted subject right away, and it reads its configuration once it
@@ -197,6 +206,13 @@
                 if (_editPanel != null && !await _editPanel.ApplyChangesAsync(CancellationToken.None))
                 {
                     return;
+                }
+
+                // Here rather than at creation, so a cancelled dialog runs nothing and the service
+                // starts with the applied edits.
+                if (ActivateHostedService)
+                {
+                    activation = SubjectFactory.ActivateHostedService(_createdSubject);
                 }
 
                 // Persisting finds its writer through the parents BeforeSave establishes.
@@ -211,6 +227,12 @@
             }
             catch (Exception exception)
             {
+                // The dialog stays open, so a cancel must leave nothing running; a retry activates afresh.
+                if (activation != null)
+                {
+                    _createdSubject.DetachHostedService(activation);
+                }
+
                 Snackbar.Add($"Failed to create subject: {exception.Message}", Severity.Error);
             }
         }
@@ -220,9 +242,11 @@
     /// Shows the create subject wizard and returns the result.
     /// </summary>
     /// <param name="dialogService">The dialog service.</param>
+    /// <param name="activateHostedService">Whether the caller keeps the created subject, so its hosted service is activated on save.</param>
     /// <param name="beforeSave">Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.</param>
     public static async Task<CreateSubjectResult?> ShowAsync(
         IDialogService dialogService,
+        bool activateHostedService,
         Action<IInterceptorSubject>? beforeSave = null)
     {
         var options = new DialogOptions
@@ -234,7 +258,8 @@
 
         var parameters = new DialogParameters<SubjectSetupDialog>
         {
-            { x => x.BeforeSave, beforeSave }
+            { x => x.BeforeSave, beforeSave },
+            { x => x.ActivateHostedService, activateHostedService }
         };
 
         var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create Subject", parameters, options);
