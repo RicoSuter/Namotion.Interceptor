@@ -53,6 +53,18 @@ namespace Namotion.Interceptor.Hosting
         public static Namotion.Interceptor.IInterceptorSubjectContext WithHostedServices(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithHostedServices(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection, bool activateSubjectHostedServices) { }
     }
+    public sealed class PrivateContextHost : System.IAsyncDisposable
+    {
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public System.Threading.Tasks.Task StopAsync(System.Threading.CancellationToken cancellationToken = default) { }
+    }
+    public static class PrivateContextHostExtensions
+    {
+        public static System.Threading.Tasks.Task<Namotion.Interceptor.Hosting.PrivateContextHost> StartAsync<TSubject>(this TSubject subject, System.Threading.CancellationToken cancellationToken = default)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Hosting.ISubjectHostedServiceFactory { }
+        public static System.Threading.Tasks.Task<Namotion.Interceptor.Hosting.PrivateContextHost> StartAsync<TSubject>(this TSubject subject, System.IServiceProvider serviceProvider, System.Threading.CancellationToken cancellationToken = default)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject, Namotion.Interceptor.Hosting.ISubjectHostedServiceFactory { }
+    }
     public static class SubjectServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedSubject<T>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, object? serviceKey, System.Action<T>? configure = null, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubjectContext>? contextResolver = null)
