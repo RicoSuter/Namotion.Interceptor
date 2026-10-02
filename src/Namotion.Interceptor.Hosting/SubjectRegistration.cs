@@ -69,6 +69,11 @@ internal sealed class SubjectRegistration<T>
             var host = new SubjectHost(serviceProvider);
             host.Attach(instance);
             _createdInstances.Add(instance, host);
+
+            // Handed to this provider's activation now rather than when it starts: an awaited attach
+            // can open the host before host start, and the activation's disposal is what still stops it
+            // when that start never comes.
+            serviceProvider.GetRequiredKeyedService<SubjectActivation<T>>(this).RecordHost(host);
             return instance;
         }
 

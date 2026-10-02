@@ -83,9 +83,12 @@ public static class SubjectServiceCollectionExtensions
             services.TryAddKeyedSingleton<T>(serviceKey, (serviceProvider, _) => registration.Create(serviceProvider));
         }
 
-        // A factory registration, not AddHostedService, which dedupes on implementation type and would
-        // drop every registration of T after the first.
-        services.AddSingleton<IHostedService>(serviceProvider => new SubjectActivation<T>(serviceProvider, registration));
+        // The activation is a keyed singleton of its own, keyed on the registration, so the registration
+        // can hand it the private host as soon as the instance is created. A factory registration for
+        // the hosted service, not AddHostedService, which dedupes on implementation type and would drop
+        // every registration of T after the first.
+        services.AddKeyedSingleton(registration, (serviceProvider, _) => new SubjectActivation<T>(serviceProvider, registration));
+        services.AddSingleton<IHostedService>(serviceProvider => serviceProvider.GetRequiredKeyedService<SubjectActivation<T>>(registration));
         return services;
     }
 

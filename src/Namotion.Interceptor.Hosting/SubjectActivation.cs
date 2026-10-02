@@ -22,11 +22,12 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
     private readonly SubjectRegistration<T> _registration;
 
     /// <summary>
-    /// The host this activation started, the registration's private host for the instance or one for a
-    /// caller registered instance. Assigned before its start, so a stop after a failed start returns
-    /// the teardown that start already ran.
+    /// The private host of this provider's instance, recorded when the instance is created so disposal
+    /// still stops a host an awaited attach opened before this activation ever started, or the host
+    /// this activation built for a caller registered instance. Assigned before its start, so a stop
+    /// after a failed start returns the teardown that start already ran.
     /// </summary>
-    private SubjectHost? _startedHost;
+    private SubjectHost? _host;
 
     public SubjectActivation(IServiceProvider serviceProvider, SubjectRegistration<T> registration)
     {
@@ -34,13 +35,14 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
         _registration = registration;
     }
 
+    internal void RecordHost(SubjectHost host) => _host = host;
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var subject = _registration.Resolve(_serviceProvider);
         var isCreatedInstance = _registration.TryGetCreatedInstance(subject, out var host);
         if (host is not null)
         {
-            _startedHost = host;
             await host.StartAsync(subjectToAttach: null, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -51,7 +53,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             // The caller registered the instance themselves and it is in no hosting graph, so it gets
             // the private host an instance this registration constructs gets, whatever it hosts.
             var callerInstanceHost = new SubjectHost(_serviceProvider);
-            _startedHost = callerInstanceHost;
+            _host = callerInstanceHost;
             await callerInstanceHost.StartAsync(subject, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -86,9 +88,9 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
-        => _startedHost?.StopAsync(cancellationToken) ?? Task.CompletedTask;
+        => _host?.StopAsync(cancellationToken) ?? Task.CompletedTask;
 
-    /// <summary>Stops the host this activation started, a no-op once it has been stopped.</summary>
+    /// <summary>Stops the host this activation holds, a no-op once it has been stopped.</summary>
     /// <remarks>
     /// After a failed host start, the container disposes the subject singleton before disposing this
     /// activation. A subject that is itself disposable (a <see cref="BackgroundService"/>, for instance)
@@ -98,7 +100,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        if (_startedHost is not { } host)
+        if (_host is not { } host)
         {
             return;
         }

@@ -339,6 +339,33 @@ public class AddSubjectModeTests
     }
 
     [Fact]
+    public async Task WhenAnAwaitedAttachOpenedThePrivateHostBeforeAnEarlierServiceFailedHostStart_ThenDisposingTheHostStopsIt()
+    {
+        // Arrange - the awaited attach opens the private handler ahead of host start, and the service
+        // failing ahead of the activation means the activation's own start never runs.
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddHostedService<ThrowingStartService>();
+        builder.Services.AddSubject<CountingHostedSubject>();
+        var host = builder.Build();
+        var subject = host.Services.GetRequiredService<CountingHostedSubject>();
+        var instance = new TrackedBackgroundService();
+        await subject.AttachHostedServiceAsync(() => instance, CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
+        var stopCountBeforeDispose = subject.StopCount;
+
+        // Act
+        await ((IAsyncDisposable)host).DisposeAsync();
+
+        // Assert
+        Assert.True(instance.IsStarted);
+        Assert.Equal(0, stopCountBeforeDispose);
+        Assert.Equal(1, subject.StopCount);
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+        Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+    }
+
+    [Fact]
     public async Task WhenCallerRegisteredInstanceIsInNoHostingGraphWithAResolver_ThenStartThrows()
     {
         // Arrange

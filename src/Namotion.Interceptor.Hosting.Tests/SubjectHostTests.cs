@@ -1,6 +1,8 @@
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
@@ -108,6 +110,21 @@ public class SubjectHostTests
         {
             await hostingHost.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsInATrackedGraphWithoutHosting_ThenStartThrowsAndTheSubjectStaysThere()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithLifecycle();
+        var subject = new CountingHostedSubject(context);
+        var host = CreateHost();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync(subject, CancellationToken.None));
+        Assert.Contains("context resolver", exception.Message);
+        Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+        Assert.Same(context.TryGetService<LifecycleInterceptor>(), ((IInterceptorSubject)subject).Context.TryGetService<LifecycleInterceptor>());
     }
 
     [Fact]

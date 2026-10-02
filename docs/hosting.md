@@ -91,6 +91,8 @@ It registers `T` as a singleton, forces its construction at host start and runs 
 - **Without a resolver** it runs in a context of its own, with property tracking, lifecycle, hosting and whatever the subject adds with [`ISubjectContextConfigurator`](#configuring-a-context-of-its-own), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
 - **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject is a hosted service.
 
+A subject in a context of its own belongs to that context alone. Do not place it in another tracked or hosting graph, for example by assigning it to a property of a subject in the application's context. The assignment does not throw, but the subject then reaches two lifecycle interceptors and two hosting handlers, so every single-service lookup on it and its children, such as `AttachHostedService`, throws far from the cause. Host startup does throw when the instance is already in a tracked graph before it starts. To share the application's context instead, as `AddHostedSubject<T>()` did, pass `contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>()`.
+
 Either way the context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`, so a subject with only injected dependencies is attached just the same.
 
 `AddKeyedSubject<T>(key)` registers one of several instances of a type as a keyed singleton, with the same two modes. Without a resolver each key runs in a context of its own:

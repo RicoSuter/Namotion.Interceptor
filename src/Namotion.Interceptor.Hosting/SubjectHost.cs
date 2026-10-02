@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting;
 
@@ -74,16 +75,15 @@ internal sealed class SubjectHost : IAsyncDisposable
 
     /// <summary>
     /// Builds the private context and attaches the subject to it. Throws when the subject is already
-    /// reachable from a hosting handler, because two handlers over one subject both claim its services.
-    /// The subject must not be part of any other tracked graph, a context with lifecycle, either; that
-    /// is not checked.
+    /// in a tracked graph, a context with lifecycle, hosting or not: a second lifecycle over one
+    /// subject double counts its references, and a second hosting handler claims its services.
     /// </summary>
     internal void Attach(IInterceptorSubject subject)
     {
-        if (!subject.Context.GetServices<HostedServiceHandler>().IsEmpty)
+        if (!subject.Context.GetServices<LifecycleInterceptor>().IsEmpty)
         {
             throw new InvalidOperationException(
-                $"Subject {subject} is already hosted by another hosting context, and two hosts over one subject both claim its services. Remove it from that context before starting it here.");
+                $"Subject {subject} is already in a tracked graph, and a second lifecycle or hosting handler over one subject double counts its references and claims its services. Pass a context resolver to AddSubject to run it in that context, or remove it from that graph before starting it here.");
         }
 
         // Assigned only past the check, so the teardown of a refused start leaves the other host's
