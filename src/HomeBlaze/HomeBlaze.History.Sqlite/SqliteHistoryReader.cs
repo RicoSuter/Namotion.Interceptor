@@ -63,11 +63,16 @@ internal readonly struct SqliteReadContext(
     // window: after the interval is reconfigured the generated keys no longer name the existing files,
     // so every earlier partition silently read as empty.
     public IEnumerable<string> PartitionKeysOverlapping(DateTimeOffset from, DateTimeOffset to) =>
+        PartitionRangesOverlapping(from, to).Select(entry => entry.Key);
+
+    // PartitionKeysOverlapping with each key's inferred range, in the same order.
+    public IEnumerable<(string Key, DateTimeOffset Start, DateTimeOffset End)> PartitionRangesOverlapping(
+        DateTimeOffset from, DateTimeOffset to) =>
         EnumeratePartitionFileKeys()
             .Select(key => (Key: key, Range: SqlitePartition.InferredRange(key)))
             .Where(entry => entry.Range.Start < to && entry.Range.End > from)
             .OrderBy(entry => entry.Range.Start)
-            .Select(entry => entry.Key);
+            .Select(entry => (entry.Key, entry.Range.Start, entry.Range.End));
 
     // Existing partition files at or before asOf, newest first (look-back across files stops at the first hit).
     public IEnumerable<string> PartitionKeysAtOrBefore(DateTimeOffset asOf) =>
