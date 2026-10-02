@@ -15,18 +15,17 @@ public class AddSubjectModeTests
         var builder = HostingTestHost.CreateBuilder();
         var sharedContext = HostingTestHost.CreateContext(builder);
         builder.Services.AddSingleton(sharedContext);
-        builder.Services.AddSubject<CountingHostedSubject>();
+        builder.Services.AddSubject<ActivatableSubject>();
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var subject = host.Services.GetRequiredService<CountingHostedSubject>();
+            var subject = host.Services.GetRequiredService<ActivatableSubject>();
 
             // Assert
-            Assert.Equal(1, subject.StartCount);
-            Assert.NotNull(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+            Assert.Equal(1, subject.CreateCount);
             Assert.NotSame(
                 sharedContext.TryGetService<HostedServiceHandler>(),
                 ((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
@@ -38,25 +37,52 @@ public class AddSubjectModeTests
     }
 
     [Fact]
-    public async Task WhenAddSubjectWithResolver_ThenSubjectRunsInSharedContext()
+    public async Task WhenAddSubjectWithResolver_ThenServiceRunsInSharedContext()
     {
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
         var sharedContext = HostingTestHost.CreateContext(builder);
-        builder.Services.AddSubject<CountingHostedSubject>(contextResolver: _ => sharedContext);
+        builder.Services.AddSubject<ActivatableSubject>(contextResolver: _ => sharedContext);
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var subject = host.Services.GetRequiredService<CountingHostedSubject>();
+            var subject = host.Services.GetRequiredService<ActivatableSubject>();
 
             // Assert
-            Assert.Equal(1, subject.StartCount);
+            Assert.Equal(1, subject.CreateCount);
             Assert.Same(
                 sharedContext.TryGetService<HostedServiceHandler>(),
                 ((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenSharedContextOptedOutOfActivation_ThenAddSubjectStillActivatesTheService()
+    {
+        // Arrange - the context does not activate on attach, so the registration's explicit
+        // activation is the only thing that can run the service.
+        var builder = HostingTestHost.CreateBuilder();
+        var sharedContext = HostingTestHost.CreateContext(builder, activateSubjectHostedServices: false);
+        builder.Services.AddSubject<ActivatableSubject>(contextResolver: _ => sharedContext);
+        var host = builder.Build();
+
+        try
+        {
+            // Act
+            await host.StartAsync();
+            var subject = host.Services.GetRequiredService<ActivatableSubject>();
+
+            // Assert
+            Assert.Equal(1, subject.CreateCount);
+            var service = Assert.IsType<ScriptedBackgroundService>(subject.LastService);
+            Assert.False(service.ExecuteTask!.IsCompleted);
         }
         finally
         {
@@ -70,7 +96,7 @@ public class AddSubjectModeTests
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
         var sharedContext = InterceptorSubjectContext.Create().WithLifecycle();
-        builder.Services.AddSubject<CountingHostedSubject>(contextResolver: _ => sharedContext);
+        builder.Services.AddSubject<ActivatableSubject>(contextResolver: _ => sharedContext);
         var host = builder.Build();
 
         // Act & Assert
@@ -102,29 +128,33 @@ public class AddSubjectModeTests
     }
 
     [Fact]
-    public async Task WhenHostStops_ThenSelfContainedSubjectIsStoppedAndDetached()
+    public async Task WhenHostStops_ThenSelfContainedServiceIsStoppedAndDisposed()
     {
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddSubject<CountingHostedSubject>();
+        builder.Services.AddSubject<ActivatableSubject>();
         var host = builder.Build();
         await host.StartAsync();
-        var subject = host.Services.GetRequiredService<CountingHostedSubject>();
+        var subject = host.Services.GetRequiredService<ActivatableSubject>();
+        var service = (ScriptedBackgroundService)subject.LastService!;
 
         // Act
         await host.StopAsync();
 
         // Assert
-        Assert.Equal(1, subject.StopCount);
+        Assert.Equal(1, service.StopCount);
+        Assert.True(service.IsDisposed);
         Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+        Assert.Null(((IInterceptorSubject)subject).TryGetLiveActivation());
     }
 
     [Fact]
-    public async Task WhenSelfContainedSubjectStartThrows_ThenHostStartThrows()
+    public async Task WhenSelfContainedServiceStartThrows_ThenHostStartThrows()
     {
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddSubject<ThrowingHostedSubject>();
+        builder.Services.AddSubject<ActivatableSubject>(subject =>
+            subject.ServiceFactory = _ => new ThrowingStartService());
         var host = builder.Build();
 
         // Act & Assert
@@ -133,24 +163,79 @@ public class AddSubjectModeTests
     }
 
     [Fact]
+    public async Task WhenSelfContainedSubjectIsConfigured_ThenServiceSeesTheConfiguration()
+    {
+        // Arrange
+        string? nameAtCreation = null;
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<ActivatableSubject>(subject =>
+        {
+            subject.Name = "configured";
+            subject.ServiceFactory = s =>
+            {
+                nameAtCreation = s.Name;
+                return new ScriptedBackgroundService(token => Task.Delay(Timeout.Infinite, token));
+            };
+        });
+        var host = builder.Build();
+
+        try
+        {
+            // Act
+            await host.StartAsync();
+
+            // Assert
+            Assert.Equal("configured", nameAtCreation);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenSelfContainedSubjectIsItselfAHostedService_ThenItStartsOnce()
+    {
+        // Arrange
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<CountingHostedSubject>();
+        var host = builder.Build();
+
+        try
+        {
+            // Act
+            await host.StartAsync();
+
+            // Assert
+            Assert.Equal(1, host.Services.GetRequiredService<CountingHostedSubject>().StartCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenCallerRegisteredTheInstanceOutsideAnyContext_ThenItRunsAndStopsWithTheHost()
     {
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
-        var subject = new CountingHostedSubject();
+        var subject = new ActivatableSubject();
         builder.Services.AddSingleton(subject);
-        builder.Services.AddSubject<CountingHostedSubject>();
+        builder.Services.AddSubject<ActivatableSubject>();
         var host = builder.Build();
         await host.StartAsync();
-        var handlerWhileRunning = ((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>();
+        var service = Assert.IsType<ScriptedBackgroundService>(subject.LastService);
+        var wasRunning = !service.ExecuteTask!.IsCompleted;
 
         // Act
         await host.StopAsync();
 
         // Assert
-        Assert.NotNull(handlerWhileRunning);
-        Assert.Equal(1, subject.StartCount);
-        Assert.Equal(1, subject.StopCount);
+        Assert.True(wasRunning);
+        Assert.Equal(1, subject.CreateCount);
+        Assert.Equal(1, service.StopCount);
+        Assert.True(service.IsDisposed);
         Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
     }
 
@@ -206,12 +291,13 @@ public class AddSubjectModeTests
     [Fact]
     public async Task WhenCallerRegisteredTheInstanceInAHostingContext_ThenThatContextRunsItWithoutASecondHost()
     {
-        // Arrange
+        // Arrange - the context does not activate on attach, so only the registration's activation
+        // through that context's handler can create the service.
         var builder = HostingTestHost.CreateBuilder();
-        var sharedContext = HostingTestHost.CreateContext(builder);
-        var subject = new CountingHostedSubject(sharedContext);
+        var sharedContext = HostingTestHost.CreateContext(builder, activateSubjectHostedServices: false);
+        var subject = new ActivatableSubject(sharedContext);
         builder.Services.AddSingleton(subject);
-        builder.Services.AddSubject<CountingHostedSubject>();
+        builder.Services.AddSubject<ActivatableSubject>();
         var host = builder.Build();
 
         try
@@ -220,7 +306,7 @@ public class AddSubjectModeTests
             await host.StartAsync();
 
             // Assert
-            Assert.Equal(1, subject.StartCount);
+            Assert.Equal(1, subject.CreateCount);
             var handler = Assert.Single(((IInterceptorSubject)subject).Context.GetServices<HostedServiceHandler>());
             Assert.Same(sharedContext.TryGetService<HostedServiceHandler>(), handler);
         }
@@ -293,49 +379,52 @@ public class AddSubjectModeTests
     {
         // Arrange
         var services = new ServiceCollection().AddLogging();
-        services.AddSubject<CountingHostedSubject>();
+        services.AddSubject<ActivatableSubject>();
         await using var first = services.BuildServiceProvider();
         await using var second = services.BuildServiceProvider();
         var firstActivation = Assert.Single(first.GetServices<IHostedService>());
         var secondActivation = Assert.Single(second.GetServices<IHostedService>());
         await firstActivation.StartAsync(CancellationToken.None);
         await secondActivation.StartAsync(CancellationToken.None);
-        var firstSubject = first.GetRequiredService<CountingHostedSubject>();
-        var secondSubject = second.GetRequiredService<CountingHostedSubject>();
+        var firstSubject = first.GetRequiredService<ActivatableSubject>();
+        var secondSubject = second.GetRequiredService<ActivatableSubject>();
+        var firstService = Assert.IsType<ScriptedBackgroundService>(firstSubject.LastService);
+        var secondService = Assert.IsType<ScriptedBackgroundService>(secondSubject.LastService);
 
         // Act
         await firstActivation.StopAsync(CancellationToken.None);
 
         // Assert
         Assert.NotSame(firstSubject, secondSubject);
-        Assert.Equal(1, firstSubject.StartCount);
-        Assert.Equal(1, secondSubject.StartCount);
-        Assert.Equal(1, firstSubject.StopCount);
-        Assert.Equal(0, secondSubject.StopCount);
-        Assert.Null(((IInterceptorSubject)firstSubject).Context.TryGetService<HostedServiceHandler>());
+        Assert.Equal(1, firstSubject.CreateCount);
+        Assert.Equal(1, secondSubject.CreateCount);
+        Assert.Equal(1, firstService.StopCount);
+        Assert.Equal(0, secondService.StopCount);
+        Assert.False(secondService.ExecuteTask!.IsCompleted);
         Assert.NotNull(((IInterceptorSubject)secondSubject).Context.TryGetService<HostedServiceHandler>());
     }
 
     [Fact]
-    public async Task WhenALaterHostedServiceFailsHostStart_ThenDisposingTheHostStopsTheSelfContainedSubject()
+    public async Task WhenALaterHostedServiceFailsHostStart_ThenDisposingTheHostStopsTheSelfContainedService()
     {
         // Arrange - the generic host disposes without stopping when a start fails, so disposal is the
         // only thing that can stop a subject host that had already started.
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddSubject<CountingHostedSubject>();
+        builder.Services.AddSubject<ActivatableSubject>();
         builder.Services.AddHostedService<ThrowingStartService>();
         var host = builder.Build();
         await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
-        var subject = host.Services.GetRequiredService<CountingHostedSubject>();
-        var stopCountBeforeDispose = subject.StopCount;
+        var service = Assert.IsType<ScriptedBackgroundService>(
+            host.Services.GetRequiredService<ActivatableSubject>().LastService);
+        var stopCountBeforeDispose = service.StopCount;
 
         // Act
         await ((IAsyncDisposable)host).DisposeAsync();
 
         // Assert
         Assert.Equal(0, stopCountBeforeDispose);
-        Assert.Equal(1, subject.StopCount);
-        Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+        Assert.Equal(1, service.StopCount);
+        Assert.True(service.IsDisposed);
     }
 
     [Fact]
@@ -371,8 +460,8 @@ public class AddSubjectModeTests
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
         var sharedContext = HostingTestHost.CreateContext(builder);
-        builder.Services.AddSingleton(new CountingHostedSubject());
-        builder.Services.AddSubject<CountingHostedSubject>(contextResolver: _ => sharedContext);
+        builder.Services.AddSingleton(new ActivatableSubject());
+        builder.Services.AddSubject<ActivatableSubject>(contextResolver: _ => sharedContext);
         var host = builder.Build();
 
         // Act & Assert
@@ -381,22 +470,48 @@ public class AddSubjectModeTests
     }
 
     [Fact]
-    public async Task WhenSelfContainedSubjectIsConstructedWithAContext_ThenItsContextIsConfiguredBeforeItJoinsIt()
+    public async Task WhenSelfContainedSubjectAddsTheRegistryToItsOwnContext_ThenItIsRegisteredAndItsServiceRuns()
     {
-        // Arrange - the generated context constructor attaches during construction, so only a
-        // construction context without lifecycle keeps the subject out of a graph until then.
+        // Arrange - configure sets the flag ConfigureContext reads, so this also shows configure runs first.
         var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddSubject<ContextConfiguratorHostedSubject>();
+        builder.Services.AddSubject<ContextConfiguratorFactorySubject>(subject => subject.AddsRegistry = true);
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var subject = host.Services.GetRequiredService<ContextConfiguratorHostedSubject>();
+            var subject = host.Services.GetRequiredService<ContextConfiguratorFactorySubject>();
+
+            // Assert
+            Assert.NotNull(subject.TryGetRegisteredSubject());
+            Assert.Equal(1, subject.ConfigureContextCount);
+            Assert.False(subject.LastService!.ExecuteTask!.IsCompleted);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenSelfContainedSubjectIsConstructedWithAContext_ThenItsContextIsConfiguredBeforeItJoinsIt()
+    {
+        // Arrange - the generated context constructor attaches during construction, so only a
+        // construction context without lifecycle keeps the subject out of a graph until then.
+        var builder = HostingTestHost.CreateBuilder();
+        builder.Services.AddSubject<ContextConfiguratorFactorySubject>();
+        var host = builder.Build();
+
+        try
+        {
+            // Act
+            await host.StartAsync();
+            var subject = host.Services.GetRequiredService<ContextConfiguratorFactorySubject>();
 
             // Assert
             Assert.False(subject.WasAttachedWhenContextWasConfigured);
+            Assert.Null(subject.TryGetRegisteredSubject());
         }
         finally
         {
@@ -410,19 +525,21 @@ public class AddSubjectModeTests
         // Arrange
         var builder = HostingTestHost.CreateBuilder();
         var sharedContext = HostingTestHost.CreateContext(builder);
-        builder.Services.AddSubject<ContextConfiguratorHostedSubject>(contextResolver: _ => sharedContext);
+        builder.Services.AddSubject<ContextConfiguratorFactorySubject>(
+            subject => subject.AddsRegistry = true,
+            contextResolver: _ => sharedContext);
         var host = builder.Build();
 
         try
         {
             // Act
             await host.StartAsync();
-            var subject = host.Services.GetRequiredService<ContextConfiguratorHostedSubject>();
+            var subject = host.Services.GetRequiredService<ContextConfiguratorFactorySubject>();
 
             // Assert
             Assert.Equal(0, subject.ConfigureContextCount);
             Assert.Null(subject.TryGetRegisteredSubject());
-            Assert.Equal(1, subject.StartCount);
+            Assert.False(subject.LastService!.ExecuteTask!.IsCompleted);
         }
         finally
         {
@@ -453,18 +570,5 @@ public class AddSubjectModeTests
         {
             await host.StopAsync();
         }
-    }
-
-    [Fact]
-    public async Task WhenSelfContainedSubjectAddsHostingToItsOwnContext_ThenHostStartThrows()
-    {
-        // Arrange - configure sets the flag ConfigureContext reads, so this also shows configure runs first.
-        var builder = HostingTestHost.CreateBuilder();
-        builder.Services.AddSubject<ContextConfiguratorHostedSubject>(subject => subject.AddsHosting = true);
-        var host = builder.Build();
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
-        Assert.Contains("added hosting", exception.Message);
     }
 }

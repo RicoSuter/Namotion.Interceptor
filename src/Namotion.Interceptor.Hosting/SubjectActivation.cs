@@ -58,7 +58,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             return;
         }
 
-        if (subject is not IHostedService)
+        if (subject is not (IHostedService or ISubjectHostedServiceFactory))
         {
             return;
         }
@@ -82,9 +82,14 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
         // deadlock host startup on registration order.
         handler.EnsureStarted();
 
-        // A false result is deliberately not a fallback into starting the subject here: another
-        // handler owning it would make that a second instance.
-        await handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
+        if (subject is IHostedService)
+        {
+            // A false result is deliberately not a fallback into starting the subject here: another
+            // handler owning it would make that a second instance.
+            await handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
+        }
+
+        await subject.ActivateHostedServiceAsync(_serviceProvider, handler, cancellationToken).ConfigureAwait(false);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
