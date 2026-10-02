@@ -122,9 +122,25 @@ public class SubjectHostTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync(subject, CancellationToken.None));
-        Assert.Contains("context resolver", exception.Message);
+        Assert.Contains("tracked graph", exception.Message);
         Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
         Assert.Same(context.TryGetService<LifecycleInterceptor>(), ((IInterceptorSubject)subject).Context.TryGetService<LifecycleInterceptor>());
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsAChildInALifecycleGraphThatPassesNoContextDown_ThenStartThrows()
+    {
+        // Arrange
+        // Lifecycle without context inheritance, so the child's own context never reaches the graph's
+        // lifecycle and only the reference count shows that the child is in it.
+        var parent = new HostedContainer(InterceptorSubjectContext.Create().WithLifecycle());
+        var child = new CountingHostedSubject();
+        parent.Child = child;
+        var host = CreateHost();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync(child, CancellationToken.None));
+        Assert.Null(((IInterceptorSubject)child).Context.TryGetService<HostedServiceHandler>());
     }
 
     [Fact]

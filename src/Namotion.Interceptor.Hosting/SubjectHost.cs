@@ -75,15 +75,18 @@ internal sealed class SubjectHost : IAsyncDisposable
 
     /// <summary>
     /// Builds the private context and attaches the subject to it. Throws when the subject is already
-    /// in a tracked graph, a context with lifecycle, hosting or not: a second lifecycle over one
-    /// subject double counts its references, and a second hosting handler claims its services.
+    /// in a tracked graph, hosting or not: when its context reaches a lifecycle, or when a lifecycle
+    /// elsewhere holds a reference to it. A second lifecycle over one subject double counts its
+    /// references, and a second hosting handler claims its services.
     /// </summary>
     internal void Attach(IInterceptorSubject subject)
     {
-        if (!subject.Context.GetServices<LifecycleInterceptor>().IsEmpty)
+        // The reference count catches a graph whose lifecycle the subject's own context does not reach,
+        // because nothing there passed its context down.
+        if (subject.GetReferenceCount() > 0 || !subject.Context.GetServices<LifecycleInterceptor>().IsEmpty)
         {
             throw new InvalidOperationException(
-                $"Subject {subject} is already in a tracked graph, and a second lifecycle or hosting handler over one subject double counts its references and claims its services. Pass a context resolver to AddSubject to run it in that context, or remove it from that graph before starting it here.");
+                $"Subject {subject} is already in a tracked graph, and a second lifecycle or hosting handler over one subject double counts its references and claims its services. Let a context with WithHostedServices() run it instead, or remove it from that graph before starting it here.");
         }
 
         // Assigned only past the check, so the teardown of a refused start leaves the other host's

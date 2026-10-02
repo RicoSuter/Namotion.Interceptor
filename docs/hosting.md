@@ -105,7 +105,7 @@ builder.Services.AddKeyedSubject<WeatherStation>("garden");
 Two sharp edges:
 
 - One registration per type, or per type and key. A second registration of the same `T` and key throws, because its `configure` and `contextResolver` could not take effect.
-- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. When it is in none, it runs in a context of its own without a resolver, and host startup throws with one.
+- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. When it is in a tracked graph without hosting, host startup throws. When it is in no graph, it runs in a context of its own without a resolver, and host startup throws with one.
 
 `configure` always runs before the attach `AddSubject` performs, so the subject is fully configured before anything can start it. Without a resolver the subject is constructed and configured before it joins any context, so on every constructor shape the assignments in `configure` are not intercepted and not tracked. With a resolver, construction and `configure` both run inside a [startup scope](#configuration-before-startup) on the resolved context, and what differs between the shapes is whether those assignments are intercepted:
 
