@@ -35,6 +35,8 @@ public static class SubjectContextFactory
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer)
             .WithDataAnnotationValidation()
-            .WithHostedServices(services);
+            // One context holds local devices and devices mirrored from another instance; only the
+            // code that creates local subjects activates.
+            .WithHostedServices(services, activateSubjectHostedServices: false);
     }
 }

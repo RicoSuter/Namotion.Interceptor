@@ -177,7 +177,7 @@
         x = SnapToGrid(x);
         y = SnapToGrid(y);
 
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, activateHostedService: true, subject =>
         {
             if (Canvas == null) return;
 
