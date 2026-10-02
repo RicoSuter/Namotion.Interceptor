@@ -479,10 +479,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         if (!startupScope.IsReady)
         {
-            await Task.WhenAny(
-                    startupScope.WaitAsync(CancellationToken.None),
-                    _gate.WaitForDrainingAsync())
-                .ConfigureAwait(false);
+            await Task.WhenAny(startupScope.WaitAsync(), _gate.WaitForDrainingAsync()).ConfigureAwait(false);
         }
 
         return MayStart(subject, target);

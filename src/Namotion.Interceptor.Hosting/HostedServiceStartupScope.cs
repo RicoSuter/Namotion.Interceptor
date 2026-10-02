@@ -14,7 +14,6 @@ public sealed class HostedServiceStartupScope : IDisposable
     private readonly AsyncLocal<HostedServiceStartupScope?> _current;
     private readonly HostedServiceStartupScope? _parent;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private bool _disposed;
 
     internal HostedServiceStartupScope(AsyncLocal<HostedServiceStartupScope?> current)
     {
@@ -32,20 +31,16 @@ public sealed class HostedServiceStartupScope : IDisposable
             _current.Value = _parent;
         }
 
-        if (_disposed) return;
-        _disposed = true;
         _completion.TrySetResult();
     }
 
     internal bool IsReady => _completion.Task.IsCompleted && (_parent is null || _parent.IsReady);
 
-    internal async Task WaitAsync(CancellationToken cancellationToken)
+    internal async Task WaitAsync()
     {
-        await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        if (_parent is not null)
+        for (var scope = this; scope is not null; scope = scope._parent)
         {
-            await _parent.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await scope._completion.Task.ConfigureAwait(false);
         }
     }
 }
