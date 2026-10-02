@@ -326,8 +326,8 @@ public class OpcUaClientTests
         await using var testHost = await OpcUaTestHost.StartAsync();
         var client = testHost.CreateClient(serverUrl: null);
         testHost.Container.Client = client;
-        await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Error);
-        Assert.NotNull(client.StatusMessage);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Status == ServiceStatus.Error && client.StatusMessage is not null);
 
         // Each of the two writes is its own pass of the interceptor chain, so the window between them is
         // wide and observable. Read it from the status write, because nothing here can hold it open to
@@ -457,8 +457,8 @@ public class OpcUaClientTests
         // short circuits until something asks for a start again. Lifting it by hand rather than through
         // the Start operation, which would enable the client and start it.
         client.Status = ServiceStatus.Starting;
-        await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Error);
-        Assert.Equal(FactoryFailureMessage, client.StatusMessage);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Status == ServiceStatus.Error && client.StatusMessage == FactoryFailureMessage);
         Assert.Same(attachment, Assert.Single(client.GetHostedServiceAttachments()));
 
         // The stop publishes its status and then awaits the detach, so what stands beside that status is
