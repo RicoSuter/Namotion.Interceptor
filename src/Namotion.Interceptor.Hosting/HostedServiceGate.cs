@@ -14,36 +14,17 @@ internal enum HostedServiceGateState
 /// </summary>
 internal sealed class HostedServiceGate
 {
-    private readonly Lock _lock = new();
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _draining = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private HostedServiceGateState _state = HostedServiceGateState.NotStarted;
 
-    public HostedServiceGateState State
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _state;
-            }
-        }
-    }
+    // An interlocked read rather than a volatile one: the checks that write and then re-read the gate
+    // need a full fence between the two, which an acquire load does not give.
+    public HostedServiceGateState State => Interlocked.CompareExchange(ref _state, default, default);
 
     /// <summary>Whether the drain has begun.</summary>
-    public bool IsDraining
-    {
-        get
-        {
-            // A lock rather than a volatile read: the checks that write and then re-read the gate need
-            // a full fence between the two, which an acquire load does not give.
-            lock (_lock)
-            {
-                return _state == HostedServiceGateState.Draining;
-            }
-        }
-    }
+    public bool IsDraining => State == HostedServiceGateState.Draining;
 
     /// <summary>
     /// Advances NotStarted to Running. A one way ratchet: calling this during shutdown must not
@@ -51,17 +32,8 @@ internal sealed class HostedServiceGate
     /// </summary>
     public void EnsureStarted()
     {
-        var opened = false;
-        lock (_lock)
-        {
-            if (_state == HostedServiceGateState.NotStarted)
-            {
-                _state = HostedServiceGateState.Running;
-                opened = true;
-            }
-        }
-
-        if (opened)
+        if (Interlocked.CompareExchange(ref _state, HostedServiceGateState.Running, HostedServiceGateState.NotStarted)
+            == HostedServiceGateState.NotStarted)
         {
             _opened.TrySetResult();
         }
@@ -69,13 +41,7 @@ internal sealed class HostedServiceGate
 
     public void BeginDraining()
     {
-        lock (_lock)
-        {
-            if (_state is HostedServiceGateState.NotStarted or HostedServiceGateState.Running)
-            {
-                _state = HostedServiceGateState.Draining;
-            }
-        }
+        Interlocked.Exchange(ref _state, HostedServiceGateState.Draining);
 
         // Releases anything parked on a gate that was never opened, so a host that aborts startup
         // does not leave transitions and their awaiters hanging forever.
