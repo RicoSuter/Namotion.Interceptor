@@ -314,6 +314,8 @@ public partial class Dog : Animal
 
 An override keeps the overriding declaration’s `PropertyInfo` and attributes. If it omits a getter or setter, the metadata retains that inherited accessor when it is callable from the subject’s generated code. This includes protected accessors, but excludes inaccessible ancestor accessors and init-only setters. A partial override still generates only the accessors written in its declaration.
 
+Each partial override has its own backing field, and the subject's metadata for the name, including the stored-value reader that supplies a change's old value, targets the most derived one. An override that omits the setter has no reader, because the inherited setter stores into the base field, so its changes carry the old value that setter passed. Calling the base accessor from the overriding class (`base.Name = value`) stores into the base field, which the property no longer exposes, so the change it publishes carries the override's stored value as its old value.
+
 ### New and Sealed Properties
 
 `new` and `sealed` are supported on partial properties. Both modifiers are repeated on the generated half of the property automatically, so the hand-written declaration only needs to carry them once:
@@ -867,7 +869,8 @@ public class CustomDevice : Device
                 subject => ((CustomDevice)subject).Location,
                 (subject, value) => ((CustomDevice)subject).Location = (string)value!,
                 isIntercepted: true,
-                isDynamic: false));
+                isDynamic: false)
+                .WithStoredValueReader(static subject => ((CustomDevice)subject)._location));
 
         Location = "unknown";
     }
@@ -880,6 +883,8 @@ public class CustomDevice : Device
     }
 }
 ```
+
+`WithStoredValueReader` is what gives the property's changes the exact old value described in [Delivery Guarantees](tracking.md#delivery-guarantees). Without it, a change carries the value the setter passed, read before the write started.
 
 One thing to avoid anywhere below a subject: do not declare a member named `GetPropertyValue`, `SetPropertyValue`, `InvokeMethod` or `GetInstanceProperties` for something else, and do not implement `IInterceptorSubject.Context`, `Data`, `SyncRoot` or `AddProperties` yourself. Either one takes over what the base class provides. Where a generated subject declares such a member, or sits below a class that does, the generator reports NI0063 or NI0064.
 

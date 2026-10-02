@@ -49,6 +49,9 @@ internal static class WriteInterceptorFactory<TProperty>
                 var subject = property.Subject;
                 lock (subject.SyncRoot)
                 {
+                    // Under the lock, so the old value is the one this store replaces. The zero-interceptor
+                    // terminal skips it: with no interceptor, nothing is left to observe it.
+                    context.ReadCurrentValueUnderLock(subject);
                     innerWriteValue(subject, context.NewValue);
                     context.IsWritten = true;
                     // See the zero-interceptor terminal above for why the property is hoisted, why the
