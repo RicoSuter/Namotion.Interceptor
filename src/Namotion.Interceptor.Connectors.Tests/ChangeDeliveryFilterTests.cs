@@ -251,6 +251,57 @@ public class ChangeDeliveryFilterTests
         Assert.True(ChangeDeliveryFilter.IsCurrent(in change, ChangeDeliveryRule.SourceValuesMayBeStale));
     }
 
+    [Fact]
+    public void WhenACommitLandsBetweenTheCurrencyCheckAndTheReapply_ThenNothingIsStoredOrPublished()
+    {
+        // Arrange: the check reads the revision, then a local write commits before the reapply.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new DerivedCollectionDevice(context) { First = 1 };
+        var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+        var parked = CreateChange(property, 0, 1, revision: 0);
+
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in parked, ChangeDeliveryRule.SourceValuesMayBeStale, out var observed));
+        subject.First = 2;
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var newerRevision, out _));
+        var timestampBefore = property.TryGetWriteTimestamp();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        // Act
+        var reapplied = ChangeDeliveryFilter.TryReapplyIfStillCurrent(in parked, ChangeDeliveryRule.SourceValuesMayBeStale, observed);
+
+        // Assert
+        Assert.False(reapplied);
+        Assert.Equal(2, subject.First);
+        Assert.Equal(0, subscription.Count);
+        Assert.True(property.TryGetWriteState(includeSourceCommitsInRevision: false, out var revisionAfter, out _));
+        Assert.Equal(newerRevision, revisionAfter);
+        Assert.Equal(timestampBefore, property.TryGetWriteTimestamp());
+    }
+
+    [Theory]
+    [InlineData(ChangeDeliveryRule.SourceValuesMayBeStale, true)]
+    [InlineData(ChangeDeliveryRule.SourceValuesAreSettled, false)]
+    public void WhenASourceCommitLandsBetweenTheCurrencyCheckAndTheReapply_ThenTheRuleDecides(ChangeDeliveryRule rule, bool expectReapplied)
+    {
+        // Arrange: only a rule that ranks source commits against local ones sees the source write as
+        // superseding, mirroring what IsCurrent would have answered had it run after that write.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var subject = new DerivedCollectionDevice(context) { First = 1 };
+        var property = new PropertyReference(subject, nameof(DerivedCollectionDevice.First));
+        var parked = CreateChange(property, 0, 1, revision: 0);
+
+        Assert.True(ChangeDeliveryFilter.IsCurrent(in parked, rule, out var observed));
+        property.SetValueFromSource(new object(), null, null, 2);
+
+        // Act
+        var reapplied = ChangeDeliveryFilter.TryReapplyIfStillCurrent(in parked, rule, observed);
+
+        // Assert
+        Assert.Equal(expectReapplied, reapplied);
+        Assert.Equal(expectReapplied ? 1 : 2, subject.First);
+    }
+
     private static SubjectPropertyChange CreateChange(
         PropertyReference property, int oldValue, int newValue, long revision)
     {
@@ -314,7 +365,7 @@ public class ChangeDeliveryFilterTests
     }
 
     /// <summary>
-    /// The public seam negates <see cref="ChangeDeliveryFilter.IsCurrent"/>, and every other test of the
+    /// The public seam negates <see cref="ChangeDeliveryFilter.IsCurrent(in SubjectPropertyChange, ChangeDeliveryRule)"/>, and every other test of the
     /// decision goes at the internal predicate, so dropping that negation changes nothing any unit test
     /// asserts. It is what the OPC UA server write loop asks while holding the node manager lock:
     /// inverted, it drops exactly what it has to write and writes exactly what it has to drop.

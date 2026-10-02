@@ -18,7 +18,7 @@ public class PendingOriginTests
         // Act & Assert
         using (PendingOrigin.Set(property, ChangeOrigin.FromSource(source), "sent"))
         {
-            Assert.True(PendingOrigin.TryConsume(property, out var attempted));
+            Assert.True(TryConsume(property, out var attempted));
             Assert.Equal(ChangeOriginKind.FromSource, attempted.Origin.Kind);
             Assert.Same(source, attempted.Origin.Source);
             Assert.Equal("sent", attempted.SentValue);
@@ -32,10 +32,10 @@ public class PendingOriginTests
         var property = CreateProperty();
         using (PendingOrigin.Set(property, ChangeOrigin.FromSource(new object()), null))
         {
-            PendingOrigin.TryConsume(property, out _);
+            TryConsume(property, out _);
 
             // Act
-            var consumed = PendingOrigin.TryConsume(property, out var attempted);
+            var consumed = TryConsume(property, out var attempted);
 
             // Assert
             Assert.False(consumed);
@@ -53,8 +53,8 @@ public class PendingOriginTests
         using (PendingOrigin.Set(armedProperty, ChangeOrigin.FromSource(new object()), null))
         {
             // Act
-            var mismatch = PendingOrigin.TryConsume(otherProperty, out var mismatchAttempted);
-            var match = PendingOrigin.TryConsume(armedProperty, out var matchAttempted);
+            var mismatch = TryConsume(otherProperty, out var mismatchAttempted);
+            var match = TryConsume(armedProperty, out var matchAttempted);
 
             // Assert
             Assert.False(mismatch);
@@ -75,7 +75,7 @@ public class PendingOriginTests
         }
 
         // Act
-        var consumed = PendingOrigin.TryConsume(property, out var attempted);
+        var consumed = TryConsume(property, out var attempted);
 
         // Assert
         Assert.False(consumed);
@@ -94,16 +94,22 @@ public class PendingOriginTests
         {
             using (PendingOrigin.Set(innerProperty, ChangeOrigin.FromSource(new object()), "inner"))
             {
-                PendingOrigin.TryConsume(innerProperty, out _);
+                TryConsume(innerProperty, out _);
             }
 
             // Act: after the inner scope disposes, the outer stamp must be intact.
-            var consumed = PendingOrigin.TryConsume(outerProperty, out var attempted);
+            var consumed = TryConsume(outerProperty, out var attempted);
 
             // Assert
             Assert.True(consumed);
             Assert.Same(outerSource, attempted.Origin.Source);
             Assert.Equal("outer", attempted.SentValue);
         }
+    }
+
+    private static bool TryConsume(PropertyReference property, out AttemptedOrigin attempted)
+    {
+        var precondition = default(CommitPrecondition);
+        return PendingOrigin.TryConsume(property, out attempted, ref precondition);
     }
 }
