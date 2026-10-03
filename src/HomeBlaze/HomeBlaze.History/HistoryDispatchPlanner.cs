@@ -71,8 +71,10 @@ internal static class HistoryDispatchPlanner
         var bucket = query.Bucket!.Value;
         var segments = new List<PlannedSegment>();
         var isAlwaysAvailable = HistoryAggregations.AlwaysAvailable.Contains(query.Aggregation);
+        var preferStartCovering =
+            query.Aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
 
-        IHistoryStore? currentOwner = null;
+        StoreCoverageSnapshot? currentOwner = null;
         DateTimeOffset segmentStart = default;
         DateTimeOffset segmentEnd = default;
         var segmentBucketCount = 0;
@@ -82,25 +84,22 @@ internal static class HistoryDispatchPlanner
         {
             var bucketEnd = bucketStart + bucket;
 
-            // The newest bucket runs past To whenever To is not bucket-aligned. It is clipped for both
-            // purposes: ownership is tested against the clipped range, because testing the unclipped
-            // bucket would leave it unowned and blank out the live edge, and the segment ends there
-            // too, so the sub-query cannot aggregate samples from after To into the trailing point.
+            // Clipped at To for ownership and the segment end alike: unclipped, the live edge would look
+            // partly uncovered and the sub-query could aggregate samples from after To.
             var clippedEnd = bucketEnd < query.To ? bucketEnd : query.To;
             var ownedRange = new HistoryCoverage(bucketStart, clippedEnd);
-            var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, ownedRange);
+            var owner = FindOwner(stores, query.Aggregation, isAlwaysAvailable, preferStartCovering, ownedRange);
 
-            if (ReferenceEquals(owner, currentOwner) && owner is not null)
+            if (currentOwner is { } current && owner is { } next && ReferenceEquals(current.Store, next.Store))
             {
                 segmentEnd = clippedEnd;
                 segmentBucketCount++;
             }
             else
             {
-                if (currentOwner is not null)
+                if (currentOwner is { } previous)
                 {
-                    segments.Add(new PlannedSegment(
-                        currentOwner, segmentStart, segmentEnd, segmentBucketCount));
+                    segments.Add(CreateBucketedSegment(previous, segmentStart, segmentEnd, segmentBucketCount));
                 }
 
                 currentOwner = owner;
@@ -112,50 +111,66 @@ internal static class HistoryDispatchPlanner
             bucketStart = bucketEnd;
         }
 
-        if (currentOwner is not null)
+        if (currentOwner is { } last)
         {
-            segments.Add(new PlannedSegment(currentOwner, segmentStart, segmentEnd, segmentBucketCount));
+            segments.Add(CreateBucketedSegment(last, segmentStart, segmentEnd, segmentBucketCount));
         }
 
         return segments;
     }
 
-    private static IHistoryStore? FindOwner(
+    private static PlannedSegment CreateBucketedSegment(
+        StoreCoverageSnapshot owner, DateTimeOffset from, DateTimeOffset to, int bucketCount) =>
+        new(owner.Store, from, to, bucketCount,
+            HistoryCoverage.CoverageStartAt(owner.CoverageRanges, to.AddTicks(-1)), owner.CoverageRanges);
+
+    // One owner per bucket, never a split: a store covering the whole bucket wins by priority, else the
+    // partial store covering most of it, ties going to priority because the stores arrive ordered. With
+    // preferStartCovering, a partial store covering the bucket start beats any that does not, because
+    // only it can carry the held value into the bucket.
+    private static StoreCoverageSnapshot? FindOwner(
         IReadOnlyList<StoreCoverageSnapshot> stores,
         string aggregation,
         bool isAlwaysAvailable,
+        bool preferStartCovering,
         HistoryCoverage bucket)
     {
-        foreach (var snapshot in stores)
+        var length = bucket.To - bucket.From;
+        StoreCoverageSnapshot? startCovering = null;
+        var startCoveringCovered = TimeSpan.Zero;
+        StoreCoverageSnapshot? other = null;
+        var otherCovered = TimeSpan.Zero;
+        for (var index = 0; index < stores.Count; index++)
         {
-            if ((isAlwaysAvailable || snapshot.Store.SupportedAggregations.Contains(aggregation)) &&
-                Contains(snapshot.CoverageRanges, bucket))
+            var snapshot = stores[index];
+            if (!isAlwaysAvailable && !snapshot.Store.SupportedAggregations.Contains(aggregation))
             {
-                return snapshot.Store;
+                continue;
+            }
+
+            var covered = HistoryCoverage.CoveredDuration(snapshot.CoverageRanges, bucket);
+            if (covered == length)
+            {
+                return snapshot;
+            }
+
+            if (preferStartCovering &&
+                HistoryCoverage.CoverageStartAt(snapshot.CoverageRanges, bucket.From) is not null)
+            {
+                if (covered > startCoveringCovered)
+                {
+                    startCovering = snapshot;
+                    startCoveringCovered = covered;
+                }
+            }
+            else if (covered > otherCovered)
+            {
+                other = snapshot;
+                otherCovered = covered;
             }
         }
 
-        return null;
-    }
-
-    // Coverage snapshots hold roughly one range per discontinuity, so a linear scan over the
-    // ordered ranges beats a binary search for the counts that actually occur.
-    private static bool Contains(ImmutableArray<HistoryCoverage> ranges, HistoryCoverage target)
-    {
-        foreach (var range in ranges)
-        {
-            if (range.Contains(target))
-            {
-                return true;
-            }
-
-            if (range.From > target.From)
-            {
-                break;
-            }
-        }
-
-        return false;
+        return startCovering ?? other;
     }
 
     private static IEnumerable<HistoryCoverage> Subtract(
@@ -178,7 +193,9 @@ internal sealed class PlannedSegment(
     IHistoryStore store,
     DateTimeOffset from,
     DateTimeOffset to,
-    int bucketCount)
+    int bucketCount,
+    DateTimeOffset? endCoverageFrom = null,
+    ImmutableArray<HistoryCoverage> ownerCoverage = default)
 {
     public IHistoryStore Store { get; } = store;
 
@@ -187,6 +204,18 @@ internal sealed class PlannedSegment(
     public DateTimeOffset To { get; } = to;
 
     public int BucketCount { get; } = bucketCount;
+
+    /// <summary>
+    /// Start of the owner's coverage range that contains the segment's last instant, or null when that
+    /// instant is uncovered. Bucketed plans only.
+    /// </summary>
+    public DateTimeOffset? EndCoverageFrom { get; } = endCoverageFrom;
+
+    /// <summary>
+    /// The owner's coverage snapshot, which a bucketed segment can span gaps in. Default for raw plans,
+    /// whose segments are coverage intersections already.
+    /// </summary>
+    public ImmutableArray<HistoryCoverage> OwnerCoverage { get; } = ownerCoverage;
 
     public HistorySeries? Result { get; set; }
 }

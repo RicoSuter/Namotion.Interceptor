@@ -7,11 +7,11 @@ namespace HomeBlaze.History.Sqlite;
 /// <summary>
 /// One per bucketed query. Fed a map of <c>bucketStartTicks -&gt; combined <see cref="BucketPartial"/></c>
 /// (already merged across partitions) and emits one <see cref="HistoryPoint"/> per aligned bucket in
-/// <c>[BucketStart(from) .. &lt; to)</c>, applying the SAME empty-bucket and carry rules as
+/// <c>[BucketStart(from) .. &lt; to)</c>, applying the SAME empty-bucket, partial-bucket and carry rules as
 /// <c>InMemoryHistoryStore.AggregateBucket</c>/<c>AggregateNumeric</c>. Numeric partials combine across
 /// partitions (Count sum, Sum sum, Min/Max min/max, SampleAverage=Sum/Count, StandardDeviation from Count+Sum+SumOfSquares);
-/// First picks the smallest <c>FirstTicks</c>, Last the largest <c>LastTicks</c>; TWA sums weighted_sum and
-/// total_duration (Task 5.4 owns the TWA value math).
+/// First picks the smallest <c>FirstTicks</c>, Last the largest <c>LastTicks</c>; TWA carries the covered
+/// integral (<c>WeightedSum</c> over <c>TotalDuration</c>), which the reader computes and the assembler divides.
 /// </summary>
 internal readonly record struct BucketPartial(
     long BucketStartTicks,
@@ -79,66 +79,72 @@ internal readonly record struct BucketPartial(
 }
 
 /// <summary>
-/// Walks the aligned bucket range for a query, applies the InMemory empty-bucket and carry semantics,
-/// and produces the final <see cref="HistoryPoint"/> list (newest-N over buckets).
+/// Walks the aligned bucket range for a query, applies the InMemory empty-bucket, partial-bucket and carry
+/// semantics, and produces the final <see cref="HistoryPoint"/> list (newest-N over buckets).
 /// </summary>
 internal static class BucketAssembler
 {
+    /// <summary>
+    /// Assembles the bucket grid. <paramref name="windows"/> is the store's coverage clipped to
+    /// [first bucket start, To), and <paramref name="lastSeed"/> the value held entering the first
+    /// bucket, for <c>Last</c> only.
+    /// </summary>
     public static HistorySeries Assemble(
         HistoryQuery query,
         IReadOnlyDictionary<long, BucketPartial> partials,
-        double? carrySeedNumber,
-        JsonElement? carrySeedJson,
-        ImmutableArray<HistoryCoverage> coverageRanges)
+        HistoryPoint? lastSeed,
+        ImmutableArray<HistoryCoverage> windows)
     {
         var bucket = query.Bucket!.Value;
         var aggregation = query.Aggregation;
 
-        // For Last, the carry threads the held value (Number AND Json) bucket to bucket, seeded for the
-        // leading empty bucket by the CarrySeed supplied by the merger.
-        var carriedNumber = IsCarryDependent(aggregation) ? carrySeedNumber : null;
-        var carriedJson = IsCarryDependent(aggregation) ? carrySeedJson : null;
+        // Only Last threads a held value (Number and Json) here; the reader integrates the
+        // TimeWeightedAverage carry itself.
+        var isLast = aggregation == HistoryAggregations.Last;
+        var carriedNumber = lastSeed?.Number;
+        var carriedJson = lastSeed?.Json;
 
-        var bucketTicks = bucket.Ticks;
         var alignedFrom = BucketAlignment.BucketStart(query.From, bucket);
         var firstBucketStart = BucketAlignment.FirstBucketStart(
             query.From, query.To, bucket, query.MaxPoints);
         var bucketStartTimestamp = firstBucketStart;
         var allPoints = new List<HistoryPoint>();
-        var coverageIndex = 0;
         while (bucketStartTimestamp < query.To)
         {
             var bucketEndTimestamp = bucketStartTimestamp + bucket;
-            while (coverageIndex < coverageRanges.Length &&
-                   coverageRanges[coverageIndex].To <= bucketStartTimestamp)
-            {
-                coverageIndex++;
-            }
 
-            // Clipped to the query window: the newest bucket runs past To whenever To is not
-            // bucket-aligned, and coverage cannot reach into the future (see HistoryDispatchPlanner).
-            var coveredRange = new HistoryCoverage(
-                bucketStartTimestamp,
-                bucketEndTimestamp < query.To ? bucketEndTimestamp : query.To);
+            // Measured over [bucket start, min(bucket end, To)) within coverage (partial buckets: history.md).
+            var clippedEnd = bucketEndTimestamp < query.To ? bucketEndTimestamp : query.To;
+            var covered = HistoryCoverage.CoveredDuration(
+                windows, new HistoryCoverage(bucketStartTimestamp, clippedEnd));
 
-            if (coverageIndex >= coverageRanges.Length ||
-                !coverageRanges[coverageIndex].Contains(coveredRange))
+            // Uncovered at the bucket start means a gap, so nothing is held before the first sample after it.
+            if (isLast && HistoryCoverage.CoverageStartAt(windows, bucketStartTimestamp) is null)
             {
                 carriedNumber = null;
                 carriedJson = null;
+            }
+
+            if (covered == TimeSpan.Zero)
+            {
                 allPoints.Add(new HistoryPoint(bucketStartTimestamp, null, null));
                 bucketStartTimestamp = bucketEndTimestamp;
                 continue;
             }
 
-            var bucketStartTicks = EpochTicks.ToEpochTicks(bucketStartTimestamp);
-            partials.TryGetValue(bucketStartTicks, out var partial);
-            var hasPartial = partials.ContainsKey(bucketStartTicks);
-
-            var point = AggregateBucket(
-                aggregation, bucketStartTimestamp, bucketStartTicks, bucketTicks,
-                hasPartial ? partial : null, ref carriedNumber, ref carriedJson);
+            var hasPartial = partials.TryGetValue(EpochTicks.ToEpochTicks(bucketStartTimestamp), out var partial);
+            var isPartial = covered < clippedEnd - bucketStartTimestamp;
+            var point = isPartial && aggregation is (HistoryAggregations.Count or HistoryAggregations.Sum)
+                ? new HistoryPoint(bucketStartTimestamp, null, null)
+                : AggregateBucket(aggregation, bucketStartTimestamp, hasPartial ? partial : null,
+                    ref carriedNumber, ref carriedJson);
             allPoints.Add(point);
+
+            if (isLast && !HoldsValueAtEnd(windows, bucketStartTimestamp, clippedEnd, partial.LastTicks))
+            {
+                carriedNumber = null;
+                carriedJson = null;
+            }
 
             bucketStartTimestamp = bucketEndTimestamp;
         }
@@ -150,11 +156,16 @@ internal static class BucketAssembler
             ImmutableArray<HistoryCoverage>.Empty);
     }
 
-    private static bool IsCarryDependent(string aggregation) =>
-        aggregation is HistoryAggregations.Last or HistoryAggregations.TimeWeightedAverage;
+    // The value held at the clipped end is unknown when that instant is uncovered, or when its coverage
+    // started inside this bucket and recorded nothing since.
+    private static bool HoldsValueAtEnd(
+        ImmutableArray<HistoryCoverage> windows, DateTimeOffset bucketStart, DateTimeOffset clippedEnd, long? lastTicks) =>
+        HistoryCoverage.CoverageStartAt(windows, clippedEnd.AddTicks(-1)) is { } endCoverageFrom &&
+        (endCoverageFrom <= bucketStart ||
+         (lastTicks is { } ticks && ticks >= EpochTicks.ToEpochTicks(endCoverageFrom)));
 
     private static HistoryPoint AggregateBucket(
-        string aggregation, DateTimeOffset bucketStart, long bucketStartTicks, long bucketTicks,
+        string aggregation, DateTimeOffset bucketStart,
         BucketPartial? partial, ref double? carriedNumber, ref JsonElement? carriedJson)
     {
         switch (aggregation)
@@ -180,54 +191,14 @@ internal static class BucketAssembler
                 return new HistoryPoint(bucketStart, null, null);
 
             case HistoryAggregations.TimeWeightedAverage:
-                return TimeWeightedAverage(bucketStart, bucketStartTicks, bucketTicks, partial, ref carriedNumber);
+                return new HistoryPoint(
+                    bucketStart,
+                    partial is { TotalDuration: > 0 } integrated ? integrated.WeightedSum / integrated.TotalDuration : null,
+                    null);
 
             default:
                 return AggregateNumeric(aggregation, bucketStart, partial);
         }
-    }
-
-    // Time-weighted average for one bucket. The SQL partial covers only the IN-BUCKET integral
-    // [firstEventTs, bucketEnd); the value held entering the bucket (carry / look-back / seed) is integrated
-    // over the leading interval [bucketStart, firstEventTs) here, and over the WHOLE bucket when it is empty.
-    // The carry then advances to the bucket's last event, including explicit null. Mirrors
-    // InMemory.TimeWeightedAverageBucket;
-    // ticks vs seconds does not matter because the ratio weightedSum/totalDuration is unit-free.
-    private static HistoryPoint TimeWeightedAverage(
-        DateTimeOffset bucketStart, long bucketStartTicks, long bucketTicks,
-        BucketPartial? partial, ref double? carriedNumber)
-    {
-        if (partial is { FirstTicks: { } firstTicks } combined)
-        {
-            // Leading interval [bucketStart, firstEventTs): the held value (if any) over that gap.
-            var weightedSum = combined.WeightedSum;
-            var totalDuration = combined.TotalDuration;
-            if (carriedNumber is { } held)
-            {
-                var leadingDuration = (double)(firstTicks - bucketStartTicks);
-                if (leadingDuration > 0)
-                {
-                    weightedSum += held * leadingDuration;
-                    totalDuration += leadingDuration;
-                }
-            }
-
-            // Advance carry even when the last event is explicit null, which clears the held value.
-            if (combined.LastTicks is not null)
-            {
-                carriedNumber = combined.LastNumber;
-            }
-
-            return new HistoryPoint(bucketStart, totalDuration > 0 ? weightedSum / totalDuration : null, null);
-        }
-
-        // Empty bucket (no events): the held value, if any, covers the whole bucket -> that value.
-        if (carriedNumber is { } heldWhole && bucketTicks > 0)
-        {
-            return new HistoryPoint(bucketStart, heldWhole, null);
-        }
-
-        return new HistoryPoint(bucketStart, null, null);
     }
 
     private static HistoryPoint AggregateNumeric(string aggregation, DateTimeOffset bucketStart, BucketPartial? partial)
