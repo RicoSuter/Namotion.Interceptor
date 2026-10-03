@@ -5,7 +5,8 @@ namespace Namotion.Interceptor.Hosting;
 /// </summary>
 /// <remarks>
 /// Disposal releases captured starts even when configuration throws.
-/// Do not await a captured service's startup before disposing the scope.
+/// Do not await a captured service's startup, or its detach, before disposing the scope: both wait for
+/// that startup.
 /// Scopes must be disposed in reverse creation order in the creating execution flow.
 /// </remarks>
 public sealed class HostedServiceStartupScope : IDisposable
@@ -13,7 +14,6 @@ public sealed class HostedServiceStartupScope : IDisposable
     private readonly AsyncLocal<HostedServiceStartupScope?> _current;
     private readonly HostedServiceStartupScope? _parent;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private bool _disposed;
 
     internal HostedServiceStartupScope(AsyncLocal<HostedServiceStartupScope?> current)
     {
@@ -22,9 +22,7 @@ public sealed class HostedServiceStartupScope : IDisposable
         current.Value = this;
     }
 
-    /// <summary>
-    /// Releases the starts captured in this scope, once its enclosing scopes are released too.
-    /// </summary>
+    /// <summary>Releases the starts captured in this scope, once its enclosing scopes are released too.</summary>
     public void Dispose()
     {
         // Restore this flow's parent even if another flow already disposed the scope.
@@ -33,20 +31,16 @@ public sealed class HostedServiceStartupScope : IDisposable
             _current.Value = _parent;
         }
 
-        if (_disposed) return;
-        _disposed = true;
         _completion.TrySetResult();
     }
 
     internal bool IsReady => _completion.Task.IsCompleted && (_parent is null || _parent.IsReady);
 
-    internal async Task WaitAsync(CancellationToken cancellationToken)
+    internal async Task WaitAsync()
     {
-        await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        if (_parent is not null)
+        for (var scope = this; scope is not null; scope = scope._parent)
         {
-            await _parent.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await scope._completion.Task.ConfigureAwait(false);
         }
     }
 }
