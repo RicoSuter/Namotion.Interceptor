@@ -1283,6 +1283,64 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
+    public async Task WhenTheGateReReadUndoesATakeAnotherHostHasSinceTaken_ThenThatHostsInstanceSurvives()
+    {
+        // Arrange - the undo runs on the attaching thread, so the whole drain it undoes against can
+        // finish first: the drain stops what it snapshotted and releases the target, and a second host
+        // reaching the subject takes it and starts its own instance. An undo that appends its stop
+        // whoever owns the target then stops and disposes that instance, and the second graph is left
+        // live with nothing running. OwnershipTakenGate parks the attaching thread between its take and
+        // its re-read for as long as all of that takes.
+        var (firstHost, firstContext) = await HostingTestHost.StartAsync();
+        var (secondHost, secondContext) = await HostingTestHost.StartAsync();
+
+        try
+        {
+            var created = new ConcurrentQueue<TrackedBackgroundService>();
+            var child = new Person();
+            var attachment = child.AttachHostedService(() =>
+            {
+                var instance = new TrackedBackgroundService();
+                created.Enqueue(instance);
+                return instance;
+            });
+
+            var firstHandler = firstContext.TryGetService<HostedServiceHandler>()!;
+            using var take = firstHandler.HoldAtOwnershipTake();
+
+            var firstParent = new Parent(firstContext);
+            var attaching = Task.Run(() => { firstParent.Child = child; });
+            await take.WaitUntilReachedAsync();
+
+            await firstHost.StopAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+            var secondParent = new Parent(secondContext);
+            secondParent.Child = child;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => created.ToArray() is [.., { IsStarted: true }] && attachment.Current is not null,
+                message: "The second host never started its own instance, so the undo below proves nothing.");
+
+            var secondInstance = created.ToArray()[^1];
+
+            // Act - the attaching thread reads Draining and undoes its take.
+            take.Release();
+            await attaching.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Assert - an empty transition behind whatever the undo appended, so the reads below are
+            // deterministic rather than timed.
+            await attachment.DrainAsync();
+
+            Assert.False(secondInstance.IsStopped, "The undo stopped an instance the second host started and owns.");
+            Assert.False(secondInstance.IsDisposed);
+            Assert.Same(secondInstance, attachment.Current);
+        }
+        finally
+        {
+            await secondHost.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task WhenAFaultedAwaitedAttachReleasesATargetWhoseQueuedStartIsCommitted_ThenThatStartsInstanceIsStoppedAndDisposed()
     {
         // Arrange - the awaited attach publishes its attachment before it waits, so a start can be

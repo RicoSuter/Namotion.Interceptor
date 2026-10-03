@@ -271,21 +271,10 @@ internal sealed class HostedServiceTarget
     }
 
     /// <summary>
-    /// Appends a stop for a subject target and hands the body the signal it must set when it has run,
+    /// Appends a stop for a subject target while <paramref name="handler"/> still owns it, as on
+    /// <see cref="AppendIfOwnedAsync"/>, and hands the body the signal it must set when it has run,
     /// chosen under the same lock acquisition as the append so an attachment stop asking for it in
-    /// between is handed the signal this stop will set.
-    /// </summary>
-    public Task AppendSubjectStopAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
-    {
-        lock (_chainLock)
-        {
-            return AppendCore(createBody(TakeStopSignalCore(handler)), handler);
-        }
-    }
-
-    /// <summary>
-    /// <see cref="AppendSubjectStopAsync"/>, appended only while <paramref name="handler"/> still owns
-    /// the target, as on <see cref="AppendIfOwnedAsync"/>. A refused append leaves the signal alone.
+    /// between is handed the signal this stop will set. A refused append leaves the signal alone.
     /// </summary>
     public Task? AppendSubjectStopIfOwnedAsync(HostedServiceHandler handler, Func<TaskCompletionSource, Func<Task>> createBody)
     {
@@ -322,7 +311,7 @@ internal sealed class HostedServiceTarget
 
     /// <summary>
     /// The current ownership's signal, created on first use. Every caller is the owner: the stop
-    /// appends check ownership or undo this handler's own take, and the wait asks only for the owner.
+    /// append and the wait both check ownership under the chain lock.
     /// </summary>
     private TaskCompletionSource TakeStopSignalCore(HostedServiceHandler handler)
     {

@@ -209,7 +209,7 @@ public static class InterceptorHostingExtensions
         // published this attachment but not yet appended its start either reads the mark and appends
         // nothing, or appends ahead of the stop below, which then stops and disposes what it created.
         target.MarkDetached();
-        return handler?.AppendStop(subject, target, waitFor: null, cancellationToken);
+        return handler?.AppendAttachmentStop(subject, target, cancellationToken);
     }
 
     /// <summary>

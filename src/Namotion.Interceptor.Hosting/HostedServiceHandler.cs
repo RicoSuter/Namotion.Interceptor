@@ -215,8 +215,11 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             // stop rather than a bare retirement, because the start above may already be committed:
             // docs/design/hosting-service-ownership.md#why-the-ownership-decision-is-inside-the-chain-lock.
             // An attachment's undo stop waits for its subject's stop like every other attachment stop,
-            // and the release below makes this the only stop the drain can get onto that chain.
-            AppendStop(subject, target, waitFor: SubjectStopToAwait(subject, target), CancellationToken.None);
+            // and the release below makes this the only stop the drain can get onto that chain. Only
+            // while still owned: the drain can finish and another handler take the target before this
+            // runs, and every release that can take this ownership first has already appended a stop
+            // behind the start.
+            _ = AppendStopIfOwned(subject, target, waitFor: SubjectStopToAwait(subject, target), CancellationToken.None);
             target.ReleaseOwnership(this);
         }
 
@@ -501,21 +504,16 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     /// <summary>
-    /// Appends a stop. A subject target's stop carries the target's stop signal, chosen with the append;
-    /// an attachment's stop waits for <paramref name="waitFor"/>, its subject's stop, when there is one.
+    /// Appends an attachment's stop whoever owns its target, for an explicit detach.
     /// </summary>
-    internal Task AppendStop(
-        IInterceptorSubject subject,
-        HostedServiceTarget target,
-        Task? waitFor,
-        CancellationToken cancellationToken)
-        => target.Subject is null
-            ? target.AppendAsync(this, CreateStopBody(subject, target, signal: null, waitFor, cancellationToken))
-            : target.AppendSubjectStopAsync(this, signal => CreateStopBody(subject, target, signal, waitFor, cancellationToken));
+    internal Task AppendAttachmentStop(IInterceptorSubject subject, HostedServiceTarget target, CancellationToken cancellationToken)
+        => target.AppendAsync(this, CreateStopBody(subject, target, signal: null, waitFor: null, cancellationToken));
 
     /// <summary>
-    /// <see cref="AppendStop"/>, only while this handler still owns the target, the two decided under
-    /// one acquisition of the chain lock. Returns null when the append was refused.
+    /// Appends a stop only while this handler still owns the target, the two decided under one
+    /// acquisition of the chain lock. A subject target's stop carries the target's stop signal, chosen
+    /// with the append; an attachment's stop waits for <paramref name="waitFor"/>, its subject's stop,
+    /// when there is one. Returns null when the append was refused.
     /// </summary>
     private Task? AppendStopIfOwned(
         IInterceptorSubject subject,
