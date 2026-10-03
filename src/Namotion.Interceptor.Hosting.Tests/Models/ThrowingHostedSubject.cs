@@ -16,8 +16,17 @@ public partial class ThrowingHostedSubject : IHostedService
     /// <summary>The handler never disposes a subject, so the stop is the only cleanup this one gets.</summary>
     public int StopCount => Volatile.Read(ref _stopCount);
 
+    /// <summary>Awaited inside <see cref="StartAsync"/> before it fails, when set.</summary>
+    public Func<Task>? StartHold { get; init; }
+
     public Task StartAsync(CancellationToken cancellationToken)
-        => throw new InvalidOperationException("start failed");
+        => StartHold is { } hold ? FailAfterAsync(hold) : throw new InvalidOperationException("start failed");
+
+    private static async Task FailAfterAsync(Func<Task> hold)
+    {
+        await hold();
+        throw new InvalidOperationException("start failed");
+    }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {

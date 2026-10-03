@@ -157,6 +157,34 @@ public class SubjectHostTests
     }
 
     [Fact]
+    public async Task WhenSubjectsOwnStartThrowsWhileItsAttachmentRuns_ThenStartAsyncThrowsOnlyOnceTheAttachmentIsStoppedAndDisposed()
+    {
+        // Arrange - the teardown after a failed start runs on the start's own token, so with one that is
+        // never cancelled it has to wait for every stop rather than give up on it. The subject's start
+        // fails only once its attachment is running, and the attachment's stop is held, so a teardown
+        // that did not wait would return with that instance still up.
+        var instance = new TrackedBackgroundService();
+        var subject = new ThrowingHostedSubject { StartHold = () => AsyncTestHelpers.WaitUntilAsync(() => instance.IsStarted) };
+        subject.AttachHostedService(() => instance);
+        using var attachmentStop = instance.HoldAtStop();
+        var host = CreateHost();
+
+        // Act
+        var starting = host.StartAsync(subject, CancellationToken.None);
+        await attachmentStop.WaitUntilReachedAsync();
+
+        // Assert
+        Assert.False(starting.IsCompleted, "The start returned while its attachment was still stopping.");
+
+        attachmentStop.Release();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => starting);
+        Assert.Equal("start failed", exception.Message);
+        Assert.True(instance.IsStopped);
+        Assert.True(instance.IsDisposed);
+        Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
+    }
+
+    [Fact]
     public async Task WhenStartIsCancelledWhileTheSubjectsStartNeverReturns_ThenStartAsyncThrowsAndSubjectIsDetached()
     {
         // Arrange

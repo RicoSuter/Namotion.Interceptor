@@ -400,6 +400,41 @@ public class HostedServiceHandlerTests
         });
     }
 
+    [Fact]
+    public async Task WhenTwoThreadsDetachOneHandleAtOnce_ThenExactlyOneReportsItRemoved()
+    {
+        // Arrange - the removal is an update delegate the dictionary reruns when its swap loses, and a
+        // rerun that no longer finds the attachment must not report the find of the run before it. The
+        // rerun is inside the dictionary, out of reach of any seam, so this repeats the race instead:
+        // two threads released together onto one handle, over enough rounds that the losing swap
+        // happens.
+        const int rounds = 2000;
+        using var barrier = new Barrier(2);
+        var roundsWithoutExactlyOneRemoval = 0;
+
+        // Act
+        for (var round = 0; round < rounds; round++)
+        {
+            var person = new Person();
+            var attachment = person.AttachHostedService(() => new TrackedBackgroundService());
+
+            bool Detach()
+            {
+                barrier.SignalAndWait();
+                return person.DetachHostedService(attachment);
+            }
+
+            var removed = await Task.WhenAll(Task.Run(Detach), Task.Run(Detach));
+            if (removed.Count(r => r) != 1)
+            {
+                roundsWithoutExactlyOneRemoval++;
+            }
+        }
+
+        // Assert
+        Assert.Equal(0, roundsWithoutExactlyOneRemoval);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
