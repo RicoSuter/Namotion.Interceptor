@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 /// <summary>
 /// The host and context bootstrap the hosting tests share. Tests that wire something extra in
-/// before the host is built, a deferrer or a second context, call <see cref="CreateContext"/> and
+/// before the host is built, a tracker or a second context, call <see cref="CreateContext"/> and
 /// build the host themselves.
 /// </summary>
 internal static class HostingTestHost
@@ -18,21 +18,21 @@ internal static class HostingTestHost
     private static readonly HostedServiceHandler DrainHandler = new();
 
     /// <summary>
-    /// Waits for everything already queued on the target's chain to have run.
+    /// Waits for everything already queued on the slot's queue to have run.
     /// </summary>
     /// <remarks>
-    /// An empty transition on the same chain. Appending never runs a body, so this completes only once
+    /// An empty transition on the same queue. Enqueuing never runs a body, so this completes only once
     /// everything ahead of it has, which is what makes a read after it deterministic rather than timed.
     /// </remarks>
-    public static Task DrainAsync(this HostedServiceTarget target)
-        => target.AppendAsync(DrainHandler, () => Task.CompletedTask);
+    public static Task DrainAsync(this HostedServiceSlot slot)
+        => slot.EnqueueAsync(DrainHandler, () => Task.CompletedTask);
 
     /// <summary>
-    /// Waits for everything already queued on the attachment's chain to have run. See
-    /// <see cref="DrainAsync(HostedServiceTarget)"/>.
+    /// Waits for everything already queued on the attachment's queue to have run. See
+    /// <see cref="DrainAsync(HostedServiceSlot)"/>.
     /// </summary>
     public static Task DrainAsync(this IHostedServiceAttachment attachment)
-        => ((IHostedServiceAttachmentTarget)attachment).Target.DrainAsync();
+        => ((IHostedServiceSlotAccess)attachment).Slot.DrainAsync();
 
     /// <summary>
     /// Creates the host builder every test in this suite builds on.

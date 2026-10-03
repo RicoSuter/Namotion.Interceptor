@@ -12,15 +12,15 @@ public static class SubjectServiceCollectionExtensions
     /// a hosted service is started, and host start waits for that start and fails on its fault.
     /// </summary>
     /// <remarks>
-    /// Without <paramref name="contextResolver"/> the subject runs in a context of its own, with
+    /// Without <paramref name="contextResolver"/> the subject runs in a private context, with
     /// property tracking, lifecycle, hosting and whatever
-    /// <see cref="ISubjectContextConfigurator.ConfigureContext"/> adds, ignores any context registered
+    /// <see cref="IPrivateContextConfigurator.ConfigureContext"/> adds, ignores any context registered
     /// in dependency injection, and is stopped and detached from that context at host stop. With it, the
     /// subject joins the resolved context, and host start throws when that context has no hosting while
     /// the subject is a hosted service. One registration per type; use
     /// <see cref="AddKeyedSubject{T}"/> for several. If <typeparamref name="T"/> is already registered,
     /// neither <paramref name="configure"/> nor the context applies to that instance: the hosting
-    /// context it is already in runs it. Otherwise, without a resolver, it runs in a context of its own
+    /// context it is already in runs it. Otherwise, without a resolver, it runs in a private context
     /// when it is in no graph and host start throws when it is in a tracked graph; with one, host start
     /// throws when it is a hosted service and leaves a plain subject alone.
     /// </remarks>
@@ -38,8 +38,8 @@ public static class SubjectServiceCollectionExtensions
 
     /// <summary>
     /// Registers the subject as a keyed singleton. Same modes as <see cref="AddSubject{T}"/>, each
-    /// self-contained registration in a context of its own; one registration per type and key. A null
-    /// <paramref name="serviceKey"/> registers it unkeyed, as <see cref="AddSubject{T}"/> does.
+    /// registration without a context resolver in a private context; one registration per type and key.
+    /// A null <paramref name="serviceKey"/> registers it unkeyed, as <see cref="AddSubject{T}"/> does.
     /// </summary>
     /// <typeparam name="T">The subject type.</typeparam>
     /// <param name="services">The service collection.</param>
@@ -85,9 +85,9 @@ public static class SubjectServiceCollectionExtensions
         }
 
         // The activation is a keyed singleton of its own, keyed on the registration, so the registration
-        // can hand it the private host as soon as the instance is created. A factory registration for
-        // the hosted service, not AddHostedService, which dedupes on implementation type and would drop
-        // every registration of T after the first.
+        // can hand it the private context host as soon as the instance is created. A factory registration
+        // for the hosted service, not AddHostedService, which dedupes on implementation type and would
+        // drop every registration of T after the first.
         services.AddKeyedSingleton(registration, (serviceProvider, _) => new SubjectActivation<T>(serviceProvider, registration));
         services.AddSingleton<IHostedService>(serviceProvider => serviceProvider.GetRequiredKeyedService<SubjectActivation<T>>(registration));
         return services;

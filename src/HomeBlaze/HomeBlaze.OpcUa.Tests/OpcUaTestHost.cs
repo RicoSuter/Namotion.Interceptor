@@ -142,7 +142,7 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
 
     /// <summary>
     /// Waits for a wrapper to report <paramref name="expected"/>. Both wrappers reconcile from a
-    /// transition on another chain, so a status has to be waited for rather than read straight after
+    /// transition on another queue, so a status has to be waited for rather than read straight after
     /// the write that triggers it.
     /// </summary>
     public static Task WaitForStatusAsync(Func<ServiceStatus> status, ServiceStatus expected)

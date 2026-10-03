@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.Hosting
         Removed = 4,
         Faulted = 5,
     }
-    public sealed class HostedServiceStartupScope : System.IDisposable
+    public sealed class HostedServiceStartDeferral : System.IDisposable
     {
         public void Dispose() { }
     }
@@ -28,7 +28,7 @@ namespace Namotion.Interceptor.Hosting
         T Current { get; }
         Namotion.Interceptor.Hosting.HostedServiceAttachmentState GetState(out T? current);
     }
-    public interface ISubjectContextConfigurator
+    public interface IPrivateContextConfigurator
     {
         void ConfigureContext(Namotion.Interceptor.IInterceptorSubjectContext context);
     }
@@ -44,7 +44,7 @@ namespace Namotion.Interceptor.Hosting
     }
     public static class InterceptorSubjectContextExtensions
     {
-        public static Namotion.Interceptor.Hosting.HostedServiceStartupScope? DeferHostedServiceStartup(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public static Namotion.Interceptor.Hosting.HostedServiceStartDeferral? DeferHostedServiceStarts(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
         public static Namotion.Interceptor.IInterceptorSubjectContext WithHostedServices(this Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.DependencyInjection.IServiceCollection serviceCollection) { }
     }
     public static class SubjectServiceCollectionExtensions

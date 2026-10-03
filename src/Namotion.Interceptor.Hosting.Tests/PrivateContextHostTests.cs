@@ -6,7 +6,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
-public class SubjectHostTests
+public class PrivateContextHostTests
 {
     [Fact]
     public async Task WhenStarted_ThenSubjectRunsInItsOwnContext()
@@ -370,7 +370,7 @@ public class SubjectHostTests
         Assert.Null(((IInterceptorSubject)subject).Context.TryGetService<HostedServiceHandler>());
     }
 
-    private static SubjectHost CreateHost() => new(NullServiceProvider.Instance);
+    private static PrivateContextHost CreateHost() => new(NullServiceProvider.Instance);
 
     /// <summary>Resolves nothing, so the host runs without a logger, as it does outside a container.</summary>
     private sealed class NullServiceProvider : IServiceProvider

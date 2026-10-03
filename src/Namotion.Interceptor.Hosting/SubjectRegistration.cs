@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
 /// One <c>AddSubject</c> or <c>AddKeyedSubject</c> call: how to construct the subject, which context
-/// it joins, and the private host when it gets one.
+/// it joins, and the private context host when it gets one.
 /// </summary>
 internal sealed class SubjectRegistration<T>
     where T : class, IInterceptorSubject
@@ -28,20 +28,20 @@ internal sealed class SubjectRegistration<T>
 
     public object? ServiceKey { get; }
 
-    public bool IsSelfContained => _contextResolver is null;
+    public bool UsesPrivateContext => _contextResolver is null;
 
     /// <summary>
-    /// Every instance this registration constructed, with its private host, or null in shared mode.
-    /// Per instance rather than one field, because every provider built from the collection runs the
-    /// factory for its own instance.
+    /// Every instance this registration constructed, with its private context host, or null in shared
+    /// mode. Per instance rather than one field, because every provider built from the collection runs
+    /// the factory for its own instance.
     /// </summary>
-    private readonly ConditionalWeakTable<T, SubjectHost?> _createdInstances = new();
+    private readonly ConditionalWeakTable<T, PrivateContextHost?> _createdInstances = new();
 
     /// <summary>
     /// Whether this registration constructed <paramref name="instance"/>, rather than the caller
-    /// registering it, and its private host, which is null in shared mode.
+    /// registering it, and its private context host, which is null in shared mode.
     /// </summary>
-    public bool TryGetCreatedInstance(T instance, out SubjectHost? host)
+    public bool TryGetCreatedInstance(T instance, out PrivateContextHost? host)
         => _createdInstances.TryGetValue(instance, out host);
 
     public T Resolve(IServiceProvider serviceProvider)
@@ -66,7 +66,7 @@ internal sealed class SubjectRegistration<T>
 
             // Attached at resolution, so the subject is in its context from then on. Nothing starts
             // until SubjectActivation<T> opens the host's handler.
-            var host = new SubjectHost(serviceProvider);
+            var host = new PrivateContextHost(serviceProvider);
             host.Attach(instance);
             _createdInstances.Add(instance, host);
 
@@ -80,9 +80,9 @@ internal sealed class SubjectRegistration<T>
         var context = _contextResolver(serviceProvider)
             ?? throw new InvalidOperationException($"The context resolver for {typeof(T).Name} returned null.");
 
-        // The shared context's handler may already be running, so the scope holds back any start
-        // until configure has run, whichever constructor shape attaches the subject.
-        using (context.DeferHostedServiceStartup())
+        // The shared context's handler may already be running, so the start deferral holds back any
+        // start until configure has run, whichever constructor shape attaches the subject.
+        using (context.DeferHostedServiceStarts())
         {
             var sharedInstance = Construct(serviceProvider, context);
 

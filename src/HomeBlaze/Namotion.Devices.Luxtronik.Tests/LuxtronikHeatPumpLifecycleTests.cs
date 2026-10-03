@@ -250,22 +250,22 @@ public class LuxtronikHeatPumpLifecycleTests
         using var server = new LuxtronikTestServer(new Version(3, 92, 3));
         server.Start();
         server.SeedTypicalValues();
-        var holds = new StartupHoldRecorder();
+        var startupWork = new StartupWorkRecorder();
 
         // Act
         await using var host = await HostedHeatPump.StartAsync(
-            "127.0.0.1", server.Port, configureContext: context => context.AddService<IStartupCompletionDeferrer>(holds));
+            "127.0.0.1", server.Port, configureContext: context => context.AddService<IStartupWorkTracker>(startupWork));
         var heatPump = host.HeatPump;
         await AsyncTestHelpers.WaitUntilAsync(
-            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running && holds.Outstanding == 0,
+            () => heatPump.IsConnected && heatPump.Status == ServiceStatus.Running && startupWork.Outstanding == 0,
             WaitTimeout,
-            message: "The heat pump should connect and every startup hold should be released.");
+            message: "The heat pump should connect and all startup work should have ended.");
 
         // Assert
-        // The heat pump's own hold and its source's. Settling in between is a startup completion wait passing
-        // while the source it waits for has not been attached yet.
-        Assert.Equal(2, holds.Taken);
-        Assert.Equal(2, holds.TakenWhenFirstSettled);
+        // The heat pump's own startup work and its source's. Settling in between is a startup completion wait
+        // passing while the source it waits for has not been attached yet.
+        Assert.Equal(2, startupWork.Taken);
+        Assert.Equal(2, startupWork.TakenWhenFirstSettled);
     }
 
     [Fact]

@@ -53,7 +53,7 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
 
         // Act
-        var hold = monitor.DeferCompletion();
+        var hold = monitor.TrackStartupWork();
 
         // Assert
         Assert.False(monitor.IsRegistrationComplete);
@@ -69,8 +69,8 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
 
         // Act
-        var outer = monitor.DeferCompletion();
-        var inner = monitor.DeferCompletion();
+        var outer = monitor.TrackStartupWork();
+        var inner = monitor.TrackStartupWork();
         inner.Dispose();
 
         // Assert
@@ -122,7 +122,7 @@ public class SourceWaitTests
     }
 
     [Fact]
-    public void WhenManyDeferCompletionHoldsAreTakenAndDisposedConcurrently_ThenTheCountReturnsToZero()
+    public void WhenManyStartupWorkHandlesAreTrackedAndDisposedConcurrently_ThenTheCountReturnsToZero()
     {
         // Arrange
         var monitor = CreateContext().GetSourceMonitor();
@@ -140,7 +140,7 @@ public class SourceWaitTests
                 barrier.SignalAndWait();
                 for (var iteration = 0; iteration < perThreadIterations; iteration++)
                 {
-                    using var hold = monitor.DeferCompletion();
+                    using var hold = monitor.TrackStartupWork();
                 }
             });
         }
@@ -412,7 +412,7 @@ public class SourceWaitTests
         // A hold keeps registration incomplete while both waits below are created, so their
         // fast-path IsBranchSynchronized check short-circuits on IsRegistrationComplete before walking any
         // scope, so the poison wait cannot throw until both waits are in the list.
-        var hold = monitor.DeferCompletion();
+        var hold = monitor.TrackStartupWork();
         monitor.CompleteSourceRegistration();
 
         // Added to _waits before the healthy wait below, so a loop with no per-wait isolation
@@ -487,7 +487,7 @@ public class SourceWaitTests
         monitor.Register(new TestStateSource(root));
         monitor.CompleteSourceRegistration();
 
-        var hold = monitor.DeferCompletion();
+        var hold = monitor.TrackStartupWork();
         var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(CancellationToken.None);
         Assert.False(poisonWait.IsCompleted);
         Assert.Throws<InvalidOperationException>(() => hold.Dispose());
@@ -667,10 +667,10 @@ public class SourceWaitTests
         monitor.CompleteSourceRegistration();
         source.ReportSynchronized();
 
-        // Act - DeferCompletion re-arms IsRegistrationComplete even though the branch itself has
+        // Act - TrackStartupWork re-arms IsRegistrationComplete even though the branch itself has
         // nothing left to synchronize: a wait created while the hold is outstanding must still block
         // purely on the hold, and only unblock once it is disposed.
-        var hold = monitor.DeferCompletion();
+        var hold = monitor.TrackStartupWork();
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
 
         // Assert

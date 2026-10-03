@@ -2,14 +2,14 @@ namespace Namotion.Interceptor.Hosting;
 
 internal enum HostedServiceGateState
 {
-    NotStarted,
-    Running,
+    Closed,
+    Open,
     Draining
 }
 
 /// <summary>
 /// Startup and shutdown gate for hosted service transitions. The state only ever moves forward:
-/// NotStarted to Running to Draining, or NotStarted straight to Draining when a host is stopped
+/// Closed to Open to Draining, or Closed straight to Draining when a host is stopped
 /// without having started. Draining is final, so it also covers a drain that has returned.
 /// </summary>
 internal sealed class HostedServiceGate
@@ -17,7 +17,7 @@ internal sealed class HostedServiceGate
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _draining = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private HostedServiceGateState _state = HostedServiceGateState.NotStarted;
+    private HostedServiceGateState _state = HostedServiceGateState.Closed;
 
     // An interlocked read rather than a volatile one: the checks that write and then re-read the gate
     // need a full fence between the two, which an acquire load does not give.
@@ -27,13 +27,13 @@ internal sealed class HostedServiceGate
     public bool IsDraining => State == HostedServiceGateState.Draining;
 
     /// <summary>
-    /// Advances NotStarted to Running. A one way ratchet: calling this during shutdown must not
+    /// Advances Closed to Open. A one way ratchet: calling this during shutdown must not
     /// reopen the gate, or a detach arriving mid drain would let queued starts run again.
     /// </summary>
-    public void EnsureStarted()
+    public void Open()
     {
-        if (Interlocked.CompareExchange(ref _state, HostedServiceGateState.Running, HostedServiceGateState.NotStarted)
-            == HostedServiceGateState.NotStarted)
+        if (Interlocked.CompareExchange(ref _state, HostedServiceGateState.Open, HostedServiceGateState.Closed)
+            == HostedServiceGateState.Closed)
         {
             _opened.TrySetResult();
         }
@@ -50,7 +50,7 @@ internal sealed class HostedServiceGate
     }
 
     /// <summary>
-    /// Completes once the gate has left <see cref="HostedServiceGateState.NotStarted"/>. Callers must
+    /// Completes once the gate has left <see cref="HostedServiceGateState.Closed"/>. Callers must
     /// then read <see cref="State"/> and decide what to do; the wait itself carries no verdict.
     /// </summary>
     // Untokened, here and below: BeginDraining completes both unconditionally, so nothing parked on
@@ -60,7 +60,7 @@ internal sealed class HostedServiceGate
 
     /// <summary>
     /// Completes once the drain has begun. Lets a transition parked on something a caller controls,
-    /// which is a startup scope and nothing else, be released by shutdown instead of holding the
+    /// which is a start deferral and nothing else, be released by shutdown instead of holding the
     /// drain's barrier for the whole shutdown deadline. Continuations run asynchronously, so what was
     /// parked cannot resume on the thread that begins the drain.
     /// </summary>

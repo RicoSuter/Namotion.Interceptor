@@ -29,7 +29,7 @@ public class WithHostedServicesTests
     public async Task WhenOneSubjectIsReachableFromTwoHostingContexts_ThenItIsStartedOnce()
     {
         // Arrange - both contexts resolve their own handler and both see the subject's context attach,
-        // so without a single owner per target the subject is started twice.
+        // so without a single owner per slot the subject is started twice.
         await HostingTestHost.RunWithTwoContextsAsync(async (firstContext, secondContext) =>
         {
             var subject = new CountingHostedSubject();
@@ -38,9 +38,9 @@ public class WithHostedServicesTests
             ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
 
-            // Assert - the empty transition drains the target's chain, so the count is read once every
+            // Assert - the empty transition drains the slot's queue, so the count is read once every
             // queued start has run.
-            await ((IInterceptorSubject)subject).TryGetSubjectTarget()!.DrainAsync();
+            await ((IInterceptorSubject)subject).TryGetSubjectSlot()!.DrainAsync();
 
             Assert.Equal(1, subject.StartCount);
         });
@@ -73,8 +73,8 @@ public class WithHostedServicesTests
             Assert.Equal(0, Volatile.Read(ref created));
 
             // A context detach and re-attach is what turns a stored factory into a running instance the
-            // caller has no handle to. Deterministic either way: every chain the re-attach can append
-            // to belongs to an attachment this list holds.
+            // caller has no handle to. Deterministic either way: every queue the re-attach can enqueue
+            // on belongs to an attachment this list holds.
             await ReAttachToSingleContextAsync(subject, firstContext, secondContext);
 
             Assert.Empty(subject.GetHostedServiceAttachments());
@@ -120,7 +120,7 @@ public class WithHostedServicesTests
     {
         // Arrange - the attachment is taken while one context is reachable, so the detach below is the
         // first call whose lookup throws. A detach that removed it first would leave the instance
-        // running with no stop appended and nothing left to reach it through.
+        // running with no stop enqueued and nothing left to reach it through.
         await HostingTestHost.RunWithTwoContextsAsync(async (firstContext, secondContext) =>
         {
             var person = new Person(firstContext);
@@ -256,8 +256,8 @@ public class WithHostedServicesTests
 
     /// <summary>
     /// Takes the subject down to one hosting context and cycles it out of that one and back in, which
-    /// is the graph event that starts whatever attachments the subject holds. Drains every chain the
-    /// re-attach could have appended to, so a read after it is ordered rather than timed.
+    /// is the graph event that starts whatever attachments the subject holds. Drains every queue the
+    /// re-attach could have enqueued on, so a read after it is ordered rather than timed.
     /// </summary>
     private static async Task ReAttachToSingleContextAsync(
         IInterceptorSubject subject,

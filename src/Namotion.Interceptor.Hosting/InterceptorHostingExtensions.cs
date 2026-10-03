@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Hosting;
 public static class InterceptorHostingExtensions
 {
     private const string AttachmentsKey = "Namotion.Hosting.HostedServiceAttachments";
-    private const string SubjectTargetKey = "Namotion.Hosting.SubjectTarget";
+    private const string SubjectSlotKey = "Namotion.Hosting.SubjectSlot";
 
     /// <summary>Gets an immutable snapshot of the hosted service attachments on the subject.</summary>
     public static ImmutableArray<IHostedServiceAttachment> GetHostedServiceAttachments(this IInterceptorSubject subject)
@@ -50,7 +50,7 @@ public static class InterceptorHostingExtensions
     public static IHostedServiceAttachment<T> AttachHostedService<T>(
         this IInterceptorSubject subject, Func<T> factory)
         where T : class, IHostedService
-        => Attach(subject, factory, ensureStarted: false, out _, out _);
+        => Attach(subject, factory, openGate: false, out _, out _);
 
     /// <summary>
     /// Attaches a hosted service factory and waits for the instance to start. Transactional: when the
@@ -64,7 +64,7 @@ public static class InterceptorHostingExtensions
         this IInterceptorSubject subject, Func<T> factory, CancellationToken cancellationToken)
         where T : class, IHostedService
     {
-        var attachment = Attach(subject, factory, ensureStarted: true, out var handler, out var start);
+        var attachment = Attach(subject, factory, openGate: true, out var handler, out var start);
         if (handler is null)
         {
             // No handler means no context to bound the lifetime, so the factory is stored and nothing runs.
@@ -78,13 +78,13 @@ public static class InterceptorHostingExtensions
         }
 
         // The start's own outcome rather than Fault, for the reason on StartFault.
-        if (attachment.Target.StartFault is { } fault)
+        if (attachment.Slot.StartFault is { } fault)
         {
-            // Released rather than only retired, unlike an explicit detach, and the stop is appended
+            // Released rather than only untracked, unlike an explicit detach, and the stop is enqueued
             // rather than awaited: docs/design/hosting-service-ownership.md#a-faulted-awaited-attach-releases-instead.
             RemoveAttachment(subject, attachment);
-            _ = MarkDetachedAndAppendStop(subject, attachment.Target, handler, CancellationToken.None);
-            attachment.Target.ReleaseOwnership(handler);
+            _ = MarkDetachedAndEnqueueStop(subject, attachment.Slot, handler, CancellationToken.None);
+            attachment.Slot.ReleaseOwnership(handler);
 
             // Captured rather than rethrown: the fault was raised on the transition thread, and a plain
             // throw overwrites its stack trace with this one, which is the stack a user reads when a
@@ -100,7 +100,7 @@ public static class InterceptorHostingExtensions
     /// factory is removed, so a later context attach starts nothing.
     /// </summary>
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedServiceAttachment attachment)
-        => Detach(subject, attachment, ensureStarted: false, CancellationToken.None, out _);
+        => Detach(subject, attachment, openGate: false, CancellationToken.None, out _);
 
     /// <summary>
     /// Detaches a hosted service attachment and waits for the instance to stop and be disposed. The
@@ -110,7 +110,7 @@ public static class InterceptorHostingExtensions
     public static async Task<bool> DetachHostedServiceAsync(
         this IInterceptorSubject subject, IHostedServiceAttachment attachment, CancellationToken cancellationToken)
     {
-        if (!Detach(subject, attachment, ensureStarted: true, cancellationToken, out var stop))
+        if (!Detach(subject, attachment, openGate: true, cancellationToken, out var stop))
         {
             return false;
         }
@@ -124,13 +124,13 @@ public static class InterceptorHostingExtensions
     }
 
     /// <summary>
-    /// Adds the attachment and, when a handler is reachable, takes ownership and appends its start.
-    /// <paramref name="start"/> is null when nothing was appended.
+    /// Adds the attachment and, when a handler is reachable, takes ownership and enqueues its start.
+    /// <paramref name="start"/> is null when nothing was enqueued.
     /// </summary>
     private static HostedServiceAttachment<T> Attach<T>(
         IInterceptorSubject subject,
         Func<T> factory,
-        bool ensureStarted,
+        bool openGate,
         out HostedServiceHandler? handler,
         out Task? start)
         where T : class, IHostedService
@@ -148,34 +148,34 @@ public static class InterceptorHostingExtensions
             return attachment;
         }
 
-        if (ensureStarted)
+        if (openGate)
         {
-            handler.EnsureStarted();
+            handler.OpenGate();
         }
 
         // Liveness before the take, because the take reads it: a subject that hosted nothing when it
         // entered the graph has no entry, and this is the moment it earns one.
         handler.MarkLiveIfAttached(subject);
 
-        // The liveness read, the ownership take and the append have to be one step, which a caller
+        // The liveness read, the ownership take and the enqueue have to be one step, which a caller
         // cannot compose without reopening the window a concurrent context detach slips through.
-        start = handler.TryTakeOwnershipAndStart(subject, attachment.Target);
+        start = handler.TryTakeOwnershipAndStart(subject, attachment.Slot);
         return attachment;
     }
 
     /// <summary>
-    /// Removes the attachment and appends the stop for its target. <paramref name="stop"/> is null when
+    /// Removes the attachment and enqueues the stop for its slot. <paramref name="stop"/> is null when
     /// no handler is reachable.
     /// </summary>
     private static bool Detach(
         IInterceptorSubject subject,
         IHostedServiceAttachment attachment,
-        bool ensureStarted,
+        bool openGate,
         CancellationToken cancellationToken,
         out Task? stop)
     {
         // Resolved before the removal, for the reason on Attach. Here the throw would leave the instance
-        // running with no stop appended and nothing left to reach it through.
+        // running with no stop enqueued and nothing left to reach it through.
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
 
         if (!RemoveAttachment(subject, attachment))
@@ -184,32 +184,32 @@ public static class InterceptorHostingExtensions
             return false;
         }
 
-        if (ensureStarted)
+        if (openGate)
         {
-            handler?.EnsureStarted();
+            handler?.OpenGate();
         }
 
-        var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-        stop = MarkDetachedAndAppendStop(subject, target, handler, cancellationToken);
+        var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+        stop = MarkDetachedAndEnqueueStop(subject, slot, handler, cancellationToken);
 
-        // Retired without releasing, and before a caller awaits the stop so a cancelled wait cannot skip it:
-        // docs/design/hosting-service-ownership.md#an-explicit-detach-retires-the-record-without-releasing-ownership.
-        handler?.ForgetOwnership(target);
+        // Untracked without releasing, and before a caller awaits the stop so a cancelled wait cannot skip it:
+        // docs/design/hosting-service-ownership.md#an-explicit-detach-untracks-the-slot-for-the-drain-without-releasing-ownership.
+        handler?.UntrackForDrain(slot);
         return true;
     }
 
     /// <summary>
-    /// Marks the target of an attachment already removed from the subject detached and appends its
+    /// Marks the slot of an attachment already removed from the subject detached and enqueues its
     /// stop. Returns the stop, or null without a handler.
     /// </summary>
-    private static Task? MarkDetachedAndAppendStop(
-        IInterceptorSubject subject, HostedServiceTarget target, HostedServiceHandler? handler, CancellationToken cancellationToken)
+    private static Task? MarkDetachedAndEnqueueStop(
+        IInterceptorSubject subject, HostedServiceSlot slot, HostedServiceHandler? handler, CancellationToken cancellationToken)
     {
-        // Marked before the stop is appended, and that order is the whole guard: an attach that has
-        // published this attachment but not yet appended its start either reads the mark and appends
-        // nothing, or appends ahead of the stop below, which then stops and disposes what it created.
-        target.MarkDetached();
-        return handler?.AppendAttachmentStop(subject, target, cancellationToken);
+        // Marked before the stop is enqueued, and that order is the whole guard: an attach that has
+        // published this attachment but not yet enqueued its start either reads the mark and enqueues
+        // nothing, or enqueues ahead of the stop below, which then stops and disposes what it created.
+        slot.MarkDetached();
+        return handler?.EnqueueAttachmentStop(subject, slot, cancellationToken);
     }
 
     /// <summary>
@@ -235,8 +235,8 @@ public static class InterceptorHostingExtensions
         where T : class, IHostedService
     {
         // Outside the update delegate, which may run more than once with no rollback: building the
-        // record inside it can register a target that loses the swap and is never seen again.
-        var attachment = new HostedServiceAttachment<T>(new HostedServiceTarget(factory, subject: null));
+        // attachment inside it can register a slot that loses the swap and is never seen again.
+        var attachment = new HostedServiceAttachment<T>(new HostedServiceSlot(factory, subject: null));
 
         subject.Data.AddOrUpdate((null, AttachmentsKey),
             _ => ImmutableArray.Create<IHostedServiceAttachment>(attachment),
@@ -283,30 +283,30 @@ public static class InterceptorHostingExtensions
         return removed;
     }
 
-    /// <summary>Gets the subject's own target, creating it on first use.</summary>
+    /// <summary>Gets the subject's own slot, creating it on first use.</summary>
     /// <remarks>
-    /// Extends <see cref="IHostedService"/> rather than taking one, so a subject target cannot exist on
+    /// Extends <see cref="IHostedService"/> rather than taking one, so a subject slot cannot exist on
     /// a subject that is not one. A context detach relies on that, using the type test in place of a
     /// second data lookup.
     /// </remarks>
-    internal static HostedServiceTarget GetOrAddSubjectTarget(this IHostedService hostedService)
+    internal static HostedServiceSlot GetOrAddSubjectSlot(this IHostedService hostedService)
     {
         var subject = (IInterceptorSubject)hostedService;
 
-        // Read first: every re-attach comes through here, and building the target ahead of the
+        // Read first: every re-attach comes through here, and building the slot ahead of the
         // GetOrAdd throws it away again on all of them.
-        if (subject.Data.TryGetValue((null, SubjectTargetKey), out var existing) && existing is HostedServiceTarget found)
+        if (subject.Data.TryGetValue((null, SubjectSlotKey), out var existing) && existing is HostedServiceSlot found)
         {
             return found;
         }
 
         // The value overload: a factory closure is a display class allocated at the top of the method,
         // so the fast path above would allocate on every call.
-        var target = new HostedServiceTarget(factory: null, subject: hostedService);
-        var stored = subject.Data.GetOrAdd((null, SubjectTargetKey), target);
-        return stored as HostedServiceTarget ?? target;
+        var slot = new HostedServiceSlot(factory: null, subject: hostedService);
+        var stored = subject.Data.GetOrAdd((null, SubjectSlotKey), slot);
+        return stored as HostedServiceSlot ?? slot;
     }
 
-    internal static HostedServiceTarget? TryGetSubjectTarget(this IInterceptorSubject subject)
-        => subject.Data.TryGetValue((null, SubjectTargetKey), out var value) ? value as HostedServiceTarget : null;
+    internal static HostedServiceSlot? TryGetSubjectSlot(this IInterceptorSubject subject)
+        => subject.Data.TryGetValue((null, SubjectSlotKey), out var value) ? value as HostedServiceSlot : null;
 }

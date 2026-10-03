@@ -3,36 +3,36 @@ namespace Namotion.Interceptor.Hosting.Tests;
 public class HostedServiceGateTests
 {
     [Fact]
-    public void WhenEnsureStartedIsCalledTwice_ThenStateIsRunning()
+    public void WhenOpenIsCalledTwice_ThenStateIsOpen()
     {
         // Arrange
         var gate = new HostedServiceGate();
 
         // Act
-        gate.EnsureStarted();
-        gate.EnsureStarted();
+        gate.Open();
+        gate.Open();
 
         // Assert
-        Assert.Equal(HostedServiceGateState.Running, gate.State);
+        Assert.Equal(HostedServiceGateState.Open, gate.State);
     }
 
     [Fact]
-    public void WhenEnsureStartedIsCalledWhileDraining_ThenStateStaysDraining()
+    public void WhenOpenIsCalledWhileDraining_ThenStateStaysDraining()
     {
         // Arrange
         var gate = new HostedServiceGate();
-        gate.EnsureStarted();
+        gate.Open();
         gate.BeginDraining();
 
         // Act
-        gate.EnsureStarted();
+        gate.Open();
 
         // Assert - a plain assignment here would reopen the shutdown race the Draining state closes
         Assert.Equal(HostedServiceGateState.Draining, gate.State);
     }
 
     [Fact]
-    public async Task WhenGateIsNotStarted_ThenWaitDoesNotComplete()
+    public async Task WhenGateIsClosed_ThenWaitDoesNotComplete()
     {
         // Arrange
         var gate = new HostedServiceGate();
@@ -42,12 +42,12 @@ public class HostedServiceGateTests
 
         // Assert
         Assert.False(wait.IsCompleted);
-        gate.EnsureStarted();
+        gate.Open();
         await wait;
     }
 
     [Fact]
-    public async Task WhenDrainingStartsFromNotStarted_ThenParkedWaitersAreReleased()
+    public async Task WhenDrainingStartsFromClosed_ThenParkedWaitersAreReleased()
     {
         // Arrange - a host that aborts startup never opens the gate; parked transitions must not hang
         var gate = new HostedServiceGate();

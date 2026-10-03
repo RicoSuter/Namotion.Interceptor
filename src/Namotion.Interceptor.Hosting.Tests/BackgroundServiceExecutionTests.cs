@@ -93,12 +93,12 @@ public class BackgroundServiceExecutionTests
             subject.Run = _ => throw new InvalidOperationException("execution failed");
 
             parent.Child = subject;
-            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+            var slot = ((IInterceptorSubject)subject).TryGetSubjectSlot()!;
 
             await AsyncTestHelpers.WaitUntilAsync(
-                () => target.GetState(out _) is HostedServiceAttachmentState.Faulted,
+                () => slot.GetState(out _) is HostedServiceAttachmentState.Faulted,
                 message: "The execution fault was never observed: the subject did not settle to Faulted.");
-            await target.DrainAsync();
+            await slot.DrainAsync();
 
             // Act
             var started = await handler.WaitForStartAsync(subject, CancellationToken.None);
@@ -162,7 +162,7 @@ public class BackgroundServiceExecutionTests
     public async Task WhenAHostedSubjectsExecutionFaultsAtOnce_ThenTheSubjectIsStoppedAndTheNextAttachRestartsIt()
     {
         // Arrange - a subject is restarted in place on the same instance, so the fault of one run and
-        // the retry that clears it are both on the one target.
+        // the retry that clears it are both on the one slot.
         await HostingTestHost.RunAsync(async context =>
         {
             var parent = new ScriptedHostedParent(context);
@@ -172,15 +172,15 @@ public class BackgroundServiceExecutionTests
 
             // Act
             parent.Child = subject;
-            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
+            var slot = ((IInterceptorSubject)subject).TryGetSubjectSlot()!;
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
-                () => target.GetState(out _) is HostedServiceAttachmentState.Faulted,
+                () => slot.GetState(out _) is HostedServiceAttachmentState.Faulted,
                 message: "The execution fault was never observed: the subject did not settle to Faulted.");
 
-            Assert.Same(exception, target.Fault);
-            Assert.Null(target.Current);
+            Assert.Same(exception, slot.Fault);
+            Assert.Null(slot.Current);
             Assert.Equal(1, subject.StopCount);
 
             // Act - the next context attach retries, and this run parks instead of faulting
@@ -189,9 +189,9 @@ public class BackgroundServiceExecutionTests
             parent.Child = subject;
 
             // Assert
-            await AsyncTestHelpers.WaitUntilAsync(() => target.Current is not null);
-            Assert.Null(target.Fault);
-            Assert.Equal(HostedServiceAttachmentState.Running, target.GetState(out _));
+            await AsyncTestHelpers.WaitUntilAsync(() => slot.Current is not null);
+            Assert.Null(slot.Fault);
+            Assert.Equal(HostedServiceAttachmentState.Running, slot.GetState(out _));
             Assert.Equal(1, subject.StopCount);
         });
     }
@@ -200,8 +200,8 @@ public class BackgroundServiceExecutionTests
     public async Task WhenAnEarlierRunsFaultIsObservedAfterTheSubjectWasRestarted_ThenTheNewRunIsLeftAlone()
     {
         // Arrange - the first run faults on the test's signal rather than on cancellation, so its
-        // fault can be timed to land once the restart is already queued. Holding the chain queues the
-        // stop and the restart, then the fault is raised, and the transition its observer appends lands
+        // fault can be timed to land once the restart is already queued. Holding the queue lines up
+        // the stop and the restart, then the fault is raised, and the transition its observer enqueues lands
         // behind the restart: the subject instance is the same, only the execute task tells the runs apart.
         await HostingTestHost.RunAsync(async context =>
         {
@@ -224,30 +224,30 @@ public class BackgroundServiceExecutionTests
             // The execution can be entered before StartAsync has returned and assigned ExecuteTask, and
             // the start still counts as in flight until its transition has finished, which the count
             // below would otherwise take for the fault transition.
-            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
-            await target.DrainAsync();
+            var slot = ((IInterceptorSubject)subject).TryGetSubjectSlot()!;
+            await slot.DrainAsync();
             var firstExecuteTask = subject.ExecuteTask!;
 
             // The second run parks until it is cancelled.
             subject.Run = null;
 
             // Act
-            using var transitions = target.HoldAtTransition();
+            using var transitions = slot.HoldAtTransition();
             parent.Child = null;
             parent.Child = subject;
 
             faultTrigger.SetResult();
             await AsyncTestHelpers.WaitUntilAsync(
                 () => handler.InFlightTransitionCount == 3,
-                message: "The fault observer did not append its transition behind the stop and the restart.");
+                message: "The fault observer did not enqueue its transition behind the stop and the restart.");
 
             transitions.Release();
-            await target.DrainAsync();
+            await slot.DrainAsync();
 
             // Assert
-            Assert.Same(subject, target.Current);
-            Assert.Null(target.Fault);
-            Assert.Equal(HostedServiceAttachmentState.Running, target.GetState(out _));
+            Assert.Same(subject, slot.Current);
+            Assert.Null(slot.Fault);
+            Assert.Equal(HostedServiceAttachmentState.Running, slot.GetState(out _));
             Assert.Equal(1, subject.StopCount);
             Assert.NotSame(firstExecuteTask, subject.ExecuteTask);
             Assert.True(firstExecuteTask.IsFaulted);
@@ -260,7 +260,7 @@ public class BackgroundServiceExecutionTests
     {
         // Arrange - the token bounds the caller's wait and nothing else. Handed to the start instead,
         // it would make BackgroundService.StartAsync schedule an execution that is cancelled before it
-        // is entered, and the start would still record the instance as running. The startup scope parks
+        // is entered, and the start would still record the instance as running. The start deferral parks
         // the start, so the wait is cancelled deterministically rather than by racing the transition.
         await HostingTestHost.RunAsync(async context =>
         {
@@ -271,7 +271,7 @@ public class BackgroundServiceExecutionTests
             await cancellation.CancelAsync();
 
             // Act
-            using (context.DeferHostedServiceStartup())
+            using (context.DeferHostedServiceStarts())
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => person.AttachHostedServiceAsync(
                     () => new ScriptedBackgroundService(async stoppingToken =>

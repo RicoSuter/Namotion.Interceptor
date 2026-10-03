@@ -44,9 +44,9 @@ public class OpcUaServerTests
     public async Task WhenAnEnabledServerEntersTheGraph_ThenTheServerHoldIsTakenBeforeTheWrapperHoldIsReleased()
     {
         // Arrange
-        var holds = new StartupHoldRecorder();
+        var startupWork = new StartupWorkRecorder();
         await using var testHost = await OpcUaTestHost.StartAsync(
-            context => context.AddService<IStartupCompletionDeferrer>(holds));
+            context => context.AddService<IStartupWorkTracker>(startupWork));
         await testHost.LoadRootAsync();
         var server = testHost.CreateServer("/NotInTheGraph");
 
@@ -54,14 +54,15 @@ public class OpcUaServerTests
         testHost.Container.Server = server;
         await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Error);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => holds.Outstanding == 0,
-            message: "A startup hold was never released.");
+            () => startupWork.Outstanding == 0,
+            message: "Some startup work never ended.");
 
         // Assert
-        // The wrapper's own hold and the attached server's, which is taken when its start is queued and
-        // so whether or not that start then fails, as it does here against a path that does not resolve.
-        Assert.Equal(2, holds.Taken);
-        Assert.Equal(2, holds.TakenWhenFirstSettled);
+        // The wrapper's own startup work and the attached server's, which is tracked when its start is
+        // queued and so whether or not that start then fails, as it does here against a path that does
+        // not resolve.
+        Assert.Equal(2, startupWork.Taken);
+        Assert.Equal(2, startupWork.TakenWhenFirstSettled);
     }
 
     [Fact]
@@ -131,7 +132,7 @@ public class OpcUaServerTests
         await server.StartAsync();
 
         // Assert
-        // The drained handler appends nothing, so the awaited attach hands back a handle holding no
+        // The drained handler enqueues nothing, so the awaited attach hands back a handle holding no
         // instance and no fault. Reaching this without the factory having run at all is what
         // distinguishes it from the resolution failure above.
         Assert.Equal(ServiceStatus.Error, server.Status);

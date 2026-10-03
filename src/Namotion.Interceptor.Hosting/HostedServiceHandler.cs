@@ -18,25 +18,25 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     private const int DrainPollMilliseconds = 1;
 
     private readonly HostedServiceGate _gate = new();
-    private readonly ConcurrentDictionary<HostedServiceTarget, IInterceptorSubject> _owned = new();
+    private readonly ConcurrentDictionary<HostedServiceSlot, IInterceptorSubject> _stopOnDrain = new();
     // Reference equality, as everywhere a subject is a key: two value equal subjects sharing one entry
     // means detaching either one clears the other's liveness while it is still in the graph.
     private readonly ConcurrentDictionary<IInterceptorSubject, byte> _liveSubjects =
         new(ReferenceEqualityComparer.Instance);
 
     /// <summary>
-    /// The startup scope open in the flow that appends a start, or null. Ambient because the attach a
-    /// constructing flow triggers runs inside a property write with nothing to pass a scope through.
+    /// The start deferral open in the flow that enqueues a start, or null. Ambient because the attach a
+    /// constructing flow triggers runs inside a property write with nothing to pass a deferral through.
     /// </summary>
-    private readonly AsyncLocal<HostedServiceStartupScope?> _startupScope = new();
+    private readonly AsyncLocal<HostedServiceStartDeferral?> _startDeferral = new();
 
-    internal HostedServiceStartupScope DeferStartup() => new(_startupScope);
+    internal HostedServiceStartDeferral DeferStarts() => new(_startDeferral);
 
-    /// <summary>Drops the ambient scope for the calling flow, which for a body is its own copy.</summary>
-    internal void ClearAmbientStartupScope() => _startupScope.Value = null;
+    /// <summary>Drops the ambient start deferral for the calling flow, which for a body is its own copy.</summary>
+    internal void ClearAmbientStartDeferral() => _startDeferral.Value = null;
 
     /// <summary>
-    /// Transitions this handler appended that have not finished. Polled by the drain rather than
+    /// Transitions this handler enqueued that have not finished. Polled by the drain rather than
     /// signalled: docs/design/hosting-service-ownership.md#why-the-count-is-re-read-rather-than-signalled.
     /// </summary>
     private int _inFlight;
@@ -49,34 +49,34 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     internal void SetLogger(ILogger logger) => _logger = logger;
 
-    // The gates below are test seams, null in production.
+    // The hooks below are test seams, null in production.
 
     /// <summary>Awaited in <see cref="StopAsync"/> after the drain begins, before the liveness clear.</summary>
-    internal Func<Task>? DrainGate { get; set; }
+    internal Func<Task>? DrainTestHook { get; set; }
 
     /// <summary>Invoked after the take and before the gate re-read.</summary>
-    internal Action? OwnershipTakenGate { get; set; }
+    internal Action? OwnershipTakenTestHook { get; set; }
 
     /// <summary>
     /// Invoked inside <see cref="LifecycleInterceptor.TryRunWhileAttached"/> between the membership
     /// answer and the liveness write, so holding it holds the graph lock.
     /// </summary>
-    internal Action? LivenessWriteGate { get; set; }
+    internal Action? LivenessWriteTestHook { get; set; }
 
-    /// <summary>Awaited in <see cref="StopAsync"/> between the owned snapshot and the stops it appends.</summary>
-    internal Func<Task>? DrainAppendGate { get; set; }
+    /// <summary>Awaited in <see cref="StopAsync"/> between the drain snapshot and the stops it enqueues.</summary>
+    internal Func<Task>? DrainEnqueueTestHook { get; set; }
 
     /// <summary>
     /// Awaited in <see cref="StopAsync"/> after the first wait for in flight transitions and before
     /// ownership is released.
     /// </summary>
-    internal Func<Task>? DrainReleaseGate { get; set; }
+    internal Func<Task>? DrainReleaseTestHook { get; set; }
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        // Runs inside LifecycleInterceptor's lock, so everything here only appends, which never blocks
-        // and never runs a body. The one exception, TakeStartupHolds, is an accepted hazard: see
-        // docs/design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own.
+        // Runs inside LifecycleInterceptor's lock, so everything here only enqueues, which never blocks
+        // and never runs a body. The one exception, BeginStartupWork, is an accepted hazard: see
+        // docs/design/hosting-service-ownership.md#4-a-startup-work-tracker-that-takes-a-lock-of-its-own.
         if (change.IsContextAttach)
         {
             AttachSubject(change.Subject);
@@ -94,28 +94,28 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             return;
         }
 
-        var subjectTarget = subject is IHostedService hostedService
-            ? hostedService.GetOrAddSubjectTarget()
+        var subjectSlot = subject is IHostedService hostedService
+            ? hostedService.GetOrAddSubjectSlot()
             : null;
 
         var attachments = subject.GetHostedServiceAttachments();
-        if (subjectTarget is null && attachments.IsEmpty)
+        if (subjectSlot is null && attachments.IsEmpty)
         {
             // Liveness is recorded only for a subject that hosts something: every reader of it holds
-            // a target. MarkLiveIfAttached covers the one moment that is not true.
+            // a slot. MarkLiveIfAttached covers the one moment that is not true.
             return;
         }
 
         _liveSubjects[subject] = 0;
 
-        if (subjectTarget is not null)
+        if (subjectSlot is not null)
         {
-            TryTakeOwnershipAndStart(subject, subjectTarget);
+            TryTakeOwnershipAndStart(subject, subjectSlot);
         }
 
         foreach (var attachment in attachments)
         {
-            TryTakeOwnershipAndStart(subject, ((IHostedServiceAttachmentTarget)attachment).Target);
+            TryTakeOwnershipAndStart(subject, ((IHostedServiceSlotAccess)attachment).Slot);
         }
 
         if (_gate.IsDraining)
@@ -131,141 +131,141 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // Read before allocating, because this runs for every subject a detach reaches. "Has ever
         // hosted", not "hosts now", for the reason on that method.
         var everHosted = subject.TryGetHostedServiceAttachments(out var attachments);
-        var subjectTarget = subject is IHostedService ? subject.TryGetSubjectTarget() : null;
-        if (subjectTarget is null && !everHosted)
+        var subjectSlot = subject is IHostedService ? subject.TryGetSubjectSlot() : null;
+        if (subjectSlot is null && !everHosted)
         {
             return;
         }
 
-        // Liveness is per subject. It cannot be per target: one subject reachable from two hosting
-        // enabled contexts shares a single target with two handlers, and both are live for it while
+        // Liveness is per subject. It cannot be per slot: one subject reachable from two hosting
+        // enabled contexts shares a single slot with two handlers, and both are live for it while
         // only one of them owns it.
         _liveSubjects.TryRemove(subject, out _);
 
-        // Stops only what this handler owns, decided with the append under the chain lock: ahead of
+        // Stops only what this handler owns, decided with the enqueue under the queue lock: ahead of
         // it, a release in between lets the stop escape the drain or reach a stranger's instance; in
-        // the body, the release below has already run. Appended now, never deferred into a transition:
+        // the body, the release below has already run. Enqueued now, never deferred into a transition:
         // docs/design/hosting-service-ownership.md#why-a-composite-transition-is-wrong.
-        if (subjectTarget is not null)
+        if (subjectSlot is not null)
         {
-            _ = AppendStopIfOwned(subject, subjectTarget, waitFor: null, CancellationToken.None);
+            _ = EnqueueStopIfOwned(subject, subjectSlot, waitFor: null, CancellationToken.None);
         }
 
         foreach (var attachment in attachments)
         {
-            _ = AppendStopIfOwned(
+            _ = EnqueueStopIfOwned(
                 subject,
-                ((IHostedServiceAttachmentTarget)attachment).Target,
-                waitFor: subjectTarget?.GetStopToAwait(this),
+                ((IHostedServiceSlotAccess)attachment).Slot,
+                waitFor: subjectSlot?.GetStopToAwait(this),
                 CancellationToken.None);
         }
 
-        // After the stops are appended and never from a body:
+        // After the stops are enqueued and never from a body:
         // docs/design/hosting-service-ownership.md#ownership-is-released-on-context-detach-and-on-drain.
-        subjectTarget?.ReleaseOwnership(this);
+        subjectSlot?.ReleaseOwnership(this);
         foreach (var attachment in attachments)
         {
-            ((IHostedServiceAttachmentTarget)attachment).Target.ReleaseOwnership(this);
+            ((IHostedServiceSlotAccess)attachment).Slot.ReleaseOwnership(this);
         }
     }
 
     /// <summary>
-    /// Takes ownership of the target for this handler and appends its start, returning the appended
+    /// Takes ownership of the slot for this handler and enqueues its start, returning the enqueued
     /// transition. Returns null when the handler took nothing, because the subject is no longer live
-    /// for it, because another handler owns the target, or because this handler is draining.
+    /// for it, because another handler owns the slot, or because this handler is draining.
     /// </summary>
     /// <remarks>
     /// The transition carries no cancellation token: a caller's token bounds its wait, never the
     /// transition, or cancelling an <c>AttachHostedServiceAsync</c> await would abort a start already
     /// under way and record it as a failure.
     /// </remarks>
-    internal Task? TryTakeOwnershipAndStart(IInterceptorSubject subject, HostedServiceTarget target)
+    internal Task? TryTakeOwnershipAndStart(IInterceptorSubject subject, HostedServiceSlot slot)
     {
         if (_gate.IsDraining)
         {
-            // Read here as well as after the append, so a drained handler installs no owner at all.
+            // Read here as well as after the enqueue, so a drained handler installs no owner at all.
             return null;
         }
 
-        // Before the append, never inside the body, or "the graph has finished starting" is reachable
+        // Before the enqueue, never inside the body, or "the graph has finished starting" is reachable
         // while this start is still queued.
-        var startupHolds = TakeStartupHolds(subject.Context);
+        var startupWork = BeginStartupWork(subject.Context);
 
-        // Read in the appending flow, which is the one that opened it. The body runs later and, on the
+        // Read in the enqueuing flow, which is the one that opened it. The body runs later and, on the
         // paths where a caller does not await the attach, in a flow that has already moved on.
-        var startupScope = _startupScope.Value;
+        var startDeferral = _startDeferral.Value;
 
-        var start = target.TryTakeOwnershipAndAppendAsync(
+        var start = slot.TryTakeOwnershipAndEnqueueAsync(
             this,
             subject,
-            () => RunStartAsync(subject, target, startupHolds, startupScope),
+            () => RunStartAsync(subject, slot, startupWork, startDeferral),
             out var ownershipTaken);
 
         if (start is null)
         {
-            ReleaseStartupHolds(startupHolds);
+            EndStartupWork(startupWork);
             return null;
         }
 
-        OwnershipTakenGate?.Invoke();
+        OwnershipTakenTestHook?.Invoke();
 
         if (ownershipTaken && _gate.IsDraining)
         {
             // Undoes a take the drain's snapshot may have missed, and only one this call installed. A
             // stop rather than a bare retirement, because the start above may already be committed:
-            // docs/design/hosting-service-ownership.md#why-the-ownership-decision-is-inside-the-chain-lock.
+            // docs/design/hosting-service-ownership.md#why-the-ownership-decision-is-inside-the-queue-lock.
             // An attachment's undo stop waits for its subject's stop like every other attachment stop,
-            // and the release below makes this the only stop the drain can get onto that chain. Only
-            // while still owned: the drain can finish and another handler take the target before this
-            // runs, and every release that can take this ownership first has already appended a stop
+            // and the release below makes this the only stop the drain can get onto that queue. Only
+            // while still owned: the drain can finish and another handler take the slot before this
+            // runs, and every release that can take this ownership first has already enqueued a stop
             // behind the start.
-            _ = AppendStopIfOwned(subject, target, waitFor: SubjectStopToAwait(subject, target), CancellationToken.None);
-            target.ReleaseOwnership(this);
+            _ = EnqueueStopIfOwned(subject, slot, waitFor: SubjectStopToAwait(subject, slot), CancellationToken.None);
+            slot.ReleaseOwnership(this);
         }
 
         return start;
     }
 
     /// <summary>
-    /// The subject stop an attachment stop appended now has to wait for, or null for a subject target
+    /// The subject stop an attachment stop enqueued now has to wait for, or null for a subject slot
     /// and for an attachment whose subject has no stop of this handler's pending.
     /// </summary>
-    private Task? SubjectStopToAwait(IInterceptorSubject subject, HostedServiceTarget target)
-        => target.Subject is null && subject is IHostedService
-            ? subject.TryGetSubjectTarget()?.GetStopToAwait(this)
+    private Task? SubjectStopToAwait(IInterceptorSubject subject, HostedServiceSlot slot)
+        => slot.Subject is null && subject is IHostedService
+            ? subject.TryGetSubjectSlot()?.GetStopToAwait(this)
             : null;
 
     private async Task RunStartAsync(
         IInterceptorSubject subject,
-        HostedServiceTarget target,
-        IDisposable[] startupHolds,
-        HostedServiceStartupScope? startupScope)
+        HostedServiceSlot slot,
+        IDisposable[] startupWork,
+        HostedServiceStartDeferral? startDeferral)
     {
         try
         {
             await _gate.WaitForOpenAsync().ConfigureAwait(false);
-            if (!MayStart(subject, target))
+            if (!MayStart(subject, slot))
             {
                 return;
             }
 
-            if (startupScope is not null && !await WaitForConfigurationAsync(subject, target, startupScope).ConfigureAwait(false))
+            if (startDeferral is not null && !await WaitForStartDeferralAsync(subject, slot, startDeferral).ConfigureAwait(false))
             {
                 return;
             }
 
             // Cleared after every guard, never before: a start that is gated out or skipped must not
             // drop a fault that a caller has not read yet.
-            target.ClearFault();
+            slot.ClearFault();
 
             try
             {
                 // Entered here, past every guard and immediately before the factory: a refused start
                 // must report the state it leaves behind rather than a start window it never entered.
-                target.BeginStart();
+                slot.BeginStart();
 
-                var instance = target.Subject ?? target.Factory!();
-                if (target.IsHandlerOwnedInstance && !target.TryRecordFactoryInstance(instance))
+                var instance = slot.Subject ?? slot.Factory!();
+                if (slot.IsFactoryAttachment && !slot.TryRecordFactoryInstance(instance))
                 {
                     // Refused for every factory attachment, whatever the instance is. Why it fails
                     // closed: docs/design/hosting-service-ownership.md#faults-and-failed-starts.
@@ -287,7 +287,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     // never recorded, so every later stop reads Current as null and returns.
                     await StopFailedStartAsync(instance, subject).ConfigureAwait(false);
 
-                    if (target.IsHandlerOwnedInstance)
+                    if (slot.IsFactoryAttachment)
                     {
                         await DisposeInstanceAsync(instance).ConfigureAwait(false);
                     }
@@ -295,69 +295,69 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                     throw;
                 }
 
-                target.CompleteStart(instance);
+                slot.RecordStarted(instance);
 
                 if (instance is BackgroundService { ExecuteTask: { } executeTask } backgroundService)
                 {
-                    ObserveExecution(subject, target, backgroundService, executeTask);
+                    ObserveExecution(subject, slot, backgroundService, executeTask);
                 }
             }
             catch (Exception exception)
             {
-                target.SetStartFault(exception);
+                slot.SetStartFault(exception);
                 _logger?.LogError(exception, "Failed to start hosted service for subject {Subject}.", subject);
             }
             finally
             {
                 // Acts on a start that recorded nothing only: a successful one already left the start
                 // window with the same write that recorded its instance.
-                target.EndStart();
+                slot.AbandonStart();
             }
         }
         finally
         {
-            ReleaseStartupHolds(startupHolds);
+            EndStartupWork(startupWork);
         }
     }
 
     private static readonly Action<Task, object?> OnExecutionEnded =
-        static (_, state) => ((ExecutionFaultObserver)state!).Append();
+        static (_, state) => ((ExecutionFaultObserver)state!).Enqueue();
 
     /// <summary>
     /// Observes the execution a <see cref="BackgroundService"/> schedules from its start, which the
-    /// start itself never covers. A fault or a cancellation in it is recorded on the target and the
-    /// instance is stopped, so the target settles to <see cref="HostedServiceAttachmentState.Faulted"/>
+    /// start itself never covers. A fault or a cancellation in it is recorded on the slot and the
+    /// instance is stopped, so the slot settles to <see cref="HostedServiceAttachmentState.Faulted"/>
     /// and the next context attach retries it.
     /// </summary>
     private void ObserveExecution(
-        IInterceptorSubject subject, HostedServiceTarget target, BackgroundService instance, Task executeTask)
+        IInterceptorSubject subject, HostedServiceSlot slot, BackgroundService instance, Task executeTask)
     {
         // A cancellation as well as a fault, since the execution is Canceled whether or not a stop asked
-        // for it. Never synchronous: the continuation takes the chain lock on a thread that may hold anything.
+        // for it. Never synchronous: the continuation takes the queue lock on a thread that may hold anything.
         executeTask.ContinueWith(
             OnExecutionEnded,
-            new ExecutionFaultObserver(this, subject, target, instance, executeTask),
+            new ExecutionFaultObserver(this, subject, slot, instance, executeTask),
             CancellationToken.None,
             TaskContinuationOptions.NotOnRanToCompletion | TaskContinuationOptions.DenyChildAttach,
             TaskScheduler.Default);
     }
 
-    /// <summary>The state of one execution's fault continuation, and the transition it appends.</summary>
+    /// <summary>The state of one execution's fault continuation, and the transition it enqueues.</summary>
     private sealed class ExecutionFaultObserver(
         HostedServiceHandler handler,
         IInterceptorSubject subject,
-        HostedServiceTarget target,
+        HostedServiceSlot slot,
         BackgroundService instance,
         Task executeTask)
     {
         /// <summary>
-        /// Appends the transition only while the handler still owns the target: after a release the
+        /// Enqueues the transition only while the handler still owns the slot: after a release the
         /// instance is stopped or another handler's, and a stop this handler no longer counts would
         /// run past its own drain.
         /// </summary>
-        public void Append()
+        public void Enqueue()
         {
-            if (target.AppendIfOwnedAsync(handler, RunAsync) is null)
+            if (slot.EnqueueIfOwnedAsync(handler, RunAsync) is null)
             {
                 try
                 {
@@ -365,7 +365,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 }
                 catch (Exception)
                 {
-                    // Outside the chain's catch-all, so a throwing log provider would fault this dropped continuation.
+                    // Outside the queue's catch-all, so a throwing log provider would fault this dropped continuation.
                 }
             }
         }
@@ -374,7 +374,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         {
             // Both checks: a subject restarts in place on the same instance with a new execute task, and
             // every stop leaves Current before StopAsync, so a run its own stop cancelled never passes.
-            if (!ReferenceEquals(target.Current, instance) || !ReferenceEquals(instance.ExecuteTask, executeTask))
+            if (!ReferenceEquals(slot.Current, instance) || !ReferenceEquals(instance.ExecuteTask, executeTask))
             {
                 LogIgnoredFault();
                 return;
@@ -382,10 +382,10 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
             var fault = ReadFault(executeTask);
 
-            target.SetFault(fault);
+            slot.SetFault(fault);
             handler._logger?.LogError(fault, "Hosted service for subject {Subject} faulted while running.", subject);
 
-            await handler.CreateStopBody(subject, target, signal: null, waitFor: null, CancellationToken.None)()
+            await handler.CreateStopBody(subject, slot, signal: null, waitFor: null, CancellationToken.None)()
                 .ConfigureAwait(false);
         }
 
@@ -424,109 +424,109 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
     }
 
-    /// <summary>Whether a start body may still create an instance, read before the scope wait and after it.</summary>
-    private bool MayStart(IInterceptorSubject subject, HostedServiceTarget target)
+    /// <summary>Whether a start body may still create an instance, read before the deferral wait and after it.</summary>
+    private bool MayStart(IInterceptorSubject subject, HostedServiceSlot slot)
     {
-        // Four guards, none covered by another, each re-read here because the append happened earlier:
+        // Four guards, none covered by another, each re-read here because the enqueue happened earlier:
         // docs/design/hosting-service-ownership.md#the-read-inside-the-start-body. The last one is what
         // stops the owning handler's second start for a subject reachable from two contexts:
         // docs/design/hosting-service-ownership.md#ownership-is-not-what-makes-two-contexts-over-one-subject-benign.
-        return _gate.State == HostedServiceGateState.Running
+        return _gate.State == HostedServiceGateState.Open
             && _liveSubjects.ContainsKey(subject)
-            && ReferenceEquals(target.Owner, this)
-            && target.Current is null;
+            && ReferenceEquals(slot.Owner, this)
+            && slot.Current is null;
     }
 
     /// <summary>
-    /// Waits for the startup scope this start was captured in, or for the drain, and re-reads every
-    /// guard afterwards, because the subject can leave the graph while the scope is open.
+    /// Waits for the start deferral this start was captured in, or for the drain, and re-reads every
+    /// guard afterwards, because the subject can leave the graph while the deferral is open.
     /// </summary>
-    private async Task<bool> WaitForConfigurationAsync(
-        IInterceptorSubject subject, HostedServiceTarget target, HostedServiceStartupScope startupScope)
+    private async Task<bool> WaitForStartDeferralAsync(
+        IInterceptorSubject subject, HostedServiceSlot slot, HostedServiceStartDeferral startDeferral)
     {
-        if (!startupScope.IsReady)
+        if (!startDeferral.IsReady)
         {
-            await Task.WhenAny(startupScope.WaitAsync(), _gate.WaitForDrainingAsync()).ConfigureAwait(false);
+            await Task.WhenAny(startDeferral.WaitAsync(), _gate.WaitForDrainingAsync()).ConfigureAwait(false);
         }
 
-        return MayStart(subject, target);
+        return MayStart(subject, slot);
     }
 
-    /// <summary>Takes a completion hold on every deferrer reachable from <paramref name="context"/>.</summary>
+    /// <summary>Begins startup work on every tracker reachable from <paramref name="context"/>.</summary>
     /// <remarks>
     /// The constraint this call site puts on an implementer is on
-    /// <see cref="IStartupCompletionDeferrer"/>.
+    /// <see cref="IStartupWorkTracker"/>.
     /// </remarks>
-    private IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
+    private IDisposable[] BeginStartupWork(IInterceptorSubjectContext context)
     {
-        var deferrers = context.GetServices<IStartupCompletionDeferrer>();
-        if (deferrers.IsEmpty)
+        var trackers = context.GetServices<IStartupWorkTracker>();
+        if (trackers.IsEmpty)
         {
             return [];
         }
 
-        var holds = new IDisposable[deferrers.Length];
+        var handles = new IDisposable[trackers.Length];
         var taken = 0;
-        foreach (var deferrer in deferrers)
+        foreach (var tracker in trackers)
         {
             try
             {
-                holds[taken] = deferrer.DeferCompletion();
+                handles[taken] = tracker.TrackStartupWork();
                 taken++;
             }
             catch (Exception exception)
             {
-                // One deferrer throwing must not abandon the holds already taken, and must not
+                // One tracker throwing must not abandon the startup work already tracked, and must not
                 // propagate: an attach runs under the lifecycle lock inside a property write, so the
                 // exception would surface at an unrelated assignment.
-                _logger?.LogError(exception, "Taking a startup completion hold threw and was ignored.");
+                _logger?.LogError(exception, "Tracking startup work threw and was ignored.");
             }
         }
 
-        return taken == holds.Length ? holds : holds[..taken];
+        return taken == handles.Length ? handles : handles[..taken];
     }
 
-    private void ReleaseStartupHolds(IDisposable[] startupHolds)
+    private void EndStartupWork(IDisposable[] startupWork)
     {
-        foreach (var hold in startupHolds)
+        foreach (var handle in startupWork)
         {
             try
             {
-                hold.Dispose();
+                handle.Dispose();
             }
             catch (Exception exception)
             {
-                // One deferrer throwing must not strand the others, for the same reason the release
-                // sits in a finally at all.
-                _logger?.LogError(exception, "Releasing a startup completion hold threw and was ignored.");
+                // One tracker throwing must not strand the others, for the same reason the start body
+                // ends its startup work in a finally at all.
+                _logger?.LogError(exception, "Ending startup work threw and was ignored.");
             }
         }
     }
 
     /// <summary>
-    /// Appends an attachment's stop whoever owns its target, for an explicit detach.
+    /// Enqueues an attachment's stop whoever owns its slot, for an explicit detach.
     /// </summary>
-    internal Task AppendAttachmentStop(IInterceptorSubject subject, HostedServiceTarget target, CancellationToken cancellationToken)
-        => target.AppendAsync(this, CreateStopBody(subject, target, signal: null, waitFor: null, cancellationToken));
+    internal Task EnqueueAttachmentStop(IInterceptorSubject subject, HostedServiceSlot slot, CancellationToken cancellationToken)
+        => slot.EnqueueAsync(this, CreateStopBody(subject, slot, signal: null, waitFor: null, cancellationToken));
 
     /// <summary>
-    /// Appends a stop only while this handler still owns the target, the two decided under one
-    /// acquisition of the chain lock. A subject target's stop carries the target's stop signal, chosen
-    /// with the append; an attachment's stop waits for <paramref name="waitFor"/>, its subject's stop,
-    /// when there is one. Returns null when the append was refused.
+    /// Enqueues a stop only while this handler still owns the slot, the two decided under one
+    /// acquisition of the queue lock. A subject slot's stop carries the slot's stop signal, chosen
+    /// with the enqueue; an attachment's stop waits for <paramref name="waitFor"/>, its subject's stop,
+    /// when there is one. Returns null when the enqueue was refused.
     /// </summary>
-    private Task? AppendStopIfOwned(
+    private Task? EnqueueStopIfOwned(
         IInterceptorSubject subject,
-        HostedServiceTarget target,
+        HostedServiceSlot slot,
         Task? waitFor,
         CancellationToken cancellationToken)
-        => target.Subject is null
-            ? target.AppendIfOwnedAsync(this, CreateStopBody(subject, target, signal: null, waitFor, cancellationToken))
-            : target.AppendSubjectStopIfOwnedAsync(this, signal => CreateStopBody(subject, target, signal, waitFor, cancellationToken));
+        => slot.Subject is null
+            ? slot.EnqueueIfOwnedAsync(this, CreateStopBody(subject, slot, signal: null, waitFor, cancellationToken))
+            : slot.EnqueueSubjectStopIfOwnedAsync(this, signal => CreateStopBody(subject, slot, signal, waitFor, cancellationToken));
 
     private Func<Task> CreateStopBody(
         IInterceptorSubject subject,
-        HostedServiceTarget target,
+        HostedServiceSlot slot,
         TaskCompletionSource? signal,
         Task? waitFor,
         CancellationToken cancellationToken)
@@ -536,25 +536,25 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             {
                 if (waitFor is not null)
                 {
-                    // Orders a subject's stop ahead of its attachments. Acyclic: the subject's chain
+                    // Orders a subject's stop ahead of its attachments. Acyclic: the subject's queue
                     // waits on nothing. A hosted service must therefore not detach an attachment from
                     // inside its own stop path, or this becomes a cycle.
                     await waitFor.ConfigureAwait(false);
                 }
 
                 // Waited for, but not read: a stop runs at every state, after the drain included, or
-                // one appended after the drain snapshotted everything never disposes its instance. The
+                // one enqueued after the drain snapshotted everything never disposes its instance. The
                 // null check below is what makes a stop idempotent.
                 await _gate.WaitForOpenAsync().ConfigureAwait(false);
 
-                var instance = target.Current;
+                var instance = slot.Current;
                 if (instance is null)
                 {
                     return;
                 }
 
                 // Below the return above, so a stop with nothing to do reports no window of its own.
-                target.BeginStop();
+                slot.BeginStop();
 
                 // A cancelled token skips the delay, but the stop and the dispose below are still owed.
                 await Task.Delay(TransitionDelayMilliseconds, cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
@@ -571,14 +571,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
                 }
                 catch (Exception exception)
                 {
-                    target.SetFault(exception);
+                    slot.SetFault(exception);
                     _logger?.LogError(exception, "Failed to stop hosted service for subject {Subject}.", subject);
                 }
                 finally
                 {
                     // In the finally rather than after the catch: Current is already cleared, so an
                     // escape from anything above would leave the instance reachable from nothing.
-                    if (target.IsHandlerOwnedInstance)
+                    if (slot.IsFactoryAttachment)
                     {
                         await DisposeInstanceAsync(instance).ConfigureAwait(false);
                     }
@@ -586,9 +586,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             }
             finally
             {
-                // Left ahead of the signal, so nothing ordered behind it reads this target still in
+                // Left ahead of the signal, so nothing ordered behind it reads this slot still in
                 // its stop window.
-                target.EndStop();
+                slot.EndStop();
 
                 // Always signals, including on the cancelled path, or an attachment stop ordered behind
                 // this one parks forever on a signal that is never set.
@@ -635,30 +635,30 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     /// <summary>Opens the startup gate if it has never been opened, and does nothing afterwards.</summary>
-    internal void EnsureStarted() => _gate.EnsureStarted();
+    internal void OpenGate() => _gate.Open();
 
     /// <summary>
-    /// Waits for the start this handler appended for the subject and rethrows the fault it recorded,
+    /// Waits for the start this handler enqueued for the subject and rethrows the fault it recorded,
     /// so a subject that fails to start aborts host startup the way <c>AddHostedService</c> does.
     /// Returns false when nothing was started, which the caller must not read as a start.
     /// </summary>
     internal async Task<bool> WaitForStartAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        // Never creates a target and never takes ownership: a claim taken here would never be released.
-        var target = subject.TryGetSubjectTarget();
-        if (target is null || !_liveSubjects.ContainsKey(subject) || !ReferenceEquals(target.Owner, this))
+        // Never creates a slot and never takes ownership: a claim taken here would never be released.
+        var slot = subject.TryGetSubjectSlot();
+        if (slot is null || !_liveSubjects.ContainsKey(subject) || !ReferenceEquals(slot.Owner, this))
         {
             return false;
         }
 
-        // An empty transition on the same chain. Appending never runs a body, so this completes only
-        // once the start appended ahead of it has run.
-        await target
-            .AppendAsync(this, () => Task.CompletedTask)
+        // An empty transition on the same queue. Enqueuing never runs a body, so this completes only
+        // once the start enqueued ahead of it has run.
+        await slot
+            .EnqueueAsync(this, () => Task.CompletedTask)
             .WaitAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (target.StartFault is { } fault)
+        if (slot.StartFault is { } fault)
         {
             // Captured rather than rethrown, for the reason on AttachHostedServiceAsync.
             ExceptionDispatchInfo.Throw(fault);
@@ -666,36 +666,39 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         // Read at all because the guards above cannot cover a drain beginning while this wait is
         // queued behind the start: the start body then gates itself out and sets nothing.
-        return target.Current is not null;
+        return slot.Current is not null;
     }
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
 
-    /// <summary>Records a target this handler installed itself as the owner of, so its drain can stop and release it.</summary>
-    internal void RecordOwnership(HostedServiceTarget target, IInterceptorSubject subject) => _owned[target] = subject;
+    /// <summary>Tracks a slot this handler installed itself as the owner of, so its drain can stop and release it.</summary>
+    internal void TrackForDrain(HostedServiceSlot slot, IInterceptorSubject subject) => _stopOnDrain[slot] = subject;
 
-    /// <summary>Retires a target's record. Called by the release, and by an explicit detach, which stops without releasing.</summary>
-    internal void ForgetOwnership(HostedServiceTarget target) => _owned.TryRemove(target, out _);
+    /// <summary>
+    /// Removes a slot from the drain set. Called by the release, and by an explicit detach, which stops
+    /// without releasing ownership.
+    /// </summary>
+    internal void UntrackForDrain(HostedServiceSlot slot) => _stopOnDrain.TryRemove(slot, out _);
 
     internal void EnterTransition() => Interlocked.Increment(ref _inFlight);
 
     internal void LeaveTransition() => Interlocked.Decrement(ref _inFlight);
 
-    /// <summary>How many transitions this handler has appended that have not finished. Test only.</summary>
+    /// <summary>How many transitions this handler has enqueued that have not finished. Test only.</summary>
     internal int InFlightTransitionCount => Volatile.Read(ref _inFlight);
 
-    /// <summary>Whether this handler holds the target in the set its drain would stop. Test only.</summary>
-    internal bool IsOwned(HostedServiceTarget target) => _owned.ContainsKey(target);
+    /// <summary>Whether the slot is in the set this handler's drain would stop. Test only.</summary>
+    internal bool IsTrackedForDrain(HostedServiceSlot slot) => _stopOnDrain.ContainsKey(slot);
 
     /// <summary>
     /// Records liveness for a subject already in the graph that hosted nothing when it entered, so
-    /// <c>AttachSubject</c> recorded none. The one moment the answer cannot be taken from a target.
+    /// <c>AttachSubject</c> recorded none. The one moment the answer cannot be taken from a slot.
     /// </summary>
     /// <remarks>
     /// The write must stay inside <see cref="LifecycleInterceptor.TryRunWhileAttached"/>'s callback.
     /// Reading membership and then writing releases the lock in between, and a graph move landing in
     /// that gap makes the write land on the opposite answer. The take after it does not need the same
-    /// treatment, because it reads liveness under the chain lock and refuses on its own. What asking
+    /// treatment, because it reads liveness under the queue lock and refuses on its own. What asking
     /// every reachable interceptor costs is in
     /// docs/design/hosting-service-ownership.md#a-handler-can-be-marked-live-for-a-graph-it-does-not-serve.
     /// </remarks>
@@ -711,7 +714,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         // Hoisted, so several interceptors cost one delegate rather than one each.
         var record = () =>
         {
-            LivenessWriteGate?.Invoke();
+            LivenessWriteTestHook?.Invoke();
             _liveSubjects[subject] = 0;
         };
 
@@ -730,7 +733,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        EnsureStarted();
+        OpenGate();
         return Task.CompletedTask;
     }
 
@@ -738,65 +741,65 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     {
         _gate.BeginDraining();
 
-        if (DrainGate is { } drainGate)
+        if (DrainTestHook is { } drainTestHook)
         {
-            await drainGate().ConfigureAwait(false);
+            await drainTestHook().ConfigureAwait(false);
         }
 
         // Liveness ends where the drain begins. A handler that still reports a subject as live claims
-        // ownership of every attachment added to it afterwards, appends a start that no-ops, and never
+        // ownership of every attachment added to it afterwards, enqueues a start that no-ops, and never
         // releases it, because the release loop below only covers the drain's own snapshot.
         _liveSubjects.Clear();
 
-        var snapshot = _owned.ToArray();
+        var snapshot = _stopOnDrain.ToArray();
 
-        if (DrainAppendGate is { } drainAppendGate)
+        if (DrainEnqueueTestHook is { } drainEnqueueTestHook)
         {
-            await drainAppendGate().ConfigureAwait(false);
+            await drainEnqueueTestHook().ConfigureAwait(false);
         }
 
         // The same shape per owned subject as a context detach: a subject's own stop has to return
         // before the attachments it uses are stopped and disposed underneath it. Subject stops first,
         // so each attachment stop finds its subject's signal already chosen rather than creating it.
-        foreach (var (target, subject) in snapshot)
+        foreach (var (slot, subject) in snapshot)
         {
-            if (target.Subject is not null)
+            if (slot.Subject is not null)
             {
-                _ = AppendStopIfOwned(subject, target, waitFor: null, cancellationToken);
+                _ = EnqueueStopIfOwned(subject, slot, waitFor: null, cancellationToken);
             }
         }
 
-        foreach (var (target, subject) in snapshot)
+        foreach (var (slot, subject) in snapshot)
         {
-            if (target.Subject is null)
+            if (slot.Subject is null)
             {
                 // Discarded rather than collected: the count is what the drain waits on, and a stop
-                // this append refused is one another handler now owns.
-                _ = AppendStopIfOwned(subject, target, SubjectStopToAwait(subject, target), cancellationToken);
+                // this enqueue refused is one another handler now owns.
+                _ = EnqueueStopIfOwned(subject, slot, SubjectStopToAwait(subject, slot), cancellationToken);
             }
         }
 
         // Bounded by the token, which for a host is the shutdown deadline. Nothing further down
-        // observes it: the chain waits inside a stop body are untokened by design, and a stop wedged
+        // observes it: the queue waits inside a stop body are untokened by design, and a stop wedged
         // behind one of them would otherwise hold the process open forever.
         var remaining = await WaitForTransitionsAsync(cancellationToken).ConfigureAwait(false);
 
-        if (DrainReleaseGate is { } drainReleaseGate)
+        if (DrainReleaseTestHook is { } drainReleaseTestHook)
         {
-            await drainReleaseGate().ConfigureAwait(false);
+            await drainReleaseTestHook().ConfigureAwait(false);
         }
 
-        foreach (var (target, _) in snapshot)
+        foreach (var (slot, _) in snapshot)
         {
             // After the stops, so a second host cannot start ahead of this host's stop, and even when
-            // the wait above gave up: a wrong stop is recoverable and a target owned by a dead handler
+            // the wait above gave up: a wrong stop is recoverable and a slot owned by a dead handler
             // is not.
-            target.ReleaseOwnership(this);
+            slot.ReleaseOwnership(this);
         }
 
         if (remaining == 0)
         {
-            // Read again rather than held: an append landing after the count first reached zero went
+            // Read again rather than held: an enqueue landing after the count first reached zero went
             // through the same increment, and only a second read sees it.
             remaining = await WaitForTransitionsAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -804,17 +807,17 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         if (remaining != 0)
         {
             // Logged rather than thrown, so the release above still runs: rethrowing would leave every
-            // target owned by a dead handler and a second host over the same subjects starting nothing.
+            // slot owned by a dead handler and a second host over the same subjects starting nothing.
             _logger?.LogWarning(
                 "Shutdown gave up waiting for {Count} hosted service transitions; they keep running unobserved.",
                 remaining);
         }
 
-        // The owned set is not cleared: what is left belongs to installs whose own gate re-read releases them.
+        // The drain set is not cleared: what is left belongs to installs whose own gate re-read releases them.
     }
 
     /// <summary>
-    /// Waits for every transition this handler appended to finish, and reports how many were still
+    /// Waits for every transition this handler enqueued to finish, and reports how many were still
     /// running when <paramref name="cancellationToken"/> expired. Zero means the wait completed.
     /// </summary>
     private async Task<int> WaitForTransitionsAsync(CancellationToken cancellationToken)

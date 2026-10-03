@@ -157,7 +157,7 @@ public class AddSubjectModeTests
     [Fact]
     public async Task WhenSelfContainedPlainSubjectHasAnAttachment_ThenTheAttachmentRunsAndStopsWithTheHost()
     {
-        // Arrange - the subject hosts nothing itself, so only its private host can run the attachment.
+        // Arrange - the subject hosts nothing itself, so only its private context host can run the attachment.
         TrackedBackgroundService? instance = null;
         IHostedServiceAttachment? attachment = null;
         var builder = HostingTestHost.CreateBuilder();

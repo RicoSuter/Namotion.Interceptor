@@ -8,27 +8,27 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// </summary>
 /// <remarks>
 /// Disposal disarms the seam and releases whatever is parked on it, so an assertion that fails while a
-/// transition is held leaves no chain wedged on a gate nothing is going to open. That is why the arming
-/// helpers on <see cref="TestGateExtensions"/> are meant to be held in a <c>using</c>.
+/// transition is held leaves no queue wedged on a hook nothing is going to release. That is why the arming
+/// helpers on <see cref="TestHookExtensions"/> are meant to be held in a <c>using</c>.
 /// </remarks>
-internal sealed class TestGate : IDisposable
+internal sealed class TestHook : IDisposable
 {
     /// <summary>
-    /// How long anything waits on this gate. Long enough that only a broken build reaches it, and
+    /// How long anything waits on this hook. Long enough that only a broken build reaches it, and
     /// bounded so a broken build fails its test rather than hanging the run.
     /// </summary>
-    private static readonly TimeSpan GateTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan HookTimeout = TimeSpan.FromSeconds(30);
 
     private readonly Action _disarm;
     private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _reported;
 
-    private TestGate(Action disarm) => _disarm = disarm;
+    private TestHook(Action disarm) => _disarm = disarm;
 
     /// <summary>
     /// Runs inside the seam before it reports being reached, so whatever it does is in place by the time
-    /// a test thread waiting for the seam returns. Runs for the first entry only: releasing the gate is
+    /// a test thread waiting for the seam returns. Runs for the first entry only: releasing the hook is
     /// permanent, so every later pass through the seam would otherwise repeat the side effect.
     /// </summary>
     public Action? OnReached { get; set; }
@@ -42,7 +42,7 @@ internal sealed class TestGate : IDisposable
     /// <summary>Lets what is held at the seam past it, and everything that reaches it afterwards.</summary>
     public void Release() => _released.TrySetResult();
 
-    public Task WaitUntilReachedAsync() => _reached.Task.WaitAsync(GateTimeout);
+    public Task WaitUntilReachedAsync() => _reached.Task.WaitAsync(HookTimeout);
 
     /// <summary>
     /// Waits for the seam from a thread that cannot await, such as another seam's body. Throws on the
@@ -51,9 +51,9 @@ internal sealed class TestGate : IDisposable
     /// </summary>
     public void WaitUntilReached()
     {
-        if (!_reached.Task.Wait(GateTimeout))
+        if (!_reached.Task.Wait(HookTimeout))
         {
-            throw new TimeoutException($"The seam was not reached within {GateTimeout.TotalSeconds:0} seconds.");
+            throw new TimeoutException($"The seam was not reached within {HookTimeout.TotalSeconds:0} seconds.");
         }
     }
 
@@ -64,19 +64,19 @@ internal sealed class TestGate : IDisposable
     }
 
     /// <summary>Arms a seam whose body is awaited, so holding it parks rather than blocking a thread.</summary>
-    public static TestGate Arm(Action<Func<Task>?> seam)
+    public static TestHook Arm(Action<Func<Task>?> seam)
     {
-        var gate = new TestGate(() => seam(null));
-        seam(gate.EnterAsync);
-        return gate;
+        var hook = new TestHook(() => seam(null));
+        seam(hook.EnterAsync);
+        return hook;
     }
 
     /// <summary>Arms a seam whose body is synchronous, so holding it blocks the thread that reached it.</summary>
-    public static TestGate ArmBlocking(Action<Action?> seam)
+    public static TestHook ArmBlocking(Action<Action?> seam)
     {
-        var gate = new TestGate(() => seam(null));
-        seam(gate.EnterAndBlock);
-        return gate;
+        var hook = new TestHook(() => seam(null));
+        seam(hook.EnterAndBlock);
+        return hook;
     }
 
     private Task EnterAsync()
@@ -88,7 +88,7 @@ internal sealed class TestGate : IDisposable
     private void EnterAndBlock()
     {
         ReportReached();
-        _released.Task.Wait(GateTimeout);
+        _released.Task.Wait(HookTimeout);
     }
 
     /// <summary>
@@ -106,45 +106,45 @@ internal sealed class TestGate : IDisposable
 }
 
 /// <summary>
-/// Arms one <see cref="TestGate"/> per seam the hosting code carries. Named per seam rather than taking
+/// Arms one <see cref="TestHook"/> per seam the hosting code carries. Named per seam rather than taking
 /// the property, so a call site says which interleaving it drives and cannot arm an awaitable seam with
 /// a blocking body.
 /// </summary>
-internal static class TestGateExtensions
+internal static class TestHookExtensions
 {
     /// <summary>Holds the drain after it began and before it clears liveness.</summary>
-    public static TestGate HoldAtDrain(this HostedServiceHandler handler)
-        => TestGate.Arm(gate => handler.DrainGate = gate);
+    public static TestHook HoldAtDrain(this HostedServiceHandler handler)
+        => TestHook.Arm(hook => handler.DrainTestHook = hook);
 
-    /// <summary>Holds the drain between its owned snapshot and the stops it appends.</summary>
-    public static TestGate HoldAtDrainAppend(this HostedServiceHandler handler)
-        => TestGate.Arm(gate => handler.DrainAppendGate = gate);
+    /// <summary>Holds the drain between its snapshot and the stops it enqueues.</summary>
+    public static TestHook HoldAtDrainEnqueue(this HostedServiceHandler handler)
+        => TestHook.Arm(hook => handler.DrainEnqueueTestHook = hook);
 
     /// <summary>Holds the drain between its first wait for in flight transitions and the release loop.</summary>
-    public static TestGate HoldAtDrainRelease(this HostedServiceHandler handler)
-        => TestGate.Arm(gate => handler.DrainReleaseGate = gate);
+    public static TestHook HoldAtDrainRelease(this HostedServiceHandler handler)
+        => TestHook.Arm(hook => handler.DrainReleaseTestHook = hook);
 
     /// <summary>Holds an attach between its ownership take and the gate re-read after it.</summary>
-    public static TestGate HoldAtOwnershipTake(this HostedServiceHandler handler)
-        => TestGate.ArmBlocking(gate => handler.OwnershipTakenGate = gate);
+    public static TestHook HoldAtOwnershipTake(this HostedServiceHandler handler)
+        => TestHook.ArmBlocking(hook => handler.OwnershipTakenTestHook = hook);
 
     /// <summary>Holds a liveness write inside the graph mutation lock it is taken under.</summary>
-    public static TestGate HoldAtLivenessWrite(this HostedServiceHandler handler)
-        => TestGate.ArmBlocking(gate => handler.LivenessWriteGate = gate);
+    public static TestHook HoldAtLivenessWrite(this HostedServiceHandler handler)
+        => TestHook.ArmBlocking(hook => handler.LivenessWriteTestHook = hook);
 
-    /// <summary>Holds every transition on the target's chain at the top of its body.</summary>
-    public static TestGate HoldAtTransition(this HostedServiceTarget target)
-        => TestGate.Arm(gate => target.TransitionGate = gate);
+    /// <summary>Holds every transition on the slot's queue at the top of its body.</summary>
+    public static TestHook HoldAtTransition(this HostedServiceSlot slot)
+        => TestHook.Arm(hook => slot.TransitionTestHook = hook);
 
-    /// <summary>Holds a take inside the chain lock, between the take and the append.</summary>
-    public static TestGate HoldAtChainLock(this HostedServiceTarget target)
-        => TestGate.ArmBlocking(gate => target.ChainLockGate = gate);
+    /// <summary>Holds a take inside the queue lock, between the take and the enqueue.</summary>
+    public static TestHook HoldAtQueueLock(this HostedServiceSlot slot)
+        => TestHook.ArmBlocking(hook => slot.QueueLockTestHook = hook);
 
     /// <summary>Holds the subject inside its own <c>StopAsync</c>.</summary>
-    public static TestGate HoldAtStop(this CountingHostedSubject subject)
-        => TestGate.Arm(gate => subject.StopHold = gate);
+    public static TestHook HoldAtStop(this CountingHostedSubject subject)
+        => TestHook.Arm(hook => subject.StopHold = hook);
 
-    /// <summary>Holds a handler owned instance inside its own <c>StopAsync</c>.</summary>
-    public static TestGate HoldAtStop(this TrackedBackgroundService instance)
-        => TestGate.Arm(gate => instance.StopHold = gate);
+    /// <summary>Holds a factory attachment's instance inside its own <c>StopAsync</c>.</summary>
+    public static TestHook HoldAtStop(this TrackedBackgroundService instance)
+        => TestHook.Arm(hook => instance.StopHold = hook);
 }

@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 /// <summary>
 /// Starts for subjects entering the graph together must overlap, not run one after another. Each start
-/// is appended to its own target's chain and nothing awaits them in turn; an earlier implementation
+/// is enqueued on its own slot's queue and nothing awaits them in turn; an earlier implementation
 /// posted every start to one shared consumer loop and paid them in series.
 /// </summary>
 /// <remarks>
@@ -24,9 +24,9 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// threads. A blocking version starves a small runner and fails for a reason unrelated to the property.
 /// </para>
 /// <para>
-/// This pins that starts overlap, and nothing else. It does not pin that each target's own transitions
+/// This pins that starts overlap, and nothing else. It does not pin that each slot's own transitions
 /// are serialized, which
-/// <see cref="HostedServiceTargetTests.WhenTransitionsAreAppendedConcurrently_ThenTheyNeverOverlap"/>
+/// <see cref="HostedServiceSlotTests.WhenTransitionsAreEnqueuedConcurrently_ThenTheyNeverOverlap"/>
 /// covers.
 /// </para>
 /// </remarks>

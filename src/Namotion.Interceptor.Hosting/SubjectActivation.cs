@@ -22,12 +22,12 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
     private readonly SubjectRegistration<T> _registration;
 
     /// <summary>
-    /// The private host of this provider's instance, recorded when the instance is created so disposal
-    /// still stops a host an awaited attach opened before this activation ever started, or the host
-    /// this activation built for a caller registered instance. Assigned before its start, so a stop
+    /// The private context host of this provider's instance, recorded when the instance is created so
+    /// disposal still stops a host an awaited attach opened before this activation ever started, or the
+    /// host this activation built for a caller registered instance. Assigned before its start, so a stop
     /// after a failed start returns the teardown that start already ran.
     /// </summary>
-    private SubjectHost? _host;
+    private PrivateContextHost? _host;
 
     public SubjectActivation(IServiceProvider serviceProvider, SubjectRegistration<T> registration)
     {
@@ -35,7 +35,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
         _registration = registration;
     }
 
-    internal void RecordHost(SubjectHost host) => _host = host;
+    internal void RecordHost(PrivateContextHost host) => _host = host;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -48,11 +48,11 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
         }
 
         var handler = subject.Context.TryGetService<HostedServiceHandler>();
-        if (handler is null && !isCreatedInstance && _registration.IsSelfContained)
+        if (handler is null && !isCreatedInstance && _registration.UsesPrivateContext)
         {
             // The caller registered the instance themselves and it is in no hosting graph, so it gets
-            // the private host an instance this registration constructs gets, whatever it hosts.
-            var callerInstanceHost = new SubjectHost(_serviceProvider);
+            // the private context host an instance this registration constructs gets, whatever it hosts.
+            var callerInstanceHost = new PrivateContextHost(_serviceProvider);
             _host = callerInstanceHost;
             await callerInstanceHost.StartAsync(subject, cancellationToken).ConfigureAwait(false);
             return;
@@ -69,7 +69,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
             {
                 throw new InvalidOperationException(
                     $"{typeof(T).Name} is registered against a context without hosting, so nothing would run it. " +
-                    "Call WithHostedServices() on that context, or register it without a context resolver to run it in a context of its own.");
+                    "Call WithHostedServices() on that context, or register it without a context resolver to run it in a private context.");
             }
 
             throw new InvalidOperationException(
@@ -80,7 +80,7 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
 
         // Opens the gate before awaiting, so a handler registered after this activation cannot
         // deadlock host startup on registration order.
-        handler.EnsureStarted();
+        handler.OpenGate();
 
         // A false result is deliberately not a fallback into starting the subject here: another
         // handler owning it would make that a second instance.

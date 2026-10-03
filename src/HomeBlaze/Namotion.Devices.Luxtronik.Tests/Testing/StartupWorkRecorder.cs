@@ -1,17 +1,14 @@
 using Namotion.Interceptor.Tracking;
 
-namespace HomeBlaze.OpcUa.Tests;
+namespace Namotion.Devices.Luxtronik.Tests.Testing;
 
 /// <summary>
-/// A startup completion deferrer that records how many holds had been taken when every hold was first
-/// released, which is the moment a startup completion wait would have passed.
+/// A startup work tracker that records how much startup work had been tracked when all of it had first
+/// ended, which is the moment a startup completion wait would have passed.
 /// </summary>
-internal sealed class StartupHoldRecorder : IStartupCompletionDeferrer
+internal sealed class StartupWorkRecorder : IStartupWorkTracker
 {
-    /// <summary>
-    /// A leaf lock, so the count a release reads and the take that may race it are one step. Nothing is
-    /// called while it is held.
-    /// </summary>
+    // A leaf lock, so the count an end reads and the tracking that may race it are one step.
     private readonly Lock _lock = new();
 
     private int _outstanding;
@@ -40,7 +37,7 @@ internal sealed class StartupHoldRecorder : IStartupCompletionDeferrer
         }
     }
 
-    /// <summary>How many holds had been taken when none was outstanding for the first time, or null before that.</summary>
+    /// <summary>How much startup work had been tracked when none was outstanding for the first time, or null before that.</summary>
     public int? TakenWhenFirstSettled
     {
         get
@@ -52,7 +49,7 @@ internal sealed class StartupHoldRecorder : IStartupCompletionDeferrer
         }
     }
 
-    public IDisposable DeferCompletion()
+    public IDisposable TrackStartupWork()
     {
         lock (_lock)
         {
@@ -60,7 +57,7 @@ internal sealed class StartupHoldRecorder : IStartupCompletionDeferrer
             _taken++;
         }
 
-        return new Hold(this);
+        return new StartupWorkHandle(this);
     }
 
     private void Release()
@@ -75,7 +72,7 @@ internal sealed class StartupHoldRecorder : IStartupCompletionDeferrer
         }
     }
 
-    private sealed class Hold(StartupHoldRecorder owner) : IDisposable
+    private sealed class StartupWorkHandle(StartupWorkRecorder owner) : IDisposable
     {
         private int _disposed;
 

@@ -41,38 +41,38 @@ public interface IHostedServiceAttachment<T> : IHostedServiceAttachment
 }
 
 /// <summary>
-/// Lets the handler reach the target from a non generic attachment. An abstract base class cannot
+/// Lets the handler reach the slot from a non generic attachment. An abstract base class cannot
 /// serve here: the generic and non generic <c>Current</c> differ only by return type, so declaring
 /// both on one class is CS0102. The non generic one is implemented explicitly instead.
 /// </summary>
-internal interface IHostedServiceAttachmentTarget
+internal interface IHostedServiceSlotAccess
 {
-    HostedServiceTarget Target { get; }
+    HostedServiceSlot Slot { get; }
 }
 
-internal sealed class HostedServiceAttachment<T> : IHostedServiceAttachment<T>, IHostedServiceAttachmentTarget
+internal sealed class HostedServiceAttachment<T> : IHostedServiceAttachment<T>, IHostedServiceSlotAccess
     where T : class, IHostedService
 {
-    public HostedServiceAttachment(HostedServiceTarget target)
+    public HostedServiceAttachment(HostedServiceSlot slot)
     {
-        Target = target;
+        Slot = slot;
     }
 
-    public HostedServiceTarget Target { get; }
+    public HostedServiceSlot Slot { get; }
 
-    public T? Current => (T?)Target.Current;
+    public T? Current => (T?)Slot.Current;
 
-    public Exception? Fault => Target.Fault;
+    public Exception? Fault => Slot.Fault;
 
     public HostedServiceAttachmentState GetState(out T? current)
     {
-        var state = Target.GetState(out var instance);
+        var state = Slot.GetState(out var instance);
         current = (T?)instance;
         return state;
     }
 
-    IHostedService? IHostedServiceAttachment.Current => Target.Current;
+    IHostedService? IHostedServiceAttachment.Current => Slot.Current;
 
     HostedServiceAttachmentState IHostedServiceAttachment.GetState(out IHostedService? current)
-        => Target.GetState(out current);
+        => Slot.GetState(out current);
 }

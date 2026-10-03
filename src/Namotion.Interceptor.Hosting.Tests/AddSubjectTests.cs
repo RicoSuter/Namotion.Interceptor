@@ -108,7 +108,7 @@ public class AddSubjectTests
     public async Task WhenAddSubjectIsRegisteredBeforeWithHostedServices_ThenStartupDoesNotHang()
     {
         // Arrange - the activation awaits a transition gated on the handler having started. Without
-        // EnsureStarted opening the gate, host startup would deadlock on registration order.
+        // OpenGate opening the gate, host startup would deadlock on registration order.
         var builder = HostingTestHost.CreateBuilder();
 
         var contextHolder = new IInterceptorSubjectContext[1];
@@ -142,7 +142,7 @@ public class AddSubjectTests
     [Fact]
     public async Task WhenTheSubjectHasNoContextConstructor_ThenConfigureCompletesBeforeTheSubjectCanStart()
     {
-        // Arrange - the attach is what makes the handler append a start, so a configure that ran
+        // Arrange - the attach is what makes the handler enqueue a start, so a configure that ran
         // after it would race that start with nothing between them but the handler's start delay.
         // Holding configure open makes the ordering observable instead of timing dependent.
         var builder = HostingTestHost.CreateBuilder();
@@ -168,14 +168,14 @@ public class AddSubjectTests
         var startup = Task.Run(() => host.StartAsync());
         Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
 
-        var attachedDuringConfigure = ((IInterceptorSubject)configuredSubject!).TryGetSubjectTarget() is not null;
+        var attachedDuringConfigure = ((IInterceptorSubject)configuredSubject!).TryGetSubjectSlot() is not null;
         releaseConfigure.Set();
         await startup.WaitAsync(WaitTimeout);
 
         try
         {
-            // Assert - a subject target exists only once a handler has seen the attach, so its
-            // absence is what proves no start could have been appended while configure still ran.
+            // Assert - a subject slot exists only once a handler has seen the attach, so its
+            // absence is what proves no start could have been enqueued while configure still ran.
             Assert.False(attachedDuringConfigure, "The subject was attached to the context before configure ran.");
             Assert.Equal("configured", configuredSubject!.NameAtStart);
             Assert.Equal(1, configuredSubject.StartCount);
@@ -220,7 +220,7 @@ public class AddSubjectTests
     public async Task WhenTheConstructorIgnoresTheContext_ThenConfigureCompletesBeforeTheSubjectCanStart()
     {
         // Arrange - this shape gets no generated context constructor, so the attach this method
-        // performs is the first one and is what makes the handler append a start. The sibling test
+        // performs is the first one and is what makes the handler enqueue a start. The sibling test
         // for the no-context shape asserts the same ordering; without it a configure held open past
         // the handler's start delay is observed by StartAsync as an unconfigured subject.
         var builder = HostingTestHost.CreateBuilder();
@@ -247,15 +247,15 @@ public class AddSubjectTests
         Assert.True(configureEntered.Wait(WaitTimeout), "The configure callback was never invoked.");
 
         var subject = configuredSubject!;
-        var attachedDuringConfigure = ((IInterceptorSubject)subject).TryGetSubjectTarget() is not null;
+        var attachedDuringConfigure = ((IInterceptorSubject)subject).TryGetSubjectSlot() is not null;
         var startCountDuringConfigure = subject.StartCount;
         releaseConfigure.Set();
         await startup.WaitAsync(WaitTimeout);
 
         try
         {
-            // Assert - a subject target exists only once a handler has seen the attach, so its
-            // absence is what proves no start could have been appended while configure still ran.
+            // Assert - a subject slot exists only once a handler has seen the attach, so its
+            // absence is what proves no start could have been enqueued while configure still ran.
             Assert.False(attachedDuringConfigure, "The subject was attached to the context before configure ran.");
             Assert.Equal(0, startCountDuringConfigure);
             Assert.Equal("configured", subject.NameAtStart);

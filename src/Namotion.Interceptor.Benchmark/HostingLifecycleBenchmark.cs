@@ -82,7 +82,7 @@ public enum HostingArm
 /// The graph is attached and detached by one array assignment each way, so a single measured
 /// operation is <see cref="SubjectCount"/> attach or detach lifecycle callbacks. The host is never
 /// started: the attach path reads the gate state and takes the same branches whether the gate is
-/// NotStarted or Running, and starting a host would add a background loop whose allocations the
+/// closed or open, and starting a host would add a background loop whose allocations the
 /// process wide memory diagnoser would absorb.
 /// </remarks>
 [MemoryDiagnoser]
@@ -139,7 +139,7 @@ public class HostingLifecycleBenchmark
 
         if (Arm == HostingArm.HostingOneHosted)
         {
-            // One worker among twenty thousand. The host is never started, so its start is appended
+            // One worker among twenty thousand. The host is never started, so its start is enqueued
             // and never runs, which keeps the measurement on the callback path rather than on a
             // background loop.
             items[0] = new HostingWorkerLeaf();

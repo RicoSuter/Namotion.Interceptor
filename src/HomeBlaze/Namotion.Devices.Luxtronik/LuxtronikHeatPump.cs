@@ -27,7 +27,7 @@ namespace Namotion.Devices.Luxtronik;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class LuxtronikHeatPump :
     BackgroundService,
-    ISubjectContextConfigurator,
+    IPrivateContextConfigurator,
     IModbusDiscovery,
     IConfigurable,
     IPowerSensor,
@@ -301,7 +301,7 @@ public partial class LuxtronikHeatPump :
     public override Task StartAsync(CancellationToken cancellationToken)
     {
         // Attached here rather than from the run loop: the base start only schedules the loop, so an attach
-        // issued there takes its startup completion hold after this subject's own hold was released, and a
+        // issued there begins its startup work after this subject's own has ended, and a
         // startup completion wait could pass in between against a tree whose source is not attached yet.
         _faultBeforeStart = _attachment?.Fault;
         if (_attachment is null && !string.IsNullOrWhiteSpace(HostAddress) && TryValidateConfiguration(out _))
@@ -579,7 +579,7 @@ public partial class LuxtronikHeatPump :
         }
     }
 
-    void ISubjectContextConfigurator.ConfigureContext(IInterceptorSubjectContext context)
+    void IPrivateContextConfigurator.ConfigureContext(IInterceptorSubjectContext context)
     {
         // The discovery and the register resolver read the registry, so running alone needs one too.
         context.WithRegistry();

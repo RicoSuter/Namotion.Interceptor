@@ -16,7 +16,7 @@ public static class GpioServiceCollectionExtensions
     /// <param name="configure">Optional callback to configure the GPIO subject.</param>
     /// <param name="contextResolver">
     /// Optional resolver for a shared context the subject joins, which must have hosting. Without it,
-    /// the subject runs in a context of its own.
+    /// the subject runs in a private context.
     /// </param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddGpio(

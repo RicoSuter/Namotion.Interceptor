@@ -19,7 +19,7 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// arrives. The child is therefore an ordinary attach carrying its own liveness write, its own
 /// ownership take and its own pair of gate reads, and the outcome does not depend on where the
 /// creating handler sits in that array. The one shape that does re-enter <c>AttachSubject</c> is a
-/// startup completion deferrer, which the handler calls synchronously from inside the outer call, and
+/// startup work tracker, which the handler calls synchronously from inside the outer call, and
 /// the last two tests drive that one.
 /// </remarks>
 public class NestedAttachTests
@@ -27,7 +27,7 @@ public class NestedAttachTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task WhenAnAttachHandlerCreatesTheContainersChild_ThenBothStartOnceAndEachOwnsItsOwnTarget(
+    public async Task WhenAnAttachHandlerCreatesTheContainersChild_ThenBothStartOnceAndEachOwnsItsOwnSlot(
         bool initializerRunsAheadOfTheHostingHandler)
     {
         // Arrange - both handler orders, because the creating handler interleaves with the hosting
@@ -51,19 +51,19 @@ public class NestedAttachTests
             Assert.NotNull(child);
             Assert.Equal(1, initializer.Created);
 
-            var containerTarget = ((IInterceptorSubject)container).TryGetSubjectTarget()!;
-            var childTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+            var containerSlot = ((IInterceptorSubject)container).TryGetSubjectSlot()!;
+            var childSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
 
-            // Empty transitions on both chains drain what the two attaches appended.
-            await containerTarget.DrainAsync();
-            await childTarget.DrainAsync();
+            // Empty transitions on both queues drain what the two attaches enqueued.
+            await containerSlot.DrainAsync();
+            await childSlot.DrainAsync();
 
             Assert.Equal(1, container.StartCount);
             Assert.Equal(1, child.StartCount);
 
-            Assert.NotSame(containerTarget, childTarget);
-            Assert.Same(handler, containerTarget.Owner);
-            Assert.Same(handler, childTarget.Owner);
+            Assert.NotSame(containerSlot, childSlot);
+            Assert.Same(handler, containerSlot.Owner);
+            Assert.Same(handler, childSlot.Owner);
 
             Assert.True(handler.IsLive(container));
             Assert.True(handler.IsLive(child));
@@ -83,7 +83,7 @@ public class NestedAttachTests
         // Arrange - the child exists only because the handler put it there, so nothing an explicit
         // AttachHostedService left behind can stop it. The detach cascade has to reach it through the
         // container's property, and both ownerships have to be released, or the re-attach below finds
-        // targets no handler can ever claim again.
+        // slots no handler can ever claim again.
         var (host, context, initializer) = BuildHost(initializerRunsAheadOfTheHostingHandler);
         await host.StartAsync();
 
@@ -95,21 +95,21 @@ public class NestedAttachTests
             holder.Container = container;
 
             var child = container.Child!;
-            var containerTarget = ((IInterceptorSubject)container).TryGetSubjectTarget()!;
-            var childTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
+            var containerSlot = ((IInterceptorSubject)container).TryGetSubjectSlot()!;
+            var childSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
             await AsyncTestHelpers.WaitUntilAsync(() => container.StartCount == 1 && child.StartCount == 1);
 
             // Act
             holder.Container = null;
 
-            await containerTarget.DrainAsync();
-            await childTarget.DrainAsync();
+            await containerSlot.DrainAsync();
+            await childSlot.DrainAsync();
 
             // Assert
             Assert.Equal(1, container.StopCount);
             Assert.Equal(1, child.StopCount);
-            Assert.Null(containerTarget.Owner);
-            Assert.Null(childTarget.Owner);
+            Assert.Null(containerSlot.Owner);
+            Assert.Null(childSlot.Owner);
             Assert.False(handler.IsLive(container));
             Assert.False(handler.IsLive(child));
 
@@ -117,8 +117,8 @@ public class NestedAttachTests
             // the same two subjects again rather than a third one appearing.
             holder.Container = container;
 
-            await containerTarget.DrainAsync();
-            await childTarget.DrainAsync();
+            await containerSlot.DrainAsync();
+            await childSlot.DrainAsync();
 
             Assert.Equal(1, initializer.Created);
             Assert.Same(child, container.Child);
@@ -140,8 +140,8 @@ public class NestedAttachTests
         // Arrange - the drain is parked inside a stop body, which is past BeginDraining and past the
         // liveness clear, so a liveness entry written from here is one nothing ever removes again and
         // the subject is rooted on a dead handler for the rest of that handler's life. Parking on a
-        // stop rather than on DrainGate is what makes that observable: an entry written while the drain
-        // is held at DrainGate is swept up by the clear that follows it, so the damage would heal
+        // stop rather than on DrainTestHook is what makes that observable: an entry written while the drain
+        // is held at DrainTestHook is swept up by the clear that follows it, so the damage would heal
         // itself. Both halves of the container attach have to refuse, the container's own and the
         // child the handler creates while that attach is being dispatched.
         var (host, context, _) = BuildHost(initializerRunsAheadOfTheHostingHandler);
@@ -158,7 +158,7 @@ public class NestedAttachTests
         // container would never reach the handler at all.
         var holder = new ContainerHolder(context);
 
-        using var subjectStop = ((IInterceptorSubject)running).TryGetSubjectTarget()!.HoldAtTransition();
+        using var subjectStop = ((IInterceptorSubject)running).TryGetSubjectSlot()!.HoldAtTransition();
 
         var stopping = host.StopAsync();
         await subjectStop.WaitUntilReachedAsync();
@@ -180,21 +180,21 @@ public class NestedAttachTests
         Assert.False(handler.IsLive(container));
         Assert.False(handler.IsLive(child));
 
-        Assert.Null(((IInterceptorSubject)container).TryGetSubjectTarget()?.Owner);
-        Assert.Null(((IInterceptorSubject)child).TryGetSubjectTarget()?.Owner);
+        Assert.Null(((IInterceptorSubject)container).TryGetSubjectSlot()?.Owner);
+        Assert.Null(((IInterceptorSubject)child).TryGetSubjectSlot()?.Owner);
         Assert.Equal(0, container.StartCount);
         Assert.Equal(0, child.StartCount);
     }
 
     [Fact]
-    public async Task WhenADeferrerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndEveryHoldIsReleased()
+    public async Task WhenAStartupWorkTrackerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndAllStartupWorkEnds()
     {
         // Arrange - the one shape that really does re-enter AttachSubject. The handler calls
-        // DeferCompletion synchronously from inside TryTakeOwnershipAndStart, which is inside the
-        // container's own AttachSubject, so a deferrer that assigns the child raises the child's
+        // TrackStartupWork synchronously from inside TryTakeOwnershipAndStart, which is inside the
+        // container's own AttachSubject, so a tracker that assigns the child raises the child's
         // context attach from there. The child's whole attach, its liveness write, its ownership take
-        // and its appended start, therefore runs before the container has taken its own target.
-        var (host, context, deferrer) = BuildHostWithDeferrer();
+        // and its enqueued start, therefore runs before the container has taken its own slot.
+        var (host, context, tracker) = BuildHostWithStartupWorkTracker();
         await host.StartAsync();
 
         try
@@ -204,7 +204,7 @@ public class NestedAttachTests
             var container = new HostedContainer();
 
             var containerWasOwnedWhenTheChildWasCreated = true;
-            deferrer.OnDefer = () =>
+            tracker.OnTrack = () =>
             {
                 if (container.Child is not null)
                 {
@@ -214,7 +214,7 @@ public class NestedAttachTests
                 // Read before the assignment, so it reports the state the nested attach starts from
                 // rather than anything that attach leaves behind.
                 containerWasOwnedWhenTheChildWasCreated =
-                    ((IInterceptorSubject)container).TryGetSubjectTarget()?.Owner is not null;
+                    ((IInterceptorSubject)container).TryGetSubjectSlot()?.Owner is not null;
 
                 container.Child = new CountingHostedSubject();
             };
@@ -227,22 +227,22 @@ public class NestedAttachTests
             Assert.NotNull(child);
             Assert.False(
                 containerWasOwnedWhenTheChildWasCreated,
-                "The container had already taken its own target, so the child's attach did not run inside the container's.");
+                "The container had already taken its own slot, so the child's attach did not run inside the container's.");
 
-            var containerTarget = ((IInterceptorSubject)container).TryGetSubjectTarget()!;
-            var childTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
-            await containerTarget.DrainAsync();
-            await childTarget.DrainAsync();
+            var containerSlot = ((IInterceptorSubject)container).TryGetSubjectSlot()!;
+            var childSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
+            await containerSlot.DrainAsync();
+            await childSlot.DrainAsync();
 
             Assert.Equal(1, container.StartCount);
             Assert.Equal(1, child.StartCount);
-            Assert.Same(handler, containerTarget.Owner);
-            Assert.Same(handler, childTarget.Owner);
+            Assert.Same(handler, containerSlot.Owner);
+            Assert.Same(handler, childSlot.Owner);
 
-            // The counted holds are what let a nested attach take its own while the outer one is still
-            // outstanding, and the inner one has to be released as reliably as the outer.
-            Assert.Equal(2, deferrer.Taken);
-            Assert.Equal(0, deferrer.Outstanding);
+            // Counted startup work is what lets a nested attach begin its own while the outer one's is
+            // still outstanding, and the inner one has to end as reliably as the outer.
+            Assert.Equal(2, tracker.Taken);
+            Assert.Equal(0, tracker.Outstanding);
         }
         finally
         {
@@ -253,14 +253,14 @@ public class NestedAttachTests
     [Fact]
     public async Task WhenTheDrainBeginsWhileANestedAttachHoldsTheOuterOne_ThenNeitherSubjectStaysLiveOnTheDrainingHandler()
     {
-        // Arrange - the interleaving the outer attach cannot see for itself: it read a running gate on
+        // Arrange - the interleaving the outer attach cannot see for itself: it read an open gate on
         // entry, wrote its liveness entry, and the drain begins while the nested attach it triggered is
         // still on the stack. Both calls then have to notice on the way out, or a subject that never
-        // starts is left rooted on a handler that is about to die. The deferrer is the seam, because it
+        // starts is left rooted on a handler that is about to die. The tracker is the seam, because it
         // is the one piece of user code the attach path runs between the liveness write and the re-read
-        // that follows the takes: the first hold creates the child, and the hold the nested attach takes
-        // for that child starts the drain and waits for it to reach DrainGate.
-        var (host, context, deferrer) = BuildHostWithDeferrer();
+        // that follows the takes: the first call to the tracker creates the child, and the call the
+        // nested attach makes for that child starts the drain and waits for it to reach DrainTestHook.
+        var (host, context, tracker) = BuildHostWithStartupWorkTracker();
         await host.StartAsync();
 
         var handler = context.TryGetService<HostedServiceHandler>()!;
@@ -270,7 +270,7 @@ public class NestedAttachTests
         var container = new HostedContainer();
 
         Task? stopping = null;
-        deferrer.OnDefer = () =>
+        tracker.OnTrack = () =>
         {
             if (container.Child is null)
             {
@@ -288,7 +288,7 @@ public class NestedAttachTests
         // Act
         holder.Container = container;
 
-        // Assert - read while the drain is still held at DrainGate, which is ahead of the liveness
+        // Assert - read while the drain is still held at DrainTestHook, which is ahead of the liveness
         // clear, so an entry either call left behind is still there to be seen. Once the drain is let
         // go the clear removes both for an unrelated reason and the window is unobservable.
         var child = container.Child;
@@ -297,15 +297,15 @@ public class NestedAttachTests
         Assert.False(handler.IsLive(container));
         Assert.False(handler.IsLive(child));
 
-        Assert.Null(((IInterceptorSubject)container).TryGetSubjectTarget()!.Owner);
-        Assert.Null(((IInterceptorSubject)child).TryGetSubjectTarget()!.Owner);
+        Assert.Null(((IInterceptorSubject)container).TryGetSubjectSlot()!.Owner);
+        Assert.Null(((IInterceptorSubject)child).TryGetSubjectSlot()!.Owner);
 
         drain.Release();
         await stopping!;
 
         Assert.Equal(0, container.StartCount);
         Assert.Equal(0, child.StartCount);
-        Assert.Equal(0, deferrer.Outstanding);
+        Assert.Equal(0, tracker.Outstanding);
     }
 
     /// <summary>
@@ -337,15 +337,15 @@ public class NestedAttachTests
         return (builder.Build(), context, initializer);
     }
 
-    private static (IHost Host, IInterceptorSubjectContext Context, CallbackStartupDeferrer Deferrer)
-        BuildHostWithDeferrer()
+    private static (IHost Host, IInterceptorSubjectContext Context, CallbackStartupWorkTracker Tracker)
+        BuildHostWithStartupWorkTracker()
     {
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
-        var deferrer = new CallbackStartupDeferrer();
-        context.AddService<IStartupCompletionDeferrer>(deferrer);
+        var tracker = new CallbackStartupWorkTracker();
+        context.AddService<IStartupWorkTracker>(tracker);
 
-        return (builder.Build(), context, deferrer);
+        return (builder.Build(), context, tracker);
     }
 }

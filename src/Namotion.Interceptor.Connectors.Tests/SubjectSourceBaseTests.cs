@@ -2143,7 +2143,7 @@ public class SubjectSourceBaseTests
     {
         monitor.Register(new TestStateSource(new Person(context)));
 
-        var hold = monitor.DeferCompletion();
+        var hold = monitor.TrackStartupWork();
         monitor.CompleteSourceRegistration();
         var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(cancellationToken);
         Assert.False(poisonWait.IsCompleted);

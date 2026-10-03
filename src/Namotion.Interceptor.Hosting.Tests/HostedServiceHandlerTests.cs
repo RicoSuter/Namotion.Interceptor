@@ -36,10 +36,10 @@ public class HostedServiceHandlerTests
             container.First = first;
             await first.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-            // Act - the scope holds the second start until after the detach, which is the shape the
-            // symptom has: one shared liveness entry means detaching either subject clears the other's,
-            // and the start still waiting reads it and declines.
-            using (context.DeferHostedServiceStartup())
+            // Act - the start deferral holds the second start until after the detach, which is the
+            // shape the symptom has: one shared liveness entry means detaching either subject clears
+            // the other's, and the start still waiting reads it and declines.
+            using (context.DeferHostedServiceStarts())
             {
                 container.Second = second;
                 container.First = null;
@@ -101,7 +101,7 @@ public class HostedServiceHandlerTests
             var person = new Person(context);
 
             Action? holdInFactory = null;
-            using var factory = TestGate.ArmBlocking(hold => holdInFactory = hold);
+            using var factory = TestHook.ArmBlocking(hold => holdInFactory = hold);
 
             var attachment = person.AttachHostedService(() =>
             {
@@ -129,9 +129,9 @@ public class HostedServiceHandlerTests
     [Fact]
     public async Task WhenAStartedAttachmentIsDetached_ThenItLeavesTheStartWindowBehind()
     {
-        // Arrange - the start window has to close when the start body leaves it, and a target that is
+        // Arrange - the start window has to close when the start body leaves it, and a slot that is
         // still running hides a window that never closed, because Running outranks Starting. Settling
-        // the target first is what makes the flag observable at all.
+        // the slot first is what makes the flag observable at all.
         await HostingTestHost.RunAsync(async context =>
         {
             var person = new Person(context);
@@ -171,7 +171,7 @@ public class HostedServiceHandlerTests
             stop.Release();
             Assert.True(await detachment);
 
-            // Assert - the detach marked the target before it appended that stop, so both held while it
+            // Assert - the detach marked the slot before it enqueued that stop, so both held while it
             // ran and only one of them is left now.
             Assert.Equal(HostedServiceAttachmentState.Removed, attachment.GetState(out _));
         });
@@ -180,7 +180,7 @@ public class HostedServiceHandlerTests
     [Fact]
     public async Task WhenAnAwaitedAttachFaults_ThenTheAttachmentReportsRemoved()
     {
-        // Arrange - the faulted attach records the fault and marks the target, so both hold at once.
+        // Arrange - the faulted attach records the fault and marks the slot, so both hold at once.
         // The handle is read out of the subject before the attach removes it, which is the only moment
         // it is reachable on this path.
         await HostingTestHost.RunAsync(async context =>
@@ -188,7 +188,7 @@ public class HostedServiceHandlerTests
             var person = new Person(context);
 
             Action? holdInFactory = null;
-            using var factory = TestGate.ArmBlocking(hold => holdInFactory = hold);
+            using var factory = TestHook.ArmBlocking(hold => holdInFactory = hold);
 
             var attaching = person.AttachHostedServiceAsync(
                 () =>
@@ -222,11 +222,11 @@ public class HostedServiceHandlerTests
             var person = new Person();
             parent.Child = person;
 
-            // Act - the scope parks the start body ahead of the guards it re-reads when the scope
-            // closes, and the detach inside it clears the liveness one of them reads, so the body runs
-            // and returns without creating anything.
+            // Act - the start deferral parks the start body ahead of the guards it re-reads when the
+            // deferral closes, and the detach inside it clears the liveness one of them reads, so the
+            // body runs and returns without creating anything.
             IHostedServiceAttachment<TrackedBackgroundService> attachment;
-            using (context.DeferHostedServiceStartup())
+            using (context.DeferHostedServiceStarts())
             {
                 attachment = person.AttachHostedService(() => new TrackedBackgroundService());
                 parent.Child = null;
@@ -360,7 +360,7 @@ public class HostedServiceHandlerTests
             parent.Child = null;
             parent.Child = child;
 
-            // Assert - the empty transition drains what the two graph moves appended. Counting is the
+            // Assert - the empty transition drains what the two graph moves enqueued. Counting is the
             // claim in the name; the attachment being gone is the mechanism.
             await attachment.DrainAsync();
 
@@ -438,13 +438,13 @@ public class HostedServiceHandlerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenAnAttachmentIsDetached_ThenTheHandlerStopsRetainingItsTarget(bool detachIsAwaited)
+    public async Task WhenAnAttachmentIsDetached_ThenTheHandlerStopsRetainingItsSlot(bool detachIsAwaited)
     {
-        // Arrange - the explicit detach stops the target without releasing it, and that is deliberate:
+        // Arrange - the explicit detach stops the slot without releasing it, and that is deliberate:
         // releasing makes a start queued ahead of the detach read Owner as null and refuse, which
-        // leaves the stop no instance to dispose. The record still has to go, or every attach and
-        // detach cycle retains a target and its subject on the handler for the handler's whole life.
-        // One case per overload, because each one retires its own record from its own code.
+        // leaves the stop no instance to dispose. The slot still has to be untracked for the drain, or
+        // every attach and detach cycle retains a slot and its subject on the handler for the handler's
+        // whole life. One case per overload, because each one untracks the slot from its own code.
         await HostingTestHost.RunAsync(async context =>
         {
             var handler = context.TryGetService<HostedServiceHandler>()!;
@@ -453,8 +453,8 @@ public class HostedServiceHandlerTests
             var attachment = person.AttachHostedService(() => instance);
 
             await attachment.DrainAsync();
-            var target = ((IHostedServiceAttachmentTarget)attachment).Target;
-            Assert.True(handler.IsOwned(target));
+            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            Assert.True(handler.IsTrackedForDrain(slot));
 
             // Act
             if (detachIsAwaited)
@@ -469,10 +469,10 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.False(
-                handler.IsOwned(target),
-                "The handler retains the detached target and its subject for the rest of its life.");
+                handler.IsTrackedForDrain(slot),
+                "The handler retains the detached slot and its subject for the rest of its life.");
 
-            Assert.Same(handler, target.Owner);
+            Assert.Same(handler, slot.Owner);
             Assert.True(instance.IsDisposed);
         });
     }
@@ -498,10 +498,10 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenAnAwaitedAttachFaults_ThenTheHandlerStopsRetainingItsTarget()
+    public async Task WhenAnAwaitedAttachFaults_ThenTheHandlerStopsRetainingItsSlot()
     {
         // Arrange - the removal that makes the awaiting overload transactional is also what puts the
-        // target out of reach: no later attach or detach enumerates an attachment that is gone from the
+        // slot out of reach: no later attach or detach enumerates an attachment that is gone from the
         // subject's data, so the ownership this call took has to be undone here or the subject stays
         // rooted on the handler until shutdown. A host that retries failed attaches, which is the
         // connector shape, leaks one subject per failure.
@@ -512,7 +512,7 @@ public class HostedServiceHandlerTests
 
             // Read from inside the factory, which is the last moment the attachment is still published:
             // the overload removes it before it throws, so the caller never sees the handle.
-            HostedServiceTarget? target = null;
+            HostedServiceSlot? slot = null;
 
             // Act
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -520,19 +520,19 @@ public class HostedServiceHandlerTests
                     () =>
                     {
                         var attachment = person.GetHostedServiceAttachments().Single();
-                        target = ((IHostedServiceAttachmentTarget)attachment).Target;
+                        slot = ((IHostedServiceSlotAccess)attachment).Slot;
                         throw new InvalidOperationException("factory failed");
                     },
                     CancellationToken.None));
 
             // Assert
-            Assert.NotNull(target);
+            Assert.NotNull(slot);
             Assert.False(
-                handler.IsOwned(target!),
-                "The handler retains the target of a failed attach, and the attachment it belongs to is "
+                handler.IsTrackedForDrain(slot!),
+                "The handler retains the slot of a failed attach, and the attachment it belongs to is "
                 + "already gone, so nothing reaches it again before shutdown.");
 
-            Assert.Null(target!.Owner);
+            Assert.Null(slot!.Owner);
         });
     }
 
@@ -583,7 +583,7 @@ public class HostedServiceHandlerTests
         {
             // Act
             var subject = new ThrowingHostedSubject(context);
-            await ((IInterceptorSubject)subject).TryGetSubjectTarget()!.DrainAsync();
+            await ((IInterceptorSubject)subject).TryGetSubjectSlot()!.DrainAsync();
 
             // Assert
             Assert.Equal(1, subject.StopCount);
@@ -701,7 +701,7 @@ public class HostedServiceHandlerTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => attachment.Current is { IsStarted: true },
-                message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
+                message: "The drained handler claimed the slot and never released it, so the live handler could not take it.");
         }
         finally
         {
@@ -714,8 +714,8 @@ public class HostedServiceHandlerTests
     {
         // Arrange - WaitForStartAsync is what an activation calls after resolving a subject, and it
         // needs the same guards as the attach paths. The attach happens before the drain, so the
-        // handler really did create, own and start the target: attaching afterwards would leave no
-        // target at all and the call would short circuit before reaching anything under test. A
+        // handler really did create, own and start the slot: attaching afterwards would leave no
+        // slot at all and the call would short circuit before reaching anything under test. A
         // drained handler releases only what its own drain snapshotted, so a claim taken here is
         // never released and the live handler below would lose the compare and exchange forever.
         var (firstHost, firstContext) = await HostingTestHost.StartAsync();
@@ -727,8 +727,8 @@ public class HostedServiceHandlerTests
         ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
         await AsyncTestHelpers.WaitUntilAsync(() => subject.StartCount == 1);
 
-        var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
-        Assert.Same(drainedHandler, target.Owner);
+        var slot = ((IInterceptorSubject)subject).TryGetSubjectSlot()!;
+        Assert.Same(drainedHandler, slot.Owner);
 
         await firstHost.StopAsync();
 
@@ -740,12 +740,12 @@ public class HostedServiceHandlerTests
             // Assert
             Assert.False(started);
             Assert.Equal(1, subject.StartCount);
-            Assert.Null(target.Owner);
+            Assert.Null(slot.Owner);
 
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
             await AsyncTestHelpers.WaitUntilAsync(
                 () => subject.StartCount == 2,
-                message: "The drained handler claimed the target and never released it, so the live handler could not take it.");
+                message: "The drained handler claimed the slot and never released it, so the live handler could not take it.");
         }
         finally
         {
@@ -757,7 +757,7 @@ public class HostedServiceHandlerTests
     public async Task WhenANonOwningHandlerIsAskedToWaitForAStart_ThenItReportsNothingStarted()
     {
         // Arrange - both handlers are live for the subject and both saw the attach, but only the
-        // first owns the target and appended a start. This is the case only the ownership check
+        // first owns the slot and enqueued a start. This is the case only the ownership check
         // rejects: the second handler's activation would otherwise read the owner's running instance
         // as its own start.
         var (firstHost, firstContext) = await HostingTestHost.StartAsync();
@@ -780,7 +780,7 @@ public class HostedServiceHandlerTests
 
             // Assert
             Assert.False(started);
-            Assert.Same(firstHandler, ((IInterceptorSubject)subject).TryGetSubjectTarget()!.Owner);
+            Assert.Same(firstHandler, ((IInterceptorSubject)subject).TryGetSubjectSlot()!.Owner);
             Assert.Equal(1, subject.StartCount);
         }
         finally
@@ -794,7 +794,7 @@ public class HostedServiceHandlerTests
     public async Task WhenAHandlerIsAskedToWaitWhileItsOwnDrainIsStopping_ThenItAnswersWithoutQueueingBehindTheStop()
     {
         // Arrange - the drain clears liveness before it releases ownership, so a subject held inside
-        // its own stop is the one window where the handler still owns the target and only the
+        // its own stop is the one window where the handler still owns the slot and only the
         // liveness check can reject. Without it the call queues an empty transition behind that stop
         // and an activation would block host startup on another host's shutdown.
         var (host, context) = await HostingTestHost.StartAsync();
@@ -812,15 +812,15 @@ public class HostedServiceHandlerTests
 
         try
         {
-            var target = ((IInterceptorSubject)subject).TryGetSubjectTarget()!;
-            Assert.Same(handler, target.Owner);
+            var slot = ((IInterceptorSubject)subject).TryGetSubjectSlot()!;
+            Assert.Same(handler, slot.Owner);
             Assert.False(handler.IsLive(subject));
 
             // Act
             var wait = handler.WaitForStartAsync(subject, CancellationToken.None);
 
             // Assert - the guard answers before the first await, so the task is already complete. An
-            // empty transition could not be: the stop ahead of it on the chain is still held.
+            // empty transition could not be: the stop ahead of it on the queue is still held.
             Assert.True(wait.IsCompleted, "The call queued behind the in flight stop instead of answering that it has no start.");
             Assert.False(await wait);
         }
@@ -917,11 +917,11 @@ public class HostedServiceHandlerTests
         var entriesBefore = subject.Data.Count;
 
         // Act
-        var target = subject.TryGetSubjectTarget();
+        var slot = subject.TryGetSubjectSlot();
         var attachments = subject.GetHostedServiceAttachments();
 
         // Assert
-        Assert.Null(target);
+        Assert.Null(slot);
         Assert.Empty(attachments);
         Assert.Equal(entriesBefore, subject.Data.Count);
     }
@@ -959,17 +959,17 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public void WhenASubjectTargetAlreadyExists_ThenReadingItAllocatesNothing()
+    public void WhenASubjectSlotAlreadyExists_ThenReadingItAllocatesNothing()
     {
-        // Arrange - a re-attach of a hosted subject reaches this, and building the target and its
-        // chain lock before the lookup throws both away every time.
+        // Arrange - a re-attach of a hosted subject reaches this, and building the slot and its
+        // queue lock before the lookup throws both away every time.
         var subject = (IInterceptorSubject)new CountingHostedSubject();
         var hostedService = (IHostedService)subject;
-        var first = hostedService.GetOrAddSubjectTarget();
+        var first = hostedService.GetOrAddSubjectSlot();
 
         for (var i = 0; i < 100; i++)
         {
-            hostedService.GetOrAddSubjectTarget();
+            hostedService.GetOrAddSubjectSlot();
         }
 
         // Act
@@ -977,7 +977,7 @@ public class HostedServiceHandlerTests
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 1000; i++)
         {
-            if (ReferenceEquals(first, hostedService.GetOrAddSubjectTarget()))
+            if (ReferenceEquals(first, hostedService.GetOrAddSubjectSlot()))
             {
                 same++;
             }
@@ -1026,14 +1026,14 @@ public class HostedServiceHandlerTests
             // Act
             firstParent.Child = null;
 
-            // Assert - the empty transitions drain what the detach appended to each chain.
-            var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
-            var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
-            await subjectTarget.DrainAsync();
-            await attachmentTarget.DrainAsync();
+            // Assert - the empty transitions drain what the detach enqueued on each queue.
+            var subjectSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
+            var attachmentSlot = ((IHostedServiceSlotAccess)attachment).Slot;
+            await subjectSlot.DrainAsync();
+            await attachmentSlot.DrainAsync();
 
             Assert.Equal(1, child.StopCount);
-            Assert.NotNull(subjectTarget.Current);
+            Assert.NotNull(subjectSlot.Current);
             Assert.NotNull(attachment.Current);
 
             var instances = created.ToArray();
@@ -1050,7 +1050,7 @@ public class HostedServiceHandlerTests
     public async Task WhenANonOwningHandlerSeesAContextDetach_ThenTheOwnersInstanceKeepsRunning()
     {
         // Arrange - the same rule with both handlers live. The second handler loses the compare and
-        // exchange on every target, so it started nothing and has nothing to stop.
+        // exchange on every slot, so it started nothing and has nothing to stop.
         var (firstHost, firstContext) = await HostingTestHost.StartAsync();
         var (secondHost, secondContext) = await HostingTestHost.StartAsync();
 
@@ -1071,13 +1071,13 @@ public class HostedServiceHandlerTests
             secondParent.Child = null;
 
             // Assert
-            var subjectTarget = ((IInterceptorSubject)child).TryGetSubjectTarget()!;
-            var attachmentTarget = ((IHostedServiceAttachmentTarget)attachment).Target;
-            await subjectTarget.DrainAsync();
-            await attachmentTarget.DrainAsync();
+            var subjectSlot = ((IInterceptorSubject)child).TryGetSubjectSlot()!;
+            var attachmentSlot = ((IHostedServiceSlotAccess)attachment).Slot;
+            await subjectSlot.DrainAsync();
+            await attachmentSlot.DrainAsync();
 
             Assert.Equal(0, child.StopCount);
-            Assert.NotNull(subjectTarget.Current);
+            Assert.NotNull(subjectSlot.Current);
             Assert.NotNull(attachment.Current);
             Assert.False(instance.IsStopped);
             Assert.False(instance.IsDisposed);
@@ -1152,7 +1152,7 @@ public class HostedServiceHandlerTests
     {
         // Arrange - the wrapper shape, and the regression guard for the deadlock the wrappers were
         // migrated away from: a subject that detaches its own attachment from its own unwind waits on
-        // a chain that is waiting on that unwind, and the host recovers only when ShutdownTimeout
+        // a queue that is waiting on that unwind, and the host recovers only when ShutdownTimeout
         // expires, so the elapsed time is what tells the two apart.
         var builder = HostingTestHost.CreateBuilder();
         builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = ShutdownTimeout);
@@ -1230,7 +1230,7 @@ public class HostedServiceHandlerTests
         // Arrange - the attachment's stop waits for the subject's stop, and a subject whose start
         // never ran has nothing to stop, so the early return in that stop is an ordinary case rather
         // than an edge one. Its signal has to be set from a finally: set after the body instead, the
-        // attachment stop parks on it forever and wedges that chain against every later append. The
+        // attachment stop parks on it forever and wedges that queue against every later enqueue. The
         // host is built but not started, so the startup gate holds both starts at a known point and
         // the graph moves below provably overtake them.
         var builder = HostingTestHost.CreateBuilder();
@@ -1320,7 +1320,7 @@ public class HostedServiceHandlerTests
                 .DetachHostedServiceAsync(attachment, CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(10));
 
-            // Assert - the stop is queued behind the start the attach appended, so both have run.
+            // Assert - the stop is queued behind the start the attach enqueued, so both have run.
             Assert.True(detached);
             Assert.True(instance.IsDisposed);
         }
@@ -1344,8 +1344,8 @@ public class HostedServiceHandlerTests
             parent.Child = child;
 
             // The fast path, and the whole reason a graph of subjects that host nothing costs nothing
-            // to attach. Every reader of liveness holds a target when it reads, so a subject with no
-            // target has no reader and needs no entry.
+            // to attach. Every reader of liveness holds a slot when it reads, so a subject with no
+            // slot has no reader and needs no entry.
             Assert.False(handler.IsLive(parent));
             Assert.False(handler.IsLive(child));
 
@@ -1364,7 +1364,7 @@ public class HostedServiceHandlerTests
     public async Task WhenASubjectLostItsLastAttachmentBeforeLeavingTheGraph_ThenALaterAttachmentStartsNothing()
     {
         // Arrange - the subject loses its last attachment while still in the graph, then leaves it.
-        // Detaching an attachment clears no liveness, because a start already appended re-reads it, so
+        // Detaching an attachment clears no liveness, because a start already enqueued re-reads it, so
         // only the context detach can end the entry. That detach's fast path turns on whether the
         // subject has ever hosted anything rather than on whether it hosts anything now, which is what
         // makes it run the clear here. The subject is constructed with the context so its own context
@@ -1522,20 +1522,20 @@ public class HostedServiceHandlerTests
         });
 
         var second = child.AttachHostedService(() => new TrackedBackgroundService());
-        var firstTarget = ((IHostedServiceAttachmentTarget)first).Target;
+        var firstSlot = ((IHostedServiceSlotAccess)first).Slot;
 
-        // The context detach releases both targets, the explicit detach then keeps the re-attach from
+        // The context detach releases both slots, the explicit detach then keeps the re-attach from
         // retaking the first one, and the re-attach writes liveness again for the second.
         parent.Child = null;
         child.DetachHostedService(first);
         parent.Child = child;
 
         // The premise the parked body meets, asserted so it fails loudly if the mechanism moves: the
-        // subject is live again because the re-attach retook the second target, and this handler no
+        // subject is live again because the re-attach retook the second slot, and this handler no
         // longer owns the first, so liveness lets the body through and only ownership refuses it.
         Assert.True(handler.IsLive(child));
-        Assert.Same(handler, ((IHostedServiceAttachmentTarget)second).Target.Owner);
-        Assert.Null(firstTarget.Owner);
+        Assert.Same(handler, ((IHostedServiceSlotAccess)second).Slot.Owner);
+        Assert.Null(firstSlot.Owner);
 
         // Act - opening the startup gate releases the parked body into its guard.
         await host.StartAsync();
@@ -1615,7 +1615,7 @@ public class HostedServiceHandlerTests
                 Volatile.Write(ref moveFinished, 1);
             });
 
-            handler.LivenessWriteGate = () =>
+            handler.LivenessWriteTestHook = () =>
             {
                 Volatile.Write(ref release, 1);
                 SpinWait.SpinUntil(() => Volatile.Read(ref moverEntered) == 1, TimeSpan.FromSeconds(30));
@@ -1662,7 +1662,7 @@ public class HostedServiceHandlerTests
     public async Task WhenAnAttachmentIsAddedAfterTheDrainClearedLiveness_ThenTheSubjectIsNotLeftLive()
     {
         // Arrange - the drain window MarkLiveIfAttached's own gate reads exist for, and the only one
-        // that reaches them. Attaching while the drain is parked at DrainGate heals itself, because
+        // that reaches them. Attaching while the drain is parked at DrainTestHook heals itself, because
         // the clear still follows; this parks the drain inside a stop body instead, past
         // StopAsync's _liveSubjects.Clear(), so an entry written here is one nothing ever removes and
         // it roots the subject on a dead handler for the life of the process.
@@ -1731,22 +1731,22 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenTakingAStartupHoldThrows_ThenTheAttachStillStartsAndTheOtherHoldsAreReleased()
+    public async Task WhenBeginningStartupWorkThrows_ThenTheAttachStillStartsAndTheOtherStartupWorkEnds()
     {
-        // Arrange - taking the holds is third party code on the attach path, and the attach runs inside
-        // a property write, so an exception escaping it surfaces at an unrelated assignment. The
-        // throwing deferrer sits between two working ones, so the guard has to do both halves: keep
-        // the hold already taken before it, and go on to take the one after it. Either failure leaves
-        // a host that never finishes starting.
+        // Arrange - beginning startup work is third party code on the attach path, and the attach runs
+        // inside a property write, so an exception escaping it surfaces at an unrelated assignment. The
+        // throwing tracker sits between two working ones, so the guard has to do both halves: keep the
+        // startup work already tracked before it, and go on to track it on the one after it. Either
+        // failure leaves a host that never finishes starting.
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
-        var throwing = new ThrowingStartupDeferrer { ThrowOnDefer = true };
-        var before = new CallbackStartupDeferrer();
-        var working = new CallbackStartupDeferrer();
-        context.AddService<IStartupCompletionDeferrer>(before);
-        context.AddService<IStartupCompletionDeferrer>(throwing);
-        context.AddService<IStartupCompletionDeferrer>(working);
+        var throwing = new ThrowingStartupWorkTracker { ThrowOnTrack = true };
+        var before = new CallbackStartupWorkTracker();
+        var working = new CallbackStartupWorkTracker();
+        context.AddService<IStartupWorkTracker>(before);
+        context.AddService<IStartupWorkTracker>(throwing);
+        context.AddService<IStartupWorkTracker>(working);
 
         var host = builder.Build();
         await host.StartAsync();
@@ -1779,19 +1779,19 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenReleasingAStartupHoldThrows_ThenTheOtherHoldsAreStillReleased()
+    public async Task WhenEndingStartupWorkThrows_ThenTheOtherStartupWorkStillEnds()
     {
-        // Arrange - the release runs in a finally on the transition thread, so an exception there
-        // faults the transition rather than any caller, and the holds behind it are never released:
-        // the host then waits on a completion that never comes. The throwing one is registered first
-        // so the working one is the one that would be stranded.
+        // Arrange - ending startup work runs in a finally on the transition thread, so an exception
+        // there faults the transition rather than any caller, and the startup work behind it never
+        // ends: the host then waits on a completion that never comes. The throwing one is registered
+        // first so the working one is the one that would be stranded.
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
-        var throwing = new ThrowingStartupDeferrer { ThrowOnRelease = true };
-        var working = new CallbackStartupDeferrer();
-        context.AddService<IStartupCompletionDeferrer>(throwing);
-        context.AddService<IStartupCompletionDeferrer>(working);
+        var throwing = new ThrowingStartupWorkTracker { ThrowOnRelease = true };
+        var working = new CallbackStartupWorkTracker();
+        context.AddService<IStartupWorkTracker>(throwing);
+        context.AddService<IStartupWorkTracker>(working);
 
         var host = builder.Build();
         await host.StartAsync();

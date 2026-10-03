@@ -12,7 +12,7 @@ public static class LuxtronikServiceCollectionExtensions
     /// <summary>
     /// Registers a <see cref="LuxtronikHeatPump"/> and runs it, as
     /// <see cref="SubjectServiceCollectionExtensions.AddSubject{T}"/> does: without
-    /// <paramref name="contextResolver"/> in a context of its own, with it in the resolved context,
+    /// <paramref name="contextResolver"/> in a private context, with it in the resolved context,
     /// which must have hosting and the registry.
     /// </summary>
     public static IServiceCollection AddLuxtronikHeatPump(

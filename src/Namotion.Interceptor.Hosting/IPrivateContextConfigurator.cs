@@ -1,11 +1,11 @@
 namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
-/// Adds what a subject needs to the context it runs in when it runs in a context of its own, through
+/// Adds what a subject needs to the context it runs in when it runs in a private context, through
 /// <c>AddSubject</c> or <c>AddKeyedSubject</c> without a context resolver. Never called for a shared
 /// context: whoever owns it decides what it contains.
 /// </summary>
-public interface ISubjectContextConfigurator
+public interface IPrivateContextConfigurator
 {
     /// <summary>
     /// Called once per such context, after the subject is constructed and configured and before it

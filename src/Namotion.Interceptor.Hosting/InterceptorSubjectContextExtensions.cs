@@ -8,12 +8,12 @@ namespace Namotion.Interceptor.Hosting;
 public static class InterceptorSubjectContextExtensions
 {
     /// <summary>
-    /// Defers hosted-service starts attached in the current execution flow until the scope and its
-    /// enclosing scopes are disposed.
+    /// Defers hosted-service starts attached in the current execution flow until the returned deferral
+    /// and its enclosing deferrals are disposed.
     /// Returns null when hosted services are not configured on this context.
     /// </summary>
-    public static HostedServiceStartupScope? DeferHostedServiceStartup(this IInterceptorSubjectContext context)
-        => context.TryGetService<HostedServiceHandler>()?.DeferStartup();
+    public static HostedServiceStartDeferral? DeferHostedServiceStarts(this IInterceptorSubjectContext context)
+        => context.TryGetService<HostedServiceHandler>()?.DeferStarts();
 
     public static IInterceptorSubjectContext WithHostedServices(this IInterceptorSubjectContext context, IServiceCollection serviceCollection)
     {

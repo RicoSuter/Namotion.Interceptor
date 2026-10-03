@@ -11,14 +11,14 @@ namespace Namotion.Interceptor.Hosting.Tests.Models;
 /// recording each call and whether it was already in a graph with lifecycle when the call came.
 /// </summary>
 [InterceptorSubject]
-public partial class ContextConfiguratorHostedSubject : IHostedService, ISubjectContextConfigurator
+public partial class ContextConfiguratorHostedSubject : IHostedService, IPrivateContextConfigurator
 {
     private int _configureContextCount;
     private int _startCount;
 
     public partial string? Name { get; set; }
 
-    /// <summary>Whether <see cref="ISubjectContextConfigurator.ConfigureContext"/> adds hosting, which it must not.</summary>
+    /// <summary>Whether <see cref="IPrivateContextConfigurator.ConfigureContext"/> adds hosting, which it must not.</summary>
     public bool AddsHosting { get; set; }
 
     public int ConfigureContextCount => Volatile.Read(ref _configureContextCount);
@@ -36,7 +36,7 @@ public partial class ContextConfiguratorHostedSubject : IHostedService, ISubject
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    void ISubjectContextConfigurator.ConfigureContext(IInterceptorSubjectContext context)
+    void IPrivateContextConfigurator.ConfigureContext(IInterceptorSubjectContext context)
     {
         Interlocked.Increment(ref _configureContextCount);
         WasAttachedWhenContextWasConfigured = ((IInterceptorSubject)this).Context.TryGetService<LifecycleInterceptor>() is not null;

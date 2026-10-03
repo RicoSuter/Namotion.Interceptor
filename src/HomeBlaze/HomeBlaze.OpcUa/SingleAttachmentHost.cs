@@ -142,12 +142,12 @@ internal sealed class SingleAttachmentHost<TService>
     /// <summary>
     /// Issues the start the wrapper wants on startup. Called from the wrapper's own StartAsync ahead of
     /// the base call, which only schedules the run loop, so the attach is issued inside the wrapper's
-    /// start and the attachment's startup hold is taken before the wrapper's own is released.
+    /// start and the attachment's startup work begins before the wrapper's own ends.
     /// </summary>
     /// <remarks>
     /// Not awaited there, so a start that has to wait for the gate or for
     /// <see cref="IAttachmentOwner{TService}.WaitUntilStartableAsync"/> cannot hold up the wrapper's start.
-    /// Such a start takes its hold only once it gets past that wait.
+    /// Such a start begins its startup work only once it gets past that wait.
     /// </remarks>
     public void BeginRun()
     {
@@ -259,12 +259,12 @@ internal sealed class SingleAttachmentHost<TService>
                 // only record of the attachment and the transition runs to completion whatever the
                 // token does, so a cancelled wait strands a live attachment with nothing pointing at
                 // it and lets the next start attach a second instance. Bounded: the instance is a
-                // BackgroundService whose StartAsync returns at its first await, and a start appended
+                // BackgroundService whose StartAsync returns at its first await, and a start enqueued
                 // during shutdown returns without creating anything.
                 var attachment = await _owner.AttachHostedServiceAsync(_owner.CreateInstance, CancellationToken.None);
                 if (attachment.Current is null && attachment.Fault is null)
                 {
-                    // No instance and no fault: the awaited overload appended nothing, because there is
+                    // No instance and no fault: the awaited overload enqueued nothing, because there is
                     // no handler, the subject is outside the graph or the host is draining, or a context
                     // detach queued behind the start has already stopped it. A start that faulted throws
                     // instead. Nothing starts before a context re-attach, so the attachment is dropped
@@ -404,7 +404,7 @@ internal sealed class SingleAttachmentHost<TService>
 
     /// <summary>
     /// Reconciles the reported status and the diagnostics with what the attachment actually holds. The
-    /// handler creates, faults and disposes the instance on its own chain, so polling the handle is the
+    /// handler creates, faults and disposes the instance on its own queue, so polling the handle is the
     /// only way those outcomes reach the UI. Must be called with <see cref="_attachmentGate"/> held.
     /// </summary>
     private void UpdateFromAttachment(int generation)

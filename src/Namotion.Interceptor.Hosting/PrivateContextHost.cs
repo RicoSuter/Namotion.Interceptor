@@ -6,12 +6,12 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
-/// Runs one subject in a context of its own, with property tracking, lifecycle, a hosting handler
-/// nothing else shares and whatever <see cref="ISubjectContextConfigurator.ConfigureContext"/> adds.
+/// Runs one subject in a private context, with property tracking, lifecycle, a hosting handler
+/// nothing else shares and whatever <see cref="IPrivateContextConfigurator.ConfigureContext"/> adds.
 /// Stopping or disposing it stops and disposes what it started and detaches the subject from the
 /// private context, so the subject and its children are plain data again.
 /// </summary>
-internal sealed class SubjectHost : IAsyncDisposable
+internal sealed class PrivateContextHost : IAsyncDisposable
 {
     private readonly HostedServiceHandler _handler = new();
     private readonly ILogger? _logger;
@@ -20,7 +20,7 @@ internal sealed class SubjectHost : IAsyncDisposable
     private IInterceptorSubjectContext? _context;
     private TaskCompletionSource? _stop;
 
-    internal SubjectHost(IServiceProvider serviceProvider)
+    internal PrivateContextHost(IServiceProvider serviceProvider)
     {
         _logger = serviceProvider.GetService(typeof(ILogger<HostedServiceHandler>)) as ILogger;
         if (_logger is not null)
@@ -45,8 +45,8 @@ internal sealed class SubjectHost : IAsyncDisposable
                 Attach(subjectToAttach);
             }
 
-            var subject = _subject ?? throw new InvalidOperationException("No subject is attached to the subject host.");
-            _handler.EnsureStarted();
+            var subject = _subject ?? throw new InvalidOperationException("No subject is attached to the private context host.");
+            _handler.OpenGate();
 
             if (subject is IHostedService)
             {
@@ -66,7 +66,7 @@ internal sealed class SubjectHost : IAsyncDisposable
             catch (Exception teardownException)
             {
                 // Reported rather than thrown: the start's exception is the one the caller acts on.
-                _logger?.LogError(teardownException, "Stopping the subject host after a failed start threw.");
+                _logger?.LogError(teardownException, "Stopping the private context host after a failed start threw.");
             }
 
             throw;
@@ -99,11 +99,11 @@ internal sealed class SubjectHost : IAsyncDisposable
             .Create()
             .WithFullPropertyTracking();
 
-        (subject as ISubjectContextConfigurator)?.ConfigureContext(context);
+        (subject as IPrivateContextConfigurator)?.ConfigureContext(context);
         if (context.TryGetService<HostedServiceHandler>() is not null)
         {
             throw new InvalidOperationException(
-                $"{nameof(ISubjectContextConfigurator.ConfigureContext)} of {subject} added hosting to the context it runs in alone, which already gets its own.");
+                $"{nameof(IPrivateContextConfigurator.ConfigureContext)} of {subject} added hosting to the context it runs in alone, which already gets its own.");
         }
 
         context.AddService(_handler);

@@ -84,23 +84,23 @@ public class OpcUaClientTests
     public async Task WhenAnEnabledClientEntersTheGraph_ThenTheSourceHoldIsTakenBeforeTheClientHoldIsReleased()
     {
         // Arrange
-        var holds = new StartupHoldRecorder();
+        var startupWork = new StartupWorkRecorder();
         await using var testHost = await OpcUaTestHost.StartAsync(
-            context => context.AddService<IStartupCompletionDeferrer>(holds));
+            context => context.AddService<IStartupWorkTracker>(startupWork));
         var client = testHost.CreateClient();
 
         // Act
         testHost.Container.Client = client;
         await OpcUaTestHost.WaitForRunningClientAsync(client);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => holds.Outstanding == 0,
-            message: "A startup hold was never released.");
+            () => startupWork.Outstanding == 0,
+            message: "Some startup work never ended.");
 
         // Assert
-        // The client's own hold and its source's. Settling in between is a startup completion wait
+        // The client's own startup work and its source's. Settling in between is a startup completion wait
         // passing while the source it waits for has not been attached yet.
-        Assert.Equal(2, holds.Taken);
-        Assert.Equal(2, holds.TakenWhenFirstSettled);
+        Assert.Equal(2, startupWork.Taken);
+        Assert.Equal(2, startupWork.TakenWhenFirstSettled);
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public class OpcUaClientTests
         await AsyncTestHelpers.WaitUntilAsync(() => attachment.Current is null);
 
         // The factory publishes Root before the handler publishes Current, and the two run on different
-        // chains, so the window between them is the wrapper's own state being briefly inconsistent.
+        // queues, so the window between them is the wrapper's own state being briefly inconsistent.
         // Holding the factory there is what makes the reconciliation land inside it every run.
         using var rootWritten = new ManualResetEventSlim();
         using var releaseFactory = new ManualResetEventSlim();
@@ -820,7 +820,7 @@ public class OpcUaClientTests
             () => client.ExecuteTask is not null,
             message: "The handler did not start the client.");
 
-        // The factory runs on the attachment's chain and the unwind on the subject's, so holding the
+        // The factory runs on the attachment's queue and the unwind on the subject's, so holding the
         // factory keeps the start inside its attach, with the gate held, while the unwind reports
         // Stopped. Failing it on release makes the attach rethrow into the start's catch.
         using var rootWritten = new ManualResetEventSlim();

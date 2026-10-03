@@ -48,7 +48,7 @@ Starts and stops queued before the host starts run once it does, or once an [awa
 | You have | Use |
 |---|---|
 | A subject with no constructor dependencies, and you want the instance during configuration | Construct it and register the instance |
-| A subject whose constructor dependencies only exist after `builder.Build()`, or a subject that should run from dependency injection, in a context of its own by default | `services.AddSubject<T>()` |
+| A subject whose constructor dependencies only exist after `builder.Build()`, or a subject that should run from dependency injection, in a private context by default | `services.AddSubject<T>()` |
 | A service that should run for as long as a subject is in the graph | Factory attachment |
 | A subject whose own purpose is a background loop | Let the subject implement `BackgroundService` |
 
@@ -88,14 +88,14 @@ builder.Services.AddSubject<WeatherStation>(station =>
 
 It registers `T` as a singleton, forces its construction at host start and runs it: a subject that implements `IHostedService` is started, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. A plain subject is only constructed and attached. Where the subject runs depends on `contextResolver`:
 
-- **Without a resolver** it runs in a context of its own, with property tracking, lifecycle, hosting and whatever the subject adds with [`ISubjectContextConfigurator`](#configuring-a-context-of-its-own), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
+- **Without a resolver** it runs in a private context, with property tracking, lifecycle, hosting and whatever the subject adds with [`IPrivateContextConfigurator`](#configuring-a-private-context), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
 - **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject is a hosted service.
 
-A subject in a context of its own belongs to that context alone. Do not place it in another tracked or hosting graph, for example by assigning it to a property of a subject in the application's context. The assignment does not throw, but the subject then reaches two lifecycle interceptors and two hosting handlers, so every single-service lookup on it and its children, such as `AttachHostedService`, throws far from the cause. What does throw is an instance that is already in a tracked graph when it joins its own context: for an instance `AddSubject` constructs, that is when it is first resolved, and for one you registered yourself, at host startup. To share the application's context instead, as `AddHostedSubject<T>()` did, pass `contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>()`.
+A subject in a private context belongs to that context alone. Do not place it in another tracked or hosting graph, for example by assigning it to a property of a subject in the application's context. The assignment does not throw, but the subject then reaches two lifecycle interceptors and two hosting handlers, so every single-service lookup on it and its children, such as `AttachHostedService`, throws far from the cause. What does throw is an instance that is already in a tracked graph when it joins its private context: for an instance `AddSubject` constructs, that is when it is first resolved, and for one you registered yourself, at host startup. To share the application's context instead, as `AddHostedSubject<T>()` did, pass `contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>()`.
 
 Either way the context is applied after construction whether or not `T` declares a constructor taking an `IInterceptorSubjectContext`, so a subject with only injected dependencies is attached just the same.
 
-`AddKeyedSubject<T>(key)` registers one of several instances of a type as a keyed singleton, with the same two modes. Without a resolver each key runs in a context of its own:
+`AddKeyedSubject<T>(key)` registers one of several instances of a type as a keyed singleton, with the same two modes. Without a resolver each key runs in a private context:
 
 ```csharp
 builder.Services.AddKeyedSubject<WeatherStation>("roof", station => station.PollingInterval = TimeSpan.FromSeconds(5));
@@ -105,16 +105,16 @@ builder.Services.AddKeyedSubject<WeatherStation>("garden");
 Two sharp edges:
 
 - One registration per type, or per type and key. A second registration of the same `T` and key throws, because its `configure` and `contextResolver` could not take effect.
-- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. Otherwise, without a resolver, it runs in a context of its own when it is in no graph, and host startup throws when it is in a tracked graph. With a resolver, host startup throws when it is a hosted service and leaves a plain subject alone.
+- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. Otherwise, without a resolver, it runs in a private context when it is in no graph, and host startup throws when it is in a tracked graph. With a resolver, host startup throws when it is a hosted service and leaves a plain subject alone.
 
-`configure` always runs before the attach `AddSubject` performs, so the subject is fully configured before anything can start it. Without a resolver the subject is constructed and configured before it joins any context, so on every constructor shape the assignments in `configure` are not intercepted and not tracked. With a resolver, construction and `configure` both run inside a [startup scope](#configuration-before-startup) on the resolved context, and what differs between the shapes is whether those assignments are intercepted:
+`configure` always runs before the attach `AddSubject` performs, so the subject is fully configured before anything can start it. Without a resolver the subject is constructed and configured before it joins any context, so on every constructor shape the assignments in `configure` are not intercepted and not tracked. With a resolver, construction and `configure` both run inside a [start deferral](#configuration-before-startup) on the resolved context, and what differs between the shapes is whether those assignments are intercepted:
 
 - **`T` has no constructor taking a context**, or it declares the documented `MySubject(IInterceptorSubjectContext? context = null)` parameter and never attaches with it. Nothing is attached while `configure` runs, so its assignments are not intercepted and not tracked.
 - **Construction attaches the subject**, which is what the generated context constructor does. `configure` runs against an attached subject, so its assignments are intercepted and tracked.
 
-#### Configuring a context of its own
+#### Configuring a private context
 
-A subject that needs more in the context it runs in alone, for example the registry, implements `ISubjectContextConfigurator`. Its `ConfigureContext` runs once per such context, after the subject is constructed and configured and before it joins the context, which already has property tracking and lifecycle and gets hosting afterwards, so the implementation must not add hosting. It is never called for a shared context: whoever owns that context decides what it contains.
+A subject that needs more in the context it runs in alone, for example the registry, implements `IPrivateContextConfigurator`. Its `ConfigureContext` runs once per such context, after the subject is constructed and configured and before it joins the context, which already has property tracking and lifecycle and gets hosting afterwards, so the implementation must not add hosting. It is never called for a shared context: whoever owns that context decides what it contains.
 
 #### What it costs at host startup
 
@@ -128,7 +128,7 @@ builder.Services.Configure<HostOptions>(options => options.ServicesStartConcurre
 
 `AddSubject<T>()` deliberately does not set this for you. The option is host wide, so it changes the startup of every hosted service in the application, including ones registered by libraries that know nothing about this package, and that decision belongs to whoever owns the host.
 
-Subjects that reach the graph as part of an object tree do not pay this cost at all. Their starts are queued on independent chains and run concurrently, so 50 subjects attached together cost about as much as one.
+Subjects that reach the graph as part of an object tree do not pay this cost at all. Their starts are queued independently, one queue per service, and run concurrently, so 50 subjects attached together cost about as much as one.
 
 ### A service bound to a subject
 
@@ -214,7 +214,7 @@ The handle carries the state of the attachment:
 
 - `Current` is the running instance, or null when nothing is running: before the first start, after a stop, and after a start that failed. The awaiting overload can return this way too, with no fault, when there was no start to wait for: no handler on the context, the subject not in the graph, the attachment already detached, or the host shutting down.
 - `Fault` is the exception from the last failed transition, or null. Only a start clears it, and only once it has got past its own guards, so that a start skipped by a shutdown does not drop a fault nobody has read yet. A stop never clears it. A start that failed followed by a clean stop therefore leaves `Fault` set with `Current` null, which is the shape of "this should be running and is not". An execution fault ends in the same shape: a `BackgroundService` whose `ExecuteAsync` faults after its `StartAsync` returned has the fault recorded, is stopped and, when the handler created it, disposed. An `OperationCanceledException` escaping `ExecuteAsync` that no stop caused, such as an `HttpClient` timeout, counts as a fault too, because the service is just as dead. `BackgroundService.StartAsync` schedules the execution and returns at once, so an `ExecuteAsync` that throws before its first await is such a run fault rather than a failed start, and an awaited attach returns the running attachment, which settles to `Faulted` afterwards. That holds unless the service's `StartAsync` runs `ExecuteAsync` inline, as `SubjectConnectorBase` does: the part before the first await is then part of the start, so a throw there is a start fault, and an awaited attach throws and removes the attachment. An execution that runs to completion is not a fault and leaves the attachment `Running`.
-- `GetState(out var current)` says what the attachment is doing, and hands back the instance that reading was derived from. The state is what tells apart the situations a null `Current` covers: `Stopped` (nothing is running), `Starting` (the handler is creating and starting an instance), `Running`, `Stopping` (the instance has left `Current` and is still stopping or being disposed), `Removed` (detached, or an awaited attach faulted, so no start appended after that point is accepted) and `Faulted` (the last attempt failed, and the next one may still succeed). `Stopped` against `Removed` is the distinction to act on: recoverable against terminal. The state is not exposed on its own, so that a caller cannot pair a state with an instance read a moment apart from it. Neither member is a promise about the next start, and no state is the state of a declined one. A start the handler declined, whether because the host is shutting down, because the subject is no longer in the graph, because ownership has moved on or because the target already holds an instance, leaves the attachment reading exactly what it read before, because every one of those refusals returns before the start clears the fault. A start already queued when a detach marked the attachment still runs and is then stopped, so `Removed` can be followed by a brief `Starting`, `Running` and `Stopping` before it settles back.
+- `GetState(out var current)` says what the attachment is doing, and hands back the instance that reading was derived from. The state is what tells apart the situations a null `Current` covers: `Stopped` (nothing is running), `Starting` (the handler is creating and starting an instance), `Running`, `Stopping` (the instance has left `Current` and is still stopping or being disposed), `Removed` (detached, or an awaited attach faulted, so no start enqueued after that point is accepted) and `Faulted` (the last attempt failed, and the next one may still succeed). `Stopped` against `Removed` is the distinction to act on: recoverable against terminal. The state is not exposed on its own, so that a caller cannot pair a state with an instance read a moment apart from it. Neither member is a promise about the next start, and no state is the state of a declined one. A start the handler declined, whether because the host is shutting down, because the subject is no longer in the graph, because another handler owns it or because an instance is already running, leaves the attachment reading exactly what it read before, because every one of those refusals returns before the start clears the fault. A start already queued when a detach marked the attachment still runs and is then stopped, so `Removed` can be followed by a brief `Starting`, `Running` and `Stopping` before it settles back.
 
 **A factory with observable side effects must not assume `Current` becomes non null before anything else can observe them.** The factory runs inside the transition and the instance is recorded only after it has returned and started, so whatever the factory publishes into the subject is already visible while `Current` is still null. That is what `GetState` is for: a consumer reconciling its own view against the handle reads `Starting` beside a null instance and leaves the fresh state alone, where `Current is null` on its own would tell it to discard what the factory has just published.
 
@@ -324,40 +324,40 @@ A run that faults, or that is cancelled by anything but its stop, stops the subj
 
 A subject that takes the context in its constructor is attached during construction, which queues its service start. Object initializers, property assignments and deserializers all run afterwards, so the service can start against a subject that is not configured yet.
 
-Either build the subject detached, configure it and attach it once it is ready, or keep the context-taking constructor and wrap the work in a startup scope:
+Either build the subject detached, configure it and attach it once it is ready, or keep the context-taking constructor and wrap the work in a start deferral:
 
 ```csharp
-using (context.DeferHostedServiceStartup())
+using (context.DeferHostedServiceStarts())
 {
     var person = new Person(context) { FirstName = "John", LastName = "Doe" };
     person.AttachHostedService(() => new PersonBackgroundService(person));
 }
 ```
 
-Attaching still takes effect immediately, so the subject joins the graph and is visible to the registry and to sources. Only the start waits for the block to exit, and leaving the block releases it even when configuration throws: the scope says when a subject is ready, never whether it is fit to run. Validating configuration stays with the service and its caller.
+Attaching still takes effect immediately, so the subject joins the graph and is visible to the registry and to sources. Only the start waits for the block to exit, and leaving the block releases it even when configuration throws: the deferral says when a subject is ready, never whether it is fit to run. Validating configuration stays with the service and its caller.
 
 Four rules have consequences:
 
 - Do not await a captured service's start, or its detach, inside its own block. Both wait for that start, which cannot run until the block exits.
-- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a scope of its own inside yours, so its subject waits for yours, and host startup waits for that subject. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a context of its own and opens no scope, so your scope neither delays nor blocks it.
-- A scope nobody disposes holds its starts until the host shuts down.
-- `DeferHostedServiceStartup()` returns null on a context without hosting support, and `using` accepts that.
+- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a start deferral of its own inside yours, so its subject waits for yours, and host startup waits for that subject. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a private context and opens no deferral, so yours neither delays nor blocks it.
+- A deferral nobody disposes holds its starts until the host shuts down.
+- `DeferHostedServiceStarts()` returns null on a context without hosting support, and `using` accepts that.
 
-`AddSubject<T>()` already wraps its own construction this way with a resolver, and without one configures the subject before it joins any context, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Startup Scopes](design/hosting-service-ownership.md#startup-scopes).
+`AddSubject<T>()` already wraps its own construction this way with a resolver, and without one configures the subject before it joins any context, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Start Deferrals](design/hosting-service-ownership.md#start-deferrals).
 
 ## Deferred Starts and Startup Completion
 
 Attaching a hosted service queues its `StartAsync` without waiting for it. Any subsystem that treats "the graph has finished starting" as a completion point would otherwise pass that point while a queued start is still on its way in.
 
-A subsystem says so by implementing `IStartupCompletionDeferrer` and registering it on the context. Before queueing a start, the hosting layer takes a hold on every deferrer reachable from the subject's context and releases it once the start has run, including when the start is skipped because the host is shutting down and when it throws. This applies to every start the handler queues, whether it came from an explicit attach or from a subject entering the graph, and to the awaiting and fire and forget attach paths alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
+A subsystem says so by implementing `IStartupWorkTracker` and registering it on the context. Before queueing a start, the hosting layer begins startup work on every tracker reachable from the subject's context and ends it once the start has run, including when the start is skipped because the host is shutting down and when it throws. This applies to every start the handler queues, whether it came from an explicit attach or from a subject entering the graph, and to the awaiting and fire and forget attach paths alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
 
-Holds are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` takes their holds before its own is released.
+Startup work is counted, so nested attaches compose: a service that attaches children during its own `StartAsync` begins their startup work before its own ends.
 
-A hold covers `StartAsync` returning and nothing after it. `BackgroundService.StartAsync` schedules `ExecuteAsync` and returns at once, so a service that attaches children or registers sources for startup completion must do so in `StartAsync`, ahead of the base call.
+Startup work covers `StartAsync` returning and nothing after it. `BackgroundService.StartAsync` schedules `ExecuteAsync` and returns at once, so a service that attaches children or registers sources for startup completion must do so in `StartAsync`, ahead of the base call.
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 
-A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the hold's `Dispose` may block on anything that needs that lock to make progress, and a lock of the deferrer's own is allowed only where its order against the lifecycle lock is already fixed. The full constraint is on `IStartupCompletionDeferrer`, and an implementation that follows it cannot take part in the deadlock: see [A deferrer that takes a lock of its own](design/hosting-service-ownership.md#4-a-deferrer-that-takes-a-lock-of-its-own).
+A tracker runs inside the lifecycle lock, so neither `TrackStartupWork` nor the `Dispose` of the handle it returns may block on anything that needs that lock to make progress, and a lock of the tracker's own is allowed only where its order against the lifecycle lock is already fixed. The full constraint is on `IStartupWorkTracker`, and an implementation that follows it cannot take part in the deadlock: see [A startup work tracker that takes a lock of its own](design/hosting-service-ownership.md#4-a-startup-work-tracker-that-takes-a-lock-of-its-own).
 
 ## For Library Authors
 

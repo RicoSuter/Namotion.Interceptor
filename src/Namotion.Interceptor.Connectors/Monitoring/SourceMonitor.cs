@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// maintains for the same lifecycle change, so it has to be up to date first.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
-public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
+public class SourceMonitor : ILifecycleHandler, IStartupWorkTracker
 {
     private readonly Lock _lock = new();
     private Func<ILogger?>? _loggerResolver;
@@ -244,16 +244,16 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
     public void CompleteSourceRegistration() => _initialHold.Dispose();
 
     /// <summary>
-    /// Takes a further hold for the duration of a later batch of source creation. Counted, so
-    /// concurrent holders compose. Taking a hold blocks pending waits but never un-completes an
-    /// already-completed one.
+    /// Tracks startup work as a further registration hold, such as for the duration of a later batch
+    /// of source creation. Counted, so concurrent holders compose. Taking a hold blocks pending waits
+    /// but never un-completes an already-completed one.
     /// </summary>
     /// <remarks>
-    /// Satisfies the locking constraint of <see cref="IStartupCompletionDeferrer"/>: the take acquires
-    /// nothing, and the release takes _lock in the order this type already establishes through
+    /// Satisfies the locking constraint of <see cref="IStartupWorkTracker"/>: tracking acquires
+    /// nothing, and ending the work takes _lock in the order this type already establishes through
     /// <see cref="HandleLifecycleChange"/>.
     /// </remarks>
-    public IDisposable DeferCompletion()
+    public IDisposable TrackStartupWork()
     {
         // Deliberately does not re-evaluate. The increment happens first, so IsBranchSynchronized
         // returns false on its registration check for every wait before it walks anything: a pass
