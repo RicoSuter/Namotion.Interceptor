@@ -484,6 +484,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                     // Marked here because this path flushes the retry queue directly rather than going
                     // through the processor, and without the mark a later transaction confirmation on
                     // this property is not written back, which is the divergence that repair exists for.
+                    // Set without the subject lock, which is safe only because the reconcile runs before
+                    // the processor starts, so no confirmation for this connector is judged concurrently.
                     property.MarkAsPublishedToSource();
                     (toSend ??= []).Add(change);
                     sent++;

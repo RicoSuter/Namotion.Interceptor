@@ -149,17 +149,16 @@ A write's origin moves through a lifecycle: it starts as a pending stamp set by 
 
 ### Change Batching and Merging
 
-A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush.
+A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush. At `bufferTime` zero each change is written on its own as it is dequeued. The guarantees about a flush below apply to buffered delivery only; the rest apply to both.
 
 **What a connector can rely on:**
 
 - At most one change per property per flush, spanning the batch: the survivor's old value is the oldest in it and the new value the newest, whatever order they arrived in.
 - The survivor's `Revision`, `Origin` and timestamps all come from the newest commit in the batch, so keying off `Origin.Source` sees the newest commit's origin. The exception is a batch containing a change built outside a write terminal, which carries no revision: the property then collapses by arrival position and the survivor carries no revision either, so it is always delivered.
 - Emit order is the arrival order of each property's last occurrence.
-- Only a property's settled state is delivered. A change the model has already moved past is dropped rather than sent, decided by commit order rather than by comparing values, so it holds for derived and runtime-registered properties too. Which commits count as moving the model past a change is not the same for every connector: see the rule below, because for a connector talking to a remote source a value that source sent does not count.
 - Values a source itself sent are not echoed back to it. The one exception is a transaction confirmation on a property a connector has also written, which is sent to repair the source.
 
-**The coalescing contract:** buffered delivery coalesces every change. At `bufferTime` zero each change is sent as it arrives, and one that a newer commit to the same property has already superseded when its turn comes is skipped. While the connector keeps up, only a change that arrives behind a newer commit is skipped; under backlog it collapses to the latest value like buffered mode. Neither mode promises every intermediate value, because changes are enqueued after their commit and outside the subject lock, so sending a superseded one could leave the sink on an older value than the model.
+**The coalescing contract:** only a property's settled state is delivered. A change the model has already moved past is dropped rather than sent, decided by commit order rather than by comparing values, so it holds for derived and runtime-registered properties too. Which commits count as moving the model past a change is not the same for every connector: see the rule below, because for a connector talking to a remote source a value that source sent does not count. Buffered delivery coalesces every change. At `bufferTime` zero each change is sent as it arrives, and one that a newer commit to the same property has already superseded when its turn comes is skipped. While the connector keeps up, only a change that arrives behind a newer commit is skipped; under backlog it collapses to the latest value like buffered mode. Neither mode promises every intermediate value, because changes are enqueued after their commit and outside the subject lock, so sending a superseded one could leave the sink on an older value than the model. Delivering every value is tracked in [#282](https://github.com/RicoSuter/Namotion.Interceptor/issues/282).
 
 What happens to a change, from dequeue to write:
 

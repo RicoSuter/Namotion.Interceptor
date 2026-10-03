@@ -58,15 +58,8 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed && IsPublishedToAnySource(change.Property);
-    }
-
-    /// <summary>
-    /// Whether any connector has written this property out, this one or another.
-    /// </summary>
-    public static bool IsPublishedToAnySource(PropertyReference property)
-    {
-        return property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
+        return change.Origin.Kind == ChangeOriginKind.Confirmed
+               && change.Property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
                && publishedToAnySource;
     }
 

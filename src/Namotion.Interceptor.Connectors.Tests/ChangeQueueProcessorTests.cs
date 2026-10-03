@@ -774,12 +774,18 @@ public class ChangeQueueProcessorTests
 
         // Act: the older write commits and is held before it can enqueue.
         var olderWrite = Task.Run(() => subject.FirstName = "Older");
-        Assert.True(interceptor.Committed.Wait(TestTimeout), "the older write should commit");
+        try
+        {
+            Assert.True(interceptor.Committed.Wait(TestTimeout), "the older write should commit");
 
-        subject.FirstName = "Newer";
-        await AsyncTestHelpers.WaitUntilAsync(() => written.Contains((nameof(Person.FirstName), "Newer")));
+            subject.FirstName = "Newer";
+            await AsyncTestHelpers.WaitUntilAsync(() => written.Contains((nameof(Person.FirstName), "Newer")));
+        }
+        finally
+        {
+            interceptor.Release.Set();
+        }
 
-        interceptor.Release.Set();
         await olderWrite.WaitAsync(TestTimeout);
 
         // The dequeue loop is FIFO, so seeing this proves the older change ahead of it was decided.
@@ -793,6 +799,81 @@ public class ChangeQueueProcessorTests
         // Cleanup
         await cancellation.CancelAsync();
         try { await processing; } catch (OperationCanceledException) { /* expected */ }
+    }
+
+    [Fact]
+    public async Task WhenAChangeIsSupersededAfterProcessingStarted_ThenItStaysOutOfABoundedQueue()
+    {
+        // Arrange
+        using var interceptor = new PauseAfterCommitInterceptor("v1");
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        context.AddService<IWriteInterceptor>(interceptor);
+
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var written = new ConcurrentQueue<(string Property, string? Value)>();
+
+        // The long buffer time leaves the teardown flush as the only flush.
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue((change.Property.Name, change.GetNewValue<string>()));
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: 1,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // Act: v1 commits and is held before it can enqueue, so it is dequeued after v2 superseded it.
+        var olderWrite = Task.Run(() => subject.FirstName = "v1");
+        try
+        {
+            Assert.True(interceptor.Committed.Wait(TestTimeout), "v1 should commit");
+
+            subject.FirstName = "v2";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => processor.QueueDepth == 1,
+                message: "v2 should reach the bounded queue");
+        }
+        finally
+        {
+            interceptor.Release.Set();
+        }
+
+        await olderWrite.WaitAsync(TestTimeout);
+
+        // The buffered path does not await between dequeues, so an empty subscription means v1 is
+        // decided before the loop observes the cancellation.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => subscription.Count == 0,
+            message: "The processor should dequeue v1");
+        await cancellation.CancelAsync();
+        try
+        {
+            await processing;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // ProcessAsync may surface the requested cancellation when its timer task observes it first.
+        }
+
+        // Assert
+        Assert.Equal([(nameof(Person.FirstName), "v2")], written.ToArray());
+        Assert.Equal(0, processor.DropCount);
     }
 
     /// <summary>
