@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors;
 internal static class ChangeDeliveryFilter
 {
     /// <summary>
-    /// Decides a survivor on the flush path and marks it published, in one property data lookup once the
+    /// Decides a change about to be written and marks it published, in one property data lookup once the
     /// property has been published, because this runs per delivered change.
     /// </summary>
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeDeliveryRule rule)
@@ -46,25 +46,6 @@ internal static class ChangeDeliveryFilter
     {
         return !change.Property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out _)
                || !IsSupersededBy(in change, commitRevision);
-    }
-
-    /// <summary>
-    /// Records that this connector has written the property out. The flag it sets is not per source; see
-    /// <see cref="PropertyReference.MarkAsPublishedToSource"/> for why that is the design rather than a
-    /// simplification. Only where no judgment of this connector's confirmations can run concurrently;
-    /// elsewhere use <see cref="TryAcceptForDelivery"/>, which orders the mark against commits.
-    /// </summary>
-    public static void MarkPropertyAsPublishedToSource(in SubjectPropertyChange change)
-    {
-        var property = change.Property;
-
-        // Read before write: the flag never clears, so after a property's first delivery every later
-        // one avoids the dictionary write.
-        if (!property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
-            || !publishedToAnySource)
-        {
-            property.MarkAsPublishedToSource();
-        }
     }
 
     /// <summary>

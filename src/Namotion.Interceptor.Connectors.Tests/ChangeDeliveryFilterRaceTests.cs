@@ -24,7 +24,7 @@ public class ChangeDeliveryFilterRaceTests
     public async Task WhenAConfirmationCommitsWhileTheFlushIsMarkingTheFirstPublish_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
     {
         // Arrange
-        await using var race = await Race.StartAsync(rule);
+        await using var race = new Race(rule);
         var gate = race.Gate;
         var subject = race.Subject;
 
@@ -72,7 +72,7 @@ public class ChangeDeliveryFilterRaceTests
     public async Task WhenAConfirmationCommitsBetweenTheFlushRevisionReadAndTheFirstPublishLock_ThenTheSourceEndsAtTheModelValue(ChangeDeliveryRule rule)
     {
         // Arrange
-        await using var race = await Race.StartAsync(rule);
+        await using var race = new Race(rule);
         var gate = race.Gate;
         var subject = race.Subject;
 
@@ -123,7 +123,7 @@ public class ChangeDeliveryFilterRaceTests
         private readonly Task _processing;
         private readonly object _source = new();
 
-        private Race(ChangeDeliveryRule rule)
+        public Race(ChangeDeliveryRule rule)
         {
             var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
             Subject = new GatedSubject(context, Gate);
@@ -152,25 +152,6 @@ public class ChangeDeliveryFilterRaceTests
         public GatedSubject Subject { get; }
 
         public ConcurrentQueue<(string Property, string? Value)> SourceWrites { get; } = new();
-
-        /// <summary>
-        /// Starts processing and waits for a first delivery, so the changes under test are not counted as
-        /// queued before the processor started, which adds a write-state lookup on the dequeue thread.
-        /// </summary>
-        public static async Task<Race> StartAsync(ChangeDeliveryRule rule)
-        {
-            var race = new Race(rule);
-            try
-            {
-                await race.DeliverTailAsync("Started");
-                return race;
-            }
-            catch
-            {
-                await race.DisposeAsync();
-                throw;
-            }
-        }
 
         /// <summary>
         /// Applies a value locally as this source's transaction confirmation.
