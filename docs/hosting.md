@@ -345,19 +345,19 @@ Four rules have consequences:
 
 `AddSubject<T>()` already wraps its own construction this way with a resolver, and without one configures the subject before it joins any context, so nothing extra is needed there. The exact contract, including nesting, disposal order and what happens to a start still waiting when its subject leaves the graph, is in [Start Deferrals](design/hosting-service-ownership.md#start-deferrals).
 
-## Deferred Starts and Startup Completion
+## Queued Starts and Startup Completion
 
 Attaching a hosted service queues its `StartAsync` without waiting for it. Any subsystem that treats "the graph has finished starting" as a completion point would otherwise pass that point while a queued start is still on its way in.
 
-A subsystem says so by implementing `IStartupWorkTracker` and registering it on the context. Before queueing a start, the hosting layer begins startup work on every tracker reachable from the subject's context and ends it once the start has run, including when the start is skipped because the host is shutting down and when it throws. This applies to every start the handler queues, whether it came from an explicit attach or from a subject entering the graph, and to the awaiting and fire and forget attach paths alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
+A subsystem says so by implementing `IStartupCompletion` and registering it on the context. Before queueing a start, the hosting layer defers startup completion on every `IStartupCompletion` reachable from the subject's context, and releases those completion deferrals once the start has run, including when the start is skipped because the host is shutting down and when it throws. This applies to every start the handler queues, whether it came from an explicit attach or from a subject entering the graph, and to the awaiting and fire and forget attach paths alike: awaiting the start blocks the caller, but it does not block whatever else is deciding that startup is finished, so the gap still needs holding open.
 
-Startup work is counted, so nested attaches compose: a service that attaches children during its own `StartAsync` begins their startup work before its own ends.
+Completion deferrals are counted, so nested attaches compose: a service that attaches children during its own `StartAsync` defers startup completion for them before its own completion deferrals are released.
 
-Startup work covers `StartAsync` returning and nothing after it. `BackgroundService.StartAsync` schedules `ExecuteAsync` and returns at once, so a service that attaches children or registers sources for startup completion must do so in `StartAsync`, ahead of the base call.
+A completion deferral covers `StartAsync` returning and nothing after it. `BackgroundService.StartAsync` schedules `ExecuteAsync` and returns at once, so a service that attaches children or registers sources for startup completion must do so in `StartAsync`, ahead of the base call.
 
 `SourceMonitor` is the one implementation in this repository. It is what makes an attached source count towards source registration from the moment it is attached rather than from the moment it finally starts, so a synchronization wait cannot complete against a tree whose sources have not registered yet. See [Applications That Create Sources at Runtime](connectors-monitoring.md#applications-that-create-sources-at-runtime).
 
-A tracker runs inside the lifecycle lock, so neither `TrackStartupWork` nor the `Dispose` of the handle it returns may block on anything that needs that lock to make progress, and a lock of the tracker's own is allowed only where its order against the lifecycle lock is already fixed. The full constraint is on `IStartupWorkTracker`, and an implementation that follows it cannot take part in the deadlock: see [A startup work tracker that takes a lock of its own](design/hosting-service-ownership.md#4-a-startup-work-tracker-that-takes-a-lock-of-its-own).
+A startup completion runs inside the lifecycle lock, so neither `Defer` nor the `Dispose` of the handle it returns may block on anything that needs that lock to make progress, and a lock of the startup completion's own is allowed only where its order against the lifecycle lock is already fixed. The full constraint is on `IStartupCompletion`, and an implementation that follows it cannot take part in the deadlock: see [A startup completion that takes a lock of its own](design/hosting-service-ownership.md#4-a-startup-completion-that-takes-a-lock-of-its-own).
 
 ## For Library Authors
 

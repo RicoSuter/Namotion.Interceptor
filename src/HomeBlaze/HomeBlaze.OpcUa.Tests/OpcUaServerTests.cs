@@ -44,9 +44,9 @@ public class OpcUaServerTests
     public async Task WhenAnEnabledServerEntersTheGraph_ThenTheServerHoldIsTakenBeforeTheWrapperHoldIsReleased()
     {
         // Arrange
-        var startupWork = new StartupWorkRecorder();
+        var recorder = new StartupCompletionRecorder();
         await using var testHost = await OpcUaTestHost.StartAsync(
-            context => context.AddService<IStartupWorkTracker>(startupWork));
+            context => context.AddService<IStartupCompletion>(recorder));
         await testHost.LoadRootAsync();
         var server = testHost.CreateServer("/NotInTheGraph");
 
@@ -54,15 +54,15 @@ public class OpcUaServerTests
         testHost.Container.Server = server;
         await OpcUaTestHost.WaitForStatusAsync(() => server.Status, ServiceStatus.Error);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => startupWork.Outstanding == 0,
-            message: "Some startup work never ended.");
+            () => recorder.Outstanding == 0,
+            message: "A completion deferral was never released.");
 
         // Assert
-        // The wrapper's own startup work and the attached server's, which is tracked when its start is
-        // queued and so whether or not that start then fails, as it does here against a path that does
-        // not resolve.
-        Assert.Equal(2, startupWork.Taken);
-        Assert.Equal(2, startupWork.TakenWhenFirstSettled);
+        // The wrapper's own completion deferral and the attached server's, which is taken when its
+        // start is queued and so whether or not that start then fails, as it does here against a path
+        // that does not resolve.
+        Assert.Equal(2, recorder.DeferralCount);
+        Assert.Equal(2, recorder.DeferralCountWhenFirstSettled);
     }
 
     [Fact]

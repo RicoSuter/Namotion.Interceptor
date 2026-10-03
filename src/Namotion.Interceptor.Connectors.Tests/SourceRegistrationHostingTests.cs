@@ -55,8 +55,8 @@ public class SourceRegistrationHostingTests
         await host.StartAsync();
 
         // Assert - ApplicationStarted has fired and released the monitor's initial hold, but this
-        // service is still sitting in StartAsync, so the startup work tracked when it was attached is
-        // still outstanding and registration must not be complete.
+        // service is still sitting in StartAsync, so the completion deferral taken when it was attached
+        // is still outstanding and registration must not be complete.
         Assert.False(monitor.IsRegistrationComplete);
 
         var wait = root.WaitForSynchronizationAsync(CancellationToken.None);
@@ -71,11 +71,11 @@ public class SourceRegistrationHostingTests
     }
 
     [Fact]
-    public async Task WhenAnAttachedHostedServiceStartThrows_ThenItsStartupWorkStillEnds()
+    public async Task WhenAnAttachedHostedServiceStartThrows_ThenItsCompletionDeferralIsStillReleased()
     {
         // Arrange
-        // The startup work ends in a finally, so a failing start cannot wedge every wait on the tree
-        // forever. Without that, this is a permanent hang rather than a wrong answer.
+        // The completion deferral is released in a finally, so a failing start cannot wedge every wait
+        // on the tree forever. Without that, this is a permanent hang rather than a wrong answer.
         var builder = Host.CreateApplicationBuilder();
         var context = InterceptorSubjectContext
             .Create()
@@ -89,7 +89,7 @@ public class SourceRegistrationHostingTests
         using var startRelease = new StartRelease();
 
         // Gated, then throwing: a start that failed immediately would let this test pass with no
-        // startup work ever tracked, since registration would simply have completed at host start.
+        // completion deferral ever taken, since registration would simply have completed at host start.
         root.AttachHostedService(() => new ThrowingStartHostedService(startRelease));
 
         var host = builder.Build();
@@ -148,8 +148,8 @@ public class SourceRegistrationHostingTests
     {
         // Arrange
         // The awaiting attach overload blocks its own caller, but that does not block whatever else
-        // decides startup is finished, so it tracks startup work like the fire-and-forget path. Without
-        // that, a wait taken while this start is still queued completes vacuously.
+        // decides startup is finished, so it defers startup completion like the fire-and-forget path.
+        // Without that, a wait taken while this start is still queued completes vacuously.
         var builder = Host.CreateApplicationBuilder();
         var context = InterceptorSubjectContext
             .Create()
@@ -166,7 +166,7 @@ public class SourceRegistrationHostingTests
 
         using var startRelease = new StartRelease();
 
-        // Act - startup work is tracked synchronously, before the returned task is handed back.
+        // Act - startup completion is deferred synchronously, before the returned task is handed back.
         var attach = root.AttachHostedServiceAsync(
             () => new GatedStartHostedService(startRelease), CancellationToken.None);
 
@@ -186,9 +186,9 @@ public class SourceRegistrationHostingTests
     {
         // Arrange
         // HostedServiceHandler guarantees that nested attaches compose: a service that attaches
-        // children during its own StartAsync begins their startup work before its own ends, so the
-        // count never reaches zero in between. Nothing tested that, and it is the case where a
-        // single-level barrier would let go too early.
+        // children during its own StartAsync defers startup completion for them before its own
+        // completion deferrals are released, so the count never reaches zero in between. Nothing
+        // tested that, and it is the case where a single-level barrier would let go too early.
         var builder = Host.CreateApplicationBuilder();
         var context = InterceptorSubjectContext
             .Create()
@@ -206,15 +206,16 @@ public class SourceRegistrationHostingTests
         using var childRelease = new StartRelease();
 
         // Act - the awaiting overload returns only once the parent's own start transition has run to
-        // completion, so the parent's startup work has provably ended by the time the assertion below
-        // reads the count. The child is attached through the fire-and-forget path from inside that
-        // start.
+        // completion, so the parent's completion deferrals have provably been released by the time the
+        // assertion below reads the count. The child is attached through the fire-and-forget path from
+        // inside that start.
         await root.AttachHostedServiceAsync(
             () => new ChildAttachingHostedService(root, () => new GatedStartHostedService(childRelease)),
             CancellationToken.None);
 
-        // Assert - the parent has finished starting and ended its startup work, but the child is still
-        // inside StartAsync, so registration must still be held open by the child's startup work.
+        // Assert - the parent has finished starting and released its completion deferrals, but the child
+        // is still inside StartAsync, so registration must still be held open by the child's completion
+        // deferral.
         Assert.False(monitor.IsRegistrationComplete);
 
         childRelease.ReleaseStart();

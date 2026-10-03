@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// maintains for the same lifecycle change, so it has to be up to date first.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
-public class SourceMonitor : ILifecycleHandler, IStartupWorkTracker
+public class SourceMonitor : ILifecycleHandler, IStartupCompletion
 {
     private readonly Lock _lock = new();
     private Func<ILogger?>? _loggerResolver;
@@ -244,16 +244,16 @@ public class SourceMonitor : ILifecycleHandler, IStartupWorkTracker
     public void CompleteSourceRegistration() => _initialHold.Dispose();
 
     /// <summary>
-    /// Tracks startup work as a further registration hold, such as for the duration of a later batch
-    /// of source creation. Counted, so concurrent holders compose. Taking a hold blocks pending waits
-    /// but never un-completes an already-completed one.
+    /// Takes a further registration hold, such as for the duration of a later batch of source
+    /// creation. Counted, so concurrent holders compose. Taking a hold blocks pending waits but never
+    /// un-completes an already-completed one.
     /// </summary>
     /// <remarks>
-    /// Satisfies the locking constraint of <see cref="IStartupWorkTracker"/>: tracking acquires
-    /// nothing, and ending the work takes _lock in the order this type already establishes through
+    /// Satisfies the locking constraint of <see cref="IStartupCompletion"/>: taking a hold acquires
+    /// nothing, and releasing it takes _lock in the order this type already establishes through
     /// <see cref="HandleLifecycleChange"/>.
     /// </remarks>
-    public IDisposable TrackStartupWork()
+    public IDisposable DeferWaitCompletion()
     {
         // Deliberately does not re-evaluate. The increment happens first, so IsBranchSynchronized
         // returns false on its registration check for every wait before it walks anything: a pass
@@ -261,6 +261,10 @@ public class SourceMonitor : ILifecycleHandler, IStartupWorkTracker
         Interlocked.Increment(ref _registrationHolds);
         return new RegistrationHold(this);
     }
+
+    /// <inheritdoc />
+    /// <remarks>Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface.</remarks>
+    IDisposable IStartupCompletion.Defer() => DeferWaitCompletion();
 
     private void ReleaseHold()
     {

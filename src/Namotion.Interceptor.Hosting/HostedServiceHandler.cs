@@ -75,8 +75,8 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         // Runs inside LifecycleInterceptor's lock, so everything here only enqueues, which never blocks
-        // and never runs a body. The one exception, BeginStartupWork, is an accepted hazard: see
-        // docs/design/hosting-service-ownership.md#4-a-startup-work-tracker-that-takes-a-lock-of-its-own.
+        // and never runs a body. The one exception, DeferStartupCompletion, is an accepted hazard: see
+        // docs/design/hosting-service-ownership.md#4-a-startup-completion-that-takes-a-lock-of-its-own.
         if (change.IsContextAttach)
         {
             AttachSubject(change.Subject);
@@ -189,7 +189,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
 
         // Before the enqueue, never inside the body, or "the graph has finished starting" is reachable
         // while this start is still queued.
-        var startupWork = BeginStartupWork(subject.Context);
+        var completionDeferrals = DeferStartupCompletion(subject.Context);
 
         // Read in the enqueuing flow, which is the one that opened it. The body runs later and, on the
         // paths where a caller does not await the attach, in a flow that has already moved on.
@@ -198,12 +198,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         var start = slot.TryTakeOwnershipAndEnqueueAsync(
             this,
             subject,
-            () => RunStartAsync(subject, slot, startupWork, startDeferral),
+            () => RunStartAsync(subject, slot, completionDeferrals, startDeferral),
             out var ownershipTaken);
 
         if (start is null)
         {
-            EndStartupWork(startupWork);
+            ReleaseCompletionDeferrals(completionDeferrals);
             return null;
         }
 
@@ -238,7 +238,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     private async Task RunStartAsync(
         IInterceptorSubject subject,
         HostedServiceSlot slot,
-        IDisposable[] startupWork,
+        IDisposable[] completionDeferrals,
         HostedServiceStartDeferral? startDeferral)
     {
         try
@@ -316,7 +316,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
         finally
         {
-            EndStartupWork(startupWork);
+            ReleaseCompletionDeferrals(completionDeferrals);
         }
     }
 
@@ -452,53 +452,53 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         return MayStart(subject, slot);
     }
 
-    /// <summary>Begins startup work on every tracker reachable from <paramref name="context"/>.</summary>
+    /// <summary>Defers startup completion on every startup completion reachable from <paramref name="context"/>.</summary>
     /// <remarks>
     /// The constraint this call site puts on an implementer is on
-    /// <see cref="IStartupWorkTracker"/>.
+    /// <see cref="IStartupCompletion"/>.
     /// </remarks>
-    private IDisposable[] BeginStartupWork(IInterceptorSubjectContext context)
+    private IDisposable[] DeferStartupCompletion(IInterceptorSubjectContext context)
     {
-        var trackers = context.GetServices<IStartupWorkTracker>();
-        if (trackers.IsEmpty)
+        var startupCompletions = context.GetServices<IStartupCompletion>();
+        if (startupCompletions.IsEmpty)
         {
             return [];
         }
 
-        var handles = new IDisposable[trackers.Length];
-        var taken = 0;
-        foreach (var tracker in trackers)
+        var completionDeferrals = new IDisposable[startupCompletions.Length];
+        var deferredCount = 0;
+        foreach (var startupCompletion in startupCompletions)
         {
             try
             {
-                handles[taken] = tracker.TrackStartupWork();
-                taken++;
+                completionDeferrals[deferredCount] = startupCompletion.Defer();
+                deferredCount++;
             }
             catch (Exception exception)
             {
-                // One tracker throwing must not abandon the startup work already tracked, and must not
-                // propagate: an attach runs under the lifecycle lock inside a property write, so the
-                // exception would surface at an unrelated assignment.
-                _logger?.LogError(exception, "Tracking startup work threw and was ignored.");
+                // One startup completion throwing must not abandon the completion deferrals already
+                // taken, and must not propagate: an attach runs under the lifecycle lock inside a
+                // property write, so the exception would surface at an unrelated assignment.
+                _logger?.LogError(exception, "Deferring startup completion threw and was ignored.");
             }
         }
 
-        return taken == handles.Length ? handles : handles[..taken];
+        return deferredCount == completionDeferrals.Length ? completionDeferrals : completionDeferrals[..deferredCount];
     }
 
-    private void EndStartupWork(IDisposable[] startupWork)
+    private void ReleaseCompletionDeferrals(IDisposable[] completionDeferrals)
     {
-        foreach (var handle in startupWork)
+        foreach (var completionDeferral in completionDeferrals)
         {
             try
             {
-                handle.Dispose();
+                completionDeferral.Dispose();
             }
             catch (Exception exception)
             {
-                // One tracker throwing must not strand the others, for the same reason the start body
-                // ends its startup work in a finally at all.
-                _logger?.LogError(exception, "Ending startup work threw and was ignored.");
+                // One startup completion throwing must not strand the others, for the same reason the
+                // start body releases its completion deferrals in a finally at all.
+                _logger?.LogError(exception, "Releasing a completion deferral threw and was ignored.");
             }
         }
     }

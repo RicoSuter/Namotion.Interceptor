@@ -84,23 +84,23 @@ public class OpcUaClientTests
     public async Task WhenAnEnabledClientEntersTheGraph_ThenTheSourceHoldIsTakenBeforeTheClientHoldIsReleased()
     {
         // Arrange
-        var startupWork = new StartupWorkRecorder();
+        var recorder = new StartupCompletionRecorder();
         await using var testHost = await OpcUaTestHost.StartAsync(
-            context => context.AddService<IStartupWorkTracker>(startupWork));
+            context => context.AddService<IStartupCompletion>(recorder));
         var client = testHost.CreateClient();
 
         // Act
         testHost.Container.Client = client;
         await OpcUaTestHost.WaitForRunningClientAsync(client);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => startupWork.Outstanding == 0,
-            message: "Some startup work never ended.");
+            () => recorder.Outstanding == 0,
+            message: "A completion deferral was never released.");
 
         // Assert
-        // The client's own startup work and its source's. Settling in between is a startup completion wait
-        // passing while the source it waits for has not been attached yet.
-        Assert.Equal(2, startupWork.Taken);
-        Assert.Equal(2, startupWork.TakenWhenFirstSettled);
+        // The client's own completion deferral and its source's. Settling in between is a startup
+        // completion wait passing while the source it waits for has not been attached yet.
+        Assert.Equal(2, recorder.DeferralCount);
+        Assert.Equal(2, recorder.DeferralCountWhenFirstSettled);
     }
 
     [Fact]

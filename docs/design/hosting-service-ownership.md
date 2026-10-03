@@ -75,7 +75,7 @@ Slots live on subjects rather than in the handler, so nothing in the handler roo
 
 Attachments live under one data key as an `ImmutableArray`, and the subject slot under another. The correctness and allocation constraints on both paths are on `InterceptorHostingExtensions.AddAttachment` and `InterceptorHostingExtensions.GetOrAddSubjectSlot`.
 
-The handler carries `[RunsAfter(typeof(ContextInheritanceHandler))]`, because it resolves startup work trackers from `subject.Context`, and for a subject entering as a child it is `ContextInheritanceHandler` that installs the parent context as a fallback. See [Handler Order Around the Descent](tracking-lifecycle.md#handler-order-around-the-descent).
+The handler carries `[RunsAfter(typeof(ContextInheritanceHandler))]`, because it resolves startup completions from `subject.Context`, and for a subject entering as a child it is `ContextInheritanceHandler` that installs the parent context as a fallback. See [Handler Order Around the Descent](tracking-lifecycle.md#handler-order-around-the-descent).
 
 ## Why Per Slot Queues Rather Than One Queue
 
@@ -95,7 +95,7 @@ All three enqueue paths, `EnqueueAsync`, `EnqueueIfOwnedAsync` and `TryTakeOwner
 
 A default `ContinueWith` never executes inline on the enqueuing thread, so a lifecycle handler may enqueue while the lifecycle interceptor holds `_attachedSubjects`, and no transition **body** ever runs under that lock.
 
-Third party code does run under that lock, though, and it is not the body: beginning and ending startup work calls into `IStartupWorkTracker` synchronously from the lifecycle event. That is [deadlock shape 4](#4-a-startup-work-tracker-that-takes-a-lock-of-its-own).
+Third party code does run under that lock, though, and it is not the body: deferring startup completion and releasing those completion deferrals calls into `IStartupCompletion` synchronously from the lifecycle event. That is [deadlock shape 4](#4-a-startup-completion-that-takes-a-lock-of-its-own).
 
 ## Enqueuing at Event Time
 
@@ -143,7 +143,7 @@ It means "the subject's stop returned", which equals "`ExecuteAsync` unwound" on
 
 A container that creates its default child from its own context attach is the one place a subject enters the graph while another subject's attach event is still being dispatched. The child's attach is an ordinary one rather than a re-entrant call (the remarks on `NestedAttachTests` record why), both handler orders reach the same state, and the detach cascade releases both ownerships so a re-attach can start both again.
 
-The one caller that really does re-enter `AttachSubject` is an `IStartupWorkTracker`, because `BeginStartupWork` calls it synchronously from inside `TryTakeOwnershipAndStart`. A tracker that assigns a subject typed property runs the whole inner attach before the outer call has taken its own slot. Nothing is shared between the two: liveness is per subject, ownership is per slot, and startup work is counted, so the inner attach begins and ends its own while the outer attach's is outstanding. What this costs a tracker is the constraint in [deadlock shape 4](#4-a-startup-work-tracker-that-takes-a-lock-of-its-own), not re-entrancy.
+The one caller that really does re-enter `AttachSubject` is an `IStartupCompletion`, because `DeferStartupCompletion` calls it synchronously from inside `TryTakeOwnershipAndStart`. A startup completion that assigns a subject typed property runs the whole inner attach before the outer call has taken its own slot. Nothing is shared between the two: liveness is per subject, ownership is per slot, and completion deferrals are counted, so the inner attach takes and releases its own while the outer attach's are outstanding. What this costs a startup completion is the constraint in [deadlock shape 4](#4-a-startup-completion-that-takes-a-lock-of-its-own), not re-entrancy.
 
 ## Ownership
 
@@ -254,7 +254,7 @@ Starts are refused at enqueue time, by `AttachSubject` and by `TryTakeOwnershipA
 |---|---|---|
 | `Closed` | parks until the gate leaves `Closed`, then re-reads | parks until the gate leaves `Closed` |
 | `Open` | runs | runs |
-| `Draining` | skips the work, releases its startup work | runs, signals |
+| `Draining` | skips the work, releases its completion deferrals | runs, signals |
 
 ### Why a stop runs at every state, after the drain included
 
@@ -266,13 +266,13 @@ A stop enqueued after the drain's second wait returned, by a graph move racing t
 
 "Nothing runs before host start" and "a caller that started before the handler must not hang" pull in opposite directions. `SubjectActivation<T>` and the awaitable attach and detach overloads call `OpenGate`, since awaiting is an explicit request for the service to be running. The synchronous overloads and every lifecycle driven enqueue only wait for the gate, which preserves the invariant for `new Car(context)` at configuration time.
 
-## Startup Work
+## Startup Completion
 
-The user facing contract is in [Deferred Starts and Startup Completion](../hosting.md#deferred-starts-and-startup-completion), and the implementer's constraint is on [`IStartupWorkTracker`](../../src/Namotion.Interceptor.Tracking/IStartupWorkTracker.cs). Startup work begins in `TryTakeOwnershipAndStart`, synchronously and **before** the enqueue, so there is no window between the attach and the tracking in which completion can fire. It covers `StartAsync` returning and nothing after it, which is why children are attached in `StartAsync`.
+The user facing contract is in [Queued Starts and Startup Completion](../hosting.md#queued-starts-and-startup-completion), and the implementer's constraint is on [`IStartupCompletion`](../../src/Namotion.Interceptor.Tracking/IStartupCompletion.cs). Startup completion is deferred in `TryTakeOwnershipAndStart`, synchronously and **before** the enqueue, so there is no window between the attach and the completion deferral in which completion can fire. A completion deferral covers `StartAsync` returning and nothing after it, which is why children are attached in `StartAsync`.
 
-It ends in the start body's `finally`, which covers every way out of the body, including a start gated out by a drain, one whose subject is no longer live and one skipped by the one instance guard. When the enqueue is refused there is no body, so that path ends the startup work itself. Startup work that never ends blocks every synchronization wait on that tree forever.
+The completion deferrals are released in the start body's `finally`, which covers every way out of the body, including a start gated out by a drain, one whose subject is no longer live and one skipped by the one instance guard. When the enqueue is refused there is no body, so that path releases the completion deferrals itself. A completion deferral that is never released blocks every synchronization wait on that tree forever.
 
-A tracker that throws is logged and ignored on both paths, so one tracker cannot strand the others (reasons at the `catch` in `BeginStartupWork` and `EndStartupWork`). A tracker that blocks is a constraint on the implementation: see [deadlock shape 4](#4-a-startup-work-tracker-that-takes-a-lock-of-its-own).
+A startup completion that throws is logged and ignored on both paths, so one startup completion cannot strand the others (reasons at the `catch` in `DeferStartupCompletion` and `ReleaseCompletionDeferrals`). A startup completion that blocks is a constraint on the implementation: see [deadlock shape 4](#4-a-startup-completion-that-takes-a-lock-of-its-own).
 
 ## Faults and Failed Starts
 
@@ -395,7 +395,7 @@ What remains on the stop side is a mitigation with no mechanism behind it, kept 
 
 `HostedServiceStartDeferral` is ambient per context, held in an `AsyncLocal` on the handler and handed out by `IInterceptorSubjectContext.DeferHostedServiceStarts()`, which returns null when the context has no handler. The contract:
 
-- **Capture is per execution flow, at enqueue time.** `TryTakeOwnershipAndStart` reads the ambient deferral in the enqueuing flow, beside the startup work: the body runs later, and on the fire and forget paths in a flow that has already moved on.
+- **Capture is per execution flow, at enqueue time.** `TryTakeOwnershipAndStart` reads the ambient deferral in the enqueuing flow, beside the completion deferrals: the body runs later, and on the fire and forget paths in a flow that has already moved on.
 - **A captured start waits for its own deferral and every deferral enclosing it**, which `HostedServiceStartDeferral.WaitAsync` walks. Disposal releases; there is nothing to call on success and no way to fail through the deferral.
 - **The wait sits after every guard in the start body and before the fault is cleared**, and each guard is re-read after it, because the subject can leave the graph, ownership can move, and a competing start can install an instance while the deferral is open. A start that finds any of that declines and creates nothing.
 - **The drain releases the wait too**, through `HostedServiceGate.WaitForDrainingAsync`. A parked start is already counted in flight, so a deferral nobody disposes would otherwise hold the barrier for the whole shutdown deadline.
@@ -430,18 +430,18 @@ The subject's stop transition waits on the unwind, the unwind waits on the attac
 
 It is the shape any `BackgroundService` subject that owns a restartable attachment reaches for when it releases that attachment as its run loop unwinds, which is why such a subject's own stop should only cancel what it started, wait for its run loop and report itself stopped. The rule is stated in [the user documentation](../hosting.md#do-not-detach-from-your-own-stop-path), and `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard. A wedged queue is unbounded in damage but bounded in blast radius: shutdown gives up on it at `ShutdownTimeout` and every other queue drains normally.
 
-### 4. A startup work tracker that takes a lock of its own
+### 4. A startup completion that takes a lock of its own
 
-`BeginStartupWork` calls `IStartupWorkTracker.TrackStartupWork()` synchronously from `HandleLifecycleChange`, and the refused-enqueue path ends that startup work from the same place, both under `_attachedSubjects`. A tracker that takes a lock of its own therefore joins that lock's order:
+`DeferStartupCompletion` calls `IStartupCompletion.Defer()` synchronously from `HandleLifecycleChange`, and the refused-enqueue path releases that completion deferral from the same place, both under `_attachedSubjects`. A startup completion that takes a lock of its own therefore joins that lock's order:
 
-1. Thread A takes the tracker's own lock `L`, then attaches a hosted service. `AttachHostedService` and `AttachHostedServiceAsync` take `_attachedSubjects` themselves, through `MarkLiveIfAttached`, and awaiting a transition whose body writes a subject typed property needs it too.
-2. Thread B holds `_attachedSubjects` for an unrelated graph write, reaches `HandleLifecycleChange`, and calls `TrackStartupWork()` on that same tracker. It blocks on `L`.
+1. Thread A takes the startup completion's own lock `L`, then attaches a hosted service. `AttachHostedService` and `AttachHostedServiceAsync` take `_attachedSubjects` themselves, through `MarkLiveIfAttached`, and awaiting a transition whose body writes a subject typed property needs it too.
+2. Thread B holds `_attachedSubjects` for an unrelated graph write, reaches `HandleLifecycleChange`, and calls `Defer()` on that same startup completion. It blocks on `L`.
 
 Nothing resolves it, and the blast radius is the whole process rather than one queue: `B` holds `_attachedSubjects`, so every structural property write in the graph queues behind it.
 
-**The call site is accepted rather than fixed, and it is not by itself the deadlock.** The startup work must be tracked before the enqueue completes, and on the lifecycle driven path the event arrives already inside `_attachedSubjects`, so there is no earlier point to begin it. Any alternative that keeps the guarantee either calls `TrackStartupWork` from the same place or needs a new cross package protocol between Hosting and Connectors.
+**The call site is accepted rather than fixed, and it is not by itself the deadlock.** The completion deferral must be taken before the enqueue completes, and on the lifecycle driven path the event arrives already inside `_attachedSubjects`, so there is no earlier point to take it. Any alternative that keeps the guarantee either calls `Defer` from the same place or needs a new cross package protocol between Hosting and Connectors.
 
-Step 2 is the only step a tracker supplies, so a tracker that never blocks there cannot take part. The constraint is stated on [`IStartupWorkTracker`](../../src/Namotion.Interceptor.Tracking/IStartupWorkTracker.cs), where an implementer meets it, and the exposure is per implementation rather than per consumer. `SourceMonitor`, the only implementation in this repository, follows it: beginning startup work is an `Interlocked.Increment`, and ending it takes the monitor's `_lock` in an order its `TrackStartupWork` remarks fix, held because nothing under `_lock` waits on anything that needs `_attachedSubjects` (the graph walk in `IsBranchSynchronized` reads parent sets, and completing a wait uses `RunContinuationsAsynchronously`).
+Step 2 is the only step a startup completion supplies, so a startup completion that never blocks there cannot take part. The constraint is stated on [`IStartupCompletion`](../../src/Namotion.Interceptor.Tracking/IStartupCompletion.cs), where an implementer meets it, and the exposure is per implementation rather than per consumer. `SourceMonitor`, the only implementation in this repository, follows it: deferring is an `Interlocked.Increment`, and releasing the completion deferral takes the monitor's `_lock` in an order its `DeferWaitCompletion` remarks fix, held because nothing under `_lock` waits on anything that needs `_attachedSubjects` (the graph walk in `IsBranchSynchronized` reads parent sets, and completing a wait uses `RunContinuationsAsynchronously`).
 
 ### 5. Awaiting a captured start, or its detach, inside its own start deferral
 
@@ -489,5 +489,5 @@ Once lifecycle events and user driven attach and detach calls have settled:
 2. **In the graph implies running, out of the graph implies stopped.** Each queue drains in enqueue order, so every slot ends in the state its last event demanded. A run fault is the one exception: the slot is stopped and reads `Faulted` while its subject is still in the graph, until the next context attach retries it. Queue order alone does not carry this, because an attach racing the subject's context entry can leave a slot neither side enqueued anything for; [the attach resolving the handler a second time](#an-attach-and-a-context-entry-are-the-same-two-facts-in-opposite-orders) closes that. Execution across slots is concurrent, so this is quiescent consistency rather than a moment by moment guarantee.
 3. **Created implies disposed by the same owner.** The handler disposes exactly the instances it created through a factory, once, and never disposes a subject.
 4. **A subject's stop precedes the disposal of its own attachments**, on both the context detach path and the shutdown path, whenever that stop is not cancelled.
-5. **No transition body runs under `_attachedSubjects`.** Every lifecycle driven action is an enqueue, and an enqueue never runs a body. User code still does: `TrackStartupWork` and ending that startup work on the refused enqueue path, which is [deadlock shape 4](#4-a-startup-work-tracker-that-takes-a-lock-of-its-own).
+5. **No transition body runs under `_attachedSubjects`.** Every lifecycle driven action is an enqueue, and an enqueue never runs a body. User code still does: `Defer` and releasing that completion deferral on the refused enqueue path, which is [deadlock shape 4](#4-a-startup-completion-that-takes-a-lock-of-its-own).
 6. **A drained handler roots nothing.** It clears its liveness set and releases every slot its snapshot held, which untracks that slot for the drain. Any slot tracked after the snapshot belongs to an install whose own gate re-read releases it, so `_stopOnDrain` is empty once things have settled rather than at the moment `StopAsync` returns. The slots on the subjects are left for the next handler.

@@ -142,12 +142,12 @@ internal sealed class SingleAttachmentHost<TService>
     /// <summary>
     /// Issues the start the wrapper wants on startup. Called from the wrapper's own StartAsync ahead of
     /// the base call, which only schedules the run loop, so the attach is issued inside the wrapper's
-    /// start and the attachment's startup work begins before the wrapper's own ends.
+    /// start and the attachment's completion deferral is taken before the wrapper's own is released.
     /// </summary>
     /// <remarks>
     /// Not awaited there, so a start that has to wait for the gate or for
     /// <see cref="IAttachmentOwner{TService}.WaitUntilStartableAsync"/> cannot hold up the wrapper's start.
-    /// Such a start begins its startup work only once it gets past that wait.
+    /// Such a start defers startup completion only once it gets past that wait.
     /// </remarks>
     public void BeginRun()
     {

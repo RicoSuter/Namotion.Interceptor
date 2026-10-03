@@ -66,7 +66,7 @@ public static class SourceMonitoringExtensions
     public static IDisposable DeferWaitCompletion(this IInterceptorSubjectContext context)
     {
         var monitors = ResolveMonitorsOrThrow(context);
-        var holds = monitors.Select(monitor => monitor.TrackStartupWork()).ToArray();
+        var holds = monitors.Select(monitor => monitor.DeferWaitCompletion()).ToArray();
         return new CompositeDisposable(holds);
     }
 

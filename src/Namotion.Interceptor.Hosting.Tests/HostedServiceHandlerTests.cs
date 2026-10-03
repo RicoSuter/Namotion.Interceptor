@@ -1731,22 +1731,22 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenBeginningStartupWorkThrows_ThenTheAttachStillStartsAndTheOtherStartupWorkEnds()
+    public async Task WhenAStartupCompletionThrowsOnDefer_ThenTheAttachStillStartsAndTheOtherCompletionDeferralsAreReleased()
     {
-        // Arrange - beginning startup work is third party code on the attach path, and the attach runs
-        // inside a property write, so an exception escaping it surfaces at an unrelated assignment. The
-        // throwing tracker sits between two working ones, so the guard has to do both halves: keep the
-        // startup work already tracked before it, and go on to track it on the one after it. Either
-        // failure leaves a host that never finishes starting.
+        // Arrange - deferring startup completion is third party code on the attach path, and the
+        // attach runs inside a property write, so an exception escaping it surfaces at an unrelated
+        // assignment. The throwing startup completion sits between two working ones, so the guard has
+        // to do both halves: keep the completion deferral already taken before it, and go on to defer
+        // the one after it. Either failure leaves a host that never finishes starting.
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
-        var throwing = new ThrowingStartupWorkTracker { ThrowOnTrack = true };
-        var before = new CallbackStartupWorkTracker();
-        var working = new CallbackStartupWorkTracker();
-        context.AddService<IStartupWorkTracker>(before);
-        context.AddService<IStartupWorkTracker>(throwing);
-        context.AddService<IStartupWorkTracker>(working);
+        var throwing = new ThrowingStartupCompletion { ThrowOnDefer = true };
+        var before = new CallbackStartupCompletion();
+        var working = new CallbackStartupCompletion();
+        context.AddService<IStartupCompletion>(before);
+        context.AddService<IStartupCompletion>(throwing);
+        context.AddService<IStartupCompletion>(working);
 
         var host = builder.Build();
         await host.StartAsync();
@@ -1766,9 +1766,9 @@ public class HostedServiceHandlerTests
             Assert.True(attachment.Current is { IsStarted: true });
             Assert.Null(attachment.Fault);
 
-            Assert.Equal(1, throwing.Taken);
-            Assert.Equal(1, before.Taken);
-            Assert.Equal(1, working.Taken);
+            Assert.Equal(1, throwing.DeferralCount);
+            Assert.Equal(1, before.DeferralCount);
+            Assert.Equal(1, working.DeferralCount);
             Assert.Equal(0, before.Outstanding);
             Assert.Equal(0, working.Outstanding);
         }
@@ -1779,19 +1779,19 @@ public class HostedServiceHandlerTests
     }
 
     [Fact]
-    public async Task WhenEndingStartupWorkThrows_ThenTheOtherStartupWorkStillEnds()
+    public async Task WhenReleasingACompletionDeferralThrows_ThenTheOtherCompletionDeferralsAreStillReleased()
     {
-        // Arrange - ending startup work runs in a finally on the transition thread, so an exception
-        // there faults the transition rather than any caller, and the startup work behind it never
-        // ends: the host then waits on a completion that never comes. The throwing one is registered
+        // Arrange - releasing completion deferrals runs in a finally on the transition thread, so an
+        // exception there faults the transition rather than any caller, and the completion deferrals
+        // behind it are never released: the host then waits on a completion that never comes. The throwing one is registered
         // first so the working one is the one that would be stranded.
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
-        var throwing = new ThrowingStartupWorkTracker { ThrowOnRelease = true };
-        var working = new CallbackStartupWorkTracker();
-        context.AddService<IStartupWorkTracker>(throwing);
-        context.AddService<IStartupWorkTracker>(working);
+        var throwing = new ThrowingStartupCompletion { ThrowOnRelease = true };
+        var working = new CallbackStartupCompletion();
+        context.AddService<IStartupCompletion>(throwing);
+        context.AddService<IStartupCompletion>(working);
 
         var host = builder.Build();
         await host.StartAsync();

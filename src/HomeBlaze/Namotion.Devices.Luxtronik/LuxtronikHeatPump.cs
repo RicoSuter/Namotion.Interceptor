@@ -301,8 +301,8 @@ public partial class LuxtronikHeatPump :
     public override Task StartAsync(CancellationToken cancellationToken)
     {
         // Attached here rather than from the run loop: the base start only schedules the loop, so an attach
-        // issued there begins its startup work after this subject's own has ended, and a
-        // startup completion wait could pass in between against a tree whose source is not attached yet.
+        // issued there defers startup completion after this subject's own completion deferral is released,
+        // and a startup completion wait could pass in between against a tree whose source is not attached yet.
         _faultBeforeStart = _attachment?.Fault;
         if (_attachment is null && !string.IsNullOrWhiteSpace(HostAddress) && TryValidateConfiguration(out _))
         {

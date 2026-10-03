@@ -90,13 +90,13 @@ public class HostedServiceHandlerRaceTests
         // Arrange - the window between publishing the attachment and enqueuing its start. A detach
         // that lands inside it removes the attachment from the subject, so the start it leaves
         // running is reachable from nothing: a later context detach enumerates no attachment for it
-        // and never stops it. Beginning startup work is the only user code the attach path runs inside
-        // that window, so the tracker drives the interleaving rather than a delay.
+        // and never stops it. Deferring startup completion is the only user code the attach path runs
+        // inside that window, so the startup completion drives the interleaving rather than a delay.
         //
         // One case per overload that reaches the window, because each attach overload enqueues through
         // its own call and each detach overload marks the slot from its own code: deleting the mark
         // from DetachHostedServiceAsync leaves the two synchronous detach cases green.
-        await RunWithStartupWorkTrackerAsync(async (context, detacher) =>
+        await RunWithStartupCompletionAsync(async (context, detacher) =>
         {
             var parent = new Parent(context);
             var child = new Person();
@@ -104,16 +104,16 @@ public class HostedServiceHandlerRaceTests
 
             var created = 0;
             var detaches = new ConcurrentQueue<Task<bool>>();
-            detacher.OnTrack = () =>
+            detacher.OnDefer = () =>
             {
                 foreach (var published in child.GetHostedServiceAttachments())
                 {
                     if (detachIsAwaited)
                     {
                         // Not awaited here: the detach runs synchronously up to and past its enqueue,
-                        // which is the whole window, and awaiting it from inside the tracker would
-                        // park the attach that is beginning startup work. The tasks are awaited below
-                        // instead.
+                        // which is the whole window, and awaiting it from inside the startup completion
+                        // would park the attach that is deferring startup completion. The tasks are
+                        // awaited below instead.
                         detaches.Enqueue(child.DetachHostedServiceAsync(published, CancellationToken.None));
                     }
                     else
@@ -139,7 +139,7 @@ public class HostedServiceHandlerRaceTests
             await slot.DrainAsync();
 
             Assert.All(await Task.WhenAll(detaches), Assert.True);
-            Assert.Equal(1, detacher.Taken);
+            Assert.Equal(1, detacher.DeferralCount);
             Assert.Empty(child.GetHostedServiceAttachments());
             Assert.Equal(0, Volatile.Read(ref created));
             Assert.Null(attachment.Current);
@@ -612,14 +612,14 @@ public class HostedServiceHandlerRaceTests
     }
 
     [Fact]
-    public async Task WhenASubjectEntersTheGraph_ThenItsStartupWorkBeginsBeforeTheGraphWriteReturns()
+    public async Task WhenASubjectEntersTheGraph_ThenStartupCompletionIsDeferredBeforeTheGraphWriteReturns()
     {
-        // Arrange - the startup work closes the window in which "the graph has finished starting" can
-        // be reached while a start is still queued, so it has to be tracked by the time the graph write
-        // returns. That is the constraint on where startup work may begin, and it is why it begins
-        // still inside the lifecycle lock: the event that enqueues the start arrives already inside
-        // that lock, so beginning it anywhere later reopens the window.
-        await RunWithStartupWorkTrackerAsync(async (context, tracker) =>
+        // Arrange - the completion deferral closes the window in which "the graph has finished
+        // starting" can be reached while a start is still queued, so it has to be taken by the time the
+        // graph write returns. That is the constraint on where startup completion may be deferred, and
+        // it is why it is deferred still inside the lifecycle lock: the event that enqueues the start
+        // arrives already inside that lock, so deferring it anywhere later reopens the window.
+        await RunWithStartupCompletionAsync(async (context, startupCompletion) =>
         {
             var parent = new Parent(context);
             var child = new Person();
@@ -629,30 +629,31 @@ public class HostedServiceHandlerRaceTests
             using var start = slot.HoldAtTransition();
 
             // Act - the start is enqueued while the graph write runs, and its body is held at the
-            // seam, so the startup work is read while the start it belongs to is provably still pending.
+            // seam, so the completion deferral is read while the start it belongs to is provably still
+            // pending.
             parent.Child = child;
 
             // Assert
-            Assert.Equal(1, tracker.Taken);
-            Assert.Equal(1, tracker.Outstanding);
+            Assert.Equal(1, startupCompletion.DeferralCount);
+            Assert.Equal(1, startupCompletion.Outstanding);
 
             start.Release();
             await slot.DrainAsync();
 
-            Assert.Equal(0, tracker.Outstanding);
+            Assert.Equal(0, startupCompletion.Outstanding);
             Assert.NotNull(attachment.Current);
         });
     }
 
     [Fact]
-    public async Task WhenAQueuedStartIsSkippedByTheDrain_ThenItsStartupWorkEnds()
+    public async Task WhenAQueuedStartIsSkippedByTheDrain_ThenItsCompletionDeferralsAreReleased()
     {
-        // Arrange - startup work that outlives the start it belongs to hangs every synchronization wait
-        // on that tree forever, which is worse than never having tracked it, so every way out of the
-        // start body has to end it. This is the drain's way out: the start is enqueued while the gate is
-        // open and its body runs once draining has begun. Two seams, so both halves are pinned
-        // rather than timed.
-        var (host, context, tracker) = await StartHostWithStartupWorkTrackerAsync();
+        // Arrange - a completion deferral that outlives the start it belongs to hangs every
+        // synchronization wait on that tree forever, which is worse than never having taken it, so
+        // every way out of the start body has to release it. This is the drain's way out: the start
+        // is enqueued while the gate is open and its body runs once draining has begun. Two seams, so
+        // both halves are pinned rather than timed.
+        var (host, context, startupCompletion) = await StartHostWithStartupCompletionAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -667,7 +668,7 @@ public class HostedServiceHandlerRaceTests
         using var start = ((IHostedServiceSlotAccess)attachment).Slot.HoldAtTransition();
 
         parent.Child = child;
-        Assert.Equal(1, tracker.Outstanding);
+        Assert.Equal(1, startupCompletion.Outstanding);
 
         var handler = context.TryGetService<HostedServiceHandler>()!;
         using var drain = handler.HoldAtDrain();
@@ -684,14 +685,14 @@ public class HostedServiceHandlerRaceTests
         await stopping;
 
         Assert.Equal(0, Volatile.Read(ref created));
-        Assert.Equal(0, tracker.Outstanding);
+        Assert.Equal(0, startupCompletion.Outstanding);
     }
 
     [Fact]
-    public async Task WhenAQueuedStartFindsItsSubjectDetached_ThenItsStartupWorkEnds()
+    public async Task WhenAQueuedStartFindsItsSubjectDetached_ThenItsCompletionDeferralsAreReleased()
     {
         // Arrange - the same leak through the liveness guard, which is the way out a graph move takes.
-        await RunWithStartupWorkTrackerAsync(async (context, tracker) =>
+        await RunWithStartupCompletionAsync(async (context, startupCompletion) =>
         {
             var parent = new Parent(context);
             var child = new Person();
@@ -707,7 +708,7 @@ public class HostedServiceHandlerRaceTests
             using var start = slot.HoldAtTransition();
 
             parent.Child = child;
-            Assert.Equal(1, tracker.Outstanding);
+            Assert.Equal(1, startupCompletion.Outstanding);
 
             // Act - the detach clears liveness while the start is held at the seam.
             parent.Child = null;
@@ -717,23 +718,24 @@ public class HostedServiceHandlerRaceTests
             await slot.DrainAsync();
 
             Assert.Equal(0, Volatile.Read(ref created));
-            Assert.Equal(0, tracker.Outstanding);
+            Assert.Equal(0, startupCompletion.Outstanding);
         });
     }
 
     [Fact]
-    public async Task WhenAQueuedStartIsSkippedByTheOneInstanceGuard_ThenItsStartupWorkEnds()
+    public async Task WhenAQueuedStartIsSkippedByTheOneInstanceGuard_ThenItsCompletionDeferralsAreReleased()
     {
         // Arrange - the third way out, and the one no other test reaches: a subject visible from two
         // hosting contexts raises one context attach per context and the OWNING handler sees both, so
         // it enqueues a second start for a slot that is already running. That start skips its work
-        // in the body, where the queue serializes the two, and has to end its startup work from there.
+        // in the body, where the queue serializes the two, and has to release its completion deferrals
+        // from there.
         await HostingTestHost.RunWithTwoContextsAsync(async (firstContext, secondContext) =>
         {
             // Registered on one context only: the subject's own context reaches it through the fallback,
-            // so both handlers resolve the same single tracker.
-            var tracker = new CallbackStartupWorkTracker();
-            firstContext.AddService<IStartupWorkTracker>(tracker);
+            // so both handlers resolve the same single startup completion.
+            var startupCompletion = new CallbackStartupCompletion();
+            firstContext.AddService<IStartupCompletion>(startupCompletion);
 
             var subject = new CountingHostedSubject();
             ((IInterceptorSubject)subject).Context.AddFallbackContext(firstContext);
@@ -742,7 +744,7 @@ public class HostedServiceHandlerRaceTests
             await slot.DrainAsync();
 
             Assert.Equal(1, subject.StartCount);
-            var takenByTheFirstAttach = tracker.Taken;
+            var deferralCountAfterTheFirstAttach = startupCompletion.DeferralCount;
 
             // Act
             ((IInterceptorSubject)subject).Context.AddFallbackContext(secondContext);
@@ -753,14 +755,15 @@ public class HostedServiceHandlerRaceTests
             Assert.Equal(1, subject.StartCount);
 
             // Exact, because "more than before" is also satisfied by the non owning handler alone: it
-            // begins startup work, loses the compare and exchange, and ends it again without ever
-            // reaching the guard under test. The second attach raises one context attach per handler,
-            // so two more is the owning handler's queued start plus that refused enqueue.
+            // defers startup completion, loses the compare and exchange, and releases the completion
+            // deferral again without ever reaching the guard under test. The second attach raises one
+            // context attach per handler, so two more is the owning handler's queued start plus that
+            // refused enqueue.
             Assert.Equal(
-                takenByTheFirstAttach + 2,
-                tracker.Taken);
+                deferralCountAfterTheFirstAttach + 2,
+                startupCompletion.DeferralCount);
 
-            Assert.Equal(0, tracker.Outstanding);
+            Assert.Equal(0, startupCompletion.Outstanding);
         });
     }
 
@@ -771,10 +774,10 @@ public class HostedServiceHandlerRaceTests
         // re-read. The body's re-read makes the outcome right, but only after the take has installed
         // this handler as the owner of a slot belonging to a subject that has left the graph, and
         // the detach released ownership before that take happened, so nothing releases it again. The
-        // next handler over the same subject then loses the compare and exchange for good. Beginning
-        // startup work is the one piece of user code the attach path runs between the gate read and
-        // the queue lock, so the tracker drives the detach rather than a delay.
-        var (firstHost, firstContext, tracker) = await StartHostWithStartupWorkTrackerAsync();
+        // next handler over the same subject then loses the compare and exchange for good. Deferring
+        // startup completion is the one piece of user code the attach path runs between the gate read
+        // and the queue lock, so the startup completion drives the detach rather than a delay.
+        var (firstHost, firstContext, startupCompletion) = await StartHostWithStartupCompletionAsync();
         var (secondHost, secondContext) = await HostingTestHost.StartAsync();
 
         try
@@ -783,12 +786,12 @@ public class HostedServiceHandlerRaceTests
             var child = new Person();
             firstParent.Child = child;
 
-            var detachOnTrack = false;
-            tracker.OnTrack = () =>
+            var detachOnDefer = false;
+            startupCompletion.OnDefer = () =>
             {
-                if (detachOnTrack)
+                if (detachOnDefer)
                 {
-                    detachOnTrack = false;
+                    detachOnDefer = false;
                     firstParent.Child = null;
                 }
             };
@@ -796,7 +799,7 @@ public class HostedServiceHandlerRaceTests
             var created = 0;
 
             // Act
-            detachOnTrack = true;
+            detachOnDefer = true;
             var attachment = child.AttachHostedService(() =>
             {
                 Interlocked.Increment(ref created);
@@ -805,7 +808,7 @@ public class HostedServiceHandlerRaceTests
 
             // Assert
             var slot = ((IHostedServiceSlotAccess)attachment).Slot;
-            Assert.Equal(1, tracker.Taken);
+            Assert.Equal(1, startupCompletion.DeferralCount);
             Assert.Null(slot.Owner);
 
             // The consequence, and the reason an unowned slot matters: the handler of the next graph
@@ -834,9 +837,9 @@ public class HostedServiceHandlerRaceTests
         // both writes after it, and the read on entry cannot see that. Nothing else undoes the take:
         // the drain's release loop covers only the slots its own snapshot held, and that snapshot is
         // taken after this attach has been swept past. Two seams, so the interleaving is driven rather
-        // than timed: the tracker runs between the read on entry and the take, and the drain seam is
-        // what proves the drain has begun by the time it returns.
-        var (host, context, tracker) = await StartHostWithStartupWorkTrackerAsync();
+        // than timed: the startup completion runs between the read on entry and the take, and the drain
+        // seam is what proves the drain has begun by the time it returns.
+        var (host, context, startupCompletion) = await StartHostWithStartupCompletionAsync();
 
         var parent = new Parent(context);
         var child = new Person();
@@ -846,7 +849,7 @@ public class HostedServiceHandlerRaceTests
         using var drain = handler.HoldAtDrain();
 
         Task? stopping = null;
-        tracker.OnTrack = () =>
+        startupCompletion.OnDefer = () =>
         {
             if (stopping is not null)
             {
@@ -1008,7 +1011,7 @@ public class HostedServiceHandlerRaceTests
 
         // Conditions are recorded rather than asserted here: the seam runs while holding the slot's
         // queue lock and the lifecycle lock, so throwing would unwind out of a property write with the
-        // slot owned and its startup work never ended, which makes a failing round far noisier than
+        // slot owned and its completion deferrals never released, which makes a failing round far noisier than
         // the failure it is reporting.
         var detachStarted = false;
         var detachSettled = false;
@@ -1640,16 +1643,16 @@ public class HostedServiceHandlerRaceTests
         => subject.AttachHostedService(() => new TrackedBackgroundService());
 
     /// <summary>
-    /// Runs <paramref name="action"/> against a started host whose context carries a tracker, and
-    /// stops the host afterwards.
+    /// Runs <paramref name="action"/> against a started host whose context carries a startup
+    /// completion, and stops the host afterwards.
     /// </summary>
-    private static async Task RunWithStartupWorkTrackerAsync(
-        Func<IInterceptorSubjectContext, CallbackStartupWorkTracker, Task> action)
+    private static async Task RunWithStartupCompletionAsync(
+        Func<IInterceptorSubjectContext, CallbackStartupCompletion, Task> action)
     {
-        var (host, context, tracker) = await StartHostWithStartupWorkTrackerAsync();
+        var (host, context, startupCompletion) = await StartHostWithStartupCompletionAsync();
         try
         {
-            await action(context, tracker);
+            await action(context, startupCompletion);
         }
         finally
         {
@@ -1657,18 +1660,18 @@ public class HostedServiceHandlerRaceTests
         }
     }
 
-    private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupWorkTracker Tracker)>
-        StartHostWithStartupWorkTrackerAsync()
+    private static async Task<(IHost Host, IInterceptorSubjectContext Context, CallbackStartupCompletion StartupCompletion)>
+        StartHostWithStartupCompletionAsync()
     {
         var builder = HostingTestHost.CreateBuilder();
 
         var context = HostingTestHost.CreateContext(builder);
 
-        var tracker = new CallbackStartupWorkTracker();
-        context.AddService<IStartupWorkTracker>(tracker);
+        var startupCompletion = new CallbackStartupCompletion();
+        context.AddService<IStartupCompletion>(startupCompletion);
 
         var host = builder.Build();
         await host.StartAsync();
-        return (host, context, tracker);
+        return (host, context, startupCompletion);
     }
 }

@@ -3,20 +3,20 @@ using Namotion.Interceptor.Tracking;
 namespace HomeBlaze.OpcUa.Tests;
 
 /// <summary>
-/// A startup work tracker that records how much startup work had been tracked when all of it had first
-/// ended, which is the moment a startup completion wait would have passed.
+/// A startup completion that records how many completion deferrals had been taken when all of them had
+/// first been released, which is the moment a startup completion wait would have passed.
 /// </summary>
-internal sealed class StartupWorkRecorder : IStartupWorkTracker
+internal sealed class StartupCompletionRecorder : IStartupCompletion
 {
     /// <summary>
-    /// A leaf lock, so the count an end reads and the tracking that may race it are one step. Nothing is
-    /// called while it is held.
+    /// A leaf lock, so the count a release reads and the deferral that may race it are one step. Nothing
+    /// is called while it is held.
     /// </summary>
     private readonly Lock _lock = new();
 
     private int _outstanding;
-    private int _taken;
-    private int? _takenWhenFirstSettled;
+    private int _deferralCount;
+    private int? _deferralCountWhenFirstSettled;
 
     public int Outstanding
     {
@@ -29,38 +29,38 @@ internal sealed class StartupWorkRecorder : IStartupWorkTracker
         }
     }
 
-    public int Taken
+    public int DeferralCount
     {
         get
         {
             lock (_lock)
             {
-                return _taken;
+                return _deferralCount;
             }
         }
     }
 
-    /// <summary>How much startup work had been tracked when none was outstanding for the first time, or null before that.</summary>
-    public int? TakenWhenFirstSettled
+    /// <summary>How many completion deferrals had been taken when none was outstanding for the first time, or null before that.</summary>
+    public int? DeferralCountWhenFirstSettled
     {
         get
         {
             lock (_lock)
             {
-                return _takenWhenFirstSettled;
+                return _deferralCountWhenFirstSettled;
             }
         }
     }
 
-    public IDisposable TrackStartupWork()
+    public IDisposable Defer()
     {
         lock (_lock)
         {
             _outstanding++;
-            _taken++;
+            _deferralCount++;
         }
 
-        return new StartupWorkHandle(this);
+        return new Deferral(this);
     }
 
     private void Release()
@@ -70,12 +70,12 @@ internal sealed class StartupWorkRecorder : IStartupWorkTracker
             _outstanding--;
             if (_outstanding == 0)
             {
-                _takenWhenFirstSettled ??= _taken;
+                _deferralCountWhenFirstSettled ??= _deferralCount;
             }
         }
     }
 
-    private sealed class StartupWorkHandle(StartupWorkRecorder owner) : IDisposable
+    private sealed class Deferral(StartupCompletionRecorder owner) : IDisposable
     {
         private int _disposed;
 

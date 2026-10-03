@@ -135,7 +135,7 @@ public class HostedServiceStartDeferralTests
         using (fixture.Context.DeferHostedServiceStarts())
         {
             subject.AttachHostedService(() => deferred);
-            Assert.Equal(1, fixture.StartupWorkTracked);
+            Assert.Equal(1, fixture.CompletionDeferred);
 
             // Establishes what this test is about. Without it the drain can begin before the body is
             // dispatched, which declines at the gate and never reaches the park at all.
@@ -144,9 +144,9 @@ public class HostedServiceStartDeferralTests
             await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
 
             // Assert - a released start declines rather than starting, because the drain re-reads the
-            // gate, and its startup work ends either way.
+            // gate, and its completion deferral is released either way.
             Assert.False(deferred.Started.Task.IsCompleted);
-            await fixture.AllStartupWorkEnded.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
         }
     }
 
@@ -217,32 +217,32 @@ public class HostedServiceStartDeferralTests
         Assert.False(started, $"The start ran while {because}, so nothing was waiting for that deferral.");
     }
 
-    private sealed class Fixture : IAsyncDisposable, IStartupWorkTracker
+    private sealed class Fixture : IAsyncDisposable, IStartupCompletion
     {
         private readonly ServiceProvider _provider;
         public IInterceptorSubjectContext Context { get; }
         public IHostedService Handler { get; }
-        public int StartupWorkTracked;
-        public int StartupWorkEnded;
-        public TaskCompletionSource AllStartupWorkEnded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CompletionDeferred;
+        public int CompletionDeferralReleased;
+        public TaskCompletionSource AllCompletionDeferralsReleased { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Fixture()
         {
             var services = new ServiceCollection().AddLogging();
             Context = InterceptorSubjectContext.Create().WithHostedServices(services);
-            Context.AddService<IStartupWorkTracker>(this);
+            Context.AddService<IStartupCompletion>(this);
             _provider = services.BuildServiceProvider();
             Handler = Assert.Single(_provider.GetServices<IHostedService>());
         }
 
-        public IDisposable TrackStartupWork()
+        public IDisposable Defer()
         {
-            Interlocked.Increment(ref StartupWorkTracked);
-            return new StartupWorkHandle(() =>
+            Interlocked.Increment(ref CompletionDeferred);
+            return new CompletionDeferral(() =>
             {
-                if (Interlocked.Increment(ref StartupWorkEnded) == Volatile.Read(ref StartupWorkTracked))
+                if (Interlocked.Increment(ref CompletionDeferralReleased) == Volatile.Read(ref CompletionDeferred))
                 {
-                    AllStartupWorkEnded.TrySetResult();
+                    AllCompletionDeferralsReleased.TrySetResult();
                 }
             });
         }
@@ -254,7 +254,7 @@ public class HostedServiceStartDeferralTests
         }
     }
 
-    private sealed class StartupWorkHandle(Action released) : IDisposable
+    private sealed class CompletionDeferral(Action released) : IDisposable
     {
         public void Dispose() => released();
     }

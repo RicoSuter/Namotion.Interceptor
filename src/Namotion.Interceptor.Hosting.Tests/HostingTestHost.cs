@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Hosting.Tests;
 
 /// <summary>
 /// The host and context bootstrap the hosting tests share. Tests that wire something extra in
-/// before the host is built, a tracker or a second context, call <see cref="CreateContext"/> and
+/// before the host is built, a startup completion or a second context, call <see cref="CreateContext"/> and
 /// build the host themselves.
 /// </summary>
 internal static class HostingTestHost

@@ -19,7 +19,7 @@ namespace Namotion.Interceptor.Hosting.Tests;
 /// arrives. The child is therefore an ordinary attach carrying its own liveness write, its own
 /// ownership take and its own pair of gate reads, and the outcome does not depend on where the
 /// creating handler sits in that array. The one shape that does re-enter <c>AttachSubject</c> is a
-/// startup work tracker, which the handler calls synchronously from inside the outer call, and
+/// startup completion, which the handler calls synchronously from inside the outer call, and
 /// the last two tests drive that one.
 /// </remarks>
 public class NestedAttachTests
@@ -187,14 +187,14 @@ public class NestedAttachTests
     }
 
     [Fact]
-    public async Task WhenAStartupWorkTrackerCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndAllStartupWorkEnds()
+    public async Task WhenAStartupCompletionCreatesTheChildWhileTheContainersOwnAttachIsStillRunning_ThenBothStartOnceAndAllCompletionDeferralsAreReleased()
     {
         // Arrange - the one shape that really does re-enter AttachSubject. The handler calls
-        // TrackStartupWork synchronously from inside TryTakeOwnershipAndStart, which is inside the
-        // container's own AttachSubject, so a tracker that assigns the child raises the child's
-        // context attach from there. The child's whole attach, its liveness write, its ownership take
+        // Defer synchronously from inside TryTakeOwnershipAndStart, which is inside the container's
+        // own AttachSubject, so a startup completion that assigns the child raises the child's context
+        // attach from there. The child's whole attach, its liveness write, its ownership take
         // and its enqueued start, therefore runs before the container has taken its own slot.
-        var (host, context, tracker) = BuildHostWithStartupWorkTracker();
+        var (host, context, startupCompletion) = BuildHostWithStartupCompletion();
         await host.StartAsync();
 
         try
@@ -204,7 +204,7 @@ public class NestedAttachTests
             var container = new HostedContainer();
 
             var containerWasOwnedWhenTheChildWasCreated = true;
-            tracker.OnTrack = () =>
+            startupCompletion.OnDefer = () =>
             {
                 if (container.Child is not null)
                 {
@@ -239,10 +239,10 @@ public class NestedAttachTests
             Assert.Same(handler, containerSlot.Owner);
             Assert.Same(handler, childSlot.Owner);
 
-            // Counted startup work is what lets a nested attach begin its own while the outer one's is
-            // still outstanding, and the inner one has to end as reliably as the outer.
-            Assert.Equal(2, tracker.Taken);
-            Assert.Equal(0, tracker.Outstanding);
+            // Counted completion deferrals are what let a nested attach take its own while the outer
+            // one's is still outstanding, and the inner one has to be released as reliably as the outer.
+            Assert.Equal(2, startupCompletion.DeferralCount);
+            Assert.Equal(0, startupCompletion.Outstanding);
         }
         finally
         {
@@ -256,11 +256,12 @@ public class NestedAttachTests
         // Arrange - the interleaving the outer attach cannot see for itself: it read an open gate on
         // entry, wrote its liveness entry, and the drain begins while the nested attach it triggered is
         // still on the stack. Both calls then have to notice on the way out, or a subject that never
-        // starts is left rooted on a handler that is about to die. The tracker is the seam, because it
-        // is the one piece of user code the attach path runs between the liveness write and the re-read
-        // that follows the takes: the first call to the tracker creates the child, and the call the
-        // nested attach makes for that child starts the drain and waits for it to reach DrainTestHook.
-        var (host, context, tracker) = BuildHostWithStartupWorkTracker();
+        // starts is left rooted on a handler that is about to die. The startup completion is the seam,
+        // because it is the one piece of user code the attach path runs between the liveness write and
+        // the re-read that follows the takes: the first call to the startup completion creates the
+        // child, and the call the nested attach makes for that child starts the drain and waits for it
+        // to reach DrainTestHook.
+        var (host, context, startupCompletion) = BuildHostWithStartupCompletion();
         await host.StartAsync();
 
         var handler = context.TryGetService<HostedServiceHandler>()!;
@@ -270,7 +271,7 @@ public class NestedAttachTests
         var container = new HostedContainer();
 
         Task? stopping = null;
-        tracker.OnTrack = () =>
+        startupCompletion.OnDefer = () =>
         {
             if (container.Child is null)
             {
@@ -305,7 +306,7 @@ public class NestedAttachTests
 
         Assert.Equal(0, container.StartCount);
         Assert.Equal(0, child.StartCount);
-        Assert.Equal(0, tracker.Outstanding);
+        Assert.Equal(0, startupCompletion.Outstanding);
     }
 
     /// <summary>
@@ -337,15 +338,15 @@ public class NestedAttachTests
         return (builder.Build(), context, initializer);
     }
 
-    private static (IHost Host, IInterceptorSubjectContext Context, CallbackStartupWorkTracker Tracker)
-        BuildHostWithStartupWorkTracker()
+    private static (IHost Host, IInterceptorSubjectContext Context, CallbackStartupCompletion StartupCompletion)
+        BuildHostWithStartupCompletion()
     {
         var builder = HostingTestHost.CreateBuilder();
         var context = HostingTestHost.CreateContext(builder);
 
-        var tracker = new CallbackStartupWorkTracker();
-        context.AddService<IStartupWorkTracker>(tracker);
+        var startupCompletion = new CallbackStartupCompletion();
+        context.AddService<IStartupCompletion>(startupCompletion);
 
-        return (builder.Build(), context, tracker);
+        return (builder.Build(), context, startupCompletion);
     }
 }

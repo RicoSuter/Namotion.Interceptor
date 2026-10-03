@@ -545,7 +545,7 @@ public class SourceWaitResultTests
         // scope for every other anchor here.
         monitor.Register(new TestStateSource(new Person(context)));
 
-        var hold = monitor.TrackStartupWork();
+        var hold = monitor.DeferWaitCompletion();
         monitor.CompleteSourceRegistration();
 
         var poisonWait = new PoisonAnchor(context).WaitForSynchronizationAsync(cancellationToken);
