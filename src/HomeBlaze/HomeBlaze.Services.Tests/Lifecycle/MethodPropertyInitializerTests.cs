@@ -23,7 +23,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void OperationMethod_CreatesMethodMetadataProperty()
+    public void WhenAMethodHasAnOperationAttribute_ThenAMethodMetadataPropertyIsRegistered()
     {
         // Arrange
         var context = CreateContext();
@@ -43,7 +43,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void QueryMethod_CreatesMethodMetadataProperty()
+    public void WhenAMethodHasAQueryAttribute_ThenAMethodMetadataPropertyIsRegistered()
     {
         // Arrange
         var context = CreateContext();
@@ -64,7 +64,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void OperationMethod_HasCorrectParameters()
+    public void WhenAnOperationHasParameters_ThenItsMetadataDescribesThem()
     {
         // Arrange
         var context = CreateContext();
@@ -85,7 +85,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task OperationMethod_InvokeAsync_CallsUnderlyingMethod()
+    public async Task WhenAnOperationIsInvoked_ThenTheUnderlyingMethodIsCalled()
     {
         // Arrange
         var context = CreateContext();
@@ -102,7 +102,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task AsyncMethod_InvokeAsync_ReturnsResult()
+    public async Task WhenAnAsyncMethodIsInvoked_ThenItsResultIsReturned()
     {
         // Arrange
         var context = CreateContext();
@@ -120,7 +120,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithCustomTitle_UsesAttributeTitle()
+    public void WhenTheAttributeSetsATitle_ThenTheMetadataUsesIt()
     {
         // Arrange
         var context = CreateContext();
@@ -136,7 +136,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithoutCustomTitle_UsesMethodNameWithoutAsync()
+    public void WhenTheAttributeSetsNoTitle_ThenTheMethodNameWithoutAsyncIsUsed()
     {
         // Arrange
         var context = CreateContext();
@@ -152,7 +152,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodFromInterface_IsDiscovered()
+    public void WhenTheAttributeIsOnAnInterfaceMethod_ThenTheMethodIsDiscovered()
     {
         // Arrange
         var context = CreateContext();
@@ -170,7 +170,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void CancellationTokenParameter_IsRuntimeProvided()
+    public void WhenAParameterIsACancellationToken_ThenItIsRuntimeProvided()
     {
         // Arrange
         var context = CreateContext();
@@ -188,7 +188,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void FromServicesParameter_IsFromServicesNotAutoInjected()
+    public void WhenAParameterIsFromServices_ThenItIsMarkedFromServicesRatherThanAutoInjected()
     {
         // Arrange
         var context = CreateContext();
@@ -207,7 +207,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void NullableFromServicesParameter_IsNullable()
+    public void WhenAFromServicesParameterIsNullable_ThenItIsMarkedNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -224,7 +224,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void NonNullableFromServicesParameter_IsNotNullable()
+    public void WhenAFromServicesParameterIsNotNullable_ThenItIsNotMarkedNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -242,7 +242,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void RegularParameter_RequiresInput()
+    public void WhenAParameterIsRegular_ThenItRequiresInput()
     {
         // Arrange
         var context = CreateContext();
@@ -261,7 +261,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task MethodWithCancellationToken_InvokeAsync_PassesTokenThrough()
+    public async Task WhenAMethodTakingACancellationTokenIsInvoked_ThenTheTokenIsPassedThrough()
     {
         // Arrange
         var context = CreateContext();
@@ -280,7 +280,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void ParameterlessMethod_HasEmptyParameters()
+    public void WhenAMethodHasNoParameters_ThenItsParametersAreEmpty()
     {
         // Arrange
         var context = CreateContext();
@@ -296,7 +296,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task ParameterlessMethod_InvokeAsync_WithNullParameters()
+    public async Task WhenAParameterlessMethodIsInvokedWithNullParameters_ThenItIsCalled()
     {
         // Arrange
         var context = CreateContext();
@@ -313,7 +313,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task ParameterlessMethod_InvokeAsync_WithEmptyParameters()
+    public async Task WhenAParameterlessMethodIsInvokedWithEmptyParameters_ThenItIsCalled()
     {
         // Arrange
         var context = CreateContext();
@@ -330,7 +330,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void VoidMethod_HasNullResultType()
+    public void WhenAMethodReturnsVoid_ThenItsResultTypeIsNull()
     {
         // Arrange
         var context = CreateContext();
@@ -346,7 +346,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task VoidMethod_InvokeAsync_ReturnsNull()
+    public async Task WhenAVoidMethodIsInvoked_ThenItReturnsNull()
     {
         // Arrange
         var context = CreateContext();
@@ -364,7 +364,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task TaskMethod_WithNoGenericResult_HasNullResultType()
+    public async Task WhenAMethodReturnsANonGenericTask_ThenItsResultTypeIsNull()
     {
         // Arrange
         var context = CreateContext();
@@ -380,7 +380,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_MethodThrows_ExceptionPropagates()
+    public async Task WhenAnInvokedMethodThrows_ThenTheOriginalExceptionPropagates()
     {
         // Arrange
         var context = CreateContext();
@@ -396,7 +396,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_AsyncMethodThrows_ExceptionPropagates()
+    public async Task WhenAnInvokedAsyncMethodThrows_ThenTheOriginalExceptionPropagates()
     {
         // Arrange
         var context = CreateContext();
@@ -412,7 +412,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_TooFewUserParameters_ThrowsArgumentException()
+    public async Task WhenInvokedWithTooFewParameters_ThenItThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
@@ -428,7 +428,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_TooManyUserParameters_ThrowsArgumentException()
+    public async Task WhenInvokedWithTooManyParameters_ThenItThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
@@ -445,7 +445,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithDescription_PreservesDescription()
+    public void WhenAMethodHasADescription_ThenTheMetadataKeepsIt()
     {
         // Arrange
         var context = CreateContext();
@@ -461,7 +461,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithoutAttributes_NotDiscovered()
+    public void WhenAMethodHasNoAttribute_ThenItIsNotDiscovered()
     {
         // Arrange
         var context = CreateContext();
@@ -476,7 +476,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task TrulyAsyncMethod_InvokeAsync_PropagatesException()
+    public async Task WhenAnInvokedMethodThrowsAfterAnAwait_ThenTheExceptionPropagates()
     {
         // Arrange — tests that exceptions thrown after an await are correctly propagated
         var context = CreateContext();
@@ -492,7 +492,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void InterfaceMethodDiscovered_WhenConcreteMethodLacksAttribute()
+    public void WhenOnlyTheInterfaceMethodHasTheAttribute_ThenTheMethodIsRegisteredOnce()
     {
         // Arrange — when both type and interface have the same method name,
         // the concrete type's version is registered (deduplication by name)
@@ -512,7 +512,24 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void SubjectWithNoMethods_HasNoMethodProperties()
+    public void WhenASubjectWithAnOperationReEntersTheGraph_ThenItsOperationIsRegisteredOnce()
+    {
+        // Arrange
+        var container = new MethodTestContainer(CreateContext());
+        var subject = new MethodTestSubject();
+        container.Child = subject;
+        container.Child = null;
+
+        // Act
+        container.Child = subject;
+
+        // Assert
+        var registered = subject.TryGetRegisteredSubject()!;
+        Assert.Single(registered.Properties, property => property.Name == "Stop");
+    }
+
+    [Fact]
+    public void WhenASubjectHasNoMethods_ThenNoMethodPropertiesAreRegistered()
     {
         // Arrange
         var context = CreateContext();
@@ -525,6 +542,12 @@ public class MethodPropertyInitializerTests
         // Assert
         Assert.Empty(methods);
     }
+}
+
+[InterceptorSubject]
+public partial class MethodTestContainer
+{
+    public partial MethodTestSubject? Child { get; set; }
 }
 
 public interface IMethodTestInterface
