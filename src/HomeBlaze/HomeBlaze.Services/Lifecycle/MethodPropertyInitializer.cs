@@ -81,6 +81,14 @@ public class MethodPropertyInitializer : ILifecycleHandler
             ? method.Name[..^5]
             : method.Name;
 
+        // The registry keeps a subject's properties across a detach, so a subject re-entering the graph
+        // already has its methods registered, and adding them again would throw. Only a method property
+        // is skipped: a different property under the same name is still a conflict.
+        if (registeredSubject.TryGetProperty(propertyName)?.GetValue() is MethodMetadata)
+        {
+            return;
+        }
+
         var parameters = method.GetParameters()
             .Select(parameter =>
             {
