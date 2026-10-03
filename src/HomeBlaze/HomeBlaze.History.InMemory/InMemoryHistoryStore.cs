@@ -67,23 +67,23 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     }
 
     /// <summary>
-    /// Restarts the coverage session at the current instant. The constructor already starts one, so
-    /// this only narrows what the store claims: the owner calls it once its change subscription is
-    /// live, so no change can fall inside claimed coverage without reaching this engine.
+    /// Starts coverage at the instant the owner's change subscription became active.
+    /// Call before recording or publishing the engine for queries.
     /// </summary>
-    internal void BeginCoverageSession()
+    internal void BeginCoverageSession(DateTimeOffset startedAt)
     {
-        Interlocked.Exchange(ref _startTimeUtcTicks, _getUtcNow().UtcTicks);
+        Interlocked.Exchange(ref _startTimeUtcTicks, startedAt.UtcTicks);
         Interlocked.Exchange(ref _coverageEndUtcTicks, 0);
     }
 
     /// <summary>
-    /// Freezes coverage at the last instant this store was recording. Nothing observes it after the
-    /// owner stops, so without this it keeps claiming "up to now" forever: at priority 100 the merger
-    /// would route the live edge here and get empty buckets instead of falling back to a durable store.
+    /// Freezes coverage at <paramref name="endedAt"/>, the last instant this store was recording. Nothing
+    /// observes it after the owner stops, so without this it keeps claiming "up to now" forever: at priority
+    /// 100 the merger would route the live edge here and get empty buckets instead of falling back to a
+    /// durable store.
     /// </summary>
-    internal void EndCoverageSession() =>
-        Interlocked.Exchange(ref _coverageEndUtcTicks, _getUtcNow().UtcTicks);
+    internal void EndCoverageSession(DateTimeOffset endedAt) =>
+        Interlocked.Exchange(ref _coverageEndUtcTicks, endedAt.UtcTicks);
 
     public int Priority { get; }
 

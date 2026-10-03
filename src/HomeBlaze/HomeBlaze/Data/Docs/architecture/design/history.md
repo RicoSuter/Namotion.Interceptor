@@ -99,16 +99,25 @@ A range means:
 
 > The store was actively collecting its configured history stream throughout this interval and detected no loss.
 
-The configured stream coalesces repeated updates to the same property within `BufferTimeMilliseconds`, keeping the oldest old value and newest new value. It is a time-series sampling policy, not an audit log of every setter invocation. After that policy is applied, no sample for a property inside a covered interval means that the property did not change. Coverage is intentionally store-wide and all-or-nothing. Per-property coverage would make routing and correctness dependent on a large and continuously changing metadata set.
+The configured stream coalesces repeated updates to the same property within `BufferTimeMilliseconds`, keeping the oldest old value and newest new value. It is a time-series sampling policy, not an audit log of every setter invocation. A configuration restart or a fault retry keeps the change subscription, so the changes queued while no processor ran are delivered to the next session, which skips a change a later write superseded as at any processor start. After that policy is applied, no sample for a property inside a covered interval means that the property did not change. Coverage is intentionally store-wide and all-or-nothing. Per-property coverage would make routing and correctness dependent on a large and continuously changing metadata set.
 
 Ranges are necessary because continuity can be lost independently of retention:
 
-- An application or store restart creates a gap between the last successful coverage heartbeat and the next store session.
+- An application restart, or anything that releases the change subscription (the store is disabled or stopped, or has faulted three times in a row), creates a gap between the last successful coverage heartbeat and the next store session. A configuration restart or a fault retry keeps the subscription, and the next session's coverage starts where the previous one stopped consuming.
 - A temporary database failure does not create a gap when every pending sample remains buffered and is later committed.
 - A bounded pending queue overflow creates a gap from the first dropped change until persistence catches up and recording resumes.
 - Retention trims or removes old portions of ranges.
 
 The merger snapshots each store's immutable ranges once per query. Planning then uses those snapshots. It does not load ranges per property or per bucket. A persistent store may hold years of ranges, but the normal count is approximately the number of discontinuities, not the number of samples. For example, one daily restart over five years is about 1,800 small metadata rows.
+
+### Store sessions
+
+Each store subject is a `ChangeQueueBackgroundService`, and every run of its processor is one engine session:
+
+- `IsEnabled` applies immediately when the configuration is applied. A disabled store serves nothing: no coverage, no samples, zeroed metrics.
+- A change to another start-time setting restarts the store on its kept subscription. SQLite keeps serving the files it wrote across the restart. The in-memory store replaces its engine, so its earlier samples are gone and its coverage starts at the restart.
+- A processing fault ends the session and sets `Status` to `Error`. The service retries after its retry delay, five seconds, on the same subscription, and from the third consecutive fault on it releases the subscription until the next run, which creates a gap. The change being processed when the fault occurs is already dequeued and lost, yet it falls inside the session's coverage.
+- SQLite serves nothing between sessions: during a restart and during a retry backoff its engine is disposed, and the next session reopens the files. The in-memory store keeps serving the ended session's samples with frozen coverage until the next session replaces them.
 
 ### In-memory coverage
 
@@ -154,7 +163,7 @@ A fixed limit of `100_000` bounds the samples waiting for durable persistence. T
 
 This policy keeps memory bounded, does not block the property-change hot path, and never claims completeness over lost changes.
 
-The subject constructs the engine, installs its change subscription, and only then calls `BeginCoverageSession`, so no change can fall inside claimed coverage without reaching the engine. During graceful shutdown SQLite performs a final bounded engine flush. This persists samples that already reached the engine, but `ChangeQueueProcessor` currently provides no contract for draining its coalescing queue when service cancellation begins.
+The subject's change subscription exists before the engine, and the engine's coverage session begins before it records, so no change can fall inside claimed coverage without reaching the engine. A change to a start-time setting, such as `BufferTimeMilliseconds`, restarts the store on the same subscription: the new engine session's coverage begins where the ending session's processor stopped consuming, and the ending session's final flush reaches past that instant, so the two ranges normalize into one. On a stop, a restart or a fault, `ChangeQueueProcessor` first flushes its coalescing queue within a fixed bound and SQLite then performs a final bounded engine flush, so the samples that reached the engine are persisted. What either bound cuts off is lost, see the limitations below.
 
 Retention removes complete partition files whose interval is older than `now - MaxAge`. It also removes or clamps coverage rows at that cutoff. Coverage does not depend on finding a sample near either boundary, so a quiet store remains honestly covered.
 
@@ -363,7 +372,7 @@ Queries should send the relevant range predicate to PostgreSQL rather than loadi
 ## Known limitations and roadmap
 
 - Changing a property's declared type changes its storage column. Older samples under another type may not be visible.
-- Service cancellation or a hard crash can lose changes still in the coalescing queue. A hard crash can also lose samples accepted by the engine since the last durable flush. These losses cannot retroactively mark their exact tail as a coverage gap.
+- A stop loses the changes still queued when the processor's bounded teardown flush ended, and a hard crash also loses the samples the engine accepted since its last durable flush. These losses cannot retroactively mark their exact tail as a coverage gap.
 - The in-memory store loses all data on restart.
 - Move detection cannot discover moves that occurred while HomeBlaze was stopped.
 - Per-property time resolution is bounded by the change queue's coalescing interval.

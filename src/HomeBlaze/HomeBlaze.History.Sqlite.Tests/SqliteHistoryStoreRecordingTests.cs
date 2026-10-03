@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+using Namotion.Interceptor.Connectors;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -8,6 +10,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.History.Sqlite.Tests;
@@ -81,10 +84,10 @@ public class SqliteHistoryStoreRecordingTests
     /// <summary>
     /// Mutates <paramref name="propertyPath"/> to <paramref name="targetValue"/> and waits until a
     /// point with exactly that value is persisted under the canonical path. A warm-up phase re-applies
-    /// a distinct sentinel value until any point appears, which deterministically bridges the brief
-    /// startup gap before the change-queue subscription goes live (no fixed sleep). It then applies the
-    /// target value and polls until it lands. Every poll forces a flush through the internal test hook so
-    /// queued samples become queryable immediately instead of waiting for the interval flush.
+    /// a distinct sentinel value until any point appears, which waits without a fixed sleep until the
+    /// store's execution has built the engine (queries return an empty series before that). It then
+    /// applies the target value and polls until it lands. Every poll forces a flush through the internal
+    /// test hook so queued samples become queryable immediately instead of waiting for the interval flush.
     /// </summary>
     private static async Task<HistorySeries> RecordAndWaitForValueAsync(
         SqliteHistoryStoreSubject store, string propertyPath, Action<double> mutate, double targetValue)
@@ -99,9 +102,9 @@ public class SqliteHistoryStoreRecordingTests
                 var warmup = QuerySeries(store, propertyPath);
                 return warmup.Points.Length > 0;
             },
-            message: $"Store never started recording under '{propertyPath}' (status='{store.Status}', recorded={store.RecordedCount}).");
+            message: $"Store never started recording under '{propertyPath}'.");
 
-        // Now the subscription is live; apply the asserted value and wait for it specifically.
+        // Now the engine is recording; apply the asserted value and wait for it specifically.
         mutate(targetValue);
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
@@ -109,7 +112,7 @@ public class SqliteHistoryStoreRecordingTests
                 store.FlushNowAsync().GetAwaiter().GetResult();
                 return QuerySeries(store, propertyPath).Points.Any(point => point.Number == targetValue);
             },
-            message: $"Value {targetValue} not recorded under '{propertyPath}' (recorded={store.RecordedCount}).");
+            message: $"Value {targetValue} not recorded under '{propertyPath}'.");
 
         return QuerySeries(store, propertyPath);
     }
@@ -323,6 +326,411 @@ public class SqliteHistoryStoreRecordingTests
         {
             await hostedService.StopAsync(CancellationToken.None);
             DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenDatabasePathChangesAndConfigurationIsApplied_ThenNewSamplesGoToTheNewDirectory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var newDatabasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.DatabasePath = newDatabasePath;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Directory.Exists(newDatabasePath) && Directory.EnumerateFiles(newDatabasePath).Any(),
+                message: "Store never opened the new database directory after the configuration was applied.");
+
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 2);
+            await store.FlushNowAsync();
+
+            // Assert
+            Assert.Contains(
+                Directory.EnumerateFiles(newDatabasePath, "*.db"),
+                file => Path.GetFileName(file) != "metadata.db");
+            var series = QuerySeries(store, "/Temperature");
+            Assert.Contains(series.Points, point => point.Number == 2);
+            Assert.DoesNotContain(series.Points, point => point.Number == 1);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+            DeleteDirectory(newDatabasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenRestarted_ThenSamplesBeforeTheRestartArePersisted()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+
+        // Long enough that no periodic flush persists value 1 before the restart does.
+        store.FlushIntervalSeconds = (int)TimeSpan.FromDays(1).TotalSeconds;
+
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 0);
+            root.Temperature = 1;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.PendingSampleCount > 0,
+                message: "Value 1 never reached the engine.");
+
+            // Act
+            var appliedAt = DateTimeOffset.UtcNow;
+            store.MaxJsonSize += 1;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+
+            // No forced flush while waiting: before the restart it would persist value 1 itself.
+            await WaitForCoverageToReachAsync(store, appliedAt);
+
+            // Assert: polled, since the ending session may still be the one serving when its final flush shows
+            // and the next one takes a moment to open the files.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 1),
+                message: "Value 1 was not persisted by the restart.");
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenRestarted_ThenCoverageContinuesAcrossTheRestart()
+    {
+        // Arrange: the subscription spans the restart and the files keep the earlier samples, so nothing is
+        // missing between the two sessions.
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+            var coverageFrom = Assert.Single(store.CoverageRanges).From;
+
+            // Act
+            var appliedAt = DateTimeOffset.UtcNow;
+            store.MaxJsonSize += 1;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await WaitForCoverageToReachAsync(store, appliedAt);
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 2);
+
+            // Assert
+            var coverage = Assert.Single(store.CoverageRanges);
+            Assert.Equal(coverageFrom, coverage.From);
+            Assert.Contains(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenIsEnabledIsClearedAndApplied_ThenTheStoreServesNoHistory()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var (store, databasePath) = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.IsEnabled = false;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Disabled",
+                message: "Store never reported Disabled after IsEnabled was cleared and applied.");
+
+            // Assert
+            Assert.Empty(store.CoverageRanges);
+            Assert.Empty(QuerySeries(store, "/Temperature").Points);
+            Assert.Equal(0, store.RecordedCount);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenOnlyPriorityAndFlushIntervalChange_ThenTheStoreDoesNotRestart()
+    {
+        // Arrange: a restart shows as a second processor; the files and the durable coverage survive one.
+        var (context, root, _) = CreateGraph();
+        using var store = new GatedHistoryStore();
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        store.BufferTimeMilliseconds = 50;
+        store.FlushIntervalSeconds = 1;
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 11);
+            var coverageFrom = Assert.Single(store.CoverageRanges).From;
+
+            // Act
+            store.Priority = 7;
+            store.FlushIntervalSeconds = 2;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
+
+            // A restarted session creates its processor before its flush loop publishes anything, so a flush
+            // instant from after the second value orders the count below after any restart.
+            var recordedAt = DateTimeOffset.UtcNow;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.LastFlushUtc > recordedAt,
+                message: "The flush loop never published a flush after the second value.");
+
+            // Assert
+            Assert.Equal(1, store.Creations);
+            var series = QuerySeries(store, "/Temperature");
+            Assert.Contains(series.Points, point => point.Number == 11);
+            Assert.Contains(series.Points, point => point.Number == 22);
+            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// Waits until the store's coverage reaches past <paramref name="instant"/>, which after a restart requested
+    /// at that instant is first done by the ending session's final flush.
+    /// </summary>
+    private static Task WaitForCoverageToReachAsync(SqliteHistoryStoreSubject store, DateTimeOffset instant) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => store.CoverageRanges is [.., var last] && last.To > instant,
+            message: "Store coverage never reached past the restart.");
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task WhenWrittenBeforeProcessingStarts_ThenHistoryQueriesIncludeTheSample(bool restart, bool heldValue)
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        using var store = new GatedHistoryStore { HoldSessions = true };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            var release = await store.Sessions.Reader.ReadAsync(timeout.Token);
+            if (restart)
+            {
+                release.SetResult();
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+                release = await store.Sessions.Reader.ReadAsync(timeout.Token);
+            }
+
+            // Act
+            root.Temperature = 21.5;
+            release.SetResult();
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                store.FlushNowAsync().GetAwaiter().GetResult();
+                return QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5);
+            });
+
+            // Assert
+            if (heldValue)
+            {
+                var recorded = Assert.Single(QuerySeries(store, "/Temperature").Points, point => point.Number == 21.5);
+                var sample = await store.GetSampleAtOrBeforeAsync("/Temperature", recorded.Timestamp, timeout.Token);
+                Assert.NotNull(sample);
+                Assert.Equal(21.5, sample.Number);
+            }
+            else
+            {
+                var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow);
+                var series = await new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token);
+                Assert.Contains(series.Points, point => point.Number == 21.5);
+            }
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task WhenProcessingFaults_ThenTheSessionEndsAndTheRetriedSessionRecords()
+    {
+        // Arrange: the first processor's filter throws on the first change, which faults its ProcessAsync.
+        var (context, root, _) = CreateGraph();
+        using var store = new GatedHistoryStore { FaultFirstProcessor = true };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            root.Temperature = 1;
+            var (statusAtRetry, lastErrorAtRetry) = await store.StateAtRetry.Task.WaitAsync(timeout.Token);
+            var series = await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 21.5);
+
+            // Assert
+            Assert.Equal("Error", statusAtRetry);
+            Assert.Equal("Filter failed.", lastErrorAtRetry);
+            Assert.Contains(series.Points, point => point.Number == 21.5);
+            Assert.Equal("Running", store.Status);
+            Assert.Null(store.LastError);
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenWrittenWhileTheNextProcessorIsBeingCreated_ThenMergedQueriesIncludeTheSample(bool afterFault)
+    {
+        // Arrange: the second CreateProcessor blocks before it runs, so the write lands after the first processor
+        // is gone and before the next session captures anything.
+        var (context, root, _) = CreateGraph();
+        using var gate = new ManualResetEventSlim();
+        using var store = new GatedHistoryStore { HoldSecondCreate = gate, FaultFirstProcessor = afterFault };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        var databasePath = Path.Combine(Path.GetTempPath(), "hb-sqlite-hist-" + Guid.NewGuid().ToString("N"));
+        store.DatabasePath = databasePath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            if (!afterFault)
+            {
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+            }
+
+            if (afterFault)
+            {
+                root.Temperature = 1;
+            }
+            else
+            {
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+            }
+            await store.SecondCreateEntered.Task.WaitAsync(timeout.Token);
+
+            // Act
+            root.Temperature = 21.5;
+            gate.Set();
+
+            // Assert: the new session serves the sample, and one continuous range covers both sessions, so a
+            // sample persisted by the first is served too.
+            var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow.AddMinutes(1));
+            var series = default(HistorySeries)!;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    store.FlushNowAsync().GetAwaiter().GetResult();
+                    series = new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token).GetAwaiter().GetResult();
+                    return series.Points.Any(point => point.Number == 21.5);
+                },
+                timeout: TimeSpan.FromSeconds(10),
+                message: "The sample written between two processors was not served.");
+            Assert.Single(store.CoverageRanges);
+            Assert.Equal(!afterFault, series.Points.Any(point => point.Number == 1));
+        }
+        finally
+        {
+            gate.Set();
+            await store.StopAsync(CancellationToken.None);
+            DeleteDirectory(databasePath);
+        }
+    }
+
+    private sealed class GatedHistoryStore() : SqliteHistoryStoreSubject(NullLogger<SqliteHistoryStoreSubject>.Instance)
+    {
+        private int _creations;
+
+        public bool HoldSessions { get; init; }
+        public bool FaultFirstProcessor { get; init; }
+        public ManualResetEventSlim? HoldSecondCreate { get; init; }
+        public int Creations => Volatile.Read(ref _creations);
+        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
+        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<(string Status, string? LastError)> StateAtRetry { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
+        {
+            if (++_creations == 2 && HoldSecondCreate is not null)
+            {
+                SecondCreateEntered.SetResult();
+                HoldSecondCreate.Wait();
+            }
+
+            var processor = base.CreateProcessor(subscription);
+            if (_creations > 1 || !FaultFirstProcessor)
+            {
+                return processor;
+            }
+
+            // Replaced by one whose filter throws, after the base captured the session's settings from it, so
+            // the retried session runs on the real processor.
+            processor.Dispose();
+            return new ChangeQueueProcessor(
+                this, subscription, _ => throw new InvalidOperationException("Filter failed."),
+                (_, _) => ValueTask.CompletedTask, ChangeDeliveryRule.SourceValuesMayBeStale,
+                bufferTime: null, maxQueueDepth: null, NullLogger.Instance);
+        }
+
+        protected override TimeSpan GetRetryDelay(Exception exception)
+        {
+            StateAtRetry.TrySetResult((Status, LastError));
+            return TimeSpan.Zero;
+        }
+
+        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
+        {
+            if (HoldSessions)
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Sessions.Writer.TryWrite(release);
+                await release.Task.WaitAsync(cancellationToken);
+            }
+
+            await base.ProcessAsync(processor, cancellationToken);
         }
     }
 }

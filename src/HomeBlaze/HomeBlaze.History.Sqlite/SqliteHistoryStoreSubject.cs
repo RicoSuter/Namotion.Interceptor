@@ -1,9 +1,9 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
+using System.Runtime.ExceptionServices;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -15,7 +15,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
-/// Priority-50 SQLite history store. A <see cref="BackgroundService"/> [InterceptorSubject]
+/// Priority-50 SQLite history store. A <see cref="ChangeQueueBackgroundService"/> [InterceptorSubject]
 /// that records recordable [State] scalar property changes into partitioned SQLite database files and
 /// answers raw and bucketed history queries through <see cref="IHistoryStore"/>. Storage concerns are
 /// delegated to the graph-free <see cref="SqliteHistoryStore"/> engine; this subject owns the change-queue
@@ -25,14 +25,19 @@ namespace HomeBlaze.History.Sqlite;
 [Description("Persists [State] history to partitioned SQLite files (priority 50).")]
 [InterceptorSubject]
 public partial class SqliteHistoryStoreSubject :
-    BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
+    ChangeQueueBackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
 {
     private readonly ILogger<SqliteHistoryStoreSubject> _logger;
 
+    private readonly Lock _settingsLock = new();
+    private readonly HistorySessionCoverage _sessionCoverage = new();
+
     private HistoryChangeRecorder? _recorder;
     private SqliteHistoryStore? _engine;
+    private Settings? _settings;
 
     public SqliteHistoryStoreSubject(ILogger<SqliteHistoryStoreSubject> logger)
+        : base(logger)
     {
         _logger = logger;
 
@@ -98,7 +103,7 @@ public partial class SqliteHistoryStoreSubject :
     public partial int MaxJsonSize { get; set; }
 
     /// <summary>
-    /// Whether the store is enabled and should auto-start on application startup.
+    /// Whether the store records; applying a change takes effect immediately.
     /// </summary>
     [Configuration]
     public partial bool IsEnabled { get; set; }
@@ -130,7 +135,7 @@ public partial class SqliteHistoryStoreSubject :
     public partial int QueueDepth { get; set; }
 
     /// <summary>
-    /// Cumulative number of samples dropped after the pending persistence queue reached its limit.
+    /// Number of samples dropped since start after the pending persistence queue reached its limit.
     /// </summary>
     [State]
     public partial long DropCount { get; set; }
@@ -142,7 +147,7 @@ public partial class SqliteHistoryStoreSubject :
     public partial DateTimeOffset? LastFlushUtc { get; set; }
 
     /// <summary>
-    /// Message of the last error encountered during flush or sweep, or null when healthy.
+    /// Message of the last error encountered during flush, sweep or processing, or null when healthy.
     /// </summary>
     [State]
     public partial string? LastError { get; set; }
@@ -169,7 +174,7 @@ public partial class SqliteHistoryStoreSubject :
 
     /// <inheritdoc />
     public ImmutableArray<HistoryCoverage> CoverageRanges =>
-        _engine?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
+        Volatile.Read(ref _engine)?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => SqliteHistoryStore.AllAggregations;
@@ -179,7 +184,8 @@ public partial class SqliteHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine is null)
+        var engine = Volatile.Read(ref _engine);
+        if (engine is null)
         {
             return Task.FromResult(
                 new HistorySeries(
@@ -189,7 +195,7 @@ public partial class SqliteHistoryStoreSubject :
                     ImmutableArray<HistoryCoverage>.Empty));
         }
 
-        return _engine.QueryAsync(query, cancellationToken);
+        return engine.QueryAsync(query, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -197,25 +203,62 @@ public partial class SqliteHistoryStoreSubject :
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
+        return new ValueTask<HistoryPoint?>(Volatile.Read(ref _engine)?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
     /// <summary>
     /// Test-only hook that forces the engine to flush its pending samples immediately, so queued
-    /// changes become queryable without waiting for the interval flush. Returns a completed task
-    /// (no-op) before the engine is built.
+    /// changes become queryable without waiting for the interval flush. A no-op before the engine is
+    /// built and when the engine it found was disposed by its session's end in the meantime.
     /// </summary>
-    internal Task FlushNowAsync(CancellationToken cancellationToken = default)
+    internal async Task FlushNowAsync(CancellationToken cancellationToken = default)
     {
-        return _engine?.FlushAsync(cancellationToken) ?? Task.CompletedTask;
+        try
+        {
+            await (Volatile.Read(ref _engine)?.FlushAsync(cancellationToken) ?? Task.CompletedTask).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // A poll across a session end; the next one finds the next engine or none.
+        }
     }
 
-    // BackgroundService
+    /// <summary>
+    /// Test-only hook: the number of samples the running engine holds but has not yet written, or zero
+    /// between sessions.
+    /// </summary>
+    internal int PendingSampleCount => Volatile.Read(ref _engine)?.QueueDepth ?? 0;
+
+    // ChangeQueueBackgroundService
 
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override IInterceptorSubjectContext Context => ((IInterceptorSubject)this).Context;
+
+    /// <inheritdoc />
+    protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
     {
-        if (!IsEnabled)
+        Settings settings;
+        lock (_settingsLock)
+        {
+            settings = ReadSettings();
+            _settings = settings;
+        }
+
+        // The recorder is read per batch: it is set once ProcessAsync has the engine, and a processor may
+        // outlive a session that ends by clearing it.
+        var processor = HistoryChangeRecorder.CreateProcessor(
+            this, subscription, () => _recorder, TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds), _logger);
+        _sessionCoverage.Track(subscription);
+        return processor;
+    }
+
+    /// <inheritdoc />
+    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
+    {
+        // Written by CreateProcessor on the flow that runs this, so no lock is needed.
+        var settings = _settings!;
+        ResetMetrics();
+        if (!settings.IsEnabled)
         {
             Status = "Disabled";
             return;
@@ -232,7 +275,7 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
+        var directory = SqliteDatabaseLocation.Resolve(settings.DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
 
         SqliteHistoryStore engine;
         try
@@ -240,9 +283,9 @@ public partial class SqliteHistoryStoreSubject :
             engine = new SqliteHistoryStore(
                 priority: Priority,
                 databaseDirectory: directory,
-                partitionInterval: PartitionInterval,
-                maxAge: TimeSpan.FromDays(MaxAgeDays),
-                maxJsonSize: MaxJsonSize,
+                partitionInterval: settings.PartitionInterval,
+                maxAge: TimeSpan.FromDays(settings.MaxAgeDays),
+                maxJsonSize: settings.MaxJsonSize,
                 getUtcNow: () => DateTimeOffset.UtcNow,
                 logger: _logger);
         }
@@ -254,48 +297,59 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        // The change-queue subscription is live from construction, before the first await. The
-        // coverage session starts only afterwards, so no change can fall inside claimed coverage
-        // without reaching the engine.
-        var recorder = new HistoryChangeRecorder(engine, resolver);
-        _recorder = recorder;
-
-        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
-        // for it. Under the other rule a source-applied value does not retire an older commit, which is
-        // what keeps both points in the series.
-        using var processor = new ChangeQueueProcessor(
-            this,
-            context,
-            HistoryChangeRecorder.IsEligible,
-            (changes, _) => recorder.RecordBatch(changes),
-            ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
-
-        engine.BeginCoverageSession();
-        _engine = engine;
+        // The subscription precedes the coverage session, which precedes recording, so no change can fall
+        // inside claimed coverage without reaching the engine, and none reaches it before the session began.
+        engine.BeginCoverageSession(_sessionCoverage.StartsAt);
+        _recorder = new HistoryChangeRecorder(engine, resolver);
+        Volatile.Write(ref _engine, engine);
 
         _logger.LogInformation("Recording SQLite history to {Directory}.", directory);
 
         LastError = null;
         Status = "Running";
 
-        var flushTask = RunFlushLoopAsync(engine, stoppingToken);
+        // The flush loop ends with the session, so a processing fault reaches the service's retry without
+        // waiting for a stop or restart.
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var flushTask = RunFlushLoopAsync(engine, session.Token);
+        Exception? fault = null;
         try
         {
-            await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+            await processor.ProcessAsync(session.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (session.IsCancellationRequested)
         {
+        }
+        catch (Exception exception)
+        {
+            fault = exception;
+            throw;
         }
         finally
         {
-            await flushTask.ConfigureAwait(false);
+            // Before the waits below, see EndSession, and before the final flush, so a successful flush reaches
+            // past this instant and the two sessions' coverage merges into one range.
+            _sessionCoverage.EndSession();
+            await session.CancelAsync().ConfigureAwait(false);
 
-            // Final shutdown flush so the un-flushed tail is persisted. The stopping token is already
-            // cancelled here, so a fresh bounded token gives the flush a chance to complete (the engine
-            // keeps pending samples on failure, so a timeout simply leaves them for the next start).
+            // The teardown below must run even when the flush loop faulted, or the engine would stay open.
+            ExceptionDispatchInfo? flushFault = null;
+            try
+            {
+                await flushTask.ConfigureAwait(false);
+            }
+            catch (Exception exception) when (fault is null)
+            {
+                flushFault = ExceptionDispatchInfo.Capture(exception);
+                fault = exception;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "History flush loop faulted while the session was ending after a processing fault.");
+            }
+
+            // Final flush on stop, restart or fault. The token is already cancelled, so a fresh bounded one
+            // gives it a chance; on timeout the pending samples are lost, which the log below reports.
             using var shutdownCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -303,12 +357,28 @@ public partial class SqliteHistoryStoreSubject :
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Final history flush on shutdown failed; pending samples were not persisted.");
+                _logger.LogError(exception, "Final history flush failed; pending samples were not persisted.");
             }
 
             RefreshMetrics(engine);
+
+            // Cleared before the dispose, so a query between sessions finds no engine; one that already read it
+            // is answered empty by the disposed engine, which no longer opens files.
+            Volatile.Write(ref _engine, null);
+            _recorder = null;
             engine.Dispose();
-            Status = "Stopped";
+            if (fault is null)
+            {
+                Status = "Stopped";
+            }
+            else
+            {
+                LastError = fault.Message;
+                Status = "Error";
+            }
+
+            // Surfaces as the session's fault, so the service logs it and retries.
+            flushFault?.Throw();
         }
     }
 
@@ -350,11 +420,24 @@ public partial class SqliteHistoryStoreSubject :
     /// <summary>
     /// The flush interval actually used, clamped into a range <see cref="Task.Delay(TimeSpan, CancellationToken)"/>
     /// accepts. The configured value reaches here from a settings form and from a hand-editable file, and
-    /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which faults the
-    /// task that <c>ExecuteAsync</c> awaits in its finally and stops the whole host.
+    /// anything past <see cref="int.MaxValue"/> milliseconds throws out of the flush loop, which stops flushing
+    /// until the session ends and then surfaces as a fault.
     /// </summary>
     private TimeSpan EffectiveFlushInterval =>
         TimeSpan.FromSeconds(Math.Clamp(FlushIntervalSeconds, 1, (int)TimeSpan.FromDays(1).TotalSeconds));
+
+    private void ResetMetrics()
+    {
+        RecordedCount = 0;
+        OversizeCount = 0;
+        QueueDepth = 0;
+        DropCount = 0;
+        EstimatedStorageSize = 0;
+        LastFlushUtc = null;
+        LastError = null;
+        IncomingChangesPerSecond = 0;
+        RecordedChangesPerSecond = 0;
+    }
 
     private void RefreshMetrics(SqliteHistoryStore engine)
     {
@@ -400,10 +483,30 @@ public partial class SqliteHistoryStoreSubject :
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Size knobs (MaxAgeDays, MaxJsonSize, PartitionInterval, DatabasePath) and BufferTime and
-        // FlushInterval are read once when the engine and change-queue processor are built in ExecuteAsync.
-        // Like OpcUaServer, configuration changes take effect on the next start; the host restarts the
-        // background service to apply them.
+        // Only a changed start-time setting restarts; the restart persists pending samples first. Under the
+        // lock CreateProcessor reads and publishes the settings in, or a revert racing a restart could compare
+        // against stale settings and be lost.
+        lock (_settingsLock)
+        {
+            if (_settings is { } started && started != ReadSettings())
+            {
+                RequestRestart();
+            }
+        }
+
         return Task.CompletedTask;
     }
+
+    private Settings ReadSettings() =>
+        new(IsEnabled, MaxAgeDays, PartitionInterval, DatabasePath, MaxJsonSize, BufferTimeMilliseconds);
+
+    // Settings read once per start. Priority is not one: HistoryStoreMerger reads it live from this subject.
+    // Neither is FlushIntervalSeconds: the flush loop re-reads it on every pass.
+    private sealed record Settings(
+        bool IsEnabled,
+        int MaxAgeDays,
+        PartitionInterval PartitionInterval,
+        string DatabasePath,
+        int MaxJsonSize,
+        int BufferTimeMilliseconds);
 }

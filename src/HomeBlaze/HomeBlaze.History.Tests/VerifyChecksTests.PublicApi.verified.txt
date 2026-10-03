@@ -10,11 +10,19 @@ namespace HomeBlaze.History
         public double RecordedChangesPerSecond { get; }
         public void Forget(Namotion.Interceptor.IInterceptorSubject subject) { }
         public System.Threading.Tasks.ValueTask RecordBatch(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes) { }
+        public static Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateProcessor(object source, Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription subscription, System.Func<HomeBlaze.History.HistoryChangeRecorder?> recorder, System.TimeSpan bufferTime, Microsoft.Extensions.Logging.ILogger logger) { }
         public static bool IsEligible(Namotion.Interceptor.PropertyReference propertyReference) { }
     }
     public static class HistoryEligibility
     {
         public static bool HasHistory(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
+    public sealed class HistorySessionCoverage
+    {
+        public HistorySessionCoverage() { }
+        public System.DateTimeOffset StartsAt { get; }
+        public System.DateTimeOffset EndSession() { }
+        public void Track(Namotion.Interceptor.Tracking.Change.PropertyChangeQueueSubscription subscription) { }
     }
     public static class HistoryStoreMerger
     {
