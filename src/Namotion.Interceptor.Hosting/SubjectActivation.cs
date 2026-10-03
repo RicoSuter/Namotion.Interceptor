@@ -100,7 +100,9 @@ internal sealed class SubjectActivation<T> : IHostedService, IAsyncDisposable, I
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        if (_host is not { } host)
+        // Taken rather than read: the container disposes this once as the keyed singleton and once as
+        // the hosted service that resolves it, and only the first disposal stops the host.
+        if (Interlocked.Exchange(ref _host, null) is not { } host)
         {
             return;
         }

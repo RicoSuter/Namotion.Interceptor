@@ -20,9 +20,9 @@ public static class SubjectServiceCollectionExtensions
     /// the subject is a hosted service. One registration per type; use
     /// <see cref="AddKeyedSubject{T}"/> for several. If <typeparamref name="T"/> is already registered,
     /// neither <paramref name="configure"/> nor the context applies to that instance: the hosting
-    /// context it is already in runs it, host start throws when it is in a tracked graph without
-    /// hosting, and when it is in no graph, it runs in a context of its own without a resolver and host
-    /// start throws with one.
+    /// context it is already in runs it. Otherwise, without a resolver, it runs in a context of its own
+    /// when it is in no graph and host start throws when it is in a tracked graph; with one, host start
+    /// throws when it is a hosted service and leaves a plain subject alone.
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
     /// <param name="services">The service collection.</param>
