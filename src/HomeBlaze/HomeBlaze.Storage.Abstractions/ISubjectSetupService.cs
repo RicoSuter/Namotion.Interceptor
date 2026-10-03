@@ -9,6 +9,6 @@ public interface ISubjectSetupService
     /// <summary>
     /// Prompts user to create a new subject.
     /// </summary>
-    /// <returns>The created subject and name, or null if cancelled</returns>
+    /// <returns>The created subject and name, or null if cancelled. The subject's hosted service is activated, so the caller keeps it.</returns>
     Task<CreateSubjectResult?> CreateSubjectAsync(CancellationToken cancellationToken);
 }

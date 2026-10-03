@@ -486,17 +486,114 @@ public partial class ShellyDevice
 - **HueBridge** (`Namotion.Devices.Philips.Hue`): Injects `ILogger<HueBridge>` only. It creates its own `HttpClient` rather than taking an `IHttpClientFactory`, because the bridge needs a handler that accepts its self-signed certificate.
 - **OpcUaSubjectServer** (`Namotion.Interceptor.OpcUa`): Injects OPC UA server configuration and telemetry services.
 
+A subject that can also be created as a copy, by a deserializer or a connector mirroring a remote one, takes no services in its constructor. It resolves them in its service instead, as the device pattern below shows.
+
 ## Implementing Hosted Subjects for DI
 
 > See [Hosting](hosting.md) for foundational concepts on hosted subjects and the hosting lifecycle.
 
-When creating a subject library whose subject extends `BackgroundService`, provide DI extension methods over `AddSubject<T>` and `AddKeyedSubject<T>` from `Namotion.Interceptor.Hosting`.
+A device library gives its subject a hosted service rather than making the subject one, so the same type can be the real device in one process and a passive copy mirrored by a connector in another. Who runs the service and who must not is in [A Subject With a Service](hosting.md#a-subject-with-a-service). A subject whose only purpose is a background loop can still extend `BackgroundService`, and the DI extension method below is the same for both.
 
-`AddSubject<T>` registers the subject as a singleton, constructs it at host start and runs it. Without a `contextResolver` it runs in a context of its own, with property tracking, lifecycle and hosting; a subject that needs more there, for example the registry, implements `ISubjectContextConfigurator`. With one, it joins the resolved context, which must have hosting, and the handler on it starts the subject because the subject entered the graph. Host startup waits for that start either way. One registration per type and key: calling the library's `AddX()` twice throws, because the second call's `configure` and `contextResolver` could not take effect, and `AddKeyedSubject<T>` registers several instances of one type, each in a context of its own when no resolver is given. Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
+### Device Pattern
+
+The subject is data: a parameterless constructor, configuration and state properties, and operations. Everything that talks to the device lives in an internal service the subject creates:
+
+```csharp
+[InterceptorSubject]
+public partial class Thermostat : ISubjectHostedServiceFactory
+{
+    private ThermostatPoller? _activeService;
+
+    // Read by a derived getter but not device data, so a field: see the rules below.
+    internal ThermostatInformation? Information;
+
+    public partial string? HostAddress { get; set; }
+
+    public partial bool IsConnected { get; internal set; }
+
+    public partial decimal? Temperature { get; internal set; }
+
+    [Derived]
+    public string? FirmwareVersion => Information?.FirmwareVersion;
+
+    public Thermostat()
+    {
+        HostAddress = null;
+        IsConnected = false;
+        Temperature = null;
+    }
+
+    public Task SetTargetTemperatureAsync(decimal temperature, CancellationToken cancellationToken)
+        => (Volatile.Read(ref _activeService) ?? throw new InvalidOperationException("The thermostat is not running."))
+            .SetTargetTemperatureAsync(temperature, cancellationToken);
+
+    IHostedService ISubjectHostedServiceFactory.CreateHostedService(IServiceProvider serviceProvider)
+        => new ThermostatPoller(this, serviceProvider.GetService<IHttpClientFactory>());
+
+    internal void SetActiveService(ThermostatPoller service) => Volatile.Write(ref _activeService, service);
+
+    // Compare and exchange, so a service that finishes after its successor started does not clear it.
+    internal void ClearActiveService(ThermostatPoller service) => Interlocked.CompareExchange(ref _activeService, null, service);
+}
+
+internal sealed record ThermostatInformation(string FirmwareVersion);
+
+internal sealed class ThermostatPoller : BackgroundService
+{
+    private readonly Thermostat _device;
+    private readonly HttpClient _client;
+
+    public ThermostatPoller(Thermostat device, IHttpClientFactory? httpClientFactory)
+    {
+        _device = device;
+        _client = httpClientFactory?.CreateClient() ?? new HttpClient();
+    }
+
+    public Task SetTargetTemperatureAsync(decimal temperature, CancellationToken cancellationToken)
+        => _client.PutAsJsonAsync($"http://{_device.HostAddress}/target", temperature, cancellationToken);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _device.SetActiveService(this);
+        try
+        {
+            _device.Information = await _client.GetFromJsonAsync<ThermostatInformation>($"http://{_device.HostAddress}/info", stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                _device.Temperature = await _client.GetFromJsonAsync<decimal>($"http://{_device.HostAddress}/temperature", stoppingToken);
+                _device.IsConnected = true;
+                await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+            }
+        }
+        finally
+        {
+            _device.ClearActiveService(this);
+            _device.IsConnected = false;
+        }
+    }
+
+    public override void Dispose()
+    {
+        _client.Dispose();
+        base.Dispose();
+    }
+}
+```
+
+What the pattern requires:
+
+- **No services in the subject's constructor.** Whatever creates the subject as data has none to give. `CreateHostedService` receives the activator's service provider, which may resolve nothing, so resolve with `GetService` and fall back.
+- **Service state is a field, never a property.** The generator registers every non-static property, internal ones included, as subject data, so state the service keeps for derived getters that is not device data goes in a field.
+- **Operations live on the subject and forward to the running service**, throwing when none runs.
+- **The service clears connection state on stop**, so a stopped device does not read as connected and operations gated on it are disabled.
+- **The service keeps its own retry loop** and reports a lost connection through the subject's state. A fault escaping `ExecuteAsync` stops the service until the subject next enters the graph.
+- **Child subjects that have a service are activated by their creator.** A service that creates such children activates each one with `child.ActivateHostedService(serviceProvider)`, passing on the provider `CreateHostedService` received, because a context that opted out of automatic activation runs only what the creator activated.
+- **A subject that needs more in a context of its own implements `ISubjectContextConfigurator`**, for example with `context.WithRegistry()` when its service resolves registered properties. See [Running one without a host](hosting.md#running-one-without-a-host) for when it is called.
+- **A service that replaces child devices detaches each replaced child's activation**, with `child.DetachHostedService(attachment)` on the attachment `ActivateHostedService` returned. A child only dropped from the graph keeps its activation, and a self-contained host keeps tracking it until it stops.
 
 ### DI Extension Method
 
-A library may provide an `AddX` and `AddKeyedX` pair over `AddSubject<T>` and `AddKeyedSubject<T>`, passing `contextResolver` through so the caller picks the mode:
+Provide an `AddX` and `AddKeyedX` pair over `AddSubject<T>` and `AddKeyedSubject<T>`, passing `contextResolver` through so the caller picks the mode:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -505,27 +602,29 @@ using Namotion.Interceptor.Hosting;
 
 namespace MyLibrary;
 
-public static class MySubjectServiceCollectionExtensions
+public static class ThermostatServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers MySubject and runs it. Without <paramref name="contextResolver"/> it runs in a
+    /// Registers a thermostat and runs it. Without <paramref name="contextResolver"/> it runs in a
     /// context of its own; with it, it joins the resolved context, which must have hosting.
     /// </summary>
-    public static IServiceCollection AddMySubject(
+    public static IServiceCollection AddThermostat(
         this IServiceCollection services,
-        Action<MySubject>? configure = null,
+        Action<Thermostat>? configure = null,
         Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
         => services.AddSubject(configure, contextResolver);
 
-    /// <summary>Registers one of several MySubject instances under a key. See <see cref="AddMySubject"/>.</summary>
-    public static IServiceCollection AddKeyedMySubject(
+    /// <summary>Registers one of several thermostats under a key. See <see cref="AddThermostat"/>.</summary>
+    public static IServiceCollection AddKeyedThermostat(
         this IServiceCollection services,
         object? serviceKey,
-        Action<MySubject>? configure = null,
+        Action<Thermostat>? configure = null,
         Func<IServiceProvider, IInterceptorSubjectContext>? contextResolver = null)
         => services.AddKeyedSubject(serviceKey, configure, contextResolver);
 }
 ```
+
+Do not register the same subject with `AddHostedService<T>` as well, because that is a second owner and a second start.
 
 ### Required Project References
 
@@ -541,21 +640,18 @@ public static class MySubjectServiceCollectionExtensions
 
 ```csharp
 // Minimal
-services.AddMySubject();
+services.AddThermostat();
 
 // With configuration
-services.AddMySubject(subject =>
-{
-    subject.Name = "Sensor 1";
-    subject.PollingInterval = TimeSpan.FromSeconds(5);
-});
+services.AddThermostat(thermostat => thermostat.HostAddress = "192.168.1.20");
 
 // Several, each in a context of its own
-services.AddKeyedMySubject("living-room", subject => subject.Name = "Sensor 1");
-services.AddKeyedMySubject("bedroom", subject => subject.Name = "Sensor 2");
+services.AddKeyedThermostat("living-room", thermostat => thermostat.HostAddress = "192.168.1.20");
+services.AddKeyedThermostat("bedroom", thermostat => thermostat.HostAddress = "192.168.1.21");
 
-// In a shared context the application owns, which must have hosting
-services.AddMySubject(contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
+// Without dependency injection
+var thermostat = new Thermostat { HostAddress = "192.168.1.20" };
+await using var running = await thermostat.StartAsync(cancellationToken);
 ```
 
 ### Context Support (Optional)

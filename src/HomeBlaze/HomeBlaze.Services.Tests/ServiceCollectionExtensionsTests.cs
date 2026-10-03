@@ -1,9 +1,12 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Tests.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
@@ -51,5 +54,21 @@ public class ServiceCollectionExtensionsTests
         // Assert
         Assert.Contains(resolver, lifecycleHandlers);
         Assert.Single(lifecycleHandlers.OfType<SubjectPathResolver>());
+    }
+
+    [Fact]
+    public void WhenSubjectWithHostedServiceIsAttachedWithoutActivation_ThenNothingRuns()
+    {
+        // Arrange
+        var context = SubjectContextFactory.Create(new ServiceCollection());
+        var parent = new ActivatableTestParent(context);
+        var child = new ActivatableTestSubject();
+
+        // Act
+        parent.Child = child;
+
+        // Assert
+        Assert.NotNull(child.TryGetRegisteredSubject());
+        Assert.Empty(child.GetHostedServiceAttachments());
     }
 }

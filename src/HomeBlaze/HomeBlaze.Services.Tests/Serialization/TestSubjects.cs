@@ -228,3 +228,39 @@ public partial class SubjectWithMixedProperties : IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
+
+[InterceptorSubject]
+public partial class ActivatableTestSubject : IConfigurable, Namotion.Interceptor.Hosting.ISubjectHostedServiceFactory
+{
+    [Configuration]
+    public partial string ConfigProperty { get; set; }
+
+    public ActivatableTestSubject()
+    {
+        ConfigProperty = string.Empty;
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    Microsoft.Extensions.Hosting.IHostedService Namotion.Interceptor.Hosting.ISubjectHostedServiceFactory.CreateHostedService(IServiceProvider serviceProvider)
+        => new NoOpHostedService();
+}
+
+public sealed class NoOpHostedService : Microsoft.Extensions.Hosting.IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ActivatableTestParent : IConfigurable
+{
+    [Configuration]
+    public partial ActivatableTestSubject? Child { get; set; }
+
+    [Configuration]
+    public partial IConfigurable? Device { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}

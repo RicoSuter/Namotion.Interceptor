@@ -1877,4 +1877,37 @@ public class HostedServiceHandlerTests
             Assert.Equal(1, instance.DisposeCount);
         });
     }
+
+    [Fact]
+    public async Task WhenTrackedActivationsAreDetachedRepeatedly_ThenTheHandlerDoesNotRetainThemAll()
+    {
+        // Arrange - a self-contained host whose service detaches the activation of each child it
+        // replaces must not grow its tracking for the life of the host. A child only dropped from the
+        // graph stays tracked until teardown, which is not what this covers.
+        var handler = new HostedServiceHandler(trackActivations: true);
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+        context.AddService(handler);
+        handler.EnsureStarted();
+        var subject = new ActivatableSubject();
+
+        try
+        {
+            // Act
+            for (var i = 0; i < 200; i++)
+            {
+                ((IInterceptorSubject)subject).Context.AddFallbackContext(context);
+                subject.DetachHostedService(subject.TryGetLiveActivation()!);
+                ((IInterceptorSubject)subject).Context.RemoveFallbackContext(context);
+            }
+
+            // Assert
+            Assert.InRange(handler.TrackedActivations.Count(), 1, 100);
+        }
+        finally
+        {
+            await handler.StopAsync(CancellationToken.None);
+        }
+    }
 }

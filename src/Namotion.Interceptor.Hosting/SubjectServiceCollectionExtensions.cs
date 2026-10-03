@@ -9,7 +9,8 @@ public static class SubjectServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the subject as a singleton, constructs it at host start and runs it: a subject that is
-    /// a hosted service is started, and host start waits for that start and fails on its fault.
+    /// a hosted service is started, an <see cref="ISubjectHostedServiceFactory"/> is activated with the
+    /// application's service provider. Host start waits for those starts and fails on their faults.
     /// </summary>
     /// <remarks>
     /// Without <paramref name="contextResolver"/> the subject runs in a context of its own, with
@@ -17,12 +18,13 @@ public static class SubjectServiceCollectionExtensions
     /// <see cref="ISubjectContextConfigurator.ConfigureContext"/> adds, ignores any context registered
     /// in dependency injection, and is stopped and detached from that context at host stop. With it, the
     /// subject joins the resolved context, and host start throws when that context has no hosting while
-    /// the subject is a hosted service. One registration per type; use
+    /// the subject has something to run. One registration per type; use
     /// <see cref="AddKeyedSubject{T}"/> for several. If <typeparamref name="T"/> is already registered,
     /// neither <paramref name="configure"/> nor the context applies to that instance: the hosting
     /// context it is already in runs it. Otherwise, without a resolver, it runs in a context of its own
     /// when it is in no graph and host start throws when it is in a tracked graph; with one, host start
-    /// throws when it is a hosted service and leaves a plain subject alone.
+    /// throws when it is a hosted service or an <see cref="ISubjectHostedServiceFactory"/> and leaves a
+    /// plain subject alone.
     /// </remarks>
     /// <typeparam name="T">The subject type.</typeparam>
     /// <param name="services">The service collection.</param>

@@ -29,7 +29,7 @@ First, load and follow the **brainstorming skill** (`superpowers:brainstorming`)
 - Source-generated interception (no runtime reflection, no manual `DetectChanges`)
 - `[Derived]` properties that auto-update when dependencies change
 - Property hooks (`OnPropertyChanging`/`OnPropertyChanged`) for validation and hardware writes
-- `BackgroundService` for polling (no `PollingThing` base class)
+- Devices implementing `ISubjectHostedServiceFactory`, with polling in an internal `BackgroundService` (no `PollingThing` base class)
 - Device libraries named `Namotion.Devices.*`
 - NO UI code in device projects (UI is separate)
 
@@ -92,7 +92,7 @@ For each v1 pattern, assess the best v2 approach:
 - Manual `DetectChanges` -> automatic via `[InterceptorSubject]` partial properties
 - Computed state -> `[Derived]` properties
 - Write-then-poll -> property hooks (`OnPropertyChanging`/`OnPropertyChanged`)
-- `PollingThing` -> `BackgroundService` with `ExecuteAsync`
+- `PollingThing` -> `ISubjectHostedServiceFactory` on the subject and an internal `BackgroundService` running the polling in `ExecuteAsync` (see `src/HomeBlaze/Namotion.Devices.MyStrom/`)
 - Nested model `[ScanForState]` -> derived properties reading from internal models
 
 ### Step 6: Check external dependencies
@@ -158,12 +158,12 @@ These are critical conventions the implementation MUST follow:
 - **Consider separate DTOs from subjects** -- don't put `[JsonPropertyName]` on subject properties. Deserialize into internal DTOs, then map to subject properties explicitly. This keeps subjects clean and avoids mixing serialization concerns into the domain model.
 - **Consider hybrid JSON parsing** -- for APIs with dynamic keys (e.g., `"switch:0"`, `"cover:1"`), parse the top level with `JsonElement.EnumerateObject()` and deserialize per-component into typed DTOs.
 - **Child collections: arrays vs dictionaries** -- use arrays when index is the identity (relay 0, pin 3, phase A). Use `Dictionary<string, T>` when identity comes from external system (API IDs, serial numbers). See v2 docs for details.
-- **Inject and use `ILogger<T>`** -- constructor-inject `ILogger<T>` for logging errors, warnings, and key lifecycle events. Don't silently swallow exceptions.
+- **Use `ILogger<T>` in the device's service** -- resolve it in `CreateHostedService` for logging errors, warnings, and key lifecycle events. Don't silently swallow exceptions.
 
 ### Deliverables
 
 1. **V2 subject project** -- `src/HomeBlaze/Namotion.Devices.{Name}/` with all device classes and `.csproj`
-2. **Service extension** -- `{Name}ServiceCollectionExtensions.cs` using `AddSubject` pattern
+2. **Service extension** -- `{Name}ServiceCollectionExtensions.cs` with an `Add{Name}` and `AddKeyed{Name}` pair over `AddSubject` and `AddKeyedSubject`
 3. **V2 UI project** -- `src/HomeBlaze/Namotion.Devices.{Name}.HomeBlaze/` with Blazor components:
    - `.csproj` (Razor SDK, references device project + `HomeBlaze.Components.Abstractions`, MudBlazor)
    - `_Imports.razor` (standard usings: `Microsoft.AspNetCore.Components`, `MudBlazor`, device namespace, `HomeBlaze.Components.Abstractions`, `HomeBlaze.Components.Abstractions.Attributes`)

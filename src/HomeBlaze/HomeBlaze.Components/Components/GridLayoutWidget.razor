@@ -181,7 +181,7 @@
 
     private async Task AddCellAt(int row, int column)
     {
-        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        await SubjectSetupDialog.ShowAsync(DialogService, activateHostedService: true, subject =>
         {
             if (Grid == null) return;
 

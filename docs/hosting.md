@@ -41,16 +41,17 @@ Without it, a subject one level below the root still starts, because the graph w
 - **The descent stops at level one.** Inheritance is what gives a child the parent's context, and it is that assignment which walks the child's own children into the graph. Without it nothing below the first level is ever attached, so nothing below the first level is ever started.
 - **Attaching to a subject already in the graph resolves no handler.** `AttachHostedService` looks the handler up on `subject.Context`. A child that never inherited the parent's context resolves nothing there, so the factory is stored and no instance is created.
 
-Starts and stops queued before the host starts run once it does, or once an [awaited attach or detach](#factory-attachment) opens the handler earlier. Each managed service has its own queue, so its own starts and stops never overlap, while unrelated services run concurrently. The one ordering guarantee across services is the one that matters for cleanup: when a subject leaves the graph, its own stop runs before the stops of the services attached to it.
+Starts and stops queued before the host starts run once it does, or once an [awaited attach or detach](#factory-attachment) opens the handler earlier. Each managed service has its own queue, so its own starts and stops never overlap, while unrelated services run concurrently. The one ordering guarantee across services is the one that matters for cleanup: when a subject leaves the graph, its own stop runs before the stops of the services attached to it, and the activated service of an `ISubjectHostedServiceFactory` subject stops before the other services attached to that subject. The second holds only while the activation is attached: once it has been detached explicitly, the other services no longer wait for it.
 
 ## Which Pattern When
 
 | You have | Use |
 |---|---|
 | A subject with no constructor dependencies, and you want the instance during configuration | Construct it and register the instance |
-| A subject whose constructor dependencies only exist after `builder.Build()`, or a subject that should run from dependency injection, in a context of its own by default | `services.AddSubject<T>()` |
+| A subject whose constructor dependencies only exist after `builder.Build()`, or a device or other subject with a service to run from dependency injection, in a context of its own by default | `services.AddSubject<T>()` |
 | A service that should run for as long as a subject is in the graph | Factory attachment |
 | A subject whose own purpose is a background loop | Let the subject implement `BackgroundService` |
+| A subject whose service should run only where it is the real one, not where it is mirrored | Implement `ISubjectHostedServiceFactory` (see [A Subject With a Service](#a-subject-with-a-service)) |
 
 ### Construct and register directly
 
@@ -86,10 +87,10 @@ builder.Services.AddSubject<WeatherStation>(station =>
 });
 ```
 
-It registers `T` as a singleton, forces its construction at host start and runs it: a subject that implements `IHostedService` is started, and host startup waits for that start and fails if it throws, the way `AddHostedService<T>` does. A plain subject is only constructed and attached. Where the subject runs depends on `contextResolver`:
+It registers `T` as a singleton, forces its construction at host start and runs it: a subject that implements `IHostedService` is started, and a subject that implements `ISubjectHostedServiceFactory` is [activated](#a-subject-with-a-service) with the application's service provider. Host startup waits for those starts and fails if one throws, the way `AddHostedService<T>` does. A plain subject is only constructed and attached. Where the subject runs depends on `contextResolver`:
 
-- **Without a resolver** it runs in a context of its own, with property tracking, lifecycle, hosting and whatever the subject adds with [`ISubjectContextConfigurator`](#configuring-a-context-of-its-own), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
-- **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject is a hosted service.
+- **Without a resolver** it runs in a context of its own, with property tracking, lifecycle, hosting and whatever the subject adds with [`ISubjectContextConfigurator`](#running-one-without-a-host), and ignores any context registered in the container. Host shutdown stops it and detaches it from that context.
+- **With a resolver** it joins the resolved context, whose handler runs it. Host startup throws when that context has no hosting, because `WithHostedServices()` was never called on it, while the subject has something to run.
 
 A subject in a context of its own belongs to that context alone. Do not place it in another tracked or hosting graph, for example by assigning it to a property of a subject in the application's context. The assignment does not throw, but the subject then reaches two lifecycle interceptors and two hosting handlers, so every single-service lookup on it and its children, such as `AttachHostedService`, throws far from the cause. What does throw is an instance that is already in a tracked graph when it joins its own context: for an instance `AddSubject` constructs, that is when it is first resolved, and for one you registered yourself, at host startup. To share the application's context instead, as `AddHostedSubject<T>()` did, pass `contextResolver: serviceProvider => serviceProvider.GetRequiredService<IInterceptorSubjectContext>()`.
 
@@ -105,20 +106,16 @@ builder.Services.AddKeyedSubject<WeatherStation>("garden");
 Two sharp edges:
 
 - One registration per type, or per type and key. A second registration of the same `T` and key throws, because its `configure` and `contextResolver` could not take effect.
-- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. Otherwise, without a resolver, it runs in a context of its own when it is in no graph, and host startup throws when it is in a tracked graph. With a resolver, host startup throws when it is a hosted service and leaves a plain subject alone.
+- If you already registered `T` yourself, `AddSubject<T>()` applies neither the context nor `configure` to that instance. The hosting graph the instance is already in runs it. Otherwise, without a resolver, it runs in a context of its own when it is in no graph, and host startup throws when it is in a tracked graph. With a resolver, host startup throws when it is a hosted service or an `ISubjectHostedServiceFactory` and leaves a plain subject alone.
 
 `configure` always runs before the attach `AddSubject` performs, so the subject is fully configured before anything can start it. Without a resolver the subject is constructed and configured before it joins any context, so on every constructor shape the assignments in `configure` are not intercepted and not tracked. With a resolver, construction and `configure` both run inside a [startup scope](#configuration-before-startup) on the resolved context, and what differs between the shapes is whether those assignments are intercepted:
 
 - **`T` has no constructor taking a context**, or it declares the documented `MySubject(IInterceptorSubjectContext? context = null)` parameter and never attaches with it. Nothing is attached while `configure` runs, so its assignments are not intercepted and not tracked.
 - **Construction attaches the subject**, which is what the generated context constructor does. `configure` runs against an attached subject, so its assignments are intercepted and tracked.
 
-#### Configuring a context of its own
-
-A subject that needs more in the context it runs in alone, for example the registry, implements `ISubjectContextConfigurator`. Its `ConfigureContext` runs once per such context, after the subject is constructed and configured and before it joins the context, which already has property tracking and lifecycle and gets hosting afterwards, so the implementation must not add hosting. It is never called for a shared context: whoever owns that context decides what it contains.
-
 #### What it costs at host startup
 
-`AddSubject<T>()` registers one hosted activation per registration, and when `T` implements `IHostedService` that activation waits for the subject to start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations, at whatever each subject's own `StartAsync` takes. A registered type that is a plain subject waits for no start and adds nothing.
+`AddSubject<T>()` registers one hosted activation per registration, and when `T` is a hosted service or has one, that activation waits for the start before host startup moves on. The generic host starts hosted services one after another by default, so those waits do not overlap and the cost is linear in the number of such registrations, at whatever each start takes. A registered type that is a plain subject waits for no start and adds nothing.
 
 Let the host start its services concurrently to get the waits overlapping:
 
@@ -137,6 +134,10 @@ When a service is not the subject itself but should run for as long as a subject
 ### A subject that is its own background loop
 
 When the subject's whole purpose is a background loop over its own properties, let it extend `BackgroundService`. See [Subject as Hosted Service](#subject-as-hosted-service) below.
+
+### A subject that has a service
+
+When the same subject type can be the real thing in one place and a copy mirrored from elsewhere in another, give it a service instead of making it one. See [A Subject With a Service](#a-subject-with-a-service) below.
 
 ## Factory Attachment
 
@@ -193,11 +194,11 @@ The factory runs inside the handler's transition, outside every lock, so it can 
 
 **A hosted service must not detach an attachment from inside its own stop path.** That includes anything reached through its `StopAsync`, and for a `BackgroundService` it includes the tail of `ExecuteAsync` as it unwinds.
 
-When a subject leaves the graph, the handler stops the subject first and holds each of its attachments' stops behind that, so an attachment is never disposed underneath a subject that is still unwinding. A stop that waits for a detach of one of those attachments therefore waits for itself.
+When a subject leaves the graph, the handler stops the subject first, then its activated service, and holds each of its other attachments' stops behind that, so an attachment is never disposed underneath a subject or service that is still unwinding. A stop that waits for a detach of one of those attachments therefore waits for itself.
 
 Nothing resolves that. The wedged queue never drains, the instance is never stopped and never disposed, and every later start or stop for the same service queues behind it for the rest of the process. Shutdown is the one thing the wedge cannot hold: the handler stops waiting for its outstanding stops when the host's `ShutdownTimeout` expires, so `StopAsync` returns even though the wedged service is still sitting there. That bounds the process, not the damage.
 
-Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine, with two exceptions. A subject must not await a detach of its own attachment from its own `StartAsync`. If shutdown begins while that start is still running, the detach queues behind shutdown's stop for the attachment, which waits for the subject's stop, which waits for that start. The same holds for a `BackgroundService` whose `ExecuteAsync` awaits a detach of its own attachment with `CancellationToken.None` as shutdown begins: the subject's stop waits for `ExecuteAsync`, so the detach parks until the host's shutdown deadline. Pass the stopping token to that detach, which the subject's stop cancels first, or use the synchronous `DetachHostedService`. Nothing detects the bad shape, so it is a rule rather than a guard. Both OPC UA wrappers in this repository had it and were changed, so it is a shape that gets written rather than a hypothetical one. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard.
+Detaching from an operation, from a configuration change, or from any path not reached through the service's own stop is fine, with two exceptions. A subject, or its activated service, must not await a detach of an attachment on that subject from its own `StartAsync`. If shutdown begins while that start is still running, the detach queues behind shutdown's stop for the attachment, which waits for the stop of the subject or of its activated service, which waits for that start. The same holds for a `BackgroundService`, the subject itself or its activated service, whose `ExecuteAsync` awaits a detach of such an attachment with `CancellationToken.None` as shutdown begins: its stop waits for `ExecuteAsync`, so the detach parks until the host's shutdown deadline. Pass the stopping token to that detach, which the stop cancels first, or use the synchronous `DetachHostedService`. Nothing detects the bad shape, so it is a rule rather than a guard. Both OPC UA wrappers in this repository had it and were changed, so it is a shape that gets written rather than a hypothetical one. `HostedServiceHandlerTests.WhenASubjectOwningAnAttachmentIsStoppedByTheHost_ThenShutdownCompletesWellInsideTheTimeout` is the regression guard.
 
 ### Keep the dispose path out of the lifecycle lock
 
@@ -320,6 +321,60 @@ This pattern fits when the subject's entire purpose is to run a background task 
 
 A run that faults, or that is cancelled by anything but its stop, stops the subject. The handler records the exception, stops the subject and leaves it stopped until the next context attach, which restarts it in place and clears the fault. This differs from the generic host, which stops the whole application when a `BackgroundService` it hosts faults.
 
+## A Subject With a Service
+
+A subject that is a hosted service runs wherever it is attached to a hosting context. That is wrong for a subject that can also be a copy. An application that mirrors devices from another instance through a connector holds the same device types, and a mirrored device that starts polling the real hardware is a second writer fighting the connector. Such a subject has a hosted service instead of being one, by implementing `ISubjectHostedServiceFactory`:
+
+```csharp
+[InterceptorSubject]
+public partial class Thermostat : ISubjectHostedServiceFactory
+{
+    public partial string? HostAddress { get; set; }
+
+    public partial decimal? Temperature { get; internal set; }
+
+    public Thermostat()
+    {
+        HostAddress = null;
+        Temperature = null;
+    }
+
+    IHostedService ISubjectHostedServiceFactory.CreateHostedService(IServiceProvider serviceProvider)
+        => new ThermostatPoller(this, serviceProvider.GetService<ILogger<ThermostatPoller>>());
+}
+```
+
+The service can be any `IHostedService`: a poller, a service that receives pushed updates, or a connector source whose root is the subject itself, such as `this.CreateModbusClientSource(configuration, logger)`. A source reads its configuration once when it is created, so a configuration change applies on its next creation, and it does not write the subject's own status properties; when either matters, return a small service that owns the source and recreates it.
+
+`CreateHostedService` must construct a new service on every call, as [any factory must](#the-factory-must-construct). The provider it receives is the activator's, and may resolve nothing.
+
+Activating the subject attaches that service to it as a [factory attachment](#factory-attachment), so from then on [the rule](#the-rule) applies: the service runs while the subject is in a hosting graph, is stopped and disposed when the subject leaves, and a fresh one runs when it returns. Activation is idempotent: every call returns the one activation attachment until that attachment is detached.
+
+Who activates:
+
+- A hosting context, as each such subject attaches to it, with the host's service provider. A context created with `WithHostedServices(services, activateSubjectHostedServices: false)` opts out, and in it attaching a subject runs nothing.
+- `AddSubject<T>()` and `AddKeyedSubject<T>()`, in both modes, with the application's service provider.
+- `subject.StartAsync()`, [below](#running-one-without-a-host).
+- In a context that opted out, any code that creates the subject as the real one, by calling `subject.ActivateHostedService(serviceProvider)` once the subject is configured. That includes a service that creates child subjects which themselves have a service: it activates each one, because nothing else will.
+
+Who must not: code that creates the subject as a copy, such as a connector building a local subject to mirror a remote one. A context that holds such copies must opt out, so that they stay data whose values the connector writes.
+
+### Running one without a host
+
+```csharp
+var thermostat = new Thermostat { HostAddress = "192.168.1.20" };
+
+await using var running = await thermostat.StartAsync(cancellationToken);
+```
+
+`StartAsync` runs the subject in a context of its own, with property tracking, lifecycle and hosting, waits for its service to start and returns a `SubjectHost`. A subject that needs more in that context, for example the registry, implements `ISubjectContextConfigurator`, whose `ConfigureContext` runs before the subject joins it, here and for `AddSubject<T>()` without a resolver; it is never called for a shared context. Child subjects that have a service run too while it does. The overload `StartAsync(serviceProvider, cancellationToken)` hands that provider to `CreateHostedService`; without it the service gets one that resolves nothing.
+
+- A start that throws or is cancelled stops what it started before it rethrows, so no handle to a half started subject is returned.
+- Starting a subject that is already started, or already in a tracked graph, a context with lifecycle or hosting or a graph that holds a reference to it, throws `InvalidOperationException`. Let that graph's hosting context run it instead, or remove it from the graph first.
+- `StopAsync(cancellationToken)` stops and disposes the services the host ran, including everything they attached, then detaches the subject from the private context and removes every activation the host ran. The subject keeps its last values and is plain data again. The token bounds the wait: a service still stopping when it expires keeps running unobserved.
+- `DisposeAsync` does the same without a deadline, so a service whose stop never returns blocks it. Call `StopAsync` with a token first to bound it, which makes the disposal a no-op.
+- A stopped subject can be started again, with a fresh service.
+
 ## Configuration Before Startup
 
 A subject that takes the context in its constructor is attached during construction, which queues its service start. Object initializers, property assignments and deserializers all run afterwards, so the service can start against a subject that is not configured yet.
@@ -339,7 +394,7 @@ Attaching still takes effect immediately, so the subject joins the graph and is 
 Four rules have consequences:
 
 - Do not await a captured service's start, or its detach, inside its own block. Both wait for that start, which cannot run until the block exits.
-- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a scope of its own inside yours, so its subject waits for yours, and host startup waits for that subject. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a context of its own and opens no scope, so your scope neither delays nor blocks it.
+- Do not start the host inside a block on a context that an `AddSubject<T>()` registration with a `contextResolver` joins. Such a registration opens a scope of its own inside yours, so its subject, and its activated service, wait for yours, and host startup waits for them. Set `HostOptions.StartupTimeout` if you want that to fail rather than hang. A registration without a resolver uses a context of its own and opens no scope, so your scope neither delays nor blocks it.
 - A scope nobody disposes holds its starts until the host shuts down.
 - `DeferHostedServiceStartup()` returns null on a context without hosting support, and `using` accepts that.
 
@@ -361,4 +416,4 @@ A deferrer runs inside the lifecycle lock, so neither `DeferCompletion` nor the 
 
 ## For Library Authors
 
-If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the recommended pattern using `AddSubject<T>()`.
+If you're building a library that provides hosted subjects, see [Subject Guidelines - Implementing Hosted Subjects for DI](subject-guidelines.md#implementing-hosted-subjects-for-di) for the device pattern: a data subject with an internal service, and an `AddX` and `AddKeyedX` pair over `AddSubject<T>()` and `AddKeyedSubject<T>()`.
