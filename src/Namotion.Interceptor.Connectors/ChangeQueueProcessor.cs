@@ -369,6 +369,12 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     else
                     {
+                        // A bounded queue drops its oldest entries on overflow, so keep superseded changes out of it.
+                        if (_maxQueueDepth is not null && !ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                        {
+                            continue;
+                        }
+
                         _changes.Enqueue(change);
                         if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
                         {

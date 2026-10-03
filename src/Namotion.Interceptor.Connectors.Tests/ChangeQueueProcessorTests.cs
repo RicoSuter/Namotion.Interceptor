@@ -282,6 +282,7 @@ public class ChangeQueueProcessorTests
         context.WithPropertyChangeSubscriptions();
 
         var subject = new Person(context);
+        var written = new ConcurrentQueue<string>();
 
         // A large buffer time keeps the periodic flush from draining the queue during the test, so the
         // bound is exercised purely by enqueue-side overflow. A non-null source ensures the direct
@@ -290,7 +291,15 @@ public class ChangeQueueProcessorTests
             source: new object(),
             context: context,
             propertyFilter: _ => true,
-            writeHandler: (_, _) => ValueTask.CompletedTask,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue(change.Property.Name);
+                }
+
+                return ValueTask.CompletedTask;
+            },
             bufferTime: TimeSpan.FromMinutes(10),
             maxQueueDepth: 2,
             logger: NullLogger.Instance,
@@ -304,19 +313,23 @@ public class ChangeQueueProcessorTests
             () => processor.QueueDepth == 1,
             message: "The processor should start before the overflow changes are produced");
         await TriggerFlushAsync(processor);
+        written.Clear();
 
-        // Act - five changes into a buffer bounded to two; the three oldest must be dropped
-        for (var i = 1; i <= 5; i++)
-        {
-            subject.FirstName = $"v{i}";
-        }
+        // Act - four changes into a buffer bounded to two; the two oldest must be dropped. Each is on its
+        // own property, since a superseded change is skipped before it can reach a bounded queue.
+        subject.FirstName = "v1";
+        subject.LastName = "v2";
+        subject.FirstName_MaxLength_Unit = "v3";
+        subject.FirstName_MaxLength++;
 
         await AsyncTestHelpers.WaitUntilAsync(
-            () => processor.DropCount >= 3,
-            message: "Three of the five changes should be dropped");
+            () => processor.DropCount >= 2,
+            message: "Two of the four changes should be dropped");
+        await TriggerFlushAsync(processor);
 
         // Assert
-        Assert.Equal(3, processor.DropCount);
+        Assert.Equal(2, processor.DropCount);
+        Assert.Equal([nameof(Person.FirstName_MaxLength_Unit), nameof(Person.FirstName_MaxLength)], written.ToArray());
 
         // Cleanup
         await cancellation.CancelAsync();
@@ -370,6 +383,68 @@ public class ChangeQueueProcessorTests
         // Cleanup
         await cancellation.CancelAsync();
         await processing;
+    }
+
+    [Fact]
+    public async Task WhenSupersededChangesExceedTheBound_ThenTheyDoNotEvictACurrentChange()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithRegistry()
+            .WithPropertyChangeSubscriptions();
+        var subject = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var written = new ConcurrentQueue<(string Property, string? Value)>();
+
+        // The long buffer time leaves the teardown flush as the only flush, so the whole backlog
+        // passes through the bounded queue before anything is written.
+        using var processor = new ChangeQueueProcessor(
+            source: new object(),
+            subscription: subscription,
+            propertyFilter: _ => true,
+            writeHandler: (changes, _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    written.Enqueue((change.Property.Name, change.GetNewValue<string>()));
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            bufferTime: TimeSpan.FromMinutes(10),
+            maxQueueDepth: 4,
+            logger: NullLogger.Instance,
+            deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
+
+        subject.FirstName = "a";
+        for (var i = 1; i <= 10; i++)
+        {
+            subject.LastName = $"b{i}";
+        }
+
+        // Act
+        using var cancellation = new CancellationTokenSource();
+        var processing = processor.ProcessAsync(cancellation.Token);
+
+        // The buffered path does not await between dequeues, so an empty subscription means the last
+        // change is decided before the loop observes the cancellation.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => subscription.Count == 0,
+            message: "The processor should dequeue the whole backlog");
+        await cancellation.CancelAsync();
+        try
+        {
+            await processing;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // ProcessAsync may surface the requested cancellation when its timer task observes it first.
+        }
+
+        // Assert
+        Assert.Contains((nameof(Person.FirstName), "a"), written);
+        Assert.Contains((nameof(Person.LastName), "b10"), written);
+        Assert.Equal(0, processor.DropCount);
     }
 
     [Fact]
