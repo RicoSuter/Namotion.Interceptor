@@ -81,6 +81,11 @@ public class MethodPropertyInitializer : ILifecycleHandler
             ? method.Name[..^5]
             : method.Name;
 
+        if (registeredSubject.TryGetProperty(propertyName)?.GetValue() is MethodMetadata)
+        {
+            return;
+        }
+
         var parameters = method.GetParameters()
             .Select(parameter =>
             {
