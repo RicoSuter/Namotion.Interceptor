@@ -1,26 +1,19 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
-using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
-using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
-using Namotion.Interceptor.Validation;
 
 namespace HomeBlaze.OpcUa.Tests;
 
 /// <summary>
 /// The host, context and graph these tests share. The context is the application's own,
 /// <see cref="SubjectContextFactory"/>, so nothing here can agree with the wrappers about a contract
-/// the application does not have. The one exception, and why it is one, is on
-/// <see cref="StartReAttachableAsync"/>.
+/// the application does not have.
 /// </summary>
 internal sealed class OpcUaTestHost : IAsyncDisposable
 {
@@ -73,23 +66,7 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     /// </summary>
     public static Task<OpcUaTestHost> StartAsync(Action<IInterceptorSubjectContext>? configureContext = null)
     {
-        return StartCoreAsync(SubjectContextFactory.Create, configureContext);
-    }
-
-    /// <summary>
-    /// Starts a host over a context a wrapper can leave and re-enter.
-    /// </summary>
-    /// <remarks>
-    /// It is <see cref="SubjectContextFactory.Create"/> without <see cref="MethodPropertyInitializer"/>,
-    /// which adds a registry property per [Operation] on every context attach and does not tolerate
-    /// adding one twice: with it, putting any subject that has an operation back into the graph throws
-    /// out of the assignment that does it, so both wrappers are unmovable in the application today and
-    /// the re-attach their factories are written for is unreachable there. Nothing else differs, and
-    /// nothing the hosting layer or either wrapper touches is missing.
-    /// </remarks>
-    public static Task<OpcUaTestHost> StartReAttachableAsync(Action<IInterceptorSubjectContext>? configureContext = null)
-    {
-        return StartCoreAsync(CreateContextWithoutMethodProperties, configureContext);
+        return StartCoreAsync(configureContext);
     }
 
     /// <summary>
@@ -217,7 +194,6 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
     }
 
     private static async Task<OpcUaTestHost> StartCoreAsync(
-        Func<IServiceCollection, IInterceptorSubjectContext> contextFactory,
         Action<IInterceptorSubjectContext>? configureContext)
     {
         // Defaults off for the reason the hosting suite gives: they watch appsettings.json, and a host
@@ -229,7 +205,7 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
         builder.Configuration.AddInMemoryCollection(
             new Dictionary<string, string?> { ["HomeBlaze:RootConfigFile"] = rootConfigurationPath });
 
-        var context = contextFactory(builder.Services);
+        var context = SubjectContextFactory.Create(builder.Services);
 
         var writeSeam = new PropertyWriteSeam();
         context.WithService<IWriteInterceptor>(() => writeSeam, _ => false);
@@ -257,22 +233,6 @@ internal sealed class OpcUaTestHost : IAsyncDisposable
 
         return new OpcUaTestHost(
             host, context, container, rootManager, pathResolver, writeSeam, serializerServices, rootConfigurationPath);
-    }
-
-    private static IInterceptorSubjectContext CreateContextWithoutMethodProperties(IServiceCollection services)
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithReadPropertyRecorder()
-            .WithRegistry()
-            .WithParents()
-            .WithLifecycle()
-            .WithService<IPropertyLifecycleHandler>(
-                () => new PropertyAttributeInitializer(),
-                handler => handler is PropertyAttributeInitializer)
-            .WithDataAnnotationValidation()
-            .WithHostedServices(services);
     }
 
     private static string WriteRootConfigurationFile()

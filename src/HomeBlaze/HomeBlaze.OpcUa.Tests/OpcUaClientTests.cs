@@ -167,7 +167,7 @@ public class OpcUaClientTests
     public async Task WhenTheInstanceIsReplacedByAFault_ThenTheDiagnosticsAndTheRootAreCleared()
     {
         // Arrange
-        await using var testHost = await OpcUaTestHost.StartReAttachableAsync();
+        await using var testHost = await OpcUaTestHost.StartAsync();
         var client = testHost.CreateClient();
         testHost.Container.Client = client;
         await OpcUaTestHost.WaitForRunningClientAsync(client);
@@ -209,7 +209,7 @@ public class OpcUaClientTests
     public async Task WhenAReAttachFaultedAndTheStartOperationIsInvoked_ThenTheWrapperIsNotStuckAtError()
     {
         // Arrange
-        await using var testHost = await OpcUaTestHost.StartReAttachableAsync();
+        await using var testHost = await OpcUaTestHost.StartAsync();
         var client = testHost.CreateClient();
         testHost.Container.Client = client;
         await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Running);
@@ -238,7 +238,7 @@ public class OpcUaClientTests
     public async Task WhenAReconciliationLandsInsideAReAttach_ThenTheReAttachStillProducesARunningClient()
     {
         // Arrange
-        await using var testHost = await OpcUaTestHost.StartReAttachableAsync();
+        await using var testHost = await OpcUaTestHost.StartAsync();
         var client = testHost.CreateClient();
         testHost.Container.Client = client;
         await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Running);
@@ -441,7 +441,7 @@ public class OpcUaClientTests
     public async Task WhenAFaultedClientStillHoldsItsAttachment_ThenDisablingItDropsTheErrorTextWithTheStatus()
     {
         // Arrange
-        await using var testHost = await OpcUaTestHost.StartReAttachableAsync();
+        await using var testHost = await OpcUaTestHost.StartAsync();
         var client = testHost.CreateClient(diagnosticsPollInterval: FastPoll);
         testHost.Container.Client = client;
         await OpcUaTestHost.WaitForStatusAsync(() => client.Status, ServiceStatus.Running);
