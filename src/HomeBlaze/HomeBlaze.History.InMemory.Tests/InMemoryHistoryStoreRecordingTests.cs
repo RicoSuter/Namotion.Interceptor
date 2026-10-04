@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+using Namotion.Interceptor.Connectors;
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
@@ -8,6 +10,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.History.InMemory.Tests;
@@ -70,14 +73,14 @@ public class InMemoryHistoryStoreRecordingTests
     /// <summary>
     /// Mutates <paramref name="propertyPath"/> to <paramref name="targetValue"/> and waits until a
     /// point with exactly that value is recorded under the canonical path. A warm-up phase re-applies
-    /// a distinct sentinel value until any point appears, which deterministically bridges the brief
-    /// startup gap before the change-queue subscription goes live (no fixed sleep). It then applies the
-    /// target value and polls until it lands, so the asserted value is never lost to the startup race.
+    /// a distinct sentinel value until any point appears, which waits without a fixed sleep until the
+    /// store's execution has built the engine (queries return an empty series before that). It then
+    /// applies the target value and polls until it lands.
     /// </summary>
     private static async Task<HistorySeries> RecordAndWaitForValueAsync(
         InMemoryHistoryStoreSubject store, string propertyPath, Action<double> mutate, double targetValue)
     {
-        // Warm-up: bridge the startup gap until the subscription is live and recording. Each iteration
+        // Warm-up: wait until the execution has built the engine and it is recording. Each iteration
         // uses a distinct negative value so the equality check never drops it as a no-op repeat. Driving
         // a new mutation on every poll is why this cannot be a plain WaitUntilAsync over a static condition;
         // the wait itself is expressed via WaitUntilAsync over the "any point landed" condition.
@@ -90,13 +93,13 @@ public class InMemoryHistoryStoreRecordingTests
                 var warmup = QuerySeries(store, propertyPath);
                 return warmup.Points.Length > 0;
             },
-            message: $"Store never started recording under '{propertyPath}' (status='{store.Status}', recorded={store.RecordedCount}).");
+            message: $"Store never started recording under '{propertyPath}'.");
 
-        // Now the subscription is live; apply the asserted value and wait for it specifically.
+        // Now the engine is recording; apply the asserted value and wait for it specifically.
         mutate(targetValue);
         await AsyncTestHelpers.WaitUntilAsync(
             () => QuerySeries(store, propertyPath).Points.Any(point => point.Number == targetValue),
-            message: $"Value {targetValue} not recorded under '{propertyPath}' (recorded={store.RecordedCount}).");
+            message: $"Value {targetValue} not recorded under '{propertyPath}'.");
 
         return QuerySeries(store, propertyPath);
     }
@@ -302,6 +305,318 @@ public class InMemoryHistoryStoreRecordingTests
         finally
         {
             await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenMaxPointsPerPropertyChangesAndConfigurationIsApplied_ThenNewSamplesUseTheNewCapacity()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.MaxPointsPerProperty = 2;
+            var appliedAt = DateTimeOffset.UtcNow;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await WaitForCoverageSessionStartedAtOrAfterAsync(store, appliedAt);
+
+            for (var target = 1; target <= 5; target++)
+            {
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, target);
+            }
+
+            // Assert
+            var series = QuerySeries(store, "/Temperature");
+            Assert.InRange(series.Points.Length, 1, 2);
+            Assert.Equal(5, series.Points[^1].Number);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenIsEnabledIsClearedAndApplied_ThenStatusBecomesDisabled()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+
+            // Act
+            store.IsEnabled = false;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Disabled",
+                message: "Store never reported Disabled after IsEnabled was cleared and applied.");
+
+            // Assert
+            Assert.Equal("Disabled", store.Status);
+            Assert.Empty(store.CoverageRanges);
+            Assert.Empty(QuerySeries(store, "/Temperature").Points);
+            Assert.Equal(0, store.RecordedCount);
+
+            store.IsEnabled = true;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => store.Status == "Running",
+                message: "Store never reported Running after IsEnabled was set again and applied.");
+
+            var series = await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 42);
+            Assert.Contains(series.Points, point => point.Number == 42);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenOnlyPriorityChanges_ThenRecordedSamplesAreKept()
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        var store = CreateStore(context);
+        var hostedService = (IHostedService)store;
+        await hostedService.StartAsync(CancellationToken.None);
+        try
+        {
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 11);
+            var coverageFrom = Assert.Single(store.CoverageRanges).From;
+
+            // Act
+            store.Priority = 7;
+            await store.ApplyConfigurationAsync(CancellationToken.None);
+
+            await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 22);
+
+            // Assert
+            var series = QuerySeries(store, "/Temperature");
+            Assert.Contains(series.Points, point => point.Number == 11);
+            Assert.Contains(series.Points, point => point.Number == 22);
+            Assert.Equal(coverageFrom, Assert.Single(store.CoverageRanges).From);
+        }
+        finally
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Waits until the store reports a coverage session that began at or after <paramref name="instant"/>,
+    /// which is how a restart shows: the new engine starts its session once its subscription is live.
+    /// </summary>
+    private static Task WaitForCoverageSessionStartedAtOrAfterAsync(InMemoryHistoryStoreSubject store, DateTimeOffset instant) =>
+        AsyncTestHelpers.WaitUntilAsync(
+            () => store.CoverageRanges is [var coverage] && coverage.From >= instant,
+            message: "Store never began a new coverage session after the configuration was applied.");
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task WhenWrittenBeforeProcessingStarts_ThenHistoryQueriesIncludeTheSample(bool restart, bool heldValue)
+    {
+        // Arrange
+        var (context, root, _) = CreateGraph();
+        using var store = new GatedHistoryStore { HoldSessions = true };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            var release = await store.Sessions.Reader.ReadAsync(timeout.Token);
+            if (restart)
+            {
+                release.SetResult();
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+                release = await store.Sessions.Reader.ReadAsync(timeout.Token);
+            }
+
+            // Act
+            root.Temperature = 21.5;
+            release.SetResult();
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                return QuerySeries(store, "/Temperature").Points.Any(point => point.Number == 21.5);
+            });
+
+            // Assert
+            if (heldValue)
+            {
+                var recorded = Assert.Single(QuerySeries(store, "/Temperature").Points, point => point.Number == 21.5);
+                var sample = await store.GetSampleAtOrBeforeAsync("/Temperature", recorded.Timestamp, timeout.Token);
+                Assert.NotNull(sample);
+                Assert.Equal(21.5, sample.Number);
+            }
+            else
+            {
+                var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow);
+                var series = await new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token);
+                Assert.Contains(series.Points, point => point.Number == 21.5);
+            }
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenProcessingFaults_ThenTheSessionEndsAndTheRetriedSessionRecords()
+    {
+        // Arrange: the first processor's filter throws on the first change, which faults its ProcessAsync.
+        var (context, root, _) = CreateGraph();
+        using var store = new GatedHistoryStore { FaultFirstProcessor = true };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            root.Temperature = 1;
+            var statusAtRetry = await store.StatusAtRetry.Task.WaitAsync(timeout.Token);
+            var series = await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 21.5);
+
+            // Assert
+            Assert.Equal("Error", statusAtRetry);
+            Assert.Contains(series.Points, point => point.Number == 21.5);
+            Assert.Equal("Running", store.Status);
+        }
+        finally
+        {
+            await store.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenWrittenWhileTheNextProcessorIsBeingCreated_ThenMergedQueriesIncludeTheSample(bool afterFault)
+    {
+        // Arrange: the second CreateProcessor blocks before it runs, so the write lands after the first processor
+        // is gone and before the next session captures anything.
+        var (context, root, _) = CreateGraph();
+        using var gate = new ManualResetEventSlim();
+        using var store = new GatedHistoryStore { HoldSecondCreate = gate, FaultFirstProcessor = afterFault };
+        ((IInterceptorSubject)store).Context.AddFallbackContext(context);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var queryFrom = DateTimeOffset.UtcNow;
+        await store.StartAsync(CancellationToken.None);
+        try
+        {
+            if (!afterFault)
+            {
+                await RecordAndWaitForValueAsync(store, "/Temperature", value => root.Temperature = value, 1);
+            }
+
+            var sessionEndRequestedAt = DateTimeOffset.UtcNow;
+            if (afterFault)
+            {
+                root.Temperature = 1;
+            }
+            else
+            {
+                store.MaxJsonSize++;
+                await store.ApplyConfigurationAsync(timeout.Token);
+            }
+            await store.SecondCreateEntered.Task.WaitAsync(timeout.Token);
+
+            // Act
+            root.Temperature = 21.5;
+            gate.Set();
+
+            // Assert: the new session serves the sample and claims its instant, and neither serves nor claims
+            // the previous session's.
+            var query = new HistoryQuery("/Temperature", queryFrom, DateTimeOffset.UtcNow.AddMinutes(1));
+            var series = default(HistorySeries)!;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    series = new IHistoryStore[] { store }.QueryHistoryAsync(query, timeout.Token).GetAwaiter().GetResult();
+                    return series.Points.Any(point => point.Number == 21.5);
+                },
+                timeout: TimeSpan.FromSeconds(10),
+                message: "The sample written between two processors was not served.");
+            var point = Assert.Single(series.Points);
+            Assert.Equal(21.5, point.Number);
+            var coverage = Assert.Single(store.CoverageRanges);
+            Assert.True(coverage.From <= point.Timestamp, "coverage starts after the sample");
+            Assert.True(coverage.From >= sessionEndRequestedAt, "coverage claims the previous session");
+            Assert.DoesNotContain(QuerySeries(store, "/Temperature").Points, point => point.Number == 1);
+        }
+        finally
+        {
+            gate.Set();
+            await store.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private sealed class GatedHistoryStore() : InMemoryHistoryStoreSubject(NullLogger<InMemoryHistoryStoreSubject>.Instance)
+    {
+        private int _creations;
+
+        public bool HoldSessions { get; init; }
+        public bool FaultFirstProcessor { get; init; }
+        public ManualResetEventSlim? HoldSecondCreate { get; init; }
+        public Channel<TaskCompletionSource> Sessions { get; } = Channel.CreateUnbounded<TaskCompletionSource>();
+        public TaskCompletionSource SecondCreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<string> StatusAtRetry { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
+        {
+            if (++_creations == 2 && HoldSecondCreate is not null)
+            {
+                SecondCreateEntered.SetResult();
+                HoldSecondCreate.Wait();
+            }
+
+            var processor = base.CreateProcessor(subscription);
+            if (_creations > 1 || !FaultFirstProcessor)
+            {
+                return processor;
+            }
+
+            // Replaced by one whose filter throws, after the base captured the session's settings from it, so
+            // the retried session runs on the real processor.
+            processor.Dispose();
+            return new ChangeQueueProcessor(
+                this, subscription, _ => throw new InvalidOperationException("Filter failed."),
+                (_, _) => ValueTask.CompletedTask, ChangeDeliveryRule.SourceValuesMayBeStale,
+                bufferTime: null, maxQueueDepth: null, NullLogger.Instance);
+        }
+
+        protected override TimeSpan GetRetryDelay(Exception exception)
+        {
+            StatusAtRetry.TrySetResult(Status);
+            return TimeSpan.Zero;
+        }
+
+        protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
+        {
+            if (HoldSessions)
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Sessions.Writer.TryWrite(release);
+                await release.Task.WaitAsync(cancellationToken);
+            }
+
+            await base.ProcessAsync(processor, cancellationToken);
         }
     }
 }

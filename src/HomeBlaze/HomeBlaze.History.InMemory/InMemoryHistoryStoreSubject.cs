@@ -3,7 +3,6 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.History.Abstractions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -15,7 +14,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 namespace HomeBlaze.History.InMemory;
 
 /// <summary>
-/// Priority-100 in-memory history store. A <see cref="BackgroundService"/> [InterceptorSubject]
+/// Priority-100 in-memory history store. A <see cref="ChangeQueueBackgroundService"/> [InterceptorSubject]
 /// that records recordable [State] scalar property changes into per-path ring buffers and answers
 /// raw and bucketed history queries through <see cref="IHistoryStore"/>. Storage concerns are delegated
 /// to the graph-free <see cref="InMemoryHistoryStore"/> engine; this subject owns the change-queue glue,
@@ -25,14 +24,19 @@ namespace HomeBlaze.History.InMemory;
 [Description("Records recent [State] history in memory (priority 100).")]
 [InterceptorSubject]
 public partial class InMemoryHistoryStoreSubject :
-    BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
+    ChangeQueueBackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler
 {
     private readonly ILogger<InMemoryHistoryStoreSubject> _logger;
 
+    private readonly Lock _settingsLock = new();
+    private readonly HistorySessionCoverage _sessionCoverage = new();
+
     private HistoryChangeRecorder? _recorder;
     private InMemoryHistoryStore? _engine;
+    private Settings? _settings;
 
     public InMemoryHistoryStoreSubject(ILogger<InMemoryHistoryStoreSubject> logger)
+        : base(logger)
     {
         _logger = logger;
 
@@ -82,7 +86,7 @@ public partial class InMemoryHistoryStoreSubject :
     public partial int MaxJsonSize { get; set; }
 
     /// <summary>
-    /// Whether the store is enabled and should auto-start on application startup.
+    /// Whether the store records; applying a change takes effect immediately.
     /// </summary>
     [Configuration]
     public partial bool IsEnabled { get; set; }
@@ -108,7 +112,7 @@ public partial class InMemoryHistoryStoreSubject :
     public partial long OversizeCount { get; set; }
 
     /// <summary>
-    /// Cumulative number of samples evicted by age or capacity.
+    /// Number of samples evicted by age or capacity since start.
     /// </summary>
     [State]
     public partial long EvictedCount { get; set; }
@@ -147,7 +151,7 @@ public partial class InMemoryHistoryStoreSubject :
 
     /// <inheritdoc />
     public ImmutableArray<HistoryCoverage> CoverageRanges =>
-        _engine?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
+        Volatile.Read(ref _engine)?.CoverageRanges ?? ImmutableArray<HistoryCoverage>.Empty;
 
     /// <inheritdoc />
     public IReadOnlySet<string> SupportedAggregations => InMemoryHistoryStore.AllAggregations;
@@ -157,7 +161,8 @@ public partial class InMemoryHistoryStoreSubject :
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine is null)
+        var engine = Volatile.Read(ref _engine);
+        if (engine is null)
         {
             return Task.FromResult(
                 new HistorySeries(
@@ -167,7 +172,7 @@ public partial class InMemoryHistoryStoreSubject :
                     ImmutableArray<HistoryCoverage>.Empty));
         }
 
-        return _engine.QueryAsync(query, cancellationToken);
+        return engine.QueryAsync(query, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -175,16 +180,40 @@ public partial class InMemoryHistoryStoreSubject :
         string propertyPath, DateTimeOffset asOf, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return new ValueTask<HistoryPoint?>(_engine?.GetSampleAtOrBefore(propertyPath, asOf));
+        return new ValueTask<HistoryPoint?>(Volatile.Read(ref _engine)?.GetSampleAtOrBefore(propertyPath, asOf));
     }
 
-    // BackgroundService
+    // ChangeQueueBackgroundService
 
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override IInterceptorSubjectContext Context => ((IInterceptorSubject)this).Context;
+
+    /// <inheritdoc />
+    protected override ChangeQueueProcessor CreateProcessor(PropertyChangeQueueSubscription subscription)
     {
-        if (!IsEnabled)
+        Settings settings;
+        lock (_settingsLock)
         {
+            settings = ReadSettings();
+            _settings = settings;
+        }
+
+        // The recorder is read per batch: it is set once ProcessAsync has the engine, and a processor may
+        // outlive a session that ends by clearing it.
+        var processor = HistoryChangeRecorder.CreateProcessor(
+            this, subscription, () => _recorder, TimeSpan.FromMilliseconds(settings.BufferTimeMilliseconds), _logger);
+        _sessionCoverage.Track(subscription);
+        return processor;
+    }
+
+    /// <inheritdoc />
+    protected override async Task ProcessAsync(ChangeQueueProcessor processor, CancellationToken cancellationToken)
+    {
+        // Written by CreateProcessor on the flow that runs this, so no lock is needed.
+        var settings = _settings!;
+        if (!settings.IsEnabled)
+        {
+            StopServing();
             Status = "Disabled";
             return;
         }
@@ -194,6 +223,7 @@ public partial class InMemoryHistoryStoreSubject :
         var resolver = context.TryGetService<ISubjectPathResolver>();
         if (resolver is null)
         {
+            StopServing();
             Status = "Error";
             _logger.LogError("No ISubjectPathResolver is registered in the context; cannot record history.");
             return;
@@ -201,51 +231,55 @@ public partial class InMemoryHistoryStoreSubject :
 
         var engine = new InMemoryHistoryStore(
             priority: Priority,
-            maxPointsPerProperty: MaxPointsPerProperty,
-            maxAge: TimeSpan.FromSeconds(MaxAgeSeconds),
-            maxJsonSize: MaxJsonSize,
+            maxPointsPerProperty: settings.MaxPointsPerProperty,
+            maxAge: TimeSpan.FromSeconds(settings.MaxAgeSeconds),
+            maxJsonSize: settings.MaxJsonSize,
             getUtcNow: () => DateTimeOffset.UtcNow);
 
-        // The change-queue subscription is live from construction, before the first await. The
-        // coverage session starts only afterwards, so no change can fall inside claimed coverage
-        // without reaching the engine.
-        var recorder = new HistoryChangeRecorder(engine, resolver);
-        _recorder = recorder;
-
-        // A recorder is not a sink that can fall behind the model, so the settled condition never holds
-        // for it. Under the other rule a source-applied value does not retire an older commit, which is
-        // what keeps both points in the series.
-        using var processor = new ChangeQueueProcessor(
-            this,
-            context,
-            HistoryChangeRecorder.IsEligible,
-            (changes, _) => recorder.RecordBatch(changes),
-            ChangeDeliveryRule.SourceValuesMayBeStale,
-            bufferTime: TimeSpan.FromMilliseconds(BufferTimeMilliseconds),
-            maxQueueDepth: null,
-            logger: _logger);
-
-        engine.BeginCoverageSession();
-        _engine = engine;
+        // The subscription precedes the coverage session, which precedes recording, so no change can fall
+        // inside claimed coverage without reaching the engine, and none reaches it before the session began.
+        engine.BeginCoverageSession(_sessionCoverage.StartsAt);
+        _recorder = new HistoryChangeRecorder(engine, resolver);
+        Volatile.Write(ref _engine, engine);
 
         Status = "Running";
 
-        var sweepTask = RunSweepLoopAsync(engine, stoppingToken);
+        // The sweep loop ends with the session, so a processing fault reaches the service's retry without
+        // waiting for a stop or restart.
+        using var session = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var sweepTask = RunSweepLoopAsync(engine, session.Token);
+        var faulted = false;
         try
         {
-            await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+            await processor.ProcessAsync(session.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (session.IsCancellationRequested)
         {
+        }
+        catch (Exception)
+        {
+            faulted = true;
+            throw;
         }
         finally
         {
-            await sweepTask.ConfigureAwait(false);
-
-            // Stop claiming the live edge: the engine stays queryable, but it is no longer recording,
-            // so coverage must end here rather than following the clock forever.
-            engine.EndCoverageSession();
-            Status = "Stopped";
+            // Before the waits below, see EndSession. The engine stays queryable but no longer records, so its
+            // coverage must end here rather than follow the clock.
+            engine.EndCoverageSession(_sessionCoverage.EndSession());
+            await session.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await sweepTask.ConfigureAwait(false);
+            }
+            catch (Exception) when (!faulted)
+            {
+                faulted = true;
+                throw;
+            }
+            finally
+            {
+                Status = faulted ? "Error" : "Stopped";
+            }
         }
     }
 
@@ -255,7 +289,17 @@ public partial class InMemoryHistoryStoreSubject :
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                engine.Sweep();
+                try
+                {
+                    engine.Sweep();
+                }
+                catch (Exception exception)
+                {
+                    // The samples stay in memory, so the next tick retries; ending the session instead would
+                    // discard them.
+                    _logger.LogError(exception, "Periodic history sweep failed; will retry on the next tick.");
+                }
+
                 RefreshMetrics(engine);
 
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
@@ -268,6 +312,23 @@ public partial class InMemoryHistoryStoreSubject :
         {
             RefreshMetrics(engine);
         }
+    }
+
+    // A session that does not record serves nothing, like a store that started in that state; otherwise
+    // the previous session's samples would stay queryable after a restart into it.
+    private void StopServing()
+    {
+        Volatile.Write(ref _engine, null);
+        _recorder = null;
+
+        RecordedCount = 0;
+        OversizeCount = 0;
+        EvictedCount = 0;
+        TrackedPropertyCount = 0;
+        TotalSampleCount = 0;
+        EstimatedMemorySize = 0;
+        IncomingChangesPerSecond = 0;
+        RecordedChangesPerSecond = 0;
     }
 
     private void RefreshMetrics(InMemoryHistoryStore engine)
@@ -298,9 +359,24 @@ public partial class InMemoryHistoryStoreSubject :
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Size knobs (MaxPointsPerProperty, MaxAgeSeconds, MaxJsonSize) and BufferTime are read once when
-        // the engine and change-queue processor are built in ExecuteAsync. Like OpcUaServer, configuration
-        // changes take effect on the next start; the host restarts the background service to apply them.
+        // A restart discards the samples held in memory, so only a changed start-time setting restarts. Under
+        // the lock CreateProcessor reads and publishes the settings in, or a revert racing a restart could
+        // compare against stale settings and be lost.
+        lock (_settingsLock)
+        {
+            if (_settings is { } started && started != ReadSettings())
+            {
+                RequestRestart();
+            }
+        }
+
         return Task.CompletedTask;
     }
+
+    private Settings ReadSettings() =>
+        new(IsEnabled, MaxAgeSeconds, MaxPointsPerProperty, MaxJsonSize, BufferTimeMilliseconds);
+
+    // Settings read once per start. Priority is not one: HistoryStoreMerger reads it live from this subject.
+    private sealed record Settings(
+        bool IsEnabled, int MaxAgeSeconds, int MaxPointsPerProperty, int MaxJsonSize, int BufferTimeMilliseconds);
 }

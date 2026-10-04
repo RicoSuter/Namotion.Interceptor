@@ -82,6 +82,10 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     private readonly object _connectionLock = new();
     private readonly Dictionary<string, SqliteConnection> _connections = new(StringComparer.Ordinal);
 
+    // Guarded by _connectionLock. A read or flush that reached the engine before its owner dropped it must
+    // not reopen connections after Dispose, because nothing would close them again.
+    private bool _disposed;
+
     // Partitions this build refused to open, so a read skips them without retrying and logging per query.
     private readonly HashSet<string> _unreadablePartitions = new(StringComparer.Ordinal);
 
@@ -139,15 +143,14 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     }
 
     /// <summary>
-    /// Restarts the coverage session at the current instant. The constructor already starts one, so
-    /// this only narrows what the store claims: the owner calls it once its change subscription is
-    /// live, so no change can fall inside claimed coverage without reaching this engine.
+    /// Starts coverage at the instant the owner's change subscription became active.
+    /// Call before recording or publishing the engine for queries.
     /// </summary>
-    internal void BeginCoverageSession()
+    internal void BeginCoverageSession(DateTimeOffset startedAt)
     {
         lock (_pendingLock)
         {
-            SetPendingCoverageStart(_getUtcNow());
+            SetPendingCoverageStart(startedAt);
             _pendingStartsNewCoverageRange = true;
         }
     }
@@ -481,6 +484,15 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // through the engine's OpenPartition/OpenMoves delegates, which re-enter this lock).
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                return new HistorySeries(
+                    query.PropertyPath,
+                    ImmutableArray<HistoryPoint>.Empty,
+                    false,
+                    ImmutableArray<HistoryCoverage>.Empty);
+            }
+
             // The bucket reader's TWA carry-seed look-back reads directly through the same context; it runs
             // while this lock is already held, matching the original inline GetSampleAtOrBefore look-back.
             var result = query.Bucket is null
@@ -505,6 +517,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
         // Serialize connection use under the re-entrant _connectionLock (see Query for the rationale).
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                return null;
+            }
+
             return GetSampleAtOrBeforeCore(propertyPath, asOf, coverageRanges);
         }
     }
@@ -835,6 +852,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SqliteHistoryStore));
+            }
+
             if (_connections.TryGetValue(key, out var existing))
             {
                 return existing;
@@ -894,6 +916,11 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SqliteHistoryStore));
+            }
+
             if (_connections.TryGetValue(MetadataKey, out var existing))
             {
                 return existing;
@@ -1007,6 +1034,7 @@ public sealed class SqliteHistoryStore : IHistoryStore, IHistoryRecorder, IDispo
     {
         lock (_connectionLock)
         {
+            _disposed = true;
             DisposeConnections();
         }
     }

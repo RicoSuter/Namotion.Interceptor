@@ -345,7 +345,7 @@ public class SubjectSetupDialogTests
             await EnterNameAsync(page, "gridhistory");
             await SelectTypeAsync(page, "type-card-inmemoryhistorystoresubject");
 
-            var isEnabledCheckBox = page.GetByLabel("Enabled (auto-start on application startup)");
+            var isEnabledCheckBox = page.GetByLabel("Enabled", new() { Exact = true });
             await Assertions.Expect(isEnabledCheckBox).ToBeCheckedAsync(new() { Timeout = ElementVisibilityTimeout });
             await isEnabledCheckBox.UncheckAsync();
             await Assertions.Expect(isEnabledCheckBox).Not.ToBeCheckedAsync();

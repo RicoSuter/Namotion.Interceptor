@@ -43,10 +43,9 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// quietly stopped delivering. Use it to drain a subscription you own exclusively at that moment,
     /// for example while connecting, and <see cref="TryDequeue"/> everywhere else.
     /// <para>
-    /// This is for a hand-rolled drain loop, not for feeding the built-in change processor: that
-    /// processor creates and owns its own subscription and does not expose it, so there is nothing there
-    /// for this to drain. Returns false both when the queue is momentarily empty and when the
-    /// subscription has been disposed, so a polling loop needs its own stop condition.
+    /// This is for a hand-rolled drain loop, or for a subscription handed to the built-in change processor
+    /// while no processor is running on it. Returns false both when the queue is momentarily empty and when
+    /// the subscription has been disposed, so a polling loop needs its own stop condition.
     /// </para>
     /// </remarks>
     public bool TryDequeueImmediate(out SubjectPropertyChange item) => _queue.TryDequeue(out item);

@@ -11,6 +11,8 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>
 /// Processes property changes from a queue, buffering and merging them before writing.
 /// Used by both client sources and server background services.
+/// A hosted service consuming it should derive from <see cref="ChangeQueueBackgroundService"/>, which subscribes
+/// before the host start returns and keeps that subscription across the processors it creates.
 /// </summary>
 public class ChangeQueueProcessor : IDisposable
 {
@@ -74,6 +76,11 @@ public class ChangeQueueProcessor : IDisposable
 
     private readonly PropertyChangeQueueSubscription _subscription;
     private readonly PropertyChangeQueueSubscription? _ownedSubscription;
+
+    /// <summary>
+    /// The subscription this processor consumes, owned or not.
+    /// </summary>
+    internal PropertyChangeQueueSubscription Subscription => _subscription;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
@@ -149,9 +156,58 @@ public class ChangeQueueProcessor : IDisposable
     }
 
     /// <summary>
-    /// Initializes the processor with an externally owned subscription. The caller keeps ownership:
-    /// <see cref="Dispose"/> does not dispose the subscription. Use this when the subscription must
-    /// outlive the processor, for example a source-lifetime subscription reused across reconnects.
+    /// Initializes the processor on a subscription the caller owns and keeps. The processor is the
+    /// subscription's only consumer while it runs.
+    /// </summary>
+    /// <param name="source">Source to ignore (to prevent update loops).</param>
+    /// <param name="subscription">The subscription to consume. The caller owns it: <see cref="Dispose"/> does not
+    /// dispose it, so it can outlive the processor and be handed to the next one, which then delivers the changes
+    /// queued in between.</param>
+    /// <param name="propertyFilter">Filter to determine if a property change should be included.
+    /// The <see cref="PropertyReference"/> may not have a registered property (e.g., when the subject
+    /// is momentarily unregistered due to a concurrent structural mutation). Callers should handle
+    /// this case explicitly, typically by resolving via <c>TryGetRegisteredProperty()</c> and
+    /// returning <c>false</c> when null.</param>
+    /// <param name="writeHandler">Handler to write batched changes.</param>
+    /// <param name="deliveryRule">Which commits may supersede a change this processor is about to
+    /// write; see <see cref="ChangeDeliveryRule"/> for the condition that decides it. Deliberately
+    /// has no default: picking the wrong one is silent and its damage is permanent, so every connector
+    /// states which it is.</param>
+    /// <param name="bufferTime">Time to buffer changes before flushing.</param>
+    /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
+    /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
+    /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
+    /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="dropHandler">Optional handler invoked when bounded-queue overflow, an ordinary
+    /// write failure, or terminal delivery closure drops changes. Terminal closure reporting may be
+    /// dispatched asynchronously. Use this to report the count to queue diagnostics without adding
+    /// work to successful enqueue or dequeue operations.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="deliveryRule"/> is
+    /// <see cref="ChangeDeliveryRule.Unspecified"/> or not a defined value. Rejected here rather than at
+    /// the first flush, where it would end delivery for this processor's lifetime. Also thrown when
+    /// <paramref name="maxQueueDepth"/> is zero or negative and <paramref name="bufferTime"/> is
+    /// greater than zero, since a bound has to leave room for at least one change.</exception>
+    public ChangeQueueProcessor(
+        object? source,
+        PropertyChangeQueueSubscription subscription,
+        Func<PropertyReference, bool> propertyFilter,
+        Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> writeHandler,
+        ChangeDeliveryRule deliveryRule,
+        TimeSpan? bufferTime,
+        int? maxQueueDepth,
+        ILogger logger,
+        Action<long>? dropHandler = null)
+        : this(
+            source, subscription, propertyFilter, writeHandler, deliveryRule, bufferTime, maxQueueDepth, logger,
+            writeHandlerOwnsChanges: false, dropHandler)
+    {
+    }
+
+    /// <summary>
+    /// Initializes the processor with an externally owned subscription and the connector-internal delivery
+    /// hooks. The caller keeps ownership: <see cref="Dispose"/> does not dispose the subscription. The ownership
+    /// flag is required so that a call without the hooks resolves to the public constructor.
     /// </summary>
     internal ChangeQueueProcessor(
         object? source,
@@ -162,8 +218,8 @@ public class ChangeQueueProcessor : IDisposable
         TimeSpan? bufferTime,
         int? maxQueueDepth,
         ILogger logger,
+        bool writeHandlerOwnsChanges,
         Action<long>? dropHandler = null,
-        bool writeHandlerOwnsChanges = false,
         Action? terminalHandler = null,
         Func<CancellationToken, ValueTask>? completionHandler = null)
     {
