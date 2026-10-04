@@ -16,14 +16,14 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     private CancellationTokenSource? _stoppingCts;
 
     private readonly Func<ILogger?> _loggerResolver;
-    private readonly BufferBlock<(HostedServiceStartupScope? Scope, Task Ready, Func<CancellationToken, Task> Execute)> _actions = new();
+    private readonly BufferBlock<(HostedServiceStartDeferral? StartDeferral, Task Ready, Func<CancellationToken, Task> Execute)> _actions = new();
     private readonly Dictionary<IHostedService, CancellationTokenSource> _deferredStarts = [];
     private bool _isStopping;
     private bool IsStopping => _isStopping || _stoppingCts?.IsCancellationRequested == true;
     private readonly HashSet<IHostedService> _hostedServices = [];
-    private readonly AsyncLocal<HostedServiceStartupScope?> _startupScope = new();
+    private readonly AsyncLocal<HostedServiceStartDeferral?> _startDeferral = new();
 
-    internal HostedServiceStartupScope DeferStartup() => new(_startupScope);
+    internal HostedServiceStartDeferral DeferStarts() => new(_startDeferral);
 
     public HostedServiceHandler(Func<ILogger?> loggerResolver)
     {
@@ -80,25 +80,25 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
 
     private async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // The long-lived action loop must not inherit the scope in which the host was started.
-        _startupScope.Value = null;
+        // The long-lived action loop must not inherit the start deferral in which the host was started.
+        _startDeferral.Value = null;
         _logger ??= _loggerResolver();
 
-        var pending = new List<(HostedServiceStartupScope? Scope, Task Ready, Func<CancellationToken, Task> Execute)>();
+        var pending = new List<(HostedServiceStartDeferral? StartDeferral, Task Ready, Func<CancellationToken, Task> Execute)>();
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    var readyIndex = pending.FindIndex(action => action.Scope?.IsReady == true || action.Ready.IsCompleted);
+                    var readyIndex = pending.FindIndex(action => action.StartDeferral?.IsReady == true || action.Ready.IsCompleted);
                     if (readyIndex >= 0)
                     {
-                        // A scope may release while the scan is in progress. Recheck earlier
+                        // A start deferral may release while the scan is in progress. Recheck earlier
                         // entries so starts released together retain attachment order.
                         if (readyIndex > 0)
                         {
-                            readyIndex = pending.FindIndex(action => action.Scope?.IsReady == true || action.Ready.IsCompleted);
+                            readyIndex = pending.FindIndex(action => action.StartDeferral?.IsReady == true || action.Ready.IsCompleted);
                         }
                         var action = pending[readyIndex];
                         pending.RemoveAt(readyIndex);
@@ -107,7 +107,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                     else if (pending.Count == 0)
                     {
                         var action = await _actions.ReceiveAsync(stoppingToken);
-                        if (action.Scope?.IsReady == true || action.Ready.IsCompleted)
+                        if (action.StartDeferral?.IsReady == true || action.Ready.IsCompleted)
                         {
                             await action.Execute(stoppingToken);
                         }
@@ -122,7 +122,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                     }
                     else
                     {
-                        // Scope readiness must not occupy the consumer: unrelated starts and stops
+                        // Start deferral readiness must not occupy the consumer: unrelated starts and stops
                         // can be queued while configuration waits for those services.
                         using var wakeCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                         await Task.WhenAny(pending.Select(action => action.Ready)
@@ -222,40 +222,41 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // otherwise reach it while this start is still on its way in - concretely, a source
                 // attached here would not yet have registered with its SourceMonitor, and a
                 // synchronization wait would complete against a tree that is not synchronized.
-                // Holds are taken HERE, synchronously, rather than inside the queued action, so
-                // there is no window between the attach and the hold in which completion can fire.
+                // Startup completion is deferred HERE, synchronously, rather than inside the queued
+                // action, so there is no window between the attach and the deferral in which
+                // completion can fire.
                 // They are released once the start has actually run (see PostStartService).
                 //
                 // A nested attach composes: a service that attaches children during its own
-                // StartAsync takes their holds before its own is released, so the count never
+                // StartAsync defers completion for them before its own deferral is released, so the count never
                 // reaches zero in between.
-                PostStartService(hostedService, null, TakeStartupHolds(context));
+                PostStartService(hostedService, null, DeferStartupCompletion(context));
             }
         }
     }
 
     /// <summary>
-    /// Takes a completion hold on every deferrer reachable from <paramref name="context"/>.
+    /// Defers startup completion on every startup completion reachable from <paramref name="context"/>.
     /// </summary>
     /// <remarks>
-    /// Empty for an application that configures no deferring subsystem (no source monitoring, for
+    /// Empty for an application that configures no startup completion (no source monitoring, for
     /// example), which is the common case and costs one empty-array check per attach.
     /// </remarks>
-    private static IDisposable[] TakeStartupHolds(IInterceptorSubjectContext context)
+    private static IDisposable[] DeferStartupCompletion(IInterceptorSubjectContext context)
     {
-        var deferrers = context.GetServices<IStartupCompletionDeferrer>();
-        if (deferrers.IsEmpty)
+        var startupCompletions = context.GetServices<IStartupCompletion>();
+        if (startupCompletions.IsEmpty)
         {
             return [];
         }
 
-        var holds = new IDisposable[deferrers.Length];
-        for (var index = 0; index < deferrers.Length; index++)
+        var completionDeferrals = new IDisposable[startupCompletions.Length];
+        for (var index = 0; index < startupCompletions.Length; index++)
         {
-            holds[index] = deferrers[index].DeferCompletion();
+            completionDeferrals[index] = startupCompletions[index].Defer();
         }
 
-        return holds;
+        return completionDeferrals;
     }
 
     internal void DetachHostedService(IHostedService hostedService)
@@ -283,11 +284,11 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             }
             else if (_hostedServices.Add(hostedService))
             {
-                // Holds here too, even though this overload's caller awaits the start: the caller
-                // being blocked does not block the startup-completion gate, so without a hold
+                // Deferred here too, even though this overload's caller awaits the start: the caller
+                // being blocked does not block the startup-completion gate, so without a deferral
                 // ApplicationStarted can fire, drop the count to zero and let a wait complete
                 // vacuously while this start is still sitting in the queue.
-                PostStartService(hostedService, tcs, TakeStartupHolds(context));
+                PostStartService(hostedService, tcs, DeferStartupCompletion(context));
             }
             else
             {
@@ -322,17 +323,17 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     }
 
     private void PostStartService(
-        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable[]? startupHolds = null)
+        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable[]? completionDeferrals = null)
     {
         // The action loop has a different execution flow from the code constructing the subject.
-        var startupScope = _startupScope.Value;
-        var cancellation = startupScope is null ? null : new CancellationTokenSource();
+        var startDeferral = _startDeferral.Value;
+        var cancellation = startDeferral is null ? null : new CancellationTokenSource();
         if (cancellation is not null)
         {
             _deferredStarts.Add(hostedService, cancellation);
         }
-        var readiness = startupScope?.WaitAsync(cancellation!.Token) ?? Task.CompletedTask;
-        _actions.Post((startupScope, readiness, async token =>
+        var readiness = startDeferral?.WaitAsync(cancellation!.Token) ?? Task.CompletedTask;
+        _actions.Post((startDeferral, readiness, async token =>
         {
             try
             {
@@ -372,24 +373,24 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                         cancellation.Dispose();
                     }
                 }
-                // In a finally, so a start that throws or is cancelled releases its hold too.
-                // Leaking a hold would block every synchronization wait on the tree forever - a
+                // In a finally, so a start that throws or is cancelled releases its deferrals too.
+                // Leaking a deferral would block every synchronization wait on the tree forever - a
                 // hang rather than a wrong answer, which is the safer direction, but still a hang.
-                if (startupHolds is not null)
+                if (completionDeferrals is not null)
                 {
-                    foreach (var hold in startupHolds)
+                    foreach (var completionDeferral in completionDeferrals)
                     {
                         try
                         {
-                            hold.Dispose();
+                            completionDeferral.Dispose();
                         }
-                        catch (Exception holdException)
+                        catch (Exception releaseException)
                         {
-                            // One deferrer throwing must not strand the others: a leaked hold blocks
+                            // One deferral throwing must not strand the others: a leaked deferral blocks
                             // every wait on that tree forever. Logged rather than swallowed, since
                             // this used to surface through the action loop.
                             _logger?.LogError(
-                                holdException, "Releasing a startup completion hold threw and was ignored.");
+                                releaseException, "Releasing a completion deferral threw and was ignored.");
                         }
                     }
                 }

@@ -17,7 +17,7 @@ namespace Namotion.Interceptor.Connectors.Monitoring;
 /// maintains for the same lifecycle change, so it has to be up to date first.
 /// </remarks>
 [RunsAfter(typeof(ContextInheritanceHandler), typeof(ParentTrackingHandler))]
-public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
+public class SourceMonitor : ILifecycleHandler, IStartupCompletion
 {
     private readonly Lock _lock = new();
     private Func<ILogger?>? _loggerResolver;
@@ -259,7 +259,7 @@ public class SourceMonitor : ILifecycleHandler, IStartupCompletionDeferrer
 
     /// <inheritdoc />
     /// <remarks>Explicit, so <see cref="DeferWaitCompletion"/> stays this type's only surface.</remarks>
-    IDisposable IStartupCompletionDeferrer.DeferCompletion() => DeferWaitCompletion();
+    IDisposable IStartupCompletion.Defer() => DeferWaitCompletion();
 
     private void ReleaseHold()
     {

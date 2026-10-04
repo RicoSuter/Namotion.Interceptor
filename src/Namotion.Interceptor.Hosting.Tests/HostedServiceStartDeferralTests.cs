@@ -6,18 +6,18 @@ using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
-public class HostedServiceStartupScopeTests
+public class HostedServiceStartDeferralTests
 {
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenScopeIsOpen_ThenIndependentFlowCanStartAndStopServices(bool alreadyStarted)
+    public async Task WhenADeferralIsOpen_ThenIndependentFlowCanStartAndStopServices(bool alreadyStarted)
     {
         // Arrange
         await using var fixture = new Fixture();
         await fixture.Handler.StartAsync(CancellationToken.None);
         var subject = new Person(fixture.Context);
-        var scoped = new ProbeService(() => "scoped");
+        var deferred = new ProbeService(() => "deferred");
         var independent = new ProbeService(() => "independent");
         if (alreadyStarted)
         {
@@ -35,20 +35,20 @@ public class HostedServiceStartupScopeTests
         });
 
         // Act
-        using (var scope = fixture.Context.DeferHostedServiceStartup())
+        using (var deferral = fixture.Context.DeferHostedServiceStarts())
         {
-            subject.AttachHostedService(scoped);
+            subject.AttachHostedService(deferred);
             proceed.SetResult();
             await independentFlow.WaitAsync(TimeSpan.FromSeconds(10));
 
             // Assert
-            Assert.False(scoped.Started.Task.IsCompleted);
+            Assert.False(deferred.Started.Task.IsCompleted);
         }
-        await scoped.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await deferred.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     [Fact]
-    public async Task WhenNestedScopeIsDisposed_ThenStartWaitsForTheOuterScope()
+    public async Task WhenANestedDeferralIsDisposed_ThenStartWaitsForTheOuterDeferral()
     {
         // Arrange
         await using var fixture = new Fixture();
@@ -57,9 +57,9 @@ public class HostedServiceStartupScopeTests
         var subject = new Person(fixture.Context);
 
         // Act
-        using (var outer = fixture.Context.DeferHostedServiceStartup())
+        using (var outer = fixture.Context.DeferHostedServiceStarts())
         {
-            using (var inner = fixture.Context.DeferHostedServiceStartup())
+            using (var inner = fixture.Context.DeferHostedServiceStarts())
             {
                 subject.AttachHostedService(service);
             }
@@ -75,16 +75,16 @@ public class HostedServiceStartupScopeTests
     [Theory]
     [InlineData(1)]
     [InlineData(3)]
-    public async Task WhenHandlerStopsDuringAnOpenScope_ThenAllStartsAreCanceledAndHoldsAreReleased(int count)
+    public async Task WhenHandlerStopsDuringAnOpenDeferral_ThenAllStartsAreCanceledAndCompletionDeferralsAreReleased(int count)
     {
         // Arrange
         await using var fixture = new Fixture();
         var services = Enumerable.Range(0, count).Select(_ => new ProbeService(() => "started")).ToArray();
         var subject = new Person(fixture.Context);
-        using var scope = fixture.Context.DeferHostedServiceStartup();
+        using var deferral = fixture.Context.DeferHostedServiceStarts();
         var attachments = services.Select(service => subject.AttachHostedServiceAsync(service, CancellationToken.None)).ToArray();
-        Assert.Equal(count, fixture.HoldsTaken);
-        Assert.Equal(0, fixture.HoldsDisposed);
+        Assert.Equal(count, fixture.CompletionDeferred);
+        Assert.Equal(0, fixture.CompletionDeferralReleased);
 
         // Act
         await fixture.Handler.StartAsync(CancellationToken.None);
@@ -95,7 +95,7 @@ public class HostedServiceStartupScopeTests
         {
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TimeSpan.FromSeconds(10)));
         }
-        Assert.Equal(count, fixture.HoldsDisposed);
+        Assert.Equal(count, fixture.CompletionDeferralReleased);
         Assert.All(services, service => Assert.False(service.Started.Task.IsCompleted));
     }
 
@@ -113,7 +113,7 @@ public class HostedServiceStartupScopeTests
             starting: token => token.Register(() => subject.DetachHostedService(deferred)));
         subject.AttachHostedService(blocking);
         await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        using var scope = fixture.Context.DeferHostedServiceStartup();
+        using var deferral = fixture.Context.DeferHostedServiceStarts();
         subject.AttachHostedService(deferred);
         Task? stopping = null;
 
@@ -131,14 +131,14 @@ public class HostedServiceStartupScopeTests
             releaseStart.TrySetResult();
             await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
         }
-        Assert.Equal(2, fixture.HoldsDisposed);
+        Assert.Equal(2, fixture.CompletionDeferralReleased);
     }
 
     [Theory]
     [InlineData("Stop")]
     [InlineData("Dispose")]
     [InlineData("Cancellation")]
-    public async Task WhenShutdownBeginsWhileAStartIsBlocked_ThenReattachmentTakesNoStartupHold(string shutdown)
+    public async Task WhenShutdownBeginsWhileAStartIsBlocked_ThenReattachmentDefersNoStartupCompletion(string shutdown)
     {
         // Arrange
         await using var fixture = new Fixture();
@@ -150,7 +150,7 @@ public class HostedServiceStartupScopeTests
         var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task);
         subject.AttachHostedService(blocking);
         await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        using var scope = fixture.Context.DeferHostedServiceStartup();
+        using var deferral = fixture.Context.DeferHostedServiceStarts();
         var deferred = new ProbeService(() => "deferred", () => stopped.TrySetResult());
         var attachment = subject.AttachHostedServiceAsync(deferred, CancellationToken.None);
         Task? stopping = null;
@@ -176,10 +176,10 @@ public class HostedServiceStartupScopeTests
 
             // Assert
             Assert.Null(exception);
-            Assert.Equal(2, fixture.HoldsTaken);
+            Assert.Equal(2, fixture.CompletionDeferred);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => subject.AttachHostedServiceAsync(
                 new ProbeService(() => "late"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
-            Assert.Equal(2, fixture.HoldsTaken);
+            Assert.Equal(2, fixture.CompletionDeferred);
         }
         finally
         {
@@ -187,14 +187,14 @@ public class HostedServiceStartupScopeTests
             await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
         }
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(2, fixture.HoldsDisposed);
+        Assert.Equal(2, fixture.CompletionDeferralReleased);
         Assert.False(deferred.Started.Task.IsCompleted);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenDeferredServiceIsDetached_ThenItsStartIsCanceledBeforeScopeRelease(bool reattach)
+    public async Task WhenDeferredServiceIsDetached_ThenItsStartIsCanceledBeforeDeferralRelease(bool reattach)
     {
         // Arrange
         await using var fixture = new Fixture();
@@ -205,7 +205,7 @@ public class HostedServiceStartupScopeTests
         Task? secondAttachment = null;
 
         // Act
-        using (var scope = fixture.Context.DeferHostedServiceStartup())
+        using (var deferral = fixture.Context.DeferHostedServiceStarts())
         {
             var firstAttachment = subject.AttachHostedServiceAsync(service, CancellationToken.None);
             var detachment = subject.DetachHostedServiceAsync(service, CancellationToken.None);
@@ -215,7 +215,7 @@ public class HostedServiceStartupScopeTests
             }
             await detachment.WaitAsync(TimeSpan.FromSeconds(10));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstAttachment.WaitAsync(TimeSpan.FromSeconds(10)));
-            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.HoldsDisposed) == 1);
+            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.CompletionDeferralReleased) == 1);
             Assert.False(service.Started.Task.IsCompleted);
         }
         if (secondAttachment is not null)
@@ -228,14 +228,14 @@ public class HostedServiceStartupScopeTests
 
         // Assert
         Assert.Equal(reattach ? new[] { "stop", "start" } : new[] { "stop" }, events);
-        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.HoldsDisposed) == fixture.HoldsTaken);
-        Assert.Equal(fixture.HoldsTaken, fixture.HoldsDisposed);
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.CompletionDeferralReleased) == fixture.CompletionDeferred);
+        Assert.Equal(fixture.CompletionDeferred, fixture.CompletionDeferralReleased);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenScopeReleasesSeveralStarts_ThenTheyRunInAttachmentOrder(bool nested)
+    public async Task WhenADeferralReleasesSeveralStarts_ThenTheyRunInAttachmentOrder(bool nested)
     {
         // Arrange
         await using var fixture = new Fixture();
@@ -245,26 +245,26 @@ public class HostedServiceStartupScopeTests
         var attachments = new List<Task>();
 
         // Act
-        using (var outer = fixture.Context.DeferHostedServiceStartup())
+        using (var outer = fixture.Context.DeferHostedServiceStarts())
         {
-            using (var inner = nested ? fixture.Context.DeferHostedServiceStartup() : null)
+            using (var inner = nested ? fixture.Context.DeferHostedServiceStarts() : null)
             {
                 attachments.Add(subject.AttachHostedServiceAsync(new ProbeService(() => { events.Add("first"); return "first"; }), CancellationToken.None));
             }
             attachments.Add(subject.AttachHostedServiceAsync(new ProbeService(() => { events.Add("second"); return "second"; }), CancellationToken.None));
-            Assert.Equal(2, fixture.HoldsTaken);
-            Assert.Equal(0, fixture.HoldsDisposed);
+            Assert.Equal(2, fixture.CompletionDeferred);
+            Assert.Equal(0, fixture.CompletionDeferralReleased);
         }
         await Task.WhenAll(attachments).WaitAsync(TimeSpan.FromSeconds(10));
-        await fixture.HoldsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Assert
         Assert.Equal(new[] { "first", "second" }, events);
-        Assert.Equal(2, fixture.HoldsDisposed);
+        Assert.Equal(2, fixture.CompletionDeferralReleased);
     }
 
     [Fact]
-    public async Task WhenHandlerStartsInsideAnOpenScope_ThenTheActionLoopDoesNotInheritIt()
+    public async Task WhenHandlerStartsInsideAnOpenDeferral_ThenTheActionLoopDoesNotInheritIt()
     {
         // Arrange
         await using var fixture = new Fixture();
@@ -276,7 +276,7 @@ public class HostedServiceStartupScopeTests
             return "parent";
         });
 
-        // Attached from a flow created before the scope below, so the scope never captures this
+        // Attached from a flow created before the deferral below, so the deferral never captures this
         // attach and the loop's own flow is the only thing that can defer the child.
         var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var independentFlow = Task.Run(async () =>
@@ -285,10 +285,10 @@ public class HostedServiceStartupScopeTests
             await subject.AttachHostedServiceAsync(parent, CancellationToken.None);
         });
 
-        // Act - the scope stays open across the start, so a loop that inherited the flow it was
+        // Act - the deferral stays open across the start, so a loop that inherited the flow it was
         // started in would capture the child that parent attaches inside its own StartAsync and
-        // hold it until this scope is disposed.
-        using (fixture.Context.DeferHostedServiceStartup())
+        // hold it until this deferral is disposed.
+        using (fixture.Context.DeferHostedServiceStarts())
         {
             await fixture.Handler.StartAsync(CancellationToken.None);
             proceed.SetResult();
@@ -303,15 +303,15 @@ public class HostedServiceStartupScopeTests
     [InlineData("OutOfOrder")]
     [InlineData("OtherFlow")]
     [InlineData("Twice")]
-    public async Task WhenAScopeIsDisposedIrregularly_ThenCapturedAndLaterServicesCanStart(string disposal)
+    public async Task WhenADeferralIsDisposedIrregularly_ThenCapturedAndLaterServicesCanStart(string disposal)
     {
         // Arrange
         await using var fixture = new Fixture();
         await fixture.Handler.StartAsync(CancellationToken.None);
         var subject = new Person(fixture.Context);
         var captured = new ProbeService(() => "captured");
-        var outer = fixture.Context.DeferHostedServiceStartup();
-        var inner = fixture.Context.DeferHostedServiceStartup();
+        var outer = fixture.Context.DeferHostedServiceStarts();
+        var inner = fixture.Context.DeferHostedServiceStarts();
         subject.AttachHostedService(captured);
 
         // Act
@@ -382,32 +382,32 @@ public class HostedServiceStartupScopeTests
         Assert.True(await attaching.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
-    private sealed class Fixture : IAsyncDisposable, IStartupCompletionDeferrer
+    private sealed class Fixture : IAsyncDisposable, IStartupCompletion
     {
         private readonly ServiceProvider _provider;
         public IInterceptorSubjectContext Context { get; }
         public IHostedService Handler { get; }
-        public int HoldsTaken;
-        public int HoldsDisposed;
-        public TaskCompletionSource HoldsReleased { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CompletionDeferred;
+        public int CompletionDeferralReleased;
+        public TaskCompletionSource AllCompletionDeferralsReleased { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Fixture()
         {
             var services = new ServiceCollection().AddLogging();
             Context = InterceptorSubjectContext.Create().WithHostedServices(services);
-            Context.AddService<IStartupCompletionDeferrer>(this);
+            Context.AddService<IStartupCompletion>(this);
             _provider = services.BuildServiceProvider();
             Handler = Assert.Single(_provider.GetServices<IHostedService>());
         }
 
-        public IDisposable DeferCompletion()
+        public IDisposable Defer()
         {
-            Interlocked.Increment(ref HoldsTaken);
-            return new CompletionHold(() =>
+            Interlocked.Increment(ref CompletionDeferred);
+            return new CompletionDeferral(() =>
             {
-                if (Interlocked.Increment(ref HoldsDisposed) == Volatile.Read(ref HoldsTaken))
+                if (Interlocked.Increment(ref CompletionDeferralReleased) == Volatile.Read(ref CompletionDeferred))
                 {
-                    HoldsReleased.TrySetResult();
+                    AllCompletionDeferralsReleased.TrySetResult();
                 }
             });
         }
@@ -419,7 +419,7 @@ public class HostedServiceStartupScopeTests
         }
     }
 
-    private sealed class CompletionHold(Action released) : IDisposable
+    private sealed class CompletionDeferral(Action released) : IDisposable
     {
         public void Dispose() => released();
     }

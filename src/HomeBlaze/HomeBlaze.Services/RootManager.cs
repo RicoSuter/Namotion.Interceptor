@@ -112,7 +112,7 @@ public class RootManager : BackgroundService, IConfigurationWriter
         }
 
         var json = await File.ReadAllTextAsync(_configurationPath, cancellationToken);
-        using var startup = _context.DeferHostedServiceStartup();
+        using var startup = _context.DeferHostedServiceStarts();
         var root = _serializer.Deserialize(json);
 
         // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
@@ -122,7 +122,7 @@ public class RootManager : BackgroundService, IConfigurationWriter
         _logger?.LogInformation("Root loaded: {Type}", Root.GetType().FullName);
         _context.AddService(Root);
 
-        // Publish readiness before scope disposal releases deferred starts.
+        // Publish readiness before deferral disposal releases deferred starts.
         _rootLoaded.TrySetResult(Root);
 
         return Root;
