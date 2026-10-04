@@ -103,7 +103,7 @@ public partial class Motor
 | `Name` | Display name (overrides property name) | `"Speed"` |
 | `Position` | Sort position in property panel | `1`, `2`, `3` |
 | `Unit` | Formatting unit | `StateUnit.DegreeCelsius` |
-| `IsCumulative` | Value only increases over time (monotonic counter). The subject is responsible for providing a value that never decreases — if the underlying API uses periodic buckets (daily/monthly) that reset, the subject must accumulate them into a true cumulative counter and persist the offset via `[Configuration]`. Consumers can query any time range by computing deltas. | `true` for energy meters, rain totals |
+| `IsCumulative` | Counter that only grows, see [Naming Cumulative Properties](#naming-cumulative-properties) | `true` for energy meters, rain totals |
 | `IsDiscrete` | Discrete variable (binary on/off, every transition matters) vs analog (sensor readings) | `true` for commands, flags |
 | `IsEstimated` | Calculated/estimated value | `true` for predictions |
 
@@ -151,7 +151,9 @@ Values are auto-scaled for display within unit families (e.g., 1500 W displays a
 
 ### Naming Cumulative Properties
 
-A property with `IsCumulative = true` is a counter that only grows (it may restart at 0 when the device resets) and is named `Total<Modifier><Quantity>`, with the modifier (such as a direction) before the quantity like in plain English: `TotalConsumedEnergy`, `TotalImportedEnergy`, `TotalExportedEnergy`, `TotalProducedThermalEnergy`, `TotalRain`, `TotalOperatingHours`. The `Total` prefix is reserved for such counters. A value that sums parts at one instant, such as the power or current of all phases of a meter, takes no prefix (`MeasuredPower`, `ElectricalCurrent`), and a value that covers a period, such as a charging session or a day, is not cumulative and does not start with `Total`.
+A property with `IsCumulative = true` is a counter that only grows and is named `Total<Modifier><Quantity>`, with the modifier (such as a direction) before the quantity like in plain English: `TotalConsumedEnergy`, `TotalImportedEnergy`, `TotalExportedEnergy`, `TotalProducedThermalEnergy`, `TotalRain`, `TotalOperatingHours`. The `Total` prefix is reserved for such counters. A value that sums parts at one instant, such as the power or current of all phases of a meter, takes no prefix (`MeasuredPower`, `ElectricalCurrent`), and a value that covers a period, such as a charging session or a day, is not cumulative and does not start with `Total`.
+
+The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device itself (for example a reboot that clears its counter) may restart the value at 0 or step it back once, so a consumer that computes deltas treats a decrease as such a reset and counts no change for that interval.
 
 ### Interface Inheritance and Attribute Merging
 

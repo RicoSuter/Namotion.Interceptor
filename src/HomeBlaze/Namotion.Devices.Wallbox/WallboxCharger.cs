@@ -36,7 +36,7 @@ public partial class WallboxCharger : BackgroundService,
     private WallboxClient? _client;
     private DateTimeOffset _lastSessionsRetrieval = DateTimeOffset.MinValue;
     private readonly Dictionary<int, decimal> _yearlySessionEnergy = new();
-    private decimal _cachedSessionEnergy;
+    private decimal? _cachedSessionEnergy;
 
     // Configuration
 
@@ -279,7 +279,7 @@ public partial class WallboxCharger : BackgroundService,
     [Operation(Title = "Set Maximum Charging Current", RequiresConfirmation = true)]
     public async Task SetMaximumChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
-        if (_client is not null && amperes >= 6 && amperes <= 32)
+        if (_client is not null && amperes is >= 6 and <= 32)
         {
             await _client.SetMaximumChargingCurrentAsync(SerialNumber, amperes, cancellationToken);
             await PollAsync(cancellationToken);
@@ -456,7 +456,8 @@ public partial class WallboxCharger : BackgroundService,
                     _client = null;
                     _lastSessionsRetrieval = DateTimeOffset.MinValue;
                     _yearlySessionEnergy.Clear();
-                    _cachedSessionEnergy = 0;
+                    _cachedSessionEnergy = null;
+                    TotalConsumedEnergy = null;
                     return;
                 }
             }
@@ -488,7 +489,7 @@ public partial class WallboxCharger : BackgroundService,
         // Derive current from power and phases assuming 230V nominal (EU/Type 2 markets).
         ChargingCurrent = status.ChargingCurrent > 0
             ? status.ChargingCurrent
-            : status.CurrentMode > 0 && status.ChargingPowerInKw > 0
+            : status is { CurrentMode: > 0, ChargingPowerInKw: > 0 }
                 ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
                 : 0;
 
@@ -584,10 +585,23 @@ public partial class WallboxCharger : BackgroundService,
         }
 
         // AddedEnergy from status API is in kWh; add current session energy (not yet in sessions API)
-        TotalConsumedEnergy = _cachedSessionEnergy +
-            (IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
+        TotalConsumedEnergy = GetTotalConsumedEnergy(TotalConsumedEnergy, _cachedSessionEnergy,
+            IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
 
         IsConnected = true;
+    }
+
+    /// <summary>
+    /// Gets the lifetime energy from the finished sessions and the current one, or <c>null</c> before the sessions were read.
+    /// </summary>
+    internal static decimal? GetTotalConsumedEnergy(decimal? currentValue, decimal? sessionsEnergy, decimal currentSessionEnergy)
+    {
+        if (sessionsEnergy == null)
+            return null;
+
+        // After unplugging, the finished session appears in the sessions only at the next refresh (up to 30 min).
+        var value = sessionsEnergy.Value + currentSessionEnergy;
+        return currentValue > value ? currentValue : value;
     }
 
     private static string? MapPartNumberToModel(string? partNumber)

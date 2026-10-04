@@ -38,6 +38,7 @@ public partial class ShellyDevice : BackgroundService,
     private string? _ethernetIpAddress;
     private string? _wifiIpAddress;
     private int? _wifiSignalStrength;
+    private bool _isVirtualEnergyCounterReadFailing;
     private string? _availableSoftwareUpdate;
     
     [Configuration]
@@ -208,10 +209,12 @@ public partial class ShellyDevice : BackgroundService,
                 Status = ServiceStatus.Starting;
                 StatusMessage = "Connecting...";
 
+                var connectedHostAddress = HostAddress;
                 using var client = CreateHttpClient();
                 await FetchDeviceInfoAsync(client, stoppingToken);
 
-                if (_deviceInfo?.Generation < 2)
+                // Gen1 devices do not report "gen".
+                if (_deviceInfo?.Generation is null or < 2)
                 {
                     Status = ServiceStatus.Error;
                     StatusMessage = "Only Gen2+ Shelly devices are supported";
@@ -248,7 +251,8 @@ public partial class ShellyDevice : BackgroundService,
                     webSocketCts.Dispose();
                 }
 
-                if (isConfigurationChanged)
+                // Another host can be another device; the same host keeps its children and counters.
+                if (isConfigurationChanged && HostAddress != connectedHostAddress)
                     ResetForConfigurationChange();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -292,26 +296,33 @@ public partial class ShellyDevice : BackgroundService,
                 IsConnected = false;
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
-                return false;
+
+                // Reconnecting at once would loop without pause when /shelly answers but RPC calls fail (e.g. authentication).
+                return await WaitForConfigurationChangeAsync(RetryInterval, stoppingToken);
             }
 
             var pollingInterval = Covers.Any(c => c.IsMoving == true)
                 ? TimeSpan.FromSeconds(1)
                 : PollingInterval;
 
-            try
-            {
-                var signaled = await _configChangedSignal.WaitAsync(pollingInterval, stoppingToken);
-                if (signaled)
-                    return true;
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
+            if (await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken))
+                return true;
         }
 
         return false;
+    }
+
+    /// <returns><c>true</c> when the configuration changed within <paramref name="timeout"/>.</returns>
+    private async Task<bool> WaitForConfigurationChangeAsync(TimeSpan timeout, CancellationToken stoppingToken)
+    {
+        try
+        {
+            return await _configChangedSignal.WaitAsync(timeout, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     private async Task FetchDeviceInfoAsync(HttpClient client, CancellationToken cancellationToken)
@@ -366,6 +377,8 @@ public partial class ShellyDevice : BackgroundService,
             {
                 _virtualEnergyCounters.Apply(numbers, configurationRevision, energyMeter);
             }
+
+            _isVirtualEnergyCounterReadFailing = false;
         }
         catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
         {
@@ -378,7 +391,10 @@ public partial class ShellyDevice : BackgroundService,
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogDebug(exception, "Shelly device {HostAddress} virtual components could not be read, retrying on next poll", HostAddress);
+            // Only the first failure of a streak is a warning, so a persistent failure does not log one per poll.
+            _logger.Log(_isVirtualEnergyCounterReadFailing ? LogLevel.Debug : LogLevel.Warning, exception,
+                "Shelly device {HostAddress} virtual components could not be read, retrying on next poll", HostAddress);
+            _isVirtualEnergyCounterReadFailing = true;
         }
     }
 

@@ -61,8 +61,9 @@ public partial class ShellyEnergyMeter :
     /// <summary>
     /// Gets a value indicating whether <see cref="TotalImportedEnergy"/> and <see cref="TotalExportedEnergy"/> are phase netted,
     /// meaning the phases are summed (vectorially, like a billing meter) before the energy is split into import and export:
-    /// <c>true</c> while they come from the phase netted energy script (<c>null</c> after a device reboot until the script publishes),
-    /// <c>false</c> while they are the device's per-phase sums, and <c>null</c> while the source is unknown, in which case both are <c>null</c>.
+    /// <c>true</c> while they come from the phase netted energy script (a counter can be <c>null</c> when HomeBlaze connects while the
+    /// device reboots, until the script publishes), <c>false</c> while they are the device's per-phase sums, and <c>null</c> while the
+    /// source is unknown, in which case both are <c>null</c>.
     /// </summary>
     [State(IsDiscrete = true, Position = 318)]
     public partial bool? IsTotalEnergyPhaseNetted { get; internal set; }
@@ -171,9 +172,9 @@ public partial class ShellyEnergyMeter :
     /// </summary>
     internal void UseScriptValues(decimal? importedValue, decimal? exportedValue)
     {
+        IsTotalEnergyPhaseNetted = true;
         TotalImportedEnergy = importedValue;
         TotalExportedEnergy = exportedValue;
-        IsTotalEnergyPhaseNetted = true;
 
         if (importedValue != null || exportedValue != null)
             HasUsedScriptValues = true;

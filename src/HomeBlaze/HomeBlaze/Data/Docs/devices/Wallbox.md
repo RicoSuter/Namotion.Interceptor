@@ -49,11 +49,6 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `MaximumChargingPower` | Watt | Hardware max power (current × 230V × phases) |
 | `ChargeLevel` | Percent | Vehicle battery level (when car reports SoC) |
 | `IsLocked` | - | Charger lock state |
-| `AddedEnergy` | WattHour | Energy added in current session |
-| `AddedRange` | km | Range added in current session |
-| `AddedGreenEnergy` | WattHour | Solar energy in current session |
-| `ChargingTime` | TimeSpan | Current session duration |
-| `SessionCost` | Currency | Current session cost |
 | `TotalConsumedEnergy` | WattHour | Cumulative total energy |
 | `EnergyPrice` | Currency/kWh | Configured energy price |
 | `IsEcoSmartEnabled` | - | Whether Eco-Smart is enabled |
@@ -62,6 +57,22 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `AvailableSoftwareUpdate` | - | Available firmware update |
 | `Model` | - | Charger model name |
 | `ProductCode` | - | Part number / SKU |
+| `Session` | - | Current charging session (see below) |
+
+### Session
+
+The `Session` child subject describes the current charging session.
+
+| Property | Unit | Description |
+|----------|------|-------------|
+| `IsCharging` | - | Whether the session is charging |
+| `AddedEnergy` | WattHour | Energy added in the session |
+| `AddedGreenEnergy` | WattHour | Solar energy added in the session |
+| `AddedGridEnergy` | WattHour | Grid energy added in the session |
+| `AddedRange` | km | Range added in the session |
+| `ChargingTime` | TimeSpan | Session duration |
+| `SessionCost` | Currency | Session cost |
+| `ChargeLevel` | Percent | Vehicle battery level (when the car reports it) |
 
 ## Interfaces
 

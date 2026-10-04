@@ -44,14 +44,15 @@ internal sealed class ShellyVirtualEnergyCounters
         var hasImported = false;
         var hasExported = false;
 
+        // The script uses the first component of each name and ignores duplicates, so the first match is the one it updates.
         foreach (var number in numbers)
         {
-            if (number.Name == ImportedComponentName)
+            if (number.Name == ImportedComponentName && !hasImported)
             {
                 hasImported = true;
                 importedValue = number.Value;
             }
-            else if (number.Name == ExportedComponentName)
+            else if (number.Name == ExportedComponentName && !hasExported)
             {
                 hasExported = true;
                 exportedValue = number.Value;
@@ -68,15 +69,23 @@ internal sealed class ShellyVirtualEnergyCounters
             return;
         }
 
+        // After a device reboot both components report 0 until the script publishes both again. The script starts at the
+        // device counters, so both being 0 is only real while the device counters are 0 too (or not known yet). A single 0
+        // is real (e.g. no netted export yet), unless the counter already showed more, since the counters only grow.
+        var isRebootReset = importedValue == 0 && exportedValue == 0 &&
+            (energyMeter.TotalImportedPhaseEnergy != 0 || energyMeter.TotalExportedPhaseEnergy != 0);
+
         // A rejected value keeps the current script value, or stays null when switching from the per-phase sums.
         var isScriptSource = energyMeter.IsTotalEnergyPhaseNetted == true;
         energyMeter.UseScriptValues(
-            IsRebootReset(importedValue, energyMeter.TotalImportedPhaseEnergy)
-                ? (isScriptSource ? energyMeter.TotalImportedEnergy : null)
-                : importedValue,
-            IsRebootReset(exportedValue, energyMeter.TotalExportedPhaseEnergy)
-                ? (isScriptSource ? energyMeter.TotalExportedEnergy : null)
-                : exportedValue);
+            SelectValue(importedValue, energyMeter.TotalImportedEnergy, isRebootReset, isScriptSource),
+            SelectValue(exportedValue, energyMeter.TotalExportedEnergy, isRebootReset, isScriptSource));
+    }
+
+    private static decimal? SelectValue(decimal? value, decimal? currentValue, bool isRebootReset, bool isScriptSource)
+    {
+        var isRejected = value == 0 && (isRebootReset || (isScriptSource && currentValue > 0));
+        return isRejected ? (isScriptSource ? currentValue : null) : value;
     }
 
     /// <summary>
@@ -112,13 +121,6 @@ internal sealed class ShellyVirtualEnergyCounters
             energyMeter.ClearTotalEnergy();
         else
             energyMeter.UsePhaseEnergy();
-    }
-
-    // After a device reboot the components report 0 until the script publishes again. The script starts at the device
-    // counters, so a 0 is only applied once the device counter is known to be 0 too; while it is unknown or above 0 it is ignored.
-    private static bool IsRebootReset(decimal? value, decimal? deviceCounter)
-    {
-        return value == 0 && deviceCounter != 0;
     }
 
     /// <summary>

@@ -4,7 +4,7 @@
 // and publishes it in Wh as the virtual number components TotalImportedEnergy and
 // TotalExportedEnergy (found by name, created when missing).
 //
-// Install: Settings > Scripts > Add script, paste, save, enable "Run on startup", start.
+// Install: in the device web UI, create a script under Scripts, paste, save, enable "Run on startup", start.
 // Behavior and limitations: see the Shelly device docs in the Namotion.Interceptor repository
 // (HomeBlaze docs, devices/Shelly.md).
 
@@ -33,6 +33,7 @@ let exported = 0;
 let importDebt = 0; // Wh that future import increments pay off before imported grows
 let exportDebt = 0; // Wh that future export increments pay off before exported grows
 let anchor = null; // { scriptNet, deviceImport, deviceExport } at the last reconcile
+let isResuming = false; // continuing from the published values, reconciled against the stored anchor
 
 let lastDevice = null;
 let lastPower = null;
@@ -95,7 +96,9 @@ function save() {
     deviceExport: round(anchor.deviceExport)
   };
   Shelly.call("KVS.Set", { key: KVS_KEY, value: JSON.stringify(state) }, function (result, errorCode, errorMessage) {
-    if (errorCode !== 0) log("KVS.Set failed: " + errorMessage);
+    if (errorCode === 0) return;
+    log("KVS.Set failed: " + errorMessage);
+    lastSaveUptimeMs = -SAVE_INTERVAL_MS; // saves again at the next reconcile
   });
   lastSaveUptimeMs = Shelly.getUptimeMs();
 }
@@ -104,8 +107,12 @@ function save() {
 // and a stale device value would push energy into the wrong counter. A correction only touches
 // the counter of the direction that dominated the interval: an excess is added to it, a
 // shortfall becomes its debt. So no counter ever steps back, and a measurement bias between em
-// power and emdata never shows up as flow in the other direction.
+// power and emdata does not show up as flow in the other direction (in minutes with one direction).
+// When resuming, the residual is mostly energy of the time the script was stopped, so its own sign
+// picks the counter.
 function reconcile(device, isStart) {
+  let wasResuming = isResuming;
+  isResuming = false;
   let isDecrease = anchor !== null &&
     (device.deviceImport < anchor.deviceImport - DECREASE_TOLERANCE_WH || device.deviceExport < anchor.deviceExport - DECREASE_TOLERANCE_WH);
   if (isDecrease && !isStart) {
@@ -122,7 +129,7 @@ function reconcile(device, isStart) {
   } else if (!isNewAnchor) {
     let deviceNet = (device.deviceImport - device.deviceExport) - (anchor.deviceImport - anchor.deviceExport);
     let residual = deviceNet - (scriptNet() - anchor.scriptNet);
-    if (deviceNet >= 0) {
+    if (wasResuming ? residual >= 0 : deviceNet >= 0) {
       if (residual > 0) addImport(residual);
       else importDebt -= residual;
     } else {
@@ -184,7 +191,7 @@ function onNumberSet(result, errorCode, errorMessage) {
 }
 
 // Compares with the value on the device, not the last value sent: a config edit of the
-// component (rename, meta) resets it to 0, and an idle counter would otherwise never be resent.
+// component (e.g. its meta) resets it to 0, and an idle counter would otherwise never be resent.
 // The tolerance keeps a device that stores numbers less precisely from getting a set every time.
 // Returns false when the component has no value.
 function publishValue(id, value) {
@@ -206,7 +213,7 @@ function publish() {
   // only a value missing on several publishes in a row means the component was deleted.
   missingPublishes++;
   if (missingPublishes >= MISSING_PUBLISHES_TO_STOP) {
-    stop("component number:" + (isImportedPresent ? exportedId : importedId) + " was deleted, restart the script");
+    stop("deleted:" + (isImportedPresent ? "" : " number:" + importedId) + (isExportedPresent ? "" : " number:" + exportedId) + ", restart the script");
   }
 }
 
@@ -221,16 +228,23 @@ function adoptPublishedValues() {
       importedValue < round(imported) || exportedValue < round(exported)) return false;
   imported = importedValue;
   exported = exportedValue;
+  isResuming = true;
   return true;
 }
 
 function start() {
   let device = readDeviceCounters();
-  if (device === null) {
-    // emdata:0 can be missing for a moment right after boot.
+  // emdata:0 can be missing for a moment right after boot. Zero counters with a stored state are
+  // also waited for: re-anchoring at a transient 0 would book the whole lifetime counter as one
+  // correction. If they stay 0, the counters were reset and reconcile handles it.
+  let isPending = device === null || (anchor !== null && device.deviceImport === 0 && device.deviceExport === 0);
+  if (isPending && startAttempts < START_ATTEMPTS) {
     startAttempts++;
-    if (startAttempts < START_ATTEMPTS) Timer.set(START_RETRY_INTERVAL_MS, false, start);
-    else stop("emdata:0 is not available, the script requires a Pro 3EM in the triphase profile");
+    Timer.set(START_RETRY_INTERVAL_MS, false, start);
+    return;
+  }
+  if (device === null) {
+    stop("emdata:0 is not available, the script requires a Pro 3EM in the triphase profile");
     return;
   }
   lastDevice = device;
@@ -311,7 +325,7 @@ function restore(value) {
   } catch (error) {
     // Unparsable state is reported as invalid below.
   }
-  if (stored === null || typeof stored.imported !== "number" || typeof stored.exported !== "number" ||
+  if (stored === null || stored.v !== STATE_VERSION || typeof stored.imported !== "number" || typeof stored.exported !== "number" ||
       typeof stored.deviceImport !== "number" || typeof stored.deviceExport !== "number") {
     log("stored state is invalid, starting at the device counters");
     return;

@@ -751,7 +751,7 @@ public class ShellyDeviceComponentParsingTests
     }
 
     [Fact]
-    public async Task WhenScriptStartsWhileFallbackIsActive_ThenIgnoredZeroLeavesNoPhaseSum()
+    public async Task WhenScriptStartsWhileFallbackIsActive_ThenIgnoredZerosLeaveNoPhaseSums()
     {
         // Arrange
         var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 200.0m);
@@ -759,12 +759,66 @@ public class ShellyDeviceComponentParsingTests
         device.ParseStatusComponents(Json("""{ "sys": { "cfg_rev": 8 } }"""), isPartialUpdate: true);
 
         // Act
-        await ReadVirtualComponentsAsync(device, ComponentsWithValues(0.0m, 200.5m, configurationRevision: 8));
+        await ReadVirtualComponentsAsync(device, ComponentsWithValues(0.0m, 0.0m, configurationRevision: 8));
 
         // Assert
         Assert.True(device.EnergyMeter!.IsTotalEnergyPhaseNetted);
         Assert.Null(device.EnergyMeter.TotalImportedEnergy);
-        Assert.Equal(200.5m, device.EnergyMeter.TotalExportedEnergy);
+        Assert.Null(device.EnergyMeter.TotalExportedEnergy);
+    }
+
+    [Fact]
+    public async Task WhenNettedExportIsZeroOnReconnect_ThenZeroIsApplied()
+    {
+        // Arrange
+        var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 0.8m);
+
+        // Act
+        await ReadVirtualComponentsAsync(device, ComponentsWithValues(1001.0m, 0.0m));
+
+        // Assert
+        Assert.True(device.EnergyMeter!.IsTotalEnergyPhaseNetted);
+        Assert.Equal(1001.0m, device.EnergyMeter.TotalImportedEnergy);
+        Assert.Equal(0.0m, device.EnergyMeter.TotalExportedEnergy);
+    }
+
+    [Fact]
+    public async Task WhenOneCounterDropsToZero_ThenCurrentValueIsKept()
+    {
+        // Arrange
+        var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 200.0m);
+        await ReadVirtualComponentsAsync(device, MappedComponents);
+
+        // Act
+        await ReadVirtualComponentsAsync(device, ComponentsWithValues(101.0m, 0.0m));
+
+        // Assert
+        Assert.Equal(101.0m, device.EnergyMeter!.TotalImportedEnergy);
+        Assert.Equal(50.0m, device.EnergyMeter.TotalExportedEnergy);
+    }
+
+    [Fact]
+    public async Task WhenComponentNamesAreDuplicated_ThenFirstComponentsAreUsed()
+    {
+        // Arrange
+        var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 200.0m);
+
+        // Act
+        await ReadVirtualComponentsAsync(device, """
+            {
+                "components": [
+                    { "key": "number:200", "status": { "value": 1001.0 }, "config": { "id": 200, "name": "TotalImportedEnergy" } },
+                    { "key": "number:201", "status": { "value": 201.0 }, "config": { "id": 201, "name": "TotalExportedEnergy" } },
+                    { "key": "number:202", "status": { "value": 5.0 }, "config": { "id": 202, "name": "TotalImportedEnergy" } },
+                    { "key": "number:203", "status": { "value": 6.0 }, "config": { "id": 203, "name": "TotalExportedEnergy" } }
+                ],
+                "cfg_rev": 7, "offset": 0, "total": 4
+            }
+            """);
+
+        // Assert
+        Assert.Equal(1001.0m, device.EnergyMeter!.TotalImportedEnergy);
+        Assert.Equal(201.0m, device.EnergyMeter.TotalExportedEnergy);
     }
 
     [Fact]
@@ -1032,7 +1086,7 @@ public class ShellyDeviceComponentParsingTests
         await device.ReadVirtualEnergyCountersAsync(client, CancellationToken.None);
 
         // Assert
-        Assert.Equal(new[] { 0, 1 }, handler.RequestUris.Select(uri => GetOffset(uri)));
+        Assert.Equal([0, 1], handler.RequestUris.Select(GetOffset));
         Assert.Equal(100.0m, device.EnergyMeter!.TotalImportedEnergy);
         Assert.Equal(50.0m, device.EnergyMeter.TotalExportedEnergy);
     }
@@ -1120,7 +1174,7 @@ public class ShellyDeviceComponentParsingTests
     }
 
     [Fact]
-    public async Task WhenConfigurationChanges_ThenDeviceStartsWithNewEnergyMeter()
+    public async Task WhenHostAddressChanges_ThenDeviceStartsWithNewEnergyMeter()
     {
         // Arrange
         var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 200.0m);

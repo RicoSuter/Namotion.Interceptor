@@ -27,7 +27,8 @@ public class StateAttribute : Attribute
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the value is cumulative (accumulated over time).
+    /// Gets or sets a value indicating whether the value is a cumulative counter that only grows. Only a reset of the device
+    /// itself may restart it at 0 or step it back once, so a consumer that computes deltas treats a decrease as such a reset.
     /// </summary>
     public bool IsCumulative
     {
