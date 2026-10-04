@@ -49,7 +49,7 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `MaximumChargingPower` | Watt | Hardware max power (current × 230V × phases) |
 | `ChargeLevel` | Percent | Vehicle battery level (when car reports SoC) |
 | `IsLocked` | - | Charger lock state |
-| `TotalConsumedEnergy` | WattHour | Cumulative total energy |
+| `TotalConsumedEnergy` | WattHour | Lifetime energy of all charging sessions (finished sessions refreshed every 30 minutes, plus the current session); null until the sessions were read |
 | `EnergyPrice` | Currency/kWh | Configured energy price |
 | `IsEcoSmartEnabled` | - | Whether Eco-Smart is enabled |
 | `EcoSmartMode` | - | Current Eco-Smart mode |

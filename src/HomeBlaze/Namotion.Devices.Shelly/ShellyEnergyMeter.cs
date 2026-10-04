@@ -21,7 +21,7 @@ public partial class ShellyEnergyMeter :
     /// <remarks>
     /// The value of the phase netted energy script (<c>Scripts/phase-netted-energy.js</c>) when it is installed, otherwise
     /// <see cref="TotalImportedPhaseEnergy"/>, which matches a billing meter only while no phases flow in opposite directions.
-    /// See <see cref="IsTotalEnergyPhaseNetted"/>.
+    /// See <see cref="IsTotalEnergyPhaseNetted"/>. Switching from the script values back to the per-phase sums (only after the device state was cleared, so through <c>null</c>) makes the counter jump.
     /// </remarks>
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
     public partial decimal? TotalImportedEnergy { get; internal set; }
@@ -30,7 +30,7 @@ public partial class ShellyEnergyMeter :
     /// <remarks>
     /// The value of the phase netted energy script (<c>Scripts/phase-netted-energy.js</c>) when it is installed, otherwise
     /// <see cref="TotalExportedPhaseEnergy"/>, which matches a billing meter only while no phases flow in opposite directions.
-    /// See <see cref="IsTotalEnergyPhaseNetted"/>.
+    /// See <see cref="IsTotalEnergyPhaseNetted"/>. Switching from the script values back to the per-phase sums (only after the device state was cleared, so through <c>null</c>) makes the counter jump.
     /// </remarks>
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
     public partial decimal? TotalExportedEnergy { get; internal set; }
@@ -73,6 +73,11 @@ public partial class ShellyEnergyMeter :
 
     [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
+
+    /// <summary>
+    /// Gets a value indicating whether this meter showed a script value.
+    /// </summary>
+    internal bool HasUsedScriptValues { get; private set; }
 
     [Derived]
     public string? Title => "Energy Meter";
@@ -161,11 +166,6 @@ public partial class ShellyEnergyMeter :
         TotalImportedEnergy = TotalImportedPhaseEnergy;
         TotalExportedEnergy = TotalExportedPhaseEnergy;
     }
-
-    /// <summary>
-    /// Gets a value indicating whether this meter showed a script value.
-    /// </summary>
-    internal bool HasUsedScriptValues { get; private set; }
 
     /// <summary>
     /// Sets <see cref="TotalImportedEnergy"/> and <see cref="TotalExportedEnergy"/> to the given script values.

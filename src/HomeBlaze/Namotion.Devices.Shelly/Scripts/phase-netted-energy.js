@@ -20,7 +20,7 @@ let PUBLISH_INTERVAL_MS = 15000;
 let SAVE_INTERVAL_MS = 60 * 60 * 1000;
 let MAX_GAP_MS = 10000;
 let START_RETRY_INTERVAL_MS = 5000;
-let START_ATTEMPTS = 12;
+let START_ATTEMPTS = 60; // 5 minutes
 let MISSING_PUBLISHES_TO_STOP = 3;
 let PUBLISH_TOLERANCE_WH = 0.0005; // half the 0.001 Wh publish rounding step
 let DECREASE_TOLERANCE_WH = 0.01; // the saved device values are rounded to 0.001 Wh
@@ -38,10 +38,11 @@ let isResuming = false; // continuing from the published values, reconciled agai
 let lastDevice = null;
 let lastPower = null;
 let lastUptimeMs = null;
-let lastSaveUptimeMs = 0;
+let lastSaveUptimeMs = -SAVE_INTERVAL_MS; // the first reconcile after a start saves
 let lastSafetyCheckUptimeMs = 0;
 let startAttempts = 0;
 let isNumberSetFailureLogged = false;
+let isSaveFailureLogged = false;
 let missingPublishes = 0;
 
 function log(message) {
@@ -96,8 +97,12 @@ function save() {
     deviceExport: round(anchor.deviceExport)
   };
   Shelly.call("KVS.Set", { key: KVS_KEY, value: JSON.stringify(state) }, function (result, errorCode, errorMessage) {
-    if (errorCode === 0) return;
-    log("KVS.Set failed: " + errorMessage);
+    if (errorCode === 0) {
+      isSaveFailureLogged = false;
+      return;
+    }
+    if (!isSaveFailureLogged) log("KVS.Set failed: " + errorMessage + " (retried every minute, further failures are not logged)");
+    isSaveFailureLogged = true;
     lastSaveUptimeMs = -SAVE_INTERVAL_MS; // saves again at the next reconcile
   });
   lastSaveUptimeMs = Shelly.getUptimeMs();
@@ -111,6 +116,10 @@ function save() {
 // When resuming, the residual is mostly energy of the time the script was stopped, so its own sign
 // picks the counter.
 function reconcile(device, isStart) {
+  // Zero counters are transient at boot or right after a counter reset. Anchoring at them would
+  // book the whole lifetime counter as one correction at the next update, so they are skipped; a
+  // real reset shows as a decrease at the next non-zero update.
+  if (device.deviceImport === 0 && device.deviceExport === 0) return;
   let wasResuming = isResuming;
   isResuming = false;
   let isDecrease = anchor !== null &&
@@ -217,9 +226,10 @@ function publish() {
   }
 }
 
-// After a script restart without a device reboot the components hold values at least as new as
+// After a script restart without a device reboot the components usually hold values newer than
 // the stored state (compared as published, rounded). Continuing from them keeps the counters
-// from stepping back. Returns true when the values were adopted.
+// from stepping back; when a save came after the last publish, the stored state is used instead.
+// Returns true when the values were adopted.
 function adoptPublishedValues() {
   if (anchor === null) return false;
   let importedValue = readComponentValue(importedId);
@@ -234,17 +244,8 @@ function adoptPublishedValues() {
 
 function start() {
   let device = readDeviceCounters();
-  // emdata:0 can be missing for a moment right after boot. Zero counters with a stored state are
-  // also waited for: re-anchoring at a transient 0 would book the whole lifetime counter as one
-  // correction. If they stay 0, the counters were reset and reconcile handles it.
-  let isPending = device === null || (anchor !== null && device.deviceImport === 0 && device.deviceExport === 0);
-  if (isPending && startAttempts < START_ATTEMPTS) {
-    startAttempts++;
-    Timer.set(START_RETRY_INTERVAL_MS, false, start);
-    return;
-  }
   if (device === null) {
-    stop("emdata:0 is not available, the script requires a Pro 3EM in the triphase profile");
+    stop("emdata:0 disappeared");
     return;
   }
   lastDevice = device;
@@ -318,6 +319,18 @@ function findComponents(offset) {
   });
 }
 
+// emdata:0 can be missing for a while after boot. Checking it before the components are created
+// leaves no stray components on a device without it.
+function waitForDevice() {
+  if (readDeviceCounters() !== null) {
+    findComponents(0);
+    return;
+  }
+  startAttempts++;
+  if (startAttempts < START_ATTEMPTS) Timer.set(START_RETRY_INTERVAL_MS, false, waitForDevice);
+  else stop("emdata:0 is not available, the script requires a Pro 3EM in the triphase profile");
+}
+
 function restore(value) {
   let stored = null;
   try {
@@ -347,5 +360,5 @@ Shelly.call("KVS.Get", { key: KVS_KEY }, function (result, errorCode, errorMessa
   } else {
     restore(result.value);
   }
-  findComponents(0);
+  waitForDevice();
 });

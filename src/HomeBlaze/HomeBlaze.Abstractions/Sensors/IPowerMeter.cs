@@ -21,13 +21,13 @@ public interface IPowerMeter
 
     /// <summary>
     /// The total energy imported in watt-hours. Where the device supports it, a multi-phase meter sums the phases before splitting by direction, like a billing meter;
-    /// an implementation that reports per-phase sums instead documents it.
+    /// an implementation that reports per-phase sums instead documents it. <c>null</c> while the value is not known yet.
     /// </summary>
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 311)]
     decimal? TotalImportedEnergy { get; }
 
     /// <summary>
-    /// The total energy exported in watt-hours, summed like <see cref="TotalImportedEnergy"/>, or <c>null</c> if the device does not measure export.
+    /// The total energy exported in watt-hours, summed like <see cref="TotalImportedEnergy"/>, or <c>null</c> if the device does not measure export or the value is not known yet.
     /// </summary>
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 312)]
     decimal? TotalExportedEnergy { get; }

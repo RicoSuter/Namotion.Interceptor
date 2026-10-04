@@ -153,7 +153,7 @@ Values are auto-scaled for display within unit families (e.g., 1500 W displays a
 
 A property with `IsCumulative = true` is a counter that only grows and is named `Total<Modifier><Quantity>`, with the modifier (such as a direction) before the quantity like in plain English: `TotalConsumedEnergy`, `TotalImportedEnergy`, `TotalExportedEnergy`, `TotalProducedThermalEnergy`, `TotalRain`, `TotalOperatingHours`. The `Total` prefix is reserved for such counters. A value that sums parts at one instant, such as the power or current of all phases of a meter, takes no prefix (`MeasuredPower`, `ElectricalCurrent`), and a value that covers a period, such as a charging session or a day, is not cumulative and does not start with `Total`.
 
-The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device itself (for example a reboot that clears its counter) may restart the value at 0 or step it back once, so a consumer that computes deltas treats a decrease as such a reset and counts no change for that interval.
+The subject keeps the value from decreasing: if the API reports periodic buckets (daily, monthly) that reset, the subject accumulates them into a true counter and persists the offset via `[Configuration]`. Only a reset of the device or service that owns the counter (for example a reboot that clears it) may restart the value at 0 or step it back once, and a change of the counter's source passes through `null`. A consumer that computes deltas treats a decrease as such a reset and restarts after `null`, counting no change for that interval.
 
 ### Interface Inheritance and Attribute Merging
 

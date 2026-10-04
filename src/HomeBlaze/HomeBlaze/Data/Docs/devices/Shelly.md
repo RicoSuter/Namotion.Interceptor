@@ -49,6 +49,7 @@ Unknown component types (for example `light:0`, `dimmer:0`, and the `em1:N` / `p
 | `IsWireless` | `false` on Ethernet, `true` on WiFi, `null` when neither has an IP |
 | `SignalStrength` | WiFi RSSI in dBm (`null` on Ethernet) |
 | `Uptime` | Device uptime |
+| `Switches` / `Covers` / `Inputs` / `TemperatureSensors` / `EnergyMeter` | Child subjects of the discovered components (`EnergyMeter` is null without `em:0`) |
 
 ## Component Types
 
@@ -73,7 +74,7 @@ Unknown component types (for example `light:0`, `dimmer:0`, and the `em1:N` / `p
 | `ShutterState` | - | Unknown, Open, Opening, PartiallyOpen, Closing, Closed, Calibrating |
 | `IsMoving` | - | Derived from power consumption (> 1 W) |
 | `LastDirection` | - | Direction of the last movement |
-| `IsCalibrating` | - | Whether a calibration runs |
+| `IsCalibrating` | - | `true` when the cover is not calibrated (the device reports no position control); `ShutterState` then shows Calibrating while the cover stands still |
 | `Source` | - | Source of the last command |
 | `MeasuredPower` | Watt | Active power |
 | `TotalImportedEnergy` | WattHour | Total energy |
@@ -97,7 +98,7 @@ Unknown component types (for example `light:0`, `dimmer:0`, and the `em1:N` / `p
 | `NeutralCurrent` | Ampere | Neutral current |
 | `TotalImportedPhaseEnergy` | WattHour | Sum of the per-phase import counters (device lifetime). Phases are split by direction before summing, so the value is too high whenever phases flow in opposite directions |
 | `TotalExportedPhaseEnergy` | WattHour | Sum of the per-phase export counters (device lifetime), summed like `TotalImportedPhaseEnergy` |
-| `IsTotalEnergyPhaseNetted` | - | `true`: the counters come from the script, `false`: they are the per-phase sums, `null`: the source is unknown and both counters are null. See [How HomeBlaze reads the counters](#how-homeblaze-reads-the-counters) |
+| `IsTotalEnergyPhaseNetted` | - | `true`: the counters come from the script (a counter can be null after a device reboot until the script publishes, or while it publishes 0 on a device without any energy yet), `false`: they are the per-phase sums, `null`: the source is unknown and both counters are null. See [How HomeBlaze reads the counters](#how-homeblaze-reads-the-counters) |
 | `Phases[3]` | - | Per-phase voltage, current, frequency, active power, apparent power (VoltAmpere), power factor, `TotalImportedEnergy`, `TotalExportedEnergy` |
 
 The energy meter has no temperature of its own. On the Pro 3EM, the temperature is reported as a separate `temperature:0` component.
@@ -147,7 +148,7 @@ A three-phase billing meter sums the phase powers first and then splits the sum 
 
 ### Requirements
 
-A Pro 3EM in the triphase profile, with a firmware that supports scripts and virtual components (verified on 2.0.1). The script stops after about one minute if the device has no `emdata:0` component.
+A Pro 3EM in the triphase profile, with a firmware that supports scripts and virtual components (verified on 2.0.1). The script stops after about five minutes if the device has no `emdata:0` component, without creating the components.
 
 ### Installation
 
@@ -163,24 +164,24 @@ The script finds the components by name and creates missing ones on a free ID. T
 
 To update the script, replace its code and restart it. It continues from the published values.
 
-To remove it, stop and delete the script, delete both components, and delete its stored state (`http://<host>/rpc/KVS.Delete?key="phase_netted_energy"`). Without the state deletion, a later install continues from the old counters and books the whole time in between as one net correction. As long as the components exist, HomeBlaze keeps reading their last values.
+To remove it, stop and delete the script, delete both components, and delete its stored state (`http://<host>/rpc/KVS.Delete?key="phase_netted_energy"`). Without the state deletion, a later install continues from the old counters and books the whole time in between as one net correction. As long as the components exist, HomeBlaze keeps reading their last values. After they are deleted, HomeBlaze shows both counters as null until it clears the device state (for example a HomeBlaze restart), then the per-phase sums.
 
 ### How the Script Counts
 
 - It integrates the summed phase power every second and publishes the counters every 15 seconds to the components (Wh, rounded to 0.001 Wh).
 - Once per minute, when the device counters update, it corrects its net (imported minus exported) against the device net. A correction only affects the counter of the direction that dominated that minute: too little is added, too much is subtracted from the next increments of the same counter (a debt). So the counters only grow, a small measurement offset between the power readings and the device counters does not show up as flow in the other direction, and imported minus exported follows the device net (up to corrections still owed from the last minute).
-- It saves its state to the device's KVS after the start, after a device counter reset, and otherwise at most once per hour.
+- It saves its state to the device's KVS on first start and after a device reboot, after a device counter reset, and otherwise once per hour.
 - On first install (no stored state) it starts at the device's own lifetime counters, so switching HomeBlaze from the per-phase sums to the script is continuous.
 - A script restart while the device keeps running continues from the published values. The energy of the time it was stopped is recovered from the device counters and booked by its sign.
-- Resetting the device's energy counters does not reset the script counters, they continue.
+- Resetting the device's energy counters does not reset the script counters, they continue. Device counters that read 0 (briefly at boot, or right after a reset) are skipped instead of being used as a reference.
 
 ### How HomeBlaze Reads the Counters
 
-- `Shelly.GetStatus` does not contain virtual components, so on a device with an energy meter every poll also reads `Shelly.GetComponents` while both components exist. WebSocket pushes are not used for them, so HomeBlaze lags the script by up to about 30 seconds (15 s publish plus 15 s poll).
+- `Shelly.GetStatus` does not contain virtual components, so on a device with an energy meter every poll also reads `Shelly.GetComponents` while both components exist. WebSocket pushes are not used for them, so HomeBlaze lags the script by up to the publish interval (15 s) plus `PollingInterval` (15 s by default).
 - Without both components (or on a firmware without `Shelly.GetComponents`), the counters are the per-phase sums, and the read is repeated only when the device configuration changes (`sys.cfg_rev`), which happens when the components are added.
-- If the components disappear after their values were used in the current connection, both counters stay null until they return, so the cumulative series does not jump back to the per-phase sums. After a reconnect (HomeBlaze restart, host change, or the device was unreachable), a device without the components uses the per-phase sums again.
-- If the components cannot be read (timeouts, server errors), the current values are kept and the read is retried on every poll. Before the first successful read, both counters and `IsTotalEnergyPhaseNetted` stay null.
-- Right after a device reboot both components report 0 until the script publishes again. HomeBlaze ignores two zeros while the device counters are not 0 (or not known yet), and a single 0 for a counter that already showed more. An ignored value keeps the value HomeBlaze shows, or stays null if HomeBlaze reconnected in the meantime.
+- If the components disappear after HomeBlaze showed their values, both counters and `IsTotalEnergyPhaseNetted` become null until the components return, so the cumulative series does not jump back to the per-phase sums. Only after HomeBlaze clears the device state (HomeBlaze restart, host address change, or a reconnect where the device did not answer) does a device without the components use the per-phase sums again.
+- If the components cannot be read (timeouts, server errors), the current values are kept and the read is retried on every poll. Before the first successful read, both counters and `IsTotalEnergyPhaseNetted` stay null, also when the error persists (the first failure is logged as a warning).
+- Right after a device reboot both components report 0 until the script publishes again. HomeBlaze ignores two zeros, a single 0 for a counter that already showed more, and a missing value. An ignored value keeps the script value HomeBlaze shows, or is null when HomeBlaze showed no script value yet (after it cleared the device state, or while switching from the per-phase sums).
 - HomeBlaze cannot tell whether the script runs. While it is stopped, the counters stay at their last values and `IsTotalEnergyPhaseNetted` stays `true`; check the script status on the device.
 
 ### Limitations
@@ -188,7 +189,7 @@ To remove it, stop and delete the script, delete both components, and delete its
 - On first install, any historic excess of the per-phase counters (phases that already flowed in opposite directions) is carried over once, equally in both counters, so the net stays exact; from then on only phase netted energy is added.
 - Within each second the split follows the sampled power, so very short load spikes are not split exactly like the billing meter does.
 - After a device reboot (power loss, firmware update), the energy since the last save is recovered from the device counters but booked only by its sign. Both counters then lack the minority-direction energy since the last save (up to about one hour), and both published counters can step back once by that amount. The net stays exact.
-- If the script does not run after a device reboot (for example "Run on startup" is off), the counters keep their last values until it runs, or stay null if HomeBlaze reconnected in between.
+- If the script does not run after a device reboot (for example "Run on startup" is off), the counters keep their last values until it runs, or stay null if HomeBlaze cleared the device state in between.
 - Editing the configuration of a component (for example its unit or display settings) resets its value to 0 on the device. The script republishes the correct value within 15 seconds, and HomeBlaze ignores the 0 in between. Do not rename the components: HomeBlaze and the script find them only by their exact names.
 
 ## Troubleshooting
@@ -196,8 +197,9 @@ To remove it, stop and delete the script, delete both components, and delete its
 - **"Only Gen2+ Shelly devices are supported"**: The device is Gen1, which uses a different REST API and is not compatible with this integration.
 - **Connection timeout** (10 seconds): Verify the IP address and that the device is on the same network.
 - **Authentication errors**: Device authentication is not supported yet. Disable authentication on the device.
-- **`IsTotalEnergyPhaseNetted` stays `false`**: The script does not run, or the components are missing, named differently, or only one exists. Check the script console on the device.
-- **`IsTotalEnergyPhaseNetted` is `null`**: The components were removed after their values were used, or the device rebooted and the script did not start.
+- **`IsTotalEnergyPhaseNetted` stays `false`**: The components do not exist (the script was never started, so it has not created them), are named differently, only one exists, or the firmware does not support `Shelly.GetComponents`. Check the script console on the device.
+- **`IsTotalEnergyPhaseNetted` is `null`**: The components were removed after HomeBlaze showed their values, or `Shelly.GetComponents` has not been read successfully yet (see the HomeBlaze log).
+- **`IsTotalEnergyPhaseNetted` is `true` but the counters are null or do not change**: The script does not run, for example after a device reboot with "Run on startup" off. Check the script status on the device.
 
 ## Implementation Details
 
@@ -237,7 +239,7 @@ Components are discovered by parsing the JSON keys of the `Shelly.GetStatus` res
 
 ### Partial Updates
 
-WebSocket `NotifyStatus` messages contain only the changed fields of a component. To keep existing values (for example voltage disappearing temporarily during a cover movement), partial updates only overwrite properties that are present in the message. Full poll responses overwrite all properties, except the energy meter's `TotalImportedEnergy` and `TotalExportedEnergy` while they come from the script.
+WebSocket `NotifyStatus` messages contain only the changed fields of a component. To keep existing values (for example voltage disappearing temporarily during a cover movement), partial updates only overwrite properties that are present in the message. Full poll responses overwrite all properties, except the energy meter's `TotalImportedEnergy` and `TotalExportedEnergy`, which follow the per-phase sums only while `IsTotalEnergyPhaseNetted` is `false`.
 
 For the energy meter, `em:0` and `emdata:0` pushes are applied as full values, because the device always sends all their fields (verified on a Pro 3EM with FW 2.0.1). The device pushes `emdata:0` on its own once per minute, so the lifetime counters update without waiting for the next poll.
 

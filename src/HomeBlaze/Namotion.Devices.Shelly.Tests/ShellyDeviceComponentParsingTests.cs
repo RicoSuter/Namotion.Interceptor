@@ -479,6 +479,27 @@ public class ShellyDeviceComponentParsingTests
         Assert.Equal(-60, device.SignalStrength);
     }
 
+    [Fact]
+    public void WhenDeviceStateIsReset_ThenNetworkAdapterIsCleared()
+    {
+        // Arrange
+        var device = CreateDevice();
+        device.ParseStatusComponents(JsonSerializer.Deserialize<JsonElement>("""
+        {
+            "eth": { "ip": "192.168.1.50" },
+            "wifi": { "sta_ip": null, "rssi": 0 }
+        }
+        """));
+
+        // Act
+        device.ResetForConfigurationChange();
+
+        // Assert
+        Assert.Null(device.IpAddress);
+        Assert.Null(device.IsWireless);
+        Assert.Null(device.SignalStrength);
+    }
+
     private const string EnergyDataPush = """
         {
             "emdata:0": {
@@ -768,6 +789,44 @@ public class ShellyDeviceComponentParsingTests
     }
 
     [Fact]
+    public async Task WhenComponentsAndDeviceCountersReportZeroOnReconnect_ThenCountersStayUnset()
+    {
+        // Arrange
+        var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 0.0m, deviceExported: 0.0m);
+
+        // Act
+        await ReadVirtualComponentsAsync(device, ComponentsWithValues(0.0m, 0.0m));
+
+        // Assert
+        Assert.True(device.EnergyMeter!.IsTotalEnergyPhaseNetted);
+        Assert.Null(device.EnergyMeter.TotalImportedEnergy);
+        Assert.Null(device.EnergyMeter.TotalExportedEnergy);
+    }
+
+    [Fact]
+    public async Task WhenComponentValueIsMissing_ThenCurrentValueIsKept()
+    {
+        // Arrange
+        var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 200.0m);
+        await ReadVirtualComponentsAsync(device, MappedComponents);
+
+        // Act
+        await ReadVirtualComponentsAsync(device, """
+            {
+                "components": [
+                    { "key": "number:201", "status": { "value": 101.0 }, "config": { "id": 201, "name": "TotalImportedEnergy" } },
+                    { "key": "number:205", "status": {}, "config": { "id": 205, "name": "TotalExportedEnergy" } }
+                ],
+                "cfg_rev": 7, "offset": 0, "total": 2
+            }
+            """);
+
+        // Assert
+        Assert.Equal(101.0m, device.EnergyMeter!.TotalImportedEnergy);
+        Assert.Equal(50.0m, device.EnergyMeter.TotalExportedEnergy);
+    }
+
+    [Fact]
     public async Task WhenNettedExportIsZeroOnReconnect_ThenZeroIsApplied()
     {
         // Arrange
@@ -866,34 +925,6 @@ public class ShellyDeviceComponentParsingTests
         Assert.False(device.EnergyMeter!.IsTotalEnergyPhaseNetted);
         Assert.Equal(1000.0m, device.EnergyMeter.TotalImportedEnergy);
         Assert.Equal(200.0m, device.EnergyMeter.TotalExportedEnergy);
-    }
-
-    [Fact]
-    public async Task WhenDeviceCounterIsUnknown_ThenZeroComponentValueIsIgnored()
-    {
-        // Arrange
-        var device = CreateDeviceWithEnergyMeter(configurationRevision: 7);
-
-        // Act
-        await ReadVirtualComponentsAsync(device, ComponentsWithValues(0.0m, 0.0m));
-
-        // Assert
-        Assert.Null(device.EnergyMeter!.TotalImportedEnergy);
-        Assert.Null(device.EnergyMeter.TotalExportedEnergy);
-    }
-
-    [Fact]
-    public async Task WhenDeviceCounterIsZero_ThenZeroComponentValueIsApplied()
-    {
-        // Arrange
-        var device = CreateDeviceWithDeviceCounters(configurationRevision: 7, deviceImported: 1000.0m, deviceExported: 0.0m);
-
-        // Act
-        await ReadVirtualComponentsAsync(device, ComponentsWithValues(1001.0m, 0.0m));
-
-        // Assert
-        Assert.Equal(1001.0m, device.EnergyMeter!.TotalImportedEnergy);
-        Assert.Equal(0.0m, device.EnergyMeter.TotalExportedEnergy);
     }
 
     [Fact]

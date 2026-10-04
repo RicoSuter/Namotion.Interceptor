@@ -21,11 +21,11 @@ internal sealed class ShellyVirtualEnergyCounters
     private int? _readConfigurationRevision;
     private int? _deviceConfigurationRevision;
 
-    // Gen2 devices always report sys.cfg_rev; without it, reads after the first success only happen after a reset.
     /// <summary>
     /// Gets a value indicating whether the next poll reads the components: until a read succeeded, while both components exist,
     /// or when the device configuration revision differs from the one of the last read.
     /// </summary>
+    // Gen2 devices always report sys.cfg_rev; without it, reads after the first success only happen after a reset.
     public bool IsReadRequired => !_isRead || _hasComponents || _readConfigurationRevision != _deviceConfigurationRevision;
 
     public void ObserveConfigurationRevision(int configurationRevision)
@@ -69,13 +69,12 @@ internal sealed class ShellyVirtualEnergyCounters
             return;
         }
 
-        // After a device reboot both components report 0 until the script publishes both again. The script starts at the
-        // device counters, so both being 0 is only real while the device counters are 0 too (or not known yet). A single 0
-        // is real (e.g. no netted export yet), unless the counter already showed more, since the counters only grow.
-        var isRebootReset = importedValue == 0 && exportedValue == 0 &&
-            (energyMeter.TotalImportedPhaseEnergy != 0 || energyMeter.TotalExportedPhaseEnergy != 0);
+        // After a device reboot both components report 0 until the script publishes both again (the device counters can read
+        // 0 at boot too, so they cannot confirm it). A single 0 is real (e.g. no netted export yet), unless the counter
+        // already showed more, since the counters only grow.
+        var isRebootReset = importedValue == 0 && exportedValue == 0;
 
-        // A rejected value keeps the current script value, or stays null when switching from the per-phase sums.
+        // A rejected or missing value keeps the current script value, or stays null when switching from the per-phase sums.
         var isScriptSource = energyMeter.IsTotalEnergyPhaseNetted == true;
         energyMeter.UseScriptValues(
             SelectValue(importedValue, energyMeter.TotalImportedEnergy, isRebootReset, isScriptSource),
@@ -84,7 +83,7 @@ internal sealed class ShellyVirtualEnergyCounters
 
     private static decimal? SelectValue(decimal? value, decimal? currentValue, bool isRebootReset, bool isScriptSource)
     {
-        var isRejected = value == 0 && (isRebootReset || (isScriptSource && currentValue > 0));
+        var isRejected = value == null || (value == 0 && (isRebootReset || (isScriptSource && currentValue > 0)));
         return isRejected ? (isScriptSource ? currentValue : null) : value;
     }
 
