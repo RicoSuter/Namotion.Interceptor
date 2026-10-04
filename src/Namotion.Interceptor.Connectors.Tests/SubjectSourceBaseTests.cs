@@ -1367,35 +1367,30 @@ public class SubjectSourceBaseTests
     [Fact]
     public async Task WhenTheSourceStopsWithRetryCapacityZero_ThenEveryOwnedWriteIsCounted()
     {
-        // Arrange
+        // Arrange: the listen never returns, so no processor consumes the owned write before the stop.
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
         var subject = new Person(context);
-        var loadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseLoad = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var listenEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var source = new TestSubjectSource(
             subject,
             context,
             NullLogger.Instance,
             writeRetryQueueSize: 0)
         {
-            LoadInitialStateOverride = async _ =>
+            StartListeningOverride = async (_, cancellationToken) =>
             {
-                loadStarted.TrySetResult();
-                await releaseLoad.Task.ConfigureAwait(false);
+                listenEntered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
                 return null;
             }
         };
         new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         await source.StartAsync(CancellationToken.None);
-        await loadStarted.Task.WaitAsync(TestTimeout);
-        subject.FirstName = "owned-during-load";
-        releaseLoad.TrySetResult();
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => source.State == SourceState.Synchronized,
-            message: "The source did not finish its connect-window reconciliation.");
+        await listenEntered.Task.WaitAsync(TestTimeout);
+        subject.FirstName = "owned-during-listen";
 
         // Act
         await source.StopAsync(CancellationToken.None).WaitAsync(TestTimeout);
