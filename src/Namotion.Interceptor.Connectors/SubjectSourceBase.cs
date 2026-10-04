@@ -457,9 +457,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private bool IsResynchronizationPending =>
         _propertyWriter.BufferingGeneration > Volatile.Read(ref _resyncedGeneration);
 
-    // Under _resyncLock. A source that cannot park sends through a reload as it did before loads were
-    // resynchronized: ending its run would hand what the processor dequeued meanwhile to a drain that
-    // cannot retain it.
+    // Under _resyncLock. A source that cannot park does not end its run for a load: ending it would leave
+    // the writes committed meanwhile to a drain that cannot retain them.
     private bool IsResynchronizationDue => _parksWrites && _loadedGeneration > _resyncedGeneration;
 
     private ValueTask DeliverFromProcessorAsync(
@@ -483,7 +482,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
     /// <summary>
     /// Called by the property writer after a load for <paramref name="generation"/> applied and was not
-    /// superseded. Ends the running processor so the pump resynchronizes against the reloaded model.
+    /// superseded. Records the load and, when this source parks writes, ends the running processor so the
+    /// pump resynchronizes against the reloaded model.
     /// </summary>
     internal void OnInitialStateLoaded(int generation)
     {
