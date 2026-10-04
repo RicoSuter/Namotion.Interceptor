@@ -26,9 +26,13 @@ public sealed class SubjectPropertyWriter
     // Bumped by every StartBuffering call. LoadInitialStateAndResumeAsync captures the generation
     // in effect when it starts and compares it again after its (possibly long) await: if a later
     // StartBuffering happened in between, this call's snapshot is stale and must not be applied,
-    // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync. Every advance and
-    // every completed load are reported to the source, which parks outbound writes in between.
+    // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync.
     private int _generation;
+
+    // The generation of the latest StartBuffering, which InvalidateGeneration does not advance: it
+    // is what the source parks outbound writes behind, and a connection loss with no reload after it
+    // must not park them.
+    private int _bufferingGeneration;
     private int _bufferedUpdateCount;
 
     /// <summary>
@@ -72,10 +76,21 @@ public sealed class SubjectPropertyWriter
     internal int BufferedUpdateCount => Volatile.Read(ref _bufferedUpdateCount);
 
     /// <summary>
+    /// Gets the generation the latest <see cref="StartBuffering"/> call opened, which the source compares
+    /// with the generation it last resynchronized after.
+    /// </summary>
+    internal int BufferingGeneration => Volatile.Read(ref _bufferingGeneration);
+
+    /// <summary>
     /// Starts buffering updates instead of applying them directly.
     /// Buffered updates will be replayed when <see cref="LoadInitialStateAndResumeAsync"/> is called.
     /// This method should be called before the source starts listening for changes.
     /// </summary>
+    /// <remarks>
+    /// Every call must be followed by a <see cref="LoadInitialStateAndResumeAsync"/> call or by another
+    /// <see cref="StartBuffering"/> call: from here until the load has completed and the source has
+    /// reconciled its parked writes against the loaded state, outbound writes are parked rather than sent.
+    /// </remarks>
     public void StartBuffering()
     {
         lock (_lock)
@@ -87,7 +102,7 @@ public sealed class SubjectPropertyWriter
             _updates = [];
             Volatile.Write(ref _bufferedUpdateCount, 0);
             _generation++;
-            _source.OnGenerationAdvanced(_generation);
+            Volatile.Write(ref _bufferingGeneration, _generation);
 
             // Under _lock, paired with the generation change that governs it, so the transition
             // cannot be observed out of sync with the buffer it belongs to.
@@ -111,7 +126,6 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             _generation++;
-            _source.OnGenerationAdvanced(_generation);
         }
     }
 
@@ -179,8 +193,8 @@ public sealed class SubjectPropertyWriter
             _source.TransitionStateTo(SourceState.Synchronized);
         }
 
-        // Outside _lock: the source reacts on its pump task, and a later generation that starts in
-        // between keeps it parking until that generation has loaded and been reconciled too.
+        // Outside _lock: the source reacts on its pump task, and a later StartBuffering in between keeps
+        // it parking until that generation has loaded and been reconciled too.
         _source.OnInitialStateLoaded(generation);
     }
 

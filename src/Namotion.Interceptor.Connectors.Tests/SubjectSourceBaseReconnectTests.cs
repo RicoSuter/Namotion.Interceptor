@@ -431,8 +431,9 @@ public class SubjectSourceBaseReconnectTests
     public async Task WhenRetryQueueIsDisabled_ThenWritesDuringAReloadAreSentAsBefore()
     {
         // Arrange: with nothing to park into, a write during a reload on a live transport is sent, as it was
-        // before loads were resynchronized, rather than counted as dropped.
-        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8, writeRetryQueueSize: 0);
+        // before loads were resynchronized, rather than counted as dropped. The load reads the server after the
+        // send, so the loaded snapshot carries the write.
+        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8, LoadStyle.Read, writeRetryQueueSize: 0);
         try
         {
             var loadGate = source.BlockNextLoad();

@@ -279,7 +279,7 @@ public class ChangeQueueProcessor : IDisposable
         var processingCancellationTask = processingTokenSource.CancelAsync();
         var teardownCancellationTask = Task.CompletedTask;
         using var teardownDelayCancellation = new CancellationTokenSource();
-        var teardownDelay = DelayTeardownBoundAsync(teardownDelayCancellation.Token);
+        var teardownDelay = DelayTeardownBoundAsync(_stoppingToken, teardownDelayCancellation.Token);
         try
         {
             if (await Task.WhenAny(processingTask, teardownDelay).ConfigureAwait(false) == processingTask)
@@ -432,14 +432,17 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    // Elapses TeardownFlushBound after the stop when a stopping token was supplied (see the internal
-    // constructor), otherwise after the call; cancelled when the run completes first.
-    private async Task DelayTeardownBoundAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Completes <see cref="TeardownFlushBound"/> after <paramref name="stoppingToken"/> is cancelled, or
+    /// after the call when that token cannot be cancelled; cancelled by <paramref name="cancellationToken"/>
+    /// when the awaited work completes first.
+    /// </summary>
+    internal static async Task DelayTeardownBoundAsync(CancellationToken stoppingToken, CancellationToken cancellationToken)
     {
-        if (_stoppingToken.CanBeCanceled)
+        if (stoppingToken.CanBeCanceled)
         {
             var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var registration = _stoppingToken.UnsafeRegister(
+            using var registration = stoppingToken.UnsafeRegister(
                 static state => ((TaskCompletionSource)state!).TrySetResult(), stopped);
             await stopped.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
