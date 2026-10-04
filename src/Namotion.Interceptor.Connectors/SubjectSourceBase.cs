@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Abstract base for source classes that owns the entire pump lifecycle
-/// (buffer -> listen -> load initial state -> run change queue processor -> retry on failure).
+/// (buffer -> listen -> run change queue processor -> load initial state -> resynchronize -> retry on failure).
 /// Derived classes override three hooks to plug in protocol-specific behavior:
 /// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
 /// and <see cref="WriteChangesAsync"/> (public).
@@ -27,8 +27,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private readonly TimeSpan _retryTime;
     private readonly SubjectPropertyWriter _propertyWriter;
 
-    private static readonly TimeSpan ConnectWindowDrainInterval = TimeSpan.FromSeconds(1);
-
     private readonly Lock _stateLock = new();
 
     // The state and its two timestamps are swapped as one value: in separate fields a reader can see
@@ -41,6 +39,16 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private int _started;
 
     private ImmutableArray<SourceMonitor> _registeredMonitors = [];
+
+    // Property writer generations (see SubjectPropertyWriter): the latest started, the latest whose load
+    // completed, and the latest the pump has resynchronized after. While the first differs from the last,
+    // the processor parks writes instead of sending them, so nothing reaches the source unreconciled.
+    // _loadedGeneration, _resyncedGeneration and _cycleSource change under _resyncLock.
+    private readonly Lock _resyncLock = new();
+    private int _startedGeneration;
+    private int _loadedGeneration;
+    private int _resyncedGeneration;
+    private CancellationTokenSource? _cycleSource;
 
     internal WriteRetryQueue WriteRetryQueue { get; }
 
@@ -229,107 +237,89 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // continuously (including during the retry delay) and never fall into a no-subscription gap.
             using var subscription = _context.CreatePropertyChangeQueueSubscription();
 
-            var firstAttempt = true;
-            while (!stoppingToken.IsCancellationRequested)
+            // The pump is the subscription's only consumer from the first successful listen on, across
+            // every later load, until the source stops or a processor faults. It starts after the listen
+            // and not before, because ownership is established in there (the OPC UA browse) and the
+            // processor keeps only what this source owns at the time it dequeues.
+            Task? pump = null;
+            try
             {
-                try
+                var firstAttempt = true;
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    if (!firstAttempt)
+                    try
                     {
-                        await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
-                    }
-                    firstAttempt = false;
-
-                    // Park writes captured since the previous attempt (retry delay + any failed attempt).
-                    // This also caps memory across repeated failed attempts.
-                    DrainOwnedWritesToRetryQueue(subscription);
-
-                    _propertyWriter.StartBuffering();
-                    await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
-
-                    // Caps the window's memory at the retry queue's size; the subscription itself is
-                    // unbounded. Starts only after StartListeningAsync, because ownership is established in
-                    // there and the drain discards what it cannot attribute, which leaves the longer leg
-                    // unguarded rather than the shorter one: for OPC UA the browse runs inside that call and
-                    // takes minutes, while the load this wraps is a batched read. Covering it needs an
-                    // ownership-neutral accumulator and an eviction contract to go with it.
-                    using (var windowDrain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
-                    {
-                        var windowDrainTask = DrainConnectWindowPeriodicallyAsync(subscription, windowDrain.Token);
-                        try
+                        if (!firstAttempt)
                         {
-                            await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                            await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
                         }
-                        finally
+                        firstAttempt = false;
+
+                        if (pump is null)
                         {
-                            // Awaited before the drain below runs, so the subscription keeps a single consumer.
-                            await windowDrain.CancelAsync().ConfigureAwait(false);
-                            await windowDrainTask.ConfigureAwait(false);
+                            // Nothing consumes the subscription yet, so a connect that keeps failing would grow
+                            // it without bound: park the owned writes of the previous attempt into the retry
+                            // queue instead. Not while the pump runs, which parks them itself and is the only
+                            // consumer the subscription may have.
+                            DrainOwnedWritesToRetryQueue(subscription);
                         }
+
+                        // Every load is a generation (see SubjectPropertyWriter). From here until the pump has
+                        // resynchronized after that generation's load, the processor parks writes instead of
+                        // sending them.
+                        _propertyWriter.StartBuffering();
+                        await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
+
+                        pump ??= PumpAsync(subscription, stoppingToken);
+
+                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+
+                        // Connected: returns on stop, throws when a processor faults.
+                        await pump.ConfigureAwait(false);
                     }
-
-                    // Park connect-window writes captured during listen/load.
-                    DrainOwnedWritesToRetryQueue(subscription);
-
-                    // Single reconcile point: send (model already holds it), restore (the load moved the
-                    // model off it), drop (a later local write supersedes it).
-                    await ReconcileRetryQueueAsync(stoppingToken).ConfigureAwait(false);
-
-                    // Connected phase reuses the source-lifetime subscription and does not own it.
-                    using var processor = new ChangeQueueProcessor(
-                        this,
-                        subscription,
-                        propertyReference => propertyReference.TryGetSource(out var source) && source == this,
-                        (changes, token) => WriteRetryQueue.WriteAsync(this, changes, token),
-                        DeliveryRule,
-                        _bufferTime,
-                        maxQueueDepth: null,
-                        logger: _logger,
-                        dropHandler: Metrics.OutboundChanges.CreateDropReporter(),
-                        writeHandlerOwnsChanges: true,
-                        terminalHandler: () =>
-                        {
-                            if (stoppingToken.IsCancellationRequested)
-                            {
-                                WriteRetryQueue.Retire();
-                            }
-                        },
-                        completionHandler: async teardownToken =>
-                        {
-                            await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
-                        });
-
-                    // Declared after the processor so it is released first, which is what lets the
-                    // retry loop's next attempt register its own: a second Register while one is
-                    // still live throws. Drops are reported into the lifetime-owned metrics directly,
-                    // so releasing this depth provider cannot lose them.
-                    using var outboundRegistration = Metrics.OutboundChanges.Register(
-                        () => processor.QueueDepth, capacity: null);
-
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    // The base class only sees exceptions that leave RunAsync, and this loop swallows
-                    // every per-attempt failure, so a source that can never connect would otherwise
-                    // report no error at all. Guarded because the clause above covers only the
-                    // cancellation, while a stop tears the connection down mid-connect with an
-                    // arbitrary exception: recording that would overwrite the genuine fault for good,
-                    // since LastError is sticky and a stopped source never restarts.
-                    if (!stoppingToken.IsCancellationRequested)
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
-                        Metrics.ReportError(ex);
+                        return;
                     }
+                    catch (Exception ex)
+                    {
+                        // A pump that ended is a faulted one (it only returns on stop), so the next attempt
+                        // starts a fresh one after it has listened again.
+                        if (pump is { IsCompleted: true })
+                        {
+                            pump = null;
+                        }
 
-                    // Whatever it reported before the failure, the source is no longer serving the model.
-                    TransitionStateTo(SourceState.Synchronizing);
-                    _logger.LogError(ex, "Failed to listen for changes in source.");
-                    // The next iteration delays before reconnecting, with the subscription still capturing.
+                        // The base class only sees exceptions that leave RunAsync, and this loop swallows
+                        // every per-attempt failure, so a source that can never connect would otherwise
+                        // report no error at all. Guarded because the clause above covers only the
+                        // cancellation, while a stop tears the connection down mid-connect with an
+                        // arbitrary exception: recording that would overwrite the genuine fault for good,
+                        // since LastError is sticky and a stopped source never restarts.
+                        if (!stoppingToken.IsCancellationRequested)
+                        {
+                            Metrics.ReportError(ex);
+                        }
+
+                        // Whatever it reported before the failure, the source is no longer serving the model.
+                        TransitionStateTo(SourceState.Synchronizing);
+                        _logger.LogError(ex, "Failed to listen for changes in source.");
+                        // The next iteration delays before reconnecting, with the subscription still capturing.
+                    }
                 }
+            }
+            finally
+            {
+                if (pump is not null)
+                {
+                    // Before the subscription is disposed under it, and before the drain below becomes
+                    // its consumer. A fault has already been observed by the loop.
+                    await pump.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                }
+
+                // An owned write nothing consumed is still counted: the queue is retired below, or already
+                // was by the processor, so what lands here is reported as dropped rather than lost silently.
+                DrainOwnedWritesToRetryQueue(subscription);
             }
         }
         finally
@@ -340,24 +330,155 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Parks owned writes into the retry queue at intervals while the initial state loads, so a slow
-    /// load cannot grow the subscription without bound. Collapsed per property like every other drain,
-    /// so a property written repeatedly costs one slot rather than one per write.
+    /// Runs processor cycles on the source-lifetime subscription, resynchronizing between them, until the
+    /// source stops or a processor faults.
     /// </summary>
-    private async Task DrainConnectWindowPeriodicallyAsync(
-        PropertyChangeQueueSubscription subscription, CancellationToken cancellationToken)
+    private async Task PumpAsync(PropertyChangeQueueSubscription subscription, CancellationToken stoppingToken)
     {
-        try
+        while (await RunProcessorUntilCycleAsync(subscription, stoppingToken).ConfigureAwait(false))
         {
-            using var timer = new PeriodicTimer(ConnectWindowDrainInterval);
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            await ResynchronizeAsync(subscription, stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Parks the owned writes still in the subscription and reconciles the retry queue against the model
+    /// the latest completed load produced. Runs only while no processor consumes the subscription.
+    /// </summary>
+    private async Task ResynchronizeAsync(PropertyChangeQueueSubscription subscription, CancellationToken cancellationToken)
+    {
+        // Read before the drain: a load that completes after this point has not been judged here, so it
+        // cycles the next processor straight away.
+        var generation = Volatile.Read(ref _loadedGeneration);
+
+        DrainOwnedWritesToRetryQueue(subscription);
+
+        // Not when a newer generation has started: the model this load produced is about to be replaced
+        // by the next load, whose resynchronization judges the parked writes against what it produced.
+        if (Volatile.Read(ref _startedGeneration) == generation)
+        {
+            // Single reconcile point: send (model already holds it), restore (the load moved the
+            // model off it), drop (a later local write supersedes it).
+            await ReconcileRetryQueueAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        lock (_resyncLock)
+        {
+            if (generation > _resyncedGeneration)
             {
-                DrainOwnedWritesToRetryQueue(subscription);
+                Volatile.Write(ref _resyncedGeneration, generation);
             }
         }
-        catch (OperationCanceledException)
+    }
+
+    /// <summary>
+    /// Runs a change queue processor on the source-lifetime subscription, which it does not own, until
+    /// the source stops or a completed load requests a resynchronization.
+    /// </summary>
+    /// <returns><c>true</c> when the run ended for a resynchronization rather than for the stop.</returns>
+    private async Task<bool> RunProcessorUntilCycleAsync(
+        PropertyChangeQueueSubscription subscription, CancellationToken stoppingToken)
+    {
+        using var cycleSource = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        using (var processor = new ChangeQueueProcessor(
+            this,
+            subscription,
+            propertyReference => propertyReference.TryGetSource(out var source) && source == this,
+            // While a resynchronization is pending, sending would flush the parked backlog ahead of the
+            // reconcile that has to judge it, so the processor parks instead, its final flush included.
+            (changes, token) => IsResynchronizationPending
+                ? ParkWrites(changes)
+                : WriteRetryQueue.WriteAsync(this, changes, token),
+            DeliveryRule,
+            _bufferTime,
+            maxQueueDepth: null,
+            logger: _logger,
+            dropHandler: Metrics.OutboundChanges.CreateDropReporter(),
+            writeHandlerOwnsChanges: true,
+            terminalHandler: () =>
+            {
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    WriteRetryQueue.Retire();
+                }
+            },
+            completionHandler: async teardownToken =>
+            {
+                if (!IsResynchronizationPending)
+                {
+                    await WriteRetryQueue.FlushAsync(this, teardownToken).ConfigureAwait(false);
+                }
+            },
+            // A cycle's final flush parks, so the only thing it can wait on is the one write that was in
+            // flight when the load completed; the teardown bound applies to the stop alone.
+            stoppingToken: stoppingToken))
         {
-            // Expected: the load finished, or the source is stopping.
+            // Declared after the processor so it is released first, which is what lets the next
+            // cycle or retry attempt register its own: a second Register while one is still live
+            // throws. Drops are reported into the lifetime-owned metrics directly, so releasing this
+            // depth provider cannot lose them.
+            using var outboundRegistration = Metrics.OutboundChanges.Register(
+                () => processor.QueueDepth, capacity: null);
+
+            lock (_resyncLock)
+            {
+                _cycleSource = cycleSource;
+
+                // A load that completed while no processor was published.
+                if (_loadedGeneration > _resyncedGeneration)
+                {
+                    cycleSource.Cancel();
+                }
+            }
+
+            try
+            {
+                await processor.ProcessAsync(cycleSource.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_resyncLock)
+                {
+                    _cycleSource = null;
+                }
+            }
+        }
+
+        return !stoppingToken.IsCancellationRequested;
+    }
+
+    private bool IsResynchronizationPending =>
+        Volatile.Read(ref _startedGeneration) != Volatile.Read(ref _resyncedGeneration);
+
+    private ValueTask ParkWrites(ReadOnlyMemory<SubjectPropertyChange> changes)
+    {
+        WriteRetryQueue.Enqueue(changes);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Called by the property writer, under its lock, whenever its generation advances.
+    /// </summary>
+    internal void OnGenerationAdvanced(int generation) => Volatile.Write(ref _startedGeneration, generation);
+
+    /// <summary>
+    /// Called by the property writer after a load for <paramref name="generation"/> applied and was not
+    /// superseded. Ends the running processor so the pump resynchronizes against the reloaded model.
+    /// </summary>
+    internal void OnInitialStateLoaded(int generation)
+    {
+        lock (_resyncLock)
+        {
+            if (generation <= _loadedGeneration)
+            {
+                return;
+            }
+
+            Volatile.Write(ref _loadedGeneration, generation);
+
+            // Under the lock so the pump cannot dispose the source in between. Nothing registers a
+            // callback on this token (ProcessAsync waits on its handle), so no foreign code runs here.
+            _cycleSource?.Cancel();
         }
     }
 

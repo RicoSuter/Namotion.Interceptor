@@ -26,7 +26,8 @@ public sealed class SubjectPropertyWriter
     // Bumped by every StartBuffering call. LoadInitialStateAndResumeAsync captures the generation
     // in effect when it starts and compares it again after its (possibly long) await: if a later
     // StartBuffering happened in between, this call's snapshot is stale and must not be applied,
-    // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync.
+    // replayed, or certified as Synchronized - see LoadInitialStateAndResumeAsync. Every advance and
+    // every completed load are reported to the source, which parks outbound writes in between.
     private int _generation;
     private int _bufferedUpdateCount;
 
@@ -86,6 +87,7 @@ public sealed class SubjectPropertyWriter
             _updates = [];
             Volatile.Write(ref _bufferedUpdateCount, 0);
             _generation++;
+            _source.OnGenerationAdvanced(_generation);
 
             // Under _lock, paired with the generation change that governs it, so the transition
             // cannot be observed out of sync with the buffer it belongs to.
@@ -109,6 +111,7 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             _generation++;
+            _source.OnGenerationAdvanced(_generation);
         }
     }
 
@@ -175,6 +178,10 @@ public sealed class SubjectPropertyWriter
             // registered monitor synchronously) is never reversed anywhere, so it cannot deadlock.
             _source.TransitionStateTo(SourceState.Synchronized);
         }
+
+        // Outside _lock: the source reacts on its pump task, and a later generation that starts in
+        // between keeps it parking until that generation has loaded and been reconciled too.
+        _source.OnInitialStateLoaded(generation);
     }
 
     /// <summary>
