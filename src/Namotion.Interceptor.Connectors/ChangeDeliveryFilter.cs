@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.Connectors;
 internal static class ChangeDeliveryFilter
 {
     /// <summary>
-    /// Decides a survivor on the flush path and marks it published, in one property data lookup once the
+    /// Decides a change about to be written and marks it published, in one property data lookup once the
     /// property has been published, because this runs per delivered change.
     /// </summary>
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeDeliveryRule rule)
@@ -49,25 +49,6 @@ internal static class ChangeDeliveryFilter
     }
 
     /// <summary>
-    /// Records that this connector has written the property out. The flag it sets is not per source; see
-    /// <see cref="PropertyReference.MarkAsPublishedToSource"/> for why that is the design rather than a
-    /// simplification. Only where no judgment of this connector's confirmations can run concurrently;
-    /// elsewhere use <see cref="TryAcceptForDelivery"/>, which orders the mark against commits.
-    /// </summary>
-    public static void MarkPropertyAsPublishedToSource(in SubjectPropertyChange change)
-    {
-        var property = change.Property;
-
-        // Read before write: the flag never clears, so after a property's first delivery every later
-        // one avoids the dictionary write.
-        if (!property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
-            || !publishedToAnySource)
-        {
-            property.MarkAsPublishedToSource();
-        }
-    }
-
-    /// <summary>
     /// Whether a change from our own source still has to be written back rather than skipped as an echo.
     /// A transaction writes to the source itself and then applies locally, so that apply arrives as a
     /// confirmation. Normally there is nothing to send, since the source already has it, but a write of
@@ -77,15 +58,8 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed && IsPublishedToAnySource(change.Property);
-    }
-
-    /// <summary>
-    /// Whether any connector has written this property out, this one or another.
-    /// </summary>
-    public static bool IsPublishedToAnySource(PropertyReference property)
-    {
-        return property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
+        return change.Origin.Kind == ChangeOriginKind.Confirmed
+               && change.Property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
                && publishedToAnySource;
     }
 
