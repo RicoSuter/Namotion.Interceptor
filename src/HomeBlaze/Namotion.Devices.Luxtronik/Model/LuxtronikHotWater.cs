@@ -30,9 +30,9 @@ public partial class LuxtronikHotWater
         LimitTemperature = null;
         IsLocked = null;
         IsCirculationRequested = null;
-        OperatingHours = null;
-        ElectricalEnergy = null;
-        ThermalEnergy = null;
+        TotalOperatingHours = null;
+        TotalElectricalEnergy = null;
+        TotalThermalEnergy = null;
     }
 
     /// <summary>
@@ -89,21 +89,21 @@ public partial class LuxtronikHotWater
     /// </summary>
     [LuxtronikInputRegister(10408, ModbusDataType.U32, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 8)]
-    public partial decimal? OperatingHours { get; internal set; }
+    public partial decimal? TotalOperatingHours { get; internal set; }
 
     /// <summary>
     /// Gets the electrical energy consumed for hot water.
     /// </summary>
     [LuxtronikInputRegister(10314, ModbusDataType.S32, Scale = 100)]
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 9)]
-    public partial decimal? ElectricalEnergy { get; internal set; }
+    public partial decimal? TotalElectricalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the thermal energy produced for hot water.
     /// </summary>
     [LuxtronikInputRegister(10324, ModbusDataType.S32, Scale = 100, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 10)]
-    public partial decimal? ThermalEnergy { get; internal set; }
+    public partial decimal? TotalThermalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the measured hot water temperature.

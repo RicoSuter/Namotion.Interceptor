@@ -20,9 +20,9 @@ public partial class LuxtronikPool
     {
         Status = null;
         IsLocked = null;
-        OperatingHours = null;
-        ElectricalEnergy = null;
-        ThermalEnergy = null;
+        TotalOperatingHours = null;
+        TotalElectricalEnergy = null;
+        TotalThermalEnergy = null;
     }
 
     /// <summary>
@@ -44,19 +44,19 @@ public partial class LuxtronikPool
     /// </summary>
     [LuxtronikInputRegister(10412, ModbusDataType.U32, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 3)]
-    public partial decimal? OperatingHours { get; internal set; }
+    public partial decimal? TotalOperatingHours { get; internal set; }
 
     /// <summary>
     /// Gets the electrical energy consumed for pool heating.
     /// </summary>
     [LuxtronikInputRegister(10318, ModbusDataType.S32, Scale = 100)]
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 4)]
-    public partial decimal? ElectricalEnergy { get; internal set; }
+    public partial decimal? TotalElectricalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the thermal energy produced for pool heating.
     /// </summary>
     [LuxtronikInputRegister(10328, ModbusDataType.S32, Scale = 100, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 5)]
-    public partial decimal? ThermalEnergy { get; internal set; }
+    public partial decimal? TotalThermalEnergy { get; internal set; }
 }

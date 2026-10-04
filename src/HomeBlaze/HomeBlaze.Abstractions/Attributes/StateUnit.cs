@@ -35,5 +35,6 @@ public enum StateUnit
     Byte,
     Kelvin,
     Minute,
-    Hour
+    Hour,
+    VoltAmpere
 }

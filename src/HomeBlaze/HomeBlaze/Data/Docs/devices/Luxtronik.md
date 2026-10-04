@@ -80,18 +80,18 @@ On every connect the device also reads the firmware version and skips values the
 
 | Group | Properties |
 |-------|-----------|
-| Device | `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`, `SoftwareVersion` (firmware, such as "3.92.3"), `Power`, `EnergyConsumed`, `ThermalPower`, `ThermalEnergyProduced` |
-| `OperatingStatus` | `HeatPumpStatus` (running compressors and auxiliary heaters), `IsCompressorRunning`, `IsAuxiliaryHeaterRunning`, `OperatingState` (heating, hot water, defrost, ...), `ErrorNumber`, `BufferType`, `MinimumOffTime` (cycling lock), `MinimumRunTime`, `OperatingHours`, `BrinePump` (VBO) |
+| Device | `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`, `SoftwareVersion` (firmware, such as "3.92.3"), `Power`, `TotalConsumedEnergy`, `ThermalPower`, `TotalProducedThermalEnergy` |
+| `OperatingStatus` | `HeatPumpStatus` (running compressors and auxiliary heaters), `IsCompressorRunning`, `IsAuxiliaryHeaterRunning`, `OperatingState` (heating, hot water, defrost, ...), `ErrorNumber`, `BufferType`, `MinimumOffTime` (cycling lock), `MinimumRunTime`, `TotalOperatingHours`, `BrinePump` (VBO) |
 | `Temperatures` | Sensors of the heat pump itself: `Flow`, `Return`, `Outside`, `OutsideAverage` (24 hours), `HeatSourceInlet`, `HeatSourceOutlet`; `MaximumFlowTemperature` |
 | `Energy` | `ThermalPower`, `ElectricalPower`, `MinimumPredictedElectricalPower`, `TotalElectricalEnergy`, `TotalThermalEnergy` |
 | `SmartGrid` | `IsEvu1Active`, `IsEvu2Active`, `State` (Locked, Reduced, Normal, Increased) |
 | `PowerConsumptionLimit` | `Mode` (none, soft, hard), `Limit` |
 | `Functions` | `IsHeatingEnabled`, `IsHotWaterEnabled`, `IsCoolingEnabled`, `IsPoolEnabled` and `IsMixingCircuit1HeatingEnabled` to `IsMixingCircuit3CoolingEnabled` (the operating mode is switched on), `IsSolarConfigured`, `IsRoomControlUnitConfigured` (see above) |
-| `Heating` | `Status` (Off when the operating mode is switched off, NoRequest, Requested, Running), `ReturnTarget`, `MinimumReturnTarget`, `ReturnLimit` (maximum return target), `LimitTemperature` (above it heating demand counts as optional), `CalculatedFlowTemperature`, `IsLocked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `ExternalReturn` sensor (separation or multifunction tank), `CirculationPump` (HUP), `SmartHomeControl`, `OverallSmartHomeControl` |
-| `HotWater` | `Status`, `Target`, `MinimumTarget`, `MaximumTarget`, `LimitTemperature` (below it a soft power limit is ignored), `IsLocked`, `IsCirculationRequested`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy`; `Temperature` sensor, `LoadingPump` (BUP), `CirculationPump` (ZIP), `SmartHomeControl`, `ExtraHotWater` (`IsRequested`, `Target`, `Duration`, `RemainingDuration`) |
-| `Cooling` | `Status`, `IsReleased`, `IsLocked`, `OperatingHours` (active cooling), `ElectricalEnergy`, `ThermalEnergy` |
-| `Pool` | `Status`, `IsLocked`, `OperatingHours`, `ElectricalEnergy`, `ThermalEnergy` |
-| `Solar` | `OperatingHours` |
+| `Heating` | `Status` (Off when the operating mode is switched off, NoRequest, Requested, Running), `ReturnTarget`, `MinimumReturnTarget`, `ReturnLimit` (maximum return target), `LimitTemperature` (above it heating demand counts as optional), `CalculatedFlowTemperature`, `IsLocked`, `TotalOperatingHours`, `TotalElectricalEnergy`, `TotalThermalEnergy`; `ExternalReturn` sensor (separation or multifunction tank), `CirculationPump` (HUP), `SmartHomeControl`, `OverallSmartHomeControl` |
+| `HotWater` | `Status`, `Target`, `MinimumTarget`, `MaximumTarget`, `LimitTemperature` (below it a soft power limit is ignored), `IsLocked`, `IsCirculationRequested`, `TotalOperatingHours`, `TotalElectricalEnergy`, `TotalThermalEnergy`; `Temperature` sensor, `LoadingPump` (BUP), `CirculationPump` (ZIP), `SmartHomeControl`, `ExtraHotWater` (`IsRequested`, `Target`, `Duration`, `RemainingDuration`) |
+| `Cooling` | `Status`, `IsReleased`, `IsLocked`, `TotalOperatingHours` (active cooling), `TotalElectricalEnergy`, `TotalThermalEnergy` |
+| `Pool` | `Status`, `IsLocked`, `TotalOperatingHours`, `TotalElectricalEnergy`, `TotalThermalEnergy` |
+| `Solar` | `TotalOperatingHours` |
 | `RoomControl` | `Temperature` sensor, `TemperatureSetpoint` |
 | `MixingCircuit1` to `MixingCircuit3` | `Target`; `MinimumTarget` and `MaximumTarget` (read while the circuit heats); `Temperature` flow sensor, `Pump` (FP1 to FP3), `HeatingSmartHomeControl` (read while the circuit heats), `CoolingSmartHomeControl` (read while the circuit cools) |
 

@@ -142,11 +142,16 @@ public enum StateUnit
     Byte,              // 512 B
     Kelvin,            // 1.5 K (temperature differences)
     Minute,            // 30 min
-    Hour               // 1234 h
+    Hour,              // 1234 h
+    VoltAmpere         // 880 VA (apparent power)
 }
 ```
 
 Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA").
+
+### Naming Cumulative Properties
+
+A property with `IsCumulative = true` is a counter that only grows (it may restart at 0 when the device resets) and is named `Total<Modifier><Quantity>`, with the modifier (such as a direction) before the quantity like in plain English: `TotalConsumedEnergy`, `TotalImportedEnergy`, `TotalExportedEnergy`, `TotalProducedThermalEnergy`, `TotalRain`, `TotalOperatingHours`. The `Total` prefix is reserved for such counters. A value that sums parts at one instant, such as the power or current of all phases of a meter, takes no prefix (`MeasuredPower`, `ElectricalCurrent`), and a value that covers a period, such as a charging session or a day, is not cumulative and does not start with `Total`.
 
 ### Interface Inheritance and Attribute Merging
 

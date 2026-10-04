@@ -30,7 +30,8 @@ The myStrom WiFi Switch is a smart plug with built-in power metering, temperatur
 |----------|------|-------------|
 | `IsOn` | - | Relay state (on/off) |
 | `MeasuredPower` | Watt | Current power consumption |
-| `MeasuredEnergyConsumed` | WattHour | Cumulative energy since device boot |
+| `TotalImportedEnergy` | WattHour | Energy since the last device boot (restarts at 0 on reboot) |
+| `TotalExportedEnergy` | WattHour | Always null (the device does not measure export) |
 | `Temperature` | C | Compensated temperature reading |
 | `Uptime` | TimeSpan | Device uptime since last boot |
 | `IsConnected` | - | Connection status |

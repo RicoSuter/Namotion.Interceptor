@@ -16,8 +16,8 @@ public partial class ShellyInput :
     [State(IsDiscrete = true, Position = 100)]
     public partial bool? IsActive { get; internal set; }
 
-    [State(Position = 400)]
-    public partial long? CountTotal { get; internal set; }
+    [State(IsCumulative = true, Position = 400)]
+    public partial long? TotalCount { get; internal set; }
 
     [State(Unit = StateUnit.Hertz, Position = 401)]
     public partial double? CountFrequency { get; internal set; }
@@ -29,19 +29,19 @@ public partial class ShellyInput :
     public string? Title => $"Input {Index}";
 
     [Derived]
-    public string IconName => CountTotal != null ? "Speed" : "Input";
+    public string IconName => TotalCount != null ? "Speed" : "Input";
 
     [Derived]
     public string? IconColor => IsActive == true ? "Success" : null;
 
     [Derived]
-    public bool IsCounterInput => CountTotal != null;
+    public bool IsCounterInput => TotalCount != null;
 
     public ShellyInput(int index)
     {
         Index = index;
         IsActive = null;
-        CountTotal = null;
+        TotalCount = null;
         CountFrequency = null;
         LastUpdated = null;
     }

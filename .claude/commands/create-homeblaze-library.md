@@ -72,6 +72,7 @@ Before creating subject-specific state properties, check whether a measurement o
 - Follow existing pattern: `I{Concept}Sensor` for sensors, `I{Concept}Controller` for controllable capabilities, `I{Concept}State` for status interfaces
 - Use `Electrical` prefix for electrical measurements to avoid ambiguity (e.g., `ElectricalCurrent` not `Current`)
 - Keep property names consistent with the interface name
+- Name cumulative properties `Total<Modifier><Quantity>` (for example `TotalImportedEnergy`), see [Naming Cumulative Properties](../../src/HomeBlaze/HomeBlaze/Data/Docs/development/building-subjects.md#naming-cumulative-properties)
 
 ### Step 7: Present plan
 

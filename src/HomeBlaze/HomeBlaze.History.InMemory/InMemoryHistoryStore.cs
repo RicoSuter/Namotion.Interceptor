@@ -94,7 +94,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     public long EvictedCount =>
         Interlocked.Read(ref _retiredEvictedCount) + _buffers.Values.Sum(buffer => buffer.EvictedCount);
     public int TrackedPropertyCount => _buffers.Count;
-    public long TotalSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
+    public long RetainedSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
 
     // Per path: the PropertyBuffer and its Lock, the dictionary entry, and the key string's object
     // header. The key's characters are counted separately.

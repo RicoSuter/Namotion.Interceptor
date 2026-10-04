@@ -54,7 +54,7 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `AddedGreenEnergy` | WattHour | Solar energy in current session |
 | `ChargingTime` | TimeSpan | Current session duration |
 | `SessionCost` | Currency | Current session cost |
-| `TotalEnergyConsumed` | WattHour | Cumulative total energy |
+| `TotalConsumedEnergy` | WattHour | Cumulative total energy |
 | `EnergyPrice` | Currency/kWh | Configured energy price |
 | `IsEcoSmartEnabled` | - | Whether Eco-Smart is enabled |
 | `EcoSmartMode` | - | Current Eco-Smart mode |
