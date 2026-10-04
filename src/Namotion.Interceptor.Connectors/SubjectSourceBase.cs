@@ -241,13 +241,6 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             // continuously (including during the retry delay) and never fall into a no-subscription gap.
             using var subscription = _context.CreatePropertyChangeQueueSubscription();
 
-            // The pump is the subscription's only consumer from the first completed load on, across every
-            // later load, until the source stops or a processor faults. It starts after that load and not
-            // after the listen, because a connector may claim ownership as late as the load's apply
-            // (WebSocket) and the processor keeps only what this source owns at the time it dequeues. Its
-            // first run ends at once for the resynchronization of that load, which drains the writes made
-            // meanwhile with ownership known.
-            Task? pump = null;
             try
             {
                 var firstAttempt = true;
@@ -261,24 +254,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         }
                         firstAttempt = false;
 
-                        if (pump is { IsCompleted: true })
-                        {
-                            // Only a faulted processor ends the pump before the stop. Awaited so a fault that
-                            // ended it while this loop was not awaiting it is still reported, below, like any
-                            // other attempt failure; a fresh pump starts once the attempt has loaded again.
-                            var endedPump = pump;
-                            pump = null;
-                            await endedPump.ConfigureAwait(false);
-                        }
-
-                        if (pump is null)
-                        {
-                            // Nothing consumes the subscription yet, so a connect that keeps failing would grow
-                            // it without bound: park the owned writes of the previous attempt into the retry
-                            // queue instead. Not while the pump runs, which parks them itself and is the only
-                            // consumer the subscription may have.
-                            DrainOwnedWritesToRetryQueue(subscription);
-                        }
+                        // No processor exists between attempts, so a connect that keeps failing would grow the
+                        // subscription without bound: park the owned writes captured since the previous
+                        // attempt into the bounded retry queue instead.
+                        DrainOwnedWritesToRetryQueue(subscription);
 
                         // Opens a generation (see SubjectPropertyWriter). From here until the pump has
                         // resynchronized after that generation's load, the processor parks writes instead of
@@ -287,10 +266,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                         await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
                         await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
-                        pump ??= PumpAsync(subscription, stoppingToken);
-
-                        // Connected: returns on stop, throws when a processor faults.
-                        await pump.ConfigureAwait(false);
+                        // Connected: the pump is the subscription's only consumer until the source stops or a
+                        // processor faults. It starts after the load and not after the listen, because a
+                        // connector may claim ownership as late as the load's apply (WebSocket) and the
+                        // processor keeps only what this source owns at the time it dequeues.
+                        await PumpAsync(subscription, stoppingToken).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
@@ -318,15 +298,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
             }
             finally
             {
-                if (pump is not null)
-                {
-                    // Before the subscription is disposed under it, and before the drain below becomes
-                    // its consumer. A fault has already been observed by the loop.
-                    await pump.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-                }
-
-                // An owned write nothing consumed is still counted: the queue is retired below, or already
-                // was by the processor, so what lands here is reported as dropped rather than lost silently.
+                // The attempt's pump has ended, so this is the only consumer. An owned write nothing consumed
+                // is still counted: the queue is retired below, or already was by the processor, so what
+                // lands here is reported as dropped rather than lost silently.
                 DrainOwnedWritesToRetryQueue(subscription);
             }
         }
@@ -338,16 +312,17 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     }
 
     /// <summary>
-    /// Runs processors on the source-lifetime subscription, resynchronizing between runs, until the
-    /// source stops or a processor faults.
+    /// Resynchronizes after the completed load, then runs processors on the source-lifetime subscription
+    /// with a resynchronization after every further load, until the source stops or a processor faults.
     /// </summary>
     private async Task PumpAsync(PropertyChangeQueueSubscription subscription, CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested &&
-               await RunProcessorAsync(subscription, stoppingToken).ConfigureAwait(false))
+        do
         {
             await ResynchronizeAsync(subscription, stoppingToken).ConfigureAwait(false);
         }
+        while (!stoppingToken.IsCancellationRequested &&
+               await RunProcessorAsync(subscription, stoppingToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -381,25 +356,30 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private async Task ReconcileWithinStopBoundAsync(CancellationToken stoppingToken)
     {
         var reconcile = ReconcileRetryQueueAsync(stoppingToken);
-        using var boundCancellation = new CancellationTokenSource();
-        var bound = ChangeQueueProcessor.DelayTeardownBoundAsync(stoppingToken, boundCancellation.Token);
-        if (await Task.WhenAny(reconcile, bound).ConfigureAwait(false) == reconcile)
+        try
         {
-            await boundCancellation.CancelAsync().ConfigureAwait(false);
-            await reconcile.ConfigureAwait(false);
-            return;
+            await reconcile.WaitAsync(stoppingToken).ConfigureAwait(false);
         }
-
-        // The drain has run, so nothing else consumes the subscription while the reconcile finishes on
-        // its own, and Retire settles whatever its late write still owns.
-        _ = reconcile.ContinueWith(
-            static task => _ = task.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-        _logger.LogWarning(
-            "Gave up waiting after {Timeout} for the retry queue reconcile to finish while stopping.",
-            ChangeQueueProcessor.TeardownFlushBound);
+        catch (OperationCanceledException) when (!reconcile.IsCompleted)
+        {
+            try
+            {
+                await reconcile.WaitAsync(ChangeQueueProcessor.TeardownFlushBound).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // The drain has run, so nothing else consumes the subscription while the reconcile finishes
+                // on its own, and Retire settles whatever its late write still owns.
+                _ = reconcile.ContinueWith(
+                    static task => _ = task.Exception,
+                    CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                _logger.LogWarning(
+                    "Gave up waiting after {Timeout} for the retry queue reconcile to finish while stopping.",
+                    ChangeQueueProcessor.TeardownFlushBound);
+            }
+        }
     }
 
     /// <summary>
@@ -413,9 +393,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
         using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         lock (_resyncLock)
         {
-            // A load completed while no processor was running: a processor started now would dequeue
-            // before it saw its cancellation, so the resynchronization comes first.
-            if (_loadedGeneration > _resyncedGeneration)
+            // A load completed during the resynchronization.
+            if (IsResynchronizationDue)
             {
                 return true;
             }
@@ -478,6 +457,11 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     private bool IsResynchronizationPending =>
         _propertyWriter.BufferingGeneration > Volatile.Read(ref _resyncedGeneration);
 
+    // Under _resyncLock. A source that cannot park sends through a reload as it did before loads were
+    // resynchronized: ending its run would hand what the processor dequeued meanwhile to a drain that
+    // cannot retain it.
+    private bool IsResynchronizationDue => _parksWrites && _loadedGeneration > _resyncedGeneration;
+
     private ValueTask DeliverFromProcessorAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken processorToken, CancellationToken stoppingToken)
     {
@@ -514,7 +498,10 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
             // Under the lock so the pump cannot dispose the source in between. Nothing registers a
             // callback on this token (ProcessAsync waits on its handle), so no foreign code runs here.
-            _runCancellation?.Cancel();
+            if (IsResynchronizationDue)
+            {
+                _runCancellation?.Cancel();
+            }
         }
     }
 
@@ -554,9 +541,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Reconciliation classifies each change against the live value and mutates that value when it
     /// restores, so two writes to one property have to be judged as one. Left separate, an older
     /// write can match the live value, get restored, and thereby make the newer write look diverged,
-    /// which drops it: the older write would win over the newer one. The queue collapses only when it
-    /// overflows, and a failed write is requeued uncollapsed, so the drained changes are not one per
-    /// property yet.
+    /// which drops it: the older write would win over the newer one.
     /// </remarks>
     private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
     {

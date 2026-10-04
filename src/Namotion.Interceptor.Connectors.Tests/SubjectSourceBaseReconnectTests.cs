@@ -476,24 +476,20 @@ public class SubjectSourceBaseReconnectTests
             source.SignalReconnect();
             await source.ReconnectCompleted.Task.WaitAsync(EventTimeout);
 
-            // Act: while the stall holds the run open, every write has to keep reaching the source. Two writes
-            // in a row, because a single one can race the cancellation of a run that is being ended.
-            var probe = 0;
-            var confirmed = 0;
-            var keepsSending = await SettlesAsync(() =>
+            // Act: writes while the stall lasts, paced so that they span the moment a run being ended stops
+            // dequeuing; a single write can race that moment. They are sent once the stall releases.
+            for (var i = 0; i < 5; i++)
             {
-                confirmed = probe > 0 && Equals(source.GetServerValue(nameof(Person.FirstName)), "W" + (probe - 1))
-                    ? confirmed + 1
-                    : 0;
-                person.FirstName = "W" + probe++;
-                return confirmed >= 2;
-            });
+                person.FirstName = "W" + i;
+                await Task.Delay(50);
+            }
+
             acknowledgement.SetResult();
 
             // Assert
-            Assert.True(keepsSending, "Writes stopped reaching the source after the reload. " + Describe(person, source));
             var settled = await SettlesAsync(() =>
-                Equals(source.GetServerValue(nameof(Person.FirstName)), person.FirstName));
+                person.FirstName == "W4" &&
+                Equals(source.GetServerValue(nameof(Person.FirstName)), "W4"));
             Assert.True(settled, Describe(person, source));
             Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
         }

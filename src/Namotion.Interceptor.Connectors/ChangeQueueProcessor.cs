@@ -432,12 +432,9 @@ public class ChangeQueueProcessor : IDisposable
         }
     }
 
-    /// <summary>
-    /// Completes <see cref="TeardownFlushBound"/> after <paramref name="stoppingToken"/> is cancelled, or
-    /// after the call when that token cannot be cancelled; cancelled by <paramref name="cancellationToken"/>
-    /// when the awaited work completes first.
-    /// </summary>
-    internal static async Task DelayTeardownBoundAsync(CancellationToken stoppingToken, CancellationToken cancellationToken)
+    // Elapses TeardownFlushBound after the stop when a stopping token was supplied (see the internal
+    // constructor), otherwise after the call; cancelled when the run completes first.
+    private static async Task DelayTeardownBoundAsync(CancellationToken stoppingToken, CancellationToken cancellationToken)
     {
         if (stoppingToken.CanBeCanceled)
         {

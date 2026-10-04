@@ -7,7 +7,8 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
-/// When the queue is full, oldest writes are dropped to make room for new ones.
+/// When the queue is full, its writes are collapsed to one per property and then the oldest are dropped
+/// to make room for new ones.
 /// </summary>
 internal sealed class WriteRetryQueue : IDisposable
 {
@@ -107,9 +108,7 @@ internal sealed class WriteRetryQueue : IDisposable
 
     /// <summary>
     /// Collapses two changes to one property into one that keeps the old value of the older change and the
-    /// new value and origin of the newer one. Which one is newer is decided by
-    /// <see cref="SubjectPropertyChange.Revision"/>, not by capture order: changes are enqueued after their
-    /// commit and outside the subject lock, so under concurrent writers arrival order is a race order. The
+    /// new value and origin of the newer one, newer by <see cref="SubjectPropertyChange.Revision"/>. The
     /// survivor carries the newer revision only when both changes carry one.
     /// </summary>
     internal static SubjectPropertyChange Collapse(SubjectPropertyChange kept, SubjectPropertyChange change) =>
@@ -380,7 +379,10 @@ internal sealed class WriteRetryQueue : IDisposable
             return 0;
         }
 
-        CollapsePendingPerProperty();
+        if (_maxQueueSize > 0)
+        {
+            CollapsePendingPerProperty();
+        }
 
         var droppedCount = Math.Max(0, _pendingWrites.Count - _maxQueueSize);
         if (droppedCount > 0)
