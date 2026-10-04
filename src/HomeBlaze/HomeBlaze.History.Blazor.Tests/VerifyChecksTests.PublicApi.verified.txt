@@ -19,7 +19,7 @@ namespace HomeBlaze.History.Blazor
                 "From",
                 "To"})]
         public static System.ValueTuple<System.DateTimeOffset, System.DateTimeOffset> ResolveCustomRange(System.DateTime? customFrom, System.DateTime? customTo, System.DateTimeOffset now, System.Func<System.DateTime, System.DateTimeOffset> toUtc) { }
-        public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> SplitIntoGapRuns(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points) { }
+        public static System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint>> SplitIntoGapRuns(System.Collections.Generic.IReadOnlyList<HomeBlaze.History.Abstractions.HistoryPoint> points, System.TimeSpan? singlePointWidth, System.DateTimeOffset windowEnd) { }
         public readonly struct ChartPeriod : System.IEquatable<HomeBlaze.History.Blazor.PropertyHistoryChartModel.ChartPeriod>
         {
             public ChartPeriod(string Label, System.TimeSpan? Bucket, bool IsAuto) { }

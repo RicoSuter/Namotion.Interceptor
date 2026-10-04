@@ -24,8 +24,12 @@ public static class HistoryStoreMerger
         cancellationToken.ThrowIfCancellationRequested();
         var ordered = OrderByPriority(stores);
         HistoryDispatchPlanner.EnsureAggregationSupported(ordered, query);
+        // Clipped to the planned span once, so per-bucket coverage lookups skip every older range.
+        var plannedSpan = query.Bucket is { } bucket
+            ? new HistoryCoverage(BucketAlignment.FirstBucketStart(query.From, query.To, bucket, query.MaxPoints), query.To)
+            : new HistoryCoverage(query.From, query.To);
         var snapshots = ordered
-            .Select(store => new StoreCoverageSnapshot(store, store.CoverageRanges))
+            .Select(store => new StoreCoverageSnapshot(store, HistoryCoverage.Clip(store.CoverageRanges, plannedSpan)))
             .ToArray();
         var plan = query.Bucket is null
             ? HistoryDispatchPlanner.PlanRaw(snapshots, query)
@@ -123,8 +127,8 @@ public static class HistoryStoreMerger
     /// Reconciliation. Carry only applies to bucketed queries (raw queries never set <c>CarrySeed</c>),
     /// and the bucketed grid is already clipped to the newest <c>MaxPoints</c> buckets before planning,
     /// so a bucketed plan cannot exceed the budget. Carry-dependent queries therefore serve every
-    /// segment and thread the carry oldest-to-newest, with one at-or-before lookup per segment for its
-    /// ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
+    /// segment and thread the carry oldest-to-newest, with at most one at-or-before lookup per segment
+    /// for its ending raw event. Only raw queries can actually exhaust the budget, and those run newest-first
     /// in a single pass, shrinking it by each returned count.
     /// </summary>
     internal static Task<HistorySeries> ExecuteWithBudget(
@@ -170,17 +174,10 @@ public static class HistoryStoreMerger
     }
 
     /// <summary>
-    /// Carry-threaded execution for bucketed <c>Last</c> / <c>TimeWeightedAverage</c>. Resolves the
-    /// initial cross-store carry seed at the oldest segment, then queries the segments
-    /// oldest-to-newest, advancing the carried value to each segment's last raw event so the next
-    /// segment's leftmost bucket continues the held value. An explicit null event clears that value.
-    ///
-    /// Every planned segment is served. <c>PlanBucketed</c> walks the grid from
-    /// <see cref="BucketAlignment.FirstBucketStart"/>, which is already clipped to the newest
-    /// <c>MaxPoints</c> buckets, so the segments' bucket counts sum to at most <c>MaxPoints</c> and
-    /// the budget cannot run out part-way through the plan. Raw queries, where it can, take the
-    /// newest-first path instead. <c>WhenTheRangeHasMoreBucketsThanTheBudget_ThenThePlanStaysWithinTheBudget</c>
-    /// guards the invariant.
+    /// Carry-threaded execution for bucketed <c>Last</c> / <c>TimeWeightedAverage</c>: serves every
+    /// planned segment oldest-to-newest and threads the held value into the next segment only while
+    /// the owner's coverage reaches the boundary (the carry rules are in the history design doc,
+    /// history.md). <see cref="ExecuteWithBudget"/> explains why the plan cannot exceed the budget.
     /// </summary>
     private static async Task<HistorySeries> ExecuteCarryThreaded(
         IReadOnlyList<IHistoryStore> ordered,
@@ -191,10 +188,12 @@ public static class HistoryStoreMerger
         HistoryPoint? carry = null;
         PlannedSegment? previousSegment = null;
 
-        // Oldest-to-newest pass threading the carry only across adjacent covered segments.
-        foreach (var segment in segments)
+        for (var index = 0; index < segments.Count; index++)
         {
-            if (previousSegment is null || previousSegment.To != segment.From)
+            var segment = segments[index];
+            if (previousSegment is null ||
+                previousSegment.To != segment.From ||
+                previousSegment.EndCoverageFrom is null)
             {
                 carry = await ResolveHeldValueAsync(
                     ordered, query.PropertyPath, segment.From, cancellationToken).ConfigureAwait(false);
@@ -203,16 +202,23 @@ public static class HistoryStoreMerger
             segment.Result = await QuerySegment(segment, query, query.MaxPoints, carry, cancellationToken)
                 .ConfigureAwait(false);
 
-            // Aggregate output is not the ending held value (a TWA point is an average). Resolve the
-            // segment's last raw event instead. Restrict it to [segment.From, segment.To), otherwise a
-            // store-local look-back from before this segment could overwrite a newer cross-store carry.
-            var asOf = segment.To.AddTicks(-1);
-            var lastEvent = await segment.Store
-                .GetSampleAtOrBeforeAsync(query.PropertyPath, asOf, cancellationToken)
-                .ConfigureAwait(false);
-            if (lastEvent is not null && lastEvent.Timestamp >= segment.From)
+            // An uncovered end makes the next segment resolve again, and the last segment has no next.
+            if (segment.EndCoverageFrom is { } endCoverageFrom && index < segments.Count - 1)
             {
-                carry = lastEvent;
+                // The last raw event, not an aggregate point (a TWA point is an average). One from before
+                // the segment would overwrite a newer cross-store carry; the look-back is coverage-scoped,
+                // so a non-null event is never older than endCoverageFrom.
+                var lastEvent = await segment.Store
+                    .GetSampleAtOrBeforeAsync(query.PropertyPath, segment.To.AddTicks(-1), cancellationToken)
+                    .ConfigureAwait(false);
+                if (lastEvent is not null && lastEvent.Timestamp >= segment.From)
+                {
+                    carry = lastEvent;
+                }
+                else if (endCoverageFrom > segment.From)
+                {
+                    carry = null;
+                }
             }
 
             previousSegment = segment;
@@ -336,32 +342,56 @@ public static class HistoryStoreMerger
     /// those as covered would tell a caller "no samples here" for a range that was never read.
     /// </summary>
     private static ImmutableArray<HistoryCoverage> EffectiveCoverage(
-        IReadOnlyList<PlannedSegment> served, HistoryQuery query) =>
-        HistoryCoverage.Clip(
-            served.Select(SegmentCoverage).OfType<HistoryCoverage>(),
-            new HistoryCoverage(query.From, query.To));
+        IReadOnlyList<PlannedSegment> served, HistoryQuery query)
+    {
+        var ranges = new List<HistoryCoverage>(served.Count);
+        foreach (var segment in served)
+        {
+            AddSegmentCoverage(ranges, segment);
+        }
+
+        return HistoryCoverage.Clip(ranges, new HistoryCoverage(query.From, query.To));
+    }
 
     /// <summary>
-    /// What one served segment stands behind. A store that truncated returned its newest points and
-    /// dropped the older ones inside the very range it was asked about, so the segment's own start is
-    /// no longer vouched for: the oldest returned point is. Claiming otherwise reads as "covered, and
-    /// nothing happened here", which a state timeline renders as a held value and an agent reads as
-    /// fact, when the truth is that the samples were never fetched.
+    /// Adds what one served segment stands behind: the part of [From, To) its owner covers, since a
+    /// bucketed segment can span the uncovered part of a partly covered bucket. A store that truncated
+    /// returned its newest points and dropped the older ones inside the very range it was asked about,
+    /// so the segment's own start is no longer vouched for: the oldest returned point is. Claiming
+    /// otherwise reads as "covered, and nothing happened here", which a state timeline renders as a
+    /// held value and an agent reads as fact, when the truth is that the samples were never fetched.
     /// </summary>
-    private static HistoryCoverage? SegmentCoverage(PlannedSegment segment)
+    private static void AddSegmentCoverage(List<HistoryCoverage> ranges, PlannedSegment segment)
     {
         var result = segment.Result!;
-        if (!result.IsTruncated)
+        var from = segment.From;
+        if (result.IsTruncated)
         {
-            return new HistoryCoverage(segment.From, segment.To);
+            if (result.Points.IsDefaultOrEmpty)
+            {
+                return;
+            }
+
+            var oldestServed = result.Points[0].Timestamp;
+            if (oldestServed > from)
+            {
+                from = oldestServed;
+            }
         }
 
-        if (result.Points.IsDefaultOrEmpty)
+        var vouched = new HistoryCoverage(from, segment.To);
+        if (segment.OwnerCoverage.IsDefault)
         {
-            return null;
+            ranges.Add(vouched);
+            return;
         }
 
-        var oldestServed = result.Points[0].Timestamp;
-        return new HistoryCoverage(oldestServed > segment.From ? oldestServed : segment.From, segment.To);
+        foreach (var range in segment.OwnerCoverage)
+        {
+            if (range.Intersect(vouched) is { } overlap)
+            {
+                ranges.Add(overlap);
+            }
+        }
     }
 }

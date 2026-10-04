@@ -376,7 +376,7 @@
             _truncationHint = bucket is null
                 ? "Too many samples in this range: the oldest are not shown."
                 : $"Bucket too small for this range: only the newest {PropertyHistoryChartModel.MaxPoints} intervals are shown.";
-            BuildView(series, valueAtStart);
+            BuildView(series, valueAtStart, bucket);
         }
         catch (HistoryAggregationNotSupportedException exception)
         {
@@ -411,7 +411,7 @@
         }
     }
 
-    private void BuildView(HistorySeries series, HistoryPoint? valueAtStart)
+    private void BuildView(HistorySeries series, HistoryPoint? valueAtStart, TimeSpan? bucket)
     {
         if (UseStateTimeline)
         {
@@ -436,7 +436,7 @@
         _segments = null;
         if (series.Points.Any(point => point.Number is not null))
         {
-            var runs = PropertyHistoryChartModel.SplitIntoGapRuns(series.Points);
+            var runs = PropertyHistoryChartModel.SplitIntoGapRuns(series.Points, bucket, _windowTo);
             _chartSeries = runs
                 .Select(run => new ChartSeries<double>
                 {

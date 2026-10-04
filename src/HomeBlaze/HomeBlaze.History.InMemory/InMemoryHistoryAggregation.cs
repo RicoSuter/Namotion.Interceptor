@@ -19,7 +19,7 @@ internal static class InMemoryHistoryAggregation
     public static HistoryPoint AggregateBucket(
         string aggregation,
         DateTimeOffset bucketStart,
-        DateTimeOffset bucketEnd,
+        HistoryCoverage measured,
         ReadOnlySpan<Sample> samples,
         bool isUlong,
         ref double? carriedNumber,
@@ -47,7 +47,7 @@ internal static class InMemoryHistoryAggregation
 
             case HistoryAggregations.TimeWeightedAverage:
                 return TimeWeightedAverage(
-                    bucketStart, bucketEnd, samples, isUlong, ref carriedNumber);
+                    bucketStart, measured, samples, isUlong, ref carriedNumber);
 
             default:
                 return AggregateNumeric(aggregation, bucketStart, samples, isUlong);
@@ -79,14 +79,14 @@ internal static class InMemoryHistoryAggregation
 
     private static HistoryPoint TimeWeightedAverage(
         DateTimeOffset bucketStart,
-        DateTimeOffset bucketEnd,
+        HistoryCoverage measured,
         ReadOnlySpan<Sample> samples,
         bool isUlong,
         ref double? carriedNumber)
     {
         double weightedSum = 0;
         double totalDuration = 0;
-        var previousTimestamp = bucketStart;
+        var previousTimestamp = measured.From;
         var previousValue = carriedNumber;
 
         foreach (var sample in samples)
@@ -103,7 +103,7 @@ internal static class InMemoryHistoryAggregation
             previousTimestamp = sample.Timestamp;
         }
 
-        var tailDuration = (bucketEnd - previousTimestamp).TotalSeconds;
+        var tailDuration = (measured.To - previousTimestamp).TotalSeconds;
         if (previousValue is { } tailHeld && tailDuration > 0)
         {
             weightedSum += tailHeld * tailDuration;

@@ -96,8 +96,10 @@ public class ChangeQueueProcessor : IDisposable
     /// <param name="bufferTime">Time to buffer changes before flushing.</param>
     /// <param name="maxQueueDepth">Bound on the buffered change queue, or null for unbounded (existing
     /// connector behavior). When set, enqueuing past the bound drops the oldest unprocessed change and
-    /// increments <see cref="DropCount"/>, so the newest change is retained. Read only on the buffered
-    /// path, so a processor with a buffer time of zero never touches the queue this bounds.</param>
+    /// increments <see cref="DropCount"/>, so the newest change is retained. A change already superseded
+    /// when it is dequeued is skipped before it reaches the queue and is not counted as dropped. Read only
+    /// on the buffered path, so a processor with a buffer time of zero never touches the queue this
+    /// bounds.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="dropHandler">Optional handler invoked when bounded-queue overflow, an ordinary
     /// write failure, or terminal delivery closure drops changes. Terminal closure reporting may be
@@ -302,8 +304,6 @@ public class ChangeQueueProcessor : IDisposable
     {
         try
         {
-            // Connect-window staleness is positional: changes arriving after this snapshot are steady state.
-            var queuedBeforeStart = _subscription.Count;
             using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
 
             var flushTask = periodicTimer is not null
@@ -347,12 +347,6 @@ public class ChangeQueueProcessor : IDisposable
             {
                 while (_subscription.TryDequeue(out var change, processingToken))
                 {
-                    var wasQueuedBeforeStart = queuedBeforeStart > 0;
-                    if (wasQueuedBeforeStart)
-                    {
-                        queuedBeforeStart--;
-                    }
-
                     if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
                     {
                         continue;
@@ -363,23 +357,12 @@ public class ChangeQueueProcessor : IDisposable
                         continue;
                     }
 
-                    if (wasQueuedBeforeStart && !ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
-                    {
-                        continue;
-                    }
-
                     if (periodicTimer is null)
                     {
-                        // Client changes preserve every intermediate value without a merge. Servers must
-                        // still avoid serving a value that their subject has already superseded.
-                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesAreSettled &&
-                            !ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
+                        // Commit order, not enqueue order, decides delivery; see ChangeDeliveryFilter.
+                        if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
                         {
                             continue;
-                        }
-                        if (_deliveryRule == ChangeDeliveryRule.SourceValuesMayBeStale)
-                        {
-                            ChangeDeliveryFilter.MarkPropertyAsPublishedToSource(in change);
                         }
 
                         _immediateBuffer[0] = change;
@@ -387,10 +370,23 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     else
                     {
-                        _changes.Enqueue(change);
-                        if (_maxQueueDepth is int maxQueueDepth && _changes.Count > maxQueueDepth)
+                        if (_maxQueueDepth is int maxQueueDepth)
                         {
-                            DropOverflow(maxQueueDepth);
+                            // A bounded queue drops its oldest entries on overflow, so keep superseded changes out of it.
+                            if (!ChangeDeliveryFilter.IsCurrent(in change, _deliveryRule))
+                            {
+                                continue;
+                            }
+
+                            _changes.Enqueue(change);
+                            if (_changes.Count > maxQueueDepth)
+                            {
+                                DropOverflow(maxQueueDepth);
+                            }
+                        }
+                        else
+                        {
+                            _changes.Enqueue(change);
                         }
                     }
                 }
