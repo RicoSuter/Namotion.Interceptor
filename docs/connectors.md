@@ -61,12 +61,14 @@ Sources use a buffer-load-replay pattern during initialization and reconnection:
 1. **Buffer**: During source startup (the base calls `StartListeningAsync` on the source after `StartBuffering`), inbound updates are buffered
 2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
 3. **Replay**: Buffered updates are replayed in order after initial state is applied
-4. **Reconcile queued writes**: Writes parked while connecting are decided by commit order and sent, unless a later local write superseded them (see [Write Retry Queue](#write-retry-queue))
+4. **Reconcile queued writes**: Writes parked while the load was pending are decided by commit order and sent, unless a later local write superseded them (see [Write Retry Queue](#write-retry-queue))
 
 This ensures:
 - Updates received during initialization are not lost
 - Updates are applied in the correct order relative to the initial state
 - Queued writes are reconciled by commit order rather than discarded
+
+The same four steps run for every load, whether the base retry loop connects or a connector reloads on its own after a transport-level reconnect (the OPC UA session manager, the MQTT and WebSocket monitors). From `StartBuffering` until the reconcile after that load has run, outbound writes are parked rather than sent, so nothing reaches the source unjudged while the model is being replaced; the parked writes appear in `Diagnostics.OutboundRetries` meanwhile. A load superseded by a later `StartBuffering` is discarded, and the reconcile waits for the later load.
 
 Writes made while the source is connecting are captured, not lost. The outbound subscription is created once for the whole source lifetime, before the retry loop, so a connect-window or reconnect-delay write cannot fall into a gap.
 
@@ -192,16 +194,17 @@ If a transaction repair write fails, the source keeps the older value and the su
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
 - Complete accounting at capacity 0: owned writes that cannot be retained are counted by `Diagnostics.OutboundRetries.TotalDropped`; writes made before the source claims their property remain unattributable and are listed under [Known Limitations](#known-limitations)
-- Memory while disconnected is bounded per connection attempt: the change subscription is drained into this queue before each attempt and again after the initial state is applied, so repeated failed attempts do not compound. Within one attempt the initial-state load is drained on a timer as well, so what accumulates without a bound is the retry delay and `StartListeningAsync`, and peak memory follows the write rate times the length of those two legs
+- Memory while disconnected is bounded by this queue's capacity. Until the source has listened once, the change subscription is drained into the queue before each connection attempt, so repeated failed attempts do not compound; what accumulates without a bound in that phase is the retry delay and `StartListeningAsync`, and peak memory follows the write rate times the length of those two legs. From the first successful listen on, the change processor runs for the rest of the source's lifetime and parks owned writes into the queue while a load is pending, at every reconnect and for the whole outage before it
+- Parked writes are collapsed per property: a property written repeatedly while a load is pending costs one slot, so it cannot evict other properties' parked writes
 - Automatic retry when `WriteChangesAsync` fails during normal operation
-- Re-apply on reconnection by commit order: after loading initial state, each queued change is kept unless a later *local* write superseded it, in which case that later write is delivered instead. A kept change is sent as a fresh write, restored locally first if the load moved the model off it. Values the load brought in do not supersede a write that already committed, because the load cannot be ranked against it.
+- Re-apply after every load by commit order: once initial state is loaded, each queued change is kept unless a later *local* write superseded it, in which case that later write is delivered instead. A kept change is sent as a fresh write, restored locally first if the load moved the model off it. Values the load brought in do not supersede a write that already committed, because the load cannot be ranked against it.
 - In-memory only: queued writes are lost on process restart
 
 ### Flushing On Stop
 
-When a connector attempt ends, the change processor hands whatever it had buffered but not yet flushed to the normal delivery owner. A source gives the batch to the retry queue above, while a server broadcasts it to the clients still connected. A failed reconnect attempt can leave the source batch parked for the next attempt. On final connector stop the retry owner is retired instead: pending and still-unconfirmed writes are cleared and counted in `Diagnostics.OutboundRetries.TotalDropped`. Without this handoff the batch would be lost silently because it has already left the change subscription that feeds the retry queue.
+When a change processor run ends, it hands whatever it had buffered but not yet flushed to the normal delivery owner. A source gives the batch to the retry queue above, while a server broadcasts it to the clients still connected. For a source a run ends either because a load completed, in which case the batch is parked for the reconcile that follows, or because the source stops. On final stop the retry owner is retired: pending and still-unconfirmed writes are cleared and counted in `Diagnostics.OutboundRetries.TotalDropped`, including writes parked for a reconcile that the stop pre-empted. Without this handoff the batch would be lost silently because it has already left the change subscription that feeds the retry queue.
 
-The cost is that a stop can block on an unreachable endpoint. Final delivery and the source retry handoff share one internal five-second safety bound, which cannot be configured per connector. Connectors stop one after another under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so the host timeout must leave enough time for every connector to complete or reach its internal bound.
+The cost is that a stop can block on an unreachable endpoint. Final delivery and the source retry handoff share one internal five-second safety bound, counted from the stop, which cannot be configured per connector. Connectors stop one after another under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so the host timeout must leave enough time for every connector to complete or reach its internal bound. A run that ends for a load is not bounded: it waits for the one write that was in flight when the load completed, however long the transport takes, so that write is neither dropped nor overtaken by the reconcile.
 
 The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own. At final stop, every write still owned when that happens is counted as locally unconfirmed; the remote side may already have accepted it or may still accept it, so teardown delivery is at least once.
 
@@ -260,17 +263,23 @@ Each iteration of the sealed `RunAsync` runs the following sequence. On failure,
 ```
 RunAsync
  ├── create source-lifetime subscription  ← captures local writes continuously (no gap across reconnects)
- └── retry loop (per connection attempt)
-      ├── Task.Delay(retryTime)            ← retries only; the subscription keeps capturing during the wait
-      ├── drain owned writes → retry queue ← park writes captured since the last attempt (caps memory)
-      ├── StartBuffering()
-      ├── StartListeningAsync()            ← your hook: connect + spawn monitor
-      ├── LoadInitialStateAndResume()      ← calls your LoadInitialStateAsync, then replays buffer
-      ├── drain owned writes → retry queue ← park connect-window writes
+ ├── retry loop (per connection attempt)
+ │    ├── Task.Delay(retryTime)            ← retries only; the subscription keeps capturing during the wait
+ │    ├── drain owned writes → retry queue ← only until the pump exists: park writes captured since the last attempt
+ │    ├── StartBuffering()                 ← starts a generation; the processor parks until it is reconciled
+ │    ├── StartListeningAsync()            ← your hook: connect + spawn monitor
+ │    ├── start the pump                   ← first successful listen only; runs until the source stops
+ │    ├── LoadInitialStateAndResume()      ← calls your LoadInitialStateAsync, then replays buffer
+ │    └── await the pump                   ← connected phase
+ └── pump (one per source lifetime, on the source-lifetime subscription)
+      ├── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync; parks while a load is pending
+      ├── (a load completed)               ← ends the run; its final flush parks what it still buffered
+      ├── drain owned writes → retry queue ← park what the processor had not dequeued yet
       ├── ReconcileRetryQueueAsync()       ← restore / send / drop queued writes vs current state
-      ├── new ChangeQueueProcessor()       ← connected phase; reuses the source-lifetime subscription
-      └── ProcessAsync()                   ← drains changes, calls your WriteChangesAsync
+      └── ProcessAsync()                   ← next run, until the next load or the stop
 ```
+
+A connector-internal reload (`StartBuffering` followed by `LoadInitialStateAndResumeAsync` from the connector's own monitor) enters the pump at "a load completed" and runs the same drain and reconcile. The retry loop reconnects only when `StartListeningAsync`, the load or the pump fails; a pump that faults is replaced by the next attempt after it has listened again.
 
 "Owned writes" are changes to properties bound to this source whose origin source is not this source; a change stamped with a different source is parked like any other. The source's own applies are skipped at drain and in the connected phase, so inbound values are not echoed back, except for a transaction confirmation on a property a connector has written out (see [Change notification source semantics](#change-notification-source-semantics)).
 
@@ -976,11 +985,9 @@ Cases where the local model and the external system can end up disagreeing, or w
 
 **A property with an `OnChanging` hook loses a connect-window write to the initial-state load.** A hook that rewrites the incoming value, which the generated `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` can do, means the stored value is not the value the source sent, so the change publishes as `Local`. The drain then treats the load's own value as an ordinary local write and it wins the per-property collapse, discarding a write the user made moments earlier. Without the hook the load's apply is skipped as an echo and the user's write is restored and sent, which is what [Write Consistency Guarantees](#write-consistency-guarantees) promises. Both ends still converge, on the loaded value; what is lost is the user's write. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
-**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
+**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`. Until the first successful listen, the drain that runs before each connection attempt must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since the change processor consumes the subscription from the first successful listen on and ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 
-**Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized` and `Diagnostics.OutboundRetries.Depth` shows it pending. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
-
-**A write that lands while the reconcile restores a parked write can be overwritten.** When the load has moved the model off a parked write, the reconcile restores it in two steps: it checks that no later local commit supersedes it, then writes it back. A local write or transaction commit to the same property that lands between those steps is overwritten by the restore and then dropped as superseded. Both ends settle on the older parked value, and a transaction that reported success is undone. Closing it would need the write path to refuse a write when a newer commit exists, which it does not offer. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
+**A write that lands while the reconcile restores a parked write can be overwritten.** When the load has moved the model off a parked write, the reconcile restores it in two steps: it checks that no later local commit supersedes it, then writes it back. A local write or transaction commit to the same property that lands between those steps is overwritten by the restore and then dropped as superseded. Both ends settle on the older parked value, and a transaction that reported success is undone. The reconcile runs after every load, connector-internal reconnects included, so the window opens once per reconnect. Closing it would need the write path to refuse a write when a newer commit exists, which it does not offer. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
 **A property with no setter cannot be restored.** If the load moves the model off a parked write for a derived or getter-only property, there is nothing to write back locally, so the change is dropped and logged by name rather than silently counted as restored.
 

@@ -127,6 +127,20 @@ to the local value.
 Both directions keep the two ends in sync. What differs is whether a committed write can vanish without
 an error.
 
+## Why every load resynchronizes, and why the processor is cycled to do it
+
+The reconcile used to run once per connection attempt of the base retry loop, before the connected processor started. Connector-internal reconnects (MQTT and WebSocket monitors, the OPC UA session manager) reload initial state while that processor keeps running, so a write parked during the outage stayed parked until some other owned write flushed it, unjudged, over a model that had meanwhile been replaced by the load (#362).
+
+The reconcile cannot simply be called from the connector's reload: it restores values with `SetValue`, which re-enters the subscription the processor is draining, and it drains the retry queue the processor's flush competes for. Both need the processor to be out of the picture, and the processor's own buffer is the hard part: at the default 8 ms buffer time a write committed just before the load completes sits in that buffer, and a reconcile that runs beside the processor never sees it. A time-based barrier (wait a little, then reconcile) was tried and rejected: no fixed delay covers a transport write that stalls.
+
+So the processor is cycled on every completed load, and the cycle is the capture barrier. The property writer reports every generation advance (`StartBuffering`, `InvalidateGeneration`) and every completed, non-superseded load to the source. While the started generation differs from the last one the pump resynchronized after, the processor's write handler parks into the retry queue instead of sending, its final flush included, and its completion handler skips the retry flush. The completed load cancels the running processor; its final flush parks whatever it still buffered; the pump then drains the subscription, reconciles, marks the generation, and starts the next processor. Everything committed before the load completed has therefore been judged by that reconcile or a later one, with no timing assumption.
+
+Two consequences shape the rest. The pump has to be the subscription's only consumer from the first successful listen on, so the per-attempt drain of the base loop runs only before it exists, which keeps a first connect that keeps failing bounded. And the processor's five-second teardown bound counts from the stop rather than from the end of a run, so a run that ends for a load waits for its single in-flight write however long the transport takes: dropping it after five seconds would lose a committed write, and letting the reconcile proceed while it is in flight would reorder the property.
+
+A load superseded by a later `StartBuffering` before its reconcile ran is deferred to the later load. Reconciling against a model that the next load is about to replace would send writes the next reload then overwrites locally; without an echo from the source the two ends would stay apart. Parked writes therefore wait for the generation that settles.
+
+Parking collapses per property. The pending window spans the whole outage, since connectors call `StartBuffering` when they detect the loss, so a property written at a modest rate for the length of an outage would otherwise take one slot per flush and evict the parked writes of every other property from the bounded retry queue before any reconcile saw them.
+
 ## What actually guarantees convergence
 
 Not the conflict rule. Two properties of the delivery path:
