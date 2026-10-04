@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors.Diagnostics;
 using Namotion.Interceptor.Tracking.Change;
@@ -56,8 +57,9 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
-    /// Enqueues writes for retry. When the queue exceeds its capacity, the oldest writes are dropped.
-    /// This operation is thread-safe.
+    /// Parks writes for retry. A write to a property with a pending write is collapsed into that one (see
+    /// <see cref="Collapse"/>), so a property written repeatedly costs one slot. When the queue then exceeds
+    /// its capacity, the oldest writes are dropped. This operation is thread-safe.
     /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
@@ -77,9 +79,23 @@ internal sealed class WriteRetryQueue : IDisposable
             }
             else
             {
-                _pendingWrites.AddRange(changes.Span);
+                var added = 0;
+                foreach (ref readonly var change in changes.Span)
+                {
+                    var index = IndexOfPending(change.Property);
+                    if (index >= 0)
+                    {
+                        _pendingWrites[index] = Collapse(_pendingWrites[index], change);
+                    }
+                    else
+                    {
+                        _pendingWrites.Add(change);
+                        added++;
+                    }
+                }
+
                 droppedCount = TrimToCapacity();
-                _ownedWriteCount += changes.Length - droppedCount;
+                _ownedWriteCount += added - droppedCount;
                 Volatile.Write(ref _count, _pendingWrites.Count);
             }
         }
@@ -99,6 +115,39 @@ internal sealed class WriteRetryQueue : IDisposable
                 _maxQueueSize);
         }
     }
+
+    // Newest first: a property parked repeatedly is near the end. Linear because the list is bounded by
+    // the capacity and every caller runs on a cold path (a park while connecting, a reconcile).
+    private int IndexOfPending(PropertyReference property)
+    {
+        var pending = CollectionsMarshal.AsSpan(_pendingWrites);
+        for (var index = pending.Length - 1; index >= 0; index--)
+        {
+            if (PropertyReference.Comparer.Equals(pending[index].Property, property))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Collapses two changes to one property into one that keeps the old value of the older change and the
+    /// new value, origin and revision of the newer one. Which one is newer is decided by
+    /// <see cref="SubjectPropertyChange.Revision"/>, not by capture order: changes are enqueued after their
+    /// commit and outside the subject lock, so under concurrent writers arrival order is a race order.
+    /// </summary>
+    internal static SubjectPropertyChange Collapse(SubjectPropertyChange kept, SubjectPropertyChange change) =>
+        change.Revision == 0 || kept.Revision == 0
+            // One of them orders against nothing, so capture order decides and the survivor carries
+            // no revision either. Same rule as the flush-path collapse: keeping a revision here would
+            // let the survivor be ranked against the property marker and dropped, on a comparison
+            // against a value it was not ordered by.
+            ? kept.MergeWithNewer(change).WithoutRevision()
+            : change.Revision < kept.Revision
+                ? change.MergeWithNewer(kept)
+                : kept.MergeWithNewer(change);
 
     /// <summary>
     /// Flushes pending writes from the queue to the source.

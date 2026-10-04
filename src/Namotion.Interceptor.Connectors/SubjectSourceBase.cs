@@ -505,18 +505,14 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         if (owned is not null)
         {
-            // Collapsed before parking, not only at reconcile time. The queue is a bounded ring buffer
-            // that drops its oldest entries, so parking raw changes lets a burst on one property evict
-            // other properties' window writes before the reconcile ever sees them. Collapsing first
-            // makes the space this costs proportional to the number of properties written rather than
-            // to the number of writes.
+            // Collapsed here as well, in one pass: the queue collapses each change against what it already
+            // holds by scanning it, and a drain can hand it thousands of changes to a few properties.
             WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
         }
     }
 
     /// <summary>
-    /// Collapses parked changes to one per property, keeping the oldest old value and the new value
-    /// of the highest-revision commit.
+    /// Collapses parked changes to one per property with <see cref="WriteRetryQueue.Collapse"/>.
     /// </summary>
     /// <remarks>
     /// Reconciliation classifies each change against the live value and mutates that value when it
@@ -524,14 +520,12 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// write can match the live value, get restored, and thereby make the newer write look diverged,
     /// which drops it: the older write would win over the newer one.
     /// <para>
-    /// Which one is newer is decided by <see cref="SubjectPropertyChange.Revision"/>, not by capture
-    /// order. Changes are enqueued after their commit and outside the subject lock, so under
-    /// concurrent writers arrival order is a race order. Both changes are writes to the same
-    /// property and therefore to the same subject, so their revisions are comparable. A change
-    /// carrying revision 0 was built outside a terminal write and orders against nothing, so
-    /// capture order decides between those and the survivor carries no revision either, matching
-    /// the flush-path collapse in <c>ChangeMerger</c> on unordered changes. The two still differ on which
-    /// old value survives when every revision is ordered, which the delivery contract calls best effort.
+    /// Both changes are writes to the same property and therefore to the same subject, so their
+    /// revisions are comparable. A change carrying revision 0 was built outside a terminal write and
+    /// orders against nothing, so capture order decides between those and the survivor carries no
+    /// revision either, matching the flush-path collapse in <c>ChangeMerger</c> on unordered changes. The
+    /// two still differ on which old value survives when every revision is ordered, which the delivery
+    /// contract calls best effort.
     /// </para>
     /// </remarks>
     private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
@@ -548,16 +542,7 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
                 continue;
             }
 
-            var kept = collapsed[index];
-            collapsed[index] = change.Revision == 0 || kept.Revision == 0
-                // One of them orders against nothing, so capture order decides and the survivor carries
-                // no revision either. Same rule as the flush-path collapse: keeping a revision here would
-                // let the survivor be ranked against the property marker and dropped, on a comparison
-                // against a value it was not ordered by.
-                ? kept.MergeWithNewer(change).WithoutRevision()
-                : change.Revision < kept.Revision
-                    ? change.MergeWithNewer(kept)
-                    : kept.MergeWithNewer(change);
+            collapsed[index] = WriteRetryQueue.Collapse(collapsed[index], change);
         }
 
         return collapsed;

@@ -784,6 +784,36 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
+    public void WhenAWriteToAPendingPropertyIsEnqueued_ThenItIsCollapsedIntoThePendingWrite()
+    {
+        // Arrange
+        var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
+        var diagnostics = new QueueDiagnostics(metrics);
+        var queue = new WriteRetryQueue(2, NullLogger.Instance, metrics);
+        var property = new PropertyReference(new Mock<IInterceptorSubject>().Object, "Hot");
+        var other = CreateChange(99);
+        queue.Enqueue(new[] { CreateChange(property, oldValue: 0, newValue: 1, revision: 1), other });
+
+        // Act: three more commits to the hot property, the last of them arriving out of commit order.
+        queue.Enqueue(new[] { CreateChange(property, oldValue: 1, newValue: 2, revision: 2) });
+        queue.Enqueue(new[]
+        {
+            CreateChange(property, oldValue: 3, newValue: 4, revision: 4),
+            CreateChange(property, oldValue: 2, newValue: 3, revision: 3),
+        });
+
+        // Assert: the other property's write survived at capacity 2, and the hot property carries the
+        // highest-revision commit's value whichever order its changes arrived in.
+        var drained = queue.DrainForLocalReapply();
+        Assert.Equal(2, drained.Length);
+        Assert.Equal(0, diagnostics.TotalDropped);
+        var hot = Assert.Single(drained, change => change.Property.Name == "Hot");
+        Assert.Equal(4, hot.GetNewValue<int>());
+        Assert.Equal(4, hot.Revision);
+        Assert.Contains(drained, change => change.Property.Name == other.Property.Name);
+    }
+
+    [Fact]
     public void WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
     {
         // Arrange
@@ -800,14 +830,11 @@ public class WriteRetryQueueTests
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();
-        return SubjectPropertyChange.Create(
-            new PropertyReference(subjectMock.Object, $"Property{id}"),
-            ChangeOrigin.Local,
-            DateTimeOffset.UtcNow,
-            null,
-            id,
-            id + 1);
+        return CreateChange(new PropertyReference(subjectMock.Object, $"Property{id}"), id, id + 1, revision: 0);
     }
+
+    private static SubjectPropertyChange CreateChange(PropertyReference property, int oldValue, int newValue, long revision) =>
+        SubjectPropertyChange.Create(property, ChangeOrigin.Local, DateTimeOffset.UtcNow, null, oldValue, newValue, revision);
 
     private static ReadOnlyMemory<SubjectPropertyChange> CreateChanges(int count, int startId = 0)
     {
