@@ -181,7 +181,7 @@ The bridge runs in a reconnect loop inside `ExecuteAsync`:
 
 - **Scenes** are not yet exposed. The Hue API supports activating scenes per room/zone, but this is not currently integrated.
 - **Entertainment API** (streaming for light sync) is not supported.
-- **Power aggregation** on rooms/zones is not available. The bridge exposes a `TotalPower` property that sums all child device power, but individual group-level aggregation is not provided.
+- **Power aggregation** on rooms/zones is not available. The bridge exposes a `CombinedPower` property that sums the estimated power of the bridge and all lights (the only Hue devices with a power estimate); rooms and zones only group lights, so they are not added again. Group-level aggregation is not provided.
 
 ## Troubleshooting
 

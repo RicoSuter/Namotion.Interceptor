@@ -2,10 +2,10 @@ using Xunit;
 
 namespace Namotion.Devices.Philips.Hue.Tests;
 
-public class HueBridgeTotalPowerTests
+public class HueBridgeCombinedPowerTests
 {
     [Fact]
-    public void WhenBridgeHasLightsOn_ThenTotalPowerIncludesBridgeAndLights()
+    public void WhenBridgeHasLightsOn_ThenCombinedPowerIncludesBridgeAndLights()
     {
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
@@ -19,14 +19,15 @@ public class HueBridgeTotalPowerTests
         };
 
         // Act
-        var totalPower = bridge.TotalPower;
+        var combinedPower = bridge.CombinedPower;
 
-        // Assert — bridge 3W + 9W + 8.5W = 20.5W
-        Assert.Equal(20.5m, totalPower);
+        // Assert
+        // Bridge 3 W + 9 W + 8.5 W = 20.5 W
+        Assert.Equal(20.5m, combinedPower);
     }
 
     [Fact]
-    public void WhenBridgeHasNoLights_ThenTotalPowerIsBridgeOnly()
+    public void WhenBridgeHasNoLights_ThenCombinedPowerIsBridgeOnly()
     {
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
@@ -34,14 +35,15 @@ public class HueBridgeTotalPowerTests
         bridge.Lights = new();
 
         // Act
-        var totalPower = bridge.TotalPower;
+        var combinedPower = bridge.CombinedPower;
 
-        // Assert — bridge 3W only
-        Assert.Equal(3.0m, totalPower);
+        // Assert
+        // Bridge 3 W only
+        Assert.Equal(3.0m, combinedPower);
     }
 
     [Fact]
-    public void WhenLightPowerIsNull_ThenTotalPowerSkipsIt()
+    public void WhenLightPowerIsNull_ThenCombinedPowerSkipsIt()
     {
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
@@ -55,14 +57,15 @@ public class HueBridgeTotalPowerTests
         };
 
         // Act
-        var totalPower = bridge.TotalPower;
+        var combinedPower = bridge.CombinedPower;
 
-        // Assert — bridge 3W + 9W = 12W (unknown skipped)
-        Assert.Equal(12.0m, totalPower);
+        // Assert
+        // Bridge 3 W + 9 W = 12 W, the unknown light is skipped
+        Assert.Equal(12.0m, combinedPower);
     }
 
     [Fact]
-    public void WhenBridgeIsDisconnected_ThenTotalPowerIsNull()
+    public void WhenBridgeIsDisconnected_ThenCombinedPowerIsNull()
     {
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
@@ -73,9 +76,9 @@ public class HueBridgeTotalPowerTests
         };
 
         // Act
-        var totalPower = bridge.TotalPower;
+        var combinedPower = bridge.CombinedPower;
 
         // Assert
-        Assert.Null(totalPower);
+        Assert.Null(combinedPower);
     }
 }

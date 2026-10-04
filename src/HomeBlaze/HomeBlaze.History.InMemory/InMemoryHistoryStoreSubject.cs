@@ -120,10 +120,10 @@ public partial class InMemoryHistoryStoreSubject :
     public partial int TrackedPropertyCount { get; set; }
 
     /// <summary>
-    /// Total number of samples currently retained across all property paths.
+    /// Number of samples currently retained across all property paths.
     /// </summary>
     [State]
-    public partial long TotalSampleCount { get; set; }
+    public partial long RetainedSampleCount { get; set; }
 
     /// <summary>
     /// Rough estimate of memory used by the retained samples in bytes.
@@ -276,7 +276,7 @@ public partial class InMemoryHistoryStoreSubject :
         OversizeCount = engine.OversizeCount;
         EvictedCount = engine.EvictedCount;
         TrackedPropertyCount = engine.TrackedPropertyCount;
-        TotalSampleCount = engine.TotalSampleCount;
+        RetainedSampleCount = engine.RetainedSampleCount;
         EstimatedMemorySize = engine.EstimatedMemoryBytes;
         IncomingChangesPerSecond = _recorder?.IncomingChangesPerSecond ?? 0;
         RecordedChangesPerSecond = _recorder?.RecordedChangesPerSecond ?? 0;

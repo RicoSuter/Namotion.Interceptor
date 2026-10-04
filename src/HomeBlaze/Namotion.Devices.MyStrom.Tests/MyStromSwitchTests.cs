@@ -47,7 +47,8 @@ public class MyStromSwitchTests
         // Assert
         Assert.Null(subject.IsOn);
         Assert.Null(subject.MeasuredPower);
-        Assert.Null(subject.MeasuredEnergyConsumed);
+        Assert.Null(subject.TotalImportedEnergy);
+        Assert.Null(subject.TotalExportedEnergy);
         Assert.Null(subject.Temperature);
         Assert.Null(subject.Uptime);
         Assert.Null(subject.LastUpdated);
