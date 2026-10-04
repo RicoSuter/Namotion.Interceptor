@@ -80,7 +80,7 @@ public class ConfigurableSubjectSerializer
             return null;
         }
 
-        using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStartup();
+        using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
         // Create instance using ActivatorUtilities for DI-aware construction
         var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurable;
         if (subject == null)

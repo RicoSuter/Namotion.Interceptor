@@ -1,21 +1,21 @@
 namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
-/// Defers hosted-service starts captured in this scope until it and its enclosing scopes are disposed.
+/// Defers hosted-service starts captured in this deferral until it and its enclosing deferrals are disposed.
 /// </summary>
 /// <remarks>
 /// Disposal releases captured starts even when configuration throws.
-/// Do not await a captured service's startup before disposing the scope.
-/// Scopes must be disposed in reverse creation order in the creating execution flow.
+/// Do not await a captured service's startup before disposing the deferral.
+/// Deferrals must be disposed in reverse creation order in the creating execution flow.
 /// </remarks>
-public sealed class HostedServiceStartupScope : IDisposable
+public sealed class HostedServiceStartDeferral : IDisposable
 {
-    private readonly AsyncLocal<HostedServiceStartupScope?> _current;
-    private readonly HostedServiceStartupScope? _parent;
+    private readonly AsyncLocal<HostedServiceStartDeferral?> _current;
+    private readonly HostedServiceStartDeferral? _parent;
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _disposed;
 
-    internal HostedServiceStartupScope(AsyncLocal<HostedServiceStartupScope?> current)
+    internal HostedServiceStartDeferral(AsyncLocal<HostedServiceStartDeferral?> current)
     {
         _current = current;
         _parent = current.Value;
@@ -23,11 +23,11 @@ public sealed class HostedServiceStartupScope : IDisposable
     }
 
     /// <summary>
-    /// Releases the starts captured in this scope, once its enclosing scopes are released too.
+    /// Releases the starts captured in this deferral, once its enclosing deferrals are released too.
     /// </summary>
     public void Dispose()
     {
-        // Restore this flow's parent even if another flow already disposed the scope.
+        // Restore this flow's parent even if another flow already disposed the deferral.
         if (ReferenceEquals(_current.Value, this))
         {
             _current.Value = _parent;
