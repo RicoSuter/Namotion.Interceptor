@@ -784,33 +784,50 @@ public class WriteRetryQueueTests
     }
 
     [Fact]
-    public void WhenAWriteToAPendingPropertyIsEnqueued_ThenItIsCollapsedIntoThePendingWrite()
+    public void WhenBelowCapacity_ThenRepeatedWritesToAPropertyAreKeptInOrder()
     {
         // Arrange
+        var queue = new WriteRetryQueue(10, NullLogger.Instance, new QueueMetrics(nameof(SourceMetrics.OutboundRetries)));
+        var property = new PropertyReference(new Mock<IInterceptorSubject>().Object, "Hot");
+
+        // Act
+        queue.Enqueue(new[] { CreateChange(property, oldValue: 0, newValue: 1, revision: 1), CreateChange(7) });
+        queue.Enqueue(new[] { CreateChange(property, oldValue: 1, newValue: 2, revision: 2) });
+
+        // Assert
+        var drained = queue.DrainForLocalReapply();
+        Assert.Equal(3, drained.Length);
+        Assert.Equal(1, drained[0].GetNewValue<int>());
+        Assert.Equal("Property7", drained[1].Property.Name);
+        Assert.Equal(2, drained[2].GetNewValue<int>());
+    }
+
+    [Fact]
+    public void WhenTheQueueOverflows_ThenWritesAreCollapsedPerPropertyBeforeTheOldestAreDropped()
+    {
+        // Arrange: capacity 3; the hot property's first write is the oldest entry when the queue overflows.
         var metrics = new QueueMetrics(nameof(SourceMetrics.OutboundRetries));
         var diagnostics = new QueueDiagnostics(metrics);
-        var queue = new WriteRetryQueue(2, NullLogger.Instance, metrics);
-        var property = new PropertyReference(new Mock<IInterceptorSubject>().Object, "Hot");
-        var other = CreateChange(99);
-        queue.Enqueue(new[] { CreateChange(property, oldValue: 0, newValue: 1, revision: 1), other });
+        var queue = new WriteRetryQueue(3, NullLogger.Instance, metrics);
+        var subject = new Mock<IInterceptorSubject>().Object;
+        var hot = new PropertyReference(subject, "Hot");
+        queue.Enqueue(new[] { CreateChange(hot, oldValue: 0, newValue: 1, revision: 1) });
+        queue.Enqueue(new[] { CreateChange(new PropertyReference(subject, "P1"), oldValue: 0, newValue: 1, revision: 2) });
+        queue.Enqueue(new[] { CreateChange(new PropertyReference(subject, "P2"), oldValue: 0, newValue: 1, revision: 3) });
 
-        // Act: three more commits to the hot property, the last of them arriving out of commit order.
-        queue.Enqueue(new[] { CreateChange(property, oldValue: 1, newValue: 2, revision: 2) });
-        queue.Enqueue(new[]
-        {
-            CreateChange(property, oldValue: 3, newValue: 4, revision: 4),
-            CreateChange(property, oldValue: 2, newValue: 3, revision: 3),
-        });
+        // Act: the fourth write collapses the hot property instead of evicting P1, the fifth evicts P1.
+        queue.Enqueue(new[] { CreateChange(hot, oldValue: 1, newValue: 4, revision: 4) });
+        var depthAfterCollapse = queue.PendingWriteCount;
+        queue.Enqueue(new[] { CreateChange(new PropertyReference(subject, "P3"), oldValue: 0, newValue: 1, revision: 5) });
 
-        // Assert: the other property's write survived at capacity 2, and the hot property carries the
-        // highest-revision commit's value whichever order its changes arrived in.
+        // Assert: each surviving property keeps its latest commit, and only one write counts as dropped.
+        Assert.Equal(3, depthAfterCollapse);
+        Assert.Equal(1, diagnostics.TotalDropped);
         var drained = queue.DrainForLocalReapply();
-        Assert.Equal(2, drained.Length);
-        Assert.Equal(0, diagnostics.TotalDropped);
-        var hot = Assert.Single(drained, change => change.Property.Name == "Hot");
-        Assert.Equal(4, hot.GetNewValue<int>());
-        Assert.Equal(4, hot.Revision);
-        Assert.Contains(drained, change => change.Property.Name == other.Property.Name);
+        Assert.Equal(["P2", "Hot", "P3"], drained.Select(change => change.Property.Name).ToArray());
+        Assert.Equal(4, drained[1].GetNewValue<int>());
+        Assert.Equal(0, drained[1].GetOldValue<int>());
+        Assert.Equal(4, drained[1].Revision);
     }
 
     [Fact]

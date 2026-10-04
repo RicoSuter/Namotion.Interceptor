@@ -32,6 +32,15 @@ public class SubjectSourceBaseReconnectTests
         Read
     }
 
+    public enum OwnershipClaim
+    {
+        /// <summary>OPC UA: claimed inside <c>StartListeningAsync</c>, after the browse.</summary>
+        InListen,
+
+        /// <summary>WebSocket: claimed inside the load's apply action, after the values were applied.</summary>
+        InLoadApply
+    }
+
     [Theory]
     [InlineData(true, 8)]
     [InlineData(false, 8)]
@@ -283,32 +292,38 @@ public class SubjectSourceBaseReconnectTests
     }
 
     [Theory]
-    [InlineData(LoadStyle.Read)]
-    [InlineData(LoadStyle.Retained)]
-    public async Task WhenWriteLandsBeforeOwnershipIsEstablishedOnFirstConnect_ThenItIsKeptAndReconciled(LoadStyle loadStyle)
+    [InlineData(OwnershipClaim.InListen, LoadStyle.Read)]
+    [InlineData(OwnershipClaim.InListen, LoadStyle.Retained)]
+    [InlineData(OwnershipClaim.InLoadApply, LoadStyle.Read)]
+    public async Task WhenWriteLandsBeforeOwnershipIsEstablishedOnFirstConnect_ThenItIsKeptAndReconciled(
+        OwnershipClaim ownershipClaim, LoadStyle loadStyle)
     {
-        // Arrange
+        // Arrange: the OPC UA client claims inside the listen (after its browse), the WebSocket client inside
+        // the load's apply. The time between the write and the claim stands in for the browse and the load, so
+        // a processor that dequeues the write before the claim discards it.
         var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
         var person = new Person(context);
-        var source = new ReconnectingSource(person, context, echoWrites: false, TimeSpan.FromMilliseconds(8), loadStyle);
+        var source = new ReconnectingSource(person, context, echoWrites: false, TimeSpan.FromMilliseconds(8), loadStyle)
+        {
+            ClaimOwnershipInLoadApply = ownershipClaim == OwnershipClaim.InLoadApply,
+            LoadDelay = TimeSpan.FromMilliseconds(100),
+        };
         source.SetServerValue(nameof(Person.FirstName), "S0");
         source.SetServerValue(nameof(Person.LastName), "S0");
-        var ownershipEstablished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.FirstListenHook = () =>
+        source.FirstListenHook = async () =>
         {
-            // The browse: the write commits before the source claims the property.
             person.FirstName = "W";
-            new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
-            new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
-            ownershipEstablished.TrySetResult();
-            return Task.CompletedTask;
+            await Task.Delay(100);
+            if (ownershipClaim == OwnershipClaim.InListen)
+            {
+                source.ClaimOwnership();
+            }
         };
 
         try
         {
             // Act
             await source.StartAsync(CancellationToken.None);
-            await ownershipEstablished.Task.WaitAsync(EventTimeout);
             await AsyncTestHelpers.WaitUntilAsync(() => source.State == SourceState.Synchronized,
                 timeout: EventTimeout, message: "The first connect did not complete.");
 
@@ -330,30 +345,234 @@ public class SubjectSourceBaseReconnectTests
     {
         // Arrange
         var (person, source) = await StartConnectedAsync(echoWrites: true, bufferMilliseconds: 8);
-        source.TransportUp = false;
-        person.FirstName = "L1";
-        await WaitForParkedAsync(person, source);
-        source.SetServerValue(nameof(Person.FirstName), "S1");
+        try
+        {
+            source.TransportUp = false;
+            person.FirstName = "L1";
+            await WaitForParkedAsync(person, source);
+            source.SetServerValue(nameof(Person.FirstName), "S1");
 
-        source.BlockNextLoad();
-        source.SignalReconnect();
-        await source.LoadBlocked.Task.WaitAsync(EventTimeout);
-        var droppedBefore = source.Diagnostics.OutboundRetries.TotalDropped;
+            source.BlockNextLoad();
+            source.SignalReconnect();
+            await source.LoadBlocked.Task.WaitAsync(EventTimeout);
+            var droppedBefore = source.Diagnostics.OutboundRetries.TotalDropped;
+
+            // Act
+            await source.StopAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Empty(source.FirstNameWrites);
+            Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > droppedBefore,
+                "The parked write was neither delivered nor counted as dropped. " + Describe(person, source));
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenSourceStopsDuringFirstListen_ThenOwnedWriteNothingConsumedIsCountedAsDropped()
+    {
+        // Arrange: the listen never returns, so no processor ever consumes the subscription.
+        var context = InterceptorSubjectContext.Create().WithRegistry().WithFullPropertyTracking();
+        var person = new Person(context);
+        var listenEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var source = new TestSubjectSource(person, context, NullLogger.Instance)
+        {
+            StartListeningOverride = async (_, cancellationToken) =>
+            {
+                listenEntered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return null;
+            },
+        };
+        new PropertyReference(person, nameof(Person.FirstName)).SetSource(source);
+
+        await source.StartAsync(CancellationToken.None);
+        await listenEntered.Task.WaitAsync(EventTimeout);
+        person.FirstName = "W";
 
         // Act
         await source.StopAsync(CancellationToken.None);
 
         // Assert
-        Assert.Empty(source.FirstNameWrites);
-        Assert.True(source.Diagnostics.OutboundRetries.TotalDropped > droppedBefore,
-            "The parked write was neither delivered nor counted as dropped. " + Describe(person, source));
-        source.Dispose();
+        Assert.Equal(1, source.Diagnostics.OutboundRetries.TotalDropped);
+    }
+
+    [Fact]
+    public async Task WhenConnectionLossIsReportedWithoutAReload_ThenWritesAreStillDelivered()
+    {
+        // Arrange: the OPC UA keep-alive reports a loss, the reconnect fails and the session stays usable, so no
+        // reload follows the report.
+        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8);
+        try
+        {
+            source.LoseConnection();
+
+            // Act
+            person.FirstName = "W";
+
+            // Assert
+            var settled = await SettlesAsync(() =>
+                Equals(source.GetServerValue(nameof(Person.FirstName)), "W") &&
+                source.Diagnostics.OutboundRetries.Depth == 0);
+            Assert.True(settled, Describe(person, source));
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueIsDisabled_ThenWritesDuringAReloadAreSentAsBefore()
+    {
+        // Arrange: with nothing to park into, a write during a reload on a live transport is sent, as it was
+        // before loads were resynchronized, rather than counted as dropped.
+        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8, writeRetryQueueSize: 0);
+        try
+        {
+            var loadGate = source.BlockNextLoad();
+            source.SignalReconnect();
+            await source.LoadBlocked.Task.WaitAsync(EventTimeout);
+
+            // Act
+            person.FirstName = "W";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Equals(source.GetServerValue(nameof(Person.FirstName)), "W") ||
+                      source.Diagnostics.OutboundRetries.TotalDropped > 0,
+                timeout: EventTimeout, message: "The write was neither sent nor dropped.");
+            loadGate.SetResult();
+            await source.ReconnectCompleted.Task.WaitAsync(EventTimeout);
+
+            // Assert
+            Assert.Equal(0, source.Diagnostics.OutboundRetries.TotalDropped);
+            var settled = await SettlesAsync(() =>
+                person.FirstName == "W" && Equals(source.GetServerValue(nameof(Person.FirstName)), "W"));
+            Assert.True(settled, Describe(person, source));
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReloadCompletesWhileAWriteIsInFlight_ThenTheWriteIsNotCancelledAndIsSentOnce()
+    {
+        // Arrange: the transport honours cancellation, so a cancelled write fails and is resent after the
+        // reconcile, which the source would then receive twice.
+        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8);
+        try
+        {
+            var acknowledgement = source.StallWrite(nameof(Person.LastName), "X", observeCancellation: true);
+            person.LastName = "X";
+            await source.WriteStalled.Task.WaitAsync(EventTimeout);
+
+            // Act
+            source.SignalReconnect();
+            await source.ReconnectCompleted.Task.WaitAsync(EventTimeout);
+            var cancelled = await SettlesAsync(() => source.CancelledWriteCount > 0, TimeSpan.FromSeconds(1));
+            acknowledgement.SetResult();
+
+            // Assert
+            var settled = await SettlesAsync(() =>
+                person.LastName == "X" &&
+                Equals(source.GetServerValue(nameof(Person.LastName)), "X") &&
+                source.Diagnostics.OutboundRetries.Depth == 0);
+            Assert.True(settled, Describe(person, source));
+            Assert.False(cancelled, "The in-flight write was cancelled by the reload. " + Describe(person, source));
+            Assert.Single(source.WriteLog, entry => entry.StartsWith("LastName=X", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenAReconcileSendStallsIgnoringCancellation_ThenStopCompletesWithinTheTeardownBound()
+    {
+        // Arrange: the parked write matches the model after the reload, so the reconcile sends it itself, and
+        // that send stalls in a transport that ignores cancellation.
+        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8);
+        var acknowledgement = source.StallWrite(nameof(Person.FirstName), "L1");
+        try
+        {
+            source.TransportUp = false;
+            person.FirstName = "L1";
+            await WaitForParkedAsync(person, source);
+            source.SetServerValue(nameof(Person.FirstName), "L1");
+            source.SignalReconnect();
+            await source.WriteStalled.Task.WaitAsync(EventTimeout);
+
+            // Act
+            await source.StopAsync(CancellationToken.None)
+                .WaitAsync(ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(3));
+
+            // Assert
+            Assert.Equal(SourceState.Stopped, source.State);
+        }
+        finally
+        {
+            acknowledgement.TrySetResult();
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenANewerReloadStartsBeforeTheCompletedLoadIsResynchronized_ThenParkedWriteWaitsForTheNewerLoad()
+    {
+        // Arrange: a stalled write keeps the processor run open past the first reload's completion, so a second
+        // reload can start before the pump resynchronizes after the first.
+        var (person, source) = await StartConnectedAsync(echoWrites: false, bufferMilliseconds: 8);
+        var acknowledgement = source.StallWrite(nameof(Person.LastName), "X");
+        try
+        {
+            person.LastName = "X";
+            await source.WriteStalled.Task.WaitAsync(EventTimeout);
+            source.SignalReconnect();
+            await source.ReconnectCompleted.Task.WaitAsync(EventTimeout);
+
+            person.FirstName = "L1";
+            source.SetServerValue(nameof(Person.FirstName), "S1");
+            var loadGate = source.BlockNextLoad();
+            source.SignalReconnect();
+            await source.LoadBlocked.Task.WaitAsync(EventTimeout);
+
+            // Act
+            acknowledgement.SetResult();
+            var parked = await SettlesAsync(() => source.Diagnostics.OutboundRetries.Depth == 1, EventTimeout);
+
+            // Assert: judged against the model the newer load produces, not against the superseded one.
+            Assert.True(parked, "The write was not parked for the newer load. " + Describe(person, source));
+            Assert.Empty(source.FirstNameWrites);
+            loadGate.SetResult();
+            var settled = await SettlesAsync(() =>
+                person.FirstName == "L1" &&
+                Equals(source.GetServerValue(nameof(Person.FirstName)), "L1") &&
+                source.Diagnostics.OutboundRetries.Depth == 0);
+            Assert.True(settled, Describe(person, source));
+            Assert.Equal(["FirstName=L1 (model=L1)"], source.FirstNameWrites);
+        }
+        finally
+        {
+            acknowledgement.TrySetResult();
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+        }
     }
 
     [Theory]
-    [InlineData(1000)]
-    [InlineData(6500)]
-    public async Task WhenTransportWriteStallsAcrossInternalReconnect_ThenBufferedWriteIsReconciled(int stallMilliseconds)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTransportWriteStallsAcrossInternalReconnect_ThenBufferedWriteIsReconciled(bool stallOutlastsTeardownBound)
     {
         // Arrange: a write to one property stalls in the transport while a reload runs and a write to another
         // property commits behind it in the processor's buffer.
@@ -376,9 +595,11 @@ public class SubjectSourceBaseReconnectTests
             source.SignalReconnect();
             await loadReturned.Task.WaitAsync(EventTimeout);
 
-            // The stall's length is the scenario: 6.5 s outlasts the processor's teardown bound, which must not
-            // apply to a reload. Only elapsed time can show that the buffered write is not given up on.
-            await Task.Delay(stallMilliseconds);
+            // The stall's length is the scenario: outlasting the processor's teardown bound shows that the bound
+            // does not apply to a reload. Only elapsed time can show that the buffered write is not given up on.
+            await Task.Delay(stallOutlastsTeardownBound
+                ? ChangeQueueProcessor.TeardownFlushBound + TimeSpan.FromSeconds(1.5)
+                : TimeSpan.FromSeconds(1));
             acknowledgement.SetResult();
             await source.ReconnectCompleted.Task.WaitAsync(EventTimeout);
 
@@ -543,20 +764,28 @@ public class SubjectSourceBaseReconnectTests
         new PropertyReference(person, nameof(Person.LastName)).SetSource(source);
 
         await source.StartAsync(CancellationToken.None);
-
-        // Connected once a probe write reaches the source, and quiet once the last probe has as well.
-        var probe = 0;
-        await AsyncTestHelpers.WaitUntilAsync(() =>
+        try
         {
-            person.LastName = "P" + probe++;
-            return source.WriteLog.Any(entry => entry.StartsWith("LastName=P", StringComparison.Ordinal));
-        }, timeout: EventTimeout, message: "The change processor did not start.");
+            // Connected once a probe write reaches the source, and quiet once the last probe has as well.
+            var probe = 0;
+            await AsyncTestHelpers.WaitUntilAsync(() =>
+            {
+                person.LastName = "P" + probe++;
+                return source.WriteLog.Any(entry => entry.StartsWith("LastName=P", StringComparison.Ordinal));
+            }, timeout: EventTimeout, message: "The change processor did not start.");
 
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => person.FirstName == "S0" && source.State == SourceState.Synchronized &&
-                  Equals(source.GetServerValue(nameof(Person.LastName)), person.LastName),
-            timeout: EventTimeout,
-            message: "The initial connect did not settle.");
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => person.FirstName == "S0" && source.State == SourceState.Synchronized &&
+                      Equals(source.GetServerValue(nameof(Person.LastName)), person.LastName),
+                timeout: EventTimeout,
+                message: "The initial connect did not settle.");
+        }
+        catch
+        {
+            await source.StopAsync(CancellationToken.None);
+            source.Dispose();
+            throw;
+        }
 
         return (person, source);
     }
@@ -602,8 +831,9 @@ public class SubjectSourceBaseReconnectTests
         private volatile bool _transportUp;
         private int _reconnectCount;
         private int _listenCount;
+        private int _cancelledWriteCount;
         private TaskCompletionSource? _loadGate;
-        private (string Property, object? Value, TaskCompletionSource Acknowledgement)? _stall;
+        private (string Property, object? Value, TaskCompletionSource Acknowledgement, bool ObserveCancellation)? _stall;
 
         public ReconnectingSource(
             Person subject,
@@ -636,6 +866,12 @@ public class SubjectSourceBaseReconnectTests
         /// <summary>Runs inside the next load's apply action, after the loaded values were applied.</summary>
         public Action? AfterLoadApplied { get; set; }
 
+        /// <summary>Claims both properties inside the load's apply action, after the values, as the WebSocket client does.</summary>
+        public bool ClaimOwnershipInLoadApply { get; init; }
+
+        /// <summary>How long every load takes before it returns.</summary>
+        public TimeSpan LoadDelay { get; init; }
+
         public bool TransportUp
         {
             get => _transportUp;
@@ -643,6 +879,9 @@ public class SubjectSourceBaseReconnectTests
         }
 
         public int ReconnectCount => Volatile.Read(ref _reconnectCount);
+
+        /// <summary>How many stalled writes observed their cancellation and failed.</summary>
+        public int CancelledWriteCount => Volatile.Read(ref _cancelledWriteCount);
 
         public IReadOnlyList<string> WriteLog
         {
@@ -681,6 +920,12 @@ public class SubjectSourceBaseReconnectTests
         /// <summary>A second outage detected while the first reconnect is still loading.</summary>
         public void StartBufferingAgain() => _propertyWriter!.StartBuffering();
 
+        public void ClaimOwnership()
+        {
+            new PropertyReference(_subject, nameof(Person.FirstName)).SetSource(this);
+            new PropertyReference(_subject, nameof(Person.LastName)).SetSource(this);
+        }
+
         public TaskCompletionSource BlockNextLoad()
         {
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -690,14 +935,15 @@ public class SubjectSourceBaseReconnectTests
 
         /// <summary>
         /// Makes the next transport write of <paramref name="value"/> to <paramref name="propertyName"/> store the
-        /// value and then wait for the returned acknowledgement, ignoring cancellation.
+        /// value and then wait for the returned acknowledgement. The wait ignores cancellation unless
+        /// <paramref name="observeCancellation"/> is set, in which case a cancelled write fails.
         /// </summary>
-        public TaskCompletionSource StallWrite(string propertyName, object? value)
+        public TaskCompletionSource StallWrite(string propertyName, object? value, bool observeCancellation = false)
         {
             var acknowledgement = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             lock (_gate)
             {
-                _stall = (propertyName, value, acknowledgement);
+                _stall = (propertyName, value, acknowledgement, observeCancellation);
             }
 
             return acknowledgement;
@@ -770,6 +1016,11 @@ public class SubjectSourceBaseReconnectTests
                 await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
 
+            if (LoadDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(LoadDelay, cancellationToken).ConfigureAwait(false);
+            }
+
             KeyValuePair<string, object?>[] snapshot;
             lock (_gate)
             {
@@ -794,6 +1045,11 @@ public class SubjectSourceBaseReconnectTests
                     new PropertyReference(_subject, propertyName).SetValueFromSource(this, null, null, value);
                 }
 
+                if (ClaimOwnershipInLoadApply)
+                {
+                    ClaimOwnership();
+                }
+
                 afterApplied?.Invoke();
             };
         }
@@ -807,7 +1063,7 @@ public class SubjectSourceBaseReconnectTests
             }
 
             var written = changes.ToArray();
-            TaskCompletionSource? acknowledgement = null;
+            (TaskCompletionSource Acknowledgement, bool ObserveCancellation)? stalled = null;
             foreach (var change in written)
             {
                 var propertyName = change.Property.Name;
@@ -820,15 +1076,30 @@ public class SubjectSourceBaseReconnectTests
                     if (_stall is { } stall && stall.Property == propertyName && Equals(stall.Value, value))
                     {
                         _stall = null;
-                        acknowledgement = stall.Acknowledgement;
+                        stalled = (stall.Acknowledgement, stall.ObserveCancellation);
                     }
                 }
             }
 
-            if (acknowledgement is not null)
+            if (stalled is { } pending)
             {
                 WriteStalled.TrySetResult();
-                await acknowledgement.Task.ConfigureAwait(false);
+                if (pending.ObserveCancellation)
+                {
+                    try
+                    {
+                        await pending.Acknowledgement.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException exception)
+                    {
+                        Interlocked.Increment(ref _cancelledWriteCount);
+                        return WriteResult.Failure(changes, exception);
+                    }
+                }
+                else
+                {
+                    await pending.Acknowledgement.Task.ConfigureAwait(false);
+                }
             }
 
             if (_echoWrites)
