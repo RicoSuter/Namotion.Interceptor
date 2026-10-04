@@ -541,8 +541,8 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
 
         if (owned is not null)
         {
-            // Collapsed here as well, in one pass: the queue collapses each change against what it already
-            // holds by scanning it, and a drain can hand it thousands of changes to a few properties.
+            // Collapsed before parking: a drain can hand the queue thousands of changes to a few
+            // properties, and the queue collapses only once it has overflowed.
             WriteRetryQueue.Enqueue(CollapsePerProperty(owned.ToArray()).ToArray());
         }
     }
@@ -554,15 +554,9 @@ public abstract class SubjectSourceBase : SubjectConnectorBase, ISubjectSource
     /// Reconciliation classifies each change against the live value and mutates that value when it
     /// restores, so two writes to one property have to be judged as one. Left separate, an older
     /// write can match the live value, get restored, and thereby make the newer write look diverged,
-    /// which drops it: the older write would win over the newer one.
-    /// <para>
-    /// Both changes are writes to the same property and therefore to the same subject, so their
-    /// revisions are comparable. A change carrying revision 0 was built outside a terminal write and
-    /// orders against nothing, so capture order decides between those and the survivor carries no
-    /// revision either, matching the flush-path collapse in <c>ChangeMerger</c> on unordered changes. The
-    /// two still differ on which old value survives when every revision is ordered, which the delivery
-    /// contract calls best effort.
-    /// </para>
+    /// which drops it: the older write would win over the newer one. The queue collapses only when it
+    /// overflows, and a failed write is requeued uncollapsed, so the drained changes are not one per
+    /// property yet.
     /// </remarks>
     private static List<SubjectPropertyChange> CollapsePerProperty(SubjectPropertyChange[] changes)
     {
