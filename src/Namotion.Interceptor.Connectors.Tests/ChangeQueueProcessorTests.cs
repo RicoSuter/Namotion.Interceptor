@@ -423,7 +423,7 @@ public class ChangeQueueProcessorTests
         }
 
         // Act
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = new CancellationTokenSource(TestTimeout);
         var processing = processor.ProcessAsync(cancellation.Token);
 
         // The buffered path does not await between dequeues, so an empty subscription means the last
@@ -835,7 +835,7 @@ public class ChangeQueueProcessorTests
             logger: NullLogger.Instance,
             deliveryRule: ChangeDeliveryRule.SourceValuesMayBeStale);
 
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = new CancellationTokenSource(TestTimeout);
         var processing = processor.ProcessAsync(cancellation.Token);
 
         // Act: v1 commits and is held before it can enqueue, so it is dequeued after v2 superseded it.

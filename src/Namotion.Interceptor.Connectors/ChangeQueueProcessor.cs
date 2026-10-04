@@ -359,7 +359,7 @@ public class ChangeQueueProcessor : IDisposable
 
                     if (periodicTimer is null)
                     {
-                        // Commit order, not enqueue order, decides, for every delivery rule; see ChangeDeliveryFilter.
+                        // Commit order, not enqueue order, decides delivery; see ChangeDeliveryFilter.
                         if (!ChangeDeliveryFilter.TryAcceptForDelivery(in change, _deliveryRule))
                         {
                             continue;
