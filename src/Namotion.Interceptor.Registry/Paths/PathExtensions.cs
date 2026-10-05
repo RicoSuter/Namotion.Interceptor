@@ -22,8 +22,8 @@ public static class PathExtensions
     private const int CycleDetectionDepthThreshold = 256;
 
     /// <summary>
-    /// Parses a path string into segments with their index text. Empty segments are skipped. The container a
-    /// segment addresses decides how its index text is typed, see <see cref="TryResolvePathSegment"/>.
+    /// Parses a path string into segments with their index text. Empty segments are skipped. The resolvers type
+    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath"/>.
     /// </summary>
     /// <exception cref="FormatException">The path is malformed.</exception>
     /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
@@ -36,7 +36,7 @@ public static class PathExtensions
     /// </summary>
     /// <param name="pathProvider">The path provider defining the separator and index characters.</param>
     /// <param name="path">The path to parse.</param>
-    /// <param name="segments">The segments, or null when the path is malformed.</param>
+    /// <param name="segments">The segment names with their index as unescaped key text, or null when the path is malformed.</param>
     /// <param name="error">The reason and position when the path is malformed, otherwise null.</param>
     /// <returns>True when the path is well formed.</returns>
     /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
@@ -45,7 +45,32 @@ public static class PathExtensions
         string path,
         [NotNullWhen(true)] out List<(string segment, string? index)>? segments,
         [NotNullWhen(false)] out string? error)
-        => PathSyntax.TryParse(pathProvider, path, out segments, out error);
+    {
+        var characters = pathProvider.GetCharacters();
+        var result = new List<(string segment, string? index)>();
+        if (!string.IsNullOrEmpty(path))
+        {
+            var position = 0;
+            while (PathSyntax.SkipToSegment(characters, path, ref position))
+            {
+                if (!PathSyntax.TryReadSegment(characters, path, ref position, out var segment, out var syntaxError))
+                {
+                    segments = null;
+                    error = PathSyntax.FormatError(syntaxError, position, characters, path);
+                    return false;
+                }
+
+                var index = segment.HasIndex
+                    ? PathSyntax.UnescapeIndex(segment.GetRawIndex(path), characters.IndexClose)
+                    : null;
+                result.Add((segment.GetName(path), index));
+            }
+        }
+
+        segments = result;
+        error = null;
+        return true;
+    }
 
     /// <summary>
     /// Tries to get a property from a path starting at the given subject.
@@ -54,8 +79,10 @@ public static class PathExtensions
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
     /// <returns>
-    /// The property and the typed key of its last segment (see <see cref="TryResolvePathSegment"/>), or null when
-    /// the path is malformed or not found.
+    /// The property and the key of its last segment, or null when the path is malformed or not found. The key is
+    /// the segment's index, or its name when the segment is an [InlinePaths] key: the collection position, or the
+    /// dictionary key typed to the dictionary's key type, also when no entry exists at it. For a key type without
+    /// a parse rule and no matching entry, the key text. Null when the last segment carries no key.
     /// </returns>
     /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
@@ -92,53 +119,62 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Resolves one parsed path segment on a subject: the property it names and, when the segment carries a key
-    /// (an index, or an [InlinePaths] key written as the segment itself), the typed key and the subject stored at it.
+    /// Resolves one segment of <paramref name="path"/> on a subject: the property it names and, when the
+    /// segment carries a key (an index, or an [InlinePaths] key written as the segment itself), the typed key and
+    /// the subject stored at it. False when no property matches or the key text is not a key of the property's container.
     /// </summary>
-    /// <param name="pathProvider">The path provider to use.</param>
-    /// <param name="subject">The subject the segment is resolved on.</param>
-    /// <param name="segment">The segment text.</param>
-    /// <param name="index">The segment's index text, or null.</param>
-    /// <param name="property">The property the segment names.</param>
-    /// <param name="key">
-    /// The collection position, or the dictionary key typed to the dictionary's key type, also when no entry exists
-    /// at it. For a key type without a parse rule and no matching entry, the index text. Null when the segment
-    /// carries no key.
-    /// </param>
-    /// <param name="child">The subject at <paramref name="key"/>, or null when there is no key or nothing is stored there.</param>
-    /// <returns>False when no property matches the segment or the index text is not a key of that property's container.</returns>
-    public static bool TryResolvePathSegment(
+    internal static bool TryResolveSegment(
         this PathProviderBase pathProvider,
         RegisteredSubject subject,
-        string segment,
-        string? index,
+        string path,
+        PathCharacters characters,
+        PathSegment segment,
         [NotNullWhen(true)] out RegisteredSubjectProperty? property,
         out object? key,
         out IInterceptorSubject? child)
     {
         key = null;
         child = null;
-        property = pathProvider.TryGetPropertyFromSegment(subject, segment);
+        var name = segment.GetName(path);
+        property = pathProvider.TryGetPropertyFromSegment(subject, name);
         if (property is null)
         {
             return false;
         }
 
-        var isInlinePathsKey = IsInlinePathsKey(pathProvider, subject, property, segment);
-        if (isInlinePathsKey && index is not null)
+        var isInlinePathsKey = IsInlinePathsKey(pathProvider, subject, property, name);
+        if (isInlinePathsKey && segment.HasIndex)
         {
             // The writer never emits a bare inline key followed by an index, so a wrong name is not accepted.
             property = null;
             return false;
         }
 
-        var keyText = index ?? (isInlinePathsKey ? segment : null);
-        if (keyText is null)
+        bool resolved;
+        if (segment.HasIndex)
+        {
+            var rawIndex = segment.GetRawIndex(path);
+            if (rawIndex.Contains(characters.IndexClose))
+            {
+                var text = PathSyntax.UnescapeIndex(rawIndex, characters.IndexClose);
+                resolved = PathIndexResolver.TryResolve(property, text, text, out key, out child);
+            }
+            else
+            {
+                resolved = PathIndexResolver.TryResolve(property, rawIndex, null, out key, out child);
+            }
+        }
+        else if (isInlinePathsKey)
+        {
+            // A name is literal text: a doubled closing bracket in it is two characters, not an escape.
+            resolved = PathIndexResolver.TryResolve(property, name, name, out key, out child);
+        }
+        else
         {
             return true;
         }
 
-        if (!PathIndexResolver.TryResolve(property, keyText, out key, out child))
+        if (!resolved)
         {
             property = null;
             return false;
@@ -166,38 +202,42 @@ public static class PathExtensions
         out object? index,
         out IInterceptorSubject? child)
     {
-        property = null;
         index = null;
         child = null;
-        if (!pathProvider.TryParsePath(path, out var segments, out _) || segments.Count == 0)
+        var characters = pathProvider.GetCharacters();
+        var position = 0;
+        if (string.IsNullOrEmpty(path) || !PathSyntax.SkipToSegment(characters, path, ref position))
         {
+            property = null;
             return false;
         }
 
+        // Segments are read while resolving: a malformed tail fails the walk, which has no side effects.
         var currentSubject = rootSubject;
-        for (var i = 0; i < segments.Count; i++)
+        while (true)
         {
-            var (segment, indexText) = segments[i];
-            if (!pathProvider.TryResolvePathSegment(currentSubject, segment, indexText, out property, out index, out child))
+            if (!PathSyntax.TryReadSegment(characters, path, ref position, out var segment, out _) ||
+                !pathProvider.TryResolveSegment(currentSubject, path, characters, segment, out property, out index, out child))
             {
+                property = null;
                 return false;
             }
 
-            if (i < segments.Count - 1)
+            if (!PathSyntax.SkipToSegment(characters, path, ref position))
             {
-                var next = index is not null ? child : property.GetValue() as IInterceptorSubject;
-                var registered = next?.TryGetRegisteredSubject();
-                if (registered is null)
-                {
-                    property = null;
-                    return false;
-                }
-
-                currentSubject = registered;
+                return true;
             }
-        }
 
-        return property is not null;
+            var next = index is not null ? child : property.GetValue() as IInterceptorSubject;
+            var registered = next?.TryGetRegisteredSubject();
+            if (registered is null)
+            {
+                property = null;
+                return false;
+            }
+
+            currentSubject = registered;
+        }
     }
 
     /// <summary>
@@ -262,7 +302,7 @@ public static class PathExtensions
             return null;
         }
 
-        PathSyntax.ValidateCharacters(pathProvider);
+        var characters = pathProvider.GetCharacters();
 
         var frames = PooledFrames.Rent();
         try
@@ -283,7 +323,7 @@ public static class PathExtensions
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))
                 {
-                    if (!TryAppendInlineKey(builder, pathProvider, prop, index))
+                    if (!TryAppendInlineKey(builder, pathProvider, characters, prop, index))
                     {
                         return null;
                     }
@@ -294,12 +334,12 @@ public static class PathExtensions
                 var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
                 if (builder.Length > 0)
                 {
-                    builder.Append(pathProvider.PathSeparator);
+                    builder.Append(characters.Separator);
                 }
 
                 builder.Append(segment);
                 if (index is not null &&
-                    !PathSyntax.TryAppendIndex(builder, index, pathProvider.IndexOpen, pathProvider.IndexClose))
+                    !PathSyntax.TryAppendIndex(builder, index, characters.IndexOpen, characters.IndexClose))
                 {
                     // A key with empty text has no path.
                     return null;
@@ -315,7 +355,8 @@ public static class PathExtensions
     }
 
     private static bool TryAppendInlineKey(
-        StringBuilder builder, PathProviderBase pathProvider, RegisteredSubjectProperty property, object index)
+        StringBuilder builder, PathProviderBase pathProvider, PathCharacters characters,
+        RegisteredSubjectProperty property, object index)
     {
         var text = PathSyntax.FormatIndex(index);
         if (text is null)
@@ -325,11 +366,11 @@ public static class PathExtensions
 
         if (builder.Length > 0)
         {
-            builder.Append(pathProvider.PathSeparator);
+            builder.Append(characters.Separator);
         }
 
         var ownSegment = GetOwnSegment(pathProvider, property);
-        if (CanWriteBareInlineKey(pathProvider, property, text, ownSegment))
+        if (CanWriteBareInlineKey(pathProvider, characters, property, text, ownSegment))
         {
             builder.Append(text);
             return true;
@@ -342,7 +383,7 @@ public static class PathExtensions
         }
 
         builder.Append(ownSegment);
-        return PathSyntax.TryAppendIndex(builder, text, pathProvider.IndexOpen, pathProvider.IndexClose);
+        return PathSyntax.TryAppendIndex(builder, text, characters.IndexOpen, characters.IndexClose);
     }
 
     /// <summary>
@@ -350,8 +391,8 @@ public static class PathExtensions
     /// parses as one name, resolves to the inline property and is not that property's own segment.
     /// </summary>
     private static bool CanWriteBareInlineKey(
-        PathProviderBase pathProvider, RegisteredSubjectProperty property, string text, string ownSegment)
-        => text.AsSpan().IndexOfAny(pathProvider.PathSeparator, pathProvider.IndexOpen) < 0 &&
+        PathProviderBase pathProvider, PathCharacters characters, RegisteredSubjectProperty property, string text, string ownSegment)
+        => text.AsSpan().IndexOfAny(characters.Separator, characters.IndexOpen) < 0 &&
            text != ownSegment &&
            pathProvider.TryGetPropertyFromSegment(property.Parent, text)?.Name == property.Name;
 

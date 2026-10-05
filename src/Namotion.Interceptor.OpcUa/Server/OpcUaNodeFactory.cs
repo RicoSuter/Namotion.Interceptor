@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Server;
@@ -46,7 +47,8 @@ internal sealed class OpcUaNodeFactory
 
         if (mapping?.BrowseName is null)
         {
-            return new QualifiedName(name + (index is not null ? $"[{index}]" : string.Empty), namespaceIndex);
+            // Not a registry path, so no bracket escaping; the index is formatted invariantly like path keys.
+            return new QualifiedName(name + (index is not null ? $"[{PathExtensions.FormatPathIndex(index)}]" : string.Empty), namespaceIndex);
         }
 
         if (mapping.BrowseNamespaceUri is not null)

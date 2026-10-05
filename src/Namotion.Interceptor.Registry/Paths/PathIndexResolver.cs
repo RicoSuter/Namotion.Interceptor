@@ -33,9 +33,18 @@ internal static class PathIndexResolver
 
     private static readonly ConcurrentDictionary<Type, (KeyKind Kind, Type? KeyType)> KeyKinds = new();
 
+    /// <summary>
+    /// Types <paramref name="text"/> by the container <paramref name="property"/> holds.
+    /// </summary>
+    /// <param name="property">The collection or dictionary property.</param>
+    /// <param name="text">The key text, unescaped.</param>
+    /// <param name="textString"><paramref name="text"/> when it already is a string, so a string key reuses it; otherwise null.</param>
+    /// <param name="key">The typed key.</param>
+    /// <param name="child">The subject stored at the key, or null.</param>
     public static bool TryResolve(
         RegisteredSubjectProperty property,
-        string index,
+        ReadOnlySpan<char> text,
+        string? textString,
         [NotNullWhen(true)] out object? key,
         out IInterceptorSubject? child)
     {
@@ -43,7 +52,7 @@ internal static class PathIndexResolver
 
         if (property.IsSubjectCollection)
         {
-            if (!TryParsePosition(index, out var position))
+            if (!TryParsePosition(text, out var position))
             {
                 key = null;
                 return false;
@@ -62,10 +71,11 @@ internal static class PathIndexResolver
 
             if (kind == KeyKind.Unknown)
             {
-                key = index;
+                var keyText = textString ?? text.ToString();
+                key = keyText;
                 if (dictionary is not null)
                 {
-                    child = FindByKeyText(dictionary, index, out var matchedKey);
+                    child = FindByKeyText(dictionary, keyText, out var matchedKey);
                     if (matchedKey is not null)
                     {
                         key = matchedKey;
@@ -75,7 +85,7 @@ internal static class PathIndexResolver
                 return true;
             }
 
-            key = ParseKey(kind, keyType, index);
+            key = ParseKey(kind, keyType, text, textString);
             if (key is null)
             {
                 return false;
@@ -89,38 +99,38 @@ internal static class PathIndexResolver
         return false;
     }
 
-    private static bool TryParsePosition(string index, out int position)
+    private static bool TryParsePosition(ReadOnlySpan<char> text, out int position)
     {
         // Canonical digits only: a sign, whitespace or a leading zero is text the writer never emits.
-        if (index.Length > 1 && index[0] == '0')
+        if (text.Length > 1 && text[0] == '0')
         {
             position = 0;
             return false;
         }
 
-        return int.TryParse(index, NumberStyles.None, CultureInfo.InvariantCulture, out position);
+        return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out position);
     }
 
-    private static object? ParseKey(KeyKind kind, Type? keyType, string index) => kind switch
+    private static object? ParseKey(KeyKind kind, Type? keyType, ReadOnlySpan<char> text, string? textString) => kind switch
     {
-        KeyKind.String => index,
-        KeyKind.SByte => ParseInteger<sbyte>(index),
-        KeyKind.Byte => ParseInteger<byte>(index),
-        KeyKind.Int16 => ParseInteger<short>(index),
-        KeyKind.UInt16 => ParseInteger<ushort>(index),
-        KeyKind.Int32 => ParseInteger<int>(index),
-        KeyKind.UInt32 => ParseInteger<uint>(index),
-        KeyKind.Int64 => ParseInteger<long>(index),
-        KeyKind.UInt64 => ParseInteger<ulong>(index),
-        KeyKind.Guid => ParseGuid(index),
-        KeyKind.Enum => ParseEnum(keyType!, index),
+        KeyKind.String => textString ?? text.ToString(),
+        KeyKind.SByte => ParseInteger<sbyte>(text),
+        KeyKind.Byte => ParseInteger<byte>(text),
+        KeyKind.Int16 => ParseInteger<short>(text),
+        KeyKind.UInt16 => ParseInteger<ushort>(text),
+        KeyKind.Int32 => ParseInteger<int>(text),
+        KeyKind.UInt32 => ParseInteger<uint>(text),
+        KeyKind.Int64 => ParseInteger<long>(text),
+        KeyKind.UInt64 => ParseInteger<ulong>(text),
+        KeyKind.Guid => ParseGuid(text),
+        KeyKind.Enum => ParseEnum(keyType!, text),
         _ => null
     };
 
-    private static object? ParseInteger<T>(string index) where T : struct, IBinaryInteger<T>
+    private static object? ParseInteger<T>(ReadOnlySpan<char> text) where T : struct, IBinaryInteger<T>
     {
-        if (T.TryParse(index, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) &&
-            IsCanonical(value, index))
+        if (T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) &&
+            IsCanonical(value, text))
         {
             return value;
         }
@@ -128,15 +138,15 @@ internal static class PathIndexResolver
         return null;
     }
 
-    private static object? ParseGuid(string index)
-        => Guid.TryParse(index, out var value) && IsCanonical(value, index) ? value : null;
+    private static object? ParseGuid(ReadOnlySpan<char> text)
+        => Guid.TryParse(text, out var value) && IsCanonical(value, text) ? value : null;
 
-    private static object? ParseEnum(Type enumType, string index)
+    private static object? ParseEnum(Type enumType, ReadOnlySpan<char> text)
     {
         // The canonical check rejects numeric forms of named values and alias names, which the writer never emits.
-        if (Enum.TryParse(enumType, index, ignoreCase: false, out var value) &&
+        if (Enum.TryParse(enumType, text, ignoreCase: false, out var value) &&
             value is ISpanFormattable formattable &&
-            IsCanonical(formattable, index))
+            IsCanonical(formattable, text))
         {
             return value;
         }
@@ -144,12 +154,12 @@ internal static class PathIndexResolver
         return null;
     }
 
-    private static bool IsCanonical<T>(T value, string text) where T : ISpanFormattable
+    private static bool IsCanonical<T>(T value, ReadOnlySpan<char> text) where T : ISpanFormattable
     {
         Span<char> buffer = stackalloc char[64];
         return value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture)
             ? buffer[..written].SequenceEqual(text)
-            : value.ToString(null, CultureInfo.InvariantCulture) == text;
+            : value.ToString(null, CultureInfo.InvariantCulture).AsSpan().SequenceEqual(text);
     }
 
     private static IInterceptorSubject? FindByKeyText(object dictionary, string text, out object? matchedKey)

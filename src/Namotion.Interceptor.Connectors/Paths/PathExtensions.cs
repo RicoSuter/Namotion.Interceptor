@@ -1,4 +1,3 @@
-using System.Text;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -150,6 +149,7 @@ public static class PathExtensions
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
     /// <returns>The found subject properties with the typed key of their last segment; a malformed or unresolved path yields a null property, an empty path yields nothing.</returns>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromPaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> paths,
@@ -157,52 +157,46 @@ public static class PathExtensions
         ISubjectFactory? subjectFactory = null,
         bool useCache = true)
     {
+        // Keyed by the path text up to the end of a segment: the same text always parses the same way, so the key
+        // needs no escaping. Looked up by span so a hit allocates no key.
         var pathValueCache = useCache
             ? new Dictionary<string, (RegisteredSubjectProperty property, object? key, IInterceptorSubject? subject)>()
-            : null;
+                .GetAlternateLookup<ReadOnlySpan<char>>()
+            : default;
 
+        var characters = pathProvider.GetCharacters();
         foreach (var path in paths)
         {
-            if (!pathProvider.TryParsePath(path, out var segments, out _))
+            var position = 0;
+            if (string.IsNullOrEmpty(path) || !PathSyntax.SkipToSegment(characters, path, ref position))
+            {
+                continue;
+            }
+
+            // Segments are read while walking, so a malformed tail is only found on the way. Without a factory the
+            // walk has no side effects; with one it may create subjects, so the whole path is checked first.
+            if (subjectFactory is not null && !PathSyntax.IsWellFormed(characters, path))
             {
                 yield return (path, null, null);
                 continue;
             }
 
-            if (segments.Count == 0)
-            {
-                continue;
-            }
-
             var currentSubject = rootSubject;
-            StringBuilder? currentPath = pathValueCache is not null ? new StringBuilder() : null;
-            for (var i = 0; i < segments.Count; i++)
+            while (true)
             {
-                var (segment, indexText) = segments[i];
-                var isLastSegment = i == segments.Count - 1;
-
-                string? currentPathString = null;
-                if (pathValueCache is not null)
+                if (!PathSyntax.TryReadSegment(characters, path, ref position, out var segment, out _))
                 {
-                    // The canonical written form: names cannot contain the separator or brackets, and a doubled
-                    // closing bracket keeps every index unambiguous.
-                    if (currentPath!.Length > 0) currentPath.Append(pathProvider.PathSeparator);
-                    currentPath.Append(segment);
-                    if (indexText is not null)
-                    {
-                        currentPath
-                            .Append(pathProvider.IndexOpen)
-                            .Append(DoubleCharacter(indexText, pathProvider.IndexClose))
-                            .Append(pathProvider.IndexClose);
-                    }
-                    currentPathString = currentPath.ToString();
+                    yield return (path, null, null);
+                    break;
                 }
+
+                var isLastSegment = !PathSyntax.SkipToSegment(characters, path, ref position);
 
                 RegisteredSubjectProperty? property;
                 object? key;
                 IInterceptorSubject? nextSubject;
-                if (pathValueCache is not null &&
-                    pathValueCache.TryGetValue(currentPathString!, out var entry) &&
+                if (useCache &&
+                    pathValueCache.TryGetValue(path.AsSpan(0, segment.End), out var entry) &&
                     (isLastSegment || entry.subject is not null))
                 {
                     property = entry.property;
@@ -213,7 +207,7 @@ public static class PathExtensions
                 {
                     var registeredSubject = currentSubject.TryGetRegisteredSubject();
                     if (registeredSubject is null ||
-                        !pathProvider.TryResolvePathSegment(registeredSubject, segment, indexText, out property, out key, out var child) ||
+                        !pathProvider.TryResolveSegment(registeredSubject, path, characters, segment, out property, out key, out var child) ||
                         !pathProvider.IsPropertyIncluded(property))
                     {
                         yield return (path, null, null);
@@ -234,20 +228,19 @@ public static class PathExtensions
                         }
                     }
 
-                    if (pathValueCache is not null)
+                    if (useCache)
                     {
-                        pathValueCache[currentPathString!] = (property, key, nextSubject);
+                        pathValueCache[path.AsSpan(0, segment.End)] = (property, key, nextSubject);
                     }
                 }
 
                 if (isLastSegment)
                 {
                     yield return (path, property, key);
+                    break;
                 }
-                else
-                {
-                    currentSubject = nextSubject!;
-                }
+
+                currentSubject = nextSubject!;
             }
         }
     }
@@ -281,7 +274,4 @@ public static class PathExtensions
 
         return nextSubject;
     }
-
-    private static string DoubleCharacter(string text, char character)
-        => text.IndexOf(character) < 0 ? text : text.Replace(character.ToString(), new string(character, 2));
 }

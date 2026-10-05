@@ -59,6 +59,7 @@ public static class SubjectLookup
     /// fast path with <see cref="IEnumerable"/> fallback. An index outside the collection answers null.
     /// </summary>
     /// <remarks>
+    /// When the collection is mutated concurrently, the lookup may throw instead of answering null.
     /// The IList fast path is split into its own tiny method body so the JIT can inline
     /// it at every call site. The IEnumerable fallback is extracted into a separate
     /// non-inlined method to keep the entry point under the inlining size budget.

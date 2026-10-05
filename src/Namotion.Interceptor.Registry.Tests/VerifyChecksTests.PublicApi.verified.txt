@@ -1,5 +1,6 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Benchmark")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Registry.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
 namespace Namotion.Interceptor.Registry.Abstractions
@@ -187,7 +188,6 @@ namespace Namotion.Interceptor.Registry.Paths
         public static bool TryParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] [System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "segment",
                 "index"})] out System.Collections.Generic.List<System.ValueTuple<string, string?>>? segments, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
-        public static bool TryResolvePathSegment(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment, string? index, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, out object? key, out Namotion.Interceptor.IInterceptorSubject? child) { }
     }
     public abstract class PathProviderBase : Namotion.Interceptor.Registry.Paths.IPathProvider
     {

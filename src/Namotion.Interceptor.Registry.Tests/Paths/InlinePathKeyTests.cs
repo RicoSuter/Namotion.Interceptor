@@ -15,6 +15,7 @@ public class InlinePathKeyTests
     [InlineData("Name", "Children[Name].Name")]
     [InlineData("Children", "Children[Children].Name")]
     [InlineData("a]b", "a]b.Name")]
+    [InlineData("a]]b", "a]]b.Name")]
     [InlineData("a[b", "Children[a[b].Name")]
     public void WhenInlineKeyIsWritten_ThenPathRoundTrips(string key, string expectedPath)
     {

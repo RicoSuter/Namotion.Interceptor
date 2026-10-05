@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 
@@ -24,78 +23,131 @@ internal static class PathSyntax
         }
     }
 
-    public static bool TryParse(
-        PathProviderBase pathProvider,
-        string path,
-        [NotNullWhen(true)] out List<(string segment, string? index)>? segments,
-        [NotNullWhen(false)] out string? error)
+    /// <summary>
+    /// Moves <paramref name="position"/> past separators, which skips empty segments.
+    /// </summary>
+    /// <returns>True when a segment starts at <paramref name="position"/>, false at the end of the path.</returns>
+    public static bool SkipToSegment(PathCharacters characters, string path, ref int position)
     {
-        ValidateCharacters(pathProvider);
-
-        if (string.IsNullOrEmpty(path))
+        while (position < path.Length && path[position] == characters.Separator)
         {
-            segments = [];
-            error = null;
+            position++;
+        }
+
+        return position < path.Length;
+    }
+
+    /// <summary>
+    /// Reads the segment starting at <paramref name="position"/>, where <see cref="SkipToSegment"/> left it. The
+    /// segment points into <paramref name="path"/>, so reading one allocates nothing.
+    /// </summary>
+    /// <returns>
+    /// True with <paramref name="position"/> just past the segment, or false with <paramref name="position"/> at
+    /// the malformed text, see <see cref="FormatError"/>.
+    /// </returns>
+    public static bool TryReadSegment(
+        PathCharacters characters,
+        string path,
+        ref int position,
+        out PathSegment segment,
+        out PathSyntaxError error)
+    {
+        // Outside an index the closing bracket is an ordinary name character.
+        var nameStart = position;
+        var nameLength = path.AsSpan(nameStart).IndexOfAny(characters.Separator, characters.IndexOpen);
+        position = nameLength < 0 ? path.Length : nameStart + nameLength;
+        if (position == nameStart)
+        {
+            return Fail(PathSyntaxError.MissingName, out segment, out error);
+        }
+
+        if (position == path.Length || path[position] != characters.IndexOpen)
+        {
+            segment = new PathSegment(nameStart, -1, position);
+            error = PathSyntaxError.None;
             return true;
         }
 
-        var separator = pathProvider.PathSeparator;
-        var indexOpen = pathProvider.IndexOpen;
-        var indexClose = pathProvider.IndexClose;
-
-        var results = new List<(string segment, string? index)>();
-        var position = 0;
-        while (position < path.Length)
+        var openPosition = position;
+        if (!TrySkipIndex(path, ref position, characters.IndexClose))
         {
-            if (path[position] == separator)
-            {
-                // Empty segments (leading, trailing or doubled separators) are skipped.
-                position++;
-                continue;
-            }
-
-            // Outside an index the closing bracket is an ordinary name character.
-            var nameStart = position;
-            while (position < path.Length &&
-                   path[position] != separator &&
-                   path[position] != indexOpen)
-            {
-                position++;
-            }
-
-            if (position == nameStart)
-            {
-                return Fail("Missing segment name", position, path, out segments, out error);
-            }
-
-            var name = path.Substring(nameStart, position - nameStart);
-            string? index = null;
-
-            if (position < path.Length && path[position] == indexOpen)
-            {
-                var openPosition = position;
-                if (!TryReadIndex(path, ref position, indexClose, out index))
-                {
-                    return Fail($"Unclosed '{indexOpen}'", openPosition, path, out segments, out error);
-                }
-
-                if (index.Length == 0)
-                {
-                    return Fail("Empty index", openPosition, path, out segments, out error);
-                }
-
-                if (position < path.Length && path[position] != separator)
-                {
-                    return Fail($"Expected '{separator}' or end of path after index", position, path, out segments, out error);
-                }
-            }
-
-            results.Add((name, index));
+            position = openPosition;
+            return Fail(PathSyntaxError.UnclosedIndex, out segment, out error);
         }
 
-        segments = results;
-        error = null;
+        if (position == openPosition + 2)
+        {
+            position = openPosition;
+            return Fail(PathSyntaxError.EmptyIndex, out segment, out error);
+        }
+
+        if (position < path.Length && path[position] != characters.Separator)
+        {
+            return Fail(PathSyntaxError.ExpectedSeparator, out segment, out error);
+        }
+
+        segment = new PathSegment(nameStart, openPosition + 1, position);
+        error = PathSyntaxError.None;
         return true;
+    }
+
+    /// <summary>
+    /// Checks that <paramref name="path"/> is well formed without allocating.
+    /// </summary>
+    public static bool IsWellFormed(PathCharacters characters, string path)
+    {
+        var position = 0;
+        while (SkipToSegment(characters, path, ref position))
+        {
+            if (!TryReadSegment(characters, path, ref position, out _, out _))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Describes an error <see cref="TryReadSegment"/> reported at <paramref name="position"/>.
+    /// </summary>
+    public static string FormatError(PathSyntaxError error, int position, PathCharacters characters, string path)
+    {
+        var reason = error switch
+        {
+            PathSyntaxError.MissingName => "Missing segment name",
+            PathSyntaxError.UnclosedIndex => $"Unclosed '{characters.IndexOpen}'",
+            PathSyntaxError.EmptyIndex => "Empty index",
+            PathSyntaxError.ExpectedSeparator => $"Expected '{characters.Separator}' or end of path after index",
+            _ => throw new ArgumentOutOfRangeException(nameof(error), error, null)
+        };
+
+        return string.Create(CultureInfo.InvariantCulture, $"{reason} at position {position} in path '{path}'");
+    }
+
+    /// <summary>
+    /// Turns raw index text (as written in a path) into the key text it stands for.
+    /// </summary>
+    public static string UnescapeIndex(ReadOnlySpan<char> rawIndex, char indexClose)
+    {
+        // Raw index text holds the closing bracket only as a doubled pair, so the key text is never longer.
+        if (rawIndex.IndexOf(indexClose) < 0)
+        {
+            return rawIndex.ToString();
+        }
+
+        var buffer = rawIndex.Length <= 256 ? stackalloc char[rawIndex.Length] : new char[rawIndex.Length];
+        var written = 0;
+        for (var i = 0; i < rawIndex.Length; i++)
+        {
+            buffer[written++] = rawIndex[i];
+            if (rawIndex[i] == indexClose)
+            {
+                i++;
+            }
+        }
+
+        return new string(buffer[..written]);
     }
 
     public static string? FormatIndex(object index)
@@ -112,13 +164,21 @@ internal static class PathSyntax
 
     public static bool TryAppendIndex(StringBuilder builder, object index, char indexOpen, char indexClose)
     {
-        if (index is int position)
+        if (index is ISpanFormattable formattable)
         {
-            // Collection positions are the common case; formatting them on the stack avoids a string per segment.
-            Span<char> buffer = stackalloc char[11];
-            position.TryFormat(buffer, out var written, provider: CultureInfo.InvariantCulture);
-            AppendQuoted(builder, buffer[..written], indexOpen, indexClose);
-            return true;
+            // Formatted on the stack to avoid a string per segment; must produce the same text as FormatIndex,
+            // which the reader matches keys against and which a longer key falls back to.
+            Span<char> buffer = stackalloc char[64];
+            if (formattable.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture))
+            {
+                if (written == 0)
+                {
+                    return false;
+                }
+
+                AppendQuoted(builder, buffer[..written], indexOpen, indexClose);
+                return true;
+            }
         }
 
         var text = FormatIndex(index);
@@ -154,14 +214,12 @@ internal static class PathSyntax
     }
 
     /// <summary>
-    /// Reads the index text after the opening bracket at <paramref name="position"/>. On success
+    /// Skips the index text after the opening bracket at <paramref name="position"/>. On success
     /// <paramref name="position"/> is just past the closing bracket.
     /// </summary>
-    private static bool TryReadIndex(string path, ref int position, char indexClose, [NotNullWhen(true)] out string? index)
+    private static bool TrySkipIndex(string path, ref int position, char indexClose)
     {
         position++;
-        var start = position;
-        StringBuilder? builder = null;
         while (position < path.Length)
         {
             if (path[position] != indexClose)
@@ -172,34 +230,60 @@ internal static class PathSyntax
 
             if (position + 1 < path.Length && path[position + 1] == indexClose)
             {
-                // A doubled closing bracket is a literal one; keep the first and skip the second.
-                builder ??= new StringBuilder();
-                builder.Append(path, start, position + 1 - start);
+                // A doubled closing bracket is a literal one.
                 position += 2;
-                start = position;
                 continue;
             }
 
-            index = builder is null
-                ? path.Substring(start, position - start)
-                : builder.Append(path, start, position - start).ToString();
             position++;
             return true;
         }
 
-        index = null;
         return false;
     }
 
-    private static bool Fail(
-        string reason,
-        int position,
-        string path,
-        out List<(string segment, string? index)>? segments,
-        out string? error)
+    private static bool Fail(PathSyntaxError reason, out PathSegment segment, out PathSyntaxError error)
     {
-        segments = null;
-        error = string.Create(CultureInfo.InvariantCulture, $"{reason} at position {position} in path '{path}'");
+        segment = default;
+        error = reason;
         return false;
     }
 }
+
+/// <summary>
+/// A path segment as ranges of the path it was read from, so neither its name nor its index needs a string until
+/// a caller asks for one.
+/// </summary>
+/// <param name="NameStart">Start of the segment name in the path.</param>
+/// <param name="IndexStart">Start of the raw index text in the path (after the opening bracket), or -1 without an index.</param>
+/// <param name="End">The position just past the segment, after the closing bracket when there is an index.</param>
+internal readonly record struct PathSegment(int NameStart, int IndexStart, int End)
+{
+    public bool HasIndex => IndexStart >= 0;
+
+    public string GetName(string path)
+        => path.Substring(NameStart, (HasIndex ? IndexStart - 1 : End) - NameStart);
+
+    /// <summary>
+    /// The index text as written, with each closing bracket doubled. Only valid when <see cref="HasIndex"/>.
+    /// </summary>
+    public ReadOnlySpan<char> GetRawIndex(string path)
+        => path.AsSpan(IndexStart, End - 1 - IndexStart);
+}
+
+/// <summary>
+/// Why <see cref="PathSyntax.TryReadSegment"/> rejected a segment.
+/// </summary>
+internal enum PathSyntaxError
+{
+    None,
+    MissingName,
+    UnclosedIndex,
+    EmptyIndex,
+    ExpectedSeparator
+}
+
+/// <summary>
+/// A provider's path characters, read once per path instead of once per segment.
+/// </summary>
+internal readonly record struct PathCharacters(char Separator, char IndexOpen, char IndexClose);

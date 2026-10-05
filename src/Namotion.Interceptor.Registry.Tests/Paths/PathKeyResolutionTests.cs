@@ -251,4 +251,51 @@ public class PathKeyResolutionTests
         Assert.Same(child, subject);
         Assert.Same(child, property?.Property.Subject);
     }
+
+    [Fact]
+    public void WhenCollectionPositionIsResolved_ThenOnlyTheNameAndTheBoxedPositionAreAllocated()
+    {
+        // Arrange
+        var context = CreateContext();
+        var container = new TestKeyedContainer(context)
+        {
+            Items = new List<TestItem> { new(context) { Value = "a" }, new(context) { Value = "b" } }
+        };
+        var root = container.TryGetRegisteredSubject()!;
+        var boxedPositionSize = 3 * IntPtr.Size;
+        var pathWithoutIndex = "Items.";
+
+        // Act
+        // The trailing separator makes the name a substring as in the indexed path; a name spanning the whole
+        // path is the path string itself.
+        var nameSize = MeasureAllocatedBytes(() => pathWithoutIndex.Substring(0, 5).Length == 5);
+        var withoutIndex = MeasureAllocatedBytes(() => Resolve(root, pathWithoutIndex));
+        var withIndex = MeasureAllocatedBytes(() => Resolve(root, "Items[1]"));
+
+        // Assert
+        Assert.Equal(nameSize, withoutIndex);
+        Assert.Equal(boxedPositionSize, withIndex - withoutIndex);
+    }
+
+    private static bool Resolve(RegisteredSubject root, string path)
+        => DefaultPathProvider.Instance.TryGetPropertyFromPath(root, path) is not null;
+
+    /// <summary>
+    /// The smallest allocation of several calls, so one-time warm-up allocations do not count.
+    /// </summary>
+    private static long MeasureAllocatedBytes(Func<bool> action)
+    {
+        var minimum = long.MaxValue;
+        for (var i = 0; i < 10; i++)
+        {
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            var succeeded = action();
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.True(succeeded);
+            minimum = Math.Min(minimum, allocated);
+        }
+
+        return minimum;
+    }
 }

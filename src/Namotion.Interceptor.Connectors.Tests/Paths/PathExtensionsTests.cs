@@ -519,6 +519,49 @@ public class PathExtensionsTests
     }
 
     [Fact]
+    public void WhenPathHasMalformedTail_ThenTryGetPropertyFromPathReturnsNull()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var (property, index) = person.TryGetPropertyFromPath("Father.FirstName[x", DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(index);
+    }
+
+    [Fact]
+    public void WhenPathWithFactoryHasMalformedTail_ThenNoSubjectIsCreated()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        person.Mother = null;
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath(
+            "Mother.FirstName[x", DefaultPathProvider.Instance, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(person.Mother);
+    }
+
+    [Fact]
+    public void WhenCollectionPositionIsOutOfRange_ThenTryGetPropertyFromPathReturnsNull()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Children[99].FirstName", DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.Null(property);
+    }
+
+    [Fact]
     public void WhenKeyEmbedsPathStructure_ThenCachedLookupKeepsItApart()
     {
         // Arrange
@@ -538,6 +581,27 @@ public class PathExtensionsTests
         Assert.Equal(2, results.Count);
         Assert.Same(embedded, results[1].property?.Subject);
         Assert.Equal("FirstName", results[1].property?.Name);
+    }
+
+    [Fact]
+    public void WhenCachedPrefixEndsInEscapedBracket_ThenLaterPathResolvesThroughIt()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var target = new Person { FirstName = "Target" };
+        person.Relationships = new Dictionary<string, Person> { ["a]b"] = target };
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(["Relationships[a]]b]", "Relationships[a]]b].FirstName"], DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Equal("Relationships", results[0].property?.Name);
+        Assert.Equal("a]b", results[0].index);
+        Assert.Equal("FirstName", results[1].property?.Name);
+        Assert.Same(target, results[1].property?.Subject);
     }
 
     [Theory]
@@ -626,6 +690,24 @@ public class PathExtensionsTests
         // Assert
         Assert.Equal(2, results.Count);
         Assert.Equal("Relationships", results[0].property?.Name);
+        Assert.Null(results[1].property);
+    }
+
+    [Fact]
+    public void WhenCachedNullReferenceIsContinuedByLaterPath_ThenLookupReportsNotFound()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        person.Mother = null;
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(["Mother", "Mother.FirstName"], DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Equal("Mother", results[0].property?.Name);
         Assert.Null(results[1].property);
     }
 

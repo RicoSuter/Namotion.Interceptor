@@ -141,6 +141,22 @@ public class PathParsingTests
         Assert.Equal(new (string segment, string? index)[] { ("notes]v2", "x"), ("a]", null) }, segments!);
     }
 
+    [Fact]
+    public void WhenEscapedIndexIsLong_ThenTryParsePathUnescapesIt()
+    {
+        // Arrange
+        var pathProvider = DefaultPathProvider.Instance;
+        var key = new string('k', 300) + "]" + new string('k', 300);
+        var path = "items[" + key.Replace("]", "]]") + "].value";
+
+        // Act
+        var parsed = pathProvider.TryParsePath(path, out var segments, out var error);
+
+        // Assert
+        Assert.True(parsed, error);
+        Assert.Equal(new (string segment, string? index)[] { ("items", key), ("value", null) }, segments!);
+    }
+
     [Theory]
     [InlineData('[', '[', ']')]
     [InlineData(']', '[', ']')]
@@ -151,6 +167,17 @@ public class PathParsingTests
         var pathProvider = new CollidingPathProvider(separator, indexOpen, indexClose);
 
         // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => pathProvider.TryParsePath("a", out _, out _));
+    }
+
+    [Fact]
+    public void WhenProviderCharactersCollide_ThenEveryCallThrows()
+    {
+        // Arrange
+        var pathProvider = new CollidingPathProvider('.', '[', '[');
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => pathProvider.TryParsePath("a", out _, out _));
         Assert.Throws<InvalidOperationException>(() => pathProvider.TryParsePath("a", out _, out _));
     }
 }

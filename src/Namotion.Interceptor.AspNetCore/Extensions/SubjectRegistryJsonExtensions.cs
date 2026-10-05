@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Parent;
 
 namespace Namotion.Interceptor.AspNetCore.Extensions;
@@ -45,8 +46,9 @@ public static class SubjectRegistryJsonExtensions
                 }
 
                 var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
+                // Not a registry path, so no bracket escaping; the index is formatted invariantly like path keys.
                 path = propertyName +
-                    (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
+                    (parent.Index is not null ? $"[{PathExtensions.FormatPathIndex(parent.Index)}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
                 var subjectParents = parent.Property.Subject.GetParents();
@@ -78,8 +80,9 @@ public static class SubjectRegistryJsonExtensions
                 }
 
                 var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
+                // Not a registry path, so no bracket escaping; the index is formatted invariantly like path keys.
                 path = propertyName +
-                    (parent.Index is not null ? $"[{parent.Index}]" : string.Empty) +
+                    (parent.Index is not null ? $"[{PathExtensions.FormatPathIndex(parent.Index)}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
 
                 var parentSubjects = parent.Property.Subject.GetParents();
