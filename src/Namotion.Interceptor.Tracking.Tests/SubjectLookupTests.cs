@@ -11,6 +11,21 @@ namespace Namotion.Interceptor.Tracking.Tests;
 
 public class SubjectLookupTests
 {
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(3)]
+    public void WhenIndexIsOutsideList_ThenReturnsNull(int index)
+    {
+        // Arrange
+        var list = new List<Person> { new(), new(), new() };
+
+        // Act
+        var result = SubjectLookup.FindSubjectInCollection(list, index);
+
+        // Assert
+        Assert.Null(result);
+    }
+
     [Fact]
     public void WhenValueIsList_ThenReturnsSubjectAtIndex()
     {

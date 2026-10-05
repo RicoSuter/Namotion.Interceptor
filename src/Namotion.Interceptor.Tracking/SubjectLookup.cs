@@ -56,7 +56,7 @@ public static class SubjectLookup
     /// <summary>
     /// Finds a single subject at the given <paramref name="index"/> inside
     /// a collection <paramref name="value"/>, using <see cref="IList"/>
-    /// fast path with <see cref="IEnumerable"/> fallback.
+    /// fast path with <see cref="IEnumerable"/> fallback. An index outside the collection answers null.
     /// </summary>
     /// <remarks>
     /// The IList fast path is split into its own tiny method body so the JIT can inline
@@ -67,7 +67,7 @@ public static class SubjectLookup
     public static IInterceptorSubject? FindSubjectInCollection(object value, int index)
     {
         if (value is IList list)
-            return list[index] as IInterceptorSubject;
+            return (uint)index < (uint)list.Count ? list[index] as IInterceptorSubject : null;
 
         return FindSubjectInCollectionSlow(value, index);
     }

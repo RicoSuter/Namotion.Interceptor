@@ -842,6 +842,27 @@ With `[InlinePaths]`:
 - Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
 - Built into `PathProviderBase.TryGetPropertyFromSegment`
 
+#### Path Syntax
+
+A path is a sequence of segments joined by the provider's `PathSeparator` (default `.`). A segment names a property and may carry an index between `IndexOpen` and `IndexClose` (default `[` and `]`) that addresses a collection position or a dictionary key:
+
+```text
+Machines[CNC01].Status
+Devices[192.168.0.1].Status
+Items[a]]b].Value
+```
+
+- Inside an index every character is literal, including the separator and `[`, except `]`, which is written twice: `Items[a]]b]` addresses the key `a]b`. `TryGetPath` applies the doubling, so the index text it writes reads back as the same text.
+- Keys are written with the invariant culture, so a `double` key `1.5` is `[1.5]` on every machine.
+- A key with empty text has no path: `TryGetPath` returns null for it.
+- Empty segments are skipped, so with a `/` separator `/a/b`, `a//b` and `a/b/` all read as `a/b`.
+- A malformed path makes `ParsePath` throw `FormatException`: an unclosed `[`, an empty index `[]`, a segment without a name, or anything after an index other than the separator. `TryParsePath` returns the reason and position instead, and the resolvers report a malformed path as not found.
+- Outside an index `]` is an ordinary character, so a segment name such as `notes]v2` needs no escaping.
+- An index is read as an `int` when its text is an integer and as a string otherwise. A key of another type, or a string key whose text is an integer, does not resolve from a path yet.
+- `PathSeparator`, `IndexOpen` and `IndexClose` must be three different characters.
+- Segments from `[Path]` attributes or `TryGetPropertySegment` are written as is. A separator inside one nests the path (`[Path("mqtt", "metrics/Humidity")]`), and they must not contain `[`.
+- `[InlinePaths]` keys are written as bare segments, so they must not contain the separator or `[`.
+
 ### Updates
 
 The `Namotion.Interceptor.Connectors.Updates` namespace contains serialization infrastructure for subject state:

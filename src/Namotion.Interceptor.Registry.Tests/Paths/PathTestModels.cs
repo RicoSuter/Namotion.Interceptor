@@ -59,3 +59,14 @@ public partial class TestBroadContainer
         Items = new Dictionary<string, TestItem>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestDoubleKeyedContainer
+{
+    public partial Dictionary<double, TestItem> Items { get; set; }
+
+    public TestDoubleKeyedContainer()
+    {
+        Items = new Dictionary<double, TestItem>();
+    }
+}
