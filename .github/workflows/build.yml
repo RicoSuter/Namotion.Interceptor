@@ -335,6 +335,95 @@ jobs:
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
+  container-build:
+    timeout-minutes: 20
+    needs: [ changes ]
+    if: needs.changes.outputs.homeblaze == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build image archive
+        run: |
+          dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-x64 /t:PublishContainer `
+            -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke `
+            -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz
+
+      - name: Smoke test image
+        run: |
+          docker load -i "${{ runner.temp }}/homeblaze.tar.gz"
+          $data = New-Item -ItemType Directory -Path (Join-Path "${{ runner.temp }}" "homeblaze-data")
+          docker run -d --name homeblaze -p 8080:8080 -v "$($data.FullName):/data" homeblaze:smoke
+          $healthy = $false
+          for ($attempt = 0; $attempt -lt 60 -and -not $healthy; $attempt++) {
+            try { $healthy = (Invoke-WebRequest -Uri http://localhost:8080/health -UseBasicParsing).StatusCode -eq 200 } catch { Start-Sleep -Seconds 2 }
+          }
+          docker logs homeblaze
+          if (-not $healthy) { throw "HomeBlaze did not become healthy" }
+          foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
+            if (-not (Test-Path (Join-Path $data.FullName $path))) { throw "Missing seeded path $path" }
+          }
+          $historyCreated = $false
+          for ($attempt = 0; $attempt -lt 30 -and -not $historyCreated; $attempt++) {
+            $historyCreated = Test-Path (Join-Path $data.FullName "History/Sqlite")
+            if (-not $historyCreated) { Start-Sleep -Seconds 1 }
+          }
+          if (-not $historyCreated) { throw "SQLite history folder was not created" }
+
+  container-publish:
+    timeout-minutes: 30
+    if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    needs: [ container-build, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          if ("${{ github.event_name }}" -eq "release") {
+            $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
+            $parts = $version.Split('.')
+            $tags = "$version;$($parts[0]).$($parts[1]);latest"
+            $informationalVersion = $version
+          } else {
+            $short = "${{ github.sha }}".Substring(0, 7)
+            $tags = "edge;sha-$short"
+            $informationalVersion = "edge+$short"
+          }
+          echo "TAGS=$tags" >> $env:GITHUB_OUTPUT
+          echo "INFORMATIONAL_VERSION=$informationalVersion" >> $env:GITHUB_OUTPUT
+
+      # Tags go through an environment variable because MSBuild splits semicolons on the command line.
+      # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version.
+      - name: Publish multi-arch image
+        env:
+          ContainerImageTags: ${{ steps.tags.outputs.TAGS }}
+        run: |
+          dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release /t:PublishContainer `
+            -p:ContainerRegistry=ghcr.io -p:ContainerRepository=ricosuter/homeblaze `
+            -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }}
+
   pack:
     timeout-minutes: 15
     if: github.event_name == 'release'
