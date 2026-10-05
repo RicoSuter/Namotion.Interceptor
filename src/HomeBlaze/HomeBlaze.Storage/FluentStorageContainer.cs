@@ -150,9 +150,9 @@ public partial class FluentStorageContainer :
             throw new InvalidOperationException("ConnectionString is not configured");
 
         Status = StorageStatus.Initializing;
-        _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
         try
         {
+            _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
             _client = StorageType switch
             {
                 "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(_storageDirectory!),

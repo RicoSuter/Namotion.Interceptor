@@ -17,7 +17,7 @@ public class FluentStorageContainerPathTests : IDisposable
         var filesDirectory = Directory.CreateDirectory(Path.Combine(_dataDirectory.FullName, "Files"));
         File.WriteAllText(Path.Combine(filesDirectory.FullName, "notes.txt"), "hello");
 
-        var storage = CreateStorage(withDataDirectory: true);
+        using var storage = CreateStorage(withDataDirectory: true);
         storage.ConnectionString = "Files";
         storage.EnableFileWatching = false;
 
@@ -27,7 +27,6 @@ public class FluentStorageContainerPathTests : IDisposable
         // Assert
         Assert.Single(storage.Children);
         Assert.Equal(Path.Combine(filesDirectory.FullName, "notes.txt"), storage.GetFileSystemPath("notes.txt"));
-        storage.Dispose();
     }
 
     [Fact]
