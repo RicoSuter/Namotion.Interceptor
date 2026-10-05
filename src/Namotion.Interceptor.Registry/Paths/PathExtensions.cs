@@ -163,11 +163,11 @@ public static class PathExtensions
         bool resolved;
         if (segment.HasIndex)
         {
-            resolved = PathIndexResolver.TryResolve(property, segment.Index, null, out key, out child);
+            resolved = PathIndexResolver.TryResolve(property, segment.Index, null, resolveChild: true, out key, out child);
         }
         else if (isInlinePathsKey)
         {
-            resolved = PathIndexResolver.TryResolve(property, name, name, out key, out child);
+            resolved = PathIndexResolver.TryResolve(property, name, name, resolveChild: true, out key, out child);
         }
         else
         {
@@ -265,8 +265,7 @@ public static class PathExtensions
     /// Formats a collection position or dictionary key as path key text: a string as is, an
     /// <see cref="IFormattable"/> with the invariant culture, anything else with <see cref="object.ToString"/>.
     /// </summary>
-    /// <returns>The key text, or null when the text is empty and the key therefore has no path.</returns>
-    public static string? FormatPathIndex(object key) => PathSyntax.FormatIndex(key);
+    public static string FormatPathIndex(object key) => PathSyntax.FormatIndex(key);
 
     /// <summary>
     /// Gets the structural property path using the default path provider (BrowseName segments joined with
@@ -359,11 +358,6 @@ public static class PathExtensions
         RegisteredSubjectProperty property, object index)
     {
         var text = PathSyntax.FormatIndex(index);
-        if (text is null)
-        {
-            return false;
-        }
-
         if (builder.Length > 0)
         {
             builder.Append(characters.Separator);

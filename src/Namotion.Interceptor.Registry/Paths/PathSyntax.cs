@@ -25,16 +25,37 @@ internal static class PathSyntax
         return string.Create(CultureInfo.InvariantCulture, $"{reason} at position {position} in path '{path}'");
     }
 
-    public static string? FormatIndex(object index)
+    /// <summary>
+    /// The key's text: a string as is, an <see cref="IFormattable"/> with the invariant culture, anything else
+    /// with <see cref="object.ToString"/>.
+    /// </summary>
+    public static string FormatIndex(object index) => index switch
     {
-        var text = index switch
-        {
-            string value => value,
-            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
-            _ => index.ToString()
-        };
+        string value => value,
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => index.ToString() ?? string.Empty
+    };
 
-        return string.IsNullOrEmpty(text) ? null : text;
+    /// <summary>
+    /// Whether <paramref name="key"/>'s text equals <paramref name="text"/>, formatting on the stack where possible.
+    /// </summary>
+    public static bool KeyTextEquals(object key, ReadOnlySpan<char> text)
+    {
+        if (key is string value)
+        {
+            return text.SequenceEqual(value);
+        }
+
+        if (key is ISpanFormattable formattable)
+        {
+            Span<char> buffer = stackalloc char[64];
+            if (formattable.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture))
+            {
+                return text.SequenceEqual(buffer[..written]);
+            }
+        }
+
+        return text.SequenceEqual(FormatIndex(key));
     }
 
     /// <summary>
@@ -54,8 +75,7 @@ internal static class PathSyntax
             }
         }
 
-        var text = FormatIndex(index);
-        return text is not null && TryAppendIndexText(builder, text, indexOpen, indexClose);
+        return TryAppendIndexText(builder, FormatIndex(index), indexOpen, indexClose);
     }
 
     private static bool TryAppendIndexText(StringBuilder builder, ReadOnlySpan<char> text, char indexOpen, char indexClose)

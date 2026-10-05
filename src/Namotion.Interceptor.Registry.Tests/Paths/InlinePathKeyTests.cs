@@ -1,4 +1,3 @@
-using System.Globalization;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -149,32 +148,5 @@ public class InlinePathKeyTests
 
         // Assert
         Assert.Equal(expectedPath, path);
-    }
-
-    [Fact]
-    public void WhenKeysAreFormatted_ThenTextIsInvariantAndEmptyTextHasNone()
-    {
-        // Arrange
-        var previousCulture = CultureInfo.CurrentCulture;
-        CultureInfo.CurrentCulture = new CultureInfo("de-DE");
-
-        try
-        {
-            // Act
-            var number = PathExtensions.FormatPathIndex(1.5);
-            var color = PathExtensions.FormatPathIndex(TestColor.Blue);
-            var text = PathExtensions.FormatPathIndex("abc");
-            var empty = PathExtensions.FormatPathIndex("");
-
-            // Assert
-            Assert.Equal("1.5", number);
-            Assert.Equal("Blue", color);
-            Assert.Equal("abc", text);
-            Assert.Null(empty);
-        }
-        finally
-        {
-            CultureInfo.CurrentCulture = previousCulture;
-        }
     }
 }

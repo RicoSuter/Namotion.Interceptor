@@ -160,7 +160,7 @@ namespace Namotion.Interceptor.Registry.Paths
     }
     public static class PathExtensions
     {
-        public static string? FormatPathIndex(object key) { }
+        public static string FormatPathIndex(object key) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "path",
                 "property"})]

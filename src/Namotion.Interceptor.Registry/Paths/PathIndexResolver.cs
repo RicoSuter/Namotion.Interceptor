@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
@@ -8,42 +7,24 @@ using Namotion.Interceptor.Tracking;
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// Types index text by the container it addresses: a collection reads a position, a dictionary reads a key of
-/// its own key type. Integer, Guid and enum keys only accept the text the writer emits. A dictionary with any
-/// other key type does not resolve.
+/// Types index text by the container it addresses. A collection reads a canonical position. A dictionary with string,
+/// integer, <see cref="Guid"/> or enum keys parses the text to its key type, accepting only the text the writer
+/// emits. Any other dictionary matches the text against the written text of its registered entries.
 /// </summary>
 internal static class PathIndexResolver
 {
-    private enum KeyKind
-    {
-        Unsupported,
-        String,
-        SByte,
-        Byte,
-        Int16,
-        UInt16,
-        Int32,
-        UInt32,
-        Int64,
-        UInt64,
-        Guid,
-        Enum
-    }
-
-    private static readonly ConcurrentDictionary<Type, (KeyKind Kind, Type? KeyType)> KeyKinds = new();
-
-    /// <summary>
-    /// Types <paramref name="text"/> by the container <paramref name="property"/> holds.
-    /// </summary>
-    /// <param name="property">The collection or dictionary property.</param>
-    /// <param name="text">The index text.</param>
-    /// <param name="textString"><paramref name="text"/> when the caller already holds it as a string, so a string key reuses it; otherwise null.</param>
+    /// <param name="property">The property the segment names.</param>
+    /// <param name="text">The unquoted index text.</param>
+    /// <param name="textString"><paramref name="text"/> as a string when the caller already holds one, otherwise null.</param>
+    /// <param name="resolveChild">Whether to look up the subject stored at the key.</param>
     /// <param name="key">The typed key.</param>
-    /// <param name="child">The subject stored at the key, or null.</param>
+    /// <param name="child">The subject stored at the key, or null (always null unless <paramref name="resolveChild"/>).</param>
+    /// <returns>False when the property is neither a subject collection nor a subject dictionary, or the text is not a key of it.</returns>
     public static bool TryResolve(
         RegisteredSubjectProperty property,
         ReadOnlySpan<char> text,
         string? textString,
+        bool resolveChild,
         [NotNullWhen(true)] out object? key,
         out IInterceptorSubject? child)
     {
@@ -58,23 +39,39 @@ internal static class PathIndexResolver
             }
 
             key = position;
-            var collection = property.GetValue();
-            child = collection is null ? null : SubjectLookup.FindSubjectInCollection(collection, position);
+            if (resolveChild && property.GetValue() is { } collection)
+            {
+                child = SubjectLookup.FindSubjectInCollection(collection, position);
+            }
+
             return true;
         }
 
         if (property.IsSubjectDictionary)
         {
             var dictionary = property.GetValue();
-            var (kind, keyType) = GetKeyKind(dictionary?.GetType() ?? property.Type);
-            key = ParseKey(kind, keyType, text, textString);
-            if (key is null)
+            var keyType = SubjectLookup.GetDictionaryKeyType(dictionary?.GetType() ?? property.Type);
+            object? parsedKey = null;
+            switch (keyType is null ? null : TryParseKey(keyType, text, textString, out parsedKey))
             {
-                return false;
-            }
+                case true:
+                    key = parsedKey!;
+                    if (resolveChild && dictionary is not null)
+                    {
+                        child = SubjectLookup.FindSubjectInDictionary(dictionary, key);
+                    }
 
-            child = dictionary is null ? null : SubjectLookup.FindSubjectInDictionary(dictionary, key);
-            return true;
+                    return true;
+
+                case false:
+                    key = null;
+                    return false;
+
+                default:
+                    key = MatchWrittenKey(property, text, out var matched) ?? textString ?? text.ToString();
+                    child = resolveChild ? matched : null;
+                    return true;
+            }
         }
 
         key = null;
@@ -83,7 +80,6 @@ internal static class PathIndexResolver
 
     private static bool TryParsePosition(ReadOnlySpan<char> text, out int position)
     {
-        // Canonical digits only: a sign, whitespace or a leading zero is text the writer never emits.
         if (text.Length > 1 && text[0] == '0')
         {
             position = 0;
@@ -93,115 +89,71 @@ internal static class PathIndexResolver
         return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out position);
     }
 
-    private static object? ParseKey(KeyKind kind, Type? keyType, ReadOnlySpan<char> text, string? textString) => kind switch
+    /// <returns>True when parsed, false when the key type is supported but the text is not its written form, null when the key type is not supported.</returns>
+    private static bool? TryParseKey(Type keyType, ReadOnlySpan<char> text, string? textString, out object? key)
     {
-        KeyKind.String => textString ?? text.ToString(),
-        KeyKind.SByte => ParseInteger<sbyte>(text),
-        KeyKind.Byte => ParseInteger<byte>(text),
-        KeyKind.Int16 => ParseInteger<short>(text),
-        KeyKind.UInt16 => ParseInteger<ushort>(text),
-        KeyKind.Int32 => ParseInteger<int>(text),
-        KeyKind.UInt32 => ParseInteger<uint>(text),
-        KeyKind.Int64 => ParseInteger<long>(text),
-        KeyKind.UInt64 => ParseInteger<ulong>(text),
-        KeyKind.Guid => ParseGuid(text),
-        KeyKind.Enum => ParseEnum(keyType!, text),
-        KeyKind.Unsupported => null,
-        _ => null
-    };
+        key = null;
+        if (keyType.IsEnum)
+        {
+            if (Enum.TryParse(keyType, text, ignoreCase: false, out var value) && IsWrittenForm((ISpanFormattable)value!, text))
+            {
+                key = value;
+            }
+
+            return key is not null;
+        }
+
+        if (keyType == typeof(Guid))
+        {
+            if (Guid.TryParse(text, out var value) && IsWrittenForm(value, text))
+            {
+                key = value;
+            }
+
+            return key is not null;
+        }
+
+        switch (Type.GetTypeCode(keyType))
+        {
+            case TypeCode.String: key = textString ?? text.ToString(); break;
+            case TypeCode.SByte: key = ParseInteger<sbyte>(text); break;
+            case TypeCode.Byte: key = ParseInteger<byte>(text); break;
+            case TypeCode.Int16: key = ParseInteger<short>(text); break;
+            case TypeCode.UInt16: key = ParseInteger<ushort>(text); break;
+            case TypeCode.Int32: key = ParseInteger<int>(text); break;
+            case TypeCode.UInt32: key = ParseInteger<uint>(text); break;
+            case TypeCode.Int64: key = ParseInteger<long>(text); break;
+            case TypeCode.UInt64: key = ParseInteger<ulong>(text); break;
+            default: return null;
+        }
+
+        return key is not null;
+    }
 
     private static object? ParseInteger<T>(ReadOnlySpan<char> text) where T : struct, IBinaryInteger<T>
+        => T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) && IsWrittenForm(value, text)
+            ? value
+            : null;
+
+    /// <summary>
+    /// Finds the registered entry whose written key text equals <paramref name="text"/>. Reads the registered children,
+    /// which reflect the last assignment of the dictionary.
+    /// </summary>
+    private static object? MatchWrittenKey(RegisteredSubjectProperty property, ReadOnlySpan<char> text, out IInterceptorSubject? child)
     {
-        if (T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) &&
-            IsCanonical(value, text))
+        foreach (var entry in property.Children)
         {
-            return value;
-        }
-
-        return null;
-    }
-
-    private static object? ParseGuid(ReadOnlySpan<char> text)
-        => Guid.TryParse(text, out var value) && IsCanonical(value, text) ? value : null;
-
-    private static object? ParseEnum(Type enumType, ReadOnlySpan<char> text)
-    {
-        // The canonical check rejects numeric forms of named values and alias names, which the writer never emits.
-        if (Enum.TryParse(enumType, text, ignoreCase: false, out var value) &&
-            value is ISpanFormattable formattable &&
-            IsCanonical(formattable, text))
-        {
-            return value;
-        }
-
-        return null;
-    }
-
-    private static bool IsCanonical<T>(T value, ReadOnlySpan<char> text) where T : ISpanFormattable
-    {
-        Span<char> buffer = stackalloc char[64];
-        return value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture)
-            ? buffer[..written].SequenceEqual(text)
-            : value.ToString(null, CultureInfo.InvariantCulture).AsSpan().SequenceEqual(text);
-    }
-
-    private static (KeyKind Kind, Type? KeyType) GetKeyKind(Type dictionaryType)
-        => KeyKinds.GetOrAdd(dictionaryType, static type =>
-        {
-            var keyType = FindKeyType(type);
-            if (keyType is null)
+            if (entry.Index is { } entryKey && PathSyntax.KeyTextEquals(entryKey, text))
             {
-                return (KeyKind.Unsupported, null);
-            }
-
-            if (keyType.IsEnum)
-            {
-                return (KeyKind.Enum, keyType);
-            }
-
-            var kind = Type.GetTypeCode(keyType) switch
-            {
-                TypeCode.String => KeyKind.String,
-                TypeCode.SByte => KeyKind.SByte,
-                TypeCode.Byte => KeyKind.Byte,
-                TypeCode.Int16 => KeyKind.Int16,
-                TypeCode.UInt16 => KeyKind.UInt16,
-                TypeCode.Int32 => KeyKind.Int32,
-                TypeCode.UInt32 => KeyKind.UInt32,
-                TypeCode.Int64 => KeyKind.Int64,
-                TypeCode.UInt64 => KeyKind.UInt64,
-                _ => keyType == typeof(Guid) ? KeyKind.Guid : KeyKind.Unsupported
-            };
-
-            return (kind, keyType);
-        });
-
-    private static Type? FindKeyType(Type type)
-    {
-        if (IsGenericDictionary(type))
-        {
-            return type.GenericTypeArguments[0];
-        }
-
-        foreach (var implemented in type.GetInterfaces())
-        {
-            if (IsGenericDictionary(implemented))
-            {
-                return implemented.GenericTypeArguments[0];
+                child = entry.Subject;
+                return entryKey;
             }
         }
 
+        child = null;
         return null;
     }
 
-    private static bool IsGenericDictionary(Type type)
-    {
-        if (!type.IsGenericType)
-        {
-            return false;
-        }
-
-        var definition = type.GetGenericTypeDefinition();
-        return definition == typeof(IDictionary<,>) || definition == typeof(IReadOnlyDictionary<,>);
-    }
+    private static bool IsWrittenForm<T>(T value, ReadOnlySpan<char> text) where T : ISpanFormattable
+        => PathSyntax.KeyTextEquals(value, text);
 }
