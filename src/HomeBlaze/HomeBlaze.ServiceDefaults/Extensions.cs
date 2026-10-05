@@ -13,8 +13,7 @@ namespace Microsoft.Extensions.Hosting;
 
 /// <summary>
 /// Adds OpenTelemetry, optional Seq export and health checks to HomeBlaze.
-/// Based on the Aspire service defaults template, without the HTTP client resilience handler and service discovery:
-/// device clients keep their own timeout and retry behavior.
+/// Based on the Aspire service defaults template.
 /// </summary>
 public static class Extensions
 {
@@ -27,21 +26,28 @@ public static class Extensions
     /// </summary>
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
-        builder.ConfigureOpenTelemetry();
+        var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+        var useSeq = !string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString(SeqConnectionName));
+
+        builder.ConfigureOpenTelemetry(useOtlpExporter, useSeq);
         builder.AddDefaultHealthChecks();
 
-        if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString(SeqConnectionName)))
+        if (useSeq)
         {
-            builder.AddSeqEndpoint(SeqConnectionName);
+            // The Seq health check is disabled: the optional log server must not make HomeBlaze unhealthy.
+            builder.AddSeqEndpoint(SeqConnectionName, settings => settings.DisableHealthChecks = true);
         }
+
+        // No HTTP client resilience handler or service discovery: device clients keep their own timeouts and retries.
 
         return builder;
     }
 
     /// <summary>
-    /// Collects logs, metrics and traces and exports them over OTLP when <c>OTEL_EXPORTER_OTLP_ENDPOINT</c> is set.
+    /// Collects logs and metrics, and traces only when an OTLP endpoint or Seq is configured.
+    /// Exports logs, metrics and traces over OTLP when <paramref name="useOtlpExporter"/> is <c>true</c>.
     /// </summary>
-    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
+    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder, bool useOtlpExporter, bool useSeq) where TBuilder : IHostApplicationBuilder
     {
         builder.Logging.AddOpenTelemetry(logging =>
         {
@@ -49,14 +55,19 @@ public static class Extensions
             logging.IncludeScopes = true;
         });
 
-        builder.Services.AddOpenTelemetry()
+        var openTelemetry = builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation();
-            })
-            .WithTracing(tracing =>
+            });
+
+        if (useOtlpExporter || useSeq)
+        {
+            // Without an exporter, the default sampler still records an Activity per request and outgoing call,
+            // so tracing is only registered when something consumes it. Seq adds its own trace processor here.
+            openTelemetry.WithTracing(tracing =>
             {
                 tracing.AddSource(builder.Environment.ApplicationName)
                     .AddAspNetCoreInstrumentation(options =>
@@ -65,10 +76,11 @@ public static class Extensions
                             && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath))
                     .AddHttpClientInstrumentation();
             });
+        }
 
-        if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+        if (useOtlpExporter)
         {
-            builder.Services.AddOpenTelemetry().UseOtlpExporter();
+            openTelemetry.UseOtlpExporter();
         }
 
         return builder;
