@@ -9,6 +9,12 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal static class McpToolHelper
 {
+    /// <summary>
+    /// Returns an error response naming the reason when <paramref name="path"/> is malformed, otherwise null.
+    /// </summary>
+    internal static object? TryGetPathSyntaxError(PathProviderBase pathProvider, string path)
+        => pathProvider.TryParsePath(path, out _, out var error) ? null : new { error = $"Invalid path syntax: {error}" };
+
     internal static bool ShouldExcludeByType(RegisteredSubject subject, Type[] excludeTypes, string[]? requestExcludeTypes)
     {
         var subjectType = subject.Subject.GetType();

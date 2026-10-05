@@ -214,6 +214,8 @@ public partial class Sensor
 }
 ```
 
+Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](connectors.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to.
+
 ### [MqttTopic] attribute
 
 `[MqttTopic]` is a `[Path]` for the `mqtt` context plus optional per-topic QoS and Retain metadata. The string is a single relative path segment composed hierarchically with parent property segments (and the optional `TopicPrefix`), exactly like `[Path]`. The QoS and Retain values are layered on top by the `MqttAttributeMapper`.

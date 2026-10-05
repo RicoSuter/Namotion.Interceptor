@@ -22,26 +22,13 @@ public static class PathExtensions
     private const int CycleDetectionDepthThreshold = 256;
 
     /// <summary>
-    /// Parses a path string into segments with their indices. An index is returned as an <see cref="int"/>
-    /// when its text is an integer, otherwise as a string. Empty segments are skipped.
+    /// Parses a path string into segments with their index text. Empty segments are skipped. The container a
+    /// segment addresses decides how its index text is typed, see <see cref="TryResolvePathSegment"/>.
     /// </summary>
     /// <exception cref="FormatException">The path is malformed.</exception>
     /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
-    public static List<(string segment, object? index)> ParsePath(this PathProviderBase pathProvider, string path)
-    {
-        if (!pathProvider.TryParsePath(path, out var segments, out var error))
-        {
-            throw new FormatException(error);
-        }
-
-        var results = new List<(string segment, object? index)>(segments.Count);
-        foreach (var (segment, index) in segments)
-        {
-            results.Add((segment, index is null ? null : PathSyntax.GuessIndexType(index)));
-        }
-
-        return results;
-    }
+    public static List<(string segment, string? index)> ParsePath(this PathProviderBase pathProvider, string path)
+        => pathProvider.TryParsePath(path, out var segments, out var error) ? segments : throw new FormatException(error);
 
     /// <summary>
     /// Parses a path string into segments with their index text. Empty segments are skipped. Inside an index
@@ -66,60 +53,18 @@ public static class PathExtensions
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
-    /// <returns>The property and its last-segment index at the path, or null if not found.</returns>
+    /// <returns>
+    /// The property and the typed key of its last segment (see <see cref="TryResolvePathSegment"/>), or null when
+    /// the path is malformed or not found.
+    /// </returns>
     /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
         string path)
-    {
-        if (!pathProvider.TryParsePath(path, out var segments, out _) || segments.Count == 0)
-        {
-            return null;
-        }
-
-        var currentSubject = rootSubject;
-        RegisteredSubjectProperty? currentProperty = null;
-        object? lastIndex = null;
-
-        for (var i = 0; i < segments.Count; i++)
-        {
-            var (segment, indexText) = segments[i];
-            object? index = indexText is null ? null : PathSyntax.GuessIndexType(indexText);
-            currentProperty = pathProvider.TryGetPropertyFromSegment(currentSubject, segment);
-
-            if (currentProperty is null)
-            {
-                return null;
-            }
-
-            // [InlinePaths] dictionary with no bracket index: the segment name is the dictionary key.
-            var effectiveIndex = index;
-            if (effectiveIndex is null &&
-                InlinePathsAttribute.IsInlinePathsProperty(
-                    currentSubject.Subject.GetType(), currentProperty.Name))
-            {
-                effectiveIndex = segment;
-            }
-
-            lastIndex = effectiveIndex;
-
-            if (i < segments.Count - 1)
-            {
-                var childSubject = GetChildSubject(currentProperty, effectiveIndex);
-                var registeredChild = childSubject?.TryGetRegisteredSubject();
-                if (registeredChild is null)
-                {
-                    return null;
-                }
-
-                currentSubject = registeredChild;
-            }
-        }
-
-        // Non-null: segments is non-empty, so the loop ran and returned early on any failed segment.
-        return (currentProperty!, lastIndex);
-    }
+        => pathProvider.TryResolvePath(rootSubject, path, out var property, out var index, out _)
+            ? (property, index)
+            : null;
 
     /// <summary>
     /// Tries to get a subject from a path starting at the given subject.
@@ -137,15 +82,122 @@ public static class PathExtensions
         RegisteredSubject rootSubject,
         string path)
     {
-        var result = pathProvider.TryGetPropertyFromPath(rootSubject, path);
-        if (result is null)
+        if (!pathProvider.TryResolvePath(rootSubject, path, out var property, out var index, out var child))
         {
             return null;
         }
 
-        var (property, index) = result.Value;
-        var childSubject = GetChildSubject(property, index);
-        return childSubject?.TryGetRegisteredSubject();
+        var subject = index is not null ? child : property.GetValue() as IInterceptorSubject;
+        return subject?.TryGetRegisteredSubject();
+    }
+
+    /// <summary>
+    /// Resolves one parsed path segment on a subject: the property it names and, when the segment carries a key
+    /// (an index, or an [InlinePaths] key written as the segment itself), the typed key and the subject stored at it.
+    /// </summary>
+    /// <param name="pathProvider">The path provider to use.</param>
+    /// <param name="subject">The subject the segment is resolved on.</param>
+    /// <param name="segment">The segment text.</param>
+    /// <param name="index">The segment's index text, or null.</param>
+    /// <param name="property">The property the segment names.</param>
+    /// <param name="key">
+    /// The collection position, or the dictionary key typed to the dictionary's key type, also when no entry exists
+    /// at it. For a key type without a parse rule and no matching entry, the index text. Null when the segment
+    /// carries no key.
+    /// </param>
+    /// <param name="child">The subject at <paramref name="key"/>, or null when there is no key or nothing is stored there.</param>
+    /// <returns>False when no property matches the segment or the index text is not a key of that property's container.</returns>
+    public static bool TryResolvePathSegment(
+        this PathProviderBase pathProvider,
+        RegisteredSubject subject,
+        string segment,
+        string? index,
+        [NotNullWhen(true)] out RegisteredSubjectProperty? property,
+        out object? key,
+        out IInterceptorSubject? child)
+    {
+        key = null;
+        child = null;
+        property = pathProvider.TryGetPropertyFromSegment(subject, segment);
+        if (property is null)
+        {
+            return false;
+        }
+
+        var isInlinePathsKey = IsInlinePathsKey(pathProvider, subject, property, segment);
+        if (isInlinePathsKey && index is not null)
+        {
+            // The writer never emits a bare inline key followed by an index, so a wrong name is not accepted.
+            property = null;
+            return false;
+        }
+
+        var keyText = index ?? (isInlinePathsKey ? segment : null);
+        if (keyText is null)
+        {
+            return true;
+        }
+
+        if (!PathIndexResolver.TryResolve(property, keyText, out key, out child))
+        {
+            property = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A bare segment is an [InlinePaths] key when it resolved to the inline property without naming it.
+    /// </summary>
+    private static bool IsInlinePathsKey(
+        PathProviderBase pathProvider, RegisteredSubject subject, RegisteredSubjectProperty property, string segment)
+        => InlinePathsAttribute.IsInlinePathsProperty(subject.Subject.GetType(), property.Name) &&
+           segment != GetOwnSegment(pathProvider, property);
+
+    private static string GetOwnSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
+        => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+
+    private static bool TryResolvePath(
+        this PathProviderBase pathProvider,
+        RegisteredSubject rootSubject,
+        string path,
+        [NotNullWhen(true)] out RegisteredSubjectProperty? property,
+        out object? index,
+        out IInterceptorSubject? child)
+    {
+        property = null;
+        index = null;
+        child = null;
+        if (!pathProvider.TryParsePath(path, out var segments, out _) || segments.Count == 0)
+        {
+            return false;
+        }
+
+        var currentSubject = rootSubject;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var (segment, indexText) = segments[i];
+            if (!pathProvider.TryResolvePathSegment(currentSubject, segment, indexText, out property, out index, out child))
+            {
+                return false;
+            }
+
+            if (i < segments.Count - 1)
+            {
+                var next = index is not null ? child : property.GetValue() as IInterceptorSubject;
+                var registered = next?.TryGetRegisteredSubject();
+                if (registered is null)
+                {
+                    property = null;
+                    return false;
+                }
+
+                currentSubject = registered;
+            }
+        }
+
+        return property is not null;
     }
 
     /// <summary>
@@ -171,27 +223,13 @@ public static class PathExtensions
         }
     }
 
-    private static IInterceptorSubject? GetChildSubject(RegisteredSubjectProperty property, object? index)
-    {
-        var value = property.GetValue();
-        if (value is null)
-        {
-            return null;
-        }
-
-        if (index is null)
-        {
-            return value as IInterceptorSubject;
-        }
-
-        if (property.IsSubjectDictionary)
-            return SubjectLookup.FindSubjectInDictionary(value, index);
-
-        if (property.IsSubjectCollection && index is int intIndex)
-            return SubjectLookup.FindSubjectInCollection(value, intIndex);
-
-        return null;
-    }
+    /// <summary>
+    /// Formats a collection position or dictionary key as path key text: a string as is, an
+    /// <see cref="IFormattable"/> with the invariant culture, anything else with <see cref="object.ToString"/>.
+    /// Inside an index each <c>]</c> of this text is written twice.
+    /// </summary>
+    /// <returns>The key text, or null when the text is empty and the key therefore has no path.</returns>
+    public static string? FormatPathIndex(object key) => PathSyntax.FormatIndex(key);
 
     /// <summary>
     /// Gets the structural property path using the default path provider (BrowseName segments joined with
@@ -239,24 +277,17 @@ public static class PathExtensions
             {
                 var (prop, index) = frames[i];
 
-                // [InlinePaths] frames emit just the index; no IsPropertyIncluded check, since providers
-                // already include them and these frames are only traversed for navigation.
+                // [InlinePaths] frames emit just the key where the reader resolves it back; no IsPropertyIncluded
+                // check, since providers already include them and these frames are only traversed for navigation.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))
                 {
-                    var keyText = PathSyntax.FormatIndex(index);
-                    if (keyText is null)
+                    if (!TryAppendInlineKey(builder, pathProvider, prop, index))
                     {
                         return null;
                     }
 
-                    if (builder.Length > 0)
-                    {
-                        builder.Append(pathProvider.PathSeparator);
-                    }
-
-                    builder.Append(keyText);
                     continue;
                 }
 
@@ -282,6 +313,47 @@ public static class PathExtensions
             frames.Return();
         }
     }
+
+    private static bool TryAppendInlineKey(
+        StringBuilder builder, PathProviderBase pathProvider, RegisteredSubjectProperty property, object index)
+    {
+        var text = PathSyntax.FormatIndex(index);
+        if (text is null)
+        {
+            return false;
+        }
+
+        if (builder.Length > 0)
+        {
+            builder.Append(pathProvider.PathSeparator);
+        }
+
+        var ownSegment = GetOwnSegment(pathProvider, property);
+        if (CanWriteBareInlineKey(pathProvider, property, text, ownSegment))
+        {
+            builder.Append(text);
+            return true;
+        }
+
+        // The explicit form only reads back while the own segment still resolves to this property.
+        if (pathProvider.TryGetPropertyFromSegment(property.Parent, ownSegment)?.Name != property.Name)
+        {
+            return false;
+        }
+
+        builder.Append(ownSegment);
+        return PathSyntax.TryAppendIndex(builder, text, pathProvider.IndexOpen, pathProvider.IndexClose);
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="IsInlinePathsKey"/>: the reader takes the bare text as this key only when the text
+    /// parses as one name, resolves to the inline property and is not that property's own segment.
+    /// </summary>
+    private static bool CanWriteBareInlineKey(
+        PathProviderBase pathProvider, RegisteredSubjectProperty property, string text, string ownSegment)
+        => text.AsSpan().IndexOfAny(pathProvider.PathSeparator, pathProvider.IndexOpen) < 0 &&
+           text != ownSegment &&
+           pathProvider.TryGetPropertyFromSegment(property.Parent, text)?.Name == property.Name;
 
     /// <summary>
     /// Fills <paramref name="frames"/> (leaf-first) with the chain from <paramref name="property"/> up to

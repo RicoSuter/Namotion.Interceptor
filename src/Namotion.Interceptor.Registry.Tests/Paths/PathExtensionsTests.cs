@@ -37,7 +37,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenPropertyHoldsImmutableDictionaryAndKeyHasWrongType_ThenSubjectPathResolvesToNull()
+    public void WhenPropertyHoldsImmutableDictionaryAndNumericKeyIsAbsent_ThenSubjectPathResolvesToNull()
     {
         // Arrange
         var context = CreateContext();
@@ -48,7 +48,7 @@ public class PathExtensionsTests
         var rootRegistered = container.TryGetRegisteredSubject()!;
 
         // Act
-        // A numeric segment is parsed into an int, which cannot be a key of a string-keyed dictionary.
+        // The text "1" is looked up as the string key "1", which is absent.
         var result = pathProvider.TryGetSubjectFromPath(rootRegistered, "Items[1]");
 
         // Assert

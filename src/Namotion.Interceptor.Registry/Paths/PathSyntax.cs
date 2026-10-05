@@ -98,9 +98,6 @@ internal static class PathSyntax
         return true;
     }
 
-    public static object GuessIndexType(string index)
-        => int.TryParse(index, NumberStyles.Integer, CultureInfo.InvariantCulture, out var position) ? position : index;
-
     public static string? FormatIndex(object index)
     {
         var text = index switch

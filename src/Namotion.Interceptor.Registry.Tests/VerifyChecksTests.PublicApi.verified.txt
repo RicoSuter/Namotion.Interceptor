@@ -160,6 +160,7 @@ namespace Namotion.Interceptor.Registry.Paths
     }
     public static class PathExtensions
     {
+        public static string? FormatPathIndex(object key) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "path",
                 "property"})]
@@ -175,7 +176,7 @@ namespace Namotion.Interceptor.Registry.Paths
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "segment",
                 "index"})]
-        public static System.Collections.Generic.List<System.ValueTuple<string, object?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
+        public static System.Collections.Generic.List<System.ValueTuple<string, string?>> ParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.IInterceptorSubject? rootSubject = null) { }
         public static string? TryGetPath(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.IInterceptorSubject? rootSubject, object? propertyIndex = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
@@ -186,6 +187,7 @@ namespace Namotion.Interceptor.Registry.Paths
         public static bool TryParsePath(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] [System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "segment",
                 "index"})] out System.Collections.Generic.List<System.ValueTuple<string, string?>>? segments, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error) { }
+        public static bool TryResolvePathSegment(this Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Registry.Abstractions.RegisteredSubject subject, string segment, string? index, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty? property, out object? key, out Namotion.Interceptor.IInterceptorSubject? child) { }
     }
     public abstract class PathProviderBase : Namotion.Interceptor.Registry.Paths.IPathProvider
     {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
@@ -91,6 +92,11 @@ internal class BrowseTool
         }
         else
         {
+            if (McpToolHelper.TryGetPathSyntaxError(pathProvider, path!) is { } syntaxError)
+            {
+                return Task.FromResult<object?>(syntaxError);
+            }
+
             var resolved = pathProvider.TryGetSubjectFromPath(rootRegisteredSubject, path!);
             if (resolved is null)
             {
@@ -221,7 +227,8 @@ internal class BrowseTool
                         }
 
                         subjectCount++;
-                        var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
+                        var key = (child.Index is null ? null : PathExtensions.FormatPathIndex(child.Index))
+                            ?? child.Subject.GetHashCode().ToString(CultureInfo.InvariantCulture);
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, excludeTypes,
