@@ -30,7 +30,7 @@ Stop the AppHost with Ctrl+C in its console. Killing the `dotnet run` process do
 |----------|-------------|---------|
 | `homeblaze` | HomeBlaze from source, with the development data folder `src/HomeBlaze/HomeBlaze/Data` | http://localhost:5192 |
 | `seq` | Seq log server, receives the logs and traces of HomeBlaze | URL shown in the dashboard |
-| `n8n` | n8n workflow automation, image pinned to 2.41.7 | http://localhost:5678 |
+| `n8n` | n8n workflow automation, pinned version | http://localhost:5678 |
 | `opcplc` | OPC UA PLC simulator with auto-accept and unsecured transport | `opc.tcp://localhost:50000` |
 
 The dashboard shows the health of HomeBlaze from its `/health` endpoint. HomeBlaze runs in the `Development` environment, so its MCP server at `/mcp` is enabled with write access.

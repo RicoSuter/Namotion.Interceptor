@@ -16,7 +16,7 @@ services:
       McpServer__ReadOnly: "true"  # set to "false" to let MCP clients such as n8n write values
       ConnectionStrings__seq: http://seq:5341
     # devices:
-    #   - /dev/gpiomem  # Raspberry Pi GPIO
+    #   - /dev/gpiomem  # Raspberry Pi 3/4 GPIO; Pi 5 is not supported in the container (needs libgpiod)
 
   seq:
     image: datalust/seq

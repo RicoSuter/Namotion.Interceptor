@@ -45,7 +45,7 @@ The runtime loader handles:
 
 ### Configuration (`Files/Plugins.json`)
 
-Plugin configuration lives in `Files/Plugins.json`, relative to the data folder. The path can be overridden via the `PluginConfigurationPath` setting in `appsettings.json`. Feed URLs and the cache directory inside the file stay relative to the application directory.
+Plugin configuration lives in `Files/Plugins.json`, relative to the data folder. The path can be overridden via the `PluginConfigurationPath` setting in `appsettings.json`. See [Configuration](../../administration/configuration.md#pluginconfigurationpath) for how relative feed URLs and the cache directory inside the file resolve.
 
 Because `Plugins.json` is also a subject configuration file, it includes a `$type` discriminator so the subject system can deserialize it as a `PluginManager`:
 

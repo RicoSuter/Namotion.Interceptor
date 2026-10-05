@@ -29,17 +29,9 @@ HomeBlaze is then available at http://localhost:8080 and opens on its welcome pa
 
 ### Data folder
 
-Everything HomeBlaze keeps lives in the folder mounted at `/data` (`./data` in the compose file):
+Everything HomeBlaze keeps lives in the folder mounted at `/data` (`./data` in the compose file). See [Configuration](configuration.md#data-folder) for the folder layout and the settings that control it.
 
-```
-data/
-├── Root.json       root configuration
-├── Files/          devices, dashboards, pages, Plugins.json, docs
-├── History/Sqlite/ SQLite history
-└── OpcUa/          OPC UA certificates
-```
-
-On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list and a SQLite history store that records to `History/Sqlite`. Existing files are never overwritten. The demo devices and sample plugins are only available when running from source. See [Configuration](configuration.md#data-folder) for the settings that control the data folder.
+On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a welcome page, a help page, this documentation, an empty plugin list and a SQLite history store that records to `History/Sqlite`. Existing files are never overwritten. The demo devices and sample plugins are only available when running from source.
 
 Back up HomeBlaze by copying this folder. Stop HomeBlaze first (`docker compose stop`) so the SQLite history is copied in a consistent state. The container runs as root, so on Linux the files in `./data` belong to root and editing them on the host needs `sudo`.
 
@@ -78,8 +70,9 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 
 ### Hardware and discovery
 
-- Raspberry Pi GPIO: uncomment the `/dev/gpiomem` device in the compose file.
-- The Hue bridge is discovered over mDNS and SSDP, which do not pass Docker's default network. Enter the bridge IP address, or run HomeBlaze with `network_mode: host` on Linux. With host networking, remove the `ports` section and reach HomeBlaze from n8n at `http://host.docker.internal:8080/mcp` after adding `extra_hosts: ["host.docker.internal:host-gateway"]` to the n8n service.
+- Raspberry Pi 3 and 4 GPIO: uncomment the `/dev/gpiomem` device in the compose file. GPIO on Raspberry Pi 5 is not supported in the container yet: Pi 5 exposes `/dev/gpiochip*` instead of `/dev/gpiomem` and needs the `libgpiod` library, which the image does not include. See [GPIO](../devices/Gpio.md#linux-dependencies) for the library requirement.
+- The Hue bridge has no IP address setting. HomeBlaze discovers it by trying the Philips cloud discovery endpoint, mDNS, SSDP and a local network scan, in that order. In Docker's default network only the cloud endpoint works, and Philips rate-limits it. For reliable discovery, run HomeBlaze with `network_mode: host` on Linux instead.
+- Host networking bypasses the compose service names: remove the `ports` section, set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341), and reach HomeBlaze from n8n at `http://host.docker.internal:8080/mcp` after adding `extra_hosts: ["host.docker.internal:host-gateway"]` to the n8n service.
 
 ## From source
 
