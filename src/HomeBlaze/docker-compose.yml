@@ -1,0 +1,49 @@
+# HomeBlaze self-hosting. Start: docker compose up -d
+# Optional services read secrets from .env (see the installation guide): docker compose --profile seq --profile n8n up -d
+# HomeBlaze has no login: keep it on a trusted network or behind an authenticating reverse proxy.
+services:
+  homeblaze:
+    image: ghcr.io/ricosuter/homeblaze:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # UI and MCP
+      - "4840:4840"   # OPC UA server subject
+    volumes:
+      - ./data:/data  # Root.json, Files/, History/, OpcUa/; filled with defaults on first start
+    environment:
+      TZ: Europe/Zurich
+      McpServer__Enabled: "true"
+      McpServer__ReadOnly: "true"  # set to "false" to let MCP clients such as n8n write values
+      ConnectionStrings__seq: http://seq:5341
+    # devices:
+    #   - /dev/gpiomem  # Raspberry Pi GPIO
+
+  seq:
+    image: datalust/seq
+    profiles: [seq]
+    restart: unless-stopped
+    ports:
+      - "5341:80"
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD:-}  # from .env; initial "admin" password, Seq asks for a new one at the first login
+    volumes:
+      - seq-data:/data
+
+  n8n:
+    # Pinned: n8n migrates its database when it upgrades, so change the version deliberately.
+    image: docker.n8n.io/n8nio/n8n:2.41.7
+    profiles: [n8n]
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-}  # from .env; n8n encrypts stored credentials with it
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: Europe/Zurich
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+volumes:
+  seq-data:
+  n8n-data:
