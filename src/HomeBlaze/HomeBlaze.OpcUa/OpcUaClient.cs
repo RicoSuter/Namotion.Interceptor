@@ -260,6 +260,11 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                     : null,
             };
 
+            if (OpcUaCertificateStoreLocation.Resolve(this, "Client") is { } certificateStorePath)
+            {
+                configuration.CertificateStoreBasePath = certificateStorePath;
+            }
+
             _clientSource = root.CreateOpcUaClientSource(configuration, _logger);
             await this.AttachHostedServiceAsync(_clientSource, cancellationToken);
 
