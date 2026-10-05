@@ -18,6 +18,9 @@ dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile o
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
+# Write-durability test: websocket-chaos plus the write-durability oracle
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-durability --configuration Release
+
 # Load test: throughput and latency at 20k changes/sec
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load --configuration Release
@@ -81,7 +84,21 @@ Each test cycle has two phases:
 
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. `SnapshotComparer.Capture` produces a normalized, deterministic JSON per participant. Structural property timestamps (Collection, Dictionary, Object) are stripped since they reflect local creation time. Value property timestamps are preserved and must converge. A null timestamp on either side matches any value (legitimate after server rebuild or when the equality interceptor suppresses a redundant write).
 
-A cycle **passes** when all participant snapshots match. It **fails** if the convergence timeout expires. On failure, the process writes per-participant JSON snapshots to disk, logs per-property diffs with write timestamps, runs a re-sync diagnostic, gracefully shuts down all hosted services, and exits with code 1.
+A cycle **passes** when all participant snapshots match and, with the [write-durability oracle](#write-durability-oracle) enabled, every participant still holds its own writes. It **fails** if the convergence timeout expires or the oracle reports a lost write. On failure, the process writes per-participant JSON snapshots to disk, logs per-property diffs with write timestamps, runs a re-sync diagnostic, gracefully shuts down all hosted services, and exits with code 1.
+
+### Write-Durability Oracle
+
+The snapshot comparison checks that participants agree, not that their writes survived. A write lost on both sides, for example because a connection dropped after the client sent it but before the server applied it, leaves every participant agreeing on the older value, and the cycle passes.
+
+`VerifyWriteDurability: true` adds a check for that, and it combines with either mutation engine, with or without chaos. Each participant records the last value it wrote to each node, and after a cycle converges, `VerificationEngine` checks that every participant's own model still holds those values. A mismatch fails the cycle and logs the participant, the property path, the written value and the value the model holds. A `--participant` run has no verification engine and ignores the option.
+
+The check is sound only when each property has a single writer, because another participant's later write looks exactly like a loss. The option therefore pins each RandomMutationEngine participant to the `TestNode` value property at its participant index, which the BatchMutationEngine does anyway, and startup rejects it with more than four participants. With the BatchMutationEngine, recording takes a lock on every write, so load numbers from such a run are not benchmark numbers.
+
+`websocket-durability` is `websocket-chaos` with the option on, and `websocket-chaos` keeps its overlapping writers, which only the agreement check covers. To enable it on another profile, set it as an environment variable, which overrides the profile's `appsettings` file:
+
+```bash
+ConnectorTester__VerifyWriteDurability=true dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release
+```
 
 ### Chaos via IFaultInjectable
 
@@ -244,6 +261,7 @@ See `appsettings.opcua-chaos.json` and `appsettings.opcua-load.json` for example
 | `Clients[].Chaos.IntervalMin/Max` | `00:01:00`/`00:05:00` | Time between disruptions |
 | `Clients[].Chaos.DurationMin/Max` | `00:00:05`/`00:00:30` | Disruption hold time |
 | `ChaosProfiles` | `[]` | Named profiles that rotate round-robin. Empty = all chaos always active |
+| `VerifyWriteDurability` | `false` | Enables the [write-durability oracle](#write-durability-oracle) and fixes each participant to its own `TestNode` value property. At most four participants |
 
 Full type definitions in `ConnectorTesterConfiguration.cs`, `ParticipantConfiguration.cs`, and `ChaosConfiguration.cs`. Chaos intervals must be shorter than `MutatePhaseDuration`. Set `IntervalMax` to at most half of `MutatePhaseDuration`.
 
