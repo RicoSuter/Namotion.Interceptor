@@ -33,7 +33,8 @@
 | `src/HomeBlaze/HomeBlaze.OpcUa/OpcUaCertificateStoreLocation.cs` | Create | `<data>/OpcUa/<Role>/Pki` |
 | `src/HomeBlaze/HomeBlaze.OpcUa/OpcUaServer.cs`, `OpcUaClient.cs` | Modify | Use the certificate store location |
 | `src/HomeBlaze/HomeBlaze/Data/**` | Move | `Data/*` to `Data/Files/*`, `root.json` to `Data/Root.json` |
-| `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj` | Modify | Data items, ServiceDefaults reference, container properties, plugin packages in publish |
+| `src/HomeBlaze/HomeBlaze/Seed/**` | Create | Starting set for new installations: root, start and help pages, empty plugins, SQLite history |
+| `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj` | Modify | Data and seed items, ServiceDefaults reference, container properties |
 | `src/HomeBlaze/HomeBlaze/Program.cs` | Modify | Seeding, plugin path, service defaults |
 | `src/HomeBlaze/HomeBlaze.ServiceDefaults/*` | Create | OpenTelemetry, Seq, health endpoints |
 | `src/HomeBlaze/HomeBlaze.AppHost/*` | Create | Aspire AppHost |
@@ -1069,11 +1070,8 @@ In `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`, replace
 with
 
 ```xml
-        <!-- The whole shipped tree is the seed for an empty data directory, Markdown included.
-             Runtime folders (Data\History, Data\OpcUa) stay out of the output. -->
-        <Content Remove="Data\**\*" />
-        <None Remove="Data\**\*" />
-        <None Include="Data\Root.json;Data\Files\**\*" Exclude="Data\Files\Plans.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+        <!-- Development data is read from the project folder, never from the output. -->
+        <Content Update="Data\**\*" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
 ```
 
 Keep `<Watch Remove="Data/**/*" />` unchanged.
@@ -1118,17 +1116,10 @@ if (seededFileCount > 0)
 
 `HomeBlaze.Services` is already imported at the top of the file.
 
-- [ ] **Step 6: Build and check the output tree**
+- [ ] **Step 6: Build**
 
-Run:
-
-```bash
-dotnet build src/HomeBlaze/HomeBlaze
-ls src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Data src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Data/Files | head -20
-ls src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Data/Files/Docs | head -3
-```
-
-Expected: `Data` contains `Root.json` and `Files`; `Files` contains `Dashboard.md`, `Devices`, `Docs`, `Plugins.json`; `Docs` contains Markdown files.
+Run: `dotnet build src/HomeBlaze/HomeBlaze`
+Expected: Build succeeded, 0 warnings.
 
 - [ ] **Step 7: Run HomeBlaze from source and check it loads**
 
@@ -1419,14 +1410,140 @@ git commit -m "feat: add OpenTelemetry, Seq and health endpoints to HomeBlaze"
 
 ---
 
-### Task 9: Container image settings
+### Task 9: Starting set and container image settings
 
 **Files:**
+- Create: `src/HomeBlaze/HomeBlaze/Seed/Root.json`
+- Create: `src/HomeBlaze/HomeBlaze/Seed/Files/Readme.md`
+- Create: `src/HomeBlaze/HomeBlaze/Seed/Files/Help.md`
+- Create: `src/HomeBlaze/HomeBlaze/Seed/Files/Plugins.json`
+- Create: `src/HomeBlaze/HomeBlaze/Seed/Files/Servers/SqliteHistory.json`
 - Modify: `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`
 
-- [ ] **Step 1: Add the container properties**
+- [ ] **Step 1: Create the starting set**
 
-Add a new `PropertyGroup` to `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`:
+`src/HomeBlaze/HomeBlaze/Seed/Root.json`:
+
+```json
+{
+  "$type": "HomeBlaze.Storage.FluentStorageContainer",
+  "storageType": "disk",
+  "connectionString": "Files",
+  "enableFileWatching": true
+}
+```
+
+`src/HomeBlaze/HomeBlaze/Seed/Files/Plugins.json`:
+
+```json
+{
+  "$type": "HomeBlaze.Plugins.PluginManager",
+  "feeds": [
+    { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
+  ],
+  "hostPackages": [],
+  "hostIdentifier": "HomeBlaze",
+  "cacheDirectory": "PluginsCache",
+  "plugins": []
+}
+```
+
+`src/HomeBlaze/HomeBlaze/Seed/Files/Servers/SqliteHistory.json` (same as the development file; an empty `databasePath` stores history in `<data>/History/Sqlite`):
+
+```json
+{
+  "$type": "HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject",
+  "priority": 50,
+  "maxAgeDays": 365,
+  "flushIntervalSeconds": 10,
+  "bufferTimeMilliseconds": 250,
+  "partitionInterval": "Weekly",
+  "databasePath": "",
+  "maxJsonSize": 8192,
+  "isEnabled": true
+}
+```
+
+`src/HomeBlaze/HomeBlaze/Seed/Files/Readme.md`:
+
+```markdown
+---
+title: Welcome to HomeBlaze
+navTitle: Home
+position: 0
+---
+
+# Welcome to HomeBlaze
+
+This is a new HomeBlaze installation. Everything you see is stored as files in the data folder, so JSON files become live objects and Markdown files become pages.
+
+## Next steps
+
+- Add devices and servers in the browser, or place their JSON files in the data folder.
+- Read the [documentation](Docs/home.md), starting with [installation](Docs/administration/installation.md) and [configuration](Docs/administration/configuration.md).
+
+History is recorded with the SQLite history store in `Servers/SqliteHistory.json`.
+```
+
+`src/HomeBlaze/HomeBlaze/Seed/Files/Help.md`:
+
+```markdown
+---
+title: Help
+icon: Help
+location: AppBar
+position: 20
+alignment: Right
+---
+
+# Help
+
+- [Documentation](Docs/home.md)
+- [Installation](Docs/administration/installation.md)
+- [Configuration](Docs/administration/configuration.md)
+- [Report an issue](https://github.com/RicoSuter/Namotion.Interceptor/issues)
+```
+
+- [ ] **Step 2: Copy the starting set and the docs to the output**
+
+In `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`, add to the `ItemGroup` that holds the `Data` items:
+
+```xml
+        <!-- Starting set for new installations, copied into an empty data folder on first start.
+             The docs are linked from the development data so they exist only once in the repository. -->
+        <Content Update="Seed\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+        <None Update="Seed\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+        <None Update="Data\Files\Docs\**\*" Link="Seed\Files\Docs\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+```
+
+Add `<Watch Remove="Seed/**/*" />` next to `<Watch Remove="Data/**/*" />`.
+
+- [ ] **Step 3: Check the output tree**
+
+```bash
+rm -rf src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Seed src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Data
+dotnet build src/HomeBlaze/HomeBlaze
+find src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Seed -maxdepth 3 | sort | head -20
+ls src/HomeBlaze/HomeBlaze/bin/Debug/net10.0/Data 2>&1 | head -1
+```
+
+Expected: `Seed/Root.json`, `Seed/Files/Readme.md`, `Seed/Files/Help.md`, `Seed/Files/Plugins.json`, `Seed/Files/Servers/SqliteHistory.json` and `Seed/Files/Docs/...` with Markdown files; `Data` does not exist (`No such file or directory`).
+
+If `Seed/Files/Docs` is missing (the `None Update` with `Link` did not apply), replace that line with a target that adds the items explicitly:
+
+```xml
+    <Target Name="LinkSeedDocs" BeforeTargets="AssignTargetPaths">
+        <ItemGroup>
+            <None Include="Data\Files\Docs\**\*" Link="Seed\Files\Docs\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+        </ItemGroup>
+    </Target>
+```
+
+and run Step 3 again.
+
+- [ ] **Step 4: Add the container properties**
+
+Add a new `PropertyGroup` and `ItemGroup` to `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`:
 
 ```xml
     <PropertyGroup>
@@ -1441,24 +1558,11 @@ Add a new `PropertyGroup` to `src/HomeBlaze/HomeBlaze/HomeBlaze.csproj`:
         <ContainerPort Include="8080" Type="tcp" />
         <ContainerPort Include="4840" Type="tcp" />
         <ContainerEnvironmentVariable Include="HomeBlaze__RootConfigFile" Value="/data/Root.json" />
-        <ContainerEnvironmentVariable Include="HomeBlaze__SeedDirectory" Value="/app/Data" />
+        <ContainerEnvironmentVariable Include="HomeBlaze__SeedDirectory" Value="/app/Seed" />
     </ItemGroup>
 ```
 
-- [ ] **Step 2: Include the bundled plugin packages in the publish output**
-
-Below the existing `CopyPluginNupkgs` target, add:
-
-```xml
-    <!-- Plugins\*.nupkg are produced by the sample plugin builds, so they are added after the build. -->
-    <Target Name="PublishPluginNupkgs" AfterTargets="ComputeResolvedFilesToPublishList">
-        <ItemGroup>
-            <ResolvedFileToPublish Include="Plugins\*.nupkg" RelativePath="Plugins\%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
-        </ItemGroup>
-    </Target>
-```
-
-- [ ] **Step 3: Build a local image archive**
+- [ ] **Step 5: Build a local image archive**
 
 Run:
 
@@ -1470,26 +1574,27 @@ dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-x64 
 
 Expected: `Pushed image 'homeblaze:local' to local archive at '/tmp/homeblaze-local.tar.gz'`.
 
-- [ ] **Step 4: Smoke test the image locally**
+- [ ] **Step 6: Smoke test the image locally**
 
 ```bash
 docker load -i /tmp/homeblaze-local.tar.gz
-mkdir -p /tmp/homeblaze-data && rm -rf /tmp/homeblaze-data/*
-docker run -d --name homeblaze-local -p 8080:8080 -v /tmp/homeblaze-data:/data homeblaze:local
+docker volume rm -f homeblaze-local-data
+docker run -d --name homeblaze-local -p 8080:8080 -v homeblaze-local-data:/data homeblaze:local
 for attempt in $(seq 1 60); do curl -sf http://localhost:8080/health && break; sleep 2; done
-ls /tmp/homeblaze-data /tmp/homeblaze-data/Files /tmp/homeblaze-data/Files/Docs | head -20
-docker exec homeblaze-local ls /app/Plugins
-docker logs homeblaze-local 2>&1 | grep -E "Seeded the data directory|Plugin loading complete"
+for attempt in $(seq 1 30); do docker exec homeblaze-local test -d /data/History/Sqlite && break; sleep 1; done
+docker exec homeblaze-local sh -c 'ls /data /data/Files /data/Files/Servers /data/History; ls /data/Files/Docs | head -3'
+docker logs homeblaze-local 2>&1 | grep -E "Seeded the data directory|Plugin loading complete|Recording SQLite history"
 docker rm -f homeblaze-local
+docker volume rm homeblaze-local-data
 ```
 
-Expected: `Healthy`; `/tmp/homeblaze-data` contains `Root.json`, `Files`; `Files/Docs` contains Markdown; `/app/Plugins` lists the two sample `.nupkg`; log shows seeding and `2 loaded, 0 failed`. If `/app/Plugins` is empty, fix the `PublishPluginNupkgs` target before continuing. Remove `/tmp/homeblaze-data` with `sudo rm -rf` if root-owned files block the cleanup.
+Expected: `Healthy`; `/data` has `Root.json`, `Files`, `History`; `Files` has `Readme.md`, `Help.md`, `Plugins.json`, `Servers`, `Docs`; the log shows seeding, `0 loaded, 0 failed` (or the "no plugins" message) and `Recording SQLite history to /data/History/Sqlite`. Then open http://localhost:8080 once while the container runs to confirm the start page and Help link render; restart the check if you already removed it.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/HomeBlaze/HomeBlaze/HomeBlaze.csproj
-git commit -m "feat: build HomeBlaze as a container image"
+git add src/HomeBlaze/HomeBlaze/Seed src/HomeBlaze/HomeBlaze/HomeBlaze.csproj
+git commit -m "feat: build HomeBlaze as a container image with a starting set"
 ```
 
 ---
@@ -1534,9 +1639,15 @@ Insert this job after `test-modbus-integration` and before `pack`:
           }
           docker logs homeblaze
           if (-not $healthy) { throw "HomeBlaze did not become healthy" }
-          foreach ($file in @("Root.json", "Files/Plugins.json")) {
-            if (-not (Test-Path (Join-Path $data.FullName $file))) { throw "Missing seeded file $file" }
+          foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
+            if (-not (Test-Path (Join-Path $data.FullName $path))) { throw "Missing seeded path $path" }
           }
+          $historyCreated = $false
+          for ($attempt = 0; $attempt -lt 30 -and -not $historyCreated; $attempt++) {
+            $historyCreated = Test-Path (Join-Path $data.FullName "History/Sqlite")
+            if (-not $historyCreated) { Start-Sleep -Seconds 1 }
+          }
+          if (-not $historyCreated) { throw "SQLite history folder was not created" }
 ```
 
 - [ ] **Step 2: Add the publish job**
@@ -1874,6 +1985,8 @@ volumes:
 
 - [ ] **Step 2: Verify compose against the local image**
 
+If `homeblaze:local` was removed, rebuild and load it as in Task 9 Steps 5 and 6.
+
 ```bash
 docker tag homeblaze:local ghcr.io/ricosuter/homeblaze:latest
 cd /tmp && rm -rf homeblaze-compose && mkdir homeblaze-compose && cd homeblaze-compose
@@ -1931,9 +2044,9 @@ data/
 └── OpcUa/          OPC UA certificates
 ```
 
-On the first start, when `Root.json` does not exist, HomeBlaze copies the shipped defaults into the folder. Existing files are never overwritten. Back up HomeBlaze by copying this folder.
+On the first start, when `Root.json` does not exist, HomeBlaze copies a starting set into the folder: a start page, this documentation, an empty plugin list and a SQLite history store that records to `History/Sqlite`. Existing files are never overwritten. Back up HomeBlaze by copying this folder. The demo devices and sample plugins are only available when running from source.
 
-Shipped docs and demo files in `Files/` are not updated by later image versions. To refresh them, delete `Files/Docs` (or other shipped files) and restart; missing files are copied again only when `Root.json` is missing too, so move `Root.json` away for that restart and put it back afterwards.
+The documentation in `Files/Docs` is not updated by later image versions. To refresh it, stop HomeBlaze, delete `Files/Docs`, move `Root.json` away, start once so the starting set is copied again, then put your `Root.json` back. Files that still exist are not overwritten.
 
 ### Optional services
 
@@ -1972,7 +2085,7 @@ In `src/HomeBlaze/HomeBlaze/Data/Files/Docs/administration/configuration.md`, re
 | Setting | Default | Description |
 |---|---|---|
 | `HomeBlaze:RootConfigFile` | `Data/Root.json` | Root configuration file, relative to the working directory. Its folder is the data folder; relative paths in configuration resolve against it. |
-| `HomeBlaze:SeedDirectory` | not set | Folder copied into the data folder on first start, when the root configuration file does not exist. The container image sets it to `/app/Data`. |
+| `HomeBlaze:SeedDirectory` | not set | Folder copied into the data folder on first start, when the root configuration file does not exist. The container image sets it to `/app/Seed`. |
 | `PluginConfigurationPath` | `Files/Plugins.json` | Plugin configuration file, relative to the data folder. |
 | `McpServer:Enabled`, `McpServer:ReadOnly` | `false`, `true` | MCP endpoint at `/mcp`. |
 | `ConnectionStrings:seq` | not set | Seq server URL; enables log and trace export to Seq. |
@@ -2046,4 +2159,4 @@ Ask the user to press F5 on `HomeBlaze` and on `HomeBlaze.AppHost` on Windows an
 
 - [ ] **Step 5: Follow-ups**
 
-Add to the pull request description (not to the code): two-phase startup with plugins found in the tree; separating shipped content from user data so upgrades refresh docs; `docs/mcp.md` still says SSE; `deployment.md` open question on image publishing can be closed.
+Add to the pull request description (not to the code): versioning of libraries, HomeBlaze and plugins (see the spec's follow-ups); two-phase startup with plugins found in the tree; separating shipped content from user data so upgrades refresh docs; `docs/mcp.md` still says SSE; `deployment.md` open question on image publishing can be closed.

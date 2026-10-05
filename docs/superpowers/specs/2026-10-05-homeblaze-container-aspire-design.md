@@ -32,6 +32,7 @@ The Aspire setup follows `../AspireApp`, which is mostly the Aspire template.
 | Platforms | `linux-x64` and `linux-arm64`. |
 | Data location | One mount point, `/data`, filled from the shipped defaults on first start. Works with named volumes and host folders. |
 | Data layout | One instance folder: `Root.json`, `Files/` (subject tree, including `Plugins.json`), `History/Sqlite/`, `OpcUa/Server/Pki/`, `OpcUa/Client/Pki/`. Same layout in development, the container and on Windows. |
+| Starting content | A dedicated `Seed/` set copied on first start: `Root.json`, `Readme.md`, `Help.md`, an empty `Plugins.json`, the SQLite history store and the docs. The development `Data/` (demo, developer device configurations, sample plugins) is not shipped. |
 | Publishing | Releases push `X.Y.Z`, `X.Y` and `latest`. Pushes to master push `edge` and `sha-<short>`. Pull requests build without pushing. |
 | Resilience handler | Not added. The template's `AddStandardResilienceHandler()` on every HttpClient would change device polling behavior. Service discovery is not added either. |
 | Health endpoints | `/health` and `/alive` are mapped in every environment, not only Development. |
@@ -90,9 +91,24 @@ The data folder is the folder that contains the root configuration file. Everyth
 - The SQLite history store's base directory becomes `<data>/History` and its default folder name `Sqlite`, so the default is `<data>/History/Sqlite`. A relative `databasePath` resolves against `<data>/History`. Without a data directory it falls back to `LocalApplicationData/HomeBlaze`.
 - The HomeBlaze OPC UA subjects set `CertificateStoreBasePath` to `<data>/OpcUa/Server/Pki` and `<data>/OpcUa/Client/Pki`. Today both share `pki` in the working directory, and the server clears its store on start, which can delete the client's certificate. The library default stays `pki`.
 
-### Build output
+### Starting set
 
-Today only the JSON files of `Data/` reach the build output, because Markdown files are not content items. The seed in the image needs the whole tree, so `Data/Root.json` and `Data/Files/**` are copied to the build and publish output. Runtime folders (`Data/History`, `Data/OpcUa`) are not.
+New folder `src/HomeBlaze/HomeBlaze/Seed/`, the content a new installation starts with:
+
+```
+Seed/
+├── Root.json                     "connectionString": "Files"
+└── Files/
+    ├── Readme.md                 start page, links to the docs
+    ├── Help.md                   app bar entry to the docs
+    ├── Plugins.json              nuget.org feed, no plugins
+    ├── Servers/SqliteHistory.json  SQLite history, stored in <data>/History/Sqlite
+    └── Docs/                     added at build time from Data/Files/Docs, not duplicated in the repository
+```
+
+- `Seed/` and the linked docs are copied to the build and publish output. `Data/` is no longer copied to the output; nothing reads it there.
+- The development `Data/` keeps the demo, the developer's devices and the sample plugins. They are not part of the image, because the device configurations point to the developer's hardware.
+- With no bundled plugins, the plugin version check is not involved in the image. See the versioning follow-up.
 
 ### First-start seeding
 
@@ -108,7 +124,7 @@ Today only the JSON files of `Data/` reach the build output, because Markdown fi
 |---|---|---|---|
 | F5, `dotnet run` | project folder | `Data/Root.json` in the source tree | off |
 | AppHost | project folder | same as F5 | off |
-| Container | `/app` | `/data/Root.json` | on, from `/app/Data` |
+| Container | `/app` | `/data/Root.json` | on, from `/app/Seed` |
 | Published build on Windows or Linux | any | as configured, for example `C:\HomeBlaze\Root.json` | on when configured |
 
 ## Part 3: Container image and CI
@@ -121,8 +137,7 @@ Container properties in `HomeBlaze.csproj`:
 - `ContainerUser`: `root`
 - Base image: the default `mcr.microsoft.com/dotnet/aspnet:10.0`
 - Ports: `8080` (HTTP, UI and MCP) and `4840` (OPC UA server subject). No HTTPS in the container; TLS belongs to a reverse proxy. The existing `UseHttpsRedirection()` logs one warning and does nothing.
-- Environment: `HomeBlaze__RootConfigFile=/data/Root.json` and `HomeBlaze__SeedDirectory=/app/Data`.
-- The sample plugin packages (`Plugins/*.nupkg`) must be part of the publish output. Today they are copied after build only; this is verified and fixed if needed.
+- Environment: `HomeBlaze__RootConfigFile=/data/Root.json` and `HomeBlaze__SeedDirectory=/app/Seed`.
 
 ### CI
 
@@ -139,7 +154,7 @@ New `container` job in `.github/workflows/build.yml`:
 - The build does not override `Version`. HomeBlaze pins it to `1.0.0` because plugins bind by assembly version. The release version only becomes the image tag and `InformationalVersion`.
 - One manual step: GHCR makes a new package private on its first push. The package is made public once in its settings. The guide mentions this for forks.
 
-Smoke test, in the same job on every trigger: load the amd64 archive, run it with an empty temporary `/data`, wait until `/health` returns 200, and check that `/data/Root.json` and `/data/Files/Plugins.json` exist.
+Smoke test, in the same job on every trigger: load the amd64 archive, run it with an empty temporary `/data`, wait until `/health` returns 200, and check that `/data/Root.json`, `/data/Files/Plugins.json` and `/data/Files/Docs` exist and that `/data/History/Sqlite` is created.
 
 ## Part 4: HomeBlaze.AppHost
 
@@ -199,6 +214,8 @@ Manual checks before the pull request:
 No Connector Tester run or benchmark is needed; no connector or hot path changes.
 
 ## Follow-ups
+
+- Versioning. The plugin check requires the same major and a plugin minor version not above the host's, using the versions in the host's `deps.json`. Source and image builds report the libraries as `0.1.0` (release builds only set `PackageVersion` when packing) and HomeBlaze as a pinned `1.0.0`, so a plugin built against `Namotion.Interceptor 0.9.x` from nuget.org would be rejected. The HomeBlaze abstractions are not published either. Needs its own design before third-party plugins are supported.
 
 - Two-phase startup that finds the plugin configuration as a subject in the loaded tree.
 - Separate shipped content (docs, demo) from user data so upgrades refresh docs.
