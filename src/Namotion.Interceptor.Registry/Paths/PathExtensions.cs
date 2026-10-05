@@ -275,8 +275,8 @@ public static class PathExtensions
     /// </summary>
     private static bool IsInlinePathsKey(
         PathProviderBase pathProvider, RegisteredSubject subject, RegisteredSubjectProperty property, string segment)
-        => InlinePathsAttribute.IsInlinePathsProperty(subject.Subject.GetType(), property.Name) &&
-           segment != GetOwnSegment(pathProvider, property);
+        => segment != GetOwnSegment(pathProvider, property) &&
+           InlinePathsAttribute.IsInlinePathsProperty(subject.Subject.GetType(), property.Name);
 
     private static string GetOwnSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
         => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;

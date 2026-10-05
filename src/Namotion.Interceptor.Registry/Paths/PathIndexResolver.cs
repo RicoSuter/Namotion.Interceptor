@@ -80,14 +80,29 @@ internal static class PathIndexResolver
 
     private static bool TryParsePosition(ReadOnlySpan<char> text, out int position)
     {
-        // Canonical digits only: a sign, whitespace or a leading zero is text the writer never emits.
-        if (text.Length > 1 && text[0] == '0')
+        position = 0;
+        return IsCanonicalInteger(text, allowSign: false) &&
+            int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out position);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> is an integer as the invariant culture writes it: digits without a leading zero
+    /// (other than "0" itself), preceded by '-' for a negative number when <paramref name="allowSign"/>.
+    /// </summary>
+    private static bool IsCanonicalInteger(ReadOnlySpan<char> text, bool allowSign)
+    {
+        if (allowSign && text.Length > 1 && text[0] == '-')
         {
-            position = 0;
-            return false;
+            text = text[1..];
+            if (text[0] == '0')
+            {
+                return false;
+            }
         }
 
-        return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out position);
+        return text.Length > 0 &&
+            (text[0] != '0' || text.Length == 1) &&
+            !text.ContainsAnyExceptInRange('0', '9');
     }
 
     /// <returns>True when parsed, false when the key type is supported but the text is not its written form, null when the key type is not supported.</returns>
@@ -133,7 +148,8 @@ internal static class PathIndexResolver
     }
 
     private static object? ParseInteger<T>(ReadOnlySpan<char> text) where T : struct, IBinaryInteger<T>
-        => T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) && PathSyntax.TextEquals(value, text)
+        => IsCanonicalInteger(text, allowSign: true) &&
+           T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value)
             ? value
             : null;
 
