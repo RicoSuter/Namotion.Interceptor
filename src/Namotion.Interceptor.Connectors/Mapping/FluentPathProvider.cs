@@ -36,7 +36,7 @@ public sealed class FluentPathProvider<TMetadata> : PathProviderBase
             return true;
 
         // Mirror AttributeBasedPathProvider: [InlinePaths] containers participate in path resolution.
-        return property.ReflectionAttributes.OfType<InlinePathsAttribute>().Any();
+        return InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name);
     }
 
     /// <inheritdoc />
