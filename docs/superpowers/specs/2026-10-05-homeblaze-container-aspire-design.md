@@ -31,7 +31,7 @@ The Aspire setup follows `../AspireApp`, which is mostly the Aspire template.
 | Image user | `ContainerUser=root`. SDK-built images own every file as root, so a non-root user could not write the data folder. Root also keeps GPIO access simple. |
 | Platforms | `linux-x64` and `linux-arm64`. |
 | Data location | One mount point, `/data`, filled from the shipped defaults on first start. Works with named volumes and host folders. |
-| Root configuration | `root.json` is renamed to `Root.json` and lives in the storage root next to `Plugins.json`, in every way of running HomeBlaze. |
+| Data layout | One instance folder: `Root.json`, `Files/` (subject tree, including `Plugins.json`), `History/Sqlite/`, `OpcUa/Server/Pki/`, `OpcUa/Client/Pki/`. Same layout in development, the container and on Windows. |
 | Publishing | Releases push `X.Y.Z`, `X.Y` and `latest`. Pushes to master push `edge` and `sha-<short>`. Pull requests build without pushing. |
 | Resilience handler | Not added. The template's `AddStandardResilienceHandler()` on every HttpClient would change device polling behavior. Service discovery is not added either. |
 | Health endpoints | `/health` and `/alive` are mapped in every environment, not only Development. |
@@ -51,41 +51,54 @@ Package versions go into `src/Directory.Packages.props`. Aspire packages use 13.
 
 ## Part 2: Data layout and startup paths
 
-### One layout everywhere
+### One instance folder everywhere
 
 ```
 <data folder>/          Data/ in the source tree, /data in the container
-├── Root.json           root subject, "connectionString": "."
-├── Plugins.json        plugin configuration
-├── Devices/...
-└── Docs/...
+├── Root.json           root subject, "connectionString": "Files"
+├── Files/              subject tree, today's Data/ content
+│   ├── Plugins.json    plugin configuration, a subject in the tree
+│   ├── Devices/...
+│   └── Docs/...
+├── History/Sqlite/     default SQLite history store
+└── OpcUa/
+    ├── Server/Pki/     OPC UA server certificate store
+    └── Client/Pki/     OPC UA client certificate store
 ```
 
-- `src/HomeBlaze/HomeBlaze/root.json` moves to `src/HomeBlaze/HomeBlaze/Data/Root.json` with `"connectionString": "."`. The csproj content item for `root.json` is updated accordingly.
+The data folder is the folder that contains the root configuration file. Everything a HomeBlaze instance keeps lives in it, so a backup is one folder copy.
+
+- `src/HomeBlaze/HomeBlaze/root.json` moves to `src/HomeBlaze/HomeBlaze/Data/Root.json` with `"connectionString": "Files"`.
+- Today's `src/HomeBlaze/HomeBlaze/Data/*` moves to `src/HomeBlaze/HomeBlaze/Data/Files/*`.
+- `Data/History/` and `Data/OpcUa/` are added to `.gitignore`.
 - The default of `HomeBlaze:RootConfigFile` changes from `root.json` to `Data/Root.json`. It still resolves against the working directory.
-- There is no fallback search for the old `root.json`. Existing installs move and rename the file or set `HomeBlaze:RootConfigFile`.
+- `Root.json` is outside the scanned `Files/` folder, so the storage needs no special case for it.
+- There is no fallback search for the old `root.json` or the old history location. There are no live installs.
+
+### Data directory service
+
+- New interface `IDataDirectoryProvider` in `HomeBlaze.Abstractions` with one property, `DataDirectory`.
+- `RootManager` implements it and registers itself in the context in its constructor. It resolves the root configuration path once in the constructor, exposed as `ConfigurationPath`, and `DataDirectory` is that file's folder.
+- Subjects read it with `Context.TryGetService<IDataDirectoryProvider>()`. Without it, for example in unit tests, each consumer keeps its current fallback.
 
 ### Path resolution
 
-- A shared helper in `HomeBlaze.Services`, for example `HomeBlazePaths`, resolves the root configuration file from `IConfiguration`. `Program.cs` and `RootManager` both use it so they agree on the location.
-- `RootManager` exposes the resolved `ConfigurationPath` and its `ConfigurationDirectory`.
-- `FluentStorageContainer` resolves a relative `ConnectionString` with `Path.GetFullPath(ConnectionString, configurationDirectory)`. Absolute paths are unchanged. Without a `RootManager` it falls back to the working directory. Nested storage containers use the same base, so the rule is: relative paths in configuration are relative to the folder of `Root.json`.
-- The plugin configuration defaults to `Plugins.json` next to `Root.json`. `PluginConfigurationPath` remains as an optional override; a relative override resolves against the folder of `Root.json`.
+- A static helper `HomeBlazePaths` in `HomeBlaze.Services` holds the setting keys and defaults and resolves the root configuration path and the plugin configuration path from `IConfiguration`. `Program.cs` and `RootManager` both use it.
+- `FluentStorageContainer` resolves a relative `ConnectionString` against `DataDirectory`, falling back to the working directory. Absolute paths are unchanged. The resolved folder is used for the FluentStorage client, the file watcher, own-write tracking and file metadata (`JsonFile`, `GenericFile`).
+- The plugin configuration defaults to `Files/Plugins.json` relative to the data folder. `PluginConfigurationPath` remains an optional override; a relative override resolves against the data folder.
 - Paths inside `Plugins.json` (the bundled `Plugins` feed, `PluginsCache`) stay relative to `AppContext.BaseDirectory`, because the bundled plugin packages ship with the app.
+- The SQLite history store's base directory becomes `<data>/History` and its default folder name `Sqlite`, so the default is `<data>/History/Sqlite`. A relative `databasePath` resolves against `<data>/History`. Without a data directory it falls back to `LocalApplicationData/HomeBlaze`.
+- The HomeBlaze OPC UA subjects set `CertificateStoreBasePath` to `<data>/OpcUa/Server/Pki` and `<data>/OpcUa/Client/Pki`. Today both share `pki` in the working directory, and the server clears its store on start, which can delete the client's certificate. The library default stays `pki`.
 
-### Storage skips the root file
+### Build output
 
-`Root.json` lies inside the storage folder, so the storage must not list or load it. Loading it would make the root container load itself.
-
-- `FluentStorageContainer` skips the blob whose full path equals `RootManager.ConfigurationPath`, in the startup scan next to the existing hidden file filter (`FluentStorageContainer.cs`, scan loop) and in `StorageFileWatcher` events, so a rewrite by `RootManager.WriteConfigurationAsync` is not picked up.
-- Blob paths are converted with `Path.GetFullPath(Path.Combine(storageRoot, blobPath))`, which handles `/` versus `\` on Windows.
-- Comparison is case-insensitive on Windows and macOS and case-sensitive on Linux.
-- The file is hidden from the tree completely, so the UI never edits the file `RootManager` writes.
+Today only the JSON files of `Data/` reach the build output, because Markdown files are not content items. The seed in the image needs the whole tree, so `Data/Root.json` and `Data/Files/**` are copied to the build and publish output. Runtime folders (`Data/History`, `Data/OpcUa`) are not.
 
 ### First-start seeding
 
 - New setting `HomeBlaze:SeedDirectory`, unset by default.
-- Seeding runs in `Program.cs` before `AddHomeBlazePlugins`, because that call reads `Plugins.json` during service registration, which is earlier than `RootManager` loads the root. If the root configuration file does not exist and `HomeBlaze:SeedDirectory` is set, copy the seed directory's contents into the folder of the root configuration file, skipping files that already exist, then make sure `Root.json` exists there with `"connectionString": "."`.
+- Seeding runs in `Program.cs` before `AddHomeBlazePlugins`, because that call reads `Plugins.json` during service registration, which is earlier than `RootManager` loads the root.
+- If the root configuration file does not exist and the seed directory is set and exists, the seed directory's contents are copied into the data folder, skipping files that already exist. The seed contains `Root.json`, so the root file exists afterwards.
 - Uses `Path` and `Directory` APIs only, so it works on Windows and Linux.
 - F5, `dotnet run` and the AppHost never set the seed directory and are unaffected.
 
@@ -119,13 +132,14 @@ New `container` job in `.github/workflows/build.yml`:
 |---|---|---|
 | Pull request | existing `homeblaze` path filter matched | build both platforms to a local archive with `ContainerArchiveOutputPath`, run the smoke test, push nothing |
 | Push to master | after `test` and `test-homeblaze-integration` | push `edge` and `sha-<short>` |
-| Release `vX.Y.Z` | after the jobs the NuGet `deploy` job waits for | push `X.Y.Z`, `X.Y` and `latest`, built with `-p:Version=X.Y.Z` |
+| Release `vX.Y.Z` | after the jobs the NuGet `deploy` job waits for | push `X.Y.Z`, `X.Y` and `latest` |
 
 - Registry `ghcr.io`, repository `ricosuter/homeblaze`, set through `ContainerRegistry` and `ContainerRepository` in CI.
 - Login with `docker/login-action` and `GITHUB_TOKEN`; the job has `permissions: packages: write`. The SDK uses those credentials.
+- The build does not override `Version`. HomeBlaze pins it to `1.0.0` because plugins bind by assembly version. The release version only becomes the image tag and `InformationalVersion`.
 - One manual step: GHCR makes a new package private on its first push. The package is made public once in its settings. The guide mentions this for forks.
 
-Smoke test, in the same job on every trigger: load the amd64 archive, run it with an empty temporary `/data`, wait until `/health` returns 200, and check that `/data/Root.json` and `/data/Plugins.json` exist.
+Smoke test, in the same job on every trigger: load the amd64 archive, run it with an empty temporary `/data`, wait until `/health` returns 200, and check that `/data/Root.json` and `/data/Files/Plugins.json` exist.
 
 ## Part 4: HomeBlaze.AppHost
 
@@ -150,22 +164,23 @@ New project `src/HomeBlaze/HomeBlaze.AppHost`, added to `Namotion.Interceptor.sl
 
 ### Documentation, in HomeBlaze's built-in docs
 
-- `administration/installation.md`: new Docker section covering the compose file and profiles, the `/data` layout and seeding, stale docs and demo after upgrades, no authentication, root user, GPIO, host networking for discovery, backup by copying `./data`, connecting n8n, and making the GHCR package public on forks.
-- `administration/configuration.md`: `HomeBlaze:RootConfigFile` (default `Data/Root.json`), `HomeBlaze:SeedDirectory`, `PluginConfigurationPath` as an optional override, `McpServer:*`, `ConnectionStrings:seq`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and relative paths resolving against `Root.json`.
-- `administration/upgrading.md`: `root.json` becomes `Data/Root.json` (case matters on Linux), and relative paths resolve against the folder of `Root.json`.
+- `administration/installation.md`: new Docker section covering the compose file and profiles, the `/data` layout (`Root.json`, `Files/`, `History/`, `OpcUa/`) and seeding, stale docs and demo after upgrades, no authentication, root user, GPIO, host networking for discovery, backup by copying `./data`, connecting n8n, and making the GHCR package public on forks.
+- `administration/configuration.md`: `HomeBlaze:RootConfigFile` (default `Data/Root.json`), `HomeBlaze:SeedDirectory`, `PluginConfigurationPath` as an optional override, `McpServer:*`, `ConnectionStrings:seq`, `OTEL_EXPORTER_OTLP_ENDPOINT`, the data folder layout, and relative paths resolving against the data folder.
+- `administration/upgrading.md`: `root.json` becomes `Data/Root.json` (case matters on Linux), subject files move to `Data/Files/`, relative paths resolve against the data folder, and SQLite history and OPC UA certificates move into the data folder.
 - `administration/monitoring.md`: from Planned to describing Seq, OpenTelemetry and the health endpoints.
 - New `development/aspire.md`: running the AppHost, persistent containers, n8n and opc-plc.
-- Existing docs that mention `root.json` are updated.
+- Existing docs that mention `root.json` or the `Data/` folder are updated.
 
 ## Testing
 
 Unit tests in `HomeBlaze.Services.Tests` and `HomeBlaze.Storage.Tests`:
 
 - Root configuration resolution: default `Data/Root.json`, relative setting against the working directory.
-- Plugin configuration: default next to `Root.json`, override respected, relative override against the folder of `Root.json`.
-- Storage `ConnectionString`: relative against the configuration directory, absolute unchanged, working directory fallback without `RootManager`.
-- Root file skip: not listed or loaded by the scan, not picked up by the watcher after `RootManager` rewrites it.
-- Seeding: copies when the root file is missing and the seed directory is set, no-op otherwise, never overwrites, writes `Root.json` with `"."`.
+- Plugin configuration: default `Files/Plugins.json` in the data folder, override respected, relative override against the data folder.
+- `RootManager` exposes `ConfigurationPath` and `DataDirectory` and registers `IDataDirectoryProvider` in the context.
+- Storage `ConnectionString`: relative against the data directory, absolute unchanged, working directory fallback without a provider.
+- SQLite default location: `<data>/History/Sqlite` with a provider, `LocalApplicationData/HomeBlaze/Sqlite` without.
+- Seeding: copies when the root file is missing and the seed directory is set, no-op otherwise, never overwrites.
 - Existing tests touching the root file (`RootManagerRootLoadedTests`, `ConfigurableSubjectStartupTests`) are updated.
 
 Integration:
