@@ -84,9 +84,8 @@ public partial class SqliteHistoryStoreSubject :
     public partial PartitionInterval PartitionInterval { get; set; }
 
     /// <summary>
-    /// Directory that holds the partition database files. Relative paths resolve under the application data
-    /// directory (outside the HomeBlaze Data folder); absolute paths are used as-is; empty uses the default
-    /// "History" folder.
+    /// Directory that holds the partition database files. Relative paths resolve under the <c>History</c> folder of
+    /// the instance data directory; absolute paths are used as-is; empty uses the default "Sqlite" folder.
     /// </summary>
     [Configuration]
     public partial string DatabasePath { get; set; }
@@ -232,7 +231,8 @@ public partial class SqliteHistoryStoreSubject :
             return;
         }
 
-        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory());
+        var dataDirectory = context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
+        var directory = SqliteDatabaseLocation.Resolve(DatabasePath, SqliteDatabaseLocation.DefaultBaseDirectory(dataDirectory));
 
         SqliteHistoryStore engine;
         try
