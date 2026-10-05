@@ -10,7 +10,7 @@ public abstract class PathProviderBase : IPathProvider
 {
     /// <summary>
     /// Gets the character used to separate path segments. The separator and the two index characters must be three
-    /// different characters; paths are ambiguous otherwise.
+    /// different characters, none of them <c>'</c>, which quotes keys; paths are ambiguous otherwise.
     /// </summary>
     public virtual char PathSeparator => '.';
 

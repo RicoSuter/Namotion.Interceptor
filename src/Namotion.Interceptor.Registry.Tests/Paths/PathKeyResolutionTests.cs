@@ -220,4 +220,26 @@ public class PathKeyResolutionTests
         Assert.Same(item, present);
         Assert.Null(absent);
     }
+
+    [Theory]
+    [InlineData("Sensor [Kitchen]", "Items['Sensor [Kitchen]'].Value")]
+    [InlineData("'quoted", "Items['''quoted'].Value")]
+    [InlineData("", "Items[''].Value")]
+    [InlineData("Bob's", "Items[Bob's].Value")]
+    [InlineData("a.b", "Items[a.b].Value")]
+    [InlineData("a[b", "Items[a[b].Value")]
+    public void WhenStringKeyIsWritten_ThenPathIsQuotedWhereNeededAndResolvesBack(string key, string expectedPath)
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "v" };
+        var container = new TestContainer(context) { Items = new Dictionary<string, TestItem> { [key] = item } };
+
+        // Act
+        var path = GetValuePath(item);
+
+        // Assert
+        Assert.Equal(expectedPath, path);
+        Assert.Same(item, ResolveProperty(container, path!)?.Property.Subject);
+    }
 }

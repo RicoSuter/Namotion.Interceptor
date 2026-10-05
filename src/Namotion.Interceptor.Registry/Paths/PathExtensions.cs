@@ -30,8 +30,7 @@ public static class PathExtensions
         => pathProvider.TryParsePath(path, out var segments, out var error) ? segments : throw new FormatException(error);
 
     /// <summary>
-    /// Parses a path string into segments with their index text. Empty segments are skipped. An index ends at the
-    /// first closing bracket.
+    /// Parses a path string into segments with their unquoted index text. Empty segments are skipped.
     /// </summary>
     /// <param name="pathProvider">The path provider defining the separator and index characters.</param>
     /// <param name="path">The path to parse.</param>
@@ -48,7 +47,7 @@ public static class PathExtensions
         var result = new List<(string segment, string? index)>();
         while (reader.TryRead(out var segment))
         {
-            result.Add((segment.GetName(), segment.HasIndex ? segment.Index.ToString() : null));
+            result.Add((segment.GetName(), segment.GetIndex()));
         }
 
         if (reader.IsMalformed)
@@ -319,7 +318,7 @@ public static class PathExtensions
     /// Optional root to make the path relative to. When <c>null</c>, the canonical absolute path is returned;
     /// when provided, <c>null</c> is returned if the property is not reachable from that root.
     /// </param>
-    /// <returns>The path, or <c>null</c> when a given root is not reachable, the parent chain has a cycle, or a key on the way has no path.</returns>
+    /// <returns>The path, or <c>null</c> when a given root is not reachable or the parent chain has a cycle.</returns>
     public static string? TryGetPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null)
         => property.TryGetPath(DefaultPathProvider.Instance, rootSubject);
 
@@ -332,11 +331,10 @@ public static class PathExtensions
     /// <param name="propertyIndex">Optional index for the property (e.g., dictionary key or collection index).
     /// When provided, the property path includes this index, which is useful for computing
     /// the path to a child subject held at a specific index within this property.</param>
-    /// <returns>The path, or null when the property is excluded, a given root is not reachable, the parent chain has a cycle, or a key on the way has no path.</returns>
+    /// <returns>The path, or null when the property is excluded, a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
-    /// A key has no path when its text is empty, or when it is written as an index and its text contains
-    /// <see cref="PathProviderBase.IndexClose"/>. Keys of any type are written with their invariant text, but only
-    /// string, integer, <see cref="Guid"/> and enum dictionary keys resolve from a path.
+    /// Keys are written with their invariant text, quoted when the text is empty, starts with <c>'</c> or contains
+    /// <see cref="PathProviderBase.IndexClose"/>. Every written path resolves back to the same entry.
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {
@@ -381,10 +379,9 @@ public static class PathExtensions
                 }
 
                 builder.Append(segment);
-                if (index is not null &&
-                    !PathSyntax.TryAppendIndex(builder, index, characters.IndexOpen, characters.IndexClose))
+                if (index is not null)
                 {
-                    return null;
+                    PathSyntax.AppendIndex(builder, index, characters);
                 }
             }
 
@@ -420,16 +417,18 @@ public static class PathExtensions
         }
 
         builder.Append(ownSegment);
-        return PathSyntax.TryAppendIndex(builder, text, characters.IndexOpen, characters.IndexClose);
+        PathSyntax.AppendIndexText(builder, text, characters);
+        return true;
     }
 
     /// <summary>
-    /// Mirrors <see cref="IsInlinePathsKey"/>: the reader takes the bare text as this key only when the text
-    /// parses as one name, resolves to the inline property and is not that property's own segment.
+    /// Mirrors <see cref="IsInlinePathsKey"/>: the reader takes the bare text as this key only when the text is one
+    /// non-empty name, resolves to the inline property and is not that property's own segment.
     /// </summary>
     private static bool CanWriteBareInlineKey(
         PathProviderBase pathProvider, PathCharacters characters, RegisteredSubjectProperty property, string text, string ownSegment)
-        => text.AsSpan().IndexOfAny(characters.Separator, characters.IndexOpen) < 0 &&
+        => text.Length > 0 &&
+           text.AsSpan().IndexOfAny(characters.Separator, characters.IndexOpen) < 0 &&
            text != ownSegment &&
            pathProvider.TryGetPropertyFromSegment(property.Parent, text)?.Name == property.Name;
 

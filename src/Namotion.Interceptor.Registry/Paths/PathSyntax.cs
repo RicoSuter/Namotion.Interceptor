@@ -4,20 +4,22 @@ using System.Text;
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// The writer's side of the grammar <see cref="PathSegmentReader"/> reads, and the reader's error text.
+/// Key text and index writing for the grammar <see cref="PathSegmentReader"/> reads, and the reader's error text.
 /// </summary>
 internal static class PathSyntax
 {
-    /// <summary>
-    /// Describes an error <see cref="PathSegmentReader"/> reported at <paramref name="position"/>.
-    /// </summary>
-    public static string FormatError(PathSyntaxError error, int position, PathCharacters characters, string path)
+    /// <summary>The quote that wraps a key needing it; not configurable.</summary>
+    public const char Quote = '\'';
+
+    public static string FormatError(string path, int position, PathSyntaxError error, PathCharacters characters)
     {
         var reason = error switch
         {
             PathSyntaxError.MissingName => "Missing segment name",
             PathSyntaxError.UnclosedIndex => $"Unclosed '{characters.IndexOpen}'",
             PathSyntaxError.EmptyIndex => "Empty index",
+            PathSyntaxError.UnclosedQuote => "Unclosed quote",
+            PathSyntaxError.ExpectedIndexClose => $"Expected '{characters.IndexClose}' after quoted key",
             PathSyntaxError.ExpectedSeparator => $"Expected '{characters.Separator}' or end of path after index",
             _ => throw new ArgumentOutOfRangeException(nameof(error), error, null)
         };
@@ -58,35 +60,47 @@ internal static class PathSyntax
         return text.SequenceEqual(FormatIndex(key));
     }
 
-    /// <summary>
-    /// Appends <paramref name="index"/> in brackets. False when its text is empty or contains the closing
-    /// bracket, so the key has no path.
-    /// </summary>
-    public static bool TryAppendIndex(StringBuilder builder, object index, char indexOpen, char indexClose)
+    /// <summary>Appends <paramref name="index"/> in brackets, quoted when its text needs it.</summary>
+    public static void AppendIndex(StringBuilder builder, object index, PathCharacters characters)
     {
         if (index is ISpanFormattable formattable)
         {
-            // Formatted on the stack to avoid a string per segment; must produce the same text as FormatIndex,
-            // which a longer key falls back to.
+            // Must produce the same text as FormatIndex, which a longer key falls back to.
             Span<char> buffer = stackalloc char[64];
             if (formattable.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture))
             {
-                return TryAppendIndexText(builder, buffer[..written], indexOpen, indexClose);
+                AppendIndexText(builder, buffer[..written], characters);
+                return;
             }
         }
 
-        return TryAppendIndexText(builder, FormatIndex(index), indexOpen, indexClose);
+        AppendIndexText(builder, FormatIndex(index), characters);
     }
 
-    private static bool TryAppendIndexText(StringBuilder builder, ReadOnlySpan<char> text, char indexOpen, char indexClose)
+    /// <summary>Appends key <paramref name="text"/> in brackets, quoted when it is empty, starts with a quote or contains the closing bracket.</summary>
+    public static void AppendIndexText(StringBuilder builder, ReadOnlySpan<char> text, PathCharacters characters)
     {
-        if (text.IsEmpty || text.Contains(indexClose))
+        builder.Append(characters.IndexOpen);
+        if (text.IsEmpty || text[0] == Quote || text.Contains(characters.IndexClose))
         {
-            return false;
+            builder.Append(Quote);
+            foreach (var character in text)
+            {
+                builder.Append(character);
+                if (character == Quote)
+                {
+                    builder.Append(Quote);
+                }
+            }
+
+            builder.Append(Quote);
+        }
+        else
+        {
+            builder.Append(text);
         }
 
-        builder.Append(indexOpen).Append(text).Append(indexClose);
-        return true;
+        builder.Append(characters.IndexClose);
     }
 }
 
@@ -99,6 +113,8 @@ internal enum PathSyntaxError
     MissingName,
     UnclosedIndex,
     EmptyIndex,
+    UnclosedQuote,
+    ExpectedIndexClose,
     ExpectedSeparator
 }
 

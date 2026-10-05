@@ -1,49 +1,44 @@
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// One segment of a path read by <see cref="PathSegmentReader"/>: a name with an optional index in brackets. The
-/// segment points into the path it was read from, so reading its name or index allocates nothing.
+/// One segment of a path read by <see cref="PathSegmentReader"/>: a name with an optional index. The name and an
+/// index without doubled quotes point into the path, so reading them allocates nothing.
 /// </summary>
 internal readonly struct PathSegment
 {
-    private readonly string? _path;
+    private readonly string _path;
     private readonly int _nameStart;
+    private readonly int _nameLength;
+    private readonly int _indexStart;
+    private readonly int _indexLength;
+    private readonly string? _unescapedIndex;
 
-    // Position of the opening bracket, or 0 without an index: a name is never empty, so no bracket sits at 0.
-    private readonly int _indexOpen;
-
-    internal PathSegment(string path, int nameStart, int indexOpen, int end)
+    public PathSegment(string path, int nameStart, int nameLength)
     {
         _path = path;
         _nameStart = nameStart;
-        _indexOpen = indexOpen;
-        End = end;
+        _nameLength = nameLength;
     }
 
-    /// <summary>
-    /// Gets the segment name, without the index.
-    /// </summary>
-    public ReadOnlySpan<char> Name => _path.AsSpan(_nameStart, NameEnd - _nameStart);
+    public PathSegment(string path, int nameStart, int nameLength, int indexStart, int indexLength, string? unescapedIndex)
+        : this(path, nameStart, nameLength)
+    {
+        _indexStart = indexStart;
+        _indexLength = indexLength;
+        _unescapedIndex = unescapedIndex;
+        HasIndex = true;
+    }
 
-    /// <summary>
-    /// Gets whether the segment has an index.
-    /// </summary>
-    public bool HasIndex => _indexOpen > 0;
+    public bool HasIndex { get; }
 
-    /// <summary>
-    /// Gets the index text between the brackets, or an empty span when the segment has no index.
-    /// </summary>
-    public ReadOnlySpan<char> Index => HasIndex ? _path.AsSpan(_indexOpen + 1, End - _indexOpen - 2) : default;
+    /// <summary>Gets the index text without quotes, or an empty span when <see cref="HasIndex"/> is false.</summary>
+    public ReadOnlySpan<char> Index
+        => _unescapedIndex is not null ? _unescapedIndex.AsSpan()
+            : HasIndex ? _path.AsSpan(_indexStart, _indexLength)
+            : default;
 
-    /// <summary>
-    /// Gets the position in the path just past the segment, after the closing bracket when there is an index.
-    /// </summary>
-    public int End { get; }
+    public string GetName() => _path.Substring(_nameStart, _nameLength);
 
-    private int NameEnd => HasIndex ? _indexOpen : End;
-
-    /// <summary>
-    /// Gets the segment name as a string, which is the path itself when the segment is the whole path.
-    /// </summary>
-    public string GetName() => _path?.Substring(_nameStart, NameEnd - _nameStart) ?? string.Empty;
+    /// <summary>Gets the index text without quotes, or null when <see cref="HasIndex"/> is false.</summary>
+    public string? GetIndex() => HasIndex ? _unescapedIndex ?? _path.Substring(_indexStart, _indexLength) : null;
 }

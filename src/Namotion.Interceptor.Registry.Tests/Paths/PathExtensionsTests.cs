@@ -899,48 +899,6 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenDictionaryKeyIsEmpty_ThenTryGetPathReturnsNull()
-    {
-        // Arrange
-        var context = CreateContext();
-        var item = new TestItem(context) { Value = "hello" };
-        var container = new TestContainer(context)
-        {
-            Name = "Root",
-            Items = new Dictionary<string, TestItem> { [""] = item }
-        };
-        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
-
-        // Act
-        var path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
-
-        // Assert
-        Assert.Null(path);
-    }
-
-    [Theory]
-    [InlineData("a]b")]
-    [InlineData("]")]
-    public void WhenDictionaryKeyContainsClosingBracket_ThenTryGetPathReturnsNull(string key)
-    {
-        // Arrange
-        var context = CreateContext();
-        var item = new TestItem(context) { Value = "hello" };
-        var container = new TestContainer(context)
-        {
-            Name = "Root",
-            Items = new Dictionary<string, TestItem> { [key] = item }
-        };
-        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
-
-        // Act
-        var path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
-
-        // Assert
-        Assert.Null(path);
-    }
-
-    [Fact]
     public void WhenDictionaryKeyIsDoubleUnderGermanCulture_ThenTryGetPathFormatsInvariantly()
     {
         // Arrange
