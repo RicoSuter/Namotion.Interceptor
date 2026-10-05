@@ -55,6 +55,9 @@ jobs:
               - 'src/Namotion.Interceptor.AspNetCore/**'
             homeblaze:
               - 'src/HomeBlaze/**'
+              - 'src/Directory.Packages.props'
+              - 'src/Directory.Build.props'
+              - '.github/workflows/build.yml'
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
               - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'
@@ -375,6 +378,12 @@ jobs:
             if (-not $historyCreated) { Start-Sleep -Seconds 1 }
           }
           if (-not $historyCreated) { throw "SQLite history folder was not created" }
+
+      - name: Build arm64 image archive
+        run: |
+          dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-arm64 /t:PublishContainer `
+            -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke-arm64 `
+            -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze-arm64.tar.gz
 
   container-publish:
     timeout-minutes: 30
