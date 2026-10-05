@@ -8,7 +8,10 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// the next lone quote, with a doubled quote standing for one, otherwise it runs to the first closing bracket. Empty
 /// segments are skipped.
 /// </summary>
-/// <remarks>A mutable struct: a copy reads on independently from where the original was.</remarks>
+/// <remarks>
+/// A mutable struct: a copy reads on independently from where the original was, and a reader stored in a
+/// <see langword="readonly"/> field does not advance. A default reader has no segments.
+/// </remarks>
 internal struct PathSegmentReader
 {
     private readonly string? _path;
@@ -16,6 +19,11 @@ internal struct PathSegmentReader
     private int _position;
     private PathSyntaxError _error;
 
+    /// <summary>
+    /// Initializes a reader at the start of <paramref name="path"/>.
+    /// </summary>
+    /// <param name="pathProvider">The path provider defining the separator and index characters.</param>
+    /// <param name="path">The path to read. Null reads as an empty path.</param>
     public PathSegmentReader(PathProviderBase pathProvider, string? path)
     {
         ArgumentNullException.ThrowIfNull(pathProvider);
@@ -50,6 +58,7 @@ internal struct PathSegmentReader
         var path = _path!;
         var characters = _characters;
 
+        // Outside an index the closing bracket is an ordinary name character.
         var nameStart = _position;
         var nameLength = path.AsSpan(nameStart).IndexOfAny(characters.Separator, characters.IndexOpen);
         var nameEnd = nameLength < 0 ? path.Length : nameStart + nameLength;

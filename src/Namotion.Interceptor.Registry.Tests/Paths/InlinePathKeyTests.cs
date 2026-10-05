@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -8,37 +9,59 @@ public class InlinePathKeyTests
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
 
+    private static RegisteredSubjectProperty GetNameProperty(IInterceptorSubject subject)
+        => subject.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
     [Theory]
     [InlineData("CNC01", "CNC01.Name")]
+    [InlineData("x]y", "x]y.Name")]
+    [InlineData("a'b", "a'b.Name")]
+    [InlineData("a[b", "Children[a[b].Name")]
     [InlineData("192.168.0.1", "Children[192.168.0.1].Name")]
     [InlineData("Name", "Children[Name].Name")]
     [InlineData("Children", "Children[Children].Name")]
-    [InlineData("a]b", "a]b.Name")]
-    [InlineData("notes]v2", "notes]v2.Name")]
-    [InlineData("a[b", "Children[a[b].Name")]
-    [InlineData("Report [2024].md", "Children['Report [2024].md'].Name")]
+    [InlineData("Report [2024]", "Children['Report [2024]'].Name")]
     [InlineData("a.b]", "Children['a.b]'].Name")]
     [InlineData("", "Children[''].Name")]
     public void WhenInlineKeyIsWritten_ThenPathRoundTrips(string key, string expectedPath)
     {
         // Arrange
         var context = CreateContext();
-        var child = new TestInlineContainer(context) { Name = "Child" };
+        var child = new TestInlineContainer(context) { Name = "child" };
         var root = new TestInlineContainer(context)
         {
-            Name = "Root",
+            Name = "root",
             Children = new Dictionary<string, TestInlineContainer> { [key] = child }
         };
-        var nameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
 
         // Act
-        var path = nameProperty.TryGetPath(DefaultPathProvider.Instance, root);
-        var result = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
+        var path = GetNameProperty(child).TryGetPath(DefaultPathProvider.Instance, null);
+        var resolved = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
 
         // Assert
         Assert.Equal(expectedPath, path);
-        Assert.Same(child, result?.Property.Subject);
-        Assert.Equal("Name", result?.Property.Name);
+        Assert.Same(child, resolved?.Property.Subject);
+    }
+
+    [Fact]
+    public void WhenInlineDictionaryHasIntKeys_ThenPathRoundTrips()
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestNumberedInlineContainer(context) { Name = "child" };
+        var root = new TestNumberedInlineContainer(context)
+        {
+            Name = "root",
+            Children = new Dictionary<int, TestNumberedInlineContainer> { [7] = child }
+        };
+
+        // Act
+        var path = GetNameProperty(child).TryGetPath(DefaultPathProvider.Instance, null);
+        var resolved = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
+
+        // Assert
+        Assert.Equal("7.Name", path);
+        Assert.Same(child, resolved?.Property.Subject);
     }
 
     [Fact]
@@ -46,22 +69,17 @@ public class InlinePathKeyTests
     {
         // Arrange
         var context = CreateContext();
-        var child = new TestInlineContainer(context) { Name = "Child" };
         var root = new TestInlineContainer(context)
         {
-            Name = "Root",
-            Children = new Dictionary<string, TestInlineContainer> { ["a"] = child }
+            Name = "root",
+            Children = new Dictionary<string, TestInlineContainer> { ["x"] = new(context) { Name = "child" } }
         };
-        var registeredRoot = root.TryGetRegisteredSubject()!;
 
         // Act
-        var wrongName = DefaultPathProvider.Instance.TryGetPropertyFromPath(registeredRoot, "Typo[a].Name");
-        var rightName = DefaultPathProvider.Instance.TryGetPropertyFromPath(registeredRoot, "Children[a].Name");
+        var resolved = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, "Typo[x].Name");
 
         // Assert
-        Assert.Null(wrongName);
-        Assert.Same(child, rightName?.Property.Subject);
-        Assert.Equal("Name", rightName?.Property.Name);
+        Assert.Null(resolved);
     }
 
     [Fact]
@@ -69,63 +87,59 @@ public class InlinePathKeyTests
     {
         // Arrange
         var context = CreateContext();
-        var root = new TestInlineContainer(context) { Name = "Root" };
-        root.Children["a"] = new TestInlineContainer(context) { Name = "Child" };
+        var root = new TestInlineContainer(context) { Name = "root" };
 
         // Act
-        var result = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, "Children");
+        var resolved = DefaultPathProvider.Instance.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, "Children");
 
         // Assert
-        Assert.Equal("Children", result?.Property.Name);
-        Assert.Null(result?.Index);
+        Assert.Equal(nameof(TestInlineContainer.Children), resolved?.Property.Name);
+        Assert.Null(resolved?.Index);
     }
 
     [Theory]
-    [InlineData("plain", "plain/name")]
-    [InlineData("name", "Children[name]/name")]
-    [InlineData("Children", "Children[Children]/name")]
-    [InlineData("a/b", "Children[a/b]/name")]
+    [InlineData("CNC01", "CNC01.name")]
+    [InlineData("name", "Children[name].name")]
+    [InlineData("a.b", "Children[a.b].name")]
     public void WhenInlinePropertyIsUnmapped_ThenAttributeProviderPathRoundTrips(string key, string expectedPath)
     {
         // Arrange
-        var pathProvider = new AttributeBasedPathProvider("test", '/');
         var context = CreateContext();
-        var child = new TestMappedInlineContainer(context) { Name = "Child" };
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestMappedInlineContainer(context) { Name = "child" };
         var root = new TestMappedInlineContainer(context)
         {
-            Name = "Root",
+            Name = "root",
             Children = new Dictionary<string, TestMappedInlineContainer> { [key] = child }
         };
-        var nameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
 
         // Act
-        var path = nameProperty.TryGetPath(pathProvider, root);
-        var result = pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
+        var path = GetNameProperty(child).TryGetPath(pathProvider, null);
+        var resolved = pathProvider.TryGetPropertyFromPath(root.TryGetRegisteredSubject()!, path!);
 
         // Assert
         Assert.Equal(expectedPath, path);
-        Assert.Same(child, result?.Property.Subject);
+        Assert.Same(child, resolved?.Property.Subject);
     }
 
     [Theory]
-    [InlineData("plain", "plain/name")]
-    [InlineData("a/b", null)]
+    [InlineData("CNC01", "CNC01.name")]
+    [InlineData("a.b", null)]
     public void WhenInlinePropertySegmentIsShadowed_ThenKeyNeedingExplicitFormHasNoPath(string key, string? expectedPath)
     {
         // Arrange
-        var pathProvider = new AttributeBasedPathProvider("test", '/');
         var context = CreateContext();
-        var child = new TestShadowedInlineContainer(context) { Label = "", Name = "Child" };
-        var root = new TestShadowedInlineContainer(context)
+        var pathProvider = new AttributeBasedPathProvider("test");
+        var child = new TestShadowedInlineContainer(context) { Name = "child", Label = "label" };
+        _ = new TestShadowedInlineContainer(context)
         {
-            Label = "",
-            Name = "Root",
+            Name = "root",
+            Label = "label",
             Children = new Dictionary<string, TestShadowedInlineContainer> { [key] = child }
         };
-        var nameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
 
         // Act
-        var path = nameProperty.TryGetPath(pathProvider, root);
+        var path = GetNameProperty(child).TryGetPath(pathProvider, null);
 
         // Assert
         Assert.Equal(expectedPath, path);

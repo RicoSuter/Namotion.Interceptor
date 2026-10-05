@@ -17,6 +17,7 @@ public class PathSyntaxTests
     [InlineData("Devices[192.168.0.1].Status", "Devices=192.168.0.1|Status")]
     [InlineData("Items[a[b].Value", "Items=a[b|Value")]
     [InlineData("notes]v2.Value", "notes]v2|Value")]
+    [InlineData(@"C:\temp.Value", @"C:\temp|Value")]
     [InlineData("Items[5]", "Items=5")]
     [InlineData("Items[Bob's]", "Items=Bob's")]
     [InlineData("Items['Sensor [Kitchen]'].Value", "Items=Sensor [Kitchen]|Value")]
@@ -55,6 +56,18 @@ public class PathSyntaxTests
         Assert.Empty(segments);
     }
 
+    [Fact]
+    public void WhenPathIsNull_ThenTryParsePathReturnsNoSegments()
+    {
+        // Act
+        var parsed = DefaultPathProvider.Instance.TryParsePath(null!, out var segments, out var error);
+
+        // Assert
+        Assert.True(parsed);
+        Assert.Empty(segments!);
+        Assert.Null(error);
+    }
+
     [Theory]
     [InlineData("[5].Value", "Missing segment name at position 0 in path '[5].Value'")]
     [InlineData("a.[5]", "Missing segment name at position 2 in path 'a.[5]'")]
@@ -64,6 +77,7 @@ public class PathSyntaxTests
     [InlineData("Items['a'b]", "Expected ']' after quoted key at position 9 in path 'Items['a'b]'")]
     [InlineData("Items[5]x", "Expected '.' or end of path after index at position 8 in path 'Items[5]x'")]
     [InlineData("Items[5][6]", "Expected '.' or end of path after index at position 8 in path 'Items[5][6]'")]
+    [InlineData("Items[a]]", "Expected '.' or end of path after index at position 8 in path 'Items[a]]'")]
     public void WhenPathIsMalformed_ThenTryParsePathReportsReasonAndParsePathThrows(string path, string expectedError)
     {
         // Act

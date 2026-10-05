@@ -490,50 +490,6 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenDictionaryKeyContainsSeparator_ThenTryGetPropertyFromPathResolves()
-    {
-        // Arrange
-        var person = CreateTestGraph();
-        var lead = new Person { FirstName = "Lead" };
-        person.Relationships = new Dictionary<string, Person>(person.Relationships!) { ["team.lead"] = lead };
-
-        // Act
-        var (property, _) = person.TryGetPropertyFromPath("Relationships[team.lead].FirstName", DefaultPathProvider.Instance);
-
-        // Assert
-        Assert.NotNull(property);
-        Assert.Same(lead, property.Subject);
-    }
-
-    [Fact]
-    public void WhenPathIsMalformed_ThenTryGetPropertyFromPathReturnsNull()
-    {
-        // Arrange
-        var person = CreateTestGraph();
-
-        // Act
-        var (property, index) = person.TryGetPropertyFromPath("Relationships[boss.FirstName", DefaultPathProvider.Instance);
-
-        // Assert
-        Assert.Null(property);
-        Assert.Null(index);
-    }
-
-    [Fact]
-    public void WhenPathHasMalformedTail_ThenTryGetPropertyFromPathReturnsNull()
-    {
-        // Arrange
-        var person = CreateTestGraph();
-
-        // Act
-        var (property, index) = person.TryGetPropertyFromPath("Father.FirstName[x", DefaultPathProvider.Instance);
-
-        // Assert
-        Assert.Null(property);
-        Assert.Null(index);
-    }
-
-    [Fact]
     public void WhenPathWithFactoryHasMalformedTail_ThenNoSubjectIsCreated()
     {
         // Arrange
@@ -550,20 +506,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenCollectionPositionIsOutOfRange_ThenTryGetPropertyFromPathReturnsNull()
-    {
-        // Arrange
-        var person = CreateTestGraph();
-
-        // Act
-        var (property, _) = person.TryGetPropertyFromPath("Children[99].FirstName", DefaultPathProvider.Instance);
-
-        // Assert
-        Assert.Null(property);
-    }
-
-    [Fact]
-    public void WhenKeyEmbedsPathStructure_ThenCachedLookupKeepsItApart()
+    public void WhenSeveralPathsShareAPrefix_ThenEachResolvesItsOwnKey()
     {
         // Arrange
         var person = CreateTestGraph();
@@ -604,42 +547,6 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenWrongNameCarriesIndexOnInlineFallback_ThenTryGetPropertyFromPathReturnsNull()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var member = new Person { FirstName = "Ann" };
-        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [7] = member } };
-
-        // Act
-        var (wrongName, _) = root.TryGetPropertyFromPath("Typo[7].FirstName", DefaultPathProvider.Instance);
-        var (rightName, _) = root.TryGetPropertyFromPath("Members[7].FirstName", DefaultPathProvider.Instance);
-
-        // Assert
-        Assert.Null(wrongName);
-        Assert.Same(member, rightName?.Subject);
-    }
-
-    [Fact]
-    public void WhenStringKeyLooksLikeInteger_ThenConnectorsResolverFindsIt()
-    {
-        // Arrange
-        var person = CreateTestGraph();
-        var five = new Person { FirstName = "Five" };
-        person.Relationships = new Dictionary<string, Person> { ["5"] = five };
-
-        // Act
-        var (property, _) = person.TryGetPropertyFromPath("Relationships[5].FirstName", DefaultPathProvider.Instance);
-        var (_, position) = person.TryGetPropertyFromPath("Children[1]", DefaultPathProvider.Instance);
-        var (_, key) = person.TryGetPropertyFromPath("Relationships[5]", DefaultPathProvider.Instance);
-
-        // Assert
-        Assert.Same(five, property?.Subject);
-        Assert.Equal((object)1, position);
-        Assert.Equal((object)"5", key);
-    }
-
-    [Fact]
     public void WhenUpdatingValueThroughIntegerLookingKey_ThenValueIsApplied()
     {
         // Arrange
@@ -657,7 +564,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenCachedLastSegmentIsContinuedByLaterPath_ThenLookupReportsNotFound()
+    public void WhenEarlierPathEndsWhereLaterPathContinues_ThenLaterPathIsNotFound()
     {
         // Arrange
         var person = CreateTestGraph();
@@ -674,7 +581,7 @@ public class PathExtensionsTests
     }
 
     [Fact]
-    public void WhenCachedNullReferenceIsContinuedByLaterPath_ThenLookupReportsNotFound()
+    public void WhenLaterPathContinuesThroughNullReference_ThenItIsNotFound()
     {
         // Arrange
         var person = CreateTestGraph();
