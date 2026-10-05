@@ -176,12 +176,16 @@ public class MqttMappingCacheTests
         await using var client = CreateClient(subject, mapper);
 
         // Act
-        var resolvedBeforeDetach = ResolveThenInsertWhileDetaching(
-            subject, mapper, () => client.TryGetPropertyForTopicAsync("child/value"));
+        var (_, resolvedDuringDetach) = DetachChildWhileInserting(subject, property =>
+        {
+            mapper.ResolvedPropertyOverride = property;
+            return SyncResult(client.TryGetPropertyForTopicAsync("child/value"))?.Name;
+        });
+        mapper.ResolvedPropertyOverride = null;
         var after = await client.TryGetPropertyForTopicAsync("child/value");
 
         // Assert
-        Assert.Equal(nameof(MqttCacheTestChild.Value), resolvedBeforeDetach);
+        Assert.Equal(nameof(MqttCacheTestChild.Value), resolvedDuringDetach);
         Assert.Null(after);
         Assert.Equal(2, mapper.PropertyLookupCount);
     }
@@ -215,12 +219,16 @@ public class MqttMappingCacheTests
         await using var server = CreateServer(subject, mapper);
 
         // Act
-        var resolvedBeforeDetach = ResolveThenInsertWhileDetaching(
-            subject, mapper, () => server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None));
+        var (_, resolvedDuringDetach) = DetachChildWhileInserting(subject, property =>
+        {
+            mapper.ResolvedPropertyOverride = property;
+            return SyncResult(server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None))?.Name;
+        });
+        mapper.ResolvedPropertyOverride = null;
         var after = await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
 
         // Assert
-        Assert.Equal(nameof(MqttCacheTestChild.Value), resolvedBeforeDetach);
+        Assert.Equal(nameof(MqttCacheTestChild.Value), resolvedDuringDetach);
         Assert.Null(after);
     }
 
@@ -331,62 +339,6 @@ public class MqttMappingCacheTests
         return (property, observed);
     }
 
-    /// <summary>
-    /// Attaches a child and starts <paramref name="lookup"/>, whose mapper resolves the child's property while the
-    /// child is attached and then holds its result. The child is detached and the result released from a
-    /// SubjectDetaching subscriber added after the connector's own, so the lookup's cache insert lands between the
-    /// connector's eviction scan and the registry deregistration that follows it. Returns what the lookup resolved.
-    /// </summary>
-    private static string? ResolveThenInsertWhileDetaching(
-        MqttCacheTestRoot root,
-        CountingMapper mapper,
-        Func<ValueTask<PropertyReference?>> lookup)
-    {
-        var child = new MqttCacheTestChild();
-        root.Child = child;
-
-        var release = new TaskCompletionSource();
-        mapper.PropertyLookupRelease = release.Task;
-        var pendingLookup = lookup();
-        mapper.PropertyLookupRelease = null;
-        Assert.False(pendingLookup.IsCompleted, "The lookup is expected to wait for the release.");
-
-        var lifecycle = ((IInterceptorSubject)root).Context.TryGetLifecycleInterceptor()!;
-        void Handler(SubjectLifecycleChange change)
-        {
-            if (ReferenceEquals(change.Subject, child))
-            {
-                // Continuations run inline on release only without a custom synchronization context such as the
-                // test runner's, and inline is what puts the lookup's cache insert inside this subscriber.
-                var synchronizationContext = SynchronizationContext.Current;
-                SynchronizationContext.SetSynchronizationContext(null);
-                try
-                {
-                    release.SetResult();
-                }
-                finally
-                {
-                    SynchronizationContext.SetSynchronizationContext(synchronizationContext);
-                }
-
-                Assert.True(pendingLookup.IsCompleted, "The insert is expected to run inside the detach.");
-            }
-        }
-
-        lifecycle.SubjectDetaching += Handler;
-        try
-        {
-            root.Child = null;
-        }
-        finally
-        {
-            lifecycle.SubjectDetaching -= Handler;
-        }
-
-        Assert.Null(child.TryGetRegisteredSubject());
-        return SyncResult(pendingLookup)?.Name;
-    }
-
     private static T SyncResult<T>(ValueTask<T> task)
     {
         Assert.True(task.IsCompleted, "The mapper is expected to resolve synchronously.");
@@ -438,10 +390,10 @@ public class MqttMappingCacheTests
         public int PropertyLookupCount => Volatile.Read(ref _propertyLookupCount);
 
         /// <summary>
-        /// When set at the start of a property lookup, the lookup resolves at once but returns its result only
-        /// after this task completes.
+        /// When set, property lookups return this property instead of resolving the key. Stands in for a lookup
+        /// that resolved before a detach began, since a path through a detaching subject no longer resolves.
         /// </summary>
-        public Task? PropertyLookupRelease { get; set; }
+        public RegisteredSubjectProperty? ResolvedPropertyOverride { get; set; }
 
         public bool TryGetMapping(
             RegisteredSubjectProperty property,
@@ -452,20 +404,15 @@ public class MqttMappingCacheTests
             return _inner.TryGetMapping(property, rootSubject, out mapping);
         }
 
-        public async ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
+        public ValueTask<RegisteredSubjectProperty?> TryGetPropertyAsync(
             MqttLookupKey key,
             RegisteredSubject subject,
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _propertyLookupCount);
-            var release = PropertyLookupRelease;
-            var property = await _inner.TryGetPropertyAsync(key, subject, cancellationToken).ConfigureAwait(false);
-            if (release is not null)
-            {
-                await release.ConfigureAwait(false);
-            }
-
-            return property;
+            return ResolvedPropertyOverride is { } property
+                ? ValueTask.FromResult<RegisteredSubjectProperty?>(property)
+                : _inner.TryGetPropertyAsync(key, subject, cancellationToken);
         }
     }
 }

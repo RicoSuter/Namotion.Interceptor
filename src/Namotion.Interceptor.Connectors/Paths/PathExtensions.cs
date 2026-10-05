@@ -37,10 +37,17 @@ public static class PathExtensions
         Func<RegisteredSubjectProperty, string, object?> getPropertyValue,
         PathProviderBase pathProvider, object? source)
     {
-        return subject
-            .VisitPropertiesFromPathsWithTimestamp([path], timestamp,
-                (property, innerPath, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, innerPath), source), pathProvider)
-            .Count == 1;
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            var (property, _) = TryResolve(subject, path, pathProvider, createMissingSubject: null);
+            if (property is null)
+            {
+                return false;
+            }
+
+            SetPropertyValue(property, timestamp, getPropertyValue(property, path), source);
+            return true;
+        }
     }
 
     /// <summary>
@@ -109,10 +116,11 @@ public static class PathExtensions
         IEnumerable<string> paths, Action<RegisteredSubjectProperty, string, object?> visitProperty,
         PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
     {
+        var createMissingSubject = CreateMissingSubjectHook(subjectFactory);
         var visitedPaths = new List<string>();
         foreach (var path in paths)
         {
-            var (property, index) = subject.TryGetPropertyFromPath(path, pathProvider, subjectFactory);
+            var (property, index) = TryResolve(subject, path, pathProvider, createMissingSubject);
             if (property is not null)
             {
                 visitProperty(property, path, index);
@@ -136,18 +144,7 @@ public static class PathExtensions
     /// <returns>The found property and the key of its last segment, or nulls when not found.</returns>
     public static (RegisteredSubjectProperty? property, object? index) TryGetPropertyFromPath(
         this IInterceptorSubject subject, string path, PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
-    {
-        var registeredSubject = subject.TryGetRegisteredSubject();
-        if (registeredSubject is null)
-        {
-            return (null, null);
-        }
-
-        var result = pathProvider.TryGetPropertyFromPath(registeredSubject, path, includedPropertiesOnly: true,
-            subjectFactory is null ? null : property => CreateSubject(property, subjectFactory));
-
-        return result is { } found ? (found.Property, found.Index) : (null, null);
-    }
+        => TryResolve(subject, path, pathProvider, CreateMissingSubjectHook(subjectFactory));
 
     /// <summary>
     /// Tries to get multiple properties from the source paths. Only properties the provider includes are resolved.
@@ -163,6 +160,7 @@ public static class PathExtensions
         PathProviderBase pathProvider,
         ISubjectFactory? subjectFactory = null)
     {
+        var createMissingSubject = CreateMissingSubjectHook(subjectFactory);
         foreach (var path in paths)
         {
             if (path.AsSpan().IndexOfAnyExcept(pathProvider.PathSeparator) < 0)
@@ -170,10 +168,32 @@ public static class PathExtensions
                 continue;
             }
 
-            var (property, index) = rootSubject.TryGetPropertyFromPath(path, pathProvider, subjectFactory);
+            var (property, index) = TryResolve(rootSubject, path, pathProvider, createMissingSubject);
             yield return (path, property, index);
         }
     }
+
+    private static (RegisteredSubjectProperty? property, object? index) TryResolve(
+        IInterceptorSubject subject, string path, PathProviderBase pathProvider,
+        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return (null, null);
+        }
+
+        var result = pathProvider.TryGetPropertyFromPath(registeredSubject, path, includedPropertiesOnly: true, createMissingSubject);
+        return result is { } found ? (found.Property, found.Index) : (null, null);
+    }
+
+    private static Func<RegisteredSubjectProperty, IInterceptorSubject?>? CreateMissingSubjectHook(ISubjectFactory? subjectFactory)
+        => subjectFactory is null ? null : CreateMissingSubjectHookForFactory(subjectFactory);
+
+    // Separate from the null check: a lambda capturing a parameter allocates its closure on entry to the method that
+    // declares the parameter, even when the lambda is never created.
+    private static Func<RegisteredSubjectProperty, IInterceptorSubject?> CreateMissingSubjectHookForFactory(ISubjectFactory subjectFactory)
+        => property => CreateSubject(property, subjectFactory);
 
     private static IInterceptorSubject CreateSubject(RegisteredSubjectProperty property, ISubjectFactory subjectFactory)
     {

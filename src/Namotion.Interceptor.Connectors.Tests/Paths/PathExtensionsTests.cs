@@ -691,11 +691,6 @@ public class PathExtensionsTests
         Assert.Null(results[1].property);
     }
 
-    private sealed class ExcludingLastNamePathProvider : PathProviderBase
-    {
-        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != nameof(Person.LastName);
-    }
-
     [Fact]
     public void WhenPropertyIsExcludedByProvider_ThenConnectorsResolverIgnoresItAndRegistryResolverFindsIt()
     {
@@ -769,5 +764,10 @@ public class PathExtensionsTests
         };
 
         return person;
+    }
+
+    private sealed class ExcludingLastNamePathProvider : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != nameof(Person.LastName);
     }
 }
