@@ -16,6 +16,9 @@ public class PathKeyBenchmark
     private RegisteredSubject _garage;
     private PathProviderBase _pathProvider;
     private RegisteredSubjectProperty _inlineNameProperty;
+    private RegisteredSubject _mappedGarage;
+    private AttributeBasedPathProvider _attributePathProvider;
+    private RegisteredSubjectProperty _mappedInlineNameProperty;
 
     [GlobalSetup]
     public void Setup()
@@ -35,6 +38,15 @@ public class PathKeyBenchmark
         _garage = garage.TryGetRegisteredSubject()!;
         _pathProvider = DefaultPathProvider.Instance;
         _inlineNameProperty = garage.Spots["A1"].TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
+        var mappedGarage = new MappedGarage(context)
+        {
+            Spots = new Dictionary<string, MappedCar> { ["A1"] = new MappedCar() }
+        };
+
+        _mappedGarage = mappedGarage.TryGetRegisteredSubject()!;
+        _attributePathProvider = new AttributeBasedPathProvider("mqtt");
+        _mappedInlineNameProperty = mappedGarage.Spots["A1"].TryGetRegisteredSubject()!.TryGetProperty("Name")!;
     }
 
     [Benchmark]
@@ -50,6 +62,27 @@ public class PathKeyBenchmark
     public void TryGetPath_InlineKey()
     {
         if (_inlineNameProperty.TryGetPath(_pathProvider, null) is null)
+        {
+            throw new InvalidOperationException();
+        }
+    }
+
+    [Benchmark]
+    public void TryGetPropertyFromPath_CollectionPosition() => Resolve("ByName[alpha].Tires[1].Pressure");
+
+    [Benchmark]
+    public void TryGetPath_InlineKey_AttributeProvider()
+    {
+        if (_mappedInlineNameProperty.TryGetPath(_attributePathProvider, null) is null)
+        {
+            throw new InvalidOperationException();
+        }
+    }
+
+    [Benchmark]
+    public void TryGetPropertyFromPath_InlineKey_AttributeProvider()
+    {
+        if (_attributePathProvider.TryGetPropertyFromPath(_mappedGarage, "A1.name") is null)
         {
             throw new InvalidOperationException();
         }

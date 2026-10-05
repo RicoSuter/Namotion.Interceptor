@@ -21,3 +21,31 @@ public partial class Garage
     [InlinePaths]
     public partial Dictionary<string, Car> Spots { get; set; }
 }
+
+[InterceptorSubject]
+public partial class MappedGarage
+{
+    public MappedGarage()
+    {
+        Spots = new Dictionary<string, MappedCar>();
+    }
+
+    [Path("mqtt", "label")]
+    public partial string? Label { get; set; }
+
+    [Path("mqtt", "owner")]
+    public partial string? Owner { get; set; }
+
+    [Path("mqtt", "city")]
+    public partial string? City { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, MappedCar> Spots { get; set; }
+}
+
+[InterceptorSubject]
+public partial class MappedCar
+{
+    [Path("mqtt", "name")]
+    public partial string? Name { get; set; }
+}
