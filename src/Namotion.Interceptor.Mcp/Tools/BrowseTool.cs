@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
@@ -212,8 +211,10 @@ internal class BrowseTool
 
                     foreach (var child in property.Children)
                     {
+                        var key = child.Index is null ? null : PathExtensions.FormatPathIndex(child.Index);
                         var childRegistered = child.Subject.TryGetRegisteredSubject();
-                        if (childRegistered is null ||
+                        if (key is null ||
+                            childRegistered is null ||
                             McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, excludeTypes) ||
                             !visited.Add(child.Subject))
                         {
@@ -227,8 +228,6 @@ internal class BrowseTool
                         }
 
                         subjectCount++;
-                        var key = (child.Index is null ? null : PathExtensions.FormatPathIndex(child.Index))
-                            ?? child.Subject.GetHashCode().ToString(CultureInfo.InvariantCulture);
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, excludeTypes,

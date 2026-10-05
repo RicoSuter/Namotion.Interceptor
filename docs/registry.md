@@ -256,3 +256,108 @@ Subject IDs are automatically managed during the subject lifecycle:
 ### Without a registry
 
 Subject IDs also work without a registry configured, because IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.
+
+## Paths
+
+Path providers map between subject property paths and external system paths. They are defined in `Namotion.Interceptor.Registry.Paths` and are used by the connectors and the MCP server to address properties by path.
+
+### IPathProvider Interface
+
+```csharp
+public interface IPathProvider
+{
+    /// <summary>
+    /// Should this property be included in paths?
+    /// </summary>
+    bool IsPropertyIncluded(RegisteredSubjectProperty property);
+
+    /// <summary>
+    /// Get the path segment for a property.
+    /// Returns null if no explicit mapping exists.
+    /// </summary>
+    string? TryGetPropertySegment(RegisteredSubjectProperty property);
+
+    /// <summary>
+    /// Find a property by its path segment.
+    /// </summary>
+    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
+}
+```
+
+### Built-in Providers
+
+- **DefaultPathProvider** - Uses property names exactly as defined
+- **CamelCasePathProvider** - Converts property names to camelCase for JSON APIs
+- **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping
+
+### [Path] Attribute
+
+Use `[Path]` attributes to map properties to custom external paths:
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    [Path("temp")]
+    public partial decimal Temperature { get; set; }
+
+    [Path("hum")]
+    public partial decimal Humidity { get; set; }
+}
+```
+
+### [InlinePaths] Attribute
+
+Marks a dictionary property as a transparent container for path resolution:
+
+```csharp
+[InterceptorSubject]
+public partial class ProductionLine
+{
+    public partial string Name { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, Machine> Machines { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Machine
+{
+    public partial string Status { get; set; }
+    public partial decimal Temperature { get; set; }
+}
+```
+
+With `[InlinePaths]`:
+- Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
+- Direct properties take precedence over child keys for a bare segment. A key named like a property is still reachable as an index on the dictionary, such as `Line.Machines[Name].Status`; `TryGetPath` writes it that way.
+- Only one property per class may be marked with `[InlinePaths]`; multiple properties throws `InvalidOperationException`
+- Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
+- Built into `PathProviderBase.TryGetPropertyFromSegment`
+
+### Path Syntax
+
+A path is a sequence of segments joined by the provider's `PathSeparator` (default `.`). A segment names a property and may carry an index between `IndexOpen` and `IndexClose` (default `[` and `]`) that addresses a collection position or a dictionary key:
+
+```text
+Machines[CNC01].Status
+Devices[192.168.0.1].Status
+```
+
+- An index is the text up to the first `]`, and every character before it is literal, including the separator and `[`. A key containing `]` therefore has no index form: `TryGetPath` returns null for it.
+- Keys are written with the invariant culture, so a `double` key `1.5` is `[1.5]` on every machine.
+- A key with empty text has no path: `TryGetPath` returns null for it.
+- Empty segments are skipped, so with a `/` separator `/a/b`, `a//b` and `a/b/` all read as `a/b`.
+- A malformed path makes `ParsePath` throw `FormatException`: an unclosed `[`, an empty index `[]`, a segment without a name, or anything after an index other than the separator. `TryParsePath` returns the reason and position instead, and the resolvers report a malformed path as not found.
+- Outside an index `]` is an ordinary character, so a segment name such as `notes]v2` is read as written.
+- `PathSeparator`, `IndexOpen` and `IndexClose` must be three different characters; paths are ambiguous otherwise.
+- Segments from `[Path]` attributes or `TryGetPropertySegment` are written as is. A separator inside one nests the path (`[Path("mqtt", "metrics/Humidity")]`), and they must not contain `[`.
+- The container decides how an index is read. A collection takes canonical invariant digits (`[1]`, not `[01]` or `[+1]`). A dictionary reads the text as its own key type: string keys as written, so `[5]` addresses the string key `"5"`; integer, `Guid` and enum keys only in the form `TryGetPath` writes (`[-3]`, `[0f8fad5b-d9cb-469f-a165-70867728950e]`, `[Blue]`, `[Read, Write]`).
+- Only string, integer, `Guid` and enum dictionary keys resolve from a path. `TryGetPath` still writes a key of any other type, such as `object`, `double` or `DateTime`, with its invariant text, but that path is not found when read.
+- `TryGetPropertyFromPath` returns the typed key of the last segment, also when no entry exists at it yet.
+- An `[InlinePaths]` key is written as a bare segment only when it reads back as that key: it contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`, and a key that needs this form and contains `]` has no path. The inline property's own segment (`Line.Machines`) addresses the property itself. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
+- Browse output and `FormatPathIndex` give a key's text, which is what `TryGetPath` writes inside an index when the key has a path.
+
+### Reading paths yourself
+
+`PathSegmentReader` reads a path segment by segment without allocating: `TryRead` returns each segment as a `PathSegment` with its name and optional index as spans, and `IsMalformed` and `Error` report a malformed path instead of throwing. `TryResolvePathSegment` resolves one such segment on a subject to the property it names and, when the segment carries a key, the typed key and the subject stored at it; it does not apply `IsPropertyIncluded`, so callers that expose only included properties check it themselves.

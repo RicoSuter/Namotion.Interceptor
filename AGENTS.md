@@ -102,6 +102,7 @@ The library uses a fluent configuration API:
 - **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
+- **InternalsVisibleTo**: only for test and benchmark projects. A library uses another library's public API; the existing exceptions (the core assembly to Tracking, `HomeBlaze.Storage` to `HomeBlaze.Storage.Blazor`) are removed when that code is touched next.
 
 ## Analyzer Policy
 

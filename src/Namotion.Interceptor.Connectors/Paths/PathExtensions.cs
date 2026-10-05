@@ -163,18 +163,17 @@ public static class PathExtensions
                 .GetAlternateLookup<ReadOnlySpan<char>>()
             : default;
 
-        var characters = pathProvider.GetCharacters();
         foreach (var path in paths)
         {
-            var position = 0;
-            if (string.IsNullOrEmpty(path) || !PathSyntax.SkipToSegment(characters, path, ref position))
+            var reader = new PathSegmentReader(pathProvider, path);
+            if (!reader.HasNext)
             {
                 continue;
             }
 
             // Segments are read while walking, so a malformed tail is only found on the way. Without a factory the
             // walk has no side effects; with one it may create subjects, so the whole path is checked first.
-            if (subjectFactory is not null && !PathSyntax.IsWellFormed(characters, path))
+            if (subjectFactory is not null && !IsWellFormed(reader))
             {
                 yield return (path, null, null);
                 continue;
@@ -183,13 +182,13 @@ public static class PathExtensions
             var currentSubject = rootSubject;
             while (true)
             {
-                if (!PathSyntax.TryReadSegment(characters, path, ref position, out var segment, out _))
+                if (!reader.TryRead(out var segment))
                 {
                     yield return (path, null, null);
                     break;
                 }
 
-                var isLastSegment = !PathSyntax.SkipToSegment(characters, path, ref position);
+                var isLastSegment = !reader.HasNext;
 
                 RegisteredSubjectProperty? property;
                 object? key;
@@ -206,7 +205,7 @@ public static class PathExtensions
                 {
                     var registeredSubject = currentSubject.TryGetRegisteredSubject();
                     if (registeredSubject is null ||
-                        !pathProvider.TryResolveSegment(registeredSubject, path, segment, out property, out key, out var child) ||
+                        !pathProvider.TryResolvePathSegment(registeredSubject, segment, out property, out key, out var child) ||
                         !pathProvider.IsPropertyIncluded(property))
                     {
                         yield return (path, null, null);
@@ -242,6 +241,18 @@ public static class PathExtensions
                 currentSubject = nextSubject!;
             }
         }
+    }
+
+    /// <summary>
+    /// Reads the rest of the path on a copy of <paramref name="reader"/>, so the caller's reader does not advance.
+    /// </summary>
+    private static bool IsWellFormed(PathSegmentReader reader)
+    {
+        while (reader.TryRead(out _))
+        {
+        }
+
+        return !reader.IsMalformed;
     }
 
     private static IInterceptorSubject? GetItemOrThrowWhenCreating(IInterceptorSubject? child, ISubjectFactory? subjectFactory)

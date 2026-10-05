@@ -138,6 +138,37 @@ public class BrowseToolEdgeCaseTests
         Assert.Equal("Light", deviceName.GetProperty("value").GetString());
     }
 
+    [Fact]
+    public async Task WhenDictionaryKeyHasNoPath_ThenChildIsSkipped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var container = new TestContainer(context) { Name = "Root" };
+        container.Children = new Dictionary<string, TestContainer>
+        {
+            [""] = new(context) { Name = "Empty" },
+            ["a"] = new(context) { Name = "A" }
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(container, config);
+        var tool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var children = json.GetProperty("result").GetProperty("properties")
+            .GetProperty("Children").GetProperty("children");
+        var keys = children.EnumerateObject().Select(child => child.Name).ToArray();
+        Assert.Equal(["a"], keys);
+    }
+
     private class ThrowingEnricher : IMcpSubjectEnricher
     {
         public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)

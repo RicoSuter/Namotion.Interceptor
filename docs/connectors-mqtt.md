@@ -214,7 +214,7 @@ public partial class Sensor
 }
 ```
 
-Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](connectors.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to. A key written as an index has no topic when it contains `]`, and only string, integer, `Guid` and enum keys resolve from an incoming topic; a key of another type is published but its topic is not read back.
+Dictionary keys become topic levels or bracketed indices as described in [Path Syntax](registry.md#path-syntax). MQTT reserves `+` and `#` as wildcards, so a key containing either produces a topic that cannot be published to. A key written as an index has no topic when it contains `]`, and only string, integer, `Guid` and enum keys resolve from an incoming topic; a key of another type is published but its topic is not read back.
 
 ### [MqttTopic] attribute
 

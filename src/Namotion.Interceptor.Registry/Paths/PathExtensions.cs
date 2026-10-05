@@ -23,7 +23,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Parses a path string into segments with their index text. Empty segments are skipped. The resolvers type
-    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath"/>.
+    /// index text by the container a segment addresses, see <see cref="TryResolvePathSegment"/>.
     /// </summary>
     /// <exception cref="FormatException">The path is malformed.</exception>
     public static List<(string segment, string? index)> ParsePath(this PathProviderBase pathProvider, string path)
@@ -44,22 +44,18 @@ public static class PathExtensions
         [NotNullWhen(true)] out List<(string segment, string? index)>? segments,
         [NotNullWhen(false)] out string? error)
     {
-        var characters = pathProvider.GetCharacters();
+        var reader = new PathSegmentReader(pathProvider, path);
         var result = new List<(string segment, string? index)>();
-        if (!string.IsNullOrEmpty(path))
+        while (reader.TryRead(out var segment))
         {
-            var position = 0;
-            while (PathSyntax.SkipToSegment(characters, path, ref position))
-            {
-                if (!PathSyntax.TryReadSegment(characters, path, ref position, out var segment, out var syntaxError))
-                {
-                    segments = null;
-                    error = PathSyntax.FormatError(syntaxError, position, characters, path);
-                    return false;
-                }
+            result.Add((segment.GetName(), segment.HasIndex ? segment.Index.ToString() : null));
+        }
 
-                result.Add((segment.GetName(path), segment.HasIndex ? segment.GetIndex(path).ToString() : null));
-            }
+        if (reader.IsMalformed)
+        {
+            segments = null;
+            error = reader.Error!;
+            return false;
         }
 
         segments = result;
@@ -74,15 +70,9 @@ public static class PathExtensions
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
     /// <returns>
-    /// The property and the key of its last segment, or null when the path is malformed or not found. The key is
-    /// the segment's index, or its name when the segment is an [InlinePaths] key: the collection position, or the
-    /// dictionary key typed to the dictionary's key type, also when no entry exists at it. Null when the last
-    /// segment carries no key.
+    /// The property and the key of its last segment as <see cref="TryResolvePathSegment"/> types it, or null when
+    /// the path is malformed or not found.
     /// </returns>
-    /// <remarks>
-    /// Only string, integer, <see cref="Guid"/> and enum dictionary keys resolve. A path through a dictionary with
-    /// any other key type is not found, although <c>TryGetPath</c> writes one.
-    /// </remarks>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
@@ -116,22 +106,46 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Resolves one segment of <paramref name="path"/> on a subject: the property it names and, when the
-    /// segment carries a key (an index, or an [InlinePaths] key written as the segment itself), the typed key and
-    /// the subject stored at it. False when no property matches or the key text is not a key of the property's container.
+    /// Resolves one path segment on a subject: the property it names and, when the segment carries a key, the
+    /// typed key and the subject stored at it.
     /// </summary>
-    internal static bool TryResolveSegment(
+    /// <param name="pathProvider">The path provider to use.</param>
+    /// <param name="subject">The subject the segment addresses a property of.</param>
+    /// <param name="segment">The segment to resolve, as read by a <see cref="PathSegmentReader"/>.</param>
+    /// <param name="property">The property the segment names, or null when the method returns false.</param>
+    /// <param name="key">
+    /// The segment's index, or its name when the segment is an [InlinePaths] key: the collection position, or the
+    /// dictionary key typed to the dictionary's key type, also when no entry exists at it. Null when the segment
+    /// carries no key.
+    /// </param>
+    /// <param name="child">The subject stored at <paramref name="key"/>, or null.</param>
+    /// <returns>
+    /// False when the segment is default, no property matches, or the key text is not a key of the property's
+    /// container.
+    /// </returns>
+    /// <remarks>
+    /// Only string, integer, <see cref="Guid"/> and enum dictionary keys resolve. A path through a dictionary with
+    /// any other key type is not found, although <c>TryGetPath</c> writes one. Does not apply
+    /// <see cref="PathProviderBase.IsPropertyIncluded"/>; callers that expose only included properties check it
+    /// themselves.
+    /// </remarks>
+    public static bool TryResolvePathSegment(
         this PathProviderBase pathProvider,
         RegisteredSubject subject,
-        string path,
-        PathSegment segment,
+        in PathSegment segment,
         [NotNullWhen(true)] out RegisteredSubjectProperty? property,
         out object? key,
         out IInterceptorSubject? child)
     {
         key = null;
         child = null;
-        var name = segment.GetName(path);
+        if (segment.Name.IsEmpty)
+        {
+            property = null;
+            return false;
+        }
+
+        var name = segment.GetName();
         property = pathProvider.TryGetPropertyFromSegment(subject, name);
         if (property is null)
         {
@@ -149,7 +163,7 @@ public static class PathExtensions
         bool resolved;
         if (segment.HasIndex)
         {
-            resolved = PathIndexResolver.TryResolve(property, segment.GetIndex(path), null, out key, out child);
+            resolved = PathIndexResolver.TryResolve(property, segment.Index, null, out key, out child);
         }
         else if (isInlinePathsKey)
         {
@@ -190,9 +204,8 @@ public static class PathExtensions
     {
         index = null;
         child = null;
-        var characters = pathProvider.GetCharacters();
-        var position = 0;
-        if (string.IsNullOrEmpty(path) || !PathSyntax.SkipToSegment(characters, path, ref position))
+        var reader = new PathSegmentReader(pathProvider, path);
+        if (!reader.HasNext)
         {
             property = null;
             return false;
@@ -202,14 +215,14 @@ public static class PathExtensions
         var currentSubject = rootSubject;
         while (true)
         {
-            if (!PathSyntax.TryReadSegment(characters, path, ref position, out var segment, out _) ||
-                !pathProvider.TryResolveSegment(currentSubject, path, segment, out property, out index, out child))
+            if (!reader.TryRead(out var segment) ||
+                !pathProvider.TryResolvePathSegment(currentSubject, segment, out property, out index, out child))
             {
                 property = null;
                 return false;
             }
 
-            if (!PathSyntax.SkipToSegment(characters, path, ref position))
+            if (!reader.HasNext)
             {
                 return true;
             }
