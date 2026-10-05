@@ -47,7 +47,7 @@ public static class Extensions
     /// Collects logs and metrics, and traces only when an OTLP endpoint or Seq is configured.
     /// Exports logs, metrics and traces over OTLP when <paramref name="useOtlpExporter"/> is <c>true</c>.
     /// </summary>
-    public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder, bool useOtlpExporter, bool useSeq) where TBuilder : IHostApplicationBuilder
+    private static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder, bool useOtlpExporter, bool useSeq) where TBuilder : IHostApplicationBuilder
     {
         builder.Logging.AddOpenTelemetry(logging =>
         {
