@@ -66,6 +66,24 @@ public class DataDirectorySeederTests : IDisposable
     }
 
     [Fact]
+    public void WhenConfiguredRootFileNameDiffersFromSeed_ThenSeedRootIsCopiedUnderConfiguredName()
+    {
+        // Arrange
+        var configuredRootFile = Path.Combine(_dataDirectory.FullName, "Home.json");
+
+        // Act
+        var copiedFileCount = DataDirectorySeeder.SeedIfMissing(configuredRootFile, _seedDirectory.FullName);
+
+        // Assert
+        Assert.Equal(3, copiedFileCount);
+        Assert.True(File.Exists(configuredRootFile));
+        Assert.Equal("{}", File.ReadAllText(configuredRootFile));
+        Assert.False(File.Exists(RootFile));
+        Assert.Equal("seed-plugins", File.ReadAllText(Path.Combine(_dataDirectory.FullName, "Files", "Plugins.json")));
+        Assert.Equal("seed-device", File.ReadAllText(Path.Combine(_dataDirectory.FullName, "Files", "Devices", "Device.json")));
+    }
+
+    [Fact]
     public void WhenDataDirectoryHasFilesButNoRootFile_ThenExistingFilesAreKept()
     {
         // Arrange

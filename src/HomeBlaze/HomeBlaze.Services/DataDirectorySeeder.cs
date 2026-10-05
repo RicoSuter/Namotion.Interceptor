@@ -6,8 +6,17 @@ namespace HomeBlaze.Services;
 public static class DataDirectorySeeder
 {
     /// <summary>
+    /// File name of the seed directory's root configuration file, matched case-insensitively and only directly
+    /// inside the seed directory (not in subfolders). It is copied to the configured root configuration path,
+    /// regardless of that path's own file name.
+    /// </summary>
+    public const string SeedRootFileName = "Root.json";
+
+    /// <summary>
     /// Copies the seed directory into the folder of <paramref name="rootConfigurationPath"/> when that file does not exist
-    /// and <paramref name="seedDirectory"/> is set and exists. Existing files are never overwritten.
+    /// and <paramref name="seedDirectory"/> is set and exists. Existing files are never overwritten. The seed's top-level
+    /// <see cref="SeedRootFileName"/> is copied to <paramref name="rootConfigurationPath"/> itself; all other files keep
+    /// their relative path under the data directory.
     /// </summary>
     /// <returns>The number of copied files; zero when nothing was seeded.</returns>
     public static int SeedIfMissing(string rootConfigurationPath, string? seedDirectory)
@@ -20,29 +29,49 @@ public static class DataDirectorySeeder
         }
 
         var sourceDirectory = Path.GetFullPath(seedDirectory);
-        var dataDirectory = Path.GetDirectoryName(Path.GetFullPath(rootConfigurationPath))!;
-        var rootFileName = Path.GetFileName(rootConfigurationPath);
+        var fullRootConfigurationPath = Path.GetFullPath(rootConfigurationPath);
+        var dataDirectory = Path.GetDirectoryName(fullRootConfigurationPath)!;
 
         // The root file is copied last: its presence is what disables seeding, so an interrupted
         // copy must not leave a root file behind that blocks the next attempt.
         var sourceFiles = Directory
             .EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
-            .OrderBy(file => Path.GetRelativePath(sourceDirectory, file) == rootFileName);
+            .OrderBy(file => IsSeedRootFile(sourceDirectory, file));
 
         var copiedFileCount = 0;
         foreach (var sourceFile in sourceFiles)
         {
-            var targetFile = Path.Combine(dataDirectory, Path.GetRelativePath(sourceDirectory, sourceFile));
+            var isRootSource = IsSeedRootFile(sourceDirectory, sourceFile);
+            var targetFile = isRootSource
+                ? fullRootConfigurationPath
+                : Path.Combine(dataDirectory, Path.GetRelativePath(sourceDirectory, sourceFile));
+
             if (File.Exists(targetFile))
             {
                 continue;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
-            File.Copy(sourceFile, targetFile);
+
+            if (isRootSource)
+            {
+                // Written atomically: copying straight to the target could leave a truncated root
+                // file if interrupted, which would wrongly look like seeding already completed.
+                var temporaryFile = targetFile + ".seeding";
+                File.Copy(sourceFile, temporaryFile, overwrite: true);
+                File.Move(temporaryFile, targetFile);
+            }
+            else
+            {
+                File.Copy(sourceFile, targetFile);
+            }
+
             copiedFileCount++;
         }
 
         return copiedFileCount;
     }
+
+    private static bool IsSeedRootFile(string sourceDirectory, string sourceFile) =>
+        string.Equals(Path.GetRelativePath(sourceDirectory, sourceFile), SeedRootFileName, StringComparison.OrdinalIgnoreCase);
 }
