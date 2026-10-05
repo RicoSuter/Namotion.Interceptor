@@ -100,7 +100,7 @@ HomeBlaze serves `/health` for load balancer and readiness probes and `/alive` f
 
 ## Container Images [Implemented]
 
-Every change on master is published as `sha-<commit>`, and `edge` follows the newest master commit. Every release is published as `X.Y.Z`, and `X.Y` and `latest` follow the repository's latest release. Pre-releases only get their exact version tag. See [Installation](../../administration/installation.md#docker).
+CI publishes HomeBlaze to GitHub Container Registry; the tags are listed in [Installation](../../administration/installation.md#docker).
 
 ## Open Questions
 

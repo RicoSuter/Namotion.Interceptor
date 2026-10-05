@@ -14,8 +14,10 @@ HomeBlaze is published as a container image for amd64 and arm64 (Raspberry Pi 4 
 
 | Tag | Content |
 |-----|---------|
-| `latest`, `X.Y`, `X.Y.Z` | Releases |
-| `edge`, `sha-<commit>` | Every change on master |
+| `X.Y.Z` | Every release |
+| `X.Y`, `latest` | The repository's latest release |
+| `sha-<commit>` | Master builds that pass CI |
+| `edge` | The newest master commit |
 
 Pre-releases are only published with their exact version tag. Until the first release is published, use the `edge` tag by setting `image: ghcr.io/ricosuter/homeblaze:edge` in the compose file. Images are published from the upstream repository only; forks do not publish. GitHub Container Registry makes a new package private on its first push, so the maintainer makes it public once in the package settings.
 
