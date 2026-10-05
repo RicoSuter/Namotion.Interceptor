@@ -15,13 +15,13 @@ public class PathParsingTests
 
         // Assert
         Assert.Equal(3, segments.Count);
-        Assert.Equal(("car", (object?)null), segments[0]);
-        Assert.Equal(("radioStations", (object?)"jazz108.5Fm"), segments[1]);
-        Assert.Equal(("name", (object?)null), segments[2]);
+        Assert.Equal(("car", (string?)null), segments[0]);
+        Assert.Equal(("radioStations", (string?)"jazz108.5Fm"), segments[1]);
+        Assert.Equal(("name", (string?)null), segments[2]);
     }
 
     [Fact]
-    public void WhenIndexIsInteger_ThenParsePathReturnsInt()
+    public void WhenIndexIsInteger_ThenParsePathReturnsItsText()
     {
         // Arrange
         var pathProvider = DefaultPathProvider.Instance;
@@ -30,7 +30,7 @@ public class PathParsingTests
         var segments = pathProvider.ParsePath("items[5]");
 
         // Assert
-        Assert.Equal(("items", (object?)5), Assert.Single(segments));
+        Assert.Equal(("items", (string?)"5"), Assert.Single(segments));
     }
 
     [Theory]

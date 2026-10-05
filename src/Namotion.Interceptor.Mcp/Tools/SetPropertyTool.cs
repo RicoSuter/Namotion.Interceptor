@@ -48,6 +48,10 @@ internal class SetPropertyTool
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
+        if (McpToolHelper.TryGetPathSyntaxError(pathProvider, path) is { } syntaxError)
+        {
+            return Task.FromResult<object?>(syntaxError);
+        }
         var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
 
         if (result is null)

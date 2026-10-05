@@ -837,7 +837,7 @@ public partial class Machine
 
 With `[InlinePaths]`:
 - Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
-- Direct properties take precedence over child keys. If a subject has both a direct property and a dictionary key with the same name, the property wins and the key is unreachable via that segment
+- Direct properties take precedence over child keys for a bare segment. A key named like a property is still reachable as an index on the dictionary, such as `Line.Machines[Name].Status`; `TryGetPath` writes it that way.
 - Only one property per class may be marked with `[InlinePaths]`; multiple properties throws `InvalidOperationException`
 - Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
 - Built into `PathProviderBase.TryGetPropertyFromSegment`
@@ -858,10 +858,12 @@ Items[a]]b].Value
 - Empty segments are skipped, so with a `/` separator `/a/b`, `a//b` and `a/b/` all read as `a/b`.
 - A malformed path makes `ParsePath` throw `FormatException`: an unclosed `[`, an empty index `[]`, a segment without a name, or anything after an index other than the separator. `TryParsePath` returns the reason and position instead, and the resolvers report a malformed path as not found.
 - Outside an index `]` is an ordinary character, so a segment name such as `notes]v2` needs no escaping.
-- An index is read as an `int` when its text is an integer and as a string otherwise. A key of another type, or a string key whose text is an integer, does not resolve from a path yet.
 - `PathSeparator`, `IndexOpen` and `IndexClose` must be three different characters.
 - Segments from `[Path]` attributes or `TryGetPropertySegment` are written as is. A separator inside one nests the path (`[Path("mqtt", "metrics/Humidity")]`), and they must not contain `[`.
-- `[InlinePaths]` keys are written as bare segments, so they must not contain the separator or `[`.
+- The container decides how an index is read. A collection takes canonical invariant digits (`[1]`, not `[01]` or `[+1]`). A dictionary reads the text as its own key type: string keys as written, so `[5]` addresses the string key `"5"`; integer, `Guid` and enum keys only in the form `TryGetPath` writes (`[-3]`, `[0f8fad5b-d9cb-469f-a165-70867728950e]`, `[Blue]`, `[Read, Write]`); any other key type by comparing the text with each key's invariant text. Two keys with the same text cannot be told apart by a path, and the first match wins. MCP browse output, which is keyed by this text, shows only one of them.
+- `TryGetPropertyFromPath` returns the typed key of the last segment, also when no entry exists at it yet; for a key type without a parse rule it returns the text when no entry matches.
+- An `[InlinePaths]` key is written as a bare segment only when it reads back as that key: it contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`. The inline property's own segment (`Line.Machines`) addresses the property itself. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
+- Browse output and `FormatPathIndex` give the key text before bracket escaping: inside an index write each `]` of a key twice.
 
 ### Updates
 

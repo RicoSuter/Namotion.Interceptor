@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -150,7 +149,7 @@ public static class PathExtensions
     /// <param name="pathProvider">The source path provider.</param>
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
-    /// <returns>The found subject properties.</returns>
+    /// <returns>The found subject properties with the typed key of their last segment; a malformed or unresolved path yields a null property, an empty path yields nothing.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromPaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> paths,
@@ -159,7 +158,7 @@ public static class PathExtensions
         bool useCache = true)
     {
         var pathValueCache = useCache
-            ? new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>()
+            ? new Dictionary<string, (RegisteredSubjectProperty property, object? key, IInterceptorSubject? subject)>()
             : null;
 
         foreach (var path in paths)
@@ -176,13 +175,10 @@ public static class PathExtensions
             }
 
             var currentSubject = rootSubject;
-            var currentPath = new StringBuilder();
+            StringBuilder? currentPath = pathValueCache is not null ? new StringBuilder() : null;
             for (var i = 0; i < segments.Count; i++)
             {
                 var (segment, indexText) = segments[i];
-                object? index = indexText is null
-                    ? null
-                    : int.TryParse(indexText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var position) ? position : indexText;
                 var isLastSegment = i == segments.Count - 1;
 
                 string? currentPathString = null;
@@ -190,7 +186,7 @@ public static class PathExtensions
                 {
                     // The canonical written form: names cannot contain the separator or brackets, and a doubled
                     // closing bracket keeps every index unambiguous.
-                    if (currentPath.Length > 0) currentPath.Append(pathProvider.PathSeparator);
+                    if (currentPath!.Length > 0) currentPath.Append(pathProvider.PathSeparator);
                     currentPath.Append(segment);
                     if (indexText is not null)
                     {
@@ -203,55 +199,50 @@ public static class PathExtensions
                 }
 
                 RegisteredSubjectProperty? property;
+                object? key;
                 IInterceptorSubject? nextSubject;
-                if (pathValueCache?.TryGetValue(currentPathString!, out var entry) == true)
+                if (pathValueCache is not null &&
+                    pathValueCache.TryGetValue(currentPathString!, out var entry) &&
+                    (isLastSegment || entry.subject is not null))
                 {
-                    // load property from cache
                     property = entry.property;
-                    nextSubject = !isLastSegment
-                        ? entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory)
-                        : null;
+                    key = entry.key;
+                    nextSubject = isLastSegment ? null : entry.subject;
                 }
                 else
                 {
-                    // look up property in subject & add to cache
                     var registeredSubject = currentSubject.TryGetRegisteredSubject();
-                    if (registeredSubject is null)
+                    if (registeredSubject is null ||
+                        !pathProvider.TryResolvePathSegment(registeredSubject, segment, indexText, out property, out key, out var child) ||
+                        !pathProvider.IsPropertyIncluded(property))
                     {
                         yield return (path, null, null);
                         break;
                     }
 
-                    // Attribute lookup is not supported - resolve as regular property
-                    property = pathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-
-                    if (property is null ||
-                        pathProvider.IsPropertyIncluded(property) == false)
-                    {
-                        yield return (path, null, null);
-                        break;
-                    }
-
+                    nextSubject = null;
                     if (!isLastSegment)
                     {
-                        nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
+                        nextSubject = key is not null
+                            ? GetItemOrThrowWhenCreating(child, subjectFactory)
+                            : TryGetReferencedSubjectOrCreate(property, subjectFactory);
+
                         if (nextSubject is null)
                         {
                             yield return (path, null, null);
                             break;
                         }
                     }
-                    else
-                    {
-                        nextSubject = null;
-                    }
 
-                    pathValueCache?.Add(currentPathString!, (property, nextSubject));
+                    if (pathValueCache is not null)
+                    {
+                        pathValueCache[currentPathString!] = (property, key, nextSubject);
+                    }
                 }
 
                 if (isLastSegment)
                 {
-                    yield return (path, property, index);
+                    yield return (path, property, key);
                 }
                 else
                 {
@@ -261,53 +252,36 @@ public static class PathExtensions
         }
     }
 
-    private static string DoubleCharacter(string text, char character)
-        => text.IndexOf(character) < 0 ? text : text.Replace(character.ToString(), new string(character, 2));
-
-    private static IInterceptorSubject? TryGetPropertySubjectOrCreate(RegisteredSubjectProperty registeredProperty, object? index, ISubjectFactory? subjectFactory)
+    private static IInterceptorSubject? GetItemOrThrowWhenCreating(IInterceptorSubject? child, ISubjectFactory? subjectFactory)
     {
-        IInterceptorSubject? nextSubject;
-        if (index is not null)
+        if (child is null && subjectFactory is not null)
         {
-            // TODO: Move to common value handle extension methods
-            // nextSubject = index is not int
-            //     ? (registeredProperty.GetValue() as IDictionary)?[index] as IInterceptorSubject
-            //     : (registeredProperty.GetValue() as IList)?[(int)index] as IInterceptorSubject;
-
-            nextSubject = registeredProperty
-                .Children
-                .SingleOrDefault(c => Equals(c.Index, index))
-                .Subject;
-
-            if (nextSubject is null && subjectFactory is not null)
-            {
-                // create missing item collection or item dictionary
-
-                throw new InvalidOperationException("Missing collection items cannot be created.");
-                // TODO: Implement collection or dictionary creation from paths (need to know all paths).
-
-                // currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
-                // var collection  = subjectFactory.CreateSubjectCollection(registeredProperty, currentSubject);
-                // registeredProperty.SetValue(collection);
-            }
+            // TODO: Implement collection or dictionary creation from paths (need to know all paths).
+            throw new InvalidOperationException("Missing collection items cannot be created.");
         }
-        else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
-        {
-            // TODO: Use registeredProperty.IsSubjectReference here instead in if
-            // TODO(perf): Use nextSubject = registeredProperty.GetValue() as IInterceptorSubject;
-            nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
 
-            if (nextSubject is null && subjectFactory is not null)
-            {
-                nextSubject = subjectFactory.CreateSubject(registeredProperty);
-                registeredProperty.SetValue(nextSubject);
-            }
-        }
-        else
+        return child;
+    }
+
+    private static IInterceptorSubject? TryGetReferencedSubjectOrCreate(RegisteredSubjectProperty registeredProperty, ISubjectFactory? subjectFactory)
+    {
+        // TODO: Use registeredProperty.IsSubjectReference here instead
+        if (!registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
         {
-            nextSubject = null;
+            return null;
+        }
+
+        // TODO(perf): Use nextSubject = registeredProperty.GetValue() as IInterceptorSubject;
+        var nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
+        if (nextSubject is null && subjectFactory is not null)
+        {
+            nextSubject = subjectFactory.CreateSubject(registeredProperty);
+            registeredProperty.SetValue(nextSubject);
         }
 
         return nextSubject;
     }
+
+    private static string DoubleCharacter(string text, char character)
+        => text.IndexOf(character) < 0 ? text : text.Replace(character.ToString(), new string(character, 2));
 }

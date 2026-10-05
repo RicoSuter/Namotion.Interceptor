@@ -540,6 +540,95 @@ public class PathExtensionsTests
         Assert.Equal("FirstName", results[1].property?.Name);
     }
 
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenPathUsesInlineKey_ThenTryGetPropertyFromPathResolves(string _, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var member = new Person { FirstName = "Ann" };
+        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [7] = member } };
+
+        // Act
+        var (property, _) = root.TryGetPropertyFromPath("7.FirstName", pathProvider);
+        var (_, index) = root.TryGetPropertyFromPath("7", pathProvider);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Same(member, property.Subject);
+        Assert.Equal((object)7, index);
+    }
+
+    [Fact]
+    public void WhenWrongNameCarriesIndexOnInlineFallback_ThenTryGetPropertyFromPathReturnsNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var member = new Person { FirstName = "Ann" };
+        var root = new InlineRoot(context) { Members = new Dictionary<int, Person> { [7] = member } };
+
+        // Act
+        var (wrongName, _) = root.TryGetPropertyFromPath("Typo[7].FirstName", DefaultPathProvider.Instance);
+        var (rightName, _) = root.TryGetPropertyFromPath("Members[7].FirstName", DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.Null(wrongName);
+        Assert.Same(member, rightName?.Subject);
+    }
+
+    [Fact]
+    public void WhenStringKeyLooksLikeInteger_ThenConnectorsResolverFindsIt()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var five = new Person { FirstName = "Five" };
+        person.Relationships = new Dictionary<string, Person> { ["5"] = five };
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Relationships[5].FirstName", DefaultPathProvider.Instance);
+        var (_, position) = person.TryGetPropertyFromPath("Children[1]", DefaultPathProvider.Instance);
+        var (_, key) = person.TryGetPropertyFromPath("Relationships[5]", DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.Same(five, property?.Subject);
+        Assert.Equal((object)1, position);
+        Assert.Equal((object)"5", key);
+    }
+
+    [Fact]
+    public void WhenUpdatingValueThroughIntegerLookingKey_ThenValueIsApplied()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var five = new Person { FirstName = "Five" };
+        person.Relationships = new Dictionary<string, Person> { ["5"] = five };
+
+        // Act
+        var applied = person.UpdatePropertyValueFromPath(
+            "Relationships[5].FirstName", DateTimeOffset.UtcNow, "Neo", DefaultPathProvider.Instance, source: null);
+
+        // Assert
+        Assert.True(applied);
+        Assert.Equal("Neo", five.FirstName);
+    }
+
+    [Fact]
+    public void WhenCachedLastSegmentIsContinuedByLaterPath_ThenLookupReportsNotFound()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(["Relationships[missing]", "Relationships[missing].FirstName"], DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Equal("Relationships", results[0].property?.Name);
+        Assert.Null(results[1].property);
+    }
+
     private static Person CreateTestGraph()
     {
         var context = InterceptorSubjectContext
