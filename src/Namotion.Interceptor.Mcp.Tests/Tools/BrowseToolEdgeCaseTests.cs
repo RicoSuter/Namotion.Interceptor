@@ -139,7 +139,7 @@ public class BrowseToolEdgeCaseTests
     }
 
     [Fact]
-    public async Task WhenDictionaryKeyHasNoPath_ThenChildIsSkipped()
+    public async Task WhenDictionaryKeyIsEmpty_ThenChildIsListedUnderEmptyKey()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -165,8 +165,8 @@ public class BrowseToolEdgeCaseTests
         // Assert
         var children = json.GetProperty("result").GetProperty("properties")
             .GetProperty("Children").GetProperty("children");
-        var keys = children.EnumerateObject().Select(child => child.Name).ToArray();
-        Assert.Equal(["a"], keys);
+        var keys = children.EnumerateObject().Select(child => child.Name).Order().ToArray();
+        Assert.Equal(["", "a"], keys);
     }
 
     private class ThrowingEnricher : IMcpSubjectEnricher

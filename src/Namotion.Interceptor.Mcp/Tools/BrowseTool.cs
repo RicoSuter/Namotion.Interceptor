@@ -91,15 +91,10 @@ internal class BrowseTool
         }
         else
         {
-            if (McpToolHelper.TryGetPathSyntaxError(pathProvider, path!) is { } syntaxError)
-            {
-                return Task.FromResult<object?>(syntaxError);
-            }
-
             var resolved = pathProvider.TryGetSubjectFromPath(rootRegisteredSubject, path!);
             if (resolved is null)
             {
-                return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+                return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path!));
             }
 
             startSubject = resolved;
@@ -211,9 +206,8 @@ internal class BrowseTool
 
                     foreach (var child in property.Children)
                     {
-                        var key = child.Index is null ? null : PathExtensions.FormatPathIndex(child.Index);
                         var childRegistered = child.Subject.TryGetRegisteredSubject();
-                        if (key is null ||
+                        if (child.Index is null ||
                             childRegistered is null ||
                             McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, excludeTypes) ||
                             !visited.Add(child.Subject))
@@ -227,6 +221,7 @@ internal class BrowseTool
                             break;
                         }
 
+                        var key = PathExtensions.FormatPathIndex(child.Index);
                         subjectCount++;
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,

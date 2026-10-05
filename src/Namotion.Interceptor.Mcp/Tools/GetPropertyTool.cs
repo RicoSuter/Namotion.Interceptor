@@ -43,15 +43,11 @@ internal class GetPropertyTool
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        if (McpToolHelper.TryGetPathSyntaxError(pathProvider, path) is { } syntaxError)
-        {
-            return Task.FromResult<object?>(syntaxError);
-        }
         var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
 
         if (result is null)
         {
-            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+            return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path));
         }
 
         var (property, _) = result.Value;
