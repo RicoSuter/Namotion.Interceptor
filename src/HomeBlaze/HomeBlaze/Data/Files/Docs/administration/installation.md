@@ -85,4 +85,4 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 2. Run `dotnet run --project src/HomeBlaze/HomeBlaze`
 3. Open http://localhost:5192
 
-HomeBlaze then uses the development data folder `src/HomeBlaze/HomeBlaze/Data`, which contains demo devices, sample plugins and this documentation. To run HomeBlaze together with Seq and an OPC UA simulator, see [Aspire](../development/aspire.md).
+HomeBlaze then uses the development data folder `src/HomeBlaze/HomeBlaze/Data`, which contains demo devices, sample plugins and this documentation. To run HomeBlaze together with Seq, see [Aspire](../development/aspire.md).
