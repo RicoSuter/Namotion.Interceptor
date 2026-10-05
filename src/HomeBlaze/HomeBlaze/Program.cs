@@ -35,8 +35,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
-var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
-    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+// Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(
+    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
+    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+
+var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
@@ -65,6 +69,11 @@ builder.Services
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
+
+if (seededFileCount > 0)
+{
+    app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
+}
 
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
