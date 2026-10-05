@@ -17,7 +17,7 @@ HomeBlaze is published as a container image for amd64 and arm64 (Raspberry Pi 4 
 | `latest`, `X.Y`, `X.Y.Z` | Releases |
 | `edge`, `sha-<commit>` | Every change on master |
 
-Pre-releases are only published with their exact version tag. Images are published from the upstream repository only; forks do not publish. GitHub Container Registry makes a new package private on its first push, so the maintainer makes it public once in the package settings.
+Pre-releases are only published with their exact version tag. Until the first release is published, use the `edge` tag by setting `image: ghcr.io/ricosuter/homeblaze:edge` in the compose file. Images are published from the upstream repository only; forks do not publish. GitHub Container Registry makes a new package private on its first push, so the maintainer makes it public once in the package settings.
 
 Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/docker-compose.yml) into an empty folder, adjust the time zone (`TZ`, and `GENERIC_TIMEZONE` for n8n), and start it:
 
