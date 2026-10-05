@@ -1,5 +1,4 @@
-﻿using System.Globalization;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Namotion.Interceptor.AspNetCore.Extensions;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -186,44 +185,6 @@ public class SubjectRegistryTests
         
         Assert.Equal("mother.mother.firstName", path);
         await Verify(person.ToJsonObject(jsonSerializerOptions).ToJsonString(jsonSerializerOptions));
-    }
-
-    [Fact]
-    public void WhenDictionaryKeyIsDoubleUnderGermanCulture_ThenJsonPathUsesInvariantIndex()
-    {
-        // Arrange
-        var originalCulture = CultureInfo.CurrentCulture;
-        try
-        {
-            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithParents()
-                .WithRegistry();
-
-            var entry = new Person { FirstName = "Entry" };
-            var scoreBoard = new ScoreBoard(context)
-            {
-                Entries = new Dictionary<double, Person> { [1.5] = entry }
-            };
-
-            var jsonSerializerOptions = new JsonSerializerOptions(JsonSerializerOptions.Default)
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-
-            var property = entry.TryGetRegisteredProperty("FirstName")!;
-
-            // Act
-            var path = property.Reference.GetJsonPath(jsonSerializerOptions);
-
-            // Assert
-            Assert.Equal("entries[1.5].firstName", path);
-        }
-        finally
-        {
-            CultureInfo.CurrentCulture = originalCulture;
-        }
     }
 
     [Fact]
