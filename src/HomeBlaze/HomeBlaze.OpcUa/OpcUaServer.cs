@@ -265,6 +265,12 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
             };
 
+            // Separate from the client store: the server cleans its own store on start.
+            if (OpcUaCertificateStoreLocation.Resolve(this, "Server") is { } certificateStorePath)
+            {
+                configuration.CertificateStoreBasePath = certificateStorePath;
+            }
+
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
             await this.AttachHostedServiceAsync(_serverService, cancellationToken);
 

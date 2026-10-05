@@ -1,0 +1,34 @@
+# HomeBlaze self-hosting. Start: docker compose up -d
+# Optional services read secrets from .env (see the installation guide): docker compose --profile seq up -d
+# HomeBlaze has no login: keep it on a trusted network or behind an authenticating reverse proxy.
+services:
+  homeblaze:
+    image: ghcr.io/ricosuter/homeblaze:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # UI and MCP
+      - "4840:4840"   # OPC UA server subject
+    volumes:
+      - ./data:/data  # Root.json, Files/, History/, OpcUa/; filled with defaults on first start
+    environment:
+      TZ: Europe/Zurich
+      McpServer__Enabled: "true"
+      McpServer__ReadOnly: "true"  # set to "false" to let MCP clients write values
+      ConnectionStrings__seq: http://seq:5341
+    # devices:
+    #   - /dev/gpiomem  # Raspberry Pi 3/4 GPIO; Pi 5 is not supported in the container (needs libgpiod)
+
+  seq:
+    image: datalust/seq
+    profiles: [seq]
+    restart: unless-stopped
+    ports:
+      - "5341:80"
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORD: ${SEQ_ADMIN_PASSWORD:-}  # from .env; initial "admin" password, Seq asks for a new one at the first login
+    volumes:
+      - seq-data:/data
+
+volumes:
+  seq-data:
