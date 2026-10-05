@@ -27,7 +27,7 @@ services.AddMcpServer()
 app.MapMcp("/mcp");
 ```
 
-The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, workflow tools such as n8n, custom MCP clients) connect to `/mcp` using the MCP Streamable HTTP transport. The legacy SSE transport is disabled by default and cannot be enabled together with `Stateless = true`, so clients must use Streamable HTTP; in n8n's MCP Client Tool node, select the HTTP Streamable transport.
+The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, custom MCP clients) connect to `/mcp` using the MCP Streamable HTTP transport. The legacy SSE transport is disabled by default and cannot be enabled together with `Stateless = true`, so clients must use Streamable HTTP.
 
 ## Output Format
 

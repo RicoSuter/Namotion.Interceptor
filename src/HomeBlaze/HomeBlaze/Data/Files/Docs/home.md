@@ -42,7 +42,7 @@ Guides for building custom subjects, plugins, and UI components.
 - [Building Subjects](development/building-subjects.md): Creating custom subject types
 - [Configurable Subjects](development/configurable-subject.md): Subject serialization and persistence
 - [Notifications](development/notifications.md): Notification channel interface
-- [Aspire](development/aspire.md): Development environment with Seq, n8n and an OPC UA simulator
+- [Aspire](development/aspire.md): Development environment with Seq and an OPC UA simulator
 
 ### Devices
 

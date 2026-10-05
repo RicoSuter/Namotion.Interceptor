@@ -21,7 +21,7 @@ HomeBlaze is published as a container image for amd64 and arm64 (Raspberry Pi 4 
 
 Pre-releases are only published with their exact version tag. Until the first release is published, use the `edge` tag by setting `image: ghcr.io/ricosuter/homeblaze:edge` in the compose file. Images are published from the upstream repository only; forks do not publish. GitHub Container Registry makes a new package private on its first push, so the maintainer makes it public once in the package settings.
 
-Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/docker-compose.yml) into an empty folder, adjust the time zone (`TZ`, and `GENERIC_TIMEZONE` for n8n), and start it:
+Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/docker-compose.yml) into an empty folder, adjust the time zone (`TZ`), and start it:
 
 ```bash
 docker compose up -d
@@ -48,23 +48,19 @@ docker compose exec homeblaze sh -c 'rm -rf /data/Files/Docs && cp -r /app/Seed/
 | Profile | Service | Address |
 |---------|---------|---------|
 | `seq` | Seq log server, receives logs and traces | http://localhost:5341 |
-| `n8n` | n8n workflow automation | http://localhost:5678 |
 
-Both services read a secret from a `.env` file next to the compose file. Create it once before the first start of a profile:
+Seq reads a secret from a `.env` file next to the compose file. Create it once before the first start of the profile:
 
 ```bash
 echo "SEQ_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> .env
-echo "N8N_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
-docker compose --profile seq --profile n8n up -d
+docker compose --profile seq up -d
 ```
 
-Keep `.env`: n8n encrypts its stored credentials with this key. Seq creates the user `admin` with `SEQ_ADMIN_PASSWORD` on its first start and asks for a new password at the first login.
+Keep `.env`: Seq creates the user `admin` with `SEQ_ADMIN_PASSWORD` on its first start and asks for a new password at the first login.
 
 HomeBlaze sends its logs and traces to Seq through `ConnectionStrings__seq`. Without the `seq` profile the export fails silently and HomeBlaze keeps working; remove the setting if you never use Seq. See [Monitoring](monitoring.md).
 
-To use HomeBlaze from an n8n AI agent, add an **MCP Client Tool** node with transport **HTTP Streamable** and endpoint `http://homeblaze:8080/mcp`. The compose file enables MCP read-only; set `McpServer__ReadOnly` to `"false"` to allow writes.
-
-The n8n image is pinned to a version because n8n migrates its database when it upgrades. Change the version deliberately and back up the `n8n-data` volume first.
+MCP clients connect to `http://<host>:8080/mcp` using the MCP Streamable HTTP transport. The compose file enables MCP read-only; set `McpServer__ReadOnly` to `"false"` to allow writes.
 
 ### Security
 
@@ -74,7 +70,7 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 
 - Raspberry Pi 3 and 4 GPIO: uncomment the `/dev/gpiomem` device in the compose file. GPIO on Raspberry Pi 5 is not supported in the container yet: Pi 5 exposes `/dev/gpiochip*` instead of `/dev/gpiomem` and needs the `libgpiod` library, which the image does not include. See [GPIO](../devices/Gpio.md#linux-dependencies) for the library requirement.
 - The Hue bridge has no IP address setting. HomeBlaze discovers it by trying the Philips cloud discovery endpoint, mDNS, SSDP and a local network scan, in that order. In Docker's default network only the cloud endpoint works, and Philips rate-limits it. For reliable discovery, run HomeBlaze with `network_mode: host` on Linux instead.
-- Host networking bypasses the compose service names: remove the `ports` section, set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341), and reach HomeBlaze from n8n at `http://host.docker.internal:8080/mcp` after adding `extra_hosts: ["host.docker.internal:host-gateway"]` to the n8n service.
+- Host networking bypasses the compose service names: remove the `ports` section, and set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341).
 
 ## From source
 
@@ -89,4 +85,4 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 2. Run `dotnet run --project src/HomeBlaze/HomeBlaze`
 3. Open http://localhost:5192
 
-HomeBlaze then uses the development data folder `src/HomeBlaze/HomeBlaze/Data`, which contains demo devices, sample plugins and this documentation. To run HomeBlaze together with Seq, n8n and an OPC UA simulator, see [Aspire](../development/aspire.md).
+HomeBlaze then uses the development data folder `src/HomeBlaze/HomeBlaze/Data`, which contains demo devices, sample plugins and this documentation. To run HomeBlaze together with Seq and an OPC UA simulator, see [Aspire](../development/aspire.md).
