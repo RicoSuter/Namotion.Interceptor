@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -163,7 +164,12 @@ public static class PathExtensions
 
         foreach (var path in paths)
         {
-            var segments = pathProvider.ParsePath(path);
+            if (!pathProvider.TryParsePath(path, out var segments, out _))
+            {
+                yield return (path, null, null);
+                continue;
+            }
+
             if (segments.Count == 0)
             {
                 continue;
@@ -173,17 +179,25 @@ public static class PathExtensions
             var currentPath = new StringBuilder();
             for (var i = 0; i < segments.Count; i++)
             {
-                var (segment, index) = segments[i];
+                var (segment, indexText) = segments[i];
+                object? index = indexText is null
+                    ? null
+                    : int.TryParse(indexText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var position) ? position : indexText;
                 var isLastSegment = i == segments.Count - 1;
 
                 string? currentPathString = null;
                 if (pathValueCache is not null)
                 {
-                    if (currentPath.Length > 0) currentPath.Append(":/:.:");
+                    // The canonical written form: names cannot contain the separator or brackets, and a doubled
+                    // closing bracket keeps every index unambiguous.
+                    if (currentPath.Length > 0) currentPath.Append(pathProvider.PathSeparator);
                     currentPath.Append(segment);
-                    if (index is not null)
+                    if (indexText is not null)
                     {
-                        currentPath.Append('[').Append(index).Append(']');
+                        currentPath
+                            .Append(pathProvider.IndexOpen)
+                            .Append(DoubleCharacter(indexText, pathProvider.IndexClose))
+                            .Append(pathProvider.IndexClose);
                     }
                     currentPathString = currentPath.ToString();
                 }
@@ -246,6 +260,9 @@ public static class PathExtensions
             }
         }
     }
+
+    private static string DoubleCharacter(string text, char character)
+        => text.IndexOf(character) < 0 ? text : text.Replace(character.ToString(), new string(character, 2));
 
     private static IInterceptorSubject? TryGetPropertySubjectOrCreate(RegisteredSubjectProperty registeredProperty, object? index, ISubjectFactory? subjectFactory)
     {

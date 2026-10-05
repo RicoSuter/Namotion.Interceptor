@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Collections.Immutable;
-using System.Globalization;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -22,59 +22,43 @@ public static class PathExtensions
     private const int CycleDetectionDepthThreshold = 256;
 
     /// <summary>
-    /// Parses a path string into segments with their indices.
+    /// Parses a path string into segments with their indices. An index is returned as an <see cref="int"/>
+    /// when its text is an integer, otherwise as a string. Empty segments are skipped.
     /// </summary>
+    /// <exception cref="FormatException">The path is malformed.</exception>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static List<(string segment, object? index)> ParsePath(this PathProviderBase pathProvider, string path)
     {
-        if (string.IsNullOrEmpty(path))
+        if (!pathProvider.TryParsePath(path, out var segments, out var error))
         {
-            return [];
+            throw new FormatException(error);
         }
 
-        var results = new List<(string segment, object? index)>();
-        var separator = pathProvider.PathSeparator;
-        var indexOpen = pathProvider.IndexOpen;
-        var indexClose = pathProvider.IndexClose;
-        var start = 0;
-
-        for (var i = 0; i <= path.Length; i++)
+        var results = new List<(string segment, object? index)>(segments.Count);
+        foreach (var (segment, index) in segments)
         {
-            if (i == path.Length || path[i] == separator)
-            {
-                if (i > start)
-                {
-                    results.Add(ParseSegment(path.AsSpan(start, i - start), indexOpen, indexClose));
-                }
-                start = i + 1;
-            }
+            results.Add((segment, index is null ? null : PathSyntax.GuessIndexType(index)));
         }
 
         return results;
     }
 
-    private static (string segment, object? index) ParseSegment(ReadOnlySpan<char> span, char indexOpen, char indexClose)
-    {
-        var bracketIndex = span.IndexOf(indexOpen);
-        if (bracketIndex < 0)
-        {
-            return (span.ToString(), null);
-        }
-
-        var name = span[..bracketIndex].ToString();
-
-        var afterOpen = span[(bracketIndex + 1)..];
-        var closeBracket = afterOpen.IndexOf(indexClose);
-        if (closeBracket <= 0)
-        {
-            return (name, null);
-        }
-
-        var indexSpan = afterOpen[..closeBracket];
-        object? index = int.TryParse(indexSpan, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intIndex)
-            ? intIndex
-            : indexSpan.ToString();
-        return (name, index);
-    }
+    /// <summary>
+    /// Parses a path string into segments with their index text. Empty segments are skipped. Inside an index
+    /// every character is literal except the closing bracket, which is written twice.
+    /// </summary>
+    /// <param name="pathProvider">The path provider defining the separator and index characters.</param>
+    /// <param name="path">The path to parse.</param>
+    /// <param name="segments">The segments, or null when the path is malformed.</param>
+    /// <param name="error">The reason and position when the path is malformed, otherwise null.</param>
+    /// <returns>True when the path is well formed.</returns>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
+    public static bool TryParsePath(
+        this PathProviderBase pathProvider,
+        string path,
+        [NotNullWhen(true)] out List<(string segment, string? index)>? segments,
+        [NotNullWhen(false)] out string? error)
+        => PathSyntax.TryParse(pathProvider, path, out segments, out error);
 
     /// <summary>
     /// Tries to get a property from a path starting at the given subject.
@@ -83,13 +67,13 @@ public static class PathExtensions
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
     /// <returns>The property and its last-segment index at the path, or null if not found.</returns>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
         string path)
     {
-        var segments = pathProvider.ParsePath(path);
-        if (segments.Count == 0)
+        if (!pathProvider.TryParsePath(path, out var segments, out _) || segments.Count == 0)
         {
             return null;
         }
@@ -100,7 +84,8 @@ public static class PathExtensions
 
         for (var i = 0; i < segments.Count; i++)
         {
-            var (segment, index) = segments[i];
+            var (segment, indexText) = segments[i];
+            object? index = indexText is null ? null : PathSyntax.GuessIndexType(indexText);
             currentProperty = pathProvider.TryGetPropertyFromSegment(currentSubject, segment);
 
             if (currentProperty is null)
@@ -146,6 +131,7 @@ public static class PathExtensions
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
     /// <returns>The subject at the path, or null if not found.</returns>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static RegisteredSubject? TryGetSubjectFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
@@ -169,6 +155,7 @@ public static class PathExtensions
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="paths">The paths to resolve.</param>
     /// <returns>An enumerable of property and index tuples that were found.</returns>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static IEnumerable<(RegisteredSubjectProperty Property, object? Index)> GetPropertiesFromPaths(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
@@ -215,7 +202,7 @@ public static class PathExtensions
     /// Optional root to make the path relative to. When <c>null</c>, the canonical absolute path is returned;
     /// when provided, <c>null</c> is returned if the property is not reachable from that root.
     /// </param>
-    /// <returns>The path, or <c>null</c> when a given root is not reachable or the parent chain has a cycle.</returns>
+    /// <returns>The path, or <c>null</c> when a given root is not reachable, the parent chain has a cycle, or a key on the way has empty text.</returns>
     public static string? TryGetPath(this RegisteredSubjectProperty property, IInterceptorSubject? rootSubject = null)
         => property.TryGetPath(DefaultPathProvider.Instance, rootSubject);
 
@@ -228,13 +215,16 @@ public static class PathExtensions
     /// <param name="propertyIndex">Optional index for the property (e.g., dictionary key or collection index).
     /// When provided, the property path includes this index, which is useful for computing
     /// the path to a child subject held at a specific index within this property.</param>
-    /// <returns>The path.</returns>
+    /// <returns>The path, or null when the property is excluded, a given root is not reachable, the parent chain has a cycle, or a key on the way has empty text.</returns>
+    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {
         if (!pathProvider.IsPropertyIncluded(property))
         {
             return null;
         }
+
+        PathSyntax.ValidateCharacters(pathProvider);
 
         var frames = PooledFrames.Rent();
         try
@@ -255,12 +245,18 @@ public static class PathExtensions
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))
                 {
+                    var keyText = PathSyntax.FormatIndex(index);
+                    if (keyText is null)
+                    {
+                        return null;
+                    }
+
                     if (builder.Length > 0)
                     {
                         builder.Append(pathProvider.PathSeparator);
                     }
 
-                    builder.Append(index);
+                    builder.Append(keyText);
                     continue;
                 }
 
@@ -271,9 +267,11 @@ public static class PathExtensions
                 }
 
                 builder.Append(segment);
-                if (index is not null)
+                if (index is not null &&
+                    !PathSyntax.TryAppendIndex(builder, index, pathProvider.IndexOpen, pathProvider.IndexClose))
                 {
-                    builder.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+                    // A key with empty text has no path.
+                    return null;
                 }
             }
 

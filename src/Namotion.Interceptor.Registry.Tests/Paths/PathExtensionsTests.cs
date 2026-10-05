@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 
@@ -847,6 +848,162 @@ public class PathExtensionsTests
 
         // Assert
         Assert.Equal("Items[1].Name", path);
+    }
+
+    // --- Keys containing path syntax characters ---
+
+    [Fact]
+    public void WhenDictionaryKeyContainsSeparator_ThenPropertyPathResolves()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestContainer(context) { Name = "Root" };
+        container.Items["jazz108.5Fm"] = item;
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var result = DefaultPathProvider.Instance.TryGetPropertyFromPath(rootRegistered, "Items[jazz108.5Fm].Value");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Value", result.Value.Property.Name);
+        Assert.Same(item, result.Value.Property.Subject);
+    }
+
+    [Theory]
+    [InlineData("jazz108.5Fm", "Items[jazz108.5Fm].Value")]
+    [InlineData("192.168.0.1", "Items[192.168.0.1].Value")]
+    [InlineData("a]b", "Items[a]]b].Value")]
+    [InlineData("]", "Items[]]].Value")]
+    [InlineData("a[b", "Items[a[b].Value")]
+    [InlineData(@"C:\temp", @"Items[C:\temp].Value")]
+    public void WhenDictionaryKeyContainsSpecialCharacters_ThenTryGetPathRoundTrips(string key, string expectedPath)
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestContainer(context)
+        {
+            Name = "Root",
+            Items = new Dictionary<string, TestItem> { [key] = item }
+        };
+        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
+
+        // Act
+        var path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
+        var result = DefaultPathProvider.Instance.TryGetPropertyFromPath(container.TryGetRegisteredSubject()!, path!);
+
+        // Assert
+        Assert.Equal(expectedPath, path);
+        Assert.NotNull(result);
+        Assert.Same(item, result.Value.Property.Subject);
+    }
+
+    [Fact]
+    public void WhenDictionaryKeyIsEmpty_ThenTryGetPathReturnsNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestContainer(context)
+        {
+            Name = "Root",
+            Items = new Dictionary<string, TestItem> { [""] = item }
+        };
+        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
+
+        // Act
+        var path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
+
+        // Assert
+        Assert.Null(path);
+    }
+
+    [Fact]
+    public void WhenDictionaryKeyIsDoubleUnderGermanCulture_ThenTryGetPathFormatsInvariantly()
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestDoubleKeyedContainer(context)
+        {
+            Items = new Dictionary<double, TestItem> { [1.5] = item }
+        };
+        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
+        var previousCulture = CultureInfo.CurrentCulture;
+
+        // Act
+        string? path;
+        CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+        try
+        {
+            path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
+
+        // Assert
+        Assert.Equal("Items[1.5].Value", path);
+    }
+
+    [Theory]
+    [InlineData("Items[jazz")]
+    [InlineData("Items[jazz]x")]
+    [InlineData("Items[]")]
+    public void WhenPathIsMalformed_ThenResolversReturnNull(string path)
+    {
+        // Arrange
+        var context = CreateContext();
+        var container = new TestContainer(context) { Name = "Root" };
+        container.Items["jazz"] = new TestItem(context) { Value = "v" };
+        var rootRegistered = container.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = DefaultPathProvider.Instance.TryGetPropertyFromPath(rootRegistered, path);
+        var subject = DefaultPathProvider.Instance.TryGetSubjectFromPath(rootRegistered, path);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(subject);
+    }
+
+    [Theory]
+    [InlineData("Items[2]")]
+    [InlineData("Items[-1]")]
+    public void WhenCollectionPositionIsOutOfRange_ThenResolversReturnNull(string path)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var root = new TryGetPathIndexRoot(context);
+        root.Items = [new TryGetPathIndexChild(context), new TryGetPathIndexChild(context)];
+        var rootRegistered = root.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = DefaultPathProvider.Instance.TryGetPropertyFromPath(rootRegistered, path + ".Name");
+        var subject = DefaultPathProvider.Instance.TryGetSubjectFromPath(rootRegistered, path);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(subject);
+    }
+
+    [Theory]
+    [InlineData('[', '[', ']')]
+    [InlineData(']', '[', ']')]
+    [InlineData('.', '[', '[')]
+    public void WhenProviderCharactersCollide_ThenTryGetPathThrows(char separator, char indexOpen, char indexClose)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var container = new TestContainer(context) { Name = "Root" };
+        var property = container.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+        var pathProvider = new CollidingPathProvider(separator, indexOpen, indexClose);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => property.TryGetPath(pathProvider, null));
     }
 }
 

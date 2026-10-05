@@ -488,6 +488,58 @@ public class PathExtensionsTests
         Assert.Equal("Children[1].FirstName", paths[2].path);
     }
 
+    [Fact]
+    public void WhenDictionaryKeyContainsSeparator_ThenTryGetPropertyFromPathResolves()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var lead = new Person { FirstName = "Lead" };
+        person.Relationships = new Dictionary<string, Person>(person.Relationships!) { ["team.lead"] = lead };
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Relationships[team.lead].FirstName", DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.NotNull(property);
+        Assert.Same(lead, property.Subject);
+    }
+
+    [Fact]
+    public void WhenPathIsMalformed_ThenTryGetPropertyFromPathReturnsNull()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var (property, index) = person.TryGetPropertyFromPath("Relationships[boss.FirstName", DefaultPathProvider.Instance);
+
+        // Assert
+        Assert.Null(property);
+        Assert.Null(index);
+    }
+
+    [Fact]
+    public void WhenKeyEmbedsPathStructure_ThenCachedLookupKeepsItApart()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var plain = new Person { FirstName = "Plain" };
+        var embedded = new Person { FirstName = "Embedded" };
+        person.Relationships = new Dictionary<string, Person> { ["x"] = plain, ["x].FirstName[y"] = embedded };
+
+        // Act
+        var results = person
+            .GetPropertiesFromPaths(
+                ["Relationships[x].FirstName[y]", "Relationships[x]].FirstName[y].FirstName"],
+                DefaultPathProvider.Instance)
+            .ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Same(embedded, results[1].property?.Subject);
+        Assert.Equal("FirstName", results[1].property?.Name);
+    }
+
     private static Person CreateTestGraph()
     {
         var context = InterceptorSubjectContext
