@@ -80,6 +80,7 @@ internal static class PathIndexResolver
 
     private static bool TryParsePosition(ReadOnlySpan<char> text, out int position)
     {
+        // Canonical digits only: a sign, whitespace or a leading zero is text the writer never emits.
         if (text.Length > 1 && text[0] == '0')
         {
             position = 0;
@@ -95,6 +96,7 @@ internal static class PathIndexResolver
         key = null;
         if (keyType.IsEnum)
         {
+            // The written-form check rejects numeric forms of named values and alias names, which the writer never emits.
             if (Enum.TryParse(keyType, text, ignoreCase: false, out var value) && IsWrittenForm((ISpanFormattable)value!, text))
             {
                 key = value;
@@ -155,5 +157,10 @@ internal static class PathIndexResolver
     }
 
     private static bool IsWrittenForm<T>(T value, ReadOnlySpan<char> text) where T : ISpanFormattable
-        => PathSyntax.KeyTextEquals(value, text);
+    {
+        Span<char> buffer = stackalloc char[64];
+        return value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture)
+            ? text.SequenceEqual(buffer[..written])
+            : text.SequenceEqual(value.ToString(null, CultureInfo.InvariantCulture));
+    }
 }
