@@ -380,7 +380,7 @@ jobs:
     timeout-minutes: 30
     # Forks cannot push to this package.
     if: github.repository_owner == 'RicoSuter' && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
-    # Serialized so a slower older run cannot move the edge tag back.
+    # Serializes publishing per ref; the Compute tags step decides whether the moving edge and latest tags may move.
     concurrency:
       group: container-publish-${{ github.ref }}
       cancel-in-progress: false
@@ -407,22 +407,32 @@ jobs:
       - name: Compute tags
         id: tags
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          if ("${{ github.event_name }}" -eq "release") {
+          # Moving tags only follow the newest master commit or release, so re-running an older run cannot move them back.
+          if ($env:GITHUB_EVENT_NAME -eq "release") {
             $version = $env:RELEASE_TAG -replace '^v', ''
-            if ($env:RELEASE_PRERELEASE -eq "true") {
-              # Pre-releases must not move latest or the minor tag.
-              $tags = $version
-            } else {
-              $parts = $version.Split('.')
-              $tags = "$version;$($parts[0]).$($parts[1]);latest"
+            $tags = $version
+            # Pre-releases must not move latest or the minor tag.
+            if ($env:RELEASE_PRERELEASE -ne "true") {
+              $latestReleaseTag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName
+              if ($LASTEXITCODE -ne 0) { throw "Could not read the latest release" }
+              if ($latestReleaseTag -eq $env:RELEASE_TAG) {
+                $parts = $version.Split('.')
+                $tags = "$tags;$($parts[0]).$($parts[1]);latest"
+              }
             }
             $informationalVersion = $version
           } else {
-            $short = "${{ github.sha }}".Substring(0, 7)
-            $tags = "edge;sha-$short"
+            $short = $env:GITHUB_SHA.Substring(0, 7)
+            $tags = "sha-$short"
+            $masterHead = git ls-remote origin refs/heads/master
+            if ($LASTEXITCODE -ne 0) { throw "Could not read the master head" }
+            if ($masterHead -and $masterHead.Split("`t")[0] -eq $env:GITHUB_SHA) {
+              $tags = "edge;$tags"
+            }
             $informationalVersion = "edge+$short"
           }
           echo "TAGS=$tags" >> $env:GITHUB_OUTPUT
