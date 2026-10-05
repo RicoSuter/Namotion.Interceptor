@@ -1,7 +1,10 @@
 ---
 title: Welcome to HomeBlaze
 navTitle: Home
+icon: Home
+location: AppBar
 position: 0
+alignment: Left
 ---
 
 # Welcome to HomeBlaze
