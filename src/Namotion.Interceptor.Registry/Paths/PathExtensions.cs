@@ -307,7 +307,12 @@ public static class PathExtensions
     /// Formats a collection position or dictionary key as path key text: a string as is, an
     /// <see cref="IFormattable"/> with the invariant culture, anything else with <see cref="object.ToString"/>.
     /// </summary>
-    public static string FormatPathIndex(object key) => PathSyntax.FormatIndex(key);
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
+    public static string FormatPathIndex(object key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return PathSyntax.FormatIndex(key);
+    }
 
     /// <summary>
     /// Gets the structural property path using the default path provider (BrowseName segments joined with

@@ -97,7 +97,7 @@ internal static class PathIndexResolver
         if (keyType.IsEnum)
         {
             // The written-form check rejects numeric forms of named values and alias names, which the writer never emits.
-            if (Enum.TryParse(keyType, text, ignoreCase: false, out var value) && IsWrittenForm((ISpanFormattable)value!, text))
+            if (Enum.TryParse(keyType, text, ignoreCase: false, out var value) && PathSyntax.TextEquals((ISpanFormattable)value!, text))
             {
                 key = value;
             }
@@ -107,7 +107,7 @@ internal static class PathIndexResolver
 
         if (keyType == typeof(Guid))
         {
-            if (Guid.TryParse(text, out var value) && IsWrittenForm(value, text))
+            if (Guid.TryParse(text, out var value) && PathSyntax.TextEquals(value, text))
             {
                 key = value;
             }
@@ -133,7 +133,7 @@ internal static class PathIndexResolver
     }
 
     private static object? ParseInteger<T>(ReadOnlySpan<char> text) where T : struct, IBinaryInteger<T>
-        => T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) && IsWrittenForm(value, text)
+        => T.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) && PathSyntax.TextEquals(value, text)
             ? value
             : null;
 
@@ -154,13 +154,5 @@ internal static class PathIndexResolver
 
         child = null;
         return null;
-    }
-
-    private static bool IsWrittenForm<T>(T value, ReadOnlySpan<char> text) where T : ISpanFormattable
-    {
-        Span<char> buffer = stackalloc char[64];
-        return value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture)
-            ? text.SequenceEqual(buffer[..written])
-            : text.SequenceEqual(value.ToString(null, CultureInfo.InvariantCulture));
     }
 }

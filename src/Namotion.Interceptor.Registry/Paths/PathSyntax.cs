@@ -27,10 +27,7 @@ internal static class PathSyntax
         return string.Create(CultureInfo.InvariantCulture, $"{reason} at position {position} in path '{path}'");
     }
 
-    /// <summary>
-    /// The key's text: a string as is, an <see cref="IFormattable"/> with the invariant culture, anything else
-    /// with <see cref="object.ToString"/>.
-    /// </summary>
+    /// <summary>The key's invariant text, see <see cref="PathExtensions.FormatPathIndex"/>.</summary>
     public static string FormatIndex(object index) => index switch
     {
         string value => value,
@@ -38,26 +35,19 @@ internal static class PathSyntax
         _ => index.ToString() ?? string.Empty
     };
 
-    /// <summary>
-    /// Whether <paramref name="key"/>'s text equals <paramref name="text"/>, formatting on the stack where possible.
-    /// </summary>
-    public static bool KeyTextEquals(object key, ReadOnlySpan<char> text)
+    /// <summary>Whether <paramref name="key"/>'s text equals <paramref name="text"/>.</summary>
+    public static bool KeyTextEquals(object key, ReadOnlySpan<char> text) => key switch
     {
-        if (key is string value)
-        {
-            return text.SequenceEqual(value);
-        }
+        string value => text.SequenceEqual(value),
+        ISpanFormattable formattable => TextEquals(formattable, text),
+        _ => text.SequenceEqual(FormatIndex(key))
+    };
 
-        if (key is ISpanFormattable formattable)
-        {
-            Span<char> buffer = stackalloc char[64];
-            if (formattable.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture))
-            {
-                return text.SequenceEqual(buffer[..written]);
-            }
-        }
-
-        return text.SequenceEqual(FormatIndex(key));
+    /// <summary>Whether <paramref name="value"/>'s invariant text equals <paramref name="text"/>.</summary>
+    public static bool TextEquals<T>(T value, ReadOnlySpan<char> text) where T : ISpanFormattable
+    {
+        Span<char> buffer = stackalloc char[64];
+        return text.SequenceEqual(FormatInvariant(value, buffer));
     }
 
     /// <summary>Appends <paramref name="index"/> in brackets, quoted when its text needs it.</summary>
@@ -65,17 +55,23 @@ internal static class PathSyntax
     {
         if (index is ISpanFormattable formattable)
         {
-            // Must produce the same text as FormatIndex, which a longer key falls back to.
             Span<char> buffer = stackalloc char[64];
-            if (formattable.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture))
-            {
-                AppendIndexText(builder, buffer[..written], characters);
-                return;
-            }
+            AppendIndexText(builder, FormatInvariant(formattable, buffer), characters);
         }
-
-        AppendIndexText(builder, FormatIndex(index), characters);
+        else
+        {
+            AppendIndexText(builder, FormatIndex(index), characters);
+        }
     }
+
+    /// <summary>
+    /// <paramref name="value"/>'s invariant text, formatted into <paramref name="buffer"/> when it fits, the same
+    /// text as <see cref="FormatIndex"/>.
+    /// </summary>
+    private static ReadOnlySpan<char> FormatInvariant<T>(T value, Span<char> buffer) where T : ISpanFormattable
+        => value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture)
+            ? buffer[..written]
+            : value.ToString(null, CultureInfo.InvariantCulture);
 
     /// <summary>Appends key <paramref name="text"/> in brackets, quoted when it is empty, starts with a quote or contains the closing bracket.</summary>
     public static void AppendIndexText(StringBuilder builder, ReadOnlySpan<char> text, PathCharacters characters)
