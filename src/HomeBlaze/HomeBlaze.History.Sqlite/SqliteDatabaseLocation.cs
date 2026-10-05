@@ -2,7 +2,7 @@ namespace HomeBlaze.History.Sqlite;
 
 /// <summary>
 /// Resolves the directory that holds the SQLite partition database files. Relative paths resolve under the
-/// history folder of the instance data directory, which is outside the scanned subject files. Without a data
+/// history folder of the instance data directory, which the default layout keeps outside the scanned subject files. Without a data
 /// directory they resolve under the per-user local application data folder. Absolute paths are used as-is.
 /// </summary>
 internal static class SqliteDatabaseLocation
