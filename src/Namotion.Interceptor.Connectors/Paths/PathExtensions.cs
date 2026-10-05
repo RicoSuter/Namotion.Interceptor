@@ -103,15 +103,16 @@ public static class PathExtensions
     /// <param name="paths">The source paths to apply values.</param>
     /// <param name="visitProperty">The callback to visit a property.</param>
     /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
+    /// <param name="subjectFactory">The subject factory to create missing referenced subjects within the path (optional).</param>
     /// <returns>The list of visited paths.</returns>
     public static IReadOnlyCollection<string> VisitPropertiesFromPaths(this IInterceptorSubject subject,
         IEnumerable<string> paths, Action<RegisteredSubjectProperty, string, object?> visitProperty,
         PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
     {
         var visitedPaths = new List<string>();
-        foreach (var (path, property, index) in subject.GetPropertiesFromPaths(paths, pathProvider, subjectFactory, useCache: false))
+        foreach (var path in paths)
         {
+            var (property, index) = subject.TryGetPropertyFromPath(path, pathProvider, subjectFactory);
             if (property is not null)
             {
                 visitProperty(property, path, index);
@@ -123,165 +124,61 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Tries to get a property from the source path.
+    /// Tries to get a property from the source path. Only properties the provider includes are resolved.
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="path">The source path of the property to look up.</param>
     /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
-    /// <returns>The found subject property or null if it is not found and factory was null.</returns>
+    /// <param name="subjectFactory">
+    /// The subject factory to create missing referenced subjects within the path (optional). Missing collection and
+    /// dictionary items are not created; such a path is not found.
+    /// </param>
+    /// <returns>The found property and the key of its last segment, or nulls when not found.</returns>
     public static (RegisteredSubjectProperty? property, object? index) TryGetPropertyFromPath(
         this IInterceptorSubject subject, string path, PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
     {
-        var (_, property, index) = subject
-            .GetPropertiesFromPaths([path], pathProvider, subjectFactory, useCache: false)
-            .FirstOrDefault();
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return (null, null);
+        }
 
-        return (property, index);
+        var result = pathProvider.TryGetPropertyFromPath(registeredSubject, path, includedPropertiesOnly: true,
+            subjectFactory is null ? null : property => CreateSubject(property, subjectFactory));
+
+        return result is { } found ? (found.Property, found.Index) : (null, null);
     }
 
     /// <summary>
-    /// Tries to get multiple properties from the source paths.
+    /// Tries to get multiple properties from the source paths. Only properties the provider includes are resolved.
     /// </summary>
     /// <param name="rootSubject">The root subject.</param>
-    /// <param name="paths">The source path of the property to look up.</param>
+    /// <param name="paths">The source paths of the properties to look up.</param>
     /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
-    /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
-    /// <returns>The found subject properties with the typed key of their last segment; a malformed or unresolved path yields a null property, an empty path yields nothing.</returns>
+    /// <param name="subjectFactory">The subject factory to create missing referenced subjects within the path (optional).</param>
+    /// <returns>Each path with its property and last-segment key, or null property when not found; a path without segments yields nothing.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromPaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> paths,
         PathProviderBase pathProvider,
-        ISubjectFactory? subjectFactory = null,
-        bool useCache = true)
+        ISubjectFactory? subjectFactory = null)
     {
-        // Keyed by the path text up to the end of a segment, which always parses the same way. Looked up by span so
-        // a hit allocates no key.
-        var pathValueCache = useCache
-            ? new Dictionary<string, (RegisteredSubjectProperty property, object? key, IInterceptorSubject? subject)>()
-                .GetAlternateLookup<ReadOnlySpan<char>>()
-            : default;
-
         foreach (var path in paths)
         {
-            var reader = new PathSegmentReader(pathProvider, path);
-            if (!reader.HasNext)
+            if (path.AsSpan().IndexOfAnyExcept(pathProvider.PathSeparator) < 0)
             {
                 continue;
             }
 
-            // Segments are read while walking, so a malformed tail is only found on the way. Without a factory the
-            // walk has no side effects; with one it may create subjects, so the whole path is checked first.
-            if (subjectFactory is not null && !IsWellFormed(reader))
-            {
-                yield return (path, null, null);
-                continue;
-            }
-
-            var currentSubject = rootSubject;
-            while (true)
-            {
-                if (!reader.TryRead(out var segment))
-                {
-                    yield return (path, null, null);
-                    break;
-                }
-
-                var isLastSegment = !reader.HasNext;
-
-                RegisteredSubjectProperty? property;
-                object? key;
-                IInterceptorSubject? nextSubject;
-                if (useCache &&
-                    pathValueCache.TryGetValue(path.AsSpan(0, segment.End), out var entry) &&
-                    (isLastSegment || entry.subject is not null))
-                {
-                    property = entry.property;
-                    key = entry.key;
-                    nextSubject = isLastSegment ? null : entry.subject;
-                }
-                else
-                {
-                    var registeredSubject = currentSubject.TryGetRegisteredSubject();
-                    if (registeredSubject is null ||
-                        !pathProvider.TryResolvePathSegment(registeredSubject, segment, out property, out key, out var child) ||
-                        !pathProvider.IsPropertyIncluded(property))
-                    {
-                        yield return (path, null, null);
-                        break;
-                    }
-
-                    nextSubject = null;
-                    if (!isLastSegment)
-                    {
-                        nextSubject = key is not null
-                            ? GetItemOrThrowWhenCreating(child, subjectFactory)
-                            : TryGetReferencedSubjectOrCreate(property, subjectFactory);
-
-                        if (nextSubject is null)
-                        {
-                            yield return (path, null, null);
-                            break;
-                        }
-                    }
-
-                    if (useCache)
-                    {
-                        pathValueCache[path.AsSpan(0, segment.End)] = (property, key, nextSubject);
-                    }
-                }
-
-                if (isLastSegment)
-                {
-                    yield return (path, property, key);
-                    break;
-                }
-
-                currentSubject = nextSubject!;
-            }
+            var (property, index) = rootSubject.TryGetPropertyFromPath(path, pathProvider, subjectFactory);
+            yield return (path, property, index);
         }
     }
 
-    /// <summary>
-    /// Reads the rest of the path on a copy of <paramref name="reader"/>, so the caller's reader does not advance.
-    /// </summary>
-    private static bool IsWellFormed(PathSegmentReader reader)
+    private static IInterceptorSubject CreateSubject(RegisteredSubjectProperty property, ISubjectFactory subjectFactory)
     {
-        while (reader.TryRead(out _))
-        {
-        }
-
-        return !reader.IsMalformed;
-    }
-
-    private static IInterceptorSubject? GetItemOrThrowWhenCreating(IInterceptorSubject? child, ISubjectFactory? subjectFactory)
-    {
-        if (child is null && subjectFactory is not null)
-        {
-            // TODO: Implement collection or dictionary creation from paths (need to know all paths).
-            throw new InvalidOperationException("Missing collection items cannot be created.");
-        }
-
-        return child;
-    }
-
-    private static IInterceptorSubject? TryGetReferencedSubjectOrCreate(RegisteredSubjectProperty registeredProperty, ISubjectFactory? subjectFactory)
-    {
-        // TODO: Use registeredProperty.IsSubjectReference here instead
-        if (!registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
-        {
-            return null;
-        }
-
-        // TODO(perf): Use nextSubject = registeredProperty.GetValue() as IInterceptorSubject;
-        var nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
-        if (nextSubject is null && subjectFactory is not null)
-        {
-            nextSubject = subjectFactory.CreateSubject(registeredProperty);
-            registeredProperty.SetValue(nextSubject);
-        }
-
-        return nextSubject;
+        var subject = subjectFactory.CreateSubject(property);
+        property.SetValue(subject);
+        return subject;
     }
 }

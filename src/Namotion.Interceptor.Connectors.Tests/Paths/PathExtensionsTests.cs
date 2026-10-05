@@ -3,6 +3,7 @@ using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -688,6 +689,55 @@ public class PathExtensionsTests
         Assert.Equal(2, results.Count);
         Assert.Equal("Mother", results[0].property?.Name);
         Assert.Null(results[1].property);
+    }
+
+    private sealed class ExcludingLastNamePathProvider : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != nameof(Person.LastName);
+    }
+
+    [Fact]
+    public void WhenPropertyIsExcludedByProvider_ThenConnectorsResolverIgnoresItAndRegistryResolverFindsIt()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = new ExcludingLastNamePathProvider();
+
+        // Act
+        var (connectorsProperty, _) = person.TryGetPropertyFromPath("LastName", pathProvider);
+        var registryResult = pathProvider.TryGetPropertyFromPath(person.TryGetRegisteredSubject()!, "LastName");
+
+        // Assert
+        Assert.Null(connectorsProperty);
+        Assert.NotNull(registryResult);
+    }
+
+    [Fact]
+    public void WhenReferenceIsMissingAndFactoryIsGiven_ThenSubjectIsCreatedAndAssigned()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        person.Mother = null;
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Mother.FirstName", DefaultPathProvider.Instance, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.NotNull(person.Mother);
+        Assert.Same(person.Mother, property?.Subject);
+    }
+
+    [Fact]
+    public void WhenKeyedItemIsMissingAndFactoryIsGiven_ThenPathIsNotFound()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var (property, _) = person.TryGetPropertyFromPath("Children[99].FirstName", DefaultPathProvider.Instance, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(property);
     }
 
     private static Person CreateTestGraph()

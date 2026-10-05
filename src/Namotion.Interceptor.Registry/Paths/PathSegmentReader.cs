@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// A mutable struct: a copy reads on independently from where the original was, and a reader stored in a
 /// <see langword="readonly"/> field does not advance. A default reader has no segments.
 /// </remarks>
-public struct PathSegmentReader
+internal struct PathSegmentReader
 {
     private readonly string? _path;
     private readonly PathCharacters _characters;

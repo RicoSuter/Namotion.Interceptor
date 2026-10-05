@@ -23,7 +23,7 @@ public static class PathExtensions
 
     /// <summary>
     /// Parses a path string into segments with their index text. Empty segments are skipped. The resolvers type
-    /// index text by the container a segment addresses, see <see cref="TryResolvePathSegment"/>.
+    /// index text by the container a segment addresses, see <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/>.
     /// </summary>
     /// <exception cref="FormatException">The path is malformed.</exception>
     public static List<(string segment, string? index)> ParsePath(this PathProviderBase pathProvider, string path)
@@ -70,14 +70,39 @@ public static class PathExtensions
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
     /// <returns>
-    /// The property and the key of its last segment as <see cref="TryResolvePathSegment"/> types it, or null when
-    /// the path is malformed or not found.
+    /// The property and the key of its last segment, or null when the path is malformed or not found. The key is the
+    /// collection position, or the dictionary key typed to the dictionary's key type (for key types other than
+    /// string, integer, <see cref="Guid"/> and enum, the matching entry's key, or the text when no entry matches),
+    /// also when no entry exists at it. Null when the last segment carries no key.
     /// </returns>
     public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
         string path)
-        => pathProvider.TryResolvePath(rootSubject, path, out var property, out var index, out _)
+        => pathProvider.TryGetPropertyFromPath(rootSubject, path, includedPropertiesOnly: false, createMissingSubject: null);
+
+    /// <summary>
+    /// Tries to get a property from a path starting at the given subject, optionally resolving only properties the
+    /// provider includes and creating missing referenced subjects on the way.
+    /// </summary>
+    /// <param name="pathProvider">The path provider to use.</param>
+    /// <param name="rootSubject">The root subject to start from.</param>
+    /// <param name="path">The path to resolve.</param>
+    /// <param name="includedPropertiesOnly">Whether every segment's property must pass <see cref="PathProviderBase.IsPropertyIncluded"/>.</param>
+    /// <param name="createMissingSubject">
+    /// Called for a subject reference on the way whose value is null. It creates and assigns the subject and returns
+    /// it, or returns null to report the path as not found. Not called for missing collection or dictionary items, and
+    /// not called at all for a malformed path.
+    /// </param>
+    /// <returns>The property and the key of its last segment as in <see cref="TryGetPropertyFromPath(PathProviderBase, RegisteredSubject, string)"/>, or null.</returns>
+    public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
+        this PathProviderBase pathProvider,
+        RegisteredSubject rootSubject,
+        string path,
+        bool includedPropertiesOnly,
+        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject)
+        => TryResolvePath(pathProvider, rootSubject, path, includedPropertiesOnly, createMissingSubject, resolveLastChild: false,
+            out var property, out var index, out _)
             ? (property, index)
             : null;
 
@@ -96,7 +121,8 @@ public static class PathExtensions
         RegisteredSubject rootSubject,
         string path)
     {
-        if (!pathProvider.TryResolvePath(rootSubject, path, out var property, out var index, out var child))
+        if (!TryResolvePath(pathProvider, rootSubject, path, includedPropertiesOnly: false, createMissingSubject: null, resolveLastChild: true,
+                out var property, out var index, out var child))
         {
             return null;
         }
@@ -105,45 +131,113 @@ public static class PathExtensions
         return subject?.TryGetRegisteredSubject();
     }
 
+    private static bool TryResolvePath(
+        PathProviderBase pathProvider,
+        RegisteredSubject rootSubject,
+        string path,
+        bool includedPropertiesOnly,
+        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject,
+        bool resolveLastChild,
+        [NotNullWhen(true)] out RegisteredSubjectProperty? property,
+        out object? index,
+        out IInterceptorSubject? child)
+    {
+        property = null;
+        index = null;
+        child = null;
+
+        var reader = new PathSegmentReader(pathProvider, path);
+        if (!reader.HasNext)
+        {
+            return false;
+        }
+
+        // Without a hook the walk has no side effects, so a malformed tail is found on the way. With one, a subject
+        // could be created before the tail is read, so the whole path is checked first.
+        if (createMissingSubject is not null && !IsWellFormed(reader))
+        {
+            return false;
+        }
+
+        var currentSubject = rootSubject;
+        while (true)
+        {
+            if (!reader.TryRead(out var segment))
+            {
+                return Fail(out property, out index, out child);
+            }
+
+            var isLastSegment = !reader.HasNext;
+            if (!TryResolveSegment(pathProvider, currentSubject, segment, !isLastSegment || resolveLastChild, out property, out index, out child) ||
+                (includedPropertiesOnly && !pathProvider.IsPropertyIncluded(property)))
+            {
+                return Fail(out property, out index, out child);
+            }
+
+            if (isLastSegment)
+            {
+                return true;
+            }
+
+            IInterceptorSubject? next;
+            if (index is not null)
+            {
+                next = child;
+            }
+            else
+            {
+                next = property.GetValue() as IInterceptorSubject;
+                if (next is null && createMissingSubject is not null && property.IsSubjectReference)
+                {
+                    next = createMissingSubject(property);
+                }
+            }
+
+            var registered = next?.TryGetRegisteredSubject();
+            if (registered is null)
+            {
+                return Fail(out property, out index, out child);
+            }
+
+            currentSubject = registered;
+        }
+    }
+
+    private static bool Fail(out RegisteredSubjectProperty? property, out object? index, out IInterceptorSubject? child)
+    {
+        property = null;
+        index = null;
+        child = null;
+        return false;
+    }
+
     /// <summary>
-    /// Resolves one path segment on a subject: the property it names and, when the segment carries a key, the
-    /// typed key and the subject stored at it.
+    /// Reads the rest of the path on a copy of <paramref name="reader"/>, so the caller's reader does not advance.
     /// </summary>
-    /// <param name="pathProvider">The path provider to use.</param>
-    /// <param name="subject">The subject the segment addresses a property of.</param>
-    /// <param name="segment">The segment to resolve, as read by a <see cref="PathSegmentReader"/>.</param>
-    /// <param name="property">The property the segment names, or null when the method returns false.</param>
-    /// <param name="key">
-    /// The segment's index, or its name when the segment is an [InlinePaths] key: the collection position, or the
-    /// dictionary key typed to the dictionary's key type, also when no entry exists at it. Null when the segment
-    /// carries no key.
-    /// </param>
-    /// <param name="child">The subject stored at <paramref name="key"/>, or null.</param>
-    /// <returns>
-    /// False when the segment is default, no property matches, or the key text is not a key of the property's
-    /// container.
-    /// </returns>
-    /// <remarks>
-    /// Only string, integer, <see cref="Guid"/> and enum dictionary keys resolve. A path through a dictionary with
-    /// any other key type is not found, although <c>TryGetPath</c> writes one. Does not apply
-    /// <see cref="PathProviderBase.IsPropertyIncluded"/>; callers that expose only included properties check it
-    /// themselves.
-    /// </remarks>
-    public static bool TryResolvePathSegment(
-        this PathProviderBase pathProvider,
+    private static bool IsWellFormed(PathSegmentReader reader)
+    {
+        while (reader.TryRead(out _))
+        {
+        }
+
+        return !reader.IsMalformed;
+    }
+
+    /// <summary>
+    /// Resolves one segment on a subject: the property it names and, when the segment carries a key (an index, or an
+    /// [InlinePaths] key written as the segment itself), the typed key and, when requested, the subject stored at it.
+    /// </summary>
+    private static bool TryResolveSegment(
+        PathProviderBase pathProvider,
         RegisteredSubject subject,
         in PathSegment segment,
+        bool resolveChild,
         [NotNullWhen(true)] out RegisteredSubjectProperty? property,
         out object? key,
         out IInterceptorSubject? child)
     {
         key = null;
         child = null;
-        if (segment.Name.IsEmpty)
-        {
-            property = null;
-            return false;
-        }
 
         var name = segment.GetName();
         property = pathProvider.TryGetPropertyFromSegment(subject, name);
@@ -153,21 +247,16 @@ public static class PathExtensions
         }
 
         var isInlinePathsKey = IsInlinePathsKey(pathProvider, subject, property, name);
-        if (isInlinePathsKey && segment.HasIndex)
-        {
-            // The writer never emits a bare inline key followed by an index, so a wrong name is not accepted.
-            property = null;
-            return false;
-        }
-
         bool resolved;
         if (segment.HasIndex)
         {
-            resolved = PathIndexResolver.TryResolve(property, segment.Index, null, resolveChild: true, out key, out child);
+            // The writer never emits a bare inline key followed by an index, so a wrong name is not accepted.
+            resolved = !isInlinePathsKey &&
+                PathIndexResolver.TryResolve(property, segment.Index, null, resolveChild, out key, out child);
         }
         else if (isInlinePathsKey)
         {
-            resolved = PathIndexResolver.TryResolve(property, name, name, resolveChild: true, out key, out child);
+            resolved = PathIndexResolver.TryResolve(property, name, name, resolveChild, out key, out child);
         }
         else
         {
@@ -177,10 +266,9 @@ public static class PathExtensions
         if (!resolved)
         {
             property = null;
-            return false;
         }
 
-        return true;
+        return resolved;
     }
 
     /// <summary>
@@ -193,51 +281,6 @@ public static class PathExtensions
 
     private static string GetOwnSegment(PathProviderBase pathProvider, RegisteredSubjectProperty property)
         => pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-
-    private static bool TryResolvePath(
-        this PathProviderBase pathProvider,
-        RegisteredSubject rootSubject,
-        string path,
-        [NotNullWhen(true)] out RegisteredSubjectProperty? property,
-        out object? index,
-        out IInterceptorSubject? child)
-    {
-        index = null;
-        child = null;
-        var reader = new PathSegmentReader(pathProvider, path);
-        if (!reader.HasNext)
-        {
-            property = null;
-            return false;
-        }
-
-        // Segments are read while resolving: a malformed tail fails the walk, which has no side effects.
-        var currentSubject = rootSubject;
-        while (true)
-        {
-            if (!reader.TryRead(out var segment) ||
-                !pathProvider.TryResolvePathSegment(currentSubject, segment, out property, out index, out child))
-            {
-                property = null;
-                return false;
-            }
-
-            if (!reader.HasNext)
-            {
-                return true;
-            }
-
-            var next = index is not null ? child : property.GetValue() as IInterceptorSubject;
-            var registered = next?.TryGetRegisteredSubject();
-            if (registered is null)
-            {
-                property = null;
-                return false;
-            }
-
-            currentSubject = registered;
-        }
-    }
 
     /// <summary>
     /// Gets all properties from a collection of paths.
