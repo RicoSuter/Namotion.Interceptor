@@ -49,6 +49,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
     <Project Path="HomeBlaze/HomeBlaze/HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.AppHost/HomeBlaze.AppHost.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Abstractions/">
     <Project Path="HomeBlaze/HomeBlaze.Abstractions/HomeBlaze.Abstractions.csproj" />
