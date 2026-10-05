@@ -44,6 +44,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Samples/HomeBlaze.Samples.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.OpcUa/HomeBlaze.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.OpcUa.Blazor/HomeBlaze.OpcUa.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.ServiceDefaults/HomeBlaze.ServiceDefaults.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services/HomeBlaze.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />

@@ -29,6 +29,7 @@ using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
 
 // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
@@ -141,6 +142,7 @@ if (mcpEnabled)
     app.MapMcp("/mcp");
 }
 
+app.MapDefaultEndpoints();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

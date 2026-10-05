@@ -27,6 +27,7 @@
         <ProjectReference Include="..\HomeBlaze.History.Sqlite\HomeBlaze.History.Sqlite.csproj" />
         <ProjectReference Include="..\HomeBlaze.History.Sqlite.Blazor\HomeBlaze.History.Sqlite.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Plugins\HomeBlaze.Plugins.csproj" />
+        <ProjectReference Include="..\HomeBlaze.ServiceDefaults\HomeBlaze.ServiceDefaults.csproj" />
         <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
             <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
             <Private>false</Private>
