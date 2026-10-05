@@ -10,20 +10,17 @@ namespace HomeBlaze.Services;
 
 /// <summary>
 /// Manages loading and access to the root subject.
-/// Bootstraps the system from root.json configuration.
+/// Bootstraps the system from the root configuration file and provides the instance data directory.
 /// </summary>
-public class RootManager : BackgroundService, IConfigurationWriter
+public class RootManager : BackgroundService, IConfigurationWriter, IDataDirectoryProvider
 {
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IInterceptorSubjectContext _context;
-    private readonly IConfiguration? _configuration;
     private readonly ILogger<RootManager>? _logger;
 
     // Continuations run off the loading thread so a UI waiter cannot resume inline inside the load.
     private readonly TaskCompletionSource<IInterceptorSubject> _rootLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private string? _configurationPath;
 
     /// <summary>
     /// The root subject loaded from configuration.
@@ -35,6 +32,14 @@ public class RootManager : BackgroundService, IConfigurationWriter
     /// is a state probe rather than a gate. Wait on <see cref="RootLoaded"/> to use the graph.
     /// </summary>
     public bool IsLoaded => Root != null;
+
+    /// <summary>
+    /// Full path of the root configuration file.
+    /// </summary>
+    public string ConfigurationPath { get; }
+
+    /// <inheritdoc />
+    public string DataDirectory { get; }
 
     public RootManager(
         SubjectTypeRegistry typeRegistry,
@@ -48,11 +53,16 @@ public class RootManager : BackgroundService, IConfigurationWriter
         _typeRegistry = typeRegistry;
         _serializer = serializer;
         _context = context;
-        _configuration = configuration;
         _logger = logger;
+
+        ConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(configuration);
+        DataDirectory = Path.GetDirectoryName(ConfigurationPath)!;
 
         // Register self with context for subjects to access
         context.AddService(this);
+
+        // Storage, history and connectors resolve their relative paths against the data directory.
+        context.AddService<IDataDirectoryProvider>(this);
 
         // Subjects loaded below resolve their own canonical path (the history stores do it on every
         // recorded change), so the resolver has to be in the context before the graph exists. Taking
@@ -102,16 +112,14 @@ public class RootManager : BackgroundService, IConfigurationWriter
             return Root;
         }
 
-        var configFileName = _configuration?["HomeBlaze:RootConfigFile"] ?? "root.json";
-        _configurationPath = Path.GetFullPath(configFileName);
-        _logger?.LogInformation("Loading root configuration from: {Path}", _configurationPath);
+        _logger?.LogInformation("Loading root configuration from: {Path}", ConfigurationPath);
 
-        if (!File.Exists(_configurationPath))
+        if (!File.Exists(ConfigurationPath))
         {
-            throw new FileNotFoundException($"Root configuration file not found: {_configurationPath}", _configurationPath);
+            throw new FileNotFoundException($"Root configuration file not found: {ConfigurationPath}", ConfigurationPath);
         }
 
-        var json = await File.ReadAllTextAsync(_configurationPath, cancellationToken);
+        var json = await File.ReadAllTextAsync(ConfigurationPath, cancellationToken);
         using var startup = _context.DeferHostedServiceStarts();
         var root = _serializer.Deserialize(json);
 
@@ -137,13 +145,10 @@ public class RootManager : BackgroundService, IConfigurationWriter
         if (subject != Root)
             return false;
 
-        if (string.IsNullOrEmpty(_configurationPath))
-            throw new InvalidOperationException("Cannot save: config path is not set");
-
-        _logger?.LogInformation("Saving root configuration to: {Path}", _configurationPath);
+        _logger?.LogInformation("Saving root configuration to: {Path}", ConfigurationPath);
 
         var json = _serializer.Serialize(Root);
-        await File.WriteAllTextAsync(_configurationPath, json, cancellationToken);
+        await File.WriteAllTextAsync(ConfigurationPath, json, cancellationToken);
 
         _logger?.LogInformation("Root configuration saved successfully");
         return true;

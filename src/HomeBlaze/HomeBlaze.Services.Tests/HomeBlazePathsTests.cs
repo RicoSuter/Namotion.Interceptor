@@ -29,6 +29,19 @@ public class HomeBlazePathsTests
     }
 
     [Fact]
+    public void WhenRootConfigFileIsEmpty_ThenDefaultsToDataRootJsonInWorkingDirectory()
+    {
+        // Arrange
+        var configuration = CreateConfiguration(rootConfigFile: "   ", pluginConfigurationPath: null);
+
+        // Act
+        var path = HomeBlazePaths.GetRootConfigurationPath(configuration);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath(Path.Combine("Data", "Root.json")), path);
+    }
+
+    [Fact]
     public void WhenRootConfigFileIsAbsolute_ThenItIsUsedAsIs()
     {
         // Arrange
@@ -48,6 +61,20 @@ public class HomeBlazePathsTests
         // Arrange
         var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
         var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: null);
+
+        // Act
+        var path = HomeBlazePaths.GetPluginConfigurationPath(configuration);
+
+        // Assert
+        Assert.Equal(Path.Combine(dataDirectory, "Files", "Plugins.json"), path);
+    }
+
+    [Fact]
+    public void WhenPluginConfigurationPathIsEmpty_ThenDefaultsToFilesPluginsJsonInDataDirectory()
+    {
+        // Arrange
+        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
+        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: "   ");
 
         // Act
         var path = HomeBlazePaths.GetPluginConfigurationPath(configuration);

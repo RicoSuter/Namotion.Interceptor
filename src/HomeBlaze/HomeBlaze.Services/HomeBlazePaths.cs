@@ -27,7 +27,8 @@ public static class HomeBlazePaths
     /// </summary>
     public static string GetRootConfigurationPath(IConfiguration? configuration)
     {
-        return Path.GetFullPath(configuration?[RootConfigurationFileKey] ?? DefaultRootConfigurationFile);
+        var rootConfigFile = configuration?[RootConfigurationFileKey];
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(rootConfigFile) ? DefaultRootConfigurationFile : rootConfigFile);
     }
 
     /// <summary>
@@ -36,6 +37,7 @@ public static class HomeBlazePaths
     public static string GetPluginConfigurationPath(IConfiguration configuration)
     {
         var dataDirectory = Path.GetDirectoryName(GetRootConfigurationPath(configuration))!;
-        return Path.GetFullPath(configuration[PluginConfigurationPathKey] ?? DefaultPluginConfigurationFile, dataDirectory);
+        var pluginConfigurationPath = configuration[PluginConfigurationPathKey];
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(pluginConfigurationPath) ? DefaultPluginConfigurationFile : pluginConfigurationPath, dataDirectory);
     }
 }
