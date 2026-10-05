@@ -1,10 +1,10 @@
 ---
 title: Deployment
 navTitle: Deployment
-status: Planned
+status: Partial
 ---
 
-# Deployment Design [Planned]
+# Deployment Design
 
 ## Overview
 
@@ -49,13 +49,13 @@ Simplest deployment — run the .NET process directly. Suitable for single-insta
 
 ### Containers
 
-Each instance runs as a container. For HA pairs, a StatefulSet with 2 replicas maps naturally — pod ordinal can determine role (0 = primary, 1 = standby). Services route traffic to the active pod.
+HomeBlaze is published as a container image for amd64 and arm64, see [Installation](../../administration/installation.md#docker). Each instance runs as a container. For HA pairs (planned), a StatefulSet with 2 replicas maps naturally, and the pod ordinal can determine the role (0 = primary, 1 = standby). Services route traffic to the active pod.
 
 ### Edge Devices
 
 Satellites can run on low-power edge hardware close to field devices. The single binary and .NET's cross-platform support make this possible without special builds. Storage backend should be local filesystem for edge nodes.
 
-## Scaling the UI / API Layer
+## Scaling the UI / API Layer [Planned]
 
 When a single instance cannot handle the HTTP load from operators and AI agents, multiple UNS instances can sync bidirectionally — the same WebSocket mechanism used for satellite↔central sync. Each instance holds full state, serves UI and MCP traffic, and propagates writes to its peers. Source tagging prevents feedback loops.
 
@@ -94,9 +94,15 @@ When running behind a reverse proxy (nginx, Caddy, cloud load balancer), ensure:
 - Request timeouts are long enough for WebSocket connections (idle connections should not be terminated)
 - If TLS is terminated at the proxy, internal communication can use plain HTTP/WS
 
+## Health Endpoints and Monitoring [Implemented]
+
+HomeBlaze serves `/health` for load balancer and readiness probes and `/alive` for liveness probes, and pushes logs, metrics and traces over OTLP when an endpoint is configured. See [Monitoring](../../administration/monitoring.md).
+
+## Container Images [Implemented]
+
+Every change on master is published as `sha-<commit>`, and `edge` follows the newest master commit. Every release is published as `X.Y.Z`, and `X.Y` and `latest` follow the repository's latest release. Pre-releases only get their exact version tag. See [Installation](../../administration/installation.md#docker).
+
 ## Open Questions
 
-- Should HomeBlaze provide a health check endpoint for load balancer probes?
-- Container image publishing and versioning strategy
 - Edge device provisioning and remote configuration updates
-- Monitoring integration guidance (Prometheus scrape endpoint, OTLP push, etc.)
+- How plugin and library package versions relate to the image version, given that the host assembly version stays at 1.0.0 because plugins bind by assembly version

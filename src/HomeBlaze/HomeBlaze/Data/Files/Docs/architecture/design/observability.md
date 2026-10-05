@@ -1,20 +1,31 @@
 ---
 title: Observability
 navTitle: Observability
-status: Planned
+status: Partial
 ---
 
-# Observability Design [Planned]
+# Observability Design
 
-## Overview
+## Overview [Implemented] / [Planned]
 
 HomeBlaze provides observability through two complementary mechanisms: **OpenTelemetry** for ops teams using standard monitoring infrastructure, and **health subjects** that expose system health within the knowledge graph itself.
+
+## Current State [Implemented]
+
+The telemetry and health endpoint infrastructure exists today. See [Monitoring](../../administration/monitoring.md) for how to configure it.
+
+- Logs, metrics and traces are exported over OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+- Logs and traces are optionally sent to Seq
+- Metrics come from the standard ASP.NET Core, HTTP client and .NET runtime instrumentation, traces from ASP.NET Core and the HTTP client
+- `/health` and `/alive` report the process status for load balancers and container restart policies; they contain only a liveness check, not the health of individual subjects
+
+The HomeBlaze-specific metrics and traces, the health check interface and the health subjects below are planned.
 
 ## OpenTelemetry
 
 .NET has built-in OpenTelemetry support. HomeBlaze exports traces, metrics, and logs via standard OTLP to any compatible backend (Prometheus, Grafana, Jaeger, etc.).
 
-### Key Metrics
+### Key Metrics [Planned]
 
 | Metric | Description |
 |--------|-------------|
@@ -25,7 +36,7 @@ HomeBlaze provides observability through two complementary mechanisms: **OpenTel
 | Subject count | Knowledge graph size |
 | Change queue depth | Backpressure indicator |
 
-### Key Traces
+### Key Traces [Planned]
 
 | Trace | Description |
 |-------|-------------|
@@ -33,7 +44,7 @@ HomeBlaze provides observability through two complementary mechanisms: **OpenTel
 | Operation invocation | Including cross-instance proxy hops |
 | MCP tool call | External agent interaction |
 
-## Health Checks
+## Health Checks [Planned]
 
 Any subject can report its health by implementing a health check interface (similar to ASP.NET Core's `IHealthCheck` pattern). This provides a uniform way to surface health across connectors, agents, storage containers, plugins, and custom domain subjects.
 
@@ -72,7 +83,7 @@ The Blazor UI provides a health page that:
 
 No special aggregator subject is needed; the page queries and subscribes directly. AI agents can do the same via MCP tools (query by interface type, subscribe to events).
 
-## Health Subjects
+## Health Subjects [Planned]
 
 Each instance also exposes instance-level health as subjects in the knowledge graph: node role, property count, changes per second, uptime, last heartbeat. These are separate from per-subject health checks; they describe the health of the platform itself rather than individual subjects.
 

@@ -65,8 +65,10 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Multi-instance topology | Implemented | Satellite/central via WebSocket |
 | High availability (active-standby) | Planned | Failover with fencing |
 | Authorization | In Progress | Graph-level access control, [PR #137](https://github.com/RicoSuter/Namotion.Interceptor/pull/137) |
-| Observability (OpenTelemetry) | Planned | |
+| Observability (OpenTelemetry, health endpoints) | Implemented | OTLP export, optional Seq, `/health` and `/alive`. See [Monitoring](../administration/monitoring.md) |
+| Observability (HomeBlaze metrics and traces) | Planned | See [Observability](design/observability.md) |
 | Observability (health subjects) | Planned | |
+| Container image | Implemented | amd64 and arm64 images on GitHub Container Registry. See [Installation](../administration/installation.md#docker) |
 | Storage layer | Implemented | `IStorageContainer` + `FluentStorageContainer` (filesystem, in-memory). Shared/cloud backends planned — see [Storage](design/storage.md) |
 | Deployment (UI scaling, multi-primary) | Planned | Bidirectional WebSocket sync between peer UNS instances — see [Deployment](design/deployment.md) |
 | Scalability optimizations | Planned | Centralized path cache, registry indexing, Welcome compression — see [Scalability](design/scalability.md) |
