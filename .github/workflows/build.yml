@@ -361,7 +361,8 @@ jobs:
           docker run -d --name homeblaze -p 8080:8080 -v "$($data.FullName):/data" homeblaze:smoke
           $healthy = $false
           for ($attempt = 0; $attempt -lt 60 -and -not $healthy; $attempt++) {
-            try { $healthy = (Invoke-WebRequest -Uri http://localhost:8080/health -UseBasicParsing).StatusCode -eq 200 } catch { Start-Sleep -Seconds 2 }
+            try { $healthy = (Invoke-WebRequest -Uri http://localhost:8080/health -UseBasicParsing).StatusCode -eq 200 } catch { $healthy = $false }
+            if (-not $healthy) { Start-Sleep -Seconds 2 }
           }
           docker logs homeblaze
           if (-not $healthy) { throw "HomeBlaze did not become healthy" }
@@ -377,7 +378,12 @@ jobs:
 
   container-publish:
     timeout-minutes: 30
-    if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    # Forks cannot push to this package.
+    if: github.repository_owner == 'RicoSuter' && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/master'))
+    # Serialized so a slower older run cannot move the edge tag back.
+    concurrency:
+      group: container-publish-${{ github.ref }}
+      cancel-in-progress: false
     needs: [ container-build, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration, test-modbus-integration ]
     runs-on: ubuntu-latest
     permissions:
@@ -400,11 +406,19 @@ jobs:
 
       - name: Compute tags
         id: tags
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           if ("${{ github.event_name }}" -eq "release") {
-            $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
-            $parts = $version.Split('.')
-            $tags = "$version;$($parts[0]).$($parts[1]);latest"
+            $version = $env:RELEASE_TAG -replace '^v', ''
+            if ($env:RELEASE_PRERELEASE -eq "true") {
+              # Pre-releases must not move latest or the minor tag.
+              $tags = $version
+            } else {
+              $parts = $version.Split('.')
+              $tags = "$version;$($parts[0]).$($parts[1]);latest"
+            }
             $informationalVersion = $version
           } else {
             $short = "${{ github.sha }}".Substring(0, 7)
