@@ -137,6 +137,7 @@ namespace Namotion.Interceptor.Tracking
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInCollection(object value, int index) { }
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInDictionary(object value, object key) { }
+        public static System.Type? GetDictionaryKeyType(System.Type dictionaryType) { }
         public static bool TryGetSubjectFromKeyValuePair(object keyValuePair, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
     public static class SubjectPropertyTypeExtensions

@@ -472,6 +472,35 @@ public class SubjectLookupTests
         Assert.Equal(1, dictionary.IndexerCalls);
     }
 
+    [Theory]
+    [InlineData(typeof(Dictionary<string, Person>), typeof(string))]
+    [InlineData(typeof(IDictionary<int, Person>), typeof(int))]
+    [InlineData(typeof(IReadOnlyDictionary<Guid, Person>), typeof(Guid))]
+    [InlineData(typeof(ImmutableDictionary<long, Person>), typeof(long))]
+    [InlineData(typeof(Hashtable), null)]
+    [InlineData(typeof(List<Person>), null)]
+    public void WhenDictionaryKeyTypeIsRequested_ThenGenericKeyTypeIsReturned(Type dictionaryType, Type? expectedKeyType)
+    {
+        // Act
+        var keyType = SubjectLookup.GetDictionaryKeyType(dictionaryType);
+
+        // Assert
+        Assert.Equal(expectedKeyType, keyType);
+    }
+
+    [Fact]
+    public void WhenIndexIsOutsideEnumerable_ThenReturnsNull()
+    {
+        // Arrange
+        var items = new HashSet<Person> { new(), new() };
+
+        // Act
+        var result = SubjectLookup.FindSubjectInCollection(items, 2);
+
+        // Assert
+        Assert.Null(result);
+    }
+
     /// <summary>Throws from the object indexer the way the immutable dictionaries do, and counts entries.</summary>
     private sealed class ThrowingCountingDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary
         where TKey : notnull

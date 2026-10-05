@@ -17,14 +17,11 @@ public static class SubjectLookup
 {
     private static readonly ConcurrentDictionary<Type, Func<object, (object? key, object? value)>?> KvpAccessorCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object, object, object?>?> DictionaryLookupCache = new();
+    private static readonly ConcurrentDictionary<Type, Type?> DictionaryKeyTypeCache = new();
 
     private static readonly Func<Type, Func<object, object, object?>?> BuildDictionaryLookup = static type =>
     {
-        var interfaces = type.GetInterfaces();
-        var dictionaryInterface =
-            Array.Find(interfaces, static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>)) ??
-            Array.Find(interfaces, static i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>));
-
+        var dictionaryInterface = FindDictionaryInterface(type);
         if (dictionaryInterface is null)
             return null;
 
@@ -52,6 +49,28 @@ public static class SubjectLookup
 
         return Expression.Lambda<Func<object, object, object?>>(body, dictionaryParameter, keyParameter).Compile();
     };
+
+    /// <summary>
+    /// Gets the key type of a generic dictionary type: the first type argument of the
+    /// <see cref="IDictionary{TKey,TValue}"/> it is or implements, else of
+    /// <see cref="IReadOnlyDictionary{TKey,TValue}"/>. Null for any other type, including a non-generic
+    /// <see cref="IDictionary"/>.
+    /// </summary>
+    public static Type? GetDictionaryKeyType(Type dictionaryType)
+        => DictionaryKeyTypeCache.GetOrAdd(dictionaryType, static type => FindDictionaryInterface(type)?.GenericTypeArguments[0]);
+
+    private static Type? FindDictionaryInterface(Type type)
+    {
+        if (IsGenericDefinition(type, typeof(IDictionary<,>)) || IsGenericDefinition(type, typeof(IReadOnlyDictionary<,>)))
+            return type;
+
+        var interfaces = type.GetInterfaces();
+        return Array.Find(interfaces, static i => IsGenericDefinition(i, typeof(IDictionary<,>))) ??
+               Array.Find(interfaces, static i => IsGenericDefinition(i, typeof(IReadOnlyDictionary<,>)));
+    }
+
+    private static bool IsGenericDefinition(Type type, Type definition)
+        => type.IsGenericType && type.GetGenericTypeDefinition() == definition;
 
     /// <summary>
     /// Finds a single subject at the given <paramref name="index"/> inside
