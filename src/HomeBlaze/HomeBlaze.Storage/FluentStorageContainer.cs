@@ -35,6 +35,7 @@ public partial class FluentStorageContainer :
     private readonly ConfigurableSubjectSerializer _serializer;
 
     private StorageFileWatcher? _fileWatcher;
+    private string? _storageDirectory;
     private JsonSubjectSynchronizer? _jsonSyncHelper;
 
     /// <summary>
@@ -121,6 +122,25 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
+    /// Returns the file system path of a storage-relative path, resolving a relative
+    /// <see cref="ConnectionString"/> against the instance data directory.
+    /// </summary>
+    internal string GetFileSystemPath(string relativePath)
+    {
+        return Path.GetFullPath(Path.Combine(_storageDirectory ?? ResolveStorageDirectory(), relativePath.TrimStart('/', '\\')));
+    }
+
+    private string ResolveStorageDirectory()
+    {
+        var baseDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory
+            ?? Directory.GetCurrentDirectory();
+
+        return string.IsNullOrEmpty(ConnectionString)
+            ? baseDirectory
+            : Path.GetFullPath(ConnectionString, baseDirectory);
+    }
+
+    /// <summary>
     /// Initializes the storage client based on configuration.
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
@@ -130,12 +150,12 @@ public partial class FluentStorageContainer :
             throw new InvalidOperationException("ConnectionString is not configured");
 
         Status = StorageStatus.Initializing;
+        _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
         try
         {
             _client = StorageType switch
             {
-                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(
-                    Path.GetFullPath(ConnectionString)),
+                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(_storageDirectory!),
                 "inmemory" => StorageFactory.Blobs.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
             };
@@ -144,7 +164,7 @@ public partial class FluentStorageContainer :
 
             Status = StorageStatus.Connected;
             _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
-                isInMemory ? "(in-memory)" : ConnectionString);
+                isInMemory ? "(in-memory)" : _storageDirectory);
 
             await ScanAsync(cancellationToken);
 
@@ -225,7 +245,7 @@ public partial class FluentStorageContainer :
     private void StartFileWatching()
     {
         _fileWatcher = new StorageFileWatcher(
-            Path.GetFullPath(ConnectionString),
+            _storageDirectory!,
             ProcessFileEventAsync,
             () => ScanAsync(CancellationToken.None),
             _logger);
@@ -334,7 +354,7 @@ public partial class FluentStorageContainer :
         if (!_pathRegistry.TryGetPath(subject, out var path))
             return false;
 
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
+        var fullPath = GetFileSystemPath(path);
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         var json = _subjectFactory.Serialize(subject);
@@ -351,7 +371,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
+        var fullPath = GetFileSystemPath(path);
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         var json = _subjectFactory.Serialize(subject);
@@ -422,7 +442,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
+        var fullPath = GetFileSystemPath(path);
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await Client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
@@ -447,7 +467,7 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
+        var fullPath = GetFileSystemPath(path);
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         await Client.DeleteAsync(path, cancellationToken: cancellationToken);

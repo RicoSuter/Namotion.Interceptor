@@ -61,7 +61,7 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
         {
             if (Storage is FluentStorageContainer container)
             {
-                var fileInfo = new FileInfo(Path.Combine(container.ConnectionString, FullPath));
+                var fileInfo = new FileInfo(container.GetFileSystemPath(FullPath));
                 FileSize = fileInfo.Length;
                 LastModified = fileInfo.LastWriteTimeUtc;
             }
