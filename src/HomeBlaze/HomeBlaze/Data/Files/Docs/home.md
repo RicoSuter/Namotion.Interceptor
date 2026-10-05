@@ -34,7 +34,6 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Markdown Pages](administration/pages.md): Interactive pages with embedded subjects
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
-- [Upgrading](administration/upgrading.md): Version upgrades and migration
 
 ### Development
 

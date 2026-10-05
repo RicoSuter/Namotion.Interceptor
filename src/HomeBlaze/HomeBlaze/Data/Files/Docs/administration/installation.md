@@ -25,7 +25,7 @@ Copy [docker-compose.yml](https://github.com/RicoSuter/Namotion.Interceptor/blob
 docker compose up -d
 ```
 
-HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`, then read [Upgrading](upgrading.md).
+HomeBlaze is then available at http://localhost:8080 and opens on its welcome page. To upgrade, run `docker compose pull` and `docker compose up -d`.
 
 ### Data folder
 
