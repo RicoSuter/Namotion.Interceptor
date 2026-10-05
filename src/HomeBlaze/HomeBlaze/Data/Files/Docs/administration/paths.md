@@ -41,7 +41,7 @@ Use brackets when accessing non-inlined collection entries explicitly:
 /Devices[0]/Temperature
 ```
 
-With `[InlinePaths]` dictionaries (like folder children), keys become direct segments — no brackets needed:
+With `[InlinePaths]` dictionaries (like folder children), keys become direct segments, so no brackets are needed:
 
 ```
 /Demo/Setup.md
@@ -67,9 +67,9 @@ With `[InlinePaths]` dictionaries (like folder children), keys become direct seg
 
 When resolving paths in markdown pages:
 
-1. **Inline subjects first** — Subjects defined in the same page with `` ```subject(name) ``
-2. **Relative path** — From current subject context
-3. **Global path** — Using `/` prefix
+1. **Inline subjects first**: Subjects defined in the same page with `` ```subject(name) ``
+2. **Relative path**: From current subject context
+3. **Global path**: Using `/` prefix
 
 ---
 
@@ -82,5 +82,5 @@ When resolving paths in markdown pages:
 
 ## Related
 
-- [Subjects, Storage & Files](subjects.md) — how folders and files become paths
-- [Markdown Pages](pages.md) — using paths in live expressions and widgets
+- [Subjects, Storage & Files](subjects.md): how folders and files become paths
+- [Markdown Pages](pages.md): using paths in live expressions and widgets

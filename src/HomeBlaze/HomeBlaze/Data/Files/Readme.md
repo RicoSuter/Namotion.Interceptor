@@ -31,8 +31,8 @@ HomeBlaze uses a **digital twin** approach where files become tracked objects:
 ```
 File System                    Object Graph
 ------------                   ------------
-root.json          -->         FluentStorageContainer
-  Data/
+Root.json          -->         FluentStorageContainer
+  Files/
     motor.json     -->           Motor (BackgroundService)
     Readme.md      -->           MarkdownFile
     docs/          -->           Folder
@@ -50,17 +50,17 @@ root.json          -->         FluentStorageContainer
 
 ## Quick Start
 
-> **Try the Demo!** The `demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](Demo/Setup.md).
+> **Try the Demo!** The `Demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](Demo/Setup.md).
 
 ### Step 1: Configure Storage
 
-Edit `root.json` to point to your data folder:
+`Root.json` at the top of the data folder (`Data/Root.json` when running from source) defines where subjects are stored. The connection string is relative to the data folder:
 
 ```json
 {
     "$type": "HomeBlaze.Storage.FluentStorageContainer",
     "storageType": "disk",
-    "connectionString": "./Data"
+    "connectionString": "Files"
 }
 ```
 
@@ -174,7 +174,7 @@ HomeBlaze supports multiple storage backends via FluentStorage:
 
 ## Demo System
 
-The `demo/` folder contains a working example with 5 motors simulating a small factory. 
+The `Demo/` folder contains a working example with 5 motors simulating a small factory. 
 
 👉 **[View Demo Setup Guide](Demo/Setup.md)** for detailed exploration steps.
 
@@ -183,7 +183,7 @@ The `demo/` folder contains a working example with 5 motors simulating a small f
 1. 📂 **Explore the Demo** - Check out the [demo folder](Demo/) with live motor simulations
 2. 📖 **Read Documentation** - Browse the [docs folder](Docs/) for in-depth guides
 3. 🔧 **Edit a Motor** - Click any motor in the Browser and change its target speed
-4. 📝 **External Edits** - Try editing `demo/CoolingFan.json` externally and watch it update!
+4. 📝 **External Edits** - Try editing `Demo/CoolingFan.json` externally and watch it update!
 
 ---
 

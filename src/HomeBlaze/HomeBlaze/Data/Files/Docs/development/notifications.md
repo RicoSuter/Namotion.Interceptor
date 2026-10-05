@@ -8,7 +8,7 @@ position: 5
 
 ## Overview
 
-HomeBlaze defines a standard interface for subjects that can send notifications to users. Notification channels are subjects themselves — any subject implementing `INotificationPublisher` can deliver messages to operators.
+HomeBlaze defines a standard interface for subjects that can send notifications to users. Notification channels are subjects themselves: any subject implementing `INotificationPublisher` can deliver messages to operators.
 
 ## INotificationPublisher
 
@@ -58,4 +58,4 @@ foreach (var publisher in publishers)
 }
 ```
 
-In the planned [Alarms](../architecture/design/alarms.md) system, alarm definitions will include configurable notification routing — which channels receive which alarms, based on alarm severity and type.
+In the planned [Alarms](../architecture/design/alarms.md) system, alarm definitions will include configurable notification routing: which channels receive which alarms, based on alarm severity and type.

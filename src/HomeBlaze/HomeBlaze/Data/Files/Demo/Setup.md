@@ -44,7 +44,7 @@ These properties auto-calculate when dependencies change:
 ## File Structure
 
 ```
-Data/
+Data/Files/
   Demo/
     Conveyor.json         # 600 RPM conveyor
     ExhaustFan.json      # 1500 RPM exhaust system

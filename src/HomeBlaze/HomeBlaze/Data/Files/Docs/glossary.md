@@ -138,9 +138,9 @@ For `AppBar` items:
 
 A subject that provides blob storage access. The default implementation uses FluentStorage for local or cloud storage. See [Subjects, Storage & Files](administration/subjects.md) and [Storage Design](architecture/design/storage.md).
 
-### `root.json`
+### `Root.json`
 
-The configuration file that defines the storage location and root subject type. See [Subjects — root.json](administration/subjects.md#rootjson).
+The configuration file at the top of the data folder that defines the storage location and root subject type. See [Subjects: Root.json](administration/subjects.md#rootjson).
 
 ### File Types
 
@@ -226,7 +226,7 @@ Registry attribute metadata for `[Configuration]` properties. Auto-registered by
 
 ### RootManager
 
-Manages loading and saving the root subject tree from `root.json`. See [Storage Design](architecture/design/storage.md).
+Manages loading and saving the root subject tree from `Root.json`. See [Storage Design](architecture/design/storage.md).
 
 ### SubjectTypeRegistry
 

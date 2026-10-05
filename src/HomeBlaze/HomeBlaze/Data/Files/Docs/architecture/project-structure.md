@@ -143,7 +143,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Purpose**: Core backend services including component discovery.
 
 **Features**:
-- **Root Management**: Load/save subject tree from `root.json`
+- **Root Management**: Load/save subject tree from `Root.json` in the data folder
 - **JSON Serialization**: Polymorphic with `"type"` discriminator
 - **Type Discovery**: Find types by name or file extension
 - **Context Factory**: Create `IInterceptorSubjectContext`
@@ -246,7 +246,7 @@ See [Plugin System Design](design/plugins.md) for full architecture documentatio
 
 **Features**:
 - **PluginManager**: `[InterceptorSubject]` owning plugin configuration (`Plugins`, `Feeds`, `HostPackages`) and runtime state (`LoadedPlugins`)
-- **PluginLoader**: Core DI service wrapping `NuGetPluginLoader`, reads `Data/Plugins.json` at startup
+- **PluginLoader**: Core DI service wrapping `NuGetPluginLoader`, reads `Files/Plugins.json` in the data folder at startup
 - **Plugin**: `[InterceptorSubject]` representing each loaded plugin with `[Derived] Title` and `[Operation] RemovePlugin`
 - **Models**: `PluginEntry`, `PluginFeedEntry` DTOs in `HomeBlaze.Plugins.Models` namespace
 
@@ -292,7 +292,7 @@ services.AddHomeBlazePlugins(pluginConfigPath);
 | `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager` |
 | `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `NavigationItemResolver`, `DeveloperModeService` |
 | `AddHomeBlazeHost()` | MudBlazor services + all above |
-| `AddHomeBlazePlugins(path)` | `PluginLoader` (reads `Data/Plugins.json`, loads NuGet plugins at startup) |
+| `AddHomeBlazePlugins(path)` | `PluginLoader` (reads `Files/Plugins.json`, loads NuGet plugins at startup) |
 
 ---
 

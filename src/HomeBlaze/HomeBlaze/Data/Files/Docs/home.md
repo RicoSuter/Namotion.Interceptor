@@ -28,12 +28,12 @@ Terms and concepts used throughout HomeBlaze.
 
 Setup, deployment, and runtime configuration for operators and administrators.
 
-- [Installation](administration/installation.md) — Getting started
-- [Configuration](administration/configuration.md) — Application settings (logging, MCP server, plugins)
-- [Subjects, Storage & Files](administration/subjects.md) — Creating and editing subjects, `root.json`, file layout
+- [Installation](administration/installation.md): Docker hosting, data folder and running from source
+- [Configuration](administration/configuration.md): Application settings (data folder, logging, plugins, MCP server, telemetry)
+- [Subjects, Storage & Files](administration/subjects.md): Creating and editing subjects, `Root.json`, file layout
 - [Paths](administration/paths.md) — Path syntax for referencing subjects
 - [Markdown Pages](administration/pages.md) — Interactive pages with embedded subjects
-- [Monitoring](administration/monitoring.md) — Health checks and observability
+- [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
 - [Troubleshooting](administration/troubleshooting.md) — Diagnostics and common issues
 - [Upgrading](administration/upgrading.md) — Version upgrades and migration
 
@@ -44,6 +44,7 @@ Guides for building custom subjects, plugins, and UI components.
 - [Building Subjects](development/building-subjects.md) — Creating custom subject types
 - [Configurable Subjects](development/configurable-subject.md) — Subject serialization and persistence
 - [Notifications](development/notifications.md) — Notification channel interface
+- [Aspire](development/aspire.md): Development environment with Seq, n8n and an OPC UA simulator
 
 ### Devices
 

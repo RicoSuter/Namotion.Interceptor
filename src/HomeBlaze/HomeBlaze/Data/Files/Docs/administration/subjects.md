@@ -6,45 +6,45 @@ position: 3
 
 # Subjects, Storage & Files
 
-This guide covers managing subjects — the objects in the HomeBlaze graph — and how they map to files on disk. For the conceptual overview, see [Concepts](../concepts.md). For app-level settings like logging and the MCP server, see [Configuration](configuration.md).
+This guide covers managing subjects (the objects in the HomeBlaze graph) and how they map to files on disk. For the conceptual overview, see [Concepts](../concepts.md). For app-level settings like logging and the MCP server, see [Configuration](configuration.md).
 
 ---
 
 ## Managing Subjects
 
-Subjects can be managed in two ways — both produce the same result:
+Subjects can be managed in two ways, and both produce the same result:
 
 **Via the Blazor UI:**
-- **Create subjects** — The subject browser lets you create new subjects by selecting a type from the registry and filling in configuration properties via an auto-generated editor
-- **Edit subjects** — Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
-- **Create and edit files** — New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
-- **Manage folders** — Create, rename, and delete folders in the storage tree
+- **Create subjects**: The subject browser lets you create new subjects by selecting a type from the registry and filling in configuration properties via an auto-generated editor
+- **Edit subjects**: Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
+- **Create and edit files**: New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
+- **Manage folders**: Create, rename, and delete folders in the storage tree
 
 **Via files directly:**
-- Edit JSON and Markdown files in the `Data/` folder with any editor
+- Edit JSON and Markdown files in the `Files/` folder of the [data folder](configuration.md#data-folder) with any editor
 - Changes are picked up automatically via file system watching
 - This is useful for bulk setup, version control, or scripting
 
-Both approaches work on the same underlying files — the UI is a management layer on top of the file-based storage, not a separate system.
+Both approaches work on the same underlying files. The UI is a management layer on top of the file-based storage, not a separate system.
 
 ---
 
-## Storage & `root.json` {#rootjson}
+## Storage & `Root.json` {#rootjson}
 
-The `root.json` file in your application directory defines the storage location:
+`Root.json` at the top of the [data folder](configuration.md#data-folder) defines the storage location. It is `Data/Root.json` when running from source and `/data/Root.json` in the container.
 
 ```json
 {
     "$type": "HomeBlaze.Storage.FluentStorageContainer",
     "storageType": "disk",
-    "connectionString": "./Data"
+    "connectionString": "Files"
 }
 ```
 
 | Property | Description |
 |----------|-------------|
 | `storageType` | `disk` for local files, `inmemory` for testing |
-| `connectionString` | Path to your data folder |
+| `connectionString` | Folder with your subjects, relative to the data folder |
 
 For the design rationale (pluggable backends, recovery behavior), see [Storage Design](../architecture/design/storage.md).
 
@@ -65,7 +65,7 @@ For the design rationale (pluggable backends, recovery behavior), see [Storage D
 Folders in your data directory become the object hierarchy:
 
 ```
-Data/
+Files/
 ├── demo/
 │   ├── motor1.json      → /demo/motor1
 │   └── motor2.json      → /demo/motor2
@@ -100,7 +100,7 @@ Subjects that inherit from `BackgroundService` start automatically when loaded. 
 
 ### Example: Adding a Motor
 
-1. Create `Data/demo/my-motor.json`:
+1. Create `Files/demo/my-motor.json`:
 
 ```json
 {
@@ -132,7 +132,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 
 The widget looks up the subject at the specified path and renders its registered component.
 
-For embedding widgets inline within markdown pages, see [Markdown Pages — Embedded Subjects](pages.md#embedded-subjects).
+For embedding widgets inline within markdown pages, see [Markdown Pages: Embedded Subjects](pages.md#embedded-subjects).
 
 ---
 
@@ -152,17 +152,17 @@ The demo includes pre-configured motors in the `demo/` folder:
 
 ## Tips & Best Practices
 
-1. **Organize by function** — Group related subjects in folders
-2. **Use descriptive names** — `conveyor-motor.json` is clearer than `m1.json`
-3. **Keep paths short** — Deep nesting makes paths harder to maintain
-4. **Use inline subjects for page-specific data** — Don't pollute the global graph
-5. **Leverage live updates** — Properties update automatically, no refresh needed
+1. **Organize by function**: Group related subjects in folders
+2. **Use descriptive names**: `conveyor-motor.json` is clearer than `m1.json`
+3. **Keep paths short**: Deep nesting makes paths harder to maintain
+4. **Use inline subjects for page-specific data**: Don't pollute the global graph
+5. **Leverage live updates**: Properties update automatically, no refresh needed
 
 ---
 
 ## Related
 
-- [Paths](paths.md) — referencing subjects and properties
-- [Markdown Pages](pages.md) — building interactive pages
-- [Building Subjects](../development/building-subjects.md) — authoring subject types in C#
-- [Storage Design](../architecture/design/storage.md) — storage architecture
+- [Paths](paths.md): referencing subjects and properties
+- [Markdown Pages](pages.md): building interactive pages
+- [Building Subjects](../development/building-subjects.md): authoring subject types in C#
+- [Storage Design](../architecture/design/storage.md): storage architecture

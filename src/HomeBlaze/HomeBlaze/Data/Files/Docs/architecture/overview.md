@@ -229,7 +229,7 @@ Connectors operate at two levels. The core `Namotion.Interceptor` packages provi
 | OPC UA Client (planned) | `Namotion.Interceptor.OpcUa` client | Connects to remote OPC UA servers, auto-discovers subjects (dynamic or statically typed) |
 | Device subjects | Any core connector or custom protocol | Domain-specific devices (e.g., Philips Hue bridge, thermostat) as subjects with properties, operations, and custom UI |
 
-All core connectors use the same interceptor pattern: inbound data from external systems is applied to subject properties with source tagging (to prevent feedback loops where a change echoes back to its origin), and outbound changes flow through a change queue that batches and distributes updates. See the [connectors documentation](../../../../../../docs/connectors.md) for protocol-level details.
+All core connectors use the same interceptor pattern: inbound data from external systems is applied to subject properties with source tagging (to prevent feedback loops where a change echoes back to its origin), and outbound changes flow through a change queue that batches and distributes updates. See the [connectors documentation](../../../../../../../docs/connectors.md) for protocol-level details.
 
 ### Level 2 — Multi-Instance and High Availability
 

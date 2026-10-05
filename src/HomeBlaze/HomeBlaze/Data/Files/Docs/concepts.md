@@ -65,9 +65,9 @@ See [Building Subjects](development/building-subjects.md) for author details and
 
 ## Storage
 
-Subjects are persisted as JSON files on disk (or another blob backend). The folder structure directly mirrors the object graph: `Data/demo/motor1.json` becomes the subject at `/demo/motor1`.
+Subjects are persisted as JSON files on disk (or another blob backend). The folder structure directly mirrors the object graph: `Files/demo/motor1.json` in the data folder becomes the subject at `/demo/motor1`.
 
-The root storage container is defined in `root.json`. See [Subjects, Storage & Files](administration/subjects.md) for the admin's view and [Storage Design](architecture/design/storage.md) for the design rationale (pluggable backends, recovery model).
+The root storage container is defined in `Root.json` at the top of the data folder. See [Subjects, Storage & Files](administration/subjects.md) for the admin's view and [Storage Design](architecture/design/storage.md) for the design rationale (pluggable backends, recovery model).
 
 ---
 

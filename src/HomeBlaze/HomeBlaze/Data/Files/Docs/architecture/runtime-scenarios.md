@@ -13,7 +13,7 @@ This document describes what happens at runtime for key system flows. Each scena
 ```
 Program.cs
   -> AddHomeBlazeHost() registers all services
-  -> RootManager loads root.json
+  -> RootManager loads Root.json from the data folder
   -> FluentStorageContainer scans storage
   -> Subjects created with InterceptorSubjectContext
      -> Source generator interceptors attached

@@ -155,7 +155,7 @@ public partial class LlmAgent : LlmAgentBase
 ### Storage Layout
 
 ```
-Data/
+Files/
 ├── Providers/
 │   ├── ClaudeProvider.json
 │   └── OpenAiProvider.json

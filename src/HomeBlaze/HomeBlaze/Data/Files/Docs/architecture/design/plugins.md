@@ -32,7 +32,7 @@ Core plugins are standard NuGet `<PackageReference>` entries. Their assemblies a
 
 ### Runtime (dynamic)
 
-External plugins are resolved and loaded at startup using the standalone `Namotion.NuGet.Plugins` library. This library is general-purpose with no HomeBlaze dependency. See its [README](../../../../../Namotion.NuGet.Plugins/README.md) for full API documentation, usage examples, and configuration reference.
+External plugins are resolved and loaded at startup using the standalone `Namotion.NuGet.Plugins` library. This library is general-purpose with no HomeBlaze dependency. See its [README](../../../../../../Namotion.NuGet.Plugins/README.md) for full API documentation, usage examples, and configuration reference.
 
 The runtime loader handles:
 - Transitive dependency resolution via NuGet API
@@ -43,9 +43,9 @@ The runtime loader handles:
 
 ## HomeBlaze-Specific Architecture
 
-### Configuration (`Data/Plugins.json`)
+### Configuration (`Files/Plugins.json`)
 
-Plugin configuration lives in `Data/Plugins.json` relative to the application directory. The path can be overridden via the `PluginConfigurationPath` setting in `appsettings.json`.
+Plugin configuration lives in `Files/Plugins.json`, relative to the data folder. The path can be overridden via the `PluginConfigurationPath` setting in `appsettings.json`. Feed URLs and the cache directory inside the file stay relative to the application directory.
 
 Because `Plugins.json` is also a subject configuration file, it includes a `$type` discriminator so the subject system can deserialize it as a `PluginManager`:
 
@@ -132,8 +132,8 @@ sequenceDiagram
     participant RM as RootManager
 
     App->>DI: Build service provider<br/>(TypeProvider, SubjectTypeRegistry as singletons)
-    Note over App: Early-read Data/Plugins.json<br/>from data directory
-    App->>PLS: Load plugins from Data/Plugins.json
+    Note over App: Early-read Files/Plugins.json<br/>from the data folder
+    App->>PLS: Load plugins from Files/Plugins.json
     PLS->>PLS: NuGetPluginLoader.LoadPluginsAsync()
     PLS-->>PLS: Resolve, classify, validate, download, load
     App->>TP: TypeProvider.AddAssembly(PluginManager assembly)
@@ -142,7 +142,7 @@ sequenceDiagram
     end
     Note over TP: Subject types from plugins<br/>now discoverable
     App->>RM: Start RootManager
-    RM->>RM: Deserialize root.json and Plugins.json<br/>using SubjectTypeRegistry<br/>(includes plugin types)
+    RM->>RM: Deserialize Root.json and Plugins.json<br/>using SubjectTypeRegistry<br/>(includes plugin types)
     RM->>RM: Instantiate subjects from config<br/>(PluginManager reads results from PluginLoader)
     Note over RM: Connectors activate, state flows
 ```
@@ -151,11 +151,11 @@ The key ordering constraints:
 1. **Build DI** -- `TypeProvider`, `SubjectTypeRegistry`, and `PluginLoader` are registered as singletons
 2. **Load plugins** -- `PluginLoader` resolves, downloads, and loads plugins after `app.Build()` but before hosted services start
 3. **Register types** -- Plugin assemblies are fed to `TypeProvider` so `SubjectTypeRegistry` discovers their `[InterceptorSubject]` types
-4. **Deserialize config** -- `RootManager` deserializes `root.json` and `Plugins.json` using the now-complete type registry. `PluginManager` reads already-loaded results from `PluginLoader`
+4. **Deserialize config** -- `RootManager` deserializes `Root.json` and `Plugins.json` using the now-complete type registry. `PluginManager` reads already-loaded results from `PluginLoader`
 
 ### PluginLoader
 
-`PluginLoader` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Data/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` (which uses `DependencyContext.Default` to detect host assemblies including both NuGet packages and project references), passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
+`PluginLoader` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Files/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` (which uses `DependencyContext.Default` to detect host assemblies including both NuGet packages and project references), passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
 
 ### Sample Plugins
 
@@ -167,7 +167,7 @@ The sample plugins demonstrate the recommended headless/UI separation pattern an
 - **`MyCompany.SamplePlugin2`** -- a second headless library containing a light sensor device subject. Also implements `IMyDevice`.
 - **`MyCompany.SamplePlugin2.HomeBlaze`** -- a Razor SDK project containing Blazor UI components for the light sensor. Follows the same pattern as plugin 1.
 
-All projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listing `MyCompany.SamplePlugin1.HomeBlaze` in `Plugins.json` transitively pulls in `MyCompany.SamplePlugin1` and `MyCompany.Abstractions`. The default `Data/Plugins.json` loads both sample plugins from a local folder feed pointing to the `Plugins` directory. Because both plugins share `MyCompany.Abstractions` in the default context, type identity is preserved -- `IMyDevice` is the same type across all plugins.
+All projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listing `MyCompany.SamplePlugin1.HomeBlaze` in `Plugins.json` transitively pulls in `MyCompany.SamplePlugin1` and `MyCompany.Abstractions`. The development `Data/Files/Plugins.json` loads both sample plugins from a local folder feed pointing to the `Plugins` directory. Because both plugins share `MyCompany.Abstractions` in the default context, type identity is preserved -- `IMyDevice` is the same type across all plugins.
 
 ### Plugin Updates
 
@@ -181,7 +181,7 @@ Plugin dependencies that need to be shared across plugins (e.g., contract/abstra
 2. **`plugin.json` manifest** -- The plugin author includes a `plugin.json` file in the nupkg root with a `hostDependencies` array listing packages that should be host-shared. This is useful when the contract author has not added the attribute.
 3. **`HostPackages` configuration** -- The host author lists glob patterns in the loader options as a manual fallback.
 
-These three sources are additive -- a package is host-shared if any source declares it so. See the [Namotion.NuGet.Plugins README](../../../../../Namotion.NuGet.Plugins/README.md) for full details on each mechanism.
+These three sources are additive -- a package is host-shared if any source declares it so. See the [Namotion.NuGet.Plugins README](../../../../../../Namotion.NuGet.Plugins/README.md) for full details on each mechanism.
 
 > **Note:** UI libraries like MudBlazor are automatically detected as host dependencies when the host application references them (they appear in the host's `deps.json`). If a plugin requires an incompatible major version (e.g., MudBlazor v8 when the host uses v9), the version validation will flag this as a conflict during Phase 3.
 
@@ -193,7 +193,7 @@ These three sources are additive -- a package is host-shared if any source decla
 | Distribution | NuGet packages | Standard .NET ecosystem, versioning, feeds |
 | Loading modes | Build-time + runtime | Core compiled in, extensibility via dynamic loading |
 | Bootstrap | DI service + subject | `PluginLoader` loads before subjects; `PluginManager` reflects state after deserialization |
-| Configuration | `Data/Plugins.json` with `$type` | Subject config file co-located with other data files |
+| Configuration | `Files/Plugins.json` with `$type` | Subject config file co-located with other data files |
 | Assembly isolation | Per-plugin-group `AssemblyLoadContext` | Isolates plugins while sharing host types via default context |
 | Dependency resolution | Eager transitive with validation | Full dependency tree resolved before loading, semver validated |
 | Version conflicts | Fail-fast for host conflicts | Inconsistent default context is unsafe; plugin failures are isolated |

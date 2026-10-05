@@ -12,9 +12,9 @@ Need assistance? You're in the right place.
 
 ## Documentation
 
-- [Getting Started](docs/Installation.md)
-- [Building Subjects](docs/BuildingSubjects.md)
-- [Architecture Overview](docs/Architecture.md)
+- [Getting Started](Docs/administration/installation.md)
+- [Building Subjects](Docs/development/building-subjects.md)
+- [Architecture Overview](Docs/architecture/overview.md)
 
 ## Support
 

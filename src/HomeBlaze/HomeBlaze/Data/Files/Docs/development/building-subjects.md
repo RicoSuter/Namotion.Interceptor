@@ -75,7 +75,7 @@ Secret configuration properties:
 - Are **persisted** to JSON like regular configuration
 - Are **hidden** in the browser property panel
 - Show as **masked password fields** in the edit dialog (empty by default, only overwritten when the user enters a new value)
-- **Cannot** be combined with `[State]` — the app will throw at startup to prevent accidental exposure
+- **Cannot** be combined with `[State]`: the app throws at startup to prevent accidental exposure
 
 ## State Properties
 
@@ -169,7 +169,7 @@ public interface IPowerSensor
     decimal? Power { get; }
 }
 
-// Class adds Position — Unit is inherited from the interface
+// Class adds Position; Unit is inherited from the interface
 [InterceptorSubject]
 public partial class MyDevice : IPowerSensor
 {
@@ -237,7 +237,7 @@ When a subject owns child subjects (e.g., a bridge owns lights), the collection 
 ```csharp
 [State]
 public partial Dictionary<string, HueLightbulb> Lights { get; set; }
-// Path: /Devices/Hue/Lights[a1b2c3d4-...] — stable across restarts
+// Path: /Devices/Hue/Lights[a1b2c3d4-...], stable across restarts
 ```
 
 **Use arrays when the index itself is the stable identity:**
@@ -245,7 +245,7 @@ public partial Dictionary<string, HueLightbulb> Lights { get; set; }
 ```csharp
 [State]
 public partial GpioPin[] Pins { get; set; }
-// Path: /Devices/Gpio/Pins[0] — pin 0 is always pin 0
+// Path: /Devices/Gpio/Pins[0], pin 0 is always pin 0
 ```
 
 **Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID). If the index has inherent meaning (hardware pin numbers, fixed slots), arrays are fine.
@@ -705,7 +705,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 
 ## Abstraction Libraries
 
-HomeBlaze provides several abstraction packages with standard interfaces that subjects can implement. These enable interoperability between plugins — for example, a dashboard can display any subject implementing `ITemperatureSensor`, regardless of which plugin provides it.
+HomeBlaze provides several abstraction packages with standard interfaces that subjects can implement. These enable interoperability between plugins. For example, a dashboard can display any subject implementing `ITemperatureSensor`, regardless of which plugin provides it.
 
 ### HomeBlaze.Abstractions
 

@@ -18,5 +18,5 @@ Configure your HomeBlaze installation here.
 
 ## Storage Settings
 
-- **Data Path**: `./Data`
+- **Data Path**: `Files`
 - **Auto-save**: Every 30 seconds
