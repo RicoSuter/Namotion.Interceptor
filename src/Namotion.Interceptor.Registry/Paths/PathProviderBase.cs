@@ -8,10 +8,9 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// </summary>
 public abstract class PathProviderBase : IPathProvider
 {
-    private bool _charactersValidated;
-
     /// <summary>
-    /// Gets the character used to separate path segments.
+    /// Gets the character used to separate path segments. The separator and the two index characters must be three
+    /// different characters; paths are ambiguous otherwise.
     /// </summary>
     public virtual char PathSeparator => '.';
 
@@ -25,20 +24,7 @@ public abstract class PathProviderBase : IPathProvider
     /// </summary>
     public virtual char IndexClose => ']';
 
-    /// <summary>
-    /// Gets the separator and index characters, throwing when they are not distinct. Checked at first use rather
-    /// than in the constructor because derived constructors may assign them after this one runs.
-    /// </summary>
-    internal PathCharacters GetCharacters()
-    {
-        if (!_charactersValidated)
-        {
-            PathSyntax.ValidateCharacters(this);
-            _charactersValidated = true;
-        }
-
-        return new PathCharacters(PathSeparator, IndexOpen, IndexClose);
-    }
+    internal PathCharacters GetCharacters() => new(PathSeparator, IndexOpen, IndexClose);
 
     /// <inheritdoc />
     public virtual bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;

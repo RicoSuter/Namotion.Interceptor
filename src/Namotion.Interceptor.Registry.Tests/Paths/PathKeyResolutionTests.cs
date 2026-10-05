@@ -151,27 +151,26 @@ public class PathKeyResolutionTests
     }
 
     [Fact]
-    public void WhenDictionaryHasObjectKeys_ThenKeysResolveByTheirText()
+    public void WhenDictionaryKeyTypeIsUnsupported_ThenPathIsWrittenButNotResolved()
     {
         // Arrange
         var context = CreateContext();
-        var numbered = new TestItem(context) { Value = "numbered" };
-        var named = new TestItem(context) { Value = "named" };
-        var container = new TestKeyedContainer(context);
-        container.ByAnything[42] = numbered;
-        container.ByAnything["x"] = named;
+        var item = new TestItem(context) { Value = "v" };
+        var container = new TestKeyedContainer(context)
+        {
+            ByAnything = new Dictionary<object, TestItem> { [42] = item }
+        };
+        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
 
         // Act
-        var numberedSubject = ResolveSubject(container, "ByAnything[42]");
-        var numberedProperty = ResolveProperty(container, "ByAnything[42]");
-        var namedSubject = ResolveSubject(container, "ByAnything[x]");
-        var absentProperty = ResolveProperty(container, "ByAnything[y]");
+        var path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
+        var subject = ResolveSubject(container, "ByAnything[42]");
+        var property = ResolveProperty(container, path!);
 
         // Assert
-        Assert.Same(numbered, numberedSubject);
-        Assert.Equal((object)42, numberedProperty?.Index);
-        Assert.Same(named, namedSubject);
-        Assert.Equal((object)"y", absentProperty?.Index);
+        Assert.Equal("ByAnything[42].Value", path);
+        Assert.Null(subject);
+        Assert.Null(property);
     }
 
     [Fact]

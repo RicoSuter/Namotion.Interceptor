@@ -149,7 +149,6 @@ public static class PathExtensions
     /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
     /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
     /// <returns>The found subject properties with the typed key of their last segment; a malformed or unresolved path yields a null property, an empty path yields nothing.</returns>
-    /// <exception cref="InvalidOperationException">The provider's separator and index characters are not distinct.</exception>
     public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromPaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> paths,
@@ -157,8 +156,8 @@ public static class PathExtensions
         ISubjectFactory? subjectFactory = null,
         bool useCache = true)
     {
-        // Keyed by the path text up to the end of a segment: the same text always parses the same way, so the key
-        // needs no escaping. Looked up by span so a hit allocates no key.
+        // Keyed by the path text up to the end of a segment, which always parses the same way. Looked up by span so
+        // a hit allocates no key.
         var pathValueCache = useCache
             ? new Dictionary<string, (RegisteredSubjectProperty property, object? key, IInterceptorSubject? subject)>()
                 .GetAlternateLookup<ReadOnlySpan<char>>()
@@ -207,7 +206,7 @@ public static class PathExtensions
                 {
                     var registeredSubject = currentSubject.TryGetRegisteredSubject();
                     if (registeredSubject is null ||
-                        !pathProvider.TryResolveSegment(registeredSubject, path, characters, segment, out property, out key, out var child) ||
+                        !pathProvider.TryResolveSegment(registeredSubject, path, segment, out property, out key, out var child) ||
                         !pathProvider.IsPropertyIncluded(property))
                     {
                         yield return (path, null, null);

@@ -46,7 +46,7 @@ public static class SubjectRegistryJsonExtensions
                 }
 
                 var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
-                // Not a registry path, so no bracket escaping; the index is formatted invariantly like path keys.
+                // The index is formatted invariantly like path keys.
                 path = propertyName +
                     (parent.Index is not null ? $"[{PathExtensions.FormatPathIndex(parent.Index)}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);
@@ -80,7 +80,7 @@ public static class SubjectRegistryJsonExtensions
                 }
 
                 var propertyName = GetJsonPropertyName(parent.Property.Subject, parent.Property.Metadata, jsonSerializerOptions);
-                // Not a registry path, so no bracket escaping; the index is formatted invariantly like path keys.
+                // The index is formatted invariantly like path keys.
                 path = propertyName +
                     (parent.Index is not null ? $"[{PathExtensions.FormatPathIndex(parent.Index)}]" : string.Empty) +
                     (path is not null ? $".{path}" : string.Empty);

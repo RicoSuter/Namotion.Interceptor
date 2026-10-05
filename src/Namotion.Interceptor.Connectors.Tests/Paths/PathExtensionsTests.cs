@@ -568,12 +568,12 @@ public class PathExtensionsTests
         var person = CreateTestGraph();
         var plain = new Person { FirstName = "Plain" };
         var embedded = new Person { FirstName = "Embedded" };
-        person.Relationships = new Dictionary<string, Person> { ["x"] = plain, ["x].FirstName[y"] = embedded };
+        person.Relationships = new Dictionary<string, Person> { ["x"] = plain, ["x.FirstName[y"] = embedded };
 
         // Act
         var results = person
             .GetPropertiesFromPaths(
-                ["Relationships[x].FirstName[y]", "Relationships[x]].FirstName[y].FirstName"],
+                ["Relationships[x].FirstName[y]", "Relationships[x.FirstName[y].FirstName"],
                 DefaultPathProvider.Instance)
             .ToList();
 
@@ -581,27 +581,6 @@ public class PathExtensionsTests
         Assert.Equal(2, results.Count);
         Assert.Same(embedded, results[1].property?.Subject);
         Assert.Equal("FirstName", results[1].property?.Name);
-    }
-
-    [Fact]
-    public void WhenCachedPrefixEndsInEscapedBracket_ThenLaterPathResolvesThroughIt()
-    {
-        // Arrange
-        var person = CreateTestGraph();
-        var target = new Person { FirstName = "Target" };
-        person.Relationships = new Dictionary<string, Person> { ["a]b"] = target };
-
-        // Act
-        var results = person
-            .GetPropertiesFromPaths(["Relationships[a]]b]", "Relationships[a]]b].FirstName"], DefaultPathProvider.Instance)
-            .ToList();
-
-        // Assert
-        Assert.Equal(2, results.Count);
-        Assert.Equal("Relationships", results[0].property?.Name);
-        Assert.Equal("a]b", results[0].index);
-        Assert.Equal("FirstName", results[1].property?.Name);
-        Assert.Same(target, results[1].property?.Subject);
     }
 
     [Theory]

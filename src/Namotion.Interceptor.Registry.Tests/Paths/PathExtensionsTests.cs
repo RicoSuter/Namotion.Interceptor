@@ -874,8 +874,6 @@ public class PathExtensionsTests
     [Theory]
     [InlineData("jazz108.5Fm", "Items[jazz108.5Fm].Value")]
     [InlineData("192.168.0.1", "Items[192.168.0.1].Value")]
-    [InlineData("a]b", "Items[a]]b].Value")]
-    [InlineData("]", "Items[]]].Value")]
     [InlineData("a[b", "Items[a[b].Value")]
     [InlineData(@"C:\temp", @"Items[C:\temp].Value")]
     public void WhenDictionaryKeyContainsSpecialCharacters_ThenTryGetPathRoundTrips(string key, string expectedPath)
@@ -910,6 +908,28 @@ public class PathExtensionsTests
         {
             Name = "Root",
             Items = new Dictionary<string, TestItem> { [""] = item }
+        };
+        var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
+
+        // Act
+        var path = valueProperty.TryGetPath(DefaultPathProvider.Instance, container);
+
+        // Assert
+        Assert.Null(path);
+    }
+
+    [Theory]
+    [InlineData("a]b")]
+    [InlineData("]")]
+    public void WhenDictionaryKeyContainsClosingBracket_ThenTryGetPathReturnsNull(string key)
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "hello" };
+        var container = new TestContainer(context)
+        {
+            Name = "Root",
+            Items = new Dictionary<string, TestItem> { [key] = item }
         };
         var valueProperty = item.TryGetRegisteredSubject()!.TryGetProperty("Value")!;
 
@@ -988,22 +1008,6 @@ public class PathExtensionsTests
         // Assert
         Assert.Null(property);
         Assert.Null(subject);
-    }
-
-    [Theory]
-    [InlineData('[', '[', ']')]
-    [InlineData(']', '[', ']')]
-    [InlineData('.', '[', '[')]
-    public void WhenProviderCharactersCollide_ThenTryGetPathThrows(char separator, char indexOpen, char indexClose)
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var container = new TestContainer(context) { Name = "Root" };
-        var property = container.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
-        var pathProvider = new CollidingPathProvider(separator, indexOpen, indexClose);
-
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => property.TryGetPath(pathProvider, null));
     }
 }
 

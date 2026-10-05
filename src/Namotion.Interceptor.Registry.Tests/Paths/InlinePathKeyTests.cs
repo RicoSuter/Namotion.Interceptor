@@ -15,7 +15,7 @@ public class InlinePathKeyTests
     [InlineData("Name", "Children[Name].Name")]
     [InlineData("Children", "Children[Children].Name")]
     [InlineData("a]b", "a]b.Name")]
-    [InlineData("a]]b", "a]]b.Name")]
+    [InlineData("notes]v2", "notes]v2.Name")]
     [InlineData("a[b", "Children[a[b].Name")]
     public void WhenInlineKeyIsWritten_ThenPathRoundTrips(string key, string expectedPath)
     {
@@ -37,6 +37,28 @@ public class InlinePathKeyTests
         Assert.Equal(expectedPath, path);
         Assert.Same(child, result?.Property.Subject);
         Assert.Equal("Name", result?.Property.Name);
+    }
+
+    [Theory]
+    [InlineData("Report [2024].md")]
+    [InlineData("a.b]")]
+    public void WhenInlineKeyNeedsExplicitFormAndContainsClosingBracket_ThenTryGetPathReturnsNull(string key)
+    {
+        // Arrange
+        var context = CreateContext();
+        var child = new TestInlineContainer(context) { Name = "Child" };
+        var root = new TestInlineContainer(context)
+        {
+            Name = "Root",
+            Children = new Dictionary<string, TestInlineContainer> { [key] = child }
+        };
+        var nameProperty = child.TryGetRegisteredSubject()!.TryGetProperty("Name")!;
+
+        // Act
+        var path = nameProperty.TryGetPath(DefaultPathProvider.Instance, root);
+
+        // Assert
+        Assert.Null(path);
     }
 
     [Fact]

@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
@@ -10,14 +9,14 @@ namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
 /// Types index text by the container it addresses: a collection reads a position, a dictionary reads a key of
-/// its own key type. Integer, Guid and enum keys only accept the text the writer emits. Other key types are
-/// matched by their invariant text, and an absent key of such a type is returned as the text.
+/// its own key type. Integer, Guid and enum keys only accept the text the writer emits. A dictionary with any
+/// other key type does not resolve.
 /// </summary>
 internal static class PathIndexResolver
 {
     private enum KeyKind
     {
-        Unknown,
+        Unsupported,
         String,
         SByte,
         Byte,
@@ -37,8 +36,8 @@ internal static class PathIndexResolver
     /// Types <paramref name="text"/> by the container <paramref name="property"/> holds.
     /// </summary>
     /// <param name="property">The collection or dictionary property.</param>
-    /// <param name="text">The key text, unescaped.</param>
-    /// <param name="textString"><paramref name="text"/> when it already is a string, so a string key reuses it; otherwise null.</param>
+    /// <param name="text">The index text.</param>
+    /// <param name="textString"><paramref name="text"/> when the caller already holds it as a string, so a string key reuses it; otherwise null.</param>
     /// <param name="key">The typed key.</param>
     /// <param name="child">The subject stored at the key, or null.</param>
     public static bool TryResolve(
@@ -68,23 +67,6 @@ internal static class PathIndexResolver
         {
             var dictionary = property.GetValue();
             var (kind, keyType) = GetKeyKind(dictionary?.GetType() ?? property.Type);
-
-            if (kind == KeyKind.Unknown)
-            {
-                var keyText = textString ?? text.ToString();
-                key = keyText;
-                if (dictionary is not null)
-                {
-                    child = FindByKeyText(dictionary, keyText, out var matchedKey);
-                    if (matchedKey is not null)
-                    {
-                        key = matchedKey;
-                    }
-                }
-
-                return true;
-            }
-
             key = ParseKey(kind, keyType, text, textString);
             if (key is null)
             {
@@ -124,6 +106,7 @@ internal static class PathIndexResolver
         KeyKind.UInt64 => ParseInteger<ulong>(text),
         KeyKind.Guid => ParseGuid(text),
         KeyKind.Enum => ParseEnum(keyType!, text),
+        KeyKind.Unsupported => null,
         _ => null
     };
 
@@ -162,45 +145,13 @@ internal static class PathIndexResolver
             : value.ToString(null, CultureInfo.InvariantCulture).AsSpan().SequenceEqual(text);
     }
 
-    private static IInterceptorSubject? FindByKeyText(object dictionary, string text, out object? matchedKey)
-    {
-        if (dictionary is IDictionary entries)
-        {
-            foreach (DictionaryEntry entry in entries)
-            {
-                if (entry.Value is IInterceptorSubject subject && PathSyntax.FormatIndex(entry.Key) == text)
-                {
-                    matchedKey = entry.Key;
-                    return subject;
-                }
-            }
-        }
-        else if (dictionary is IEnumerable pairs)
-        {
-            foreach (var pair in pairs)
-            {
-                if (pair is not null &&
-                    SubjectLookup.TryGetSubjectFromKeyValuePair(pair, out var pairKey, out var subject) &&
-                    pairKey is not null &&
-                    PathSyntax.FormatIndex(pairKey) == text)
-                {
-                    matchedKey = pairKey;
-                    return subject;
-                }
-            }
-        }
-
-        matchedKey = null;
-        return null;
-    }
-
     private static (KeyKind Kind, Type? KeyType) GetKeyKind(Type dictionaryType)
         => KeyKinds.GetOrAdd(dictionaryType, static type =>
         {
             var keyType = FindKeyType(type);
             if (keyType is null)
             {
-                return (KeyKind.Unknown, null);
+                return (KeyKind.Unsupported, null);
             }
 
             if (keyType.IsEnum)
@@ -219,7 +170,7 @@ internal static class PathIndexResolver
                 TypeCode.UInt32 => KeyKind.UInt32,
                 TypeCode.Int64 => KeyKind.Int64,
                 TypeCode.UInt64 => KeyKind.UInt64,
-                _ => keyType == typeof(Guid) ? KeyKind.Guid : KeyKind.Unknown
+                _ => keyType == typeof(Guid) ? KeyKind.Guid : KeyKind.Unsupported
             };
 
             return (kind, keyType);
