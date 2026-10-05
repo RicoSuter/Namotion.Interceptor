@@ -330,7 +330,6 @@ public partial class Machine
 
 With `[InlinePaths]`:
 - Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
-- Direct properties take precedence over child keys for a bare segment. A key named like a property is still reachable as an index on the dictionary, such as `Line.Machines[Name].Status`; `TryGetPath` writes it that way.
 - Only one property per class may be marked with `[InlinePaths]`; multiple properties throws `InvalidOperationException`
 - Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
 - Built into `PathProviderBase.TryGetPropertyFromSegment`
@@ -342,22 +341,36 @@ A path is a sequence of segments joined by the provider's `PathSeparator` (defau
 ```text
 Machines[CNC01].Status
 Devices[192.168.0.1].Status
+Sensors['Kitchen [north]'].Temperature
 ```
 
-- An index is the text up to the first `]`, and every character before it is literal, including the separator and `[`. A key containing `]` therefore has no index form: `TryGetPath` returns null for it.
-- Keys are written with the invariant culture, so a `double` key `1.5` is `[1.5]` on every machine.
-- A key with empty text has no path: `TryGetPath` returns null for it.
+#### Grammar
+
+- Inside an index the separator and `[` are literal, so `Devices[192.168.0.1]` is one key.
+- An index that starts with `'` is a quoted key and runs to the next lone `'`; a doubled `''` inside stands for one `'`. `['']` is the empty key. Any key may be quoted, and quoting does not change its type: `[5]` and `['5']` address the same entry.
+- An unquoted index runs to the first `]` and must not be empty.
+- Outside an index `]` and `'` are ordinary name characters, so a segment such as `notes]v2` is read as written.
 - Empty segments are skipped, so with a `/` separator `/a/b`, `a//b` and `a/b/` all read as `a/b`.
-- A malformed path makes `ParsePath` throw `FormatException`: an unclosed `[`, an empty index `[]`, a segment without a name, or anything after an index other than the separator. `TryParsePath` returns the reason and position instead, and the resolvers report a malformed path as not found.
-- Outside an index `]` is an ordinary character, so a segment name such as `notes]v2` is read as written.
-- `PathSeparator`, `IndexOpen` and `IndexClose` must be three different characters; paths are ambiguous otherwise.
+- A malformed path makes `ParsePath` throw `FormatException`: a segment without a name, an unclosed `[` or quote, an empty `[]`, anything but `]` after a closing quote, or anything but the separator after an index. `TryParsePath` returns the reason and position instead, and the resolvers report a malformed path as not found.
+- `PathSeparator`, `IndexOpen` and `IndexClose` must be three different characters, none of them `'`.
 - Segments from `[Path]` attributes or `TryGetPropertySegment` are written as is. A separator inside one nests the path (`[Path("mqtt", "metrics/Humidity")]`), and they must not contain `[`.
-- The container decides how an index is read. A collection takes canonical invariant digits (`[1]`, not `[01]` or `[+1]`). A dictionary reads the text as its own key type: string keys as written, so `[5]` addresses the string key `"5"`; integer, `Guid` and enum keys only in the form `TryGetPath` writes (`[-3]`, `[0f8fad5b-d9cb-469f-a165-70867728950e]`, `[Blue]`, `[Read, Write]`).
-- Only string, integer, `Guid` and enum dictionary keys resolve from a path. `TryGetPath` still writes a key of any other type, such as `object`, `double` or `DateTime`, with its invariant text, but that path is not found when read.
-- `TryGetPropertyFromPath` returns the typed key of the last segment, also when no entry exists at it yet.
-- An `[InlinePaths]` key is written as a bare segment only when it reads back as that key: it contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`, and a key that needs this form and contains `]` has no path. The inline property's own segment (`Line.Machines`) addresses the property itself. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
-- Browse output and `FormatPathIndex` give a key's text, which is what `TryGetPath` writes inside an index when the key has a path.
 
-### Reading paths yourself
+#### Writing keys
 
-`PathSegmentReader` reads a path segment by segment without allocating: `TryRead` returns each segment as a `PathSegment` with its name and optional index as spans, and `IsMalformed` and `Error` report a malformed path instead of throwing. `TryResolvePathSegment` resolves one such segment on a subject to the property it names and, when the segment carries a key, the typed key and the subject stored at it; it does not apply `IsPropertyIncluded`, so callers that expose only included properties check it themselves.
+- `TryGetPath` writes a key's invariant text (`FormatPathIndex`), so a `double` key `1.5` is `[1.5]` on every machine.
+- A key is quoted when its text is empty, starts with `'` or contains `]`: `Sensors['Kitchen [north]']`, `Sensors['''quoted']`, `Sensors['']`. Every other key is written as is.
+- Every path `TryGetPath` writes resolves back to the same entry.
+
+#### Reading keys
+
+- A collection reads a position in canonical form: `[1]`, not `[01]` or `[+1]`. A position outside the collection resolves to no subject; `TryGetPropertyFromPath` still returns it as the key of the last segment (see below).
+- A dictionary with string, integer, `Guid` or enum keys reads the text as its key type and accepts only the form `TryGetPath` writes: string keys as written (`[5]` addresses the string key `"5"`), integers like `[-3]`, Guids in lower case `D` form, enum names like `[Blue]` or `[Read, Write]`.
+- A dictionary with any other key type, such as `object`, `double` or `DateTime`, matches the text against the written text of its entries. This reads the registered entries, so the dictionary has to be assigned rather than mutated in place, and the lookup is linear in the number of entries.
+- An index on a property that is neither a collection nor a dictionary is not found.
+- `TryGetPropertyFromPath` returns the key of the last segment, typed as above, also when no entry exists at it yet.
+
+`[InlinePaths]` keys follow the same rules. A key is written as a bare segment only when it reads back as that key: it is not empty, contains neither the separator nor `[`, differs from the inline property's own segment, and does not name another property. Otherwise it is written as an index on the inline property, such as `Line.Machines[192.168.0.1].Status` or `Line.Machines[Name].Status`. The inline property's own segment (`Line.Machines`) addresses the property itself. Whether a key is written bare is decided when the path is written, so adding a property later that is named like a key changes how that bare path reads.
+
+#### Resolving with options
+
+`TryGetPropertyFromPath(rootSubject, path, includedPropertiesOnly, createMissingSubject)` resolves only properties that pass `IsPropertyIncluded` when `includedPropertiesOnly` is true, and calls `createMissingSubject` for a subject reference on the way whose value is null. Missing collection and dictionary items are never created, and a malformed path never calls the hook. The connector path extensions are built on it.

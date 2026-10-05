@@ -85,7 +85,7 @@ Items[myKey]                     (dictionary key)
 Folder/SubFolder/Device/Status   (property path)
 ```
 
-Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are written and read, including keys that need the bracket form. An index ends at the first `]`, so a key containing `]` has no path, and only string, integer, `Guid` and enum dictionary keys resolve. A malformed path is answered with `Invalid path syntax` and the reason, rather than `Path not found`.
+Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are written and read, including keys that need the bracket form. A malformed path is answered with `Invalid path syntax: <reason>` rather than `Path not found`.
 
 ### `browse`
 
