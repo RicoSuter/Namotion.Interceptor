@@ -58,11 +58,9 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         ConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(configuration);
         DataDirectory = Path.GetDirectoryName(ConfigurationPath)!;
 
-        // Register self with context for subjects to access
+        // Register self with context for subjects to access, which also serves IDataDirectoryProvider
+        // lookups: storage, history and connectors resolve their relative paths against it.
         context.AddService(this);
-
-        // Storage, history and connectors resolve their relative paths against the data directory.
-        context.AddService<IDataDirectoryProvider>(this);
 
         // Subjects loaded below resolve their own canonical path (the history stores do it on every
         // recorded change), so the resolver has to be in the context before the graph exists. Taking
