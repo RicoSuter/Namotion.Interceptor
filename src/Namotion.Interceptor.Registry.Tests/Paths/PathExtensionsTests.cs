@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Registry.Tests.Paths;
@@ -868,6 +870,54 @@ public class PathExtensionsTests
         // Assert
         Assert.Null(property);
         Assert.Null(subject);
+    }
+
+    // --- Resolver options ---
+
+    private sealed class ExcludingPathProvider(string excludedPropertyName) : PathProviderBase
+    {
+        public override bool IsPropertyIncluded(RegisteredSubjectProperty property) => property.Name != excludedPropertyName;
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void WhenIntermediateSegmentIsExcluded_ThenOnlyResolvesWithoutIncludedPropertiesOnly(bool includedPropertiesOnly, bool expectedResolved)
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context) { Father = new Person(context) { FirstName = "Dad" } };
+        var pathProvider = new ExcludingPathProvider(nameof(Person.Father));
+
+        // Act
+        var result = pathProvider.TryGetPropertyFromPath(
+            person.TryGetRegisteredSubject()!, "Father.FirstName", includedPropertiesOnly, createMissingSubject: null);
+
+        // Assert
+        Assert.Equal(expectedResolved, result is not null);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenReferenceOnTheWayIsNull_ThenHookDecidesWhetherPathResolves(bool createsSubject)
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+
+        // Act
+        var result = DefaultPathProvider.Instance.TryGetPropertyFromPath(
+            person.TryGetRegisteredSubject()!, "Father.FirstName", includedPropertiesOnly: false,
+            createMissingSubject: _ => createsSubject ? person.Father = new Person(context) : null);
+
+        // Assert
+        Assert.Equal(createsSubject, result is not null);
+        Assert.Equal(createsSubject, person.Father is not null);
+        if (createsSubject)
+        {
+            Assert.Same(person.Father, result!.Value.Property.Subject);
+        }
     }
 }
 

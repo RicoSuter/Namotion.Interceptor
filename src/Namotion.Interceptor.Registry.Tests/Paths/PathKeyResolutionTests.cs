@@ -46,6 +46,9 @@ public class PathKeyResolutionTests
     [InlineData("ByNumber[03]", false)]
     [InlineData("ByNumber[ 3]", false)]
     [InlineData("ByNumber[abc]", false)]
+    [InlineData("ByNumber[0]", true)]
+    [InlineData("ByNumber[-0]", false)]
+    [InlineData("ByNumber[-03]", false)]
     [InlineData("ByColor[Blue]", true)]
     [InlineData("ByColor[4]", false)]
     [InlineData("ByColor[blue]", false)]
@@ -58,7 +61,7 @@ public class PathKeyResolutionTests
         var context = CreateContext();
         var container = new TestKeyedContainer(context)
         {
-            ByNumber = new Dictionary<int, TestItem> { [42] = new(context), [-3] = new(context), [3] = new(context) },
+            ByNumber = new Dictionary<int, TestItem> { [42] = new(context), [-3] = new(context), [3] = new(context), [0] = new(context) },
             ByColor = new Dictionary<TestColor, TestItem> { [TestColor.Blue] = new(context) },
             ById = new Dictionary<Guid, TestItem> { [KnownGuid] = new(context) }
         };
@@ -106,7 +109,7 @@ public class PathKeyResolutionTests
         // Arrange
         var context = CreateContext();
         var item = new TestItem(context) { Value = "v" };
-        _ = new TestKeyedContainer(context)
+        var container = new TestKeyedContainer(context)
         {
             ByPermissions = new Dictionary<TestPermissions, TestItem> { [TestPermissions.Read | TestPermissions.Write] = item }
         };
@@ -116,6 +119,48 @@ public class PathKeyResolutionTests
 
         // Assert
         Assert.Equal("ByPermissions[Read, Write].Value", path);
+        Assert.Same(item, ResolveProperty(container, path!)?.Property.Subject);
+    }
+
+    [Fact]
+    public void WhenGuidAndEnumKeysAreWritten_ThenPathsResolveBackToTheSameItems()
+    {
+        // Arrange
+        var context = CreateContext();
+        var byId = new TestItem(context) { Value = "id" };
+        var byColor = new TestItem(context) { Value = "color" };
+        var container = new TestKeyedContainer(context)
+        {
+            ById = new Dictionary<Guid, TestItem> { [KnownGuid] = byId },
+            ByColor = new Dictionary<TestColor, TestItem> { [TestColor.Green] = byColor }
+        };
+
+        // Act
+        var idPath = GetValuePath(byId)!;
+        var colorPath = GetValuePath(byColor)!;
+
+        // Assert
+        Assert.Equal("ById[0f8fad5b-d9cb-469f-a165-70867728950e].Value", idPath);
+        Assert.Equal("ByColor[Green].Value", colorPath);
+        Assert.Same(byId, ResolveProperty(container, idPath)?.Property.Subject);
+        Assert.Same(byColor, ResolveProperty(container, colorPath)?.Property.Subject);
+    }
+
+    [Fact]
+    public void WhenFallbackKeyedDictionaryHasNoMatchingEntry_ThenIndexIsTheText()
+    {
+        // Arrange
+        var context = CreateContext();
+        var keyed = new TestKeyedContainer(context) { ByAnything = new Dictionary<object, TestItem> { [5] = new(context) } };
+        var doubleKeyed = new TestDoubleKeyedContainer(context) { Items = new Dictionary<double, TestItem> { [1.5] = new(context) } };
+
+        // Act
+        var objectResult = ResolveProperty(keyed, "ByAnything[7]");
+        var doubleResult = ResolveProperty(doubleKeyed, "Items[2.5]");
+
+        // Assert
+        Assert.Equal((object)"7", objectResult?.Index);
+        Assert.Equal((object)"2.5", doubleResult?.Index);
     }
 
     [Fact]
@@ -241,5 +286,55 @@ public class PathKeyResolutionTests
         // Assert
         Assert.Equal(expectedPath, path);
         Assert.Same(item, ResolveProperty(container, path!)?.Property.Subject);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WhenStringKeyIsLongerThan64Characters_ThenPathRoundTrips(bool objectKeyed)
+    {
+        // Arrange
+        var key = new string('k', 70) + "]";
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "v" };
+        IInterceptorSubject container = objectKeyed
+            ? new TestKeyedContainer(context) { ByAnything = new Dictionary<object, TestItem> { [key] = item } }
+            : new TestContainer(context) { Items = new Dictionary<string, TestItem> { [key] = item } };
+
+        // Act
+        var path = GetValuePath(item);
+
+        // Assert
+        Assert.EndsWith($"['{key}'].Value", path);
+        Assert.Same(item, ResolveProperty(container, path!)?.Property.Subject);
+    }
+
+    [Fact]
+    public void WhenFormattableKeyTextIsLongerThan64Characters_ThenPathRoundTrips()
+    {
+        // Arrange
+        var key = new LongTextKey(new string('k', 80));
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "v" };
+        var container = new TestKeyedContainer(context) { ByAnything = new Dictionary<object, TestItem> { [key] = item } };
+
+        // Act
+        var path = GetValuePath(item);
+
+        // Assert
+        Assert.Equal($"ByAnything[{key.Text}].Value", path);
+        Assert.Same(item, ResolveProperty(container, path!)?.Property.Subject);
+        Assert.Equal((object)key, ResolveProperty(container, $"ByAnything[{key.Text}]")?.Index);
+    }
+
+    private readonly record struct LongTextKey(string Text) : ISpanFormattable
+    {
+        public string ToString(string? format, IFormatProvider? formatProvider) => Text;
+
+        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
+        {
+            charsWritten = Text.Length <= destination.Length ? Text.Length : 0;
+            return Text.AsSpan().TryCopyTo(destination);
+        }
     }
 }
