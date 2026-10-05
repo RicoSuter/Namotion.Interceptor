@@ -35,7 +35,7 @@ public sealed class FluentPathProvider<TMetadata> : PathProviderBase
         if (_registry.TryGetSegment(property.Subject.GetType(), property.Name, out _))
             return true;
 
-        // Mirror AttributeBasedPathProvider: [InlinePaths] containers participate in path resolution.
+        // An unmapped [InlinePaths] property is still included, because its keys are written and read as path segments.
         return InlinePathsAttribute.IsInlinePathsProperty(property.Subject.GetType(), property.Name);
     }
 

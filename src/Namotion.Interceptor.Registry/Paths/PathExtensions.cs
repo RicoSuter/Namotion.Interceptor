@@ -334,7 +334,10 @@ public static class PathExtensions
     /// <returns>The path, or null when the property is excluded, a given root is not reachable, the parent chain has a cycle, or an [InlinePaths] key needs the explicit form while another property's segment shadows the inline property.</returns>
     /// <remarks>
     /// Keys are written with their invariant text, quoted when the text is empty, starts with <c>'</c> or contains
-    /// <see cref="PathProviderBase.IndexClose"/>. Every written path resolves back to the same entry.
+    /// <see cref="PathProviderBase.IndexClose"/>. A written path resolves back to the same entry for collection
+    /// positions and string, integer, <see cref="Guid"/> and enum keys. For other key types it does when the key's
+    /// text is unique within its dictionary, otherwise the first entry with that text wins. A segment that contains
+    /// the separator is written as is and does not resolve back.
     /// </remarks>
     public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {

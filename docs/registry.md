@@ -353,19 +353,19 @@ Sensors['Kitchen [north]'].Temperature
 - Empty segments are skipped, so with a `/` separator `/a/b`, `a//b` and `a/b/` all read as `a/b`.
 - A malformed path makes `ParsePath` throw `FormatException`: a segment without a name, an unclosed `[` or quote, an empty `[]`, anything but `]` after a closing quote, or anything but the separator after an index. `TryParsePath` returns the reason and position instead, and the resolvers report a malformed path as not found.
 - `PathSeparator`, `IndexOpen` and `IndexClose` must be three different characters, none of them `'`.
-- Segments from `[Path]` attributes or `TryGetPropertySegment` are written as is. A separator inside one nests the path (`[Path("mqtt", "metrics/Humidity")]`), and they must not contain `[`.
+- Segments from `[Path]` attributes or `TryGetPropertySegment` are written as is and must not contain `[`. A segment that contains the separator is written but does not resolve back when read.
 
 #### Writing keys
 
 - `TryGetPath` writes a key's invariant text (`FormatPathIndex`), so a `double` key `1.5` is `[1.5]` on every machine.
 - A key is quoted when its text is empty, starts with `'` or contains `]`: `Sensors['Kitchen [north]']`, `Sensors['''quoted']`, `Sensors['']`. Every other key is written as is.
-- Every path `TryGetPath` writes resolves back to the same entry.
+- A path `TryGetPath` writes resolves back to the same entry for collection positions and string, integer, `Guid` and enum keys. For other key types it does when the key's text is unique within its dictionary, otherwise the first entry with that text wins (for example the keys `5` and `"5"` in a `Dictionary<object, T>`, `DateTime` keys that differ below one second, or custom keys without a `ToString` override).
 
 #### Reading keys
 
 - A collection reads a position in canonical form: `[1]`, not `[01]` or `[+1]`. A position outside the collection resolves to no subject; `TryGetPropertyFromPath` still returns it as the key of the last segment (see below).
 - A dictionary with string, integer, `Guid` or enum keys reads the text as its key type and accepts only the form `TryGetPath` writes: string keys as written (`[5]` addresses the string key `"5"`), integers like `[-3]`, Guids in lower case `D` form, enum names like `[Blue]` or `[Read, Write]`.
-- A dictionary with any other key type, such as `object`, `double` or `DateTime`, matches the text against the written text of its entries. This reads the registered entries, so the dictionary has to be assigned rather than mutated in place, and the lookup is linear in the number of entries.
+- A dictionary with any other key type, such as `object`, `double` or `DateTime`, matches the text against the written text of its entries, and the first match wins. When no entry matches, the key is returned as its text (a `string`). This reads the registered entries, so the dictionary has to be assigned rather than mutated in place, and the lookup is linear in the number of entries.
 - An index on a property that is neither a collection nor a dictionary is not found.
 - `TryGetPropertyFromPath` returns the key of the last segment, typed as above, also when no entry exists at it yet.
 
