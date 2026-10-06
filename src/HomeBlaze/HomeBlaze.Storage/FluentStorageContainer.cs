@@ -668,14 +668,8 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        if (!_hierarchyManager.ReplaceInHierarchy(path, unknownSubject, replacement, children))
-        {
-            // The placeholder lost its key to another entry when it was placed, so it has no place to take.
-            _logger?.LogDebug("Skipping recreation of {Path}: the placeholder is not in the hierarchy.", path);
-            return;
-        }
-
+        // Read before the swap: a nested replacement is attached as soon as its folder's children are assigned,
+        // so no await may separate that from the registry update.
         string? hash = null;
         try
         {
@@ -685,6 +679,14 @@ public partial class FluentStorageContainer :
         catch (Exception exception)
         {
             _logger?.LogWarning(exception, "Failed to compute hash for: {Path}", path);
+        }
+
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        if (!_hierarchyManager.ReplaceInHierarchy(path, unknownSubject, replacement, children))
+        {
+            // The placeholder lost its key to another entry when it was placed, so it has no place to take.
+            _logger?.LogDebug("Skipping recreation of {Path}: the placeholder is not in the hierarchy.", path);
+            return;
         }
 
         _pathRegistry.Unregister(path);
