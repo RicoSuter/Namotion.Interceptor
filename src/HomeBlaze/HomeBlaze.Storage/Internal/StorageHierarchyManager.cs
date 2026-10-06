@@ -116,16 +116,69 @@ internal sealed class StorageHierarchyManager
         }
     }
 
-    public void RemoveFromHierarchy(string path, IInterceptorSubject subject, Dictionary<string, IInterceptorSubject> children)
+    /// <summary>
+    /// Replaces <paramref name="subject"/> with <paramref name="replacement"/> at the path in one pass, so the
+    /// containing folder never lacks the entry. Changes nothing and returns false when the entry at the path's
+    /// key is not <paramref name="subject"/> itself, or when the replacement's key is taken by another entry.
+    /// </summary>
+    public bool ReplaceInHierarchy(
+        string path,
+        IInterceptorSubject subject,
+        IInterceptorSubject replacement,
+        Dictionary<string, IInterceptorSubject> children)
     {
         path = NormalizePath(path);
-        var segments = path.Split('/');
+        var key = GetChildKey(path, subject);
+        var replacementKey = GetChildKey(path, replacement);
+
+        return UpdateLeafChildren(path, children, leafChildren =>
+        {
+            if (!leafChildren.TryGetValue(key, out var existing) || !ReferenceEquals(existing, subject))
+            {
+                return false;
+            }
+
+            if (replacementKey != key && leafChildren.ContainsKey(replacementKey))
+            {
+                _logger?.LogWarning("Skipping replacement of '{Path}' - key \"{Key}\" already claimed", path, replacementKey);
+                return false;
+            }
+
+            leafChildren.Remove(key);
+            leafChildren[replacementKey] = replacement;
+            return true;
+        });
+    }
+
+    /// <summary>
+    /// Removes the subject at the path. Changes nothing and returns false when the entry at the path's key
+    /// is not <paramref name="subject"/> itself.
+    /// </summary>
+    public bool RemoveFromHierarchy(string path, IInterceptorSubject subject, Dictionary<string, IInterceptorSubject> children)
+    {
+        path = NormalizePath(path);
         var key = GetChildKey(path, subject);
 
+        return UpdateLeafChildren(path, children, leafChildren =>
+            leafChildren.TryGetValue(key, out var existing) &&
+            ReferenceEquals(existing, subject) &&
+            leafChildren.Remove(key));
+    }
+
+    /// <summary>
+    /// Applies <paramref name="update"/> to a copy of the children of the folder containing the path, then assigns
+    /// the copies to the traversed folders. Nothing is assigned when the folder path is missing or the update
+    /// returns false. At the root, <paramref name="children"/> is updated in place.
+    /// </summary>
+    private static bool UpdateLeafChildren(
+        string path,
+        Dictionary<string, IInterceptorSubject> children,
+        Func<Dictionary<string, IInterceptorSubject>, bool> update)
+    {
+        var segments = path.Split('/');
         if (segments.Length == 1)
         {
-            children.Remove(key);
-            return;
+            return update(children);
         }
 
         // Track folders and their new Children dicts as we traverse
@@ -137,7 +190,7 @@ internal sealed class StorageHierarchyManager
             var folderName = segments[i];
 
             if (!current.TryGetValue(folderName, out var existing) || existing is not VirtualFolder vf)
-                return;
+                return false;
 
             // Create a COPY of the folder's Children (don't mutate the original!)
             var newChildren = new Dictionary<string, IInterceptorSubject>(vf.Children);
@@ -145,8 +198,10 @@ internal sealed class StorageHierarchyManager
             current = newChildren;
         }
 
-        // Remove the subject from the leaf folder's NEW children dict
-        current.Remove(key);
+        if (!update(current))
+        {
+            return false;
+        }
 
         // Reassign Children for all traversed folders (triggers change tracking)
         // Go in reverse order so child folders are updated before parent folders
@@ -155,6 +210,8 @@ internal sealed class StorageHierarchyManager
             var (folder, newChildren) = foldersToUpdate[i];
             folder.Children = newChildren;
         }
+
+        return true;
     }
 
     private static string NormalizePath(string path)

@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -236,5 +237,81 @@ public class StorageHierarchyManagerTests
         var folder = children["Demo"] as VirtualFolder;
         Assert.NotNull(folder);
         Assert.True(folder.Children.ContainsKey("motor"), "Existing child should be preserved");
+    }
+
+    [Fact]
+    public void WhenKeyHoldsAnotherInstance_ThenRemoveKeepsTheEntry()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var children = new Dictionary<string, IInterceptorSubject>();
+        manager.PlaceInHierarchy("Motor1/", null, children, storage);
+        var folder = children["Motor1"];
+        var placeholder = new UnknownSubject(storage, "Motor1.json", "HomeBlaze.Samples.Motor", UnknownSubject.TypeNotLoadedReason);
+
+        // Act
+        manager.RemoveFromHierarchy("Motor1.json", placeholder, children);
+
+        // Assert
+        Assert.Same(folder, children["Motor1"]);
+    }
+
+    [Fact]
+    public void WhenNestedKeyHoldsAnotherInstance_ThenRemoveKeepsTheEntry()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var children = new Dictionary<string, IInterceptorSubject>();
+        var subject = CreateConfigurableSubject();
+        manager.PlaceInHierarchy("Demo/motor.json", subject, children, storage);
+        var otherSubject = CreateConfigurableSubject();
+
+        // Act
+        manager.RemoveFromHierarchy("Demo/motor.json", otherSubject, children);
+
+        // Assert
+        var folder = Assert.IsType<VirtualFolder>(children["Demo"]);
+        Assert.Same(subject, folder.Children["motor"]);
+    }
+
+    [Fact]
+    public void WhenReplacingNestedLeaf_ThenNewSubjectTakesTheKey()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var children = new Dictionary<string, IInterceptorSubject>();
+        var placeholder = new UnknownSubject(storage, "Demo/motor.json", "HomeBlaze.Samples.Motor", UnknownSubject.TypeNotLoadedReason);
+        manager.PlaceInHierarchy("Demo/motor.json", placeholder, children, storage);
+        var replacement = CreateConfigurableSubject();
+
+        // Act
+        var replaced = manager.ReplaceInHierarchy("Demo/motor.json", placeholder, replacement, children);
+
+        // Assert
+        Assert.True(replaced);
+        var folder = Assert.IsType<VirtualFolder>(children["Demo"]);
+        Assert.Same(replacement, folder.Children["motor"]);
+    }
+
+    [Fact]
+    public void WhenReplacingLeafWhoseKeyHoldsAnotherInstance_ThenNothingChanges()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var children = new Dictionary<string, IInterceptorSubject>();
+        manager.PlaceInHierarchy("Motor1/", null, children, storage);
+        var folder = children["Motor1"];
+        var placeholder = new UnknownSubject(storage, "Motor1.json", "HomeBlaze.Samples.Motor", UnknownSubject.TypeNotLoadedReason);
+
+        // Act
+        var replaced = manager.ReplaceInHierarchy("Motor1.json", placeholder, CreateConfigurableSubject(), children);
+
+        // Assert
+        Assert.False(replaced);
+        Assert.Same(folder, children["Motor1"]);
     }
 }

@@ -75,7 +75,10 @@ internal sealed class StorageFileWatcher : IDisposable
     {
         // Process events with coalescing: group by path, collect events in time window, then coalesce
         // Note: We don't filter temp files here - they're handled in coalescing logic
+        // Synchronize: events can arrive concurrently (an old watcher's callback overlapping a restart, or a
+        // simulated event), and GroupBy must not see overlapping OnNext calls.
         _fileEventSubscription = _fileEvents
+            .Synchronize()
             .Where(e => !IsOwnWrite(e.FullPath))
             .GroupBy(e => GetCanonicalPath(e.FullPath))
             .SelectMany(group => group
