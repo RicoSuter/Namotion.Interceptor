@@ -21,18 +21,19 @@ Plugin configuration becomes ordinary subjects in the tree instead of a file at 
 ### TypeProvider (HomeBlaze.Services)
 
 - New `event EventHandler? TypesChanged`, raised after the new type array is published and outside the lock.
+- New `AddAssemblies(IEnumerable<Assembly>)` adds a batch and raises `TypesChanged` once. `AddAssembly` stays for fluent startup registration.
 - `AddTypes` ignores a type that is already registered (same `Type` instance).
-- A different type with the same full name as a registered one is skipped and logged as a warning naming both assemblies. `TypeProvider` takes an optional `ILogger<TypeProvider>`.
+- A different type with the same full name as a registered one is skipped. `AddTypes` and `AddAssemblies` return the skipped types, and the caller (a plugin provider) logs them with both assemblies.
 - `TypesChanged` is raised only when at least one type was added.
 
-### Caches that refresh on TypesChanged
+### Caches that refresh when types are added
 
-- `SubjectTypeRegistry`: the two `Lazy` caches become snapshot fields that are rebuilt on the next access after `TypesChanged`. Entries added through the `Type.GetType` fallback survive only until the next rebuild, which then finds them again through the fallback.
-- `SubjectComponentRegistry`: the component map and the resolved cache are reset on `TypesChanged`. This resolves the existing TODO in that class.
-- `ConfigurableSubjectSerializer`: `JsonSerializerOptions` caches the polymorphic `$type` list after first use, so the serializer creates a new options instance on `TypesChanged`. Without this, saving a subject whose type was added later fails with an unknown derived type.
+`TypeProvider` publishes a new array on every change, so each cache stores the array it was built from and rebuilds when `TypeProvider.Types` returns a different instance. This needs no subscription and cannot miss a change that happens during a rebuild.
+
+- `SubjectTypeRegistry`: the two `Lazy` caches become one snapshot. Entries added through the `Type.GetType` fallback survive only until the next rebuild, which then finds them again through the fallback.
+- `SubjectComponentRegistry`: the component map and the resolved cache become one snapshot. This resolves the existing TODO in that class.
+- `ConfigurableSubjectSerializer`: `JsonSerializerOptions` caches the polymorphic `$type` list after first use, so the serializer keeps its options in a snapshot as well. Without this, saving a subject whose type was added later fails with an unknown derived type.
 - `SubjectTypeRegistryTypeProvider` (MCP) reads `SubjectTypeRegistry.RegisteredTypes` on every call and needs no change.
-
-All of these subscribe in their constructor. They are singletons, so they do not unsubscribe.
 
 ### UnknownSubject (HomeBlaze.Storage.Files)
 
@@ -41,6 +42,7 @@ All of these subscribe in their constructor. They are singletons, so they do not
 - Title is the file name without extension, icon is a warning icon in the warning color.
 - The raw JSON stays readable, editable and deletable through the existing file operations, like a `JsonFile`.
 - It is not `IConfigurable`, so the configuration writer never writes it. The file on disk stays exactly as authored until the real type takes over.
+- Its child key in the storage hierarchy is the file name without extension, like a configurable subject's, so its path stays the same when it is upgraded.
 
 ### FileSubjectFactory (HomeBlaze.Storage)
 
@@ -77,7 +79,7 @@ For `.json` files:
 - New `Retry` operation: loads all plugins with status Error again through the same path.
 - The existing remove operation on `Plugin` edits the configuration and runs reconcile, so the plugin shows "Restart required".
 - Loading runs one load call at a time per provider (a `SemaphoreSlim`), so `ExecuteAsync`, reconcile and retry never load concurrently on the same loader.
-- `Dispose` disposes the loader.
+- The loader lives until the process exits. Disposing it would unload assemblies that live subjects still use, so the subject does not dispose it.
 
 Path resolution (one helper, unit tested):
 
@@ -130,7 +132,7 @@ Each provider has its own loader and its own `LoadedPlugins`. Shared contract as
 
 - `$type` becomes `HomeBlaze.Plugins.NuGetPluginProvider` in the Seed, dev data and E2E test data `Plugins.json`.
 - Dev `Plugins.json`: local feed `../Plugins`, no `cacheDirectory` (default `Data/Plugins/Cache`). `.gitignore` adds `src/HomeBlaze/HomeBlaze/Data/Plugins/` and drops the obsolete `PluginsCache` entry.
-- E2E test data keeps the local feed `Plugins`, which resolves against the test output folder where the sample packages are copied. `WebTestingHostFactory` no longer sets `PluginConfigurationPath`.
+- E2E test data keeps the local feed `Plugins`, which resolves against the test output folder where the sample packages are copied. It sets `cacheDirectory` to `PluginsCache`, because the default `Plugins/Cache` would sit inside that feed folder. `WebTestingHostFactory` no longer sets `PluginConfigurationPath`.
 - `architecture/design/plugins.md`: new bootstrap sequence, multiple providers, `UnknownSubject`, path rules, writing your own provider by adding assemblies to `TypeProvider`.
 - `administration/configuration.md`: remove `PluginConfigurationPath`, describe cache and feed path rules, add `Plugins/Cache` to the data folder layout, mention excluding it from backups.
 - `architecture/project-structure.md`: replace `PluginLoader` and `AddHomeBlazePlugins`.
