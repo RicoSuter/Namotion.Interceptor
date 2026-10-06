@@ -36,14 +36,11 @@ builder.AddServiceDefaults();
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
-// Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
+// Seeding runs before anything reads the data directory.
 var seededFileCount = DataDirectorySeeder.SeedIfMissing(
     HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
     builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
 
-var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
-
-builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
 // Optionally add the MCP subject server (default: false, enabled in Development)
@@ -106,21 +103,7 @@ typeProvider
     .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly);                                 // Namotion.Devices.Luxtronik.HomeBlaze
 
 // Register HomeBlaze.Plugins subject types
-typeProvider.AddAssembly(typeof(PluginManager).Assembly);
-
-// Load runtime plugins
-var pluginLoader = app.Services.GetRequiredService<PluginLoader>();
-var pluginResult = await pluginLoader.LoadPluginsAsync(CancellationToken.None);
-if (pluginResult != null)
-{
-    foreach (var plugin in pluginResult.LoadedPlugins)
-    {
-        foreach (var assembly in plugin.Assemblies)
-        {
-            typeProvider.AddAssembly(assembly);
-        }
-    }
-}
+typeProvider.AddAssembly(typeof(NuGetPluginProvider).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

@@ -22,7 +22,7 @@ public class PluginLoadingTests
     }
 
     [Fact]
-    public async Task WhenPluginsLoaded_ThenBothSamplePluginsAppearInPluginManager()
+    public async Task WhenPluginsLoaded_ThenBothSamplePluginsAppearInPluginProvider()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
