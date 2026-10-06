@@ -433,8 +433,130 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         await markdownFile.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(1, logger.CountMessages("HomeBlaze.Samples.Motor"));
+        Assert.Equal(1, logger.CountMessages("HomeBlaze.Samples.Motor", LogLevel.Warning));
     }
+
+    [Fact]
+    public async Task WhenTypeOfMarkdownSubjectBlockIsMissingDuringStartup_ThenItIsWarnedOnlyIfStillMissingAfterStartup()
+    {
+        // Arrange
+        WriteFile("Dashboard.md", MotorBlockPage);
+        var parserLogger = new CapturingLogger<MarkdownContentParser>();
+        var storageLogger = new CapturingLogger();
+        FluentStorageContainer? root = null;
+        var resolver = new SubjectPathResolver(() => root);
+        var (storage, typeProvider) = CreateStorage(
+            logger: storageLogger,
+            resolver: resolver,
+            configureServices: services => services.AddSingleton<ILogger<MarkdownContentParser>>(parserLogger));
+        root = storage;
+        using var _ = storage;
+        typeProvider.AddAssembly(typeof(MarkdownFile).Assembly);
+        var gate = new StartupGate();
+        ((IInterceptorSubject)storage).Context.AddService(gate);
+
+        // Act
+        await storage.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Dashboard.md"));
+
+        // Assert
+        Assert.Equal(1, parserLogger.CountMessages("HomeBlaze.Samples.Motor", LogLevel.Information));
+        Assert.Equal(0, parserLogger.CountMessages("HomeBlaze.Samples.Motor", LogLevel.Warning));
+        Assert.Equal(0, storageLogger.CountMessages("HomeBlaze.Samples.Motor", LogLevel.Warning));
+
+        gate.CompleteRootLoad();
+        await AsyncTestHelpers.WaitUntilAsync(() => storageLogger.CountMessages("HomeBlaze.Samples.Motor", LogLevel.Warning) == 1);
+        await storage.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenPageIsParsedAgainBecauseTypesChanged_ThenUnchangedSubjectsAreKeptAndNotReconfigured()
+    {
+        // Arrange
+        WriteFile("Dashboard.md", CounterBlock("first") + MotorBlockPage);
+        var (storage, typeProvider, markdownFile) = await ConnectMarkdownStorageAsync();
+        using var _ = storage;
+        var counter = Assert.IsType<CountingConfigurableSubject>(markdownFile.Children["counter"]);
+
+        // Act
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => markdownFile.Children.ContainsKey("motor"));
+        Assert.Same(counter, markdownFile.Children["counter"]);
+        Assert.Equal(0, counter.ApplyCount);
+    }
+
+    [Fact]
+    public async Task WhenSubjectBlockJsonIsEdited_ThenTheSameSubjectIsReconfigured()
+    {
+        // Arrange
+        WriteFile("Dashboard.md", CounterBlock("first"));
+        var (storage, _, markdownFile) = await ConnectMarkdownStorageAsync();
+        using var __ = storage;
+        var counter = Assert.IsType<CountingConfigurableSubject>(markdownFile.Children["counter"]);
+
+        // Act
+        await markdownFile.WriteAsync(ToStream(CounterBlock("second")), CancellationToken.None);
+
+        // Assert
+        Assert.Same(counter, markdownFile.Children["counter"]);
+        Assert.Equal("second", counter.Value);
+        Assert.Equal(1, counter.ApplyCount);
+    }
+
+    [Fact]
+    public async Task WhenEmbeddedSubjectConfigurationIsWritten_ThenParsingTheWrittenPageDoesNotReconfigureIt()
+    {
+        // Arrange
+        WriteFile("Dashboard.md", CounterBlock("first"));
+        var (storage, _, markdownFile) = await ConnectMarkdownStorageAsync();
+        using var __ = storage;
+        var counter = Assert.IsType<CountingConfigurableSubject>(markdownFile.Children["counter"]);
+        counter.Value = "second";
+
+        // Act
+        await markdownFile.WriteConfigurationAsync(counter, CancellationToken.None);
+
+        // Assert
+        Assert.Same(counter, markdownFile.Children["counter"]);
+        Assert.Equal(0, counter.ApplyCount);
+        Assert.Contains("second", File.ReadAllText(Path.Combine(_directory.FullName, "Dashboard.md")));
+    }
+
+    private async Task<(FluentStorageContainer Storage, TypeProvider TypeProvider, MarkdownFile MarkdownFile)> ConnectMarkdownStorageAsync()
+    {
+        FluentStorageContainer? root = null;
+        var resolver = new SubjectPathResolver(() => root);
+        var (storage, typeProvider) = CreateStorage(resolver: resolver);
+        root = storage;
+
+        // Configuration updates find the configuration properties through the registry.
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        typeProvider.AddAssembly(typeof(MarkdownFile).Assembly);
+        typeProvider.AddTypes([typeof(CountingConfigurableSubject)]);
+        await storage.ConnectAsync(CancellationToken.None);
+        return (storage, typeProvider, Assert.IsType<MarkdownFile>(storage.Children["Dashboard.md"]));
+    }
+
+    private static string CounterBlock(string value) => $$"""
+        # Counter
+
+        ```subject(counter)
+        {
+          "$type": "{{typeof(CountingConfigurableSubject).FullName}}",
+          "value": "{{value}}"
+        }
+        ```
+
+        """;
 
     private const string MotorBlockPage = """
         # Dashboard
@@ -512,15 +634,16 @@ public class FluentStorageContainerUpgradeTests : IDisposable
 
     private class CapturingLogger<T> : ILogger<T>
     {
-        private readonly ConcurrentQueue<string> _messages = new();
+        private readonly ConcurrentQueue<(LogLevel Level, string Message)> _messages = new();
 
-        public int CountMessages(string fragment) => _messages.Count(message => message.Contains(fragment, StringComparison.Ordinal));
+        public int CountMessages(string fragment, LogLevel? level = null) => _messages.Count(entry =>
+            entry.Message.Contains(fragment, StringComparison.Ordinal) && (level is null || entry.Level == level));
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => _messages.Enqueue(formatter(state, exception));
+            => _messages.Enqueue((logLevel, formatter(state, exception)));
     }
 }

@@ -151,6 +151,49 @@ public partial class FluentStorageContainer :
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await ConnectAsync(stoppingToken);
+
+        var context = ((IInterceptorSubject)this).Context;
+        if (!context.IsStartupCompleted())
+        {
+            // Not awaited: startup waits for this ExecuteAsync to finish.
+            _ = WarnAboutMissingSubjectBlockTypesAfterStartupAsync(context, stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Warns about markdown subject blocks whose type is still not loaded once startup completed. While it runs,
+    /// the parser only logs them as information because plugins may still add the types.
+    /// </summary>
+    private async Task WarnAboutMissingSubjectBlockTypesAfterStartupAsync(
+        IInterceptorSubjectContext context, CancellationToken stoppingToken)
+    {
+        try
+        {
+            await context.WaitForStartupAsync(stoppingToken);
+            await RunLockedAsync(() =>
+            {
+                foreach (var (markdownFile, path) in _pathRegistry.GetSubjects<MarkdownFile>())
+                {
+                    if (markdownFile.UnresolvedSubjectTypeNames.Count > 0)
+                    {
+                        _logger?.LogWarning(
+                            "Subject blocks in {Path} are not shown because their types {Types} are still not loaded after startup completed.",
+                            path, string.Join(", ", markdownFile.UnresolvedSubjectTypeNames));
+                    }
+                }
+
+                return Task.CompletedTask;
+            }, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopped before startup completed: nothing to report.
+        }
+        catch (Exception exception)
+        {
+            // Includes a failed startup, which the root manager reports itself.
+            _logger?.LogDebug(exception, "Skipped reporting markdown subject blocks with missing types.");
+        }
     }
 
     /// <summary>

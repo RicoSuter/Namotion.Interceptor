@@ -76,6 +76,15 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     internal static readonly IReadOnlySet<string> NoTypeNames = new HashSet<string>();
 
     /// <summary>
+    /// The JSON of each subject block as of the last parse or configuration write, by block name. A block whose
+    /// JSON did not change since is not reconfigured when the page is parsed again. Replaced as a whole, never
+    /// changed once published.
+    /// </summary>
+    internal IReadOnlyDictionary<string, string> SubjectBlockJson { get; set; } = NoSubjectBlockJson;
+
+    internal static readonly IReadOnlyDictionary<string, string> NoSubjectBlockJson = new Dictionary<string, string>();
+
+    /// <summary>
     /// File size in bytes.
     /// </summary>
     [State("Size", Position = 1)]
@@ -156,8 +165,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             return string.Empty;
         }
 
+        // The subjects already have the configuration written here, so parsing the written page must not
+        // reconfigure them.
+        var writtenJson = new Dictionary<string, string>(SubjectBlockJson);
+
         // Regex matches: ```subject(name)\n{json}```
-        return SubjectBlockRegex().Replace(
+        var content = SubjectBlockRegex().Replace(
             Content,
             match =>
             {
@@ -166,13 +179,17 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 // Find the child subject by name and serialize it
                 if (Children.TryGetValue(name, out var child))
                 {
-                    var json = _serializer.Serialize(child);
+                    var json = _serializer.Serialize(child).Trim();
+                    writtenJson[name] = json;
                     return $"```subject({name})\n{json}\n```";
                 }
 
                 // Subject not found - keep original block unchanged
                 return match.Value;
             });
+
+        SubjectBlockJson = writtenJson;
+        return content;
     }
 
     private static string FormatFilename(string name)
