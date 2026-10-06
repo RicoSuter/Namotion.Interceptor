@@ -29,8 +29,9 @@ public class ConfigurableSubjectSerializer
         _serviceProvider = serviceProvider;
     }
 
-    // System.Text.Json freezes the polymorphic $type list of an options instance on first use, so types
-    // added later need a new instance.
+    // A new instance is required, not just new options with the same resolver: System.Text.Json shares
+    // cached metadata across options instances that have equal settings and the same resolver instance,
+    // so reusing the resolver would silently keep serving the frozen $type list.
     private JsonSerializerOptions Options
     {
         get
@@ -201,5 +202,10 @@ public class ConfigurableSubjectSerializer
         }
     }
 
-    private sealed record OptionsSnapshot(IReadOnlyCollection<Type> Source, JsonSerializerOptions Options);
+    private sealed class OptionsSnapshot(IReadOnlyCollection<Type> source, JsonSerializerOptions options)
+    {
+        public IReadOnlyCollection<Type> Source => source;
+
+        public JsonSerializerOptions Options => options;
+    }
 }

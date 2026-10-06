@@ -24,7 +24,8 @@ public class SubjectComponentRegistry
     {
         var snapshot = GetSnapshot();
         return snapshot.ResolvedCache.GetOrAdd((subjectType, type, name),
-            key => ResolveComponent(snapshot.Components, key.Item1, key.Item2, key.Item3));
+            static (key, components) => ResolveComponent(components, key.Item1, key.Item2, key.Item3),
+            snapshot.Components);
     }
 
     private static SubjectComponentRegistration? ResolveComponent(
@@ -114,8 +115,15 @@ public class SubjectComponentRegistry
         return dictionary;
     }
 
-    private sealed record Snapshot(
-        IReadOnlyCollection<Type> Source,
-        Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> Components,
-        ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> ResolvedCache);
+    private sealed class Snapshot(
+        IReadOnlyCollection<Type> source,
+        Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> components,
+        ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> resolvedCache)
+    {
+        public IReadOnlyCollection<Type> Source => source;
+
+        public Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> Components => components;
+
+        public ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> ResolvedCache => resolvedCache;
+    }
 }

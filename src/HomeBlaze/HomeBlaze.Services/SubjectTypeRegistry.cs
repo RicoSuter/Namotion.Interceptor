@@ -141,8 +141,15 @@ public class SubjectTypeRegistry
         return dictionary;
     }
 
-    private sealed record Snapshot(
-        IReadOnlyCollection<Type> Source,
-        ConcurrentDictionary<string, Type> TypesByName,
-        ConcurrentDictionary<string, Type> TypesByExtension);
+    private sealed class Snapshot(
+        IReadOnlyCollection<Type> source,
+        ConcurrentDictionary<string, Type> typesByName,
+        ConcurrentDictionary<string, Type> typesByExtension)
+    {
+        public IReadOnlyCollection<Type> Source => source;
+
+        public ConcurrentDictionary<string, Type> TypesByName => typesByName;
+
+        public ConcurrentDictionary<string, Type> TypesByExtension => typesByExtension;
+    }
 }
