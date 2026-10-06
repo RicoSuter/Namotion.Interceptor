@@ -47,7 +47,7 @@ public class ModbusRegisterAttribute : Attribute
     /// <summary>
     /// Gets the name of an <see cref="ModbusDataType.S16"/> register property on the same subject holding a power-of-ten exponent:
     /// value = raw * <see cref="Scale"/> * 10^exponent. For a scale factor on another subject, implement
-    /// <c>IModbusScaleFactorProvider</c> instead.
+    /// <see cref="IModbusScaleFactorProvider"/> instead.
     /// </summary>
     public string? ScaleFactorProperty { get; init; }
 

@@ -96,6 +96,34 @@ public partial class ModbusSubjectClientSourceTests
         public partial int? Other { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class ScaledBlock
+    {
+        [ModbusRegister(0, ModbusDataType.S16)]
+        public partial short? CurrentScaleFactor { get; set; }
+
+        public partial ScaledChannel? Channel { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class ScaledChannel : IModbusBaseAddressProvider, IModbusScaleFactorProvider
+    {
+        public ScaledChannel(ScaledBlock block)
+        {
+            Block = block;
+        }
+
+        public ScaledBlock Block { get; }
+
+        public int BaseAddress => 10;
+
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial decimal? Current { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Current) ? new PropertyReference(Block, nameof(ScaledBlock.CurrentScaleFactor)) : null;
+    }
+
     private static void SeedServer(ModbusTestServer server)
     {
         server.SetHoldingRegister<short>(0, 215);
@@ -913,6 +941,33 @@ public partial class ModbusSubjectClientSourceTests
             Assert.DoesNotContain(server.Requests, request =>
                 request.FunctionCode == ModbusFunctionCode.ReadHoldingRegisters &&
                 request.Address <= 40 && request.Address + request.Quantity > 40);
+        }
+        finally
+        {
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenScaleFactorIsProvidedByAnotherSubject_ThenValueIsScaled()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        server.SetHoldingRegister<short>(0, -1);
+        server.SetHoldingRegister<ushort>(10, 1234);
+
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var block = new ScaledBlock(context);
+        block.Channel = new ScaledChannel(block);
+        var source = CreateSource(block, server);
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => block.Channel.Current == 123.4m, TimeSpan.FromSeconds(30), message: "The channel should be scaled by the block's scale factor.");
         }
         finally
         {

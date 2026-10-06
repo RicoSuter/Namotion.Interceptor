@@ -38,7 +38,7 @@ public class ModbusValueConvertersTests
     }
 
     private static object? Convert(ModbusRegisterAttribute attribute, Type propertyType, byte[] raw, int exponent = 0)
-        => ModbusValueConverters.Create(attribute, propertyType, "Test.Property")(raw, exponent);
+        => ModbusValueConverters.Create(attribute, propertyType, "Test.Property", hasDynamicScale: attribute.ScaleFactorProperty is not null)(raw, exponent);
 
     [Fact]
     public void WhenScalingIntoDecimal_ThenResultIsExact()
@@ -233,7 +233,7 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
-            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Scale = 1e30 }, typeof(decimal?), "Test.Property"));
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Scale = 1e30 }, typeof(decimal?), "Test.Property", hasDynamicScale: false));
     }
 
     [Theory]
@@ -271,7 +271,7 @@ public class ModbusValueConvertersTests
                     Length = dataType == ModbusDataType.String ? 1 : 0,
                     NotAvailableValue = ModbusNotAvailableValue.SignedMaximum
                 },
-                propertyType, "Test.Property"));
+                propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Fact]
@@ -312,7 +312,7 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
-            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.1 }, propertyType, "Test.Property"));
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.1 }, propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Theory]
@@ -326,7 +326,7 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
-            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType), propertyType, "Test.Property"));
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType), propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Fact]
@@ -336,7 +336,7 @@ public class ModbusValueConvertersTests
         Assert.Throws<ModbusConfigurationException>(() =>
             ModbusValueConverters.Create(
                 new ModbusRegisterAttribute(0, ModbusDataType.U16) { NotAvailableValue = ModbusNotAvailableValue.SignedMaximum },
-                typeof(int), "Test.Property"));
+                typeof(int), "Test.Property", hasDynamicScale: false));
     }
 
     [Theory]
@@ -349,7 +349,7 @@ public class ModbusValueConvertersTests
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
             ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Length = dataType == ModbusDataType.String ? 1 : 0 },
-                propertyType, "Test.Property"));
+                propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Fact]

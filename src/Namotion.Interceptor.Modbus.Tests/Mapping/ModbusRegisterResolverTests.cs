@@ -235,6 +235,60 @@ public partial class ModbusRegisterResolverTests
         public partial CycleSubject? Next { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class ProviderParent
+    {
+        [ModbusRegister(0, ModbusDataType.S16)]
+        public partial short? CurrentScaleFactor { get; set; }
+
+        public partial ProviderChild? Child { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class ProviderChild : IModbusBaseAddressProvider, IModbusScaleFactorProvider
+    {
+        public ProviderChild(ProviderParent parent)
+        {
+            Parent = parent;
+        }
+
+        public ProviderParent Parent { get; }
+
+        public int BaseAddress => 10;
+
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial decimal? Current { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.U16)]
+        public partial int? Status { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Current) ? new PropertyReference(Parent, nameof(ProviderParent.CurrentScaleFactor)) : null;
+    }
+
+    [InterceptorSubject]
+    public partial class ConflictingProviderSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.S16)]
+        public partial short? Factor { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Value) ? new PropertyReference(this, nameof(Factor)) : null;
+    }
+
+    [InterceptorSubject]
+    public partial class MissingProvidedScaleFactorSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial decimal? Value { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Value) ? new PropertyReference(this, "Missing") : null;
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -296,6 +350,22 @@ public partial class ModbusRegisterResolverTests
         // Assert
         var value = Find(bindings, subject, nameof(ScaleAndScaleFactorSubject.Value));
         Assert.Same(Find(bindings, subject, nameof(ScaleAndScaleFactorSubject.Factor)), value.ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProviderSuppliesScaleFactorOfAnotherSubject_ThenBindingIsLinked()
+    {
+        // Arrange
+        var parent = new ProviderParent(CreateContext());
+        var child = new ProviderChild(parent);
+        parent.Child = child;
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(parent, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        Assert.Same(Find(bindings, parent, nameof(ProviderParent.CurrentScaleFactor)), Find(bindings, child, nameof(ProviderChild.Current)).ScaleFactor);
+        Assert.Null(Find(bindings, child, nameof(ProviderChild.Status)).ScaleFactor);
     }
 
     [Fact]
@@ -430,6 +500,8 @@ public partial class ModbusRegisterResolverTests
         context => new UndefinedSpaceSubject(context),
         context => new UndefinedWordOrderSubject(context),
         context => new UndefinedNotAvailableValueSubject(context),
+        context => new ConflictingProviderSubject(context),
+        context => new MissingProvidedScaleFactorSubject(context),
     };
 
     [Theory]

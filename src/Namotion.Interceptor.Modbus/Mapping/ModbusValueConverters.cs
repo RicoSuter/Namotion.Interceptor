@@ -20,14 +20,13 @@ internal static class ModbusValueConverters
     private static readonly decimal[] PowersOfTen = CreatePowersOfTen();
     private static readonly decimal[] NegativePowersOfTen = CreateNegativePowersOfTen();
 
-    public static ModbusValueReader Create(ModbusRegisterAttribute attribute, Type propertyType, string propertyPath)
+    public static ModbusValueReader Create(ModbusRegisterAttribute attribute, Type propertyType, string propertyPath, bool hasDynamicScale)
     {
         var underlyingType = Nullable.GetUnderlyingType(propertyType);
         var targetType = underlyingType ?? propertyType;
         var isNullable = underlyingType is not null || !propertyType.IsValueType;
 
         var dataType = attribute.DataType;
-        var hasDynamicScale = attribute.ScaleFactorProperty is not null;
         var isScaled = hasDynamicScale || attribute.Scale is not 1.0;
 
         ValidateNotAvailableValue(attribute, isNullable, propertyPath);
