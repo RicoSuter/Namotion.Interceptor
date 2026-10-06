@@ -74,7 +74,7 @@ The architecture implies graceful degradation through connector independence and
 **Questions to investigate:**
 - History sink down: does the history collector drop changes silently, buffer, or raise an alarm? (Connector independence suggests it won't block the pipeline, but this should be explicit)
 - Central down: can operators still use satellite UIs for their local domain? (Implied by same binary, should be documented)
-- Plugin load failure: does the instance start without the failed plugin, or refuse to start?
+- Plugin load failure (answered): the instance starts without the failed plugin. The plugin shows the error, files of its types stay `UnknownSubject` placeholders, and other plugins are not affected. See [Plugin System](plugins.md#changing-plugins).
 
 ### 6. Configuration Corruption
 
@@ -85,7 +85,7 @@ Configuration is persisted as JSON files on disk.
 **Remaining questions to investigate:**
 - Should configuration files include a checksum or schema version for validation on load?
 - Should the system keep a backup of the last known good configuration and fall back on load failure?
-- How should the system behave if configuration references a subject type from a plugin that is no longer available?
+- Configuration that references a subject type from a plugin that is no longer available (answered): the file loads as an `UnknownSubject` placeholder that is never rewritten and turns into the real subject once the type is loaded again. See [Unknown Types](storage.md#unknown-types).
 
 ### 7. Time Synchronization
 

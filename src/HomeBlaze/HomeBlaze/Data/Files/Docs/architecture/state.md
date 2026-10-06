@@ -60,7 +60,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Building Block | Status | Notes |
 |---|---|---|
 | Plugin system (build-time NuGet) | Implemented | Standard package references |
-| Plugin system (runtime loading) | Planned | NuGet feed resolution at startup |
+| Plugin system (runtime loading) | Implemented | Plugin provider subjects load NuGet packages at runtime. See [Plugin System](design/plugins.md) |
 | Blazor operator UI | Implemented | Subject browser, dashboards, editors |
 | Multi-instance topology | Implemented | Satellite/central via WebSocket |
 | High availability (active-standby) | Planned | Failover with fencing |

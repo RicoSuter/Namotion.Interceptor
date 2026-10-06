@@ -32,7 +32,7 @@ Core plugins are standard NuGet `<PackageReference>` entries. Their assemblies a
 
 ### Runtime (dynamic)
 
-External plugins are resolved and loaded at runtime by plugin provider subjects (see [Plugin Providers](#plugin-providers)) using the standalone `Namotion.NuGet.Plugins` library. This library is general-purpose with no HomeBlaze dependency. See its [README](../../../../../../Namotion.NuGet.Plugins/README.md) for full API documentation, usage examples, and configuration reference.
+External plugins are resolved and loaded at runtime by plugin provider subjects (see [Plugin Providers](#plugin-providers)) using the standalone `Namotion.NuGet.Plugins` library. This library is general-purpose with no HomeBlaze dependency. See its [README](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.NuGet.Plugins/README.md) for full API documentation, usage examples, and configuration reference.
 
 The runtime loader handles:
 - Transitive dependency resolution via NuGet API
@@ -45,29 +45,27 @@ The runtime loader handles:
 
 ### Plugin Providers
 
-A plugin provider is a subject that loads plugin assemblies at runtime and adds them to the `TypeProvider`. HomeBlaze ships one provider type, `NuGetPluginProvider`, and its instances are ordinary JSON subject files that can live anywhere in the subject tree. There is no fixed configuration path: every `NuGetPluginProvider` in the tree loads its plugins when it starts. The container seed ships one provider as `Files/Plugins.json` with nuget.org as its only feed and no plugins. Several providers can coexist (see [Multiple Providers](#multiple-providers)).
+A plugin provider is a subject that loads plugin assemblies at runtime and adds them to the `TypeProvider`. HomeBlaze ships one provider type, `NuGetPluginProvider`, and its instances are ordinary JSON subject files that can live anywhere in the subject tree. There is no fixed configuration path: every `NuGetPluginProvider` in the tree loads its plugins when it starts. The container seed ships one provider as `Files/Plugins.json` (see [Configuration](#configuration)). Several providers can coexist (see [Multiple Providers](#multiple-providers)).
 
 ### Configuration
 
-The development data folder contains this `Files/Plugins.json`:
+A new container data folder starts with this `Files/Plugins.json`, which uses nuget.org as its only feed and loads no plugins yet:
 
 ```json
 {
   "$type": "HomeBlaze.Plugins.NuGetPluginProvider",
   "feeds": [
-    { "name": "local", "url": "../Plugins" },
     { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
   ],
   "hostPackages": [],
   "hostIdentifier": "HomeBlaze",
-  "plugins": [
-    { "packageName": "MyCompany.SamplePlugin1.HomeBlaze", "version": "1.0.0" },
-    { "packageName": "MyCompany.SamplePlugin2.HomeBlaze", "version": "1.0.0" }
-  ]
+  "plugins": []
 }
 ```
 
-The `local` feed is a folder path relative to the data folder `src/HomeBlaze/HomeBlaze/Data`, so it points to `src/HomeBlaze/HomeBlaze/Plugins`, where the sample plugin builds place their `.nupkg` files. The `hostPackages` array is empty because host-shared packages are discovered automatically (see [Host-Shared Package Discovery](#host-shared-package-discovery) below). The file sets no `cacheDirectory`, so downloaded packages are kept in `Plugins/Cache` in the data folder and are not downloaded again after a restart.
+Plugins are added with the provider's **Add Plugin** operation or by listing them in `plugins`. The `hostPackages` array is empty because host-shared packages are discovered automatically (see [Host-Shared Package Discovery](#host-shared-package-discovery) below). The file sets no `cacheDirectory`, so downloaded packages are kept in `Plugins/Cache` in the data folder and are not downloaded again after a restart.
+
+When running from source, the data folder `src/HomeBlaze/HomeBlaze/Data` has a `Files/Plugins.json` with an additional `local` feed whose URL `../Plugins` is a folder path relative to the data folder. It points to `src/HomeBlaze/HomeBlaze/Plugins`, where the sample plugin builds place their `.nupkg` files, and the file loads both [sample plugins](#sample-plugins) from there.
 
 | Field | Purpose |
 |-------|---------|
@@ -95,14 +93,15 @@ The DTOs `PluginEntry` and `PluginFeedEntry` live in the `HomeBlaze.Plugins.Mode
 
 ### Changing Plugins
 
-A provider creates one loader from its configuration and keeps it until the process exits, because unloading assemblies that live subjects still use is not safe. This decides which changes apply right away:
+A provider creates its loader from its configuration when it first loads a package. Once a plugin has loaded, the provider keeps the loader until the process exits, because unloading assemblies that live subjects still use is not safe. Until then, a configuration change replaces the loader. This decides which changes apply right away:
 
 | Change | Takes effect |
 |--------|--------------|
 | Add a plugin | Immediately. The package is loaded and its types become available. |
 | Remove a plugin, or change its version | After a restart. The plugin shows a message and `IsRestartRequired` is set. |
 | Remove or change a plugin that failed to load | Immediately, because none of its types were registered. |
-| Change `feeds`, `hostPackages`, `hostIdentifier` or `cacheDirectory` after the first package was loaded | After a restart. `IsRestartRequired` is set. |
+| Change `feeds`, `hostPackages`, `hostIdentifier` or `cacheDirectory` while no plugin has loaded | Immediately. The next load, for example by **Retry Failed Plugins**, uses the new settings. |
+| Change `feeds`, `hostPackages`, `hostIdentifier` or `cacheDirectory` after a plugin has loaded | After a restart. `IsRestartRequired` is set. |
 
 The same rules apply whether the change is made through the operations, the property editor, or by editing the JSON file on disk. Edits on disk are picked up by the storage and applied in the background, so a slow package download does not hold up other file changes. Reverting a pending change clears the restart message again.
 
@@ -168,7 +167,7 @@ sequenceDiagram
 ```
 
 The key steps:
-1. **Load the tree**: `RootManager` loads `Root.json` and the storages scan their files. A JSON file whose `$type` cannot be created yet becomes an [`UnknownSubject`](#unknown-types).
+1. **Load the tree**: `RootManager` loads `Root.json` and the storages scan their files. A JSON file whose `$type` cannot be created yet becomes an [`UnknownSubject`](storage.md#unknown-types).
 2. **Load plugins**: every `NuGetPluginProvider` in the tree starts, loads its packages and adds their assemblies to `TypeProvider` with `AddAssemblies`.
 3. **Refresh**: `TypeProvider` raises `TypesChanged`. `SubjectTypeRegistry`, `SubjectComponentRegistry` and `ConfigurableSubjectSerializer` rebuild their caches when they next see a new type list, and every storage recreates its `UnknownSubject`s whose type now resolves. It also parses a markdown page again when one of its `subject(...)` blocks had a type that now resolves, which adds the embedded subject.
 4. **Settle**: whatever is still unknown after all providers have finished stays an `UnknownSubject` with its reason.
@@ -178,36 +177,40 @@ The key steps:
 
 ### Unknown Types
 
-A JSON file with a `$type` that cannot be created becomes an `UnknownSubject` instead of being dropped. This happens when no loaded assembly has the type, when creating the subject throws, or when the file is not valid JSON but contains `"$type"`. The subject shows a warning icon, the `$type` value and the reason, and keeps the path the real subject would have (the file name without `.json`), so references to that path work once the type arrives.
-
-The file of an `UnknownSubject` is never rewritten: it stays exactly as authored until the real type takes over. Its raw JSON can be edited and the file deleted like any other file. Saving it, or changing it on disk, recreates the subject from the file, which yields the real subject when the type can now be created, or an `UnknownSubject` with the current reason. When types are added, storages upgrade their `UnknownSubject`s automatically; a file with invalid JSON only changes when the file itself changes. See [Subjects, Storage & Files](../../administration/subjects.md#file-types) for how JSON files are classified.
+A JSON file whose `$type` is not loaded yet becomes an `UnknownSubject` placeholder at the path of the real subject, and the storage swaps the real subject in once a provider adds the type. See [Unknown Types](storage.md#unknown-types) for how files are classified and when placeholders are recreated.
 
 ### Multiple Providers
 
 Each `NuGetPluginProvider` has its own loader and its own `LoadedPlugins`, so several providers can coexist, for example one per feed or per team. They share the process, which has consequences:
 
-- **Shared contracts load once per process.** A host-shared package (see [Host-Shared Package Discovery](#host-shared-package-discovery)) is loaded once into the default `AssemblyLoadContext`, and the first loaded version wins for all providers. Keep plugins that share a contract package in one provider when they need different versions of it, so the loader can pick one version that satisfies all of them.
+- **Shared contracts load once per process.** A host-shared package (see [Host-Shared Package Discovery](#host-shared-package-discovery)) is loaded once into the default `AssemblyLoadContext`, and the first loaded version wins for all providers. Configure plugins that share a contract package in one provider so they load together and the loader picks one version that satisfies all of them. A plugin added later, with **Add Plugin** or in another provider, gets the version that was loaded first.
 - **Duplicate type names are skipped.** When a provider adds a type whose full name is already registered from another assembly, the type is skipped and a warning names both assemblies. The plugin's `StatusMessage` lists the skipped types.
 - **The cache can be shared.** Packages are extracted into a temporary folder and moved into place, so providers that use the same `cacheDirectory` do not corrupt each other's extractions.
 
 ### Writing a Provider
 
-`NuGetPluginProvider` is one way to add types. Any subject can be a plugin provider: get `TypeProvider` injected and call `AddAssemblies` with the assemblies to register. To configure the provider from a JSON file like `NuGetPluginProvider`, also implement `IConfigurable` (see [Configurable Subjects](../../development/configurable-subject.md)).
+`NuGetPluginProvider` is one way to add types. Any subject can be a plugin provider: get `TypeProvider` injected and call `AddAssemblies` with the assemblies to register. A provider that lives in a JSON file like `NuGetPluginProvider` must implement `IConfigurable`, because storages only create `IConfigurable` types from JSON files; a file of any other type stays an `UnknownSubject` (see [Configurable Subjects](../../development/configurable-subject.md)).
 
 ```csharp
 [InterceptorSubject]
-public partial class MyPluginProvider : BackgroundService
+public partial class MyPluginProvider : BackgroundService, IConfigurable
 {
     private readonly TypeProvider _typeProvider;
 
     public MyPluginProvider(TypeProvider typeProvider)
     {
         _typeProvider = typeProvider;
+        PluginFolder = "MyPlugins";
     }
+
+    [Configuration]
+    public partial string PluginFolder { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var assemblies = LoadMyAssemblies();
+        var assemblies = LoadMyAssemblies(PluginFolder);
         var skippedTypes = _typeProvider.AddAssemblies(assemblies);
         // Log skippedTypes: their full names are already registered from other assemblies.
         return Task.CompletedTask;
@@ -227,7 +230,7 @@ The sample plugins demonstrate the recommended headless/UI separation pattern an
 - **`MyCompany.SamplePlugin2`** -- a second headless library containing a light sensor device subject. Also implements `IMyDevice`.
 - **`MyCompany.SamplePlugin2.HomeBlaze`** -- a Razor SDK project containing Blazor UI components for the light sensor. Follows the same pattern as plugin 1.
 
-All projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listing `MyCompany.SamplePlugin1.HomeBlaze` in `Plugins.json` transitively pulls in `MyCompany.SamplePlugin1` and `MyCompany.Abstractions`. The development `Data/Files/Plugins.json` loads both sample plugins from the local folder feed shown in [Configuration](#configuration). Because both plugins share `MyCompany.Abstractions` in the default context, type identity is preserved -- `IMyDevice` is the same type across all plugins.
+All projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listing `MyCompany.SamplePlugin1.HomeBlaze` in `Plugins.json` transitively pulls in `MyCompany.SamplePlugin1` and `MyCompany.Abstractions`. The development `Data/Files/Plugins.json` loads both sample plugins from the local folder feed described in [Configuration](#configuration). Because both plugins share `MyCompany.Abstractions` in the default context, type identity is preserved: `IMyDevice` is the same type across all plugins.
 
 ### Host-Shared Package Discovery
 
@@ -237,7 +240,7 @@ Plugin dependencies that need to be shared across plugins (e.g., contract/abstra
 2. **`plugin.json` manifest** -- The plugin author includes a `plugin.json` file in the nupkg root with a `hostDependencies` array listing packages that should be host-shared. This is useful when the contract author has not added the attribute.
 3. **`HostPackages` configuration** -- The host author lists glob patterns in the loader options as a manual fallback.
 
-These three sources are additive -- a package is host-shared if any source declares it so. See the [Namotion.NuGet.Plugins README](../../../../../../Namotion.NuGet.Plugins/README.md) for full details on each mechanism.
+These three sources are additive: a package is host-shared if any source declares it so. See the [Namotion.NuGet.Plugins README](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.NuGet.Plugins/README.md) for full details on each mechanism.
 
 > **Note:** UI libraries like MudBlazor are automatically detected as host dependencies when the host application references them (they appear in the host's `deps.json`). If a plugin requires an incompatible major version (e.g., MudBlazor v8 when the host uses v9), the version validation will flag this as a conflict during Phase 3.
 
@@ -273,7 +276,7 @@ The container image reports the released versions of the Namotion libraries in i
 
 Currently removing or updating a plugin requires an application restart. Runtime unloading is planned but involves several challenges beyond assembly unloading:
 
-1. **Assembly unloading** -- `NuGetPluginLoader.UnloadPlugin()` already supports unloading the plugin's `AssemblyLoadContext`. However, host-shared assemblies loaded into the default context cannot be unloaded.
-2. **Subject instance lifecycle** -- When a plugin is unloaded, subject instances created from plugin types are still live in the object graph. These must either be removed from the graph entirely, or converted to placeholders that preserve their state without requiring the original type, as [`UnknownSubject`](#unknown-types) already does for files whose type is not loaded.
-3. **Reload sequence** -- After unloading, the updated plugin version must be downloaded, loaded into a fresh `AssemblyLoadContext`, and subject instances re-created from the preserved state.
-4. **UI invalidation** -- Blazor components from the old plugin must be replaced or removed when the plugin is unloaded.
+1. **Assembly unloading**: `NuGetPluginLoader.UnloadPlugin()` already supports unloading the plugin's `AssemblyLoadContext`. However, host-shared assemblies loaded into the default context cannot be unloaded.
+2. **Subject instance lifecycle**: When a plugin is unloaded, subject instances created from plugin types are still live in the object graph. These must either be removed from the graph entirely, or converted to placeholders that preserve their state without requiring the original type, as [`UnknownSubject`](storage.md#unknown-types) already does for files whose type is not loaded.
+3. **Reload sequence**: After unloading, the updated plugin version must be downloaded, loaded into a fresh `AssemblyLoadContext`, and subject instances re-created from the preserved state.
+4. **UI invalidation**: Blazor components from the old plugin must be replaced or removed when the plugin is unloaded.

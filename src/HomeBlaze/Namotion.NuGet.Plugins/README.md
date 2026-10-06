@@ -244,7 +244,7 @@ Everything else in the JSON file is consumer-defined and opaque to the loader. T
 }
 ```
 
-In this example, the loader reads `schemaVersion` and `hostDependencies`. The consuming application (e.g., HomeBlaze) reads `minimumHostVersion` and `diRegistrations` from `plugin.PluginManifest` -- no coupling between the loader and any specific consumer.
+In this example, the loader reads `schemaVersion` and `hostDependencies`. The host application reads `minimumHostVersion` and `diRegistrations` from `plugin.PluginManifest`, so the loader is not coupled to any specific host.
 
 ### Accessing the manifest
 

@@ -86,13 +86,24 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 | Type | Extension | Description |
 |------|-----------|-------------|
 | `MarkdownFile` | `.md` | Markdown with YAML frontmatter, embedded subjects (```` ```subject(name) ````), and live expressions (`{{ path }}`) |
-| `JsonFile` | `.json` | Plain JSON files without `$type` (non-configurable subjects) |
-| `UnknownSubject` | `.json` | Placeholder for a file whose `$type` cannot be created, or invalid JSON that contains `"$type"` |
+| `JsonFile` | `.json` | JSON data without `$type`, including invalid JSON without a `"$type"` marker |
+| `UnknownSubject` | `.json` | Placeholder for a file whose `$type` cannot be created, or invalid JSON that contains `"$type"` (see [Unknown Types](#unknown-types)) |
 | `GenericFile` | Other | Fallback for unknown extensions — metadata only |
 
 Plugin authors can register additional file types via `[FileExtension]`.
 
-An `UnknownSubject` keeps the path the real subject would have and its file is never rewritten. When `TypeProvider` raises `TypesChanged`, each storage recreates its `UnknownSubject`s whose type now resolves and swaps the real subject in at the same path. A change to the file, including a save in the editor, recreates it the same way. See [Unknown Types](plugins.md#unknown-types).
+### Unknown Types
+
+A `.json` file becomes:
+
+- the subject of its `$type` when that type can be created,
+- an `UnknownSubject` when its `$type` cannot be created, with a reason: the type is not loaded (for example because the plugin providing it has not loaded yet), the loaded type does not implement `IConfigurable`, or creating the subject failed, with the error,
+- an `UnknownSubject` with an empty type and the parse error as reason when it is not valid JSON but contains `"$type"`,
+- a `JsonFile` otherwise, including invalid JSON without a `"$type"` marker.
+
+An `UnknownSubject` shows a warning icon, the `$type` value and the reason. It keeps the path the real subject would have (the file name without `.json`), so references to that path work once the type arrives. Third-party JSON files that use a `$type` property of their own also show as `UnknownSubject`.
+
+The file of an `UnknownSubject` is never rewritten: it stays exactly as authored until the real subject takes over. Its raw JSON can be edited and the file deleted like any other file. Saving it, or changing it on disk, recreates the subject from the file, which yields the real subject when its type can now be created, or an `UnknownSubject` with the current reason. When `TypeProvider` raises `TypesChanged`, for example because a [plugin provider](plugins.md#plugin-providers) added types, each storage recreates its `UnknownSubject`s the same way and swaps a real subject in at the same path. One with an empty type, from invalid JSON, only changes when its file changes.
 
 ### Subject Files vs Documents [Implemented]
 

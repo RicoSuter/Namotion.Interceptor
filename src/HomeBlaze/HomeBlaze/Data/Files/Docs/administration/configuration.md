@@ -63,7 +63,7 @@ Data/
 
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
 
-`Plugins/Cache` only holds packages that HomeBlaze downloads again when they are missing, so it can be excluded from backups. Plugins are configured in plugin provider files such as `Files/Plugins.json`, which can live anywhere in the subject tree. Relative feed folders and a relative cache directory in these files resolve against the data folder. See [Plugin System Design](../architecture/design/plugins.md#configuration) for the fields.
+`Plugins/Cache` only holds packages that HomeBlaze downloads again when they are missing, so it can be excluded from backups as long as the configured feeds still serve those package versions. Plugins are configured in plugin provider files such as `Files/Plugins.json`, which can live anywhere in the subject tree. Relative feed folders and a relative cache directory in these files resolve against the data folder. See [Plugin System Design](../architecture/design/plugins.md#configuration) for the fields.
 
 ---
 
