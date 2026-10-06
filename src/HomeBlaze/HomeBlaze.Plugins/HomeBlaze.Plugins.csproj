@@ -4,10 +4,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="HomeBlaze.Plugins.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\Namotion.NuGet.Plugins\Namotion.NuGet.Plugins.csproj" />
     <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
   </ItemGroup>
 
   <ItemGroup>
