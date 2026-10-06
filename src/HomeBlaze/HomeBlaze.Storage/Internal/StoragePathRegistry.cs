@@ -32,6 +32,15 @@ internal sealed class StoragePathRegistry
     public bool TryGetSubject(string path, out IInterceptorSubject subject)
         => _pathToSubject.TryGetValue(NormalizeForLookup(path), out subject!);
 
+    /// <summary>
+    /// Returns a snapshot of the registered subjects of type <typeparamref name="T"/> with their original paths.
+    /// </summary>
+    public List<(T Subject, string Path)> GetSubjects<T>() where T : IInterceptorSubject
+        => _subjectPaths
+            .Where(entry => entry.Key is T)
+            .Select(entry => ((T)entry.Key, entry.Value))
+            .ToList();
+
     public void Register(IInterceptorSubject subject, string path)
     {
         var originalPath = NormalizePath(path);  // Preserves case
