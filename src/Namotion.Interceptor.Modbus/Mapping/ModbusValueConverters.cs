@@ -242,7 +242,8 @@ internal static class ModbusValueConverters
             return value * staticScale;
         }
 
-        return exponent < 0 ? value / Math.Pow(10, -exponent) : value * Math.Pow(10, exponent);
+        var scaled = exponent < 0 ? value / Math.Pow(10, -exponent) : value * Math.Pow(10, exponent);
+        return staticScale is 1.0 ? scaled : scaled * staticScale;
     }
 
     private static decimal GetDecimalScale(bool hasDynamicScale, decimal staticScale, int exponent)
@@ -257,7 +258,8 @@ internal static class ModbusValueConverters
             throw new OverflowException($"Scale factor exponent {exponent} is outside the decimal range.");
         }
 
-        return exponent < 0 ? NegativePowersOfTen[-exponent] : PowersOfTen[exponent];
+        var power = exponent < 0 ? NegativePowersOfTen[-exponent] : PowersOfTen[exponent];
+        return staticScale == 1m ? power : staticScale * power;
     }
 
     private static decimal ToDecimalScale(string propertyPath, double scale)

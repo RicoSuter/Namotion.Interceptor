@@ -457,4 +457,27 @@ public class ModbusValueConvertersTests
         // Assert
         Assert.Equal(Marker.High, value);
     }
+
+    [Fact]
+    public void WhenScaleIsCombinedWithDynamicScaleFactorIntoDecimal_ThenBothApplyExactly()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.01, ScaleFactorProperty = "Factor" },
+            typeof(decimal?), [0x11, 0xC6], exponent: -2);
+
+        // Assert
+        Assert.Equal(0.455m, value);
+    }
+
+    [Fact]
+    public void WhenScaleIsCombinedWithDynamicScaleFactorIntoDouble_ThenBothApply()
+    {
+        // Act
+        var value = (double?)Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.01, ScaleFactorProperty = "Factor" },
+            typeof(double?), [0x11, 0xC6], exponent: -2);
+
+        // Assert
+        Assert.NotNull(value);
+        Assert.Equal(0.455, value.Value, 10);
+    }
 }

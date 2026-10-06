@@ -39,13 +39,15 @@ public class ModbusRegisterAttribute : Attribute
     public ModbusWordOrder WordOrder { get; init; } = ModbusWordOrder.HighWordFirst;
 
     /// <summary>
-    /// Gets the static factor the raw value is multiplied with. Requires a floating point or decimal property.
+    /// Gets the static factor the raw value is multiplied with, in addition to the dynamic scale factor when one applies:
+    /// value = raw * Scale * 10^exponent. Requires a floating point or decimal property.
     /// </summary>
     public double Scale { get; init; } = 1.0;
 
     /// <summary>
     /// Gets the name of an <see cref="ModbusDataType.S16"/> register property on the same subject holding a power-of-ten exponent:
-    /// value = raw * 10^exponent. Mutually exclusive with <see cref="Scale"/>.
+    /// value = raw * <see cref="Scale"/> * 10^exponent. For a scale factor on another subject, implement
+    /// <c>IModbusScaleFactorProvider</c> instead.
     /// </summary>
     public string? ScaleFactorProperty { get; init; }
 

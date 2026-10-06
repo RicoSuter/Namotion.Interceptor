@@ -285,6 +285,20 @@ public partial class ModbusRegisterResolverTests
     }
 
     [Fact]
+    public void WhenScaleIsCombinedWithScaleFactorProperty_ThenBindingIsLinked()
+    {
+        // Arrange
+        var subject = new ScaleAndScaleFactorSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var value = Find(bindings, subject, nameof(ScaleAndScaleFactorSubject.Value));
+        Assert.Same(Find(bindings, subject, nameof(ScaleAndScaleFactorSubject.Factor)), value.ScaleFactor);
+    }
+
+    [Fact]
     public void WhenPropertyIsExcluded_ThenNoBindingIsCreated()
     {
         // Arrange
@@ -400,7 +414,6 @@ public partial class ModbusRegisterResolverTests
 
     public static TheoryData<Func<IInterceptorSubjectContext, IInterceptorSubject>> InvalidSubjects => new()
     {
-        context => new ScaleAndScaleFactorSubject(context),
         context => new MissingScaleFactorSubject(context),
         context => new FloatScaleFactorSubject(context),
         context => new U16ScaleFactorSubject(context),

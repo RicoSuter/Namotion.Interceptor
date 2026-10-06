@@ -145,11 +145,6 @@ internal static class ModbusRegisterResolver
 
     private static void ValidateScale(string path, ModbusRegisterAttribute attribute)
     {
-        if (attribute.ScaleFactorProperty is not null && attribute.Scale is not 1.0)
-        {
-            throw ModbusConfigurationException.ForMapping(path, "Scale and ScaleFactorProperty are mutually exclusive.");
-        }
-
         if (!double.IsFinite(attribute.Scale) || attribute.Scale == 0)
         {
             throw ModbusConfigurationException.ForMapping(path, "Scale must be a finite, non-zero number.");
