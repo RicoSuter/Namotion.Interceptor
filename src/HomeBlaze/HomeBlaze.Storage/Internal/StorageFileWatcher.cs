@@ -25,6 +25,11 @@ internal sealed class StorageFileWatcher : IDisposable
     private FileSystemWatcher? _watcher;
     private IDisposable? _fileEventSubscription;
 
+    /// <summary>
+    /// Whether <see cref="Dispose"/> has been called on this watcher.
+    /// </summary>
+    internal bool IsDisposed { get; private set; }
+
     public StorageFileWatcher(
         string basePath,
         Func<FileSystemEventArgs, Task> onFileEvent,
@@ -222,5 +227,6 @@ internal sealed class StorageFileWatcher : IDisposable
         _fileEvents.Dispose();
         _watcher?.Dispose();
         _watcher = null;
+        IsDisposed = true;
     }
 }

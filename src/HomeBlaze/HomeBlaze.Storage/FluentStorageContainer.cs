@@ -39,6 +39,11 @@ public partial class FluentStorageContainer :
     private JsonSubjectSynchronizer? _jsonSyncHelper;
 
     /// <summary>
+    /// The active file watcher, if any. Exposed for tests verifying watcher lifecycle across reconnects.
+    /// </summary>
+    internal StorageFileWatcher? FileWatcher => _fileWatcher;
+
+    /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
     /// </summary>
     [Configuration]
@@ -148,6 +153,11 @@ public partial class FluentStorageContainer :
         var isInMemory = StorageType == "inmemory";
         if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
+
+        // Reconnecting replaces the watcher below; without disposing the old one here first, every
+        // reconnect (e.g. a configuration save) leaks its FileSystemWatcher and Rx subscription.
+        _fileWatcher?.Dispose();
+        _fileWatcher = null;
 
         Status = StorageStatus.Initializing;
         try

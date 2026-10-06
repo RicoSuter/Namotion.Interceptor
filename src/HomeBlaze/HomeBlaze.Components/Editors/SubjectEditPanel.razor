@@ -143,6 +143,14 @@
 
         try
         {
+            // The edit component already wrote the file via IStorageFile.WriteAsync; persisting
+            // the storage's IConfigurable parent instead would reconnect and rescan the whole storage.
+            if (subject is IStorageFile && subject is not IConfigurable)
+            {
+                Snackbar.Add("Configuration saved.", Severity.Info);
+                return;
+            }
+
             if (subject is not IConfigurable)
             {
                 subject = subject.TryGetFirstParent<IConfigurable>() as IInterceptorSubject;
