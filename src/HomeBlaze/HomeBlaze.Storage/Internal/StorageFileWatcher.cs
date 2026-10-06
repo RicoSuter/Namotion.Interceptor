@@ -25,10 +25,20 @@ internal sealed class StorageFileWatcher : IDisposable
     private FileSystemWatcher? _watcher;
     private IDisposable? _fileEventSubscription;
 
+    // Read by the FileSystemWatcher's background callback thread and written by Dispose on an
+    // arbitrary thread; must be volatile so a callback in flight during Dispose observes it.
+    private volatile bool _disposed;
+
     /// <summary>
     /// Whether <see cref="Dispose"/> has been called on this watcher.
     /// </summary>
-    internal bool IsDisposed { get; private set; }
+    internal bool IsDisposed => _disposed;
+
+    /// <summary>
+    /// The underlying file system watcher, if started and not yet disposed. Exposed for tests
+    /// verifying that a disposed instance does not create a replacement watcher.
+    /// </summary>
+    internal FileSystemWatcher? Watcher => _watcher;
 
     public StorageFileWatcher(
         string basePath,
@@ -174,6 +184,18 @@ internal sealed class StorageFileWatcher : IDisposable
     public string GetRelativePath(string fullPath)
         => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
 
+    /// <summary>
+    /// Pushes a file system event directly into the processing pipeline. Exposed for tests
+    /// simulating a watcher callback without a real file system event.
+    /// </summary>
+    internal void SimulateFileEvent(FileSystemEventArgs e) => _fileEvents.OnNext(e);
+
+    /// <summary>
+    /// Simulates a <see cref="FileSystemWatcher.Error"/> callback. Exposed for tests verifying
+    /// the watcher does not restart once disposed.
+    /// </summary>
+    internal void SimulateWatcherError(Exception exception) => OnWatcherError(this, new ErrorEventArgs(exception));
+
     private bool IsOwnWrite(string fullPath)
     {
         if (_pendingWrites.TryGetValue(fullPath, out var writeTime))
@@ -198,12 +220,20 @@ internal sealed class StorageFileWatcher : IDisposable
 
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
+        // A callback can still be in flight when Dispose runs on another thread; without this
+        // check it would restart and leave an undisposed FileSystemWatcher behind.
+        if (_disposed)
+            return;
+
         _logger?.LogError(e.GetException(), "FileSystemWatcher error (buffer overflow?), triggering rescan");
         Restart();
     }
 
     private void Restart()
     {
+        if (_disposed)
+            return;
+
         _watcher?.Dispose();
         Start();
 
@@ -223,10 +253,22 @@ internal sealed class StorageFileWatcher : IDisposable
 
     public void Dispose()
     {
+        // Set first so a concurrent watcher callback (possibly already running on the FileSystemWatcher's
+        // own callback thread) sees it before touching the watcher, subscription, or subject below.
+        _disposed = true;
+
+        if (_watcher != null)
+        {
+            _watcher.EnableRaisingEvents = false;
+            _watcher.Error -= OnWatcherError;
+            _watcher.Dispose();
+            _watcher = null;
+        }
+
         _fileEventSubscription?.Dispose();
-        _fileEvents.Dispose();
-        _watcher?.Dispose();
-        _watcher = null;
-        IsDisposed = true;
+
+        // OnCompleted (not Dispose) so a callback that raced past the checks above and calls
+        // OnNext afterwards is a no-op instead of throwing ObjectDisposedException.
+        _fileEvents.OnCompleted();
     }
 }

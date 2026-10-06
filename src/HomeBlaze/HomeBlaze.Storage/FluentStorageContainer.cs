@@ -39,7 +39,7 @@ public partial class FluentStorageContainer :
     private JsonSubjectSynchronizer? _jsonSyncHelper;
 
     /// <summary>
-    /// The active file watcher, if any. Exposed for tests verifying watcher lifecycle across reconnects.
+    /// The active file watcher, if any.
     /// </summary>
     internal StorageFileWatcher? FileWatcher => _fileWatcher;
 
@@ -154,21 +154,19 @@ public partial class FluentStorageContainer :
         if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
-        // Reconnecting replaces the watcher below; without disposing the old one here first, every
-        // reconnect (e.g. a configuration save) leaks its FileSystemWatcher and Rx subscription.
-        _fileWatcher?.Dispose();
-        _fileWatcher = null;
-
         Status = StorageStatus.Initializing;
         try
         {
             _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
+
+            var previousClient = _client;
             _client = StorageType switch
             {
                 "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(_storageDirectory!),
                 "inmemory" => StorageFactory.Blobs.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
             };
+            previousClient?.Dispose();
 
             _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
 
@@ -181,6 +179,11 @@ public partial class FluentStorageContainer :
             if (EnableFileWatching && !isInMemory)
             {
                 StartFileWatching();
+            }
+            else
+            {
+                _fileWatcher?.Dispose();
+                _fileWatcher = null;
             }
         }
         catch (Exception ex)
@@ -254,18 +257,26 @@ public partial class FluentStorageContainer :
 
     private void StartFileWatching()
     {
-        _fileWatcher = new StorageFileWatcher(
+        // Dispose the previous watcher immediately before replacing it, not at the start of
+        // ConnectAsync, so it keeps covering changes while ScanAsync runs.
+        _fileWatcher?.Dispose();
+
+        StorageFileWatcher? watcher = null;
+        watcher = new StorageFileWatcher(
             _storageDirectory!,
-            ProcessFileEventAsync,
+            e => ProcessFileEventAsync(watcher!, e),
             () => ScanAsync(CancellationToken.None),
             _logger);
 
-        _fileWatcher.Start();
+        _fileWatcher = watcher;
+        watcher.Start();
     }
 
-    private Task ProcessFileEventAsync(FileSystemEventArgs e)
+    private Task ProcessFileEventAsync(StorageFileWatcher watcher, FileSystemEventArgs e)
     {
-        var relativePath = _fileWatcher!.GetRelativePath(e.FullPath);
+        // Close over the watcher that raised the event rather than reading the mutable _fileWatcher
+        // field, which a concurrent reconnect may have already reassigned or cleared.
+        var relativePath = watcher.GetRelativePath(e.FullPath);
 
         return e.ChangeType switch
         {
@@ -273,7 +284,7 @@ public partial class FluentStorageContainer :
             WatcherChangeTypes.Changed => HandleFileChangedAsync(relativePath, e.FullPath),
             WatcherChangeTypes.Deleted => HandleFileDeletedAsync(relativePath),
             WatcherChangeTypes.Renamed when e is RenamedEventArgs re =>
-                HandleFileRenamedAsync(relativePath, _fileWatcher.GetRelativePath(re.OldFullPath)),
+                HandleFileRenamedAsync(relativePath, watcher.GetRelativePath(re.OldFullPath)),
             _ => Task.CompletedTask
         };
     }

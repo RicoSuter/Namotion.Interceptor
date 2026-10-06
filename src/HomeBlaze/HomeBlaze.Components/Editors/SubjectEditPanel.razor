@@ -134,7 +134,8 @@
 
     /// <summary>
     /// Writes the configuration through the nearest IConfigurationWriter among the subject's parents,
-    /// else the root manager, and applies it.
+    /// else the root manager, and applies it. A storage file that is not itself IConfigurable is not
+    /// persisted further here, because its edit component already wrote the file.
     /// </summary>
     public async Task PersistAsync(CancellationToken cancellationToken)
     {
@@ -160,11 +161,6 @@
             {
                 var configurationWriter = RootManager.GetConfigurationWriter(subject);
                 await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
-            }
-
-            if (subject is IStorageFile storageFile)
-            {
-                await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
             if (subject is IConfigurable configurableSubject)

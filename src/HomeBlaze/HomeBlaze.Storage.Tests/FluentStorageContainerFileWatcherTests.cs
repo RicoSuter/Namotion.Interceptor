@@ -32,6 +32,27 @@ public class FluentStorageContainerFileWatcherTests : IDisposable
         Assert.False(secondWatcher!.IsDisposed);
     }
 
+    [Fact]
+    public async Task WhenConnectAsyncRunsTwiceWithFileWatchingDisabled_ThenThePreviousFileWatcherIsDisposed()
+    {
+        // Arrange
+        using var storage = CreateStorage();
+        storage.ConnectionString = _storageDirectory.FullName;
+        storage.EnableFileWatching = true;
+
+        await storage.ConnectAsync(CancellationToken.None);
+        var firstWatcher = storage.FileWatcher;
+
+        // Act
+        storage.EnableFileWatching = false;
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(firstWatcher);
+        Assert.True(firstWatcher!.IsDisposed);
+        Assert.Null(storage.FileWatcher);
+    }
+
     private FluentStorageContainer CreateStorage()
     {
         var typeProvider = new TypeProvider();
