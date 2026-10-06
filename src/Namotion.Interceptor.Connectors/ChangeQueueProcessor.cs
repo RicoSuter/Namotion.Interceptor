@@ -37,7 +37,7 @@ public class ChangeQueueProcessor : IDisposable
     private readonly Func<CancellationToken, ValueTask>? _completionHandler;
     private readonly Func<int, bool>? _mergedDeliveryAdmission;
 
-    // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
+    // Use a concurrent, lock-free queue for collecting changes from the dequeue loop.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
 
     private readonly int? _maxQueueDepth;
@@ -345,8 +345,20 @@ public class ChangeQueueProcessor : IDisposable
 
             try
             {
-                while (_subscription.TryDequeue(out var change, processingToken))
+                // Checked before every dequeue so stopping is observed while producers keep the queue fed.
+                while (!processingToken.IsCancellationRequested)
                 {
+                    if (!_subscription.TryDequeueImmediate(out var change))
+                    {
+                        // Awaited rather than blocking, so an idle processor holds no thread-pool thread.
+                        if (!await _subscription.WaitToDequeueAsync(processingToken).ConfigureAwait(false))
+                        {
+                            break;
+                        }
+
+                        continue;
+                    }
+
                     if (ReferenceEquals(change.Origin.Source, _source) && !ChangeDeliveryFilter.NeedsWriteBack(in change))
                     {
                         continue;
