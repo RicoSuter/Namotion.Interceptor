@@ -73,12 +73,37 @@ internal class PackageExtractor
     private string ExtractToCache(string packageName, string packageVersion, Stream stream)
     {
         var packagePath = Path.Combine(_cacheDirectory, packageName, packageVersion);
-
-        if (!Directory.Exists(packagePath))
+        if (Directory.Exists(packagePath))
         {
-            Directory.CreateDirectory(packagePath);
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-            archive.ExtractToDirectory(packagePath);
+            return packagePath;
+        }
+
+        // Extracted into a unique sibling and moved into place, so neither a concurrent extraction of the
+        // same package nor an interrupted one can leave a partial directory that later loads treat as complete.
+        var temporaryPath = $"{packagePath}.extracting-{Guid.NewGuid():N}";
+        Directory.CreateDirectory(temporaryPath);
+        try
+        {
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
+            {
+                archive.ExtractToDirectory(temporaryPath);
+            }
+
+            try
+            {
+                Directory.Move(temporaryPath, packagePath);
+            }
+            catch (IOException) when (Directory.Exists(packagePath))
+            {
+                // Another extraction of the same package completed first; its copy is equivalent.
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryPath))
+            {
+                Directory.Delete(temporaryPath, recursive: true);
+            }
         }
 
         return packagePath;
