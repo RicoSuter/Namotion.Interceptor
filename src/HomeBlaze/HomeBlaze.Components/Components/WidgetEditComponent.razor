@@ -16,11 +16,11 @@
                       Variant="Variant.Outlined"
                       CanSelectProperty="@_canSelectSubjectOnly" />
 
-    @if (WidgetSubject?.ResolvedSubject != null)
+    @if (WidgetSubject?.GetLastResolvedSubject() is { } resolvedSubject)
     {
         <MudAlert Severity="Severity.Success" Class="mt-4">
             <MudText Typo="Typo.body2">
-                <strong>Resolved:</strong> @WidgetSubject.ResolvedSubject.GetType().Name
+                <strong>Resolved:</strong> @resolvedSubject.GetType().Name
             </MudText>
         </MudAlert>
     }

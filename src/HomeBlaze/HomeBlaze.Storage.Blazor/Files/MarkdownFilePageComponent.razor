@@ -106,7 +106,7 @@
             else if (child is RenderExpression expr)
             {
                 sb ??= new StringBuilder();
-                sb.Append(HttpUtility.HtmlEncode(expr.Value?.ToString() ?? string.Empty));
+                sb.Append(HttpUtility.HtmlEncode(expr.GetLastValue()?.ToString() ?? string.Empty));
             }
             else
             {

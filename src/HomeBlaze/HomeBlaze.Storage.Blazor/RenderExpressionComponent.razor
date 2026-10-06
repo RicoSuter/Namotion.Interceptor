@@ -6,7 +6,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(RenderExpression))]
 @implements ISubjectComponent
 
-@Expression?.Value
+@Expression?.GetLastValue()
 
 @code {
     [Parameter]

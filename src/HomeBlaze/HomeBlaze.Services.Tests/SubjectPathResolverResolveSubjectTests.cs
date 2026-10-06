@@ -25,6 +25,23 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
     }
 
     [Fact]
+    public void WhenChildIsAttachedAfterUnsuccessfulResolve_ThenResolvesTheChild()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+        Assert.Null(Resolver.ResolveSubject("/Child", PathStyle.Canonical));
+
+        // Act
+        root.Child = child;
+        var result = Resolver.ResolveSubject("/Child", PathStyle.Canonical);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    [Fact]
     public void ResolveSubject_AbsoluteChild_ReturnsChild()
     {
         // Arrange

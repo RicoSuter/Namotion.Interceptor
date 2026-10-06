@@ -13,6 +13,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Recorder;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -296,6 +297,43 @@ public class FluentStorageContainerUpgradeTests : IDisposable
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(() => expressions.All(updatedExpressions.ContainsKey));
+        Assert.All(expressions, expression => Assert.Equal("Upgraded Motor", expression.GetLastValue()));
+    }
+
+    [Fact]
+    public async Task WhenMarkdownExpressionIsReadForRendering_ThenOnlyItsValueIsRecorded()
+    {
+        // Arrange
+        WriteFile("Devices/Motor1.json", """{ "$type": "HomeBlaze.Samples.Motor", "name": "Motor" }""");
+        WriteFile("Dashboard.md", "Name: {{ /Devices/Motor1/Name }}");
+        FluentStorageContainer? root = null;
+        var resolver = new SubjectPathResolver(() => root);
+        var (storage, typeProvider) = CreateStorage(resolver: resolver);
+        root = storage;
+        using var _ = storage;
+        typeProvider.AddAssembly(typeof(MarkdownFile).Assembly);
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithReadPropertyRecorder()
+            .WithRegistry()
+            .WithService<ILifecycleHandler>(() => resolver, handler => handler == resolver);
+        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        await storage.ConnectAsync(CancellationToken.None);
+        var expression = ((MarkdownFile)storage.Children["Dashboard.md"]).Children.Values.OfType<RenderExpression>().Single();
+
+        // Act
+        var recordedProperties = new ConcurrentDictionary<PropertyReference, bool>();
+        object? value;
+        using (ReadPropertyRecorder.Start(recordedProperties))
+        {
+            value = expression.GetLastValue();
+        }
+
+        // Assert
+        Assert.Equal("Motor", value);
+        Assert.Equal([new PropertyReference(expression, nameof(RenderExpression.Value))], recordedProperties.Keys);
     }
 
     private static MemoryStream ToStream(string content) => new(Encoding.UTF8.GetBytes(content));

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
 using HomeBlaze.Services.Tests.Models;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -13,7 +13,7 @@ namespace HomeBlaze.Services.Tests;
 public class SubjectPathResolverReplacementTests : SubjectPathResolverTestBase
 {
     [Fact]
-    public async Task WhenSubjectAtPathIsReplaced_ThenEveryDerivedReferenceToThePathIsRecalculated()
+    public void WhenSubjectAtPathIsReplaced_ThenEveryDerivedReferenceToThePathIsRecalculated()
     {
         // Arrange
         var placeholder = new TestContainer { Name = "Placeholder" };
@@ -29,15 +29,15 @@ public class SubjectPathResolverReplacementTests : SubjectPathResolverTestBase
         };
 
         var changes = new ConcurrentQueue<SubjectPropertyChange>();
-        using var subscription = Context.GetPropertyChangeObservable().Subscribe(changes.Enqueue);
+        using var subscription = Context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(changes.Enqueue);
 
         // Act
         var motor = new TestContainer { Name = "Motor" };
         root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["Motor1"] = motor };
 
         // Assert
-        await AsyncTestHelpers.WaitUntilAsync(() =>
-            HasResolvedTo(changes, firstReference, motor) && HasResolvedTo(changes, secondReference, motor));
+        Assert.True(HasResolvedTo(changes, firstReference, motor));
+        Assert.True(HasResolvedTo(changes, secondReference, motor));
     }
 
     private static bool HasResolvedTo(IEnumerable<SubjectPropertyChange> changes, TestPathReference reference, IInterceptorSubject expected)

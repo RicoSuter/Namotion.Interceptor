@@ -19,7 +19,9 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     </ItemGroup>
 
 </Project>
