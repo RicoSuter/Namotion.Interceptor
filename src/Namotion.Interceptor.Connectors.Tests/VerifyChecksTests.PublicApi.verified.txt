@@ -366,7 +366,7 @@ namespace Namotion.Interceptor.Connectors.Paths
                 "path",
                 "property",
                 "index"})]
-        public static System.Collections.Generic.IEnumerable<System.ValueTuple<string, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?, object?>> GetPropertiesFromPaths(this Namotion.Interceptor.IInterceptorSubject rootSubject, System.Collections.Generic.IEnumerable<string> paths, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory = null, bool useCache = true) { }
+        public static System.Collections.Generic.IEnumerable<System.ValueTuple<string, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?, object?>> GetPropertiesFromPaths(this Namotion.Interceptor.IInterceptorSubject rootSubject, System.Collections.Generic.IEnumerable<string> paths, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory = null) { }
         [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
                 "property",
                 "index"})]

@@ -37,20 +37,7 @@ public class AttributeBasedPathProvider : PathProviderBase
     /// or properties marked with [InlinePaths] for path resolution.
     /// </remarks>
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        // Include if has matching [Path] attribute
-        var hasPathAttribute = property.ReflectionAttributes
-            .OfType<PathAttribute>()
-            .Any(a => a.Name == _name);
-
-        if (hasPathAttribute)
-            return true;
-
-        // Also include [InlinePaths] properties for path resolution (transparent containers)
-        return property.ReflectionAttributes
-            .OfType<InlinePathsAttribute>()
-            .Any();
-    }
+        => FindPathAttribute(property.ReflectionAttributes, out var hasInlinePaths) is not null || hasInlinePaths;
 
     /// <inheritdoc />
     /// <remarks>
@@ -58,11 +45,45 @@ public class AttributeBasedPathProvider : PathProviderBase
     /// Use <see cref="IsPropertyIncluded"/> to check if a property should be monitored/exposed.
     /// </remarks>
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
-    {
-        var pathAttribute = property.ReflectionAttributes
-            .OfType<PathAttribute>()
-            .FirstOrDefault(a => a.Name == _name);
+        => FindPathAttribute(property.ReflectionAttributes, out _)?.Path;
 
-        return pathAttribute?.Path;
+    // Indexed rather than enumerated: this runs for every property of a subject on each segment lookup, and an
+    // interface enumerator would allocate per call.
+    private PathAttribute? FindPathAttribute(IReadOnlyCollection<Attribute> attributes, out bool hasInlinePaths)
+    {
+        hasInlinePaths = false;
+        if (attributes is IList<Attribute> list)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (Match(list[i], ref hasInlinePaths) is { } match)
+                {
+                    return match;
+                }
+            }
+
+            return null;
+        }
+
+        foreach (var attribute in attributes)
+        {
+            if (Match(attribute, ref hasInlinePaths) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private PathAttribute? Match(Attribute attribute, ref bool hasInlinePaths)
+    {
+        if (attribute is PathAttribute pathAttribute && pathAttribute.Name == _name)
+        {
+            return pathAttribute;
+        }
+
+        hasInlinePaths |= attribute is InlinePathsAttribute;
+        return null;
     }
 }
