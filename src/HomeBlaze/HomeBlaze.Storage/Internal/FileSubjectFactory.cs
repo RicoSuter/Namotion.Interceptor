@@ -126,10 +126,7 @@ internal sealed class FileSubjectFactory
         {
             _logger?.LogError(exception, "Failed to create subject of type {Type} from: {Path}", typeName, blob.FullPath);
 
-            // ActivatorUtilities invokes the constructor directly for a type with no DI parameters, so the
-            // original exception usually isn't wrapped; TargetInvocationException only shows up for overloads
-            // it reaches through reflection. Either way, the outer message is the one the constructor chose
-            // to surface, so prefer it over an inner cause's message.
+            // Prefer the constructor's own message over an inner cause; unwrap only reflection's wrapper.
             reason = exception is TargetInvocationException { InnerException: { } inner } ? inner.Message : exception.Message;
         }
 
