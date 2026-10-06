@@ -6,15 +6,13 @@ namespace Namotion.Interceptor.Cache;
 
 internal sealed class ReadInterceptorChain<TProperty>
 {
-    public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext<TProperty> context, Func<IInterceptorSubject, TProperty> terminal);
-
     private readonly ImmutableArray<IReadInterceptor> _interceptors;
-    private readonly ReadInterceptionFunc _executeTerminal;
+    private readonly ReadFunc<TProperty> _executeTerminal;
     private readonly ContinuationNode[] _continuations;
 
     public ReadInterceptorChain(
         ImmutableArray<IReadInterceptor> interceptors,
-        ReadInterceptionFunc executeTerminal)
+        ReadFunc<TProperty> executeTerminal)
     {
         _interceptors = interceptors;
         _executeTerminal = executeTerminal;
