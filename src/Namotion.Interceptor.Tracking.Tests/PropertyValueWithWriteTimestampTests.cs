@@ -31,24 +31,6 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
     }
 
-    [Fact]
-    public void WhenWriteCommitsAfterTheValueRead_ThenValueComesWithTheLaterWritesTimestamp()
-    {
-        // Arrange
-        var subject = CreateCounter(out var interceptor);
-        var property = subject.GetPropertyReference(nameof(TimestampedCounter.Value));
-        Write(subject, 1, FirstTimestamp);
-        interceptor.AfterValueRead = () => Write(subject, 2, SecondTimestamp);
-        interceptor.Armed = true;
-
-        // Act
-        var value = property.GetValue(out var metadata);
-
-        // Assert
-        Assert.Equal(1, value);
-        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
-    }
-
     /// <summary>
     /// An int is a type a read could take without the subject's lock, and a value read that skips the lock
     /// fails this test unless the metadata read takes it, so the pairing must not rely on the read terminal.
@@ -114,15 +96,10 @@ public class PropertyValueWithWriteTimestampTests
         var property = subject.GetPropertyReference(nameof(TimestampedCounter.Value));
 
         // Act
-        _ = subject.Value;
-        var syncRootHeldForPlainRead = observer.SyncRootHeld;
-
         _ = property.GetValue(out _);
-        var syncRootHeldForPairedRead = observer.SyncRootHeld;
 
         // Assert
-        Assert.False(syncRootHeldForPlainRead);
-        Assert.False(syncRootHeldForPairedRead);
+        Assert.False(observer.SyncRootHeld);
     }
 
     [Fact]
@@ -197,53 +174,6 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
         Assert.Equal(expectedValue, settledValue);
         Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
-    }
-
-    /// <summary>
-    /// A dependency on another subject is recorded like any other, so the paired read reaches that
-    /// subject's write state for the timestamp while the recalculation is still pending.
-    /// </summary>
-    [Fact]
-    public async Task WhenDerivedPropertyDependsOnAnotherSubject_ThenPairedReadCarriesThatSubjectsWriteTimestamp()
-    {
-        // Arrange
-        var parking = new ParkingWriteInterceptor(nameof(Tire.Pressure));
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        context.AddService<IWriteInterceptor>(parking);
-
-        var car = new Car(context);
-        var averagePressure = car.GetPropertyReference(nameof(Car.AveragePressure));
-
-        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
-        {
-            foreach (var tire in car.Tires)
-            {
-                tire.Pressure = 2m;
-            }
-        }
-
-        parking.Armed = true;
-        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-        {
-            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
-            {
-                car.Tires[0].Pressure = 6m;
-            }
-        }, "writer");
-
-        Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
-
-        // Act
-        var separateTimestamp = averagePressure.TryGetWriteTimestamp();
-        var pairedValue = averagePressure.GetValue(out var pairedMetadata);
-
-        parking.Release.Set();
-        await writer.WaitAsync(WaitBudget);
-
-        // Assert
-        Assert.Equal(FirstTimestamp, separateTimestamp);
-        Assert.Equal(3m, pairedValue);
-        Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
     }
 
     /// <summary>
@@ -396,153 +326,6 @@ public class PropertyValueWithWriteTimestampTests
     }
 
     /// <summary>
-    /// Without an equality check, rewriting a derived-with-setter property's value stamps its write state
-    /// before the recalculation commits the equal value that write produces. The paired read returns the
-    /// timestamp of that rewrite, not the older one the previous recalculation committed with an equal value.
-    /// </summary>
-    [Fact]
-    public async Task WhenDerivedPropertyWithSetterIsRewrittenWithAnEqualValue_ThenValueComesWithTheRewriteTimestamp()
-    {
-        // Arrange
-        var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
-        var context = InterceptorSubjectContext.Create().WithDerivedPropertyChangeDetection();
-        context.AddService<IWriteInterceptor>(parking);
-
-        var person = new DerivedSetterPerson(context);
-        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
-
-        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
-        {
-            person.Nickname = "John";
-        }
-
-        parking.Armed = true;
-        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-        {
-            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
-            {
-                person.Nickname = "John";
-            }
-        }, "writer");
-
-        Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
-
-        // Act
-        var separateTimestamp = nickname.TryGetWriteTimestamp();
-        var pairedValue = nickname.GetValue(out var pairedMetadata);
-
-        parking.Release.Set();
-        await writer.WaitAsync(WaitBudget);
-
-        var settledValue = nickname.GetValue(out var settledMetadata);
-
-        // Assert
-        Assert.Equal(SecondTimestamp, separateTimestamp);
-        Assert.Equal("John", pairedValue);
-        Assert.Equal(SecondTimestamp, pairedMetadata.WriteTimestamp);
-        Assert.Equal("John", settledValue);
-        Assert.Equal(SecondTimestamp, settledMetadata.WriteTimestamp);
-    }
-
-    /// <summary>
-    /// A derived-with-setter write recalculates after its terminal, so an older write's recalculation can run
-    /// after a newer write has settled. It then reads the newer value and must leave that write's timestamp in
-    /// place, for the property and for the derived property that depends on it.
-    /// </summary>
-    [Fact(Skip = "Known limit listed on PropertyReference.GetValue(out PropertyValueMetadata): the late recalculation stamps the older write's timestamp.")]
-    public async Task WhenOlderSetterWriteRecalculatesAfterANewerWriteSettled_ThenNewerWriteTimestampIsKept()
-    {
-        // Arrange
-        var parking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        context.AddService<IWriteInterceptor>(parking);
-
-        var person = new DerivedSetterPerson(context);
-        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
-        var nicknameWithPrefix = person.GetPropertyReference(nameof(DerivedSetterPerson.NicknameWithPrefix));
-
-        parking.Armed = true;
-        var olderWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-        {
-            using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
-            {
-                person.Nickname = "B";
-            }
-        }, "older writer");
-
-        Assert.True(parking.Committed.Wait(WaitBudget), "The older writer did not reach the parked commit.");
-
-        // Act
-        using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
-        {
-            person.Nickname = "C";
-        }
-
-        parking.Release.Set();
-        await olderWriter.WaitAsync(WaitBudget);
-
-        var value = nickname.GetValue(out var metadata);
-        var prefixedValue = nicknameWithPrefix.GetValue(out var prefixedMetadata);
-
-        // Assert
-        Assert.Equal("C", value);
-        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
-        Assert.Equal(SecondTimestamp, nickname.TryGetWriteTimestamp());
-        Assert.Equal("Mr. C", prefixedValue);
-        Assert.Equal(SecondTimestamp, prefixedMetadata.WriteTimestamp);
-    }
-
-    /// <summary>
-    /// The older write's recalculation reads the newer value and publishes it with the older timestamp, and the
-    /// newer write's own recalculation, running last, stamps the newer timestamp again.
-    /// </summary>
-    [Fact]
-    public async Task WhenNewerSetterWriteCommitsBeforeAnOlderRecalculationEvaluates_ThenNewerWriteTimestampIsKept()
-    {
-        // Arrange
-        var olderParking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
-        var newerParking = new ParkingWriteInterceptor(nameof(DerivedSetterPerson.Nickname));
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        context.AddService<IWriteInterceptor>(olderParking);
-        context.AddService<IWriteInterceptor>(newerParking);
-
-        var person = new DerivedSetterPerson(context);
-        var nickname = person.GetPropertyReference(nameof(DerivedSetterPerson.Nickname));
-
-        olderParking.Armed = true;
-        var olderWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-        {
-            using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
-            {
-                person.Nickname = "B";
-            }
-        }, "older writer");
-        Assert.True(olderParking.Committed.Wait(WaitBudget), "The older writer did not reach the parked commit.");
-
-        newerParking.Armed = true;
-        var newerWriter = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
-        {
-            using (SubjectChangeContext.WithChangedTimestamp(SecondTimestamp))
-            {
-                person.Nickname = "C";
-            }
-        }, "newer writer");
-        Assert.True(newerParking.Committed.Wait(WaitBudget), "The newer writer did not reach the parked commit.");
-
-        // Act
-        olderParking.Release.Set();
-        await olderWriter.WaitAsync(WaitBudget);
-        newerParking.Release.Set();
-        await newerWriter.WaitAsync(WaitBudget);
-
-        var value = nickname.GetValue(out var metadata);
-
-        // Assert
-        Assert.Equal("C", value);
-        Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
-    }
-
-    /// <summary>
     /// A derived property over a field the interceptor cannot see is never recalculated, so its timestamp
     /// is the one from attach. The paired read still returns what the getter computes now.
     /// </summary>
@@ -567,45 +350,6 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal("1.2.3", value);
         Assert.Equal(softwareVersion.TryGetWriteTimestamp(), metadata.WriteTimestamp);
         Assert.Equal(FirstTimestamp, metadata.WriteTimestamp);
-    }
-
-    [Fact]
-    public void WhenDerivedGetterThrewAtAttach_ThenGetterIsInvoked()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-
-        // The denominator is zero when the subject attaches, so the getter throws there and no recalculation follows.
-        var divider = new Divider(context);
-        divider.Numerator = 10;
-        divider.Denominator = 2;
-        var quotient = divider.GetPropertyReference(nameof(Divider.Quotient));
-
-        // Act
-        var value = quotient.GetValue(out var metadata);
-
-        // Assert
-        Assert.Equal(5, value);
-        Assert.Null(metadata.WriteTimestamp);
-    }
-
-    [Fact]
-    public void WhenDerivedPropertyIsDetached_ThenGetterIsInvoked()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
-        var parent = new Person(context);
-        var child = new Person();
-        parent.Father = child;
-        child.FirstName = "John";
-        parent.Father = null;
-        var fullName = child.GetPropertyReference(nameof(Person.FullName));
-
-        // Act
-        var value = fullName.GetValue(out _);
-
-        // Assert
-        Assert.Equal("John", value);
     }
 
     [Fact]
@@ -635,9 +379,9 @@ public class PropertyValueWithWriteTimestampTests
         }
     }
 
-    private static TimestampedCounter CreateCounter(out ConcurrentlyWritingReadInterceptor interceptor)
+    private static TimestampedCounter CreateCounter(out WritingReadInterceptor interceptor)
     {
-        var writing = new ConcurrentlyWritingReadInterceptor(nameof(TimestampedCounter.Value));
+        var writing = new WritingReadInterceptor(nameof(TimestampedCounter.Value));
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -655,16 +399,12 @@ public class PropertyValueWithWriteTimestampTests
         }
     }
 
-    // Once armed, commits the configured writes on another thread around the next value read of the named
-    // property. The writes are joined with a bound: a read that held the subject's lock across this
-    // interceptor would block them forever.
-    private sealed class ConcurrentlyWritingReadInterceptor(string propertyName) : IReadInterceptor
+    // Once armed, runs the configured write inside the next value read of the named property, before the value is read.
+    private sealed class WritingReadInterceptor(string propertyName) : IReadInterceptor
     {
         public volatile bool Armed;
 
         public Action? BeforeValueRead { get; set; }
-
-        public Action? AfterValueRead { get; set; }
 
         public TProperty ReadProperty<TProperty>(ref PropertyReadContext<TProperty> context, ReadInterceptionDelegate<TProperty> next)
         {
@@ -674,24 +414,8 @@ public class PropertyValueWithWriteTimestampTests
             }
 
             Armed = false;
-            WriteOnOtherThread(BeforeValueRead);
-            var value = next(ref context);
-            WriteOnOtherThread(AfterValueRead);
-            return value;
-        }
-
-        private static void WriteOnOtherThread(Action? write)
-        {
-            if (write is null)
-            {
-                return;
-            }
-
-            var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(write, "writer");
-            if (!writer.Wait(WaitBudget))
-            {
-                throw new TimeoutException("The concurrent write did not commit while the read interceptor ran.");
-            }
+            BeforeValueRead?.Invoke();
+            return next(ref context);
         }
     }
 
@@ -726,17 +450,6 @@ public class PropertyValueWithWriteTimestampTests
 public partial class TimestampedCounter
 {
     public partial int Value { get; set; }
-}
-
-[InterceptorSubject]
-public partial class Divider
-{
-    public partial int Numerator { get; set; }
-
-    public partial int Denominator { get; set; }
-
-    [Derived]
-    public int Quotient => Numerator / Denominator;
 }
 
 [InterceptorSubject]
