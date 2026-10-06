@@ -7,21 +7,28 @@ namespace HomeBlaze.Abstractions.Sensors;
 /// Interface for devices that physically measure power flowing through an external circuit.
 /// Unlike <see cref="IPowerSensor"/> which reports a device's own power consumption,
 /// this interface is for measurement devices (smart plugs, energy meters) that report
-/// the power consumed by connected external devices or circuits.
+/// the power and energy flowing through connected external devices or circuits, in both directions.
 /// </summary>
 [SubjectAbstraction]
-[Description("Measures power flowing through an external circuit in watts.")]
+[Description("Measures power and energy flowing through an external circuit in both directions.")]
 public interface IPowerMeter
 {
     /// <summary>
-    /// The currently measured power in watts.
+    /// The currently measured active power in watts, positive when power flows into the measured circuit (import), negative when it flows out (export).
     /// </summary>
     [State(Unit = StateUnit.Watt, Position = 310)]
     decimal? MeasuredPower { get; }
 
     /// <summary>
-    /// The total measured energy consumed in watt-hours.
+    /// The total energy imported in watt-hours. Where the device supports it, a multi-phase meter sums the phases before splitting by direction, like a billing meter;
+    /// an implementation that reports per-phase sums instead documents it. <c>null</c> while the value is not known yet.
     /// </summary>
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 311)]
-    decimal? MeasuredEnergyConsumed { get; }
+    decimal? TotalImportedEnergy { get; }
+
+    /// <summary>
+    /// The total energy exported in watt-hours, summed like <see cref="TotalImportedEnergy"/>, or <c>null</c> if the device does not measure export or the value is not known yet.
+    /// </summary>
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 312)]
+    decimal? TotalExportedEnergy { get; }
 }

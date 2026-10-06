@@ -69,7 +69,10 @@ public partial class MyStromSwitch : BackgroundService,
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    public partial decimal? MeasuredEnergyConsumed { get; internal set; }
+    public partial decimal? TotalImportedEnergy { get; internal set; }
+
+    [Derived]
+    public decimal? TotalExportedEnergy => null;
 
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
@@ -143,7 +146,7 @@ public partial class MyStromSwitch : BackgroundService,
         LastUpdated = null;
         IsOn = null;
         MeasuredPower = null;
-        MeasuredEnergyConsumed = null;
+        TotalImportedEnergy = null;
         Temperature = null;
         Uptime = null;
     }
@@ -279,7 +282,7 @@ public partial class MyStromSwitch : BackgroundService,
         {
             IsOn = report.IsRelayOn;
             MeasuredPower = Math.Round(report.Power, 1);
-            MeasuredEnergyConsumed = Math.Round(report.EnergySinceBoot / 3600m, 2);
+            TotalImportedEnergy = Math.Round(report.EnergySinceBoot / 3600m, 2);
             Uptime = TimeSpan.FromSeconds(report.TimeSinceBoot);
             IsConnected = true;
         }

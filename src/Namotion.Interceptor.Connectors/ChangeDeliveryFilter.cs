@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -14,31 +15,27 @@ namespace Namotion.Interceptor.Connectors;
 internal static class ChangeDeliveryFilter
 {
     /// <summary>
-    /// Decides a survivor on the flush path and marks it published, in one property data lookup because
-    /// this runs per delivered change.
+    /// Decides a change about to be written and marks it published, in one property data lookup once the
+    /// property has been published, because this runs per delivered change.
     /// </summary>
     public static bool TryAcceptForDelivery(in SubjectPropertyChange change, ChangeDeliveryRule rule)
     {
         var property = change.Property;
-        if (!property.TryGetWriteState(CountsSourceCommits(rule), out var commitRevision, out var publishedToAnySource))
+        var countsSourceCommits = CountsSourceCommits(rule);
+        if (property.TryGetWriteState(countsSourceCommits, out var commitRevision, out var publishedToAnySource))
         {
-            // Nothing has ever been written to this property, so nothing can have superseded the change.
-            property.MarkAsPublishedToSource();
-            return true;
+            if (IsSupersededBy(in change, commitRevision))
+            {
+                return false;
+            }
+
+            if (publishedToAnySource)
+            {
+                return true;
+            }
         }
 
-        if (IsSupersededBy(in change, commitRevision))
-        {
-            return false;
-        }
-
-        if (!publishedToAnySource)
-        {
-            // One-way, so this is a once-per-property cost rather than a per-change one.
-            property.MarkAsPublishedToSource();
-        }
-
-        return true;
+        return TryAcceptFirstPublish(in change, countsSourceCommits);
     }
 
     /// <summary>
@@ -52,24 +49,6 @@ internal static class ChangeDeliveryFilter
     }
 
     /// <summary>
-    /// Records that this connector has written the property out. The flag it sets is not per source; see
-    /// <see cref="PropertyReference.MarkAsPublishedToSource"/> for why that is the design rather than a
-    /// simplification.
-    /// </summary>
-    public static void MarkPropertyAsPublishedToSource(in SubjectPropertyChange change)
-    {
-        var property = change.Property;
-
-        // Read before write: the flag never clears, so after a property's first delivery every later
-        // one avoids the dictionary write.
-        if (!property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
-            || !publishedToAnySource)
-        {
-            property.MarkAsPublishedToSource();
-        }
-    }
-
-    /// <summary>
     /// Whether a change from our own source still has to be written back rather than skipped as an echo.
     /// A transaction writes to the source itself and then applies locally, so that apply arrives as a
     /// confirmation. Normally there is nothing to send, since the source already has it, but a write of
@@ -79,16 +58,31 @@ internal static class ChangeDeliveryFilter
     /// </summary>
     public static bool NeedsWriteBack(in SubjectPropertyChange change)
     {
-        return change.Origin.Kind == ChangeOriginKind.Confirmed && IsPublishedToAnySource(change.Property);
+        return change.Origin.Kind == ChangeOriginKind.Confirmed
+               && change.Property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
+               && publishedToAnySource;
     }
 
-    /// <summary>
-    /// Whether any connector has written this property out, this one or another.
-    /// </summary>
-    public static bool IsPublishedToAnySource(PropertyReference property)
+    // Kept out of TryAcceptForDelivery so the lock's exception frame is not paid per delivered change.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool TryAcceptFirstPublish(in SubjectPropertyChange change, bool countsSourceCommits)
     {
-        return property.TryGetWriteState(includeSourceCommitsInRevision: false, out _, out var publishedToAnySource)
-               && publishedToAnySource;
+        var property = change.Property;
+
+        // First publish: check and mark under the lock the write terminal commits under, so a confirmation
+        // either commits first and the re-check drops this older change, or commits after the mark and is
+        // written back.
+        lock (property.Subject.SyncRoot)
+        {
+            if (property.TryGetWriteState(countsSourceCommits, out var commitRevision, out _) &&
+                IsSupersededBy(in change, commitRevision))
+            {
+                return false;
+            }
+
+            property.MarkAsPublishedToSource();
+            return true;
+        }
     }
 
     // Explicit arms rather than a comparison, so the zero value cannot fall through to the client rule.

@@ -13,8 +13,8 @@ namespace HomeBlaze.History.InMemory
         public long OversizeCount { get; }
         public int Priority { get; }
         public long RecordedCount { get; }
+        public long RetainedSampleCount { get; }
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
-        public long TotalSampleCount { get; }
         public int TrackedPropertyCount { get; }
         public HomeBlaze.History.Abstractions.HistoryPoint? GetSampleAtOrBefore(string propertyPath, System.DateTimeOffset asOf) { }
         public System.Threading.Tasks.ValueTask<HomeBlaze.History.Abstractions.HistoryPoint?> GetSampleAtOrBeforeAsync(string propertyPath, System.DateTimeOffset asOf, System.Threading.CancellationToken cancellationToken) { }
@@ -57,11 +57,11 @@ namespace HomeBlaze.History.InMemory
         [HomeBlaze.Abstractions.Attributes.State]
         public long RecordedCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
+        public long RetainedSampleCount { get; set; }
+        [HomeBlaze.Abstractions.Attributes.State]
         public string Status { get; set; }
         public System.Collections.Generic.IReadOnlySet<string> SupportedAggregations { get; }
         public string? Title { get; }
-        [HomeBlaze.Abstractions.Attributes.State]
-        public long TotalSampleCount { get; set; }
         [HomeBlaze.Abstractions.Attributes.State]
         public int TrackedPropertyCount { get; set; }
         public static System.Collections.Generic.IReadOnlyDictionary<string, Namotion.Interceptor.SubjectPropertyMetadata> DefaultProperties { get; }

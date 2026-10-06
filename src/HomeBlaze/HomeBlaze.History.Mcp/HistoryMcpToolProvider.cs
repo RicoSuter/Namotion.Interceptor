@@ -72,7 +72,8 @@ public class HistoryMcpToolProvider : IMcpToolProvider
             Description = "Query recorded history for one or more [State] property paths over a time range. " +
                           "Supports raw samples or bucketed downsampling with an aggregation. Returns a 'series' " +
                           "map keyed by path, each with a value_type hint, effective coverage ranges, the points " +
-                          "(null entries are gaps), and a truncated flag; a path that cannot be served carries its " +
+                          "(a null value means a gap, an unknown value, or the Count or Sum of a partly covered bucket), " +
+                          "and a truncated flag; a path that cannot be served carries its " +
                           "own error and the others still return data. " +
                           "All input and output timestamps are UTC. " +
                           "Use browse or search to discover paths first.",

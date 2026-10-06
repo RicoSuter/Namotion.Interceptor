@@ -351,8 +351,13 @@ public static class PropertyHistoryChartModel
     /// <summary>
     /// Splits a point sequence into contiguous runs of numeric points, breaking at every null
     /// (empty-bucket) entry. Each run renders as one chart line so gaps appear as visual breaks.
+    /// A single-point run is widened into a flat two-point run so a line chart draws it, ending at the
+    /// earliest of the point plus <paramref name="singlePointWidth"/>, the next point in
+    /// <paramref name="points"/>, and <paramref name="windowEnd"/>. A null width (raw samples) holds the
+    /// point until the next point or the window end.
     /// </summary>
-    public static IReadOnlyList<IReadOnlyList<HistoryPoint>> SplitIntoGapRuns(IReadOnlyList<HistoryPoint> points)
+    public static IReadOnlyList<IReadOnlyList<HistoryPoint>> SplitIntoGapRuns(
+        IReadOnlyList<HistoryPoint> points, TimeSpan? singlePointWidth, DateTimeOffset windowEnd)
     {
         var runs = new List<IReadOnlyList<HistoryPoint>>();
         List<HistoryPoint>? current = null;
@@ -360,11 +365,7 @@ public static class PropertyHistoryChartModel
         {
             if (point.Number is null)
             {
-                if (current is { Count: > 0 })
-                {
-                    runs.Add(current);
-                }
-
+                AddRun(runs, current, singlePointWidth, point.Timestamp < windowEnd ? point.Timestamp : windowEnd);
                 current = null;
                 continue;
             }
@@ -373,11 +374,34 @@ public static class PropertyHistoryChartModel
             current.Add(point);
         }
 
-        if (current is { Count: > 0 })
+        AddRun(runs, current, singlePointWidth, windowEnd);
+        return runs;
+    }
+
+    private static void AddRun(
+        List<IReadOnlyList<HistoryPoint>> runs, List<HistoryPoint>? run, TimeSpan? singlePointWidth, DateTimeOffset limit)
+    {
+        if (run is not { Count: > 0 })
         {
-            runs.Add(current);
+            return;
         }
 
-        return runs;
+        if (run.Count == 1)
+        {
+            var point = run[0];
+            var end = limit;
+            if (singlePointWidth is { } width)
+            {
+                var widthEnd = point.Timestamp + width;
+                if (widthEnd < end)
+                {
+                    end = widthEnd;
+                }
+            }
+
+            run.Add(point with { Timestamp = end });
+        }
+
+        runs.Add(run);
     }
 }

@@ -14,6 +14,7 @@ In practice, sources act as network clients and servers act as network servers, 
 - [WebSocket](connectors-websocket.md) - Bidirectional WebSocket protocol for real-time synchronization
 - [MQTT](connectors-mqtt.md) - MQTT client/server integration for IoT scenarios
 - [OPC UA](connectors-opcua.md) - OPC UA client/server integration for industrial automation ([Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md) | [Mapping](connectors-opcua-mapping.md))
+- [Modbus](connectors-modbus.md) - Read-only Modbus TCP client that polls device registers
 - [Subject Updates](connectors-subject-updates.md) - Wire format for serializing subject state
 - [Source Monitoring](connectors-monitoring.md) - Synchronization state, waits, and the source event stream
 
@@ -23,7 +24,7 @@ A **source** represents an external authoritative system where the data originat
 
 **Examples**: OPC UA client connecting to a PLC, MQTT client subscribing to a broker, database client, REST API consumer
 
-**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens initially by scanning the subject graph during startup, and dynamically when the model changes structurally (subjects attached or detached via lifecycle events). Dynamic ownership changes require the external system to support adding and removing subscriptions at runtime. You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
+**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens by scanning the subject graph during startup, and ownership is released when a subject is detached. How a source follows subjects attached at runtime is described in [Structural Changes](#structural-changes). You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
 
 ### Data Flow
 
@@ -148,17 +149,16 @@ A write's origin moves through a lifecycle: it starts as a pending stamp set by 
 
 ### Change Batching and Merging
 
-A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush.
+A source with a `bufferTime` above zero batches outbound changes and collapses each flush to one change per property, so `WriteChangesAsync` sees at most one entry per property per flush. At `bufferTime` zero each change is written on its own as it is dequeued. The guarantees about a flush below apply to buffered delivery only; the rest apply to both.
 
 **What a connector can rely on:**
 
 - At most one change per property per flush, spanning the batch: the survivor's old value is the oldest in it and the new value the newest, whatever order they arrived in.
 - The survivor's `Revision`, `Origin` and timestamps all come from the newest commit in the batch, so keying off `Origin.Source` sees the newest commit's origin. The exception is a batch containing a change built outside a write terminal, which carries no revision: the property then collapses by arrival position and the survivor carries no revision either, so it is always delivered.
-- Emit order is the arrival order of each property's last occurrence.
-- Only a property's settled state is delivered. A change the model has already moved past is dropped rather than sent, decided by commit order rather than by comparing values, so it holds for derived and runtime-registered properties too. Which commits count as moving the model past a change is not the same for every connector: see the rule below, because for a connector talking to a remote source a value that source sent does not count.
+- Within a flush, emit order is the arrival order of each property's last occurrence.
 - Values a source itself sent are not echoed back to it. The one exception is a transaction confirmation on a property a connector has also written, which is sent to repair the source.
 
-**The coalescing contract:** buffered delivery coalesces every change. At `bufferTime` zero it depends on the rule: a connector talking to a remote source coalesces only what was queued before processing started, so **a source that needs every intermediate value must run without buffering**, while a server keeps dropping superseded changes because it must not serve a value the model has moved past. The asymmetry is deliberate: a change queued before processing started was captured while the source was connecting, so a superseded one is stale state, whereas a change arriving afterwards is stream data, where an intermediate value is data rather than staleness.
+**The coalescing contract:** only a property's settled state is delivered. A change the model has already moved past is dropped rather than sent, decided by commit order rather than by comparing values, so it holds for derived and runtime-registered properties too. Which commits count as moving the model past a change is not the same for every connector: see the rule below, because for a connector talking to a remote source a value that source sent does not count. Buffered delivery coalesces every change. At `bufferTime` zero each change is sent as it arrives, and one that a newer commit to the same property has already superseded when its turn comes is skipped. While the connector keeps up, only a change that arrives behind a newer commit is skipped; under backlog it collapses to the latest value like buffered mode. Neither mode promises every intermediate value, because changes are enqueued after their commit and outside the subject lock, so sending a superseded one could leave the sink on an older value than the model. Delivering every value is tracked in [#282](https://github.com/RicoSuter/Namotion.Interceptor/issues/282).
 
 What happens to a change, from dequeue to write:
 
@@ -177,7 +177,7 @@ flowchart TD
     J -->|no| L[Send]
 ```
 
-The echo and property-filter checks happen as each change is dequeued, and so does a supersession check for anything queued before processing started. The collapse and the flush-time supersession check happen at the flush, which a zero buffer time skips: there each change is written as it is dequeued, and a server still drops superseded ones while a wire connector does not. A transaction confirmation being written back passes the same checks, so it can still be dropped if a later commit superseded it.
+The echo and property-filter checks happen as each change is dequeued. The collapse and the supersession check happen at the flush. A zero buffer time has no flush: it skips the collapse and runs the supersession check on each change as it is dequeued, right before writing it. A transaction confirmation being written back passes the same checks, so it can still be dropped if a later commit superseded it.
 
 Which commits count as superseding is not the same for every connector, and choosing wrongly loses data in both directions. Connectors talking to a remote source may not rank against a value that source sent; servers must. See `ChangeDeliveryRule` and [connector delivery](design/connector-delivery.md) for the condition that decides it.
 
@@ -204,6 +204,18 @@ When a connector attempt ends, the change processor hands whatever it had buffer
 The cost is that a stop can block on an unreachable endpoint. Final delivery and the source retry handoff share one internal five-second safety bound, which cannot be configured per connector. Connectors stop one after another under the host's shared `HostOptions.ShutdownTimeout` of 30 seconds by default, so the host timeout must leave enough time for every connector to complete or reach its internal bound.
 
 The batch is one more write through the normal handler, not a privileged one, so for a source the handler flushes the write retry queue first: that backlog holds older commits and must keep its place in commit order. A deep backlog on a slow transport can consume the whole bound on its own. At final stop, every write still owned when that happens is counted as locally unconfirmed; the remote side may already have accepted it or may still accept it, so teardown delivery is at least once.
+
+### Structural Changes
+
+A **structural property** holds child subjects: a subject reference, a collection or a dictionary of subjects (`RegisteredSubjectProperty.CanContainSubjects`). A **structural change** is a write to one, which attaches or detaches subjects. A source follows structural changes through the same path as values:
+
+- **Claim structural properties.** A source claims the structural properties of the subjects it binds, next to their value properties, so their changes reach `WriteChangesAsync` through the change queue. A subtree bound later is claimed the same way, structural properties included.
+- **Handle both kinds in `WriteChangesAsync`.** A batch can mix structural and value changes and keeps their order, so a new subject's structure can be sent before its values. The source checks `CanContainSubjects` per change. For a structural change it binds the attached subtree and unbinds the detached one, and sends the change when the protocol can create or delete remote nodes. It reads the children with `GetCurrentValue` and compares them with what it has bound, rather than using `GetOldValue` and `GetNewValue`: deliveries can arrive out of commit order, and merging and supersession combine or drop the changes in between. A source that cannot send structure only follows it and reports success; it never fails or warns about a structural change because it cannot write it.
+- **Authority is the same as for values.** For a source the remote side is authoritative: a local structural change is a request, and the structure applied by the next load or notification wins. For a server the local model is authoritative.
+- **Releasing stays synchronous.** `SourceOwnershipManager` releases the claims of a detaching subject while it detaches, before its change reaches the queue, so a source never writes into a removed subject.
+- **Identity is per connector.** How a remote node, topic or path maps to a subject instance is the protocol's decision. [Subject Updates](connectors-subject-updates.md) describes the path-based mapping for protocols without an identity of their own.
+
+Following structure requires the external system to support adding and removing subscriptions at runtime. A source whose remote structure is fixed for a session can bind on connect instead and restart when its structure has to change. Whether a built-in connector follows structural changes yet is stated in its own documentation.
 
 ### Monitoring Synchronization State
 
@@ -301,7 +313,7 @@ The `SourceMetrics` instance is the writable side and stays private to the sourc
 
 A direct source may register `ClaimedPropertyCount`; registering it is required only when the source must expose a non-null ownership count. A registered gauge can measure zero, while an unregistered gauge remains `null`. A direct source must register all queue gauges it owns: `OutboundChanges`, `OutboundRetries`, and `InboundBuffer`. Give a disabled queue a capacity of `0`; use a `null` capacity only when the queue is actually unbounded. If the source owns custom `IResettableMetrics` instances, register each one once before `MarkStarted()` so its totals join the run's first epoch.
 
-Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the terminal handling of any liveness the derived source has published. **Publishing liveness is the derived class's job**: the base never calls `MarkOperational()` or `MarkNotOperational()`, because each protocol becomes usable or unavailable at different points and those points are what `IsOperational` means for that connector. Calling either method opts the source into liveness reporting. A simple source that calls neither exposes `IsOperational == null` for as long as it runs, while its `State` can still reach `Synchronized`, and `false` once it stops. The three in-tree clients show where to put the calls: the MQTT client reports serving once `ConnectAsync` returns, the WebSocket client once the server's Welcome has been accepted, and the OPC UA client only once a session it has already created is confirmed usable, which is several steps later and which step depends on how that session came about (see [OPC UA Client](connectors-opcua-client.md#diagnostics)). Each reports the explicit down value from the path that detects the loss.
+Deriving from `SubjectSourceBase` instead gets both members, the start epoch, the recording of a failed connect attempt, and the terminal handling of any liveness the derived source has published. **Publishing liveness is the derived class's job**: the base never calls `MarkOperational()` or `MarkNotOperational()`, because each protocol becomes usable or unavailable at different points and those points are what `IsOperational` means for that connector. Calling either method opts the source into liveness reporting. A simple source that calls neither exposes `IsOperational == null` for as long as it runs, while its `State` can still reach `Synchronized`, and `false` once it stops. Call `MarkOperational()` where the protocol becomes usable and `MarkNotOperational()` from the path that detects the loss; each connector's page states where that is for it.
 
 `StateChangeTime` and `LastSynchronizedAt` are both required, and neither can answer the other's question. `StateChangeTime` moves on every transition, so read with `State` it says how long the current state has lasted: `Synchronizing` plus T reads as stale since T. `LastSynchronizedAt` is stamped only on the way into `Synchronized` and never cleared, so it says whether a good period ever began, and it cannot say when synchronization was lost.
 
@@ -420,7 +432,7 @@ builder.Services.AddMqttSubjectClientSource<Sensor>(
 
 #### BackgroundTaskLifetime
 
-`BackgroundTaskLifetime` manages a background task tied to the listen lifetime. It creates a linked `CancellationTokenSource`, spawns the task, and on disposal cancels the token, awaits the task, and then invokes an optional cleanup callback. All built-in sources (OPC UA, MQTT, WebSocket) use it for their monitor/health-check loops.
+`BackgroundTaskLifetime` manages a background task tied to the listen lifetime. It creates a linked `CancellationTokenSource`, spawns the task, and on disposal cancels the token, awaits the task, and then invokes an optional cleanup callback. All built-in sources (OPC UA, MQTT, WebSocket, Modbus) use it for their monitor, health-check or poll loops.
 
 ```csharp
 return BackgroundTaskLifetime.Start(
@@ -457,7 +469,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### SourceOwnershipManager
 
-Sources claim ownership of properties in two phases: initially inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and dynamically at runtime when subjects are attached to or detached from the object graph. The `SourceOwnershipManager` class simplifies this by handling:
+Sources claim ownership of properties inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and for subtrees bound later when they follow [structural changes](#structural-changes). The `SourceOwnershipManager` class simplifies this by handling:
 - Property ownership tracking (which properties this source is responsible for)
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
@@ -578,6 +590,7 @@ A server implementation typically handles:
 
 - **Starting the protocol server**: bind to a port, accept connections, restart on failure
 - **Publishing property changes**: observe changes via `ChangeQueueProcessor` and push them to connected clients using the protocol's wire format. Where in startup the processor is created decides what a client can miss: the OPC UA server creates it before the protocol server starts, so changes made during startup are captured, while the MQTT and WebSocket servers create it once theirs is already listening. Of the changes that are captured, those a later local commit superseded are collapsed rather than published in sequence, so clients see the settled value instead of every intermediate one
+- **Publishing structural changes**: a server's change queue delivers [structural changes](#structural-changes) in order with values when its mapping includes the structural property. The local model is authoritative, so the server adds or removes what it exposes for the attached or detached subjects
 - **Handling inbound writes**: receive write requests from external clients and apply them to the local model (typically via `SetValueFromSource()` to prevent echo loops)
 - **Lifecycle cleanup**: release caches and subscriptions when subjects are detached from the object graph
 
@@ -753,81 +766,7 @@ See the protocol-specific documentation for details on each connector's mapping 
 
 ### Path Providers
 
-Path providers map between subject property paths and external system paths. They are defined in `Namotion.Interceptor.Registry.Paths`.
-
-#### IPathProvider Interface
-
-```csharp
-public interface IPathProvider
-{
-    /// <summary>
-    /// Should this property be included in paths?
-    /// </summary>
-    bool IsPropertyIncluded(RegisteredSubjectProperty property);
-
-    /// <summary>
-    /// Get the path segment for a property.
-    /// Returns null if no explicit mapping exists.
-    /// </summary>
-    string? TryGetPropertySegment(RegisteredSubjectProperty property);
-
-    /// <summary>
-    /// Find a property by its path segment.
-    /// </summary>
-    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
-}
-```
-
-#### Built-in Providers
-
-- **DefaultPathProvider** - Uses property names exactly as defined
-- **CamelCasePathProvider** - Converts property names to camelCase for JSON APIs
-- **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping
-
-#### [Path] Attribute
-
-Use `[Path]` attributes to map properties to custom external paths:
-
-```csharp
-[InterceptorSubject]
-public partial class Sensor
-{
-    [Path("temp")]
-    public partial decimal Temperature { get; set; }
-
-    [Path("hum")]
-    public partial decimal Humidity { get; set; }
-}
-```
-
-#### [InlinePaths] Attribute
-
-Marks a dictionary property as a transparent container for path resolution:
-
-```csharp
-[InterceptorSubject]
-public partial class ProductionLine
-{
-    public partial string Name { get; set; }
-
-    [InlinePaths]
-    public partial Dictionary<string, Machine> Machines { get; set; }
-}
-
-[InterceptorSubject]
-public partial class Machine
-{
-    public partial string Status { get; set; }
-    public partial decimal Temperature { get; set; }
-}
-```
-
-With `[InlinePaths]`:
-- Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
-- Direct properties take precedence over child keys. If a subject has both a direct property and a dictionary key with the same name, the property wins and the key is unreachable via that segment
-- Only one property per class may be marked with `[InlinePaths]`; multiple properties throws `InvalidOperationException`
-- Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
-- Built into `PathProviderBase.TryGetPropertyFromSegment`
+Sources and servers map properties to external paths through a path provider. The path providers, the `[Path]` and `[InlinePaths]` attributes and the path syntax are described in [Paths](registry.md#paths).
 
 ### Updates
 
@@ -939,7 +878,7 @@ What a server author must implement:
 
 A connector whose transport work runs in a task the loop does not await, such as a client's reconnect monitor, is outside `RunAsync` too, and has to report its own failures for the same reason.
 
-A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and runs each restart-loop iteration through `RunAttemptAsync`, which gives the iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. `InjectFaultAsync` kills through `ForceKillCurrentAttemptAsync`. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [MQTT server](../src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServer.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), [WebSocket server](../src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectServer.cs) and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) all take that route. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
+A connector that participates in chaos testing implements [`IFaultInjectable`](../src/Namotion.Interceptor.Connectors/IFaultInjectable.cs) and runs each restart-loop iteration through `RunAttemptAsync`, which gives the iteration its own [`ConnectorRunAttempt`](../src/Namotion.Interceptor.Connectors/ConnectorRunAttempt.cs), so injected-kill cancellation and the flag identifying it have the same lifetime. `InjectFaultAsync` kills through `ForceKillCurrentAttemptAsync`. The [MQTT client](../src/Namotion.Interceptor.Mqtt/Client/MqttSubjectClientSource.cs), [MQTT server](../src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServer.cs), [WebSocket client](../src/Namotion.Interceptor.WebSocket/Client/WebSocketSubjectClientSource.cs), [WebSocket server](../src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectServer.cs) and [OPC UA server](../src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs) all take that route. The [Modbus client](../src/Namotion.Interceptor.Modbus/Client/ModbusSubjectClientSource.cs) takes it too, although the Connector Tester has no Modbus profile yet. The OPC UA client instead cancels the SDK session by clearing it, or cancels the currently owned manual-reconnection token, because the SDK owns its reconnect loop.
 
 The outbound queue is wired up by reporting drops into the lifetime-owned metrics and registering only the processor's depth provider. The registration is released when that processor goes away:
 
@@ -966,6 +905,8 @@ Cases where the local model and the external system can end up disagreeing, or w
 **Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 
 **Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized` and `Diagnostics.OutboundRetries.Depth` shows it pending. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
+
+**A write that lands while the reconcile restores a parked write can be overwritten.** When the load has moved the model off a parked write, the reconcile restores it in two steps: it checks that no later local commit supersedes it, then writes it back. A local write or transaction commit to the same property that lands between those steps is overwritten by the restore and then dropped as superseded. Both ends settle on the older parked value, and a transaction that reported success is undone. Closing it would need the write path to refuse a write when a newer commit exists, which it does not offer. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
 **A property with no setter cannot be restored.** If the load moves the model off a parked write for a derived or getter-only property, there is nothing to write back locally, so the change is dropped and logged by name rather than silently counted as restored.
 

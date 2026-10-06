@@ -95,7 +95,7 @@ public partial class HueLightbulb : HueDevice,
         null;
 
     [Derived]
-    public decimal? EnergyConsumed => null;
+    public decimal? TotalConsumedEnergy => null;
 
     [Derived]
     [State]

@@ -22,19 +22,26 @@ using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
 using Namotion.Devices.Ecowitt;
 using Namotion.Devices.Ecowitt.HomeBlaze;
+using Namotion.Devices.Luxtronik;
+using Namotion.Devices.Luxtronik.HomeBlaze;
 using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
 
 // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
-var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
-    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+// Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(
+    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
+    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+
+var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
@@ -64,6 +71,11 @@ builder.Services
 
 var app = builder.Build();
 
+if (seededFileCount > 0)
+{
+    app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
+}
+
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
@@ -86,10 +98,12 @@ typeProvider
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly)
-    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject).Assembly) // HomeBlaze.History.InMemory
-    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)               // HomeBlaze.History.InMemory.Blazor
-    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)     // HomeBlaze.History.Sqlite
-    .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly);               // HomeBlaze.History.Sqlite.Blazor
+    .AddAssembly(typeof(HomeBlaze.History.InMemory.InMemoryHistoryStoreSubject).Assembly)   // HomeBlaze.History.InMemory
+    .AddAssembly(typeof(InMemoryHistoryStoreEditComponent).Assembly)                        // HomeBlaze.History.InMemory.Blazor
+    .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)       // HomeBlaze.History.Sqlite
+    .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
+    .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
+    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly);                                 // Namotion.Devices.Luxtronik.HomeBlaze
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
@@ -128,6 +142,7 @@ if (mcpEnabled)
     app.MapMcp("/mcp");
 }
 
+app.MapDefaultEndpoints();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

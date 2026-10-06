@@ -184,19 +184,6 @@ public class WallboxChargerDerivedPropertyTests
         Assert.Equal(7360m, charger.Power);
     }
 
-    [Fact]
-    public void WhenTotalEnergySet_ThenEnergyConsumedDelegates()
-    {
-        // Arrange
-        var charger = CreateCharger();
-
-        // Act
-        charger.TotalEnergyConsumed = 50000m;
-
-        // Assert
-        Assert.Equal(50000m, charger.EnergyConsumed);
-    }
-
     private class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();

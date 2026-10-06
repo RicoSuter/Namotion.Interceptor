@@ -1,6 +1,7 @@
 using HomeBlaze.History.Abstractions;
 using HomeBlaze.History.Sqlite;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.History.Sqlite.Tests;
 
@@ -68,9 +69,69 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
             TimeSpan.FromSeconds(10),
             HistoryAggregations.Last,
             MaxPoints: 10));
+
+        // [10,20) and [30,40) are each covered for one tick by a range already holding a value, so
+        // they are partial buckets that keep it.
         Assert.Equal(
-            new double?[] { 1, null, 2, null },
+            new double?[] { 1, 1, 2, 2 },
             series.Points.Select(point => point.Number).ToArray());
+    }
+
+    [Fact]
+    public async Task WhenARestartGapIsInsideABucket_ThenBothCoveredPartsAreAggregatedWithoutCarryingAcrossIt()
+    {
+        // Arrange - coverage [0,3] and [5,9]; 10 holds [1,3], then nothing is known until 30 at 8.
+        // Carrying 10 across the gap would add [5,8) and give 13.33 instead of 16.67.
+        using var reopened = await ReopenAfterRestartInsideABucketAsync(
+            secondSessionSample: 30d, secondSessionEndSecond: 9, reopenSecond: 20);
+
+        HistoryPoint QuerySingle(string aggregation) =>
+            reopened.Query(Query(aggregation, toSecond: 10)).Points.Single();
+
+        // Act & Assert
+        Assert.Equal((10d * 2 + 30d * 1) / 3, QuerySingle(HistoryAggregations.TimeWeightedAverage).Number!.Value, 4);
+        Assert.Equal(30d, QuerySingle(HistoryAggregations.Last).Number);
+        Assert.Equal(10d, QuerySingle(HistoryAggregations.First).Number);
+        Assert.Equal(10d, QuerySingle(HistoryAggregations.Minimum).Number);
+        Assert.Null(QuerySingle(HistoryAggregations.Count).Number);
+    }
+
+    [Fact]
+    public async Task WhenCoverageRestartsInsideABucketAndRecordsASample_ThenTheNextBucketCarriesIt()
+    {
+        // Arrange - coverage [0,3] and [5,25]; 10 at 1 in the first session, 30 at 8 in the second.
+        // Bucket [0,10) TWA: 10 holds [1, 3 + 1 tick), 30 holds [8,10), so (10 * (2s + 1 tick) + 30 * 2s) / (4s + 1 tick).
+        using var reopened = await ReopenAfterRestartInsideABucketAsync(
+            secondSessionSample: 30d, secondSessionEndSecond: 25, reopenSecond: 30);
+
+        // Act
+        var last = reopened.Query(Query(HistoryAggregations.Last));
+        var timeWeightedAverage = reopened.Query(Query(HistoryAggregations.TimeWeightedAverage));
+
+        // Assert
+        Assert.Equal(new double?[] { 30, 30 }, last.Points.Select(point => point.Number).ToArray());
+        var twoSeconds = (double)TimeSpan.TicksPerSecond * 2;
+        Assert.Equal(
+            (10d * (twoSeconds + 1) + 30d * twoSeconds) / (2 * twoSeconds + 1),
+            timeWeightedAverage.Points[0].Number!.Value,
+            10);
+        Assert.Equal(30d, timeWeightedAverage.Points[1].Number);
+    }
+
+    [Fact]
+    public async Task WhenCoverageRestartsInsideABucketWithoutASample_ThenTheNextBucketCarriesNothing()
+    {
+        // Arrange - 10 at 1 in the first session; the second session starts at 5 and records nothing.
+        using var reopened = await ReopenAfterRestartInsideABucketAsync(
+            secondSessionSample: null, secondSessionEndSecond: 25, reopenSecond: 30);
+
+        // Act
+        var last = reopened.Query(Query(HistoryAggregations.Last));
+        var timeWeightedAverage = reopened.Query(Query(HistoryAggregations.TimeWeightedAverage));
+
+        // Assert
+        Assert.Equal(new double?[] { 10, null }, last.Points.Select(point => point.Number).ToArray());
+        Assert.Equal(new double?[] { 10, null }, timeWeightedAverage.Points.Select(point => point.Number).ToArray());
     }
 
     [Fact]
@@ -154,6 +215,29 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
                 new HistoryCoverage(Base.AddSeconds(10), Base.AddSeconds(20).AddTicks(1))
             },
             store.CoverageRanges.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenADropGapEndsABucket_ThenNothingIsCarriedAcrossIt()
+    {
+        // Arrange - coverage [0,5) and [10,20]: the change at 5 is dropped, so the held 1 ends at the gap
+        // and the fully covered bucket [10,20) after it knows nothing.
+        var now = Base;
+        using var store = NewStore(() => now, maxPendingSamples: 1);
+        store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
+        store.Record("/a/Value", Base.AddSeconds(5), 2d, typeof(double));   // dropped
+        now = Base.AddSeconds(10);
+        await store.FlushAsync(CancellationToken.None);
+        now = Base.AddSeconds(20);
+        await store.FlushAsync(CancellationToken.None);
+
+        // Act
+        var last = store.Query(Query(HistoryAggregations.Last));
+        var timeWeightedAverage = store.Query(Query(HistoryAggregations.TimeWeightedAverage));
+
+        // Assert
+        Assert.Equal(new double?[] { 1, null }, last.Points.Select(point => point.Number).ToArray());
+        Assert.Equal(new double?[] { 1, null }, timeWeightedAverage.Points.Select(point => point.Number).ToArray());
     }
 
     [Fact]
@@ -361,7 +445,7 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         // rather than as a fault. It stays silent by design for now -- see the coverage-precision
         // follow-up -- so at least say so.
         var now = Base;
-        var logger = new CapturingLogger();
+        var logger = new RecordingLogger();
         using var store = NewStore(() => now, maxPendingSamples: 1, logger: logger);
 
         store.Record("/a/Value", Base.AddSeconds(1), 1d, typeof(double));
@@ -384,27 +468,40 @@ public sealed class SqliteHistoryStoreCoverageTests : IDisposable
         now = Base.AddSeconds(20);
         await store.FlushAsync(CancellationToken.None);
         Assert.NotEmpty(store.CoverageRanges);
-        Assert.Contains(logger.Information, message => message.Contains("recovered"));
+        Assert.Contains(logger.Entries, entry => entry.Level == LogLevel.Information && entry.Message.Contains("recovered"));
     }
 
-    private sealed class CapturingLogger : ILogger
+    // The first session records 10 at second 1 and ends at 3; the second starts at 5, records
+    // secondSessionSample at 8 when given, and ends at secondSessionEndSecond. Reopened at reopenSecond.
+    private async Task<SqliteHistoryStore> ReopenAfterRestartInsideABucketAsync(
+        double? secondSessionSample, int secondSessionEndSecond, int reopenSecond)
     {
-        public List<string> Errors { get; } = [];
-
-        public List<string> Information { get; } = [];
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
+        var now = Base;
+        using (var first = NewStore(() => now))
         {
-            var target = logLevel == LogLevel.Error ? Errors : Information;
-            target.Add(formatter(state, exception));
+            first.Record("/a/Value", Base.AddSeconds(1), 10d, typeof(double));
+            now = Base.AddSeconds(3);
+            await first.FlushAsync(CancellationToken.None);
         }
+
+        now = Base.AddSeconds(5);
+        using (var second = NewStore(() => now))
+        {
+            if (secondSessionSample is { } sample)
+            {
+                second.Record("/a/Value", Base.AddSeconds(8), sample, typeof(double));
+            }
+
+            now = Base.AddSeconds(secondSessionEndSecond);
+            await second.FlushAsync(CancellationToken.None);
+        }
+
+        now = Base.AddSeconds(reopenSecond);
+        return NewStore(() => now);
     }
+
+    private static HistoryQuery Query(string aggregation, int toSecond = 20) =>
+        new("/a/Value", Base, Base.AddSeconds(toSecond), TimeSpan.FromSeconds(10), aggregation, MaxPoints: 10);
 
     private SqliteHistoryStore NewStore(
         Func<DateTimeOffset> getUtcNow,

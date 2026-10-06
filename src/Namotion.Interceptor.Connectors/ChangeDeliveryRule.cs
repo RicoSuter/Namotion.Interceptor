@@ -6,7 +6,8 @@ namespace Namotion.Interceptor.Connectors;
 /// </summary>
 /// <remarks>
 /// Both settings lose data when chosen wrongly, silently and permanently, so decide it by the condition
-/// rather than by whether the connector is called a client or a server.
+/// rather than by whether the connector is called a client or a server. The rule covers changes to
+/// structural properties the same way as value changes.
 /// </remarks>
 public enum ChangeDeliveryRule
 {

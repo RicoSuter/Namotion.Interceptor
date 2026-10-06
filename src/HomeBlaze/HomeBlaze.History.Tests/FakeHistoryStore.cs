@@ -121,7 +121,7 @@ public sealed class FakeHistoryStore : IHistoryStore
         for (var index = CoverageRanges.Length - 1; index >= 0; index--)
         {
             var range = CoverageRanges[index];
-            if (range.From <= asOf && range.To >= asOf)
+            if (range.From <= asOf && range.To > asOf)
             {
                 containingRange = range;
                 break;

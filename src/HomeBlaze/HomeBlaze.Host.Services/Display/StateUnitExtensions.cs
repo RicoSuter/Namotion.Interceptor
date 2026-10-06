@@ -15,6 +15,7 @@ public static class StateUnitExtensions
     private static readonly (StateUnit Unit, string Suffix, decimal Factor)[][] UnitFamilies =
     [
         [(StateUnit.Watt, "W", 1m), (StateUnit.Kilowatt, "kW", 1000m)],
+        [(StateUnit.VoltAmpere, "VA", 1m), (default, "kVA", 1000m)],
         [(StateUnit.WattHour, "Wh", 1m), (StateUnit.KilowattHour, "kWh", 1000m)],
         [(StateUnit.Millimeter, "mm", 1m), (StateUnit.Meter, "m", 1000m), (StateUnit.Kilometer, "km", 1_000_000m)],
         [(StateUnit.Milliampere, "mA", 1m), (StateUnit.Ampere, "A", 1000m)],
@@ -178,6 +179,7 @@ public static class StateUnitExtensions
         StateUnit.Degree => ("°", false),
         StateUnit.Watt => ("W", true),
         StateUnit.Kilowatt => ("kW", true),
+        StateUnit.VoltAmpere => ("VA", true),
         StateUnit.WattHour => ("Wh", true),
         StateUnit.Volt => ("V", true),
         StateUnit.Ampere => ("A", true),
@@ -199,6 +201,9 @@ public static class StateUnitExtensions
         StateUnit.Hectopascal => ("hPa", true),
         StateUnit.UvIndex => ("UV", true),
         StateUnit.HexColor => ("hex", true),
+        StateUnit.Kelvin => ("K", true),
+        StateUnit.Minute => ("min", true),
+        StateUnit.Hour => ("h", true),
         _ => null
     };
 
