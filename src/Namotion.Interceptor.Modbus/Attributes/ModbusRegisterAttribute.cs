@@ -34,7 +34,7 @@ public class ModbusRegisterAttribute : Attribute
     public ModbusAddressSpace AddressSpace { get; init; } = ModbusAddressSpace.HoldingRegister;
 
     /// <summary>
-    /// Gets the register order of 32-bit values. Ignored for other types.
+    /// Gets the register order of 32-bit and 64-bit values. Ignored for other types.
     /// </summary>
     public ModbusWordOrder WordOrder { get; init; } = ModbusWordOrder.HighWordFirst;
 

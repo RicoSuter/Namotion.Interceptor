@@ -333,4 +333,63 @@ public class ModbusValueConvertersTests
             ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Length = dataType == ModbusDataType.String ? 1 : 0 },
                 propertyType, "Test.Property"));
     }
+
+    [Fact]
+    public void WhenConvertingMaximumU64IntoDecimal_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(decimal?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // Assert
+        Assert.Equal(18446744073709551615m, value);
+    }
+
+    [Fact]
+    public void WhenConvertingU64IntoUnsignedLong_ThenValueIsKept()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(ulong?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // Assert
+        Assert.Equal(ulong.MaxValue, value);
+    }
+
+    [Fact]
+    public void WhenConvertingS64IntoLong_ThenSignIsKept()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(long?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(-2L, value);
+    }
+
+    [Fact]
+    public void WhenScalingU64WithDynamicScaleFactor_ThenPowerOfTenIsApplied()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64) { ScaleFactorProperty = "Factor" },
+            typeof(decimal?), [0, 0, 0, 0, 0, 0, 0, 150], exponent: 3);
+
+        // Assert
+        Assert.Equal(150000m, value);
+    }
+
+    [Fact]
+    public void WhenU64IsUnsignedMaximumPattern_ThenValueIsNull()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64) { NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum },
+            typeof(decimal?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenConvertingU64IntoLong_ThenConfigurationExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() => Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(long?), new byte[8]));
+    }
 }

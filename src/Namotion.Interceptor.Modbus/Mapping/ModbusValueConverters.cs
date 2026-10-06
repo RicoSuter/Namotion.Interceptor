@@ -127,19 +127,19 @@ internal static class ModbusValueConverters
             var decimalScale = ToDecimalScale(propertyPath, staticScale);
             return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+                : (decimal)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
         }
 
         if (targetType == typeof(double))
         {
             return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : ApplyDoubleScale(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
+                : ApplyDoubleScale((double)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
         }
 
         return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
             ? null
-            : (float)ApplyDoubleScale(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
+            : (float)ApplyDoubleScale((double)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
     }
 
     private static ModbusValueReader CreateUnscaledIntegerReader(
@@ -160,7 +160,7 @@ internal static class ModbusValueConverters
                     return null;
                 }
 
-                return ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) != 0 ? True : False;
+                return ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) != Int128.Zero ? True : False;
             };
         }
 
@@ -169,7 +169,7 @@ internal static class ModbusValueConverters
             RequireIntegralRange(propertyPath, dataType, Enum.GetUnderlyingType(targetType));
             return (raw, _) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : Enum.ToObject(targetType, ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder));
+                : ToEnum(targetType, ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder));
         }
 
         var typeCode = Type.GetTypeCode(targetType);
@@ -179,7 +179,7 @@ internal static class ModbusValueConverters
             : BoxIntegral(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), typeCode);
     }
 
-    private static object BoxIntegral(long value, TypeCode typeCode) => typeCode switch
+    private static object BoxIntegral(Int128 value, TypeCode typeCode) => typeCode switch
     {
         TypeCode.Byte => (byte)value,
         TypeCode.SByte => (sbyte)value,
@@ -187,10 +187,14 @@ internal static class ModbusValueConverters
         TypeCode.UInt16 => (ushort)value,
         TypeCode.Int32 => (int)value,
         TypeCode.UInt32 => (uint)value,
-        TypeCode.Int64 => value,
+        TypeCode.Int64 => (long)value,
         TypeCode.UInt64 => (ulong)value,
         _ => throw new ArgumentOutOfRangeException(nameof(typeCode), typeCode, null)
     };
+
+    // Enum.ToObject has no Int128 overload; a negative value only occurs for a signed underlying type.
+    private static object ToEnum(Type enumType, Int128 value)
+        => value < Int128.Zero ? Enum.ToObject(enumType, (long)value) : Enum.ToObject(enumType, (ulong)value);
 
     private static void RequireIntegralRange(string propertyPath, ModbusDataType dataType, Type targetType)
     {
@@ -212,6 +216,8 @@ internal static class ModbusValueConverters
         ModbusDataType.S16 => (short.MinValue, short.MaxValue),
         ModbusDataType.U32 => (0m, uint.MaxValue),
         ModbusDataType.S32 => (int.MinValue, int.MaxValue),
+        ModbusDataType.U64 => (0m, ulong.MaxValue),
+        ModbusDataType.S64 => (long.MinValue, long.MaxValue),
         _ => null
     };
 

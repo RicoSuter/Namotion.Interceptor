@@ -11,6 +11,8 @@ public class ModbusRegisterCodecTests
     [InlineData(ModbusDataType.U32, 0, 2)]
     [InlineData(ModbusDataType.S32, 0, 2)]
     [InlineData(ModbusDataType.F32, 0, 2)]
+    [InlineData(ModbusDataType.U64, 0, 4)]
+    [InlineData(ModbusDataType.S64, 0, 4)]
     [InlineData(ModbusDataType.String, 8, 8)]
     public void WhenGettingRegisterCount_ThenMatchesDataType(ModbusDataType dataType, int length, int expected)
     {
@@ -32,7 +34,7 @@ public class ModbusRegisterCodecTests
         var value = ModbusRegisterCodec.ReadInteger(raw, dataType, ModbusWordOrder.HighWordFirst);
 
         // Assert
-        Assert.Equal(expected, value);
+        Assert.Equal((Int128)expected, value);
     }
 
     [Fact]
@@ -45,7 +47,7 @@ public class ModbusRegisterCodecTests
         var value = ModbusRegisterCodec.ReadInteger(raw, ModbusDataType.U16, ModbusWordOrder.HighWordFirstByteSwapped);
 
         // Assert
-        Assert.Equal(0x1234L, value);
+        Assert.Equal((Int128)0x1234, value);
     }
 
     [Theory]
@@ -74,7 +76,7 @@ public class ModbusRegisterCodecTests
         var value = ModbusRegisterCodec.ReadInteger(raw, ModbusDataType.S32, wordOrder);
 
         // Assert
-        Assert.Equal(-2L, value);
+        Assert.Equal((Int128)(-2), value);
     }
 
     // 1.5f is 0x3FC00000
@@ -151,5 +153,58 @@ public class ModbusRegisterCodecTests
 
         // Assert
         Assert.Equal(expected, isNotAvailable);
+    }
+
+    [Theory]
+    [InlineData(ModbusWordOrder.HighWordFirst, new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 })]
+    [InlineData(ModbusWordOrder.LowWordFirst, new byte[] { 0x07, 0x08, 0x05, 0x06, 0x03, 0x04, 0x01, 0x02 })]
+    [InlineData(ModbusWordOrder.HighWordFirstByteSwapped, new byte[] { 0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07 })]
+    [InlineData(ModbusWordOrder.LowWordFirstByteSwapped, new byte[] { 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01 })]
+    public void WhenReadingU64_ThenWordOrderIsApplied(ModbusWordOrder wordOrder, byte[] raw)
+    {
+        // Act
+        var value = ModbusRegisterCodec.ReadU64(raw, wordOrder);
+
+        // Assert
+        Assert.Equal(0x0102030405060708UL, value);
+    }
+
+    [Fact]
+    public void WhenReadingS64_ThenSignIsExtended()
+    {
+        // Arrange
+        byte[] raw = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE];
+
+        // Act
+        var value = ModbusRegisterCodec.ReadInteger(raw, ModbusDataType.S64, ModbusWordOrder.HighWordFirst);
+
+        // Assert
+        Assert.Equal((Int128)(-2), value);
+    }
+
+    [Fact]
+    public void WhenReadingMaximumU64_ThenValueIsNotTruncated()
+    {
+        // Arrange
+        byte[] raw = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+        // Act
+        var value = ModbusRegisterCodec.ReadInteger(raw, ModbusDataType.U64, ModbusWordOrder.HighWordFirst);
+
+        // Assert
+        Assert.Equal((Int128)ulong.MaxValue, value);
+    }
+
+    [Theory]
+    [InlineData(ModbusDataType.S64, ModbusNotAvailableValue.SignedMinimum, new byte[] { 0x80, 0, 0, 0, 0, 0, 0, 0 })]
+    [InlineData(ModbusDataType.S64, ModbusNotAvailableValue.SignedMaximum, new byte[] { 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF })]
+    [InlineData(ModbusDataType.U64, ModbusNotAvailableValue.UnsignedMaximum, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF })]
+    public void When64BitRawMatchesNotAvailablePattern_ThenItIsNotAvailable(ModbusDataType dataType, ModbusNotAvailableValue notAvailableValue, byte[] raw)
+    {
+        // Act
+        var isNotAvailable = ModbusRegisterCodec.IsNotAvailable(raw, dataType, ModbusWordOrder.HighWordFirst, notAvailableValue);
+
+        // Assert
+        Assert.True(isNotAvailable);
     }
 }

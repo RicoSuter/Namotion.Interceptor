@@ -7,7 +7,7 @@ Dependencies: [FluentModbus](https://github.com/Apollo3zehn/FluentModbus) (MIT)
 ## Key Features
 
 - Attribute-based mapping of holding registers, input registers, coils and discrete inputs
-- U16, S16, U32, S32, F32, String and Boolean values, all four 32-bit word orders
+- U16, S16, U32, S32, U64, S64, F32, String and Boolean values, all four word orders
 - Static scaling and dynamic scale factors (value = raw * 10^exponent)
 - Conversion to integer and floating point types, `decimal`, `bool`, `string`, enums, flags enums and their nullable forms
 - "Not available" raw patterns mapped to `null`
@@ -55,18 +55,18 @@ To create a source for a subject at runtime, for example in a device subject tha
 | Setting | Default | Meaning |
 |---|---|---|
 | `AddressSpace` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
-| `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit values |
+| `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit and 64-bit values |
 | `Scale` | `1.0` | Static factor, requires a `float`, `double` or `decimal` property |
 | `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Mutually exclusive with `Scale`, and the named property must not be excluded |
 | `Length` | 0 | Register count of `String` values, 1 to 125 |
-| `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF or 0x7FFFFFFF), `SignedMinimum` (0x8000 or 0x80000000) or `UnsignedMaximum` (0xFFFF or 0xFFFFFFFF) |
+| `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF, 0x7FFFFFFF or 0x7FFFFFFFFFFFFFFF), `SignedMinimum` (0x8000, 0x80000000 or 0x8000000000000000) or `UnsignedMaximum` (0xFFFF, 0xFFFFFFFF or 0xFFFFFFFFFFFFFFFF) |
 | `Access` | `ReadWrite` | Declares writability for a later write stage, not enforced yet |
 
 Addresses are raw protocol addresses, without the `3xxxx`/`4xxxx` documentation prefixes and without the +1 offset some tools use.
 
 Values convert as follows:
 
-- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
+- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`, U64 into `ulong` but not `long`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
 - Scaled values require a `float`, `double` or `decimal` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
 - F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
 - String reads two ASCII characters per register up to the first NUL and trims trailing spaces.

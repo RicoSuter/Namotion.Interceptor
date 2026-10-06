@@ -5,11 +5,14 @@ namespace Namotion.Interceptor.Modbus.Mapping;
 
 internal static class ModbusRegisterCodec
 {
-    public static int GetRegisterCount(ModbusDataType dataType, int length) => dataType switch
+    public static int GetRegisterCount(ModbusDataType dataType, int length)
+        => dataType == ModbusDataType.String ? length : GetFixedRegisterCount(dataType);
+
+    private static int GetFixedRegisterCount(ModbusDataType dataType) => dataType switch
     {
         ModbusDataType.Boolean or ModbusDataType.U16 or ModbusDataType.S16 => 1,
         ModbusDataType.U32 or ModbusDataType.S32 or ModbusDataType.F32 => 2,
-        ModbusDataType.String => length,
+        ModbusDataType.U64 or ModbusDataType.S64 => 4,
         _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, null)
     };
 
@@ -31,12 +34,35 @@ internal static class ModbusRegisterCodec
         };
     }
 
-    public static long ReadInteger(ReadOnlySpan<byte> raw, ModbusDataType dataType, ModbusWordOrder wordOrder) => dataType switch
+    public static ulong ReadU64(ReadOnlySpan<byte> raw, ModbusWordOrder wordOrder)
     {
-        ModbusDataType.U16 => ReadU16(raw),
-        ModbusDataType.S16 => (short)ReadU16(raw),
-        ModbusDataType.U32 => ReadU32(raw, wordOrder),
-        ModbusDataType.S32 => (int)ReadU32(raw, wordOrder),
+        if (wordOrder is < ModbusWordOrder.HighWordFirst or > ModbusWordOrder.LowWordFirstByteSwapped)
+        {
+            throw new ArgumentOutOfRangeException(nameof(wordOrder), wordOrder, null);
+        }
+
+        var isLowWordFirst = wordOrder is ModbusWordOrder.LowWordFirst or ModbusWordOrder.LowWordFirstByteSwapped;
+        var isByteSwapped = wordOrder is ModbusWordOrder.HighWordFirstByteSwapped or ModbusWordOrder.LowWordFirstByteSwapped;
+
+        ulong value = 0;
+        for (var index = 0; index < 4; index++)
+        {
+            var register = BinaryPrimitives.ReadUInt16BigEndian(raw[((isLowWordFirst ? 3 - index : index) * 2)..]);
+            value = (value << 16) | (isByteSwapped ? BinaryPrimitives.ReverseEndianness(register) : register);
+        }
+
+        return value;
+    }
+
+    // Int128 holds every value of all integer data types, including U64 above long.MaxValue.
+    public static Int128 ReadInteger(ReadOnlySpan<byte> raw, ModbusDataType dataType, ModbusWordOrder wordOrder) => dataType switch
+    {
+        ModbusDataType.U16 => (Int128)ReadU16(raw),
+        ModbusDataType.S16 => (Int128)(short)ReadU16(raw),
+        ModbusDataType.U32 => (Int128)ReadU32(raw, wordOrder),
+        ModbusDataType.S32 => (Int128)(int)ReadU32(raw, wordOrder),
+        ModbusDataType.U64 => (Int128)ReadU64(raw, wordOrder),
+        ModbusDataType.S64 => (Int128)(long)ReadU64(raw, wordOrder),
         _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, null)
     };
 
@@ -68,6 +94,7 @@ internal static class ModbusRegisterCodec
         {
             ModbusDataType.U16 or ModbusDataType.S16 => IsNotAvailable16(ReadU16(raw), notAvailableValue),
             ModbusDataType.U32 or ModbusDataType.S32 => IsNotAvailable32(ReadU32(raw, wordOrder), notAvailableValue),
+            ModbusDataType.U64 or ModbusDataType.S64 => IsNotAvailable64(ReadU64(raw, wordOrder), notAvailableValue),
             _ => false
         };
     }
@@ -85,6 +112,14 @@ internal static class ModbusRegisterCodec
         ModbusNotAvailableValue.SignedMaximum => value == 0x7FFFFFFFu,
         ModbusNotAvailableValue.SignedMinimum => value == 0x80000000u,
         ModbusNotAvailableValue.UnsignedMaximum => value == 0xFFFFFFFFu,
+        _ => false
+    };
+
+    private static bool IsNotAvailable64(ulong value, ModbusNotAvailableValue notAvailableValue) => notAvailableValue switch
+    {
+        ModbusNotAvailableValue.SignedMaximum => value == 0x7FFFFFFFFFFFFFFFUL,
+        ModbusNotAvailableValue.SignedMinimum => value == 0x8000000000000000UL,
+        ModbusNotAvailableValue.UnsignedMaximum => value == 0xFFFFFFFFFFFFFFFFUL,
         _ => false
     };
 }
