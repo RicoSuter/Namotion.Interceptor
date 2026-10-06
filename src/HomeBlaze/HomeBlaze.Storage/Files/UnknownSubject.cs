@@ -7,7 +7,7 @@ namespace HomeBlaze.Storage.Files;
 
 /// <summary>
 /// Stands in for a JSON file whose <c>$type</c> cannot be created, either because the type is not loaded,
-/// because creating it failed, or because the file's JSON could not be read at all. The file is never
+/// because it is not configurable, because creating it failed, or because the file's JSON could not be read at all. The file is never
 /// written by the configuration writer, and the storage replaces this subject with the real one once its
 /// type can be created.
 /// </summary>
@@ -18,6 +18,11 @@ public partial class UnknownSubject : IStorageFile, ITitleProvider, IIconProvide
     /// The reason used when no loaded type has the file's <c>$type</c> name.
     /// </summary>
     public const string TypeNotLoadedReason = "Type is not loaded.";
+
+    /// <summary>
+    /// The reason used when the loaded type with the file's <c>$type</c> name does not implement <see cref="IConfigurable"/>.
+    /// </summary>
+    public const string TypeNotConfigurableReason = "Type is not configurable from a file.";
 
     public string? Title => Path.GetFileNameWithoutExtension(FullPath);
 

@@ -120,7 +120,9 @@ internal sealed class FileSubjectFactory
                 return (IInterceptorSubject)subject;
             }
 
-            reason = UnknownSubject.TypeNotLoadedReason;
+            reason = _serializer.FindType(typeName) is null
+                ? UnknownSubject.TypeNotLoadedReason
+                : UnknownSubject.TypeNotConfigurableReason;
         }
         catch (Exception exception)
         {

@@ -91,23 +91,25 @@ public class ConfigurableSubjectSerializer
             return null;
         }
 
-        // Find the type in registered types
-        var type = _typeProvider.Types.FirstOrDefault(t => t.FullName == typeName);
-        if (type == null)
+        var type = FindType(typeName);
+        if (type == null || !typeof(IConfigurable).IsAssignableFrom(type))
         {
             return null;
         }
 
         using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
         // Create instance using ActivatorUtilities for DI-aware construction
-        var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurable;
-        if (subject == null)
-        {
-            return null;
-        }
-
+        var subject = (IConfigurable)ActivatorUtilities.CreateInstance(_serviceProvider, type);
         PopulateConfigurationProperties(subject, type, root);
         return subject;
+    }
+
+    /// <summary>
+    /// Finds the loaded type whose full name is <paramref name="typeName"/>, whether or not it is configurable.
+    /// </summary>
+    public Type? FindType(string typeName)
+    {
+        return _typeProvider.Types.FirstOrDefault(type => type.FullName == typeName);
     }
 
     /// <summary>

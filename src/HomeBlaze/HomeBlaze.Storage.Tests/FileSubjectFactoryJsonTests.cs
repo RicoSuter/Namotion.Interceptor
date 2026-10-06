@@ -42,6 +42,22 @@ public class FileSubjectFactoryJsonTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTypeIsLoadedButNotConfigurable_ThenUnknownSubjectExplainsIt()
+    {
+        // Arrange
+        WriteFile("Plain.json", $$"""{ "$type": "{{typeof(NonConfigurableSubject).FullName}}" }""");
+        using var storage = CreateStorage([typeof(NonConfigurableSubject)]);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        var unknown = Assert.IsType<UnknownSubject>(storage.Children["Plain"]);
+        Assert.Equal(typeof(NonConfigurableSubject).FullName, unknown.TypeName);
+        Assert.Equal(UnknownSubject.TypeNotConfigurableReason, unknown.Reason);
+    }
+
+    [Fact]
     public async Task WhenConstructionThrows_ThenUnknownSubjectHasErrorAsReason()
     {
         // Arrange
