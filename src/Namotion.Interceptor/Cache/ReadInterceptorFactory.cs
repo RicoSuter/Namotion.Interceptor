@@ -11,7 +11,13 @@ internal static class ReadInterceptorFactory<TProperty>
         // wide struct. Static lambdas, not method groups: a delegate over a static method goes through a shuffle thunk.
         ReadFunc<TProperty> terminal =
             typeof(TProperty) != typeof(object) && AtomicAccess.IsGuaranteedFor(typeof(TProperty))
-                ? static (ref context, innerReadValue) => innerReadValue(context.Property.Subject)
+                ? static (ref context, innerReadValue) =>
+                {
+                    var value = innerReadValue(context.Property.Subject);
+                    // Acquire ordering for the loads after this read, which the lock gave (publish-then-flag on ARM64).
+                    Volatile.ReadBarrier();
+                    return value;
+                }
                 : static (ref context, innerReadValue) =>
                 {
                     lock (context.Property.Subject.SyncRoot)
