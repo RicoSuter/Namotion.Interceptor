@@ -133,6 +133,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// </summary>
     internal long GetWriteTimestampTicksAfterValueRead()
     {
+        // The pairing relies on this lock, under which every terminal stores a value together with its timestamp.
         lock (Subject.SyncRoot)
         {
             if (!TryGetWriteState(out var state))
@@ -222,12 +223,7 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// When the property or one of its recorded dependencies was last written without a timestamp, the write
     /// timestamp is null rather than an earlier write's.
     /// <para>
-    /// When writes to a derived property with a setter race, a late recalculation can stamp an older write's
-    /// timestamp next to a newer write's value, which stays until the next write, and the derived properties
-    /// that depend on it inherit that timestamp. The change stream can carry the same pair, from the older write's
-    /// own change or from the recalculation's. This covers a recalculation that runs after a newer write has
-    /// settled, one that coalesces several writes into a single pass, and, when the getter also reads other
-    /// intercepted properties, one triggered by a write to one of them.
+    /// Derived properties with a setter can keep an older write's timestamp under racing writes (#608).
     /// </para>
     /// </remarks>
     public object? GetValue(out PropertyValueMetadata metadata)
@@ -235,8 +231,6 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
         var propertyMetadata = Metadata;
         var value = propertyMetadata.GetValue?.Invoke(Subject);
 
-        // Locked even when the value read was not: a terminal stores the value and the timestamp under this
-        // lock, which is what keeps the timestamp no older than a stored or derived-with-setter value's write.
         var timestampTicks = GetWriteTimestampTicksAfterValueRead();
         if (propertyMetadata.IsDerived
             && TryGetPropertyData(DerivedDependenciesKey, out var data)
