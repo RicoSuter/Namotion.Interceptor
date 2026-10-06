@@ -86,4 +86,49 @@ public class NuGetPluginPathsTests
         // Assert
         Assert.Equal(folder, resolved);
     }
+
+    [Fact]
+    public void WhenFeedUrlIsFileUri_ThenItIsUsedAsIs()
+    {
+        // Arrange
+        var fileUri = new Uri(Path.Combine(Path.GetTempPath(), "feed")).AbsoluteUri;
+
+        // Act
+        var resolved = NuGetPluginPaths.ResolveFeedUrl(fileUri, DataDirectory);
+
+        // Assert
+        Assert.Equal(fileUri, resolved);
+    }
+
+    [Fact]
+    public void WhenFeedUrlIsRelativeWithSurroundingWhitespace_ThenItIsTrimmedAndResolvedAgainstDataDirectory()
+    {
+        // Act
+        var resolved = NuGetPluginPaths.ResolveFeedUrl("  MyFeed  ", DataDirectory);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath("MyFeed", DataDirectory), resolved);
+    }
+
+    [Fact]
+    public void WhenFeedUrlIsRelativeAndDataDirectoryIsMissing_ThenWorkingDirectoryIsUsed()
+    {
+        // Act
+        var resolved = NuGetPluginPaths.ResolveFeedUrl("MyFeed", dataDirectory: null);
+
+        // Assert
+        Assert.Equal(Path.GetFullPath("MyFeed"), resolved);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void WhenFeedUrlIsNullOrWhitespace_ThenArgumentExceptionIsThrown(string? url)
+    {
+        // Act & Assert
+        // ArgumentException.ThrowIfNullOrWhiteSpace throws ArgumentNullException for null, which derives from
+        // ArgumentException, so ThrowsAny covers all three inputs with one assertion.
+        Assert.ThrowsAny<ArgumentException>(() => NuGetPluginPaths.ResolveFeedUrl(url!, DataDirectory));
+    }
 }
