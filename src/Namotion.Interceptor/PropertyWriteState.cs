@@ -22,6 +22,12 @@ internal sealed class PropertyWriteState
     internal long TimestampTicks;
 
     /// <summary>
+    /// What <see cref="PropertyReference.GetWriteTimestampTicksAfterValueRead"/> returns for a property whose last write
+    /// had no timestamp. Above every real tick count, so a maximum over timestamps keeps it.
+    /// </summary>
+    internal const long WrittenWithoutTimestampTicks = long.MaxValue;
+
+    /// <summary>
     /// Converts <see cref="TimestampTicks"/> to a UTC timestamp, or null when it is zero.
     /// </summary>
     internal static DateTimeOffset? ToTimestamp(long ticks)

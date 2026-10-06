@@ -126,7 +126,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Gets the write timestamp as raw UTC ticks, or 0 if no timestamp has been set, under the subject's lock.
+    /// Gets the write timestamp as raw UTC ticks under the subject's lock: 0 if the property has never been written,
+    /// or <see cref="PropertyWriteState.WrittenWithoutTimestampTicks"/> if its last write had no timestamp.
     /// Called after a value read, it returns the timestamp of the write a terminal stored that value with, or
     /// of a later write, whether or not the value read took the lock.
     /// </summary>
@@ -134,7 +135,13 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     {
         lock (Subject.SyncRoot)
         {
-            return GetWriteTimestampTicks();
+            if (!TryGetWriteState(out var state))
+            {
+                return 0;
+            }
+
+            var ticks = Volatile.Read(ref state.TimestampTicks);
+            return ticks == 0 ? PropertyWriteState.WrittenWithoutTimestampTicks : ticks;
         }
     }
 
@@ -212,6 +219,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
     /// property change detection, the metadata carries the property's own write timestamp alone. For a
     /// property that is not intercepted, the value and metadata may come from different writes, in either
     /// order. Inside a transaction, a pending value is returned with the metadata of the last committed write.
+    /// When the property or one of its recorded dependencies was last written without a timestamp, the write
+    /// timestamp is null rather than an earlier write's.
     /// <para>
     /// When writes to a derived property with a setter race, a late recalculation can stamp an older write's
     /// timestamp next to a newer write's value, which stays until the next write, and the derived properties
@@ -236,7 +245,8 @@ public readonly struct PropertyReference : IEquatable<PropertyReference>
             timestampTicks = Math.Max(timestampTicks, dependencies.GetLatestDependencyWriteTimestampTicks());
         }
 
-        metadata = new PropertyValueMetadata(timestampTicks);
+        metadata = new PropertyValueMetadata(
+            timestampTicks == PropertyWriteState.WrittenWithoutTimestampTicks ? 0 : timestampTicks);
         return value;
     }
 

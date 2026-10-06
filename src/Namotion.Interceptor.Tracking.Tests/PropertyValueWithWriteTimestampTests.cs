@@ -277,6 +277,75 @@ public class PropertyValueWithWriteTimestampTests
         Assert.Equal(SecondTimestamp, metadata.WriteTimestamp);
     }
 
+    [Fact]
+    public void WhenDependencyIsWrittenWithoutTimestamp_ThenDerivedValueComesWithoutTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Person(context);
+        var fullName = person.GetPropertyReference(nameof(Person.FullName));
+
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            person.LastName = "Doe";
+            person.FirstName = "John";
+        }
+
+        using (SubjectChangeContext.WithChangedTimestamp(null))
+        {
+            person.FirstName = "Jane";
+        }
+
+        // Act
+        var value = fullName.GetValue(out var metadata);
+
+        // Assert
+        Assert.Equal("Jane Doe", value);
+        Assert.Null(fullName.TryGetWriteTimestamp());
+        Assert.Null(metadata.WriteTimestamp);
+    }
+
+    [Fact]
+    public async Task WhenDerivedPropertyIsReadWhileARecalculationAfterAWriteWithoutTimestampIsPending_ThenGetterValueComesWithoutTimestamp()
+    {
+        // Arrange
+        var parking = new ParkingWriteInterceptor(nameof(Person.FirstName));
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        context.AddService<IWriteInterceptor>(parking);
+
+        var person = new Person(context);
+        var fullName = person.GetPropertyReference(nameof(Person.FullName));
+
+        using (SubjectChangeContext.WithChangedTimestamp(FirstTimestamp))
+        {
+            person.LastName = "Doe";
+            person.FirstName = "John";
+        }
+
+        parking.Armed = true;
+        var writer = DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+        {
+            using (SubjectChangeContext.WithChangedTimestamp(null))
+            {
+                person.FirstName = "Jane";
+            }
+        }, "writer");
+
+        Assert.True(parking.Committed.Wait(WaitBudget), "The writer did not reach the parked commit.");
+
+        // Act
+        var separateTimestamp = fullName.TryGetWriteTimestamp();
+        var pairedValue = fullName.GetValue(out var pairedMetadata);
+
+        parking.Release.Set();
+        await writer.WaitAsync(WaitBudget);
+
+        // Assert
+        Assert.Equal(FirstTimestamp, separateTimestamp);
+        Assert.Equal("Jane Doe", pairedValue);
+        Assert.Null(pairedMetadata.WriteTimestamp);
+    }
+
     /// <summary>
     /// The terminal of a derived-with-setter write stamps the property's write state before the recalculation
     /// that follows commits the value that write produces. While that recalculation is pending the getter
