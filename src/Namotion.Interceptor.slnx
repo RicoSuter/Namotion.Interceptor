@@ -79,6 +79,9 @@
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik/Namotion.Devices.Luxtronik.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.Tests/Namotion.Devices.Luxtronik.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec/Namotion.Devices.SunSpec.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Generator/Namotion.Devices.SunSpec.Generator.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Tests/Namotion.Devices.SunSpec.Tests.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/History/">
     <Project Path="HomeBlaze/HomeBlaze.History/HomeBlaze.History.csproj" />

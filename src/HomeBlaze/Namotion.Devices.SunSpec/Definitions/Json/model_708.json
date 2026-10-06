@@ -1,0 +1,356 @@
+{
+    "group": {
+        "desc": "DER high voltage trip model.",
+        "groups": [
+            {
+                "comments": [
+                    "Stored curve sets - Number of curve sets contained in NCrvSet - The first set is read-only and indicates the current settings."
+                ],
+                "count": "NCrvSet",
+                "desc": "Stored curve sets.",
+                "groups": [
+                    {
+                        "comments": [
+                            "Stored curve set containing a Must Trip, May Trip, and Momentary Cessation Curve - Number of curve points contained in NPt"
+                        ],
+                        "desc": "Stored must trip curve.",
+                        "groups": [
+                            {
+                                "count": "NPt",
+                                "desc": "Must trip curve points.",
+                                "label": "Must Trip Curve Points",
+                                "name": "Pt",
+                                "points": [
+                                    {
+                                        "access": "RW",
+                                        "desc": "Curve voltage point as percentage.",
+                                        "label": "Voltage Point",
+                                        "name": "V",
+                                        "sf": "V_SF",
+                                        "size": 1,
+                                        "type": "uint16",
+                                        "units": "VNomPct",
+                                        "standards": [
+                                            "IEEE 1547-2018"
+                                        ],
+                                        "detail": "Internal curve conformance checks should be conducted when AdptCrvReq is set to 1, not on point writes."
+                                    },
+                                    {
+                                        "access": "RW",
+                                        "desc": "Curve time point in seconds.",
+                                        "label": "Time Point",
+                                        "name": "Tms",
+                                        "sf": "Tms_SF",
+                                        "size": 2,
+                                        "type": "uint32",
+                                        "units": "Secs",
+                                        "standards": [
+                                            "IEEE 1547-2018"
+                                        ],
+                                        "detail": "Internal curve conformance checks should be conducted when AdptCrvReq is set to 1, not on point writes."
+                                    }
+                                ],
+                                "type": "group"
+                            }
+                        ],
+                        "label": "Must Trip Curve",
+                        "name": "MustTrip",
+                        "points": [
+                            {
+                                "access": "RW",
+                                "desc": "Number of active points in must trip curve.",
+                                "label": "Number Of Active Points",
+                                "name": "ActPt",
+                                "size": 1,
+                                "type": "uint16",
+                                "standards": [
+                                    "IEEE 1547-2018"
+                                ]
+                            }
+                        ],
+                        "type": "group"
+                    },
+                    {
+                        "desc": "Stored may trip curve.",
+                        "groups": [
+                            {
+                                "count": "NPt",
+                                "desc": "May trip curve points.",
+                                "label": "May Trip Curve Points",
+                                "name": "Pt",
+                                "points": [
+                                    {
+                                        "access": "RW",
+                                        "desc": "Curve voltage point as percentage.",
+                                        "label": "Voltage Point",
+                                        "name": "V",
+                                        "sf": "V_SF",
+                                        "size": 1,
+                                        "type": "uint16",
+                                        "units": "VNomPct",
+                                        "standards": []
+                                    },
+                                    {
+                                        "access": "RW",
+                                        "desc": "Curve time point in seconds.",
+                                        "label": "Time Point",
+                                        "name": "Tms",
+                                        "sf": "Tms_SF",
+                                        "size": 2,
+                                        "type": "uint32",
+                                        "units": "Secs",
+                                        "standards": []
+                                    }
+                                ],
+                                "type": "group"
+                            }
+                        ],
+                        "label": "May Trip Curve",
+                        "name": "MayTrip",
+                        "points": [
+                            {
+                                "access": "RW",
+                                "desc": "Number of active points in may trip curve.",
+                                "label": "Number Of Active Points",
+                                "name": "ActPt",
+                                "size": 1,
+                                "type": "uint16",
+                                "standards": []
+                            }
+                        ],
+                        "type": "group"
+                    },
+                    {
+                        "desc": "Stored momentary cessation curve.",
+                        "groups": [
+                            {
+                                "count": "NPt",
+                                "desc": "Momentary cessation curve points.",
+                                "label": "Mom Cessation Curve Points",
+                                "name": "Pt",
+                                "points": [
+                                    {
+                                        "access": "RW",
+                                        "desc": "Curve voltage point as percentage.",
+                                        "label": "Voltage Point",
+                                        "name": "V",
+                                        "sf": "V_SF",
+                                        "size": 1,
+                                        "type": "uint16",
+                                        "units": "VNomPct",
+                                        "standards": []
+                                    },
+                                    {
+                                        "access": "RW",
+                                        "desc": "Curve time point in seconds.",
+                                        "label": "Time Point",
+                                        "name": "Tms",
+                                        "sf": "Tms_SF",
+                                        "size": 2,
+                                        "type": "uint32",
+                                        "units": "Secs",
+                                        "standards": []
+                                    }
+                                ],
+                                "type": "group"
+                            }
+                        ],
+                        "label": "Momentary Cessation Curve",
+                        "name": "MomCess",
+                        "points": [
+                            {
+                                "access": "RW",
+                                "desc": "Number of active points in the momentary cessation curve.",
+                                "label": "Number Of Active Points",
+                                "name": "ActPt",
+                                "size": 1,
+                                "type": "uint16",
+                                "standards": []
+                            }
+                        ],
+                        "type": "group"
+                    }
+                ],
+                "label": "Stored Curves",
+                "name": "Crv",
+                "points": [
+                    {
+                        "desc": "Curve read-write access.",
+                        "label": "Curve Access",
+                        "mandatory": "M",
+                        "name": "ReadOnly",
+                        "size": 1,
+                        "static": "S",
+                        "symbols": [
+                            {
+                                "desc": "Curve has read-write access.",
+                                "label": "Read-Write Access",
+                                "name": "RW",
+                                "value": 0
+                            },
+                            {
+                                "desc": "Curve has read-only access.",
+                                "label": "Read-Only Access",
+                                "name": "R",
+                                "value": 1
+                            }
+                        ],
+                        "type": "enum16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    }
+                ],
+                "type": "group"
+            }
+        ],
+        "label": "DER Trip HV",
+        "name": "DERTripHV",
+        "points": [
+            {
+                "desc": "DER high voltage trip model ID.",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 708,
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "DER high voltage trip model length.",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "DER high voltage trip control enable.",
+                "label": "DER Trip HV Module Enable",
+                "mandatory": "M",
+                "name": "Ena",
+                "size": 1,
+                "symbols": [
+                    {
+                        "desc": "Function is disabled.",
+                        "label": "Disabled",
+                        "name": "DISABLED",
+                        "value": 0
+                    },
+                    {
+                        "desc": "Function is enabled.",
+                        "label": "Enabled",
+                        "name": "ENABLED",
+                        "value": 1
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Index of curve points to adopt. First curve index is 1.",
+                "label": "Adopt Curve Request",
+                "mandatory": "M",
+                "name": "AdptCrvReq",
+                "size": 1,
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Result of last adopt curve operation.",
+                "label": "Adopt Curve Result",
+                "mandatory": "M",
+                "name": "AdptCrvRslt",
+                "size": 1,
+                "symbols": [
+                    {
+                        "desc": "Curve update in progress.",
+                        "label": "Update In Progress",
+                        "name": "IN_PROGRESS",
+                        "value": 0
+                    },
+                    {
+                        "desc": "Curve update completed successfully.",
+                        "label": "Update Complete",
+                        "name": "COMPLETED",
+                        "value": 1
+                    },
+                    {
+                        "desc": "Curve update failed.",
+                        "label": "Update Failed",
+                        "name": "FAILED",
+                        "value": 2
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Number of curve points supported.",
+                "label": "Number Of Points",
+                "mandatory": "M",
+                "name": "NPt",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Number of stored curves supported.",
+                "label": "Stored Curve Count",
+                "mandatory": "M",
+                "name": "NCrvSet",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Scale factor for curve voltage points.",
+                "label": "Voltage Scale Factor",
+                "mandatory": "M",
+                "name": "V_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Scale factor for curve time points.",
+                "label": "Time Point Scale Factor",
+                "mandatory": "M",
+                "name": "Tms_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            }
+        ],
+        "type": "group"
+    },
+    "id": 708
+}
