@@ -26,6 +26,7 @@ public class PluginLoadingTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
+        await _fixture.WaitForPluginsLoadedAsync();
 
         // Act - Navigate to browser and open the Plugins subject
         await NavigateToPluginsAsync(page);
@@ -43,6 +44,7 @@ public class PluginLoadingTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
+        await _fixture.WaitForPluginsLoadedAsync();
 
         // Act - Navigate to browser, open Plugins, then click on SamplePlugin1
         await NavigateToPluginsAsync(page);
@@ -57,10 +59,11 @@ public class PluginLoadingTests
     }
 
     [Fact]
-    public async Task WhenPluginLoadsAfterStartup_ThenItsDeviceFileBecomesTheRealSubject()
+    public async Task WhenPluginIsLoaded_ThenItsDeviceFileShowsAsTheRealSubject()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
+        await _fixture.WaitForPluginsLoadedAsync();
 
         // Act
         await page.GotoAsync(_fixture.ServerAddress);
@@ -70,7 +73,7 @@ public class PluginLoadingTests
         await browserLink.ClickAsync();
 
         // Assert - the title comes from SampleDevice1, the placeholder would show the file name
-        await Assertions.Expect(page.GetByText("E2E Sample Sensor").First)
+        await Assertions.Expect(page.GetByText("E2E Sample Sensor", new() { Exact = true }))
             .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
     }
 

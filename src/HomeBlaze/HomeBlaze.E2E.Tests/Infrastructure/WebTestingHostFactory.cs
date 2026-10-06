@@ -66,6 +66,10 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // (testRoot.json, ./TestData) resolve correctly regardless of where dotnet test is run from.
         Environment.CurrentDirectory = AppContext.BaseDirectory;
 
+        // The sample packages never change version, and an extracted version folder is reused as is,
+        // so a cache left by an earlier run would load the assemblies of a previous plugin build.
+        DeletePluginCache();
+
         // Create the standard TestServer host (required by base class)
         var testHost = builder.Build();
 
@@ -96,6 +100,22 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // Start the TestServer host to satisfy the base class
         testHost.Start();
         return testHost;
+    }
+
+    private static void DeletePluginCache()
+    {
+        var cacheDirectory = Path.Combine(AppContext.BaseDirectory, "PluginsCache");
+        try
+        {
+            if (Directory.Exists(cacheDirectory))
+            {
+                Directory.Delete(cacheDirectory, recursive: true);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Could not delete the plugin cache '{cacheDirectory}': {exception.Message}");
+        }
     }
 
     protected override void Dispose(bool disposing)

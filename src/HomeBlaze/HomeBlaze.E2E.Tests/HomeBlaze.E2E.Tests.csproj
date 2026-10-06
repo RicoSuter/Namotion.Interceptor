@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
