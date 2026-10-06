@@ -172,6 +172,36 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenFeedsChangeAfterEveryPluginFailed_ThenRetryLoadsFromNewFeedWithoutRestart()
+    {
+        // Arrange
+        var emptyFeedDirectory = Directory.CreateTempSubdirectory("homeblaze-plugins-empty-feed-");
+        try
+        {
+            var provider = CreateProvider(new TypeProvider(), emptyFeedDirectory.FullName);
+            provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
+            await provider.ReconcileAsync(CancellationToken.None);
+            Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins[Plugin1].Status);
+
+            // Act
+            provider.Feeds =
+            [
+                new PluginFeedEntry { Name = "samples", Url = FindPluginsFolder() },
+                .. provider.Feeds.Where(feed => feed.Name != "samples")
+            ];
+            await provider.RetryAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(ServiceStatus.Running, provider.LoadedPlugins[Plugin1].Status);
+            Assert.False(provider.IsRestartRequired);
+        }
+        finally
+        {
+            emptyFeedDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task WhenRetryingNextToMissingPackage_ThenLoadedPluginIsUntouched()
     {
         // Arrange

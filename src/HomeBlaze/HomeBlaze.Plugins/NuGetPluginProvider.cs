@@ -18,7 +18,7 @@ namespace HomeBlaze.Plugins;
 /// Loads NuGet packages as plugins and adds their assemblies to the <see cref="TypeProvider"/>.
 /// Adding a plugin, and removing or changing a plugin that failed to load, takes effect immediately.
 /// Removing a loaded plugin, changing its version or changing the feeds, host packages, host identifier or
-/// cache directory after the first package was loaded takes effect after a restart.
+/// cache directory after a plugin has loaded takes effect after a restart.
 /// </summary>
 [InterceptorSubject]
 public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
@@ -34,11 +34,11 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     // Status message of each loaded plugin at load time, shown again once a pending restart change is reverted.
     private readonly Dictionary<string, string?> _loadStatusMessages = new(StringComparer.OrdinalIgnoreCase);
 
-    // Replaced on every reconcile until the loader exists; the loader is created from these options.
+    // Replaced on every reconcile until a plugin has loaded; the loader is created from these options.
     private NuGetPluginLoaderOptions? _loaderOptions;
     private string? _loaderSettings;
 
-    // Never disposed: disposing it unloads plugin assemblies that live subjects still use.
+    // Disposed only while none of its plugins is loaded: disposing it unloads plugin assemblies that live subjects use.
     private NuGetPluginLoader? _loader;
 
     // Cancelled by StopAsync and replaced by StartAsync when already cancelled, so a restart does not leave
@@ -213,8 +213,14 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
             var settings = GetLoaderSettings(options);
 
             var isRestartRequired = false;
-            if (_loader is null)
+            if (_loader is null || _loader.LoadedPlugins.Count == 0)
             {
+                if (_loader is not null && settings != _loaderSettings)
+                {
+                    _loader.Dispose();
+                    _loader = null;
+                }
+
                 _loaderOptions = options;
                 _loaderSettings = settings;
             }

@@ -83,6 +83,25 @@ public class NuGetPluginProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenFeedsChangeAfterEveryPluginFailed_ThenRestartIsNotRequired()
+    {
+        // Arrange
+        var provider = CreateProvider();
+        provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }];
+        await provider.ReconcileAsync(CancellationToken.None);
+        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+
+        // Act
+        Directory.CreateDirectory(Path.Combine(_dataDirectory.FullName, "Other"));
+        provider.Feeds = [new PluginFeedEntry { Name = "other", Url = "Other" }];
+        await provider.RetryAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(provider.IsRestartRequired);
+        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+    }
+
+    [Fact]
     public async Task WhenLoadedPluginIsRemoved_ThenRestartIsRequired()
     {
         // Arrange
