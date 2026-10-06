@@ -156,6 +156,89 @@ public class SunSpecLayoutTests
         Assert.Throws<InvalidDataException>(() => SunSpecLayout.Resolve(definition, 40000, registers));
     }
 
+    [Fact]
+    public void WhenCountPointIsTwoLevelsUp_ThenItCountsTheNestedGroup()
+    {
+        // Arrange
+        var definition = SunSpecDefinitions.TryGetBuiltIn(707)!;
+        var top = definition.Group;
+        var curve = top.Groups.Single(group => group.Name == "Crv");
+        var mustTrip = curve.Groups.Single(group => group.Name == "MustTrip");
+        var pointSize = mustTrip.Groups.Single(group => group.Name == "Pt").Points.Sum(p => p.Size);
+        var curveSize = curve.Points.Sum(p => p.Size) + curve.Groups.Sum(group => group.Points.Sum(p => p.Size) + 3 * pointSize);
+        var registers = new ushort[top.Points.Sum(p => p.Size) + 2 * curveSize];
+        registers[0] = 707;
+        registers[1] = (ushort)(registers.Length - 2);
+        registers[OffsetOf(top, "NCrvSet")] = 2;
+        registers[OffsetOf(top, "NPt")] = 3;
+
+        // Act
+        var layout = SunSpecLayout.Resolve(definition, 40000, registers);
+
+        // Assert
+        var curves = layout.GetGroup("Crv");
+        Assert.Equal(2, curves.Count);
+        Assert.All(curves, instance => Assert.Equal(3, instance.GetGroup("MustTrip").Single().GetGroup("Pt").Count));
+        Assert.Equal(40000 + registers.Length - pointSize, curves[1].GetGroup("MomCess").Single().GetGroup("Pt")[2].Address);
+        Assert.Equal(registers.Length, layout.Length);
+    }
+
+    [Fact]
+    public void WhenGroupHasAFixedCount_ThenItRepeatsThatOften()
+    {
+        // Arrange
+        var definition = Parse("""
+            { "id": 64903, "group": { "name": "fixed", "points": [
+                { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 } ],
+              "groups": [ { "name": "slot", "count": 3, "points": [ { "name": "V", "type": "uint32", "size": 2 } ] } ] } }
+            """);
+        ushort[] registers = [64903, 6, 0, 0, 0, 0, 0, 0];
+
+        // Act
+        var layout = SunSpecLayout.Resolve(definition, 40000, registers);
+
+        // Assert
+        Assert.Equal(new[] { 40002, 40004, 40006 }, layout.GetGroup("slot").Select(slot => slot.Address));
+    }
+
+    [Fact]
+    public void WhenANearerGroupDefinesTheCountPoint_ThenTheNearerPointIsUsed()
+    {
+        // Arrange
+        var definition = Parse("""
+            { "id": 64904, "group": { "name": "shadow", "points": [
+                { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 },
+                { "name": "N", "type": "count", "size": 1 } ],
+              "groups": [ { "name": "outer", "count": "N", "points": [ { "name": "N", "type": "count", "size": 1 } ],
+                "groups": [ { "name": "inner", "count": "N", "points": [ { "name": "V", "type": "uint16", "size": 1 } ] } ] } ] } }
+            """);
+        ushort[] registers = [64904, 5, 1, 3, 0, 0, 0];
+
+        // Act
+        var layout = SunSpecLayout.Resolve(definition, 40000, registers);
+
+        // Assert
+        var outer = Assert.Single(layout.GetGroup("outer"));
+        Assert.Equal(3, outer.GetGroup("inner").Count);
+    }
+
+    [Fact]
+    public void WhenCountedGroupHasNoRegisters_ThenResolvingFails()
+    {
+        // Arrange
+        var definition = Parse("""
+            { "id": 64905, "group": { "name": "empty", "points": [
+                { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 },
+                { "name": "N", "type": "count", "size": 1 } ],
+              "groups": [ { "name": "nothing", "count": "N", "points": [] } ] } }
+            """);
+        ushort[] registers = [64905, 1, 2];
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidDataException>(() => SunSpecLayout.Resolve(definition, 40000, registers));
+        Assert.Contains("has no registers", exception.Message);
+    }
+
     private static ushort[] CreateRegistersFor705(SunSpecModelDefinition definition, int curveCount, int pointCount)
     {
         var top = definition.Group;

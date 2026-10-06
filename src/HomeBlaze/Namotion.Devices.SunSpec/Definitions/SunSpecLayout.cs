@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace Namotion.Devices.SunSpec.Definitions;
 
 /// <summary>
@@ -13,7 +15,11 @@ internal sealed class SunSpecGroupInstance
     /// <summary>Gets the zero-based position within its group.</summary>
     public required int Index { get; init; }
 
-    /// <summary>Gets the register count, including nested groups.</summary>
+    /// <summary>
+    /// Gets the register count, including nested groups. For the top-level instance this is the length the definition
+    /// resolves to, which may exceed the registers of a device reporting a shorter model; compare against the reported
+    /// model length to find points the device does not provide.
+    /// </summary>
     public required int Length { get; init; }
 
     public required IReadOnlyDictionary<string, IReadOnlyList<SunSpecGroupInstance>> Groups { get; init; }
@@ -35,7 +41,9 @@ internal static class SunSpecLayout
     /// <paramref name="registers"/> holds the whole model, starting with the ID and length registers.
     /// A count point reading 0xFFFF (not implemented) yields no instances.
     /// </summary>
-    /// <exception cref="InvalidDataException">The groups do not fit the model.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The groups do not fit the model, a counted group has no registers, or a count point is not defined in an enclosing group.
+    /// </exception>
     public static SunSpecGroupInstance Resolve(SunSpecModelDefinition definition, int modelAddress, ushort[] registers)
     {
         var context = new LayoutContext(definition.Id, modelAddress, registers);
@@ -45,6 +53,15 @@ internal static class SunSpecLayout
     private static SunSpecGroupInstance ResolveInstance(LayoutContext context, SunSpecGroupDefinition group, int address, int index, LayoutScope? parent)
     {
         var offset = address + GetPointsSize(group);
+        if (group.Groups.Count == 0)
+        {
+            return new SunSpecGroupInstance
+            {
+                Definition = group, Address = address, Index = index, Length = offset - address,
+                Groups = ReadOnlyDictionary<string, IReadOnlyList<SunSpecGroupInstance>>.Empty
+            };
+        }
+
         var scope = new LayoutScope(group, address, parent);
         var groups = new Dictionary<string, IReadOnlyList<SunSpecGroupInstance>>(group.Groups.Count);
 
@@ -82,15 +99,21 @@ internal static class SunSpecLayout
 
     private static int ResolveCounted(LayoutContext context, SunSpecGroupDefinition group, int offset, LayoutScope scope, List<SunSpecGroupInstance> instances)
     {
-        var isCountedByPoint = group.Count.PointName is not null && group.Count.Fixed is null;
+        var isCountedByPoint = group.Count.PointName is not null;
         var count = group.Count.IsSingle ? 1 : group.Count.Fixed ?? ReadCount(context, group.Count.PointName!, scope);
         for (var instanceIndex = 0; instanceIndex < count; instanceIndex++)
         {
             var instance = ResolveInstance(context, group, offset, instanceIndex, scope);
-            offset += instance.Length;
+
+            // Without registers a device-reported count would not be bounded by the model length.
+            if (isCountedByPoint && instance.Length == 0)
+            {
+                throw new InvalidDataException($"Group {group.Name} of model {context.ModelId} is counted by point {group.Count.PointName} but has no registers.");
+            }
 
             // Checked per instance so a device-reported count cannot create more instances than fit the model.
-            if (offset > context.End || (isCountedByPoint && instance.Length == 0))
+            offset += instance.Length;
+            if (offset > context.End)
             {
                 throw new InvalidDataException($"Group {group.Name} of model {context.ModelId} runs past the model length.");
             }
