@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
@@ -13,6 +14,8 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// </summary>
 internal static class PathIndexResolver
 {
+    private static readonly ConcurrentDictionary<Type, Shape> Shapes = new();
+
     /// <param name="property">The property the segment names.</param>
     /// <param name="text">The unquoted index text.</param>
     /// <param name="textString"><paramref name="text"/> as a string when the caller already holds one, otherwise null.</param>
@@ -30,7 +33,8 @@ internal static class PathIndexResolver
     {
         child = null;
 
-        if (property.IsSubjectCollection)
+        var shape = GetShape(property.Type);
+        if (shape.IsCollection)
         {
             if (!TryParsePosition(text, out var position))
             {
@@ -47,12 +51,11 @@ internal static class PathIndexResolver
             return true;
         }
 
-        if (property.IsSubjectDictionary)
+        if (shape.IsDictionary)
         {
             var dictionary = property.GetValue();
-            var keyType = SubjectLookup.GetDictionaryKeyType(dictionary?.GetType() ?? property.Type);
-            object? parsedKey = null;
-            switch (keyType is null ? null : TryParseKey(keyType, text, textString, out parsedKey))
+            var keyShape = dictionary is null || dictionary.GetType() == property.Type ? shape : GetShape(dictionary.GetType());
+            switch (TryParseKey(keyShape, text, textString, out var parsedKey))
             {
                 case true:
                     key = parsedKey!;
@@ -106,42 +109,42 @@ internal static class PathIndexResolver
     }
 
     /// <returns>True when parsed, false when the key type is supported but the text is not its written form, null when the key type is not supported.</returns>
-    private static bool? TryParseKey(Type keyType, ReadOnlySpan<char> text, string? textString, out object? key)
+    private static bool? TryParseKey(Shape shape, ReadOnlySpan<char> text, string? textString, out object? key)
     {
-        key = null;
-        if (keyType.IsEnum)
+        switch (shape.KeyKind)
         {
-            // The written-form check rejects numeric forms of named values and alias names, which the writer never emits.
-            if (Enum.TryParse(keyType, text, ignoreCase: false, out var value) && PathSyntax.TextEquals((ISpanFormattable)value!, text))
-            {
-                key = value;
-            }
+            case KeyKind.String: key = textString ?? text.ToString(); return true;
+            case KeyKind.SByte: key = ParseInteger<sbyte>(text); break;
+            case KeyKind.Byte: key = ParseInteger<byte>(text); break;
+            case KeyKind.Int16: key = ParseInteger<short>(text); break;
+            case KeyKind.UInt16: key = ParseInteger<ushort>(text); break;
+            case KeyKind.Int32: key = ParseInteger<int>(text); break;
+            case KeyKind.UInt32: key = ParseInteger<uint>(text); break;
+            case KeyKind.Int64: key = ParseInteger<long>(text); break;
+            case KeyKind.UInt64: key = ParseInteger<ulong>(text); break;
 
-            return key is not null;
-        }
+            case KeyKind.Enum:
+                key = null;
+                // The written-form check rejects numeric forms of named values and alias names, which the writer never emits.
+                if (Enum.TryParse(shape.KeyType!, text, ignoreCase: false, out var enumValue) && PathSyntax.TextEquals((ISpanFormattable)enumValue!, text))
+                {
+                    key = enumValue;
+                }
 
-        if (keyType == typeof(Guid))
-        {
-            if (Guid.TryParse(text, out var value) && PathSyntax.TextEquals(value, text))
-            {
-                key = value;
-            }
+                break;
 
-            return key is not null;
-        }
+            case KeyKind.Guid:
+                key = null;
+                if (Guid.TryParse(text, out var guidValue) && PathSyntax.TextEquals(guidValue, text))
+                {
+                    key = guidValue;
+                }
 
-        switch (Type.GetTypeCode(keyType))
-        {
-            case TypeCode.String: key = textString ?? text.ToString(); break;
-            case TypeCode.SByte: key = ParseInteger<sbyte>(text); break;
-            case TypeCode.Byte: key = ParseInteger<byte>(text); break;
-            case TypeCode.Int16: key = ParseInteger<short>(text); break;
-            case TypeCode.UInt16: key = ParseInteger<ushort>(text); break;
-            case TypeCode.Int32: key = ParseInteger<int>(text); break;
-            case TypeCode.UInt32: key = ParseInteger<uint>(text); break;
-            case TypeCode.Int64: key = ParseInteger<long>(text); break;
-            case TypeCode.UInt64: key = ParseInteger<ulong>(text); break;
-            default: return null;
+                break;
+
+            default:
+                key = null;
+                return null;
         }
 
         return key is not null;
@@ -170,5 +173,75 @@ internal static class PathIndexResolver
 
         child = null;
         return null;
+    }
+
+    private static Shape GetShape(Type type) => Shapes.GetOrAdd(type, static type => new Shape(type));
+
+    private enum KeyKind : byte
+    {
+        Unsupported,
+        String,
+        SByte,
+        Byte,
+        Int16,
+        UInt16,
+        Int32,
+        UInt32,
+        Int64,
+        UInt64,
+        Enum,
+        Guid
+    }
+
+    /// <summary>The resolver's view of a property or dictionary type: container kind and how its keys parse.</summary>
+    private sealed class Shape
+    {
+        public Shape(Type type)
+        {
+            IsCollection = type.IsSubjectCollectionType();
+            IsDictionary = type.IsSubjectDictionaryType();
+            KeyType = SubjectLookup.GetDictionaryKeyType(type);
+            KeyKind = GetKeyKind(KeyType);
+        }
+
+        public bool IsCollection { get; }
+
+        public bool IsDictionary { get; }
+
+        public Type? KeyType { get; }
+
+        public KeyKind KeyKind { get; }
+
+        private static KeyKind GetKeyKind(Type? keyType)
+        {
+            if (keyType is null)
+            {
+                return KeyKind.Unsupported;
+            }
+
+            if (keyType.IsEnum)
+            {
+                return KeyKind.Enum;
+            }
+
+            if (keyType == typeof(Guid))
+            {
+                return KeyKind.Guid;
+            }
+
+            return Type.GetTypeCode(keyType) switch
+            {
+                TypeCode.String => KeyKind.String,
+                TypeCode.SByte => KeyKind.SByte,
+                TypeCode.Byte => KeyKind.Byte,
+                TypeCode.Int16 => KeyKind.Int16,
+                TypeCode.UInt16 => KeyKind.UInt16,
+                TypeCode.Int32 => KeyKind.Int32,
+                TypeCode.UInt32 => KeyKind.UInt32,
+                TypeCode.Int64 => KeyKind.Int64,
+                TypeCode.UInt64 => KeyKind.UInt64,
+                _ => KeyKind.Unsupported
+            };
+        }
     }
 }
