@@ -68,7 +68,7 @@ Values convert as follows:
 
 - Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`, U64 into `ulong` but not `long`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
 - Scaled values require a `float`, `double`, `decimal` or `TimeSpan` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
-- F32 converts to `float`, `double`, `decimal` or `TimeSpan`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property, and on a `TimeSpan?` property also a value beyond the `TimeSpan` range.
+- F32 converts to `float`, `double`, `decimal` or `TimeSpan`. A NaN, an infinity or a float beyond the `decimal` range becomes `null` on a `decimal?` or `TimeSpan?` property, as does a converted value beyond the `TimeSpan` range on a `TimeSpan?` property. Scaling that overflows `decimal` is an error.
 - `TimeSpan` takes the value a `decimal` property would get as seconds, truncated to whole ticks; use `Scale` for other units, such as `Scale = 0.001` for milliseconds.
 - String reads two ASCII characters per register up to the first NUL and trims trailing spaces.
 - `NotAvailableValue` requires a nullable property and an integer data type, and is checked before scaling.

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Namotion.Interceptor.Modbus.Attributes;
 
 namespace Namotion.Interceptor.Modbus.Mapping;
@@ -109,7 +110,7 @@ internal static class ModbusValueConverters
                     return null;
                 }
 
-                return (decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+                return ToDecimal(value) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
             };
         }
 
@@ -131,7 +132,7 @@ internal static class ModbusValueConverters
             var value = ModbusRegisterCodec.ReadSingle(raw, wordOrder);
             if (!isNullable)
             {
-                return ToTimeSpan((decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent));
+                return ToTimeSpan(ToDecimal(value) * GetDecimalScale(hasDynamicScale, decimalScale, exponent));
             }
 
             // Also true for NaN, which fails every comparison.
@@ -140,7 +141,7 @@ internal static class ModbusValueConverters
                 return null;
             }
 
-            return TryToTimeSpan((decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent), out var timeSpan) ? timeSpan : null;
+            return TryToTimeSpan(ToDecimal(value) * GetDecimalScale(hasDynamicScale, decimalScale, exponent), out var timeSpan) ? timeSpan : null;
         };
     }
 
@@ -298,6 +299,20 @@ internal static class ModbusValueConverters
 
         var power = exponent < 0 ? NegativePowersOfTen[-exponent] : PowersOfTen[exponent];
         return staticScale == 1m ? power : staticScale * power;
+    }
+
+    // A float holds about 7 digits: a direct cast rounds 16777216f to 16777220, a cast via double turns 230.1f into
+    // 230.100006103516. The shortest round-trip string keeps the value the device sent without binary noise.
+    private static decimal ToDecimal(float value)
+    {
+        if (!float.IsFinite(value))
+        {
+            throw new OverflowException($"F32 value {value} cannot be converted to decimal.");
+        }
+
+        Span<char> buffer = stackalloc char[32];
+        value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture);
+        return decimal.Parse(buffer[..written], NumberStyles.Float, CultureInfo.InvariantCulture);
     }
 
     private static object ToTimeSpan(decimal seconds)

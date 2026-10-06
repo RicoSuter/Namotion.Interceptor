@@ -226,6 +226,54 @@ public class ModbusValueConvertersTests
         Assert.Equal(0.15m, value);
     }
 
+    [Fact]
+    public void WhenFloatHasMoreThanSevenSignificantDigitsIntoDecimal_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), [0x4B, 0x80, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(16777216m, value);
+    }
+
+    [Fact]
+    public void WhenFloatHasMoreThanSevenSignificantDigitsIntoTimeSpan_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan?), [0x4B, 0x80, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(16777216), value);
+    }
+
+    [Fact]
+    public void WhenFloatIsNotExactInBinaryIntoDecimal_ThenShortestRoundTripValueIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), [0x43, 0x66, 0x19, 0x9A]);
+
+        // Assert
+        Assert.Equal(230.1m, value);
+    }
+
+    [Fact]
+    public void WhenLargeFloatIntoDecimal_ThenShortestRoundTripValueIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), [0x60, 0xAD, 0x78, 0xEC]);
+
+        // Assert
+        Assert.Equal(100000000000000000000m, value);
+    }
+
+    [Fact]
+    public void WhenInfiniteFloatTargetsNonNullableDecimal_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal), [0x7F, 0x80, 0x00, 0x00]));
+    }
+
     [Theory]
     [InlineData(ModbusDataType.U16)]
     [InlineData(ModbusDataType.F32)]

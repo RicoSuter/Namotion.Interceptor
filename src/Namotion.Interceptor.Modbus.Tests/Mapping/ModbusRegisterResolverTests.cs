@@ -408,7 +408,7 @@ public partial class ModbusRegisterResolverTests
     }
 
     [Fact]
-    public void WhenProviderSuppliesScaleFactorOfTimeSpan_ThenReaderAppliesIt()
+    public void WhenProviderSuppliesScaleFactorForTimeSpanProperty_ThenReaderAppliesIt()
     {
         // Arrange
         var subject = new DurationProviderSubject(CreateContext());
