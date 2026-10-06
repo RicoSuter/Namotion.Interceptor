@@ -1,0 +1,5 @@
+{
+  "$type": "MyCompany.SamplePlugin1.SampleDevice1",
+  "name": "E2E Sample Sensor",
+  "pollingIntervalMs": 2000
+}

@@ -56,6 +56,24 @@ public class PluginLoadingTests
         await Assertions.Expect(hostDependencies).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
+    [Fact]
+    public async Task WhenPluginLoadsAfterStartup_ThenItsDeviceFileBecomesTheRealSubject()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+
+        // Act
+        await page.GotoAsync(_fixture.ServerAddress);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
+        await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await browserLink.ClickAsync();
+
+        // Assert - the title comes from SampleDevice1, the placeholder would show the file name
+        await Assertions.Expect(page.GetByText("E2E Sample Sensor").First)
+            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+    }
+
     private async Task NavigateToPluginsAsync(IPage page)
     {
         await page.GotoAsync(_fixture.ServerAddress);

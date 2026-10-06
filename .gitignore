@@ -382,7 +382,7 @@ FodyWeavers.xsd
 
 # HomeBlaze plugin output
 src/HomeBlaze/HomeBlaze/Plugins/
-src/HomeBlaze/HomeBlaze/PluginsCache/
+src/HomeBlaze/HomeBlaze/Data/Plugins/
 src/HomeBlaze/HomeBlaze/Data/History/
 src/HomeBlaze/HomeBlaze/Data/OpcUa/
 # Performance pass artifacts

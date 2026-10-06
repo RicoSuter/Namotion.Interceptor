@@ -49,9 +49,6 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
 
         // Use test-specific root configuration to avoid loading HomeBlaze's Data folder
         builder.UseSetting("HomeBlaze:RootConfigFile", "testRoot.json");
-
-        // Point to test-specific plugin configuration
-        builder.UseSetting("PluginConfigurationPath", Path.Combine(AppContext.BaseDirectory, "TestData", "Plugins.json"));
     }
 
     private void EnsureServer()
