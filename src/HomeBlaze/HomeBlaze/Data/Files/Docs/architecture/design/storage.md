@@ -86,17 +86,20 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 | Type | Extension | Description |
 |------|-----------|-------------|
 | `MarkdownFile` | `.md` | Markdown with YAML frontmatter, embedded subjects (```` ```subject(name) ````), and live expressions (`{{ path }}`) |
-| `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
+| `JsonFile` | `.json` | Plain JSON files without `$type` (non-configurable subjects) |
+| `UnknownSubject` | `.json` | Placeholder for a file whose `$type` cannot be created, or invalid JSON that contains `"$type"` |
 | `GenericFile` | Other | Fallback for unknown extensions — metadata only |
 
 Plugin authors can register additional file types via `[FileExtension]`.
+
+An `UnknownSubject` keeps the path the real subject would have and its file is never rewritten. When `TypeProvider` raises `TypesChanged`, each storage recreates its `UnknownSubject`s whose type now resolves and swaps the real subject in at the same path. A change to the file, including a save in the editor, recreates it the same way. See [Unknown Types](plugins.md#unknown-types).
 
 ### Subject Files vs Documents [Implemented]
 
 Files in storage become subjects in the knowledge graph through two different paths:
 
-- **Subject files** — `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted.
-- **Documents** — all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
+- **Subject files**: `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted. A file whose `$type` cannot be created yet appears as an `UnknownSubject` until the type is available.
+- **Documents**: all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
 
 Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools (`query` to find them, `invoke_method` to read/write). Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned — see below).
 

@@ -54,9 +54,18 @@ For the design rationale (pluggable backends, recovery behavior), see [Storage D
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | Configured type or `JsonFile` | Subject defined by `$type` property |
+| `.json` | Configured type, `UnknownSubject` or `JsonFile` | Subject defined by `$type` property |
 | `.md` | `MarkdownFile` | Interactive page with expressions |
 | Other | `GenericFile` | Basic file representation |
+
+A `.json` file becomes:
+
+- the subject of its `$type` when that type can be created,
+- an `UnknownSubject` when it has a `$type` that cannot be created, for example because the plugin providing the type is not loaded yet or creating the subject failed,
+- an `UnknownSubject` when it is not valid JSON but contains `"$type"`, with the parse error as reason,
+- a `JsonFile` when it has no `$type`.
+
+An `UnknownSubject` shows a warning icon, the `$type` value and the reason. Its raw JSON can be edited in the file editor, and its file is never rewritten by HomeBlaze. Saving or changing the file creates the subject again, and it is replaced by the real subject automatically once a plugin adds the type. Third-party JSON files that use a `$type` property of their own also show as `UnknownSubject`. See [Unknown Types](../architecture/design/plugins.md#unknown-types) for details.
 
 ---
 

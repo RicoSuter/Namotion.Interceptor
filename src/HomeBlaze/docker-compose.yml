@@ -9,7 +9,7 @@ services:
       - "8080:8080"   # UI and MCP
       - "4840:4840"   # OPC UA server subject
     volumes:
-      - ./data:/data  # Root.json, Files/, History/, OpcUa/; filled with defaults on first start
+      - ./data:/data  # Root.json, Files/, History/, OpcUa/, Plugins/ (package cache, created once a plugin is added); filled with defaults on first start
     environment:
       TZ: Europe/Zurich
       McpServer__Enabled: "true"

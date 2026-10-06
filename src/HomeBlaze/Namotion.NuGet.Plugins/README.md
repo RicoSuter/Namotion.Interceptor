@@ -414,7 +414,7 @@ foreach (var plugin in result.LoadedPlugins)
 ## Thread Safety
 
 - `LoadPluginsAsync` is not thread-safe and must not be called concurrently on the same loader instance.
-- Package extraction (`PackageExtractor`) is not thread-safe for the same cache directory.
+- Package extraction is safe for loaders and processes that share a cache directory: each package is extracted into a temporary folder and moved into place, so a concurrent or interrupted extraction never leaves a partially extracted package at its cache path.
 - `GetTypes<T>()` and `LoadedPlugins` are safe to call from any thread after loading completes.
 
 ## Architecture and Internals
