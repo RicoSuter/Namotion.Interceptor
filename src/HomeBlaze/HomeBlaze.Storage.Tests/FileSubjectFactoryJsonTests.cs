@@ -56,6 +56,21 @@ public class FileSubjectFactoryJsonTests : IDisposable
         Assert.Contains("Device driver is broken.", unknown.Reason);
     }
 
+    [Fact]
+    public async Task WhenConstructionThrowsWithCause_ThenUnknownSubjectReasonKeepsOuterMessage()
+    {
+        // Arrange
+        WriteFile("Broken2.json", $$"""{ "$type": "{{typeof(ThrowingSubjectWithCause).FullName}}" }""");
+        using var storage = CreateStorage([typeof(ThrowingSubjectWithCause)]);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        var unknown = Assert.IsType<UnknownSubject>(storage.Children["Broken2"]);
+        Assert.Contains("Could not open port", unknown.Reason);
+    }
+
     [Theory]
     [InlineData("""{ "name": "plain data" }""")]
     [InlineData("""[1, 2, 3]""")]
@@ -71,6 +86,55 @@ public class FileSubjectFactoryJsonTests : IDisposable
 
         // Assert
         Assert.IsType<JsonFile>(storage.Children["Data.json"]);
+    }
+
+    [Theory]
+    [InlineData("""{ "$type": 123 }""")]
+    [InlineData("""{ "$type": "" }""")]
+    [InlineData("""{ "$type": "   " }""")]
+    public async Task WhenTypeValueIsNotAUsableString_ThenJsonFileIsCreated(string content)
+    {
+        // Arrange
+        WriteFile("Data.json", content);
+        using var storage = CreateStorage([]);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        Assert.IsType<JsonFile>(storage.Children["Data.json"]);
+    }
+
+    [Fact]
+    public async Task WhenJsonIsInvalidButContainsTypeMarker_ThenUnknownSubjectIsCreatedUnderKeyWithoutExtension()
+    {
+        // Arrange
+        WriteFile("Truncated.json", """{ "$type": "HomeBlaze.Samples.Motor", """);
+        using var storage = CreateStorage([]);
+
+        // Act
+        await storage.ConnectAsync(CancellationToken.None);
+
+        // Assert
+        var unknown = Assert.IsType<UnknownSubject>(storage.Children["Truncated"]);
+        Assert.Equal(string.Empty, unknown.TypeName);
+        Assert.StartsWith("Invalid JSON", unknown.Reason);
+    }
+
+    [Fact]
+    public async Task WhenDeletingPlaceholder_ThenItIsRemovedFromChildren()
+    {
+        // Arrange
+        WriteFile("Sensor1.json", """{ "$type": "MyCompany.Sensor" }""");
+        using var storage = CreateStorage([]);
+        await storage.ConnectAsync(CancellationToken.None);
+        var unknown = Assert.IsType<UnknownSubject>(storage.Children["Sensor1"]);
+
+        // Act
+        await storage.DeleteSubjectAsync(unknown, CancellationToken.None);
+
+        // Assert
+        Assert.False(storage.Children.ContainsKey("Sensor1"));
     }
 
     private void WriteFile(string relativePath, string content)

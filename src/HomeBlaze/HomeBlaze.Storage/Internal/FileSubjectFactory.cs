@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using FluentStorage.Blobs;
 using HomeBlaze.Services;
@@ -83,7 +84,27 @@ internal sealed class FileSubjectFactory
         CancellationToken cancellationToken)
     {
         var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-        var typeName = TryReadTypeName(json);
+
+        string? typeName;
+        try
+        {
+            typeName = TryReadTypeName(json);
+        }
+        catch (JsonException exception)
+        {
+            // A file with a $type marker is a device file whose content is corrupt, not plain data:
+            // it stays visible as a placeholder so the scan does not silently misclassify it as a JsonFile.
+            if (!json.Contains("\"$type\"", StringComparison.Ordinal))
+            {
+                return new JsonFile(storage, blob.FullPath);
+            }
+
+            _logger?.LogWarning(exception, "Invalid JSON with a $type marker in: {Path}", blob.FullPath);
+            var invalidJsonSubject = new UnknownSubject(storage, blob.FullPath, string.Empty, $"Invalid JSON: {exception.Message}");
+            UpdateFileMetadata(invalidJsonSubject, blob);
+            return invalidJsonSubject;
+        }
+
         if (typeName is null)
         {
             return new JsonFile(storage, blob.FullPath);
@@ -104,7 +125,12 @@ internal sealed class FileSubjectFactory
         catch (Exception exception)
         {
             _logger?.LogError(exception, "Failed to create subject of type {Type} from: {Path}", typeName, blob.FullPath);
-            reason = (exception.InnerException ?? exception).Message;
+
+            // ActivatorUtilities invokes the constructor directly for a type with no DI parameters, so the
+            // original exception usually isn't wrapped; TargetInvocationException only shows up for overloads
+            // it reaches through reflection. Either way, the outer message is the one the constructor chose
+            // to surface, so prefer it over an inner cause's message.
+            reason = exception is TargetInvocationException { InnerException: { } inner } ? inner.Message : exception.Message;
         }
 
         var unknownSubject = new UnknownSubject(storage, blob.FullPath, typeName, reason);
@@ -114,20 +140,16 @@ internal sealed class FileSubjectFactory
 
     private static string? TryReadTypeName(string json)
     {
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            return document.RootElement.ValueKind == JsonValueKind.Object &&
-                   document.RootElement.TryGetProperty("$type", out var typeElement) &&
-                   typeElement.ValueKind == JsonValueKind.String &&
-                   !string.IsNullOrWhiteSpace(typeElement.GetString())
-                ? typeElement.GetString()
-                : null;
-        }
-        catch (JsonException)
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("$type", out var typeElement) ||
+            typeElement.ValueKind != JsonValueKind.String)
         {
             return null;
         }
+
+        var typeName = typeElement.GetString();
+        return string.IsNullOrWhiteSpace(typeName) ? null : typeName;
     }
 
     /// <summary>

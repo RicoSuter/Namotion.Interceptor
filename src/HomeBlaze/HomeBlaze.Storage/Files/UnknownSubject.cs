@@ -6,9 +6,10 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Storage.Files;
 
 /// <summary>
-/// Stands in for a JSON file whose <c>$type</c> cannot be created, either because the type is not loaded
-/// or because creating it failed. The file is never written by the configuration writer, and the storage
-/// replaces this subject with the real one once its type can be created.
+/// Stands in for a JSON file whose <c>$type</c> cannot be created, either because the type is not loaded,
+/// because creating it failed, or because the file's JSON could not be read at all. The file is never
+/// written by the configuration writer, and the storage replaces this subject with the real one once its
+/// type can be created.
 /// </summary>
 [InterceptorSubject]
 public partial class UnknownSubject : IStorageFile, ITitleProvider, IIconProvider
@@ -63,6 +64,20 @@ public partial class UnknownSubject : IStorageFile, ITitleProvider, IIconProvide
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
-    // The storage recreates the subject on a file change, so there is no in-memory content to refresh.
-    public Task OnFileChangedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task OnFileChangedAsync(CancellationToken cancellationToken)
+    {
+        // Refresh metadata
+        try
+        {
+            if (Storage is FluentStorageContainer container)
+            {
+                var fileInfo = new FileInfo(container.GetFileSystemPath(FullPath));
+                FileSize = fileInfo.Length;
+                LastModified = fileInfo.LastWriteTimeUtc;
+            }
+        }
+        catch { /* Ignore metadata errors */ }
+
+        return Task.CompletedTask;
+    }
 }
