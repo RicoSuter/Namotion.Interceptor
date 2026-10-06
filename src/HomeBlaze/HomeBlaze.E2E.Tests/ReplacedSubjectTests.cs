@@ -46,40 +46,35 @@ public class ReplacedSubjectTests
     [Fact]
     public async Task WhenPlaceholderTypeIsFixedAndSaved_ThenPageShowsRealSubject()
     {
-        // Arrange
-        var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", "MistypedMotor.json");
-        var originalContent = await File.ReadAllTextAsync(filePath);
-        try
-        {
-            var page = await _fixture.CreatePageAsync();
-            await page.GotoAsync($"{_fixture.ServerAddress}pages/MistypedMotor");
-            await Assertions.Expect(page).ToHaveTitleAsync("MistypedMotor - HomeBlaze", new() { Timeout = PageLoadTimeout });
+        // Arrange - the test data is reset from the source before the server starts
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/MistypedMotor");
+        await Assertions.Expect(page).ToHaveTitleAsync("MistypedMotor - HomeBlaze", new() { Timeout = PageLoadTimeout });
 
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
-            await editMenu.ClickAsync();
-            await page.GetByText("Source").ClickAsync();
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await editMenu.ClickAsync();
+        await page.GetByText("Source").ClickAsync();
 
-            // The JSON editor reads the file after it is created, so the content is set once that has happened.
-            await page.WaitForFunctionAsync(
-                "() => window.monaco?.editor?.getEditors().length > 0",
-                null,
-                new() { Timeout = PageLoadTimeout });
-            await page.EvaluateAsync(
-                "content => monaco.editor.getEditors()[0].setValue(content)",
-                originalContent.Replace("HomeBlaze.Samples.MistypedMotor", "HomeBlaze.Samples.Motor"));
-            await Assertions.Expect(page.Locator(".monaco-editor .view-lines")).ToContainTextAsync("HomeBlaze.Samples.Motor\"");
+        // The JSON editor reads the file after it is created, so the content is set once that has happened.
+        await page.WaitForFunctionAsync(
+            "() => window.monaco?.editor?.getEditors().length > 0",
+            null,
+            new() { Timeout = PageLoadTimeout });
+        await page.EvaluateAsync(
+            "content => monaco.editor.getEditors()[0].setValue(content)",
+            """
+            {
+              "$type": "HomeBlaze.Samples.Motor",
+              "name": "E2E Saved Motor"
+            }
+            """);
+        await Assertions.Expect(page.Locator(".monaco-editor .view-lines")).ToContainTextAsync("HomeBlaze.Samples.Motor\"");
 
-            // Act
-            await page.Locator("[data-testid='save-button'] button").ClickAsync();
+        // Act
+        await page.Locator("[data-testid='save-button'] button").ClickAsync();
 
-            // Assert
-            await Assertions.Expect(page).ToHaveTitleAsync("E2E Saved Motor - HomeBlaze", new() { Timeout = PageLoadTimeout });
-        }
-        finally
-        {
-            // Test data is copied only when newer, so a saved file would carry over into later runs.
-            await File.WriteAllTextAsync(filePath, originalContent);
-        }
+        // Assert
+        await Assertions.Expect(page).ToHaveTitleAsync("E2E Saved Motor - HomeBlaze", new() { Timeout = PageLoadTimeout });
     }
 }

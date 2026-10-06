@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
@@ -69,6 +70,7 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // The sample packages never change version, and an extracted version folder is reused as is,
         // so a cache left by an earlier run would load the assemblies of a previous plugin build.
         DeletePluginCache();
+        ResetTestData();
 
         // Create the standard TestServer host (required by base class)
         var testHost = builder.Build();
@@ -100,6 +102,24 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         // Start the TestServer host to satisfy the base class
         testHost.Start();
         return testHost;
+    }
+
+    private static void ResetTestData()
+    {
+        // Tests write to the copied test data, and the build only copies a file again when its source is newer,
+        // so a run that stopped before restoring a file would hand its changes to the next run.
+        var sourceDirectory = typeof(WebTestingHostFactory<>).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .Single(attribute => attribute.Key == "TestDataSourceDirectory")
+            .Value!;
+
+        var targetDirectory = Path.Combine(AppContext.BaseDirectory, "TestData");
+        foreach (var sourceFile in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var targetFile = Path.Combine(targetDirectory, Path.GetRelativePath(sourceDirectory, sourceFile));
+            Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+            File.Copy(sourceFile, targetFile, overwrite: true);
+        }
     }
 
     private static void DeletePluginCache()

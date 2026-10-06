@@ -115,23 +115,26 @@
 
     private void RebuildFromPath()
     {
-        BuildPanesFromPath();
+        if (Root != null)
+        {
+            _subjectRegistry = Root.Context.GetService<ISubjectRegistry>();
+            _childrenWatcher ??= new PropertyChangeWatcher(
+                Root.Context, InvokeAsync, OnPaneChildrenChanged, exception => _ = DispatchExceptionAsync(exception));
+        }
+
+        BuildPanes(Path, _panes, _breadcrumbs);
         WatchPaneChildren();
     }
 
-    private void BuildPanesFromPath()
+    private void BuildPanes(string? path, List<SubjectPane> panes, List<BreadcrumbItem> breadcrumbs)
     {
-        _panes.Clear();
-        _breadcrumbs.Clear();
+        panes.Clear();
+        breadcrumbs.Clear();
 
         if (Root == null) return;
 
-        // Get registry from root's context
-        _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
-        _childrenWatcher ??= new PropertyChangeWatcher(Root.Context, InvokeAsync, OnPaneChildrenChanged);
-
         // Always show root as first pane
-        _panes.Add(new SubjectPane
+        panes.Add(new SubjectPane
         {
             Subject = Root,
             DisplayName = "Root",
@@ -140,13 +143,13 @@
             Index = null
         });
 
-        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
+        breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
 
-        if (string.IsNullOrEmpty(Path))
+        if (string.IsNullOrEmpty(path))
             return;
 
         // Use RoutePathResolver to navigate the path and build panes
-        var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
+        var pathSegments = path.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Select(Uri.UnescapeDataString)
             .ToArray();
 
@@ -179,8 +182,8 @@
                             currentPath = $"{currentPath}{childKey}/";
                             var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                             var childDisplayName = GetChildDisplayName(property, child, childKey);
-                            _breadcrumbs.Add(new BreadcrumbItem(childDisplayName, breadcrumbPath));
-                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
+                            breadcrumbs.Add(new BreadcrumbItem(childDisplayName, breadcrumbPath));
+                            panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
                             currentSubject = child;
                             continue;
                         }
@@ -209,8 +212,8 @@
                 currentPath = $"{currentPath}{propertyName}/{indexStr}/";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                 var displayName = GetChildDisplayName(property, child, indexStr);
-                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
+                breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
+                panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
                 currentSubject = child;
             }
             else if (property.IsSubjectReference)
@@ -222,8 +225,8 @@
                 currentPath = $"{currentPath}{propertyName}/";
                 var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
                 var displayName = GetChildDisplayName(property, child, index: null);
-                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
+                breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
+                panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
                 currentSubject = child;
             }
             else
@@ -423,6 +426,11 @@
 
     private void WatchPaneChildren()
     {
+        if (_childrenWatcher is null)
+        {
+            return;
+        }
+
         // Each pane after the first is held by a property of the pane before it. Storage replaces a subject
         // at the same path by assigning that property, which leaves the pane on the detached instance.
         var properties = new PropertyReference[Math.Max(_panes.Count - 1, 0)];
@@ -431,22 +439,64 @@
             properties[i - 1] = new PropertyReference(_panes[i - 1].Subject, _panes[i].PropertyName!);
         }
 
-        _childrenWatcher?.Watch(properties);
+        _childrenWatcher.Watch(properties);
+
+        // A replacement after the panes were resolved but before the watch was published is not reported.
+        var currentPanes = new List<SubjectPane>(_panes.Count);
+        BuildPanes(GetPanesPath(), currentPanes, []);
+        if (!HaveSameSubjects(currentPanes, _panes))
+        {
+            _childrenWatcher.Invalidate();
+        }
     }
 
     private void OnPaneChildrenChanged()
     {
-        var paneCount = _panes.Count;
-        Path = GetPanesPath();
-        RebuildFromPath();
+        var path = GetPanesPath();
+        var panes = new List<SubjectPane>(_panes.Count);
+        var breadcrumbs = new List<BreadcrumbItem>(_breadcrumbs.Count);
+        BuildPanes(path, panes, breadcrumbs);
+        if (HaveSameSubjects(panes, _panes))
+        {
+            return;
+        }
 
-        if (_panes.Count != paneCount)
+        var isPathShortened = panes.Count != _panes.Count;
+        _panes.Clear();
+        _panes.AddRange(panes);
+        _breadcrumbs.Clear();
+        _breadcrumbs.AddRange(breadcrumbs);
+
+        if (isPathShortened)
         {
             // A subject on the path is gone, so the URL follows the panes that are left.
+            Path = GetPanesPath();
             UpdateUrl();
+        }
+        else
+        {
+            WatchPaneChildren();
         }
 
         StateHasChanged();
+    }
+
+    private static bool HaveSameSubjects(List<SubjectPane> panes, List<SubjectPane> otherPanes)
+    {
+        if (panes.Count != otherPanes.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < panes.Count; i++)
+        {
+            if (!ReferenceEquals(panes[i].Subject, otherPanes[i].Subject))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Breadcrumbs and pane titles use the same label as the child list of the parent pane.
@@ -461,6 +511,9 @@
 
     public async ValueTask DisposeAsync()
     {
+        // First, so a failing module disposal cannot leave the watcher observing every write in the graph.
+        Dispose();
+
         if (_jsModule != null)
         {
             try
@@ -472,7 +525,6 @@
                 // Circuit already disconnected, nothing to clean up
             }
         }
-        Dispose();
     }
 
     private class SubjectPane

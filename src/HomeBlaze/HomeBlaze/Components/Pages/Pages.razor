@@ -154,11 +154,7 @@
         _subject = null;
         _title = "";
 
-        var path = Path;
-        var subject = string.IsNullOrEmpty(path) || Root is null
-            ? null
-            : PathResolver.ResolveSubject(path, PathStyle.Route);
-
+        var subject = ResolveSubject();
         WatchParents(subject);
         if (subject != null)
         {
@@ -175,6 +171,14 @@
         }
     }
 
+    private IInterceptorSubject? ResolveSubject()
+    {
+        var path = Path;
+        return string.IsNullOrEmpty(path) || Root is null
+            ? null
+            : PathResolver.ResolveSubject(path, PathStyle.Route);
+    }
+
     private void WatchParents(IInterceptorSubject? subject)
     {
         if (_parentWatcher is null)
@@ -184,7 +188,8 @@
                 return;
             }
 
-            _parentWatcher = new PropertyChangeWatcher(Root.Context, InvokeAsync, OnParentChanged);
+            _parentWatcher = new PropertyChangeWatcher(
+                Root.Context, InvokeAsync, OnParentChanged, exception => _ = DispatchExceptionAsync(exception));
         }
 
         // Storage replaces a subject at the same path by assigning the property that holds it, which leaves
@@ -197,6 +202,12 @@
         }
 
         _parentWatcher.Watch(properties);
+
+        // A replacement after the path was resolved but before the watch was published is not reported.
+        if (!ReferenceEquals(ResolveSubject(), subject))
+        {
+            _parentWatcher.Invalidate();
+        }
     }
 
     private void OnParentChanged()
@@ -205,6 +216,8 @@
         LoadSubject();
         if (!ReferenceEquals(previousSubject, _subject))
         {
+            // A new key so page components do not carry state over from the replaced subject.
+            _componentKey++;
             StateHasChanged();
         }
     }
