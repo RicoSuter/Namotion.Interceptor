@@ -29,6 +29,12 @@ public sealed class StartupGate : IStartupCompletion
     /// <inheritdoc />
     public IDisposable Defer()
     {
+        // Hosted service attaches keep deferring after startup; they need no counted handle then.
+        if (_completed.Task.IsCompleted)
+        {
+            return NoOpDeferral.Instance;
+        }
+
         Interlocked.Increment(ref _deferrals);
         return new Deferral(this);
     }

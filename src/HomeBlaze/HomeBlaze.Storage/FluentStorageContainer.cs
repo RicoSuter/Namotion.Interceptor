@@ -50,10 +50,6 @@ public partial class FluentStorageContainer :
     // 1 while an upgrade pass is queued but has not yet read the path registry.
     private int _upgradePending;
 
-    // Held from StartAsync until the connect of ExecuteAsync finished, so startup completes only after the
-    // first scan attached the files. Exchanged because StopAsync also releases it: ExecuteAsync may never run.
-    private IDisposable? _startupDeferral;
-
     private StorageFileWatcher? _fileWatcher;
     private string? _storageDirectory;
     private JsonSubjectSynchronizer? _jsonSyncHelper;
@@ -133,37 +129,28 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Disconnected;
     }
         
-    public override Task StartAsync(CancellationToken cancellationToken)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
         // Taken before base.StartAsync while the hosted service start still defers startup, so startup cannot
-        // complete in between.
-        Interlocked.Exchange(ref _startupDeferral, ((IInterceptorSubject)this).Context.DeferStartupCompletion())?.Dispose();
+        // complete in between. Held until the first scan attached the files.
+        var startupDeferral = ((IInterceptorSubject)this).Context.DeferStartupCompletion();
         try
         {
-            return base.StartAsync(cancellationToken);
+            await base.StartAsync(cancellationToken);
         }
         catch
         {
-            ReleaseStartupDeferral();
+            startupDeferral.Dispose();
             throw;
         }
+
+        // Bound to this start's ExecuteAsync, so an earlier start's ExecuteAsync ending late cannot release it.
+        startupDeferral.ReleaseWhenCompleted(ExecuteTask);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
-        {
-            await ConnectAsync(stoppingToken);
-        }
-        finally
-        {
-            ReleaseStartupDeferral();
-        }
-    }
-
-    private void ReleaseStartupDeferral()
-    {
-        Interlocked.Exchange(ref _startupDeferral, null)?.Dispose();
+        await ConnectAsync(stoppingToken);
     }
 
     /// <summary>
@@ -780,7 +767,6 @@ public partial class FluentStorageContainer :
         // long-running storage event.
         UnsubscribeFromTypeChanges();
         Interlocked.Exchange(ref _fileWatcher, null)?.Dispose();
-        ReleaseStartupDeferral();
 
         await base.StopAsync(cancellationToken);
     }

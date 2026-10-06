@@ -20,8 +20,9 @@ Program.cs
      -> Registry populated (if WithRegistry)
      -> Lifecycle callbacks fire (if WithLifecycle)
   -> Blazor Server starts, SignalR circuit ready
-  -> Plugin providers load their packages, storages upgrade placeholders
-  -> StartupGate completes, the OPC UA server builds its address space
+  -> Concurrently with the Blazor start:
+     -> Plugin providers load their packages, storages upgrade placeholders
+     -> StartupGate completes, the OPC UA server builds its address space
 ```
 
 See [Bootstrap Sequence](design/plugins.md#bootstrap-sequence) for when startup counts as complete.

@@ -101,6 +101,38 @@ public class StartupGateTests : IDisposable
     }
 
     [Fact]
+    public void WhenGateHasCompleted_ThenDeferringReturnsTheSameNoOpHandle()
+    {
+        // Arrange
+        var gate = new StartupGate();
+        gate.CompleteRootLoad();
+
+        // Act
+        var first = gate.Defer();
+        var second = gate.Defer();
+
+        // Assert
+        Assert.Same(first, second);
+    }
+
+    [Fact]
+    public async Task WhenDeferralIsReleasedWithATask_ThenItIsReleasedOnceTheTaskCompleted()
+    {
+        // Arrange
+        var gate = new StartupGate();
+        var task = new TaskCompletionSource();
+        gate.Defer().ReleaseWhenCompleted(task.Task);
+        gate.CompleteRootLoad();
+        Assert.False(gate.Completed.IsCompleted);
+
+        // Act
+        task.SetCanceled();
+
+        // Assert
+        await gate.Completed.WaitAsync(WaitTimeout);
+    }
+
+    [Fact]
     public async Task WhenRootFailsToLoad_ThenGateFaultsWithTheLoadException()
     {
         // Arrange

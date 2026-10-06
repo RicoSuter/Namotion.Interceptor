@@ -254,6 +254,28 @@ public class NuGetPluginProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenProviderIsRestarted_ThenStartupStaysOpenUntilTheReconcileOfTheNewStartFinished()
+    {
+        // Arrange: hold the load lock so no reconcile can finish yet.
+        var gate = new StartupGate();
+        var provider = CreateProvider(gate);
+        var loadLock = GetLoadLock(provider);
+        await loadLock.WaitAsync();
+        await provider.StartAsync(CancellationToken.None);
+        await provider.StopAsync(CancellationToken.None);
+
+        // Act
+        await provider.StartAsync(CancellationToken.None);
+        gate.CompleteRootLoad();
+
+        // Assert
+        Assert.False(gate.Completed.IsCompleted);
+        loadLock.Release();
+        await gate.Completed.WaitAsync(TimeSpan.FromSeconds(30));
+        await provider.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task WhenProviderStopsBeforeItsFirstReconcileFinished_ThenStartupIsNotHeldOpen()
     {
         // Arrange: hold the load lock so the first reconcile cannot finish.

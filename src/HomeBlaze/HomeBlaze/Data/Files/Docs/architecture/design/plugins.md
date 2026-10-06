@@ -149,6 +149,8 @@ sequenceDiagram
     participant ST as Storage
     participant PP as NuGetPluginProvider
     participant TP as TypeProvider
+    participant SG as StartupGate
+    participant OS as OpcUaServer
 
     RM->>RM: Load Root.json
     RM->>ST: Start storage
@@ -160,6 +162,9 @@ sequenceDiagram
     Note over TP: Type registries, components and<br/>the serializer refresh on next use
     ST->>ST: Recreate UnknownSubjects whose type now resolves<br/>at the same path
     Note over ST: Upgraded subjects attach and start
+    Note over SG: Completes once the root is loaded and every<br/>start, scan, load and upgrade above released its deferral
+    SG-->>OS: Completed
+    OS->>OS: Build the address space and start
 ```
 
 The key steps:
@@ -167,7 +172,7 @@ The key steps:
 2. **Load plugins**: every `NuGetPluginProvider` in the tree starts, loads its packages and adds their assemblies to `TypeProvider` with `AddAssemblies`.
 3. **Refresh**: `TypeProvider` raises `TypesChanged`. `SubjectTypeRegistry`, `SubjectComponentRegistry` and `ConfigurableSubjectSerializer` rebuild their caches when they next see a new type list, and every storage recreates its `UnknownSubject`s whose type now resolves. It also parses a markdown page again when one of its `subject(...)` blocks had a type that now resolves, which adds the embedded subject.
 4. **Settle**: whatever is still unknown after all providers have finished stays an `UnknownSubject` with its reason.
-5. **Startup completes**: the `StartupGate` on the subject context completes once the root is loaded, the queued hosted subject starts ran, the storages finished their first scan, every provider finished its initial load and the placeholder upgrades this triggered are done. Each of these defers the gate through `IStartupCompletion` until its work ran. Subjects that build a one-time view of the tree wait for it: the OPC UA server starts only then, so subjects of plugin types are in its address space.
+5. **Startup completes**: the `StartupGate` on the subject context completes once the root is loaded, the queued hosted subject starts ran, the storages finished their first scan, every provider finished its initial load and the placeholder upgrades this triggered are done. Each of these defers the gate through `IStartupCompletion` until its work ran. Subjects that build a one-time view of the tree wait for it: the OPC UA server starts only then, so subjects of plugin types are in its address space. The server waits at most five minutes, then starts anyway and logs a warning (see [Known Limitations](#known-limitations)).
 
 `HomeBlaze.Plugins` itself is registered with `TypeProvider` at startup so that `NuGetPluginProvider` files resolve during the first scan.
 
@@ -258,7 +263,8 @@ The container image reports the released versions of the Namotion libraries in i
 ## Known Limitations
 
 - **Removing a provider keeps its types.** Deleting a provider file leaves the types it added registered until the next restart.
-- **Plugins added at runtime are missing from OPC UA until the server restarts.** The OPC UA server builds its address space once when it starts and adds no nodes for subjects attached later. Subjects whose type comes from a plugin added while running, and the subjects upgraded from placeholders because of it, appear in OPC UA after the server is restarted (its Stop and Start operations, or a restart of the application).
+- **Subjects attached at runtime are missing from OPC UA until the server restarts.** The OPC UA server builds its address space once when it starts. It removes the nodes of a detached subject and adds none for an attached one. Subjects whose type comes from a plugin added while running, subjects upgraded from placeholders because of it, and subjects recreated at runtime (for example when a storage reconnects) are missing from OPC UA until the server is restarted with its Stop and Start operations or the application restarts.
+- **A slow startup leaves plugin subjects out of OPC UA.** The OPC UA server waits at most five minutes for startup to complete, for example for a plugin download from a slow feed. After that it starts with the subjects present at that point and logs a warning; stopping and starting the server rebuilds its address space.
 - **Reconnecting a storage loads packages again.** Changing a storage's own configuration recreates all its subjects, including any `NuGetPluginProvider` in it. The new provider loads its packages again into new load contexts. The types registered by the earlier copy are kept and the new copies are skipped as duplicates, and the memory of the earlier copies is only released on restart.
 
 ## Planned
