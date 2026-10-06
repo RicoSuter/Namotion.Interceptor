@@ -47,6 +47,10 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     // Task.Run). A replaced source is never disposed: a caller already reading its .Token may still be using it.
     private CancellationTokenSource _stoppingCts = new();
 
+    // Held from StartAsync until the reconcile of ExecuteAsync finished, so startup completes only after the
+    // initial load. Exchanged because StopAsync also releases it: ExecuteAsync may never run.
+    private IDisposable? _startupDeferral;
+
     // Exposed for tests that seed a loaded plugin. Only change these under _loadLock: tests seed them
     // before any reconcile runs, and ReconcileAsync/LoadAsync read and write them while holding the lock.
     internal Dictionary<string, string?> RequestedVersions => _requestedVersions;
@@ -103,9 +107,16 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     [State]
     public partial bool IsRestartRequired { get; internal set; }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        return ReconcileAndLogAsync(stoppingToken);
+        try
+        {
+            await ReconcileAndLogAsync(stoppingToken);
+        }
+        finally
+        {
+            ReleaseStartupDeferral();
+        }
     }
 
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -116,7 +127,18 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
             Volatile.Write(ref _stoppingCts, new CancellationTokenSource());
         }
 
-        return base.StartAsync(cancellationToken);
+        // Taken before base.StartAsync while the hosted service start still defers startup, so startup cannot
+        // complete in between, and before the reconcile adds types, so storages defer their upgrade in time.
+        Interlocked.Exchange(ref _startupDeferral, ((IInterceptorSubject)this).Context.DeferStartupCompletion())?.Dispose();
+        try
+        {
+            return base.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            ReleaseStartupDeferral();
+            throw;
+        }
     }
 
     public override Task StopAsync(CancellationToken cancellationToken)
@@ -124,7 +146,13 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         // Cancelled directly, not only via the token passed to ExecuteAsync: ExecuteAsync may not have been
         // scheduled yet (base.StartAsync dispatches it via Task.Run), so that token might never exist yet.
         Volatile.Read(ref _stoppingCts).Cancel();
+        ReleaseStartupDeferral();
         return base.StopAsync(cancellationToken);
+    }
+
+    private void ReleaseStartupDeferral()
+    {
+        Interlocked.Exchange(ref _startupDeferral, null)?.Dispose();
     }
 
     /// <summary>

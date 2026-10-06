@@ -167,6 +167,7 @@ The key steps:
 2. **Load plugins**: every `NuGetPluginProvider` in the tree starts, loads its packages and adds their assemblies to `TypeProvider` with `AddAssemblies`.
 3. **Refresh**: `TypeProvider` raises `TypesChanged`. `SubjectTypeRegistry`, `SubjectComponentRegistry` and `ConfigurableSubjectSerializer` rebuild their caches when they next see a new type list, and every storage recreates its `UnknownSubject`s whose type now resolves.
 4. **Settle**: whatever is still unknown after all providers have finished stays an `UnknownSubject` with its reason.
+5. **Startup completes**: the `StartupGate` on the subject context completes once the root is loaded, the queued hosted subject starts ran, the storages finished their first scan, every provider finished its initial load and the placeholder upgrades this triggered are done. Each of these defers the gate through `IStartupCompletion` until its work ran. Subjects that build a one-time view of the tree wait for it: the OPC UA server starts only then, so subjects of plugin types are in its address space.
 
 `HomeBlaze.Plugins` itself is registered with `TypeProvider` at startup so that `NuGetPluginProvider` files resolve during the first scan.
 
@@ -257,6 +258,7 @@ The container image reports the released versions of the Namotion libraries in i
 ## Known Limitations
 
 - **Removing a provider keeps its types.** Deleting a provider file leaves the types it added registered until the next restart.
+- **Plugins added at runtime are missing from OPC UA until the server restarts.** The OPC UA server builds its address space once when it starts and adds no nodes for subjects attached later. Subjects whose type comes from a plugin added while running, and the subjects upgraded from placeholders because of it, appear in OPC UA after the server is restarted (its Stop and Start operations, or a restart of the application).
 - **Reconnecting a storage loads packages again.** Changing a storage's own configuration recreates all its subjects, including any `NuGetPluginProvider` in it. The new provider loads its packages again into new load contexts. The types registered by the earlier copy are kept and the new copies are skipped as duplicates, and the memory of the earlier copies is only released on restart.
 
 ## Planned

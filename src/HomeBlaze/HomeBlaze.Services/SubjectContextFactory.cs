@@ -17,7 +17,7 @@ public static class SubjectContextFactory
 {
     /// <summary>
     /// Creates an InterceptorSubjectContext with full tracking, registry,
-    /// validation, and hosted service support.
+    /// validation, hosted service support and a <see cref="StartupGate"/>.
     /// </summary>
     public static IInterceptorSubjectContext Create(IServiceCollection services)
     {
@@ -35,6 +35,7 @@ public static class SubjectContextFactory
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer)
             .WithDataAnnotationValidation()
+            .WithService(() => new StartupGate())
             .WithHostedServices(services);
     }
 }

@@ -5,6 +5,7 @@ using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
@@ -206,6 +207,15 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     public async Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         await StopServerAsync(cancellationToken);
+
+        // Storages apply configuration under their lock, which a pending placeholder upgrade needs before
+        // startup can complete, so waiting for startup here could deadlock. A server enabled when it was
+        // started is started by ExecuteAsync once startup completed, with the configuration it has by then.
+        if (!((IInterceptorSubject)this).Context.IsStartupCompleted())
+        {
+            return;
+        }
+
         await StartServerAsync(cancellationToken);
     }
 
@@ -229,6 +239,10 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
                 // caller's cancellation has to be checked in its own right.
                 cancellationToken.ThrowIfCancellationRequested();
                 await _rootManager.RootLoaded.WaitAsync(cancellationToken);
+
+                // The address space is built once and does not follow subjects attached later, so wait until
+                // plugin providers loaded their types and storages replaced their placeholders.
+                await ((IInterceptorSubject)this).Context.WaitForStartupAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _rootManager.RootLoaded.IsCanceled)
             {

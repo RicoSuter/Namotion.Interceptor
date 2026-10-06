@@ -18,6 +18,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger<RootManager>? _logger;
+    private readonly StartupGate? _startupGate;
 
     // Continuations run off the loading thread so a UI waiter cannot resume inline inside the load.
     private readonly TaskCompletionSource<IInterceptorSubject> _rootLoaded = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -54,6 +55,7 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         _serializer = serializer;
         _context = context;
         _logger = logger;
+        _startupGate = context.TryGetService<StartupGate>();
 
         ConfigurationPath = HomeBlazePaths.GetRootConfigurationPath(configuration);
         DataDirectory = Path.GetDirectoryName(ConfigurationPath)!;
@@ -89,16 +91,21 @@ public class RootManager : BackgroundService, IConfigurationWriter, IDataDirecto
         try
         {
             _rootLoaded.TrySetResult(await LoadAsync(stoppingToken));
+
+            // After the graph is attached, so the hosted starts it queued already defer the gate.
+            _startupGate?.CompleteRootLoad();
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (stoppingToken.IsCancellationRequested)
         {
             // Cancelled rather than faulted, so a waiting UI treats a normal shutdown as one.
             _rootLoaded.TrySetCanceled(stoppingToken);
+            _startupGate?.FailRootLoad(exception);
             throw;
         }
         catch (Exception exception)
         {
             _rootLoaded.TrySetException(exception);
+            _startupGate?.FailRootLoad(exception);
             throw;
         }
     }

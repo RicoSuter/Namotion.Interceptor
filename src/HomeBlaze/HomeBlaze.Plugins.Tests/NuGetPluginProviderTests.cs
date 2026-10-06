@@ -220,9 +220,7 @@ public class NuGetPluginProviderTests : IDisposable
         // Arrange: hold the load lock so the background reconcile is still waiting on it when StopAsync runs.
         var provider = CreateProvider();
         provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }];
-        var loadLock = (SemaphoreSlim)typeof(NuGetPluginProvider)
-            .GetField("_loadLock", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .GetValue(provider)!;
+        var loadLock = GetLoadLock(provider);
         await loadLock.WaitAsync();
 
         // Act
@@ -233,6 +231,45 @@ public class NuGetPluginProviderTests : IDisposable
         // Assert: if the waiting reconcile were not cancelled, releasing the lock would hand it straight over.
         Assert.Equal(1, loadLock.CurrentCount);
         Assert.Empty(provider.LoadedPlugins);
+    }
+
+    [Fact]
+    public async Task WhenProviderStarts_ThenStartupStaysOpenUntilItsFirstReconcileFinished()
+    {
+        // Arrange: hold the load lock so the first reconcile cannot finish yet.
+        var gate = new StartupGate();
+        var provider = CreateProvider(gate);
+        var loadLock = GetLoadLock(provider);
+        await loadLock.WaitAsync();
+
+        // Act
+        await provider.StartAsync(CancellationToken.None);
+        gate.CompleteRootLoad();
+
+        // Assert
+        Assert.False(gate.Completed.IsCompleted);
+        loadLock.Release();
+        await gate.Completed.WaitAsync(TimeSpan.FromSeconds(30));
+        await provider.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenProviderStopsBeforeItsFirstReconcileFinished_ThenStartupIsNotHeldOpen()
+    {
+        // Arrange: hold the load lock so the first reconcile cannot finish.
+        var gate = new StartupGate();
+        var provider = CreateProvider(gate);
+        var loadLock = GetLoadLock(provider);
+        await loadLock.WaitAsync();
+        await provider.StartAsync(CancellationToken.None);
+        gate.CompleteRootLoad();
+
+        // Act
+        await provider.StopAsync(CancellationToken.None);
+
+        // Assert
+        await gate.Completed.WaitAsync(TimeSpan.FromSeconds(30));
+        loadLock.Release();
     }
 
     [Fact]
@@ -295,7 +332,14 @@ public class NuGetPluginProviderTests : IDisposable
         Assert.Same(NuGetFeed.NuGetOrg, Assert.Single(options.Feeds));
     }
 
-    private NuGetPluginProvider CreateProvider()
+    private static SemaphoreSlim GetLoadLock(NuGetPluginProvider provider)
+    {
+        return (SemaphoreSlim)typeof(NuGetPluginProvider)
+            .GetField("_loadLock", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(provider)!;
+    }
+
+    private NuGetPluginProvider CreateProvider(StartupGate? gate = null)
     {
         Directory.CreateDirectory(Path.Combine(_dataDirectory.FullName, "Feed"));
         var provider = new NuGetPluginProvider(new TypeProvider(), NullLoggerFactory.Instance)
@@ -305,6 +349,11 @@ public class NuGetPluginProviderTests : IDisposable
 
         var context = InterceptorSubjectContext.Create();
         context.AddService<IDataDirectoryProvider>(new TestDataDirectoryProvider(_dataDirectory.FullName));
+        if (gate is not null)
+        {
+            context.AddService(gate);
+        }
+
         ((IInterceptorSubject)provider).Context.AddFallbackContext(context);
         return provider;
     }

@@ -50,6 +50,10 @@ public partial class FluentStorageContainer :
     // 1 while an upgrade pass is queued but has not yet read the path registry.
     private int _upgradePending;
 
+    // Held from StartAsync until the connect of ExecuteAsync finished, so startup completes only after the
+    // first scan attached the files. Exchanged because StopAsync also releases it: ExecuteAsync may never run.
+    private IDisposable? _startupDeferral;
+
     private StorageFileWatcher? _fileWatcher;
     private string? _storageDirectory;
     private JsonSubjectSynchronizer? _jsonSyncHelper;
@@ -129,9 +133,37 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Disconnected;
     }
         
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Taken before base.StartAsync while the hosted service start still defers startup, so startup cannot
+        // complete in between.
+        Interlocked.Exchange(ref _startupDeferral, ((IInterceptorSubject)this).Context.DeferStartupCompletion())?.Dispose();
+        try
+        {
+            return base.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            ReleaseStartupDeferral();
+            throw;
+        }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await ConnectAsync(stoppingToken);
+        try
+        {
+            await ConnectAsync(stoppingToken);
+        }
+        finally
+        {
+            ReleaseStartupDeferral();
+        }
+    }
+
+    private void ReleaseStartupDeferral()
+    {
+        Interlocked.Exchange(ref _startupDeferral, null)?.Dispose();
     }
 
     /// <summary>
@@ -599,7 +631,20 @@ public partial class FluentStorageContainer :
         // the registry also covers these types, so no second one is queued.
         if (Interlocked.Exchange(ref _upgradePending, 1) == 0)
         {
-            _ = Task.Run(UpgradeUnknownSubjectsAsync);
+            // Deferred here, synchronously, while the provider that added the types still defers startup, so
+            // startup completes only once the real subjects replaced their placeholders.
+            var startupDeferral = ((IInterceptorSubject)this).Context.DeferStartupCompletion();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await UpgradeUnknownSubjectsAsync();
+                }
+                finally
+                {
+                    startupDeferral.Dispose();
+                }
+            });
         }
     }
 
@@ -711,6 +756,7 @@ public partial class FluentStorageContainer :
         // long-running storage event.
         UnsubscribeFromTypeChanges();
         Interlocked.Exchange(ref _fileWatcher, null)?.Dispose();
+        ReleaseStartupDeferral();
 
         await base.StopAsync(cancellationToken);
     }

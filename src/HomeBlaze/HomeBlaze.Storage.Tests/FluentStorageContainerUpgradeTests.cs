@@ -336,6 +336,67 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         Assert.Equal([new PropertyReference(expression, nameof(RenderExpression.Value))], recordedProperties.Keys);
     }
 
+    [Fact]
+    public async Task WhenStorageStarts_ThenStartupStaysOpenUntilItsFirstScanFinished()
+    {
+        // Arrange: hold the hierarchy lock so the first scan cannot finish yet.
+        WriteFile("Motor1.json", """{ "$type": "HomeBlaze.Samples.Motor" }""");
+        var (storage, typeProvider) = CreateStorage();
+        using var _ = storage;
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+        var gate = new StartupGate();
+        ((IInterceptorSubject)storage).Context.AddService(gate);
+        var hierarchyLock = GetHierarchyLock(storage);
+        await hierarchyLock.WaitAsync();
+
+        // Act
+        await storage.StartAsync(CancellationToken.None);
+        gate.CompleteRootLoad();
+
+        // Assert
+        Assert.False(gate.Completed.IsCompleted);
+        hierarchyLock.Release();
+        await gate.Completed.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.IsType<Motor>(storage.Children["Motor1"]);
+        await storage.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenTypesChange_ThenStartupStaysOpenUntilThePlaceholdersAreUpgraded()
+    {
+        // Arrange
+        WriteFile("Motor1.json", """{ "$type": "HomeBlaze.Samples.Motor" }""");
+        var (storage, typeProvider) = CreateStorage();
+        using var _ = storage;
+        var gate = new StartupGate();
+        ((IInterceptorSubject)storage).Context.AddService(gate);
+        await storage.ConnectAsync(CancellationToken.None);
+        Assert.IsType<UnknownSubject>(storage.Children["Motor1"]);
+
+        // Stands in for a plugin provider whose first load adds the types.
+        var providerDeferral = gate.Defer();
+        gate.CompleteRootLoad();
+        var hierarchyLock = GetHierarchyLock(storage);
+        await hierarchyLock.WaitAsync();
+
+        // Act
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+        providerDeferral.Dispose();
+
+        // Assert
+        Assert.False(gate.Completed.IsCompleted);
+        hierarchyLock.Release();
+        await gate.Completed.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.IsType<Motor>(storage.Children["Motor1"]);
+    }
+
+    private static SemaphoreSlim GetHierarchyLock(FluentStorageContainer storage)
+    {
+        return (SemaphoreSlim)typeof(FluentStorageContainer)
+            .GetField("_hierarchyLock", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(storage)!;
+    }
+
     private static MemoryStream ToStream(string content) => new(Encoding.UTF8.GetBytes(content));
 
     private static int GetTypesChangedHandlerCount(TypeProvider typeProvider)
