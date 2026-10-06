@@ -8,6 +8,7 @@ namespace HomeBlaze.Services;
 public class TypeProvider
 {
     private readonly Lock _lock = new();
+    private readonly Dictionary<string, Type> _typesByFullName = new(StringComparer.Ordinal);
 
     // Copy-on-write: readers take the current array without a lock, writers publish a replacement.
     // Registration is a short burst at startup while the lookups below run for the life of the process
@@ -16,49 +17,96 @@ public class TypeProvider
     private Type[] _types = [];
 
     /// <summary>
-    /// Gets all collected types.
+    /// Gets all collected types. Returns the same instance until types are added, so callers can cache
+    /// data derived from it per instance.
     /// </summary>
     public IReadOnlyCollection<Type> Types => Volatile.Read(ref _types);
+
+    /// <summary>
+    /// Raised after types were added, outside the registration lock.
+    /// </summary>
+    public event EventHandler? TypesChanged;
 
     /// <summary>
     /// Adds exported types from an assembly.
     /// </summary>
     public TypeProvider AddAssembly(Assembly assembly)
     {
-        Type[] exportedTypes;
-        try
-        {
-            exportedTypes = assembly.GetExportedTypes();
-        }
-        catch (ReflectionTypeLoadException exception)
-        {
-            exportedTypes = exception.Types.Where(type => type is not null).ToArray()!;
-        }
-
-        AddTypes(exportedTypes);
+        AddAssemblies([assembly]);
         return this;
     }
 
     /// <summary>
-    /// Adds types directly (e.g., from plugins).
+    /// Adds exported types from the assemblies and raises <see cref="TypesChanged"/> once when any type was added.
     /// </summary>
-    public void AddTypes(IEnumerable<Type> types)
+    /// <returns>Types skipped because a different type with the same full name is already registered.</returns>
+    public IReadOnlyList<Type> AddAssemblies(IEnumerable<Assembly> assemblies)
     {
-        var addedTypes = types as Type[] ?? types.ToArray();
-        if (addedTypes.Length == 0)
-        {
-            return;
-        }
+        return AddTypes(assemblies.SelectMany(GetExportedTypes));
+    }
+
+    /// <summary>
+    /// Adds types directly and raises <see cref="TypesChanged"/> once when any type was added.
+    /// Already registered types are ignored.
+    /// </summary>
+    /// <returns>Types skipped because a different type with the same full name is already registered.</returns>
+    public IReadOnlyList<Type> AddTypes(IEnumerable<Type> types)
+    {
+        var candidateTypes = types as Type[] ?? types.ToArray();
+        List<Type>? skippedTypes = null;
+        var addedCount = 0;
 
         lock (_lock)
         {
-            var existingTypes = _types;
-            var combinedTypes = new Type[existingTypes.Length + addedTypes.Length];
+            var addedTypes = new List<Type>(candidateTypes.Length);
+            foreach (var type in candidateTypes)
+            {
+                var fullName = type.FullName ?? type.Name;
+                if (_typesByFullName.TryGetValue(fullName, out var registeredType))
+                {
+                    if (registeredType != type)
+                    {
+                        (skippedTypes ??= []).Add(type);
+                    }
 
-            existingTypes.CopyTo(combinedTypes, 0);
-            addedTypes.CopyTo(combinedTypes, existingTypes.Length);
+                    continue;
+                }
 
-            Volatile.Write(ref _types, combinedTypes);
+                _typesByFullName.Add(fullName, type);
+                addedTypes.Add(type);
+            }
+
+            if (addedTypes.Count > 0)
+            {
+                var existingTypes = _types;
+                var combinedTypes = new Type[existingTypes.Length + addedTypes.Count];
+
+                existingTypes.CopyTo(combinedTypes, 0);
+                addedTypes.CopyTo(combinedTypes, existingTypes.Length);
+
+                Volatile.Write(ref _types, combinedTypes);
+            }
+
+            addedCount = addedTypes.Count;
+        }
+
+        if (addedCount > 0)
+        {
+            TypesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        return (IReadOnlyList<Type>?)skippedTypes ?? [];
+    }
+
+    private static Type[] GetExportedTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetExportedTypes();
+        }
+        catch (ReflectionTypeLoadException exception)
+        {
+            return exception.Types.Where(type => type is not null).ToArray()!;
         }
     }
 }
