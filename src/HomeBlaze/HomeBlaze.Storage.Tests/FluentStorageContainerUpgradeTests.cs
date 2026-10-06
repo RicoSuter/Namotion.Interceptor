@@ -257,6 +257,47 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         Assert.Same(placeholder, storage.Children["Truncated"]);
     }
 
+    [Fact]
+    public async Task WhenPlaceholderIsUpgraded_ThenMarkdownExpressionsShowTheRealSubject()
+    {
+        // Arrange
+        WriteFile("Motor1.json", """{ "$type": "HomeBlaze.Samples.Motor", "name": "Upgraded Motor" }""");
+        WriteFile("Dashboard.md", "Name: {{ /Motor1/Name }}, again: {{ /Motor1/Name }}");
+        FluentStorageContainer? root = null;
+        var resolver = new SubjectPathResolver(() => root);
+        var (storage, typeProvider) = CreateStorage(resolver: resolver);
+        root = storage;
+        using var _ = storage;
+        typeProvider.AddAssembly(typeof(MarkdownFile).Assembly);
+
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithService<ILifecycleHandler>(() => resolver, handler => handler == resolver);
+        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        await storage.ConnectAsync(CancellationToken.None);
+        Assert.IsType<UnknownSubject>(storage.Children["Motor1"]);
+        var expressions = ((MarkdownFile)storage.Children["Dashboard.md"]).Children.Values.OfType<RenderExpression>().ToArray();
+        Assert.Equal(2, expressions.Length);
+
+        var updatedExpressions = new ConcurrentDictionary<RenderExpression, bool>();
+        using var subscription = context.GetPropertyChangeObservable().Subscribe(change =>
+        {
+            if (change.Property.Subject is RenderExpression expression &&
+                change.Property.Name == nameof(RenderExpression.Value) &&
+                Equals(change.GetNewValue<object?>(), "Upgraded Motor"))
+            {
+                updatedExpressions[expression] = true;
+            }
+        });
+
+        // Act
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => expressions.All(updatedExpressions.ContainsKey));
+    }
+
     private static MemoryStream ToStream(string content) => new(Encoding.UTF8.GetBytes(content));
 
     private static int GetTypesChangedHandlerCount(TypeProvider typeProvider)
@@ -276,7 +317,7 @@ public class FluentStorageContainerUpgradeTests : IDisposable
     }
 
     private (FluentStorageContainer Storage, TypeProvider TypeProvider) CreateStorage(
-        bool enableFileWatching = false, ILogger<FluentStorageContainer>? logger = null)
+        bool enableFileWatching = false, ILogger<FluentStorageContainer>? logger = null, SubjectPathResolver? resolver = null)
     {
         var typeProvider = new TypeProvider();
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
@@ -287,6 +328,11 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create());
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<MarkdownContentParser>();
+        if (resolver is not null)
+        {
+            services.AddSingleton(resolver);
+        }
+
         var serviceProvider = services.BuildServiceProvider();
 
         var storage = new FluentStorageContainer(typeRegistry, serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(), serviceProvider, logger)

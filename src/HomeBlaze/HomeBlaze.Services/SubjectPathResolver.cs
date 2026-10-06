@@ -13,7 +13,7 @@ namespace HomeBlaze.Services;
 /// <summary>
 /// Thread-safe service that resolves subjects from paths and builds paths from subjects.
 /// Supports canonical notation (/Items[0]/Name) and route notation (/Items/0/Name).
-/// Implements lifecycle handling to invalidate caches when subjects are attached/detached.
+/// Implements lifecycle handling to invalidate the path cache when subjects are attached/detached.
 /// </summary>
 public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
 {
@@ -22,8 +22,9 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     // Subject → canonical paths cache (with leading /)
     private readonly ConcurrentDictionary<IInterceptorSubject, IReadOnlyList<string>> _canonicalPathsCache = new();
 
-    // (path, style) → Subject resolve cache (absolute paths only)
-    private readonly ConcurrentDictionary<(string Path, PathStyle Style), IInterceptorSubject?> _resolveCache = new();
+    // Path → subject resolution is deliberately not cached: derived properties and render tracking
+    // record the property reads of the walk, and a cache hit would record none, so a subject replaced
+    // at the same path would never be picked up.
 
     /// <param name="getRoot">
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
@@ -65,8 +66,7 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
             if (root == null)
                 return null;
 
-            var remainingPath = path[1..];
-            return _resolveCache.GetOrAdd((path, style), _ => ResolveInternal(root, remainingPath, style));
+            return ResolveInternal(root, path[1..], style);
         }
 
         // Explicit relative: ./...
@@ -156,17 +156,11 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     }
 
     /// <summary>
-    /// Invalidates caches when subject graph changes.
+    /// Invalidates the path cache when the subject graph changes.
     /// </summary>
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        ClearCaches();
-    }
-
-    private void ClearCaches()
-    {
         _canonicalPathsCache.Clear();
-        _resolveCache.Clear();
     }
 
     /// <summary>
