@@ -71,8 +71,8 @@ public sealed class PropertyChangeWatcher : IDisposable
     private void OnPropertyChanged(SubjectPropertyChange change)
     {
         // Pairs with the exchange in Watch: either this read sees the new set, or the caller's read after
-        // Watch sees this write. Runs on the writing thread for every write in the context.
-        Interlocked.MemoryBarrier();
+        // Watch sees this write. The change dispatch already fences between the commit and this call (the
+        // change interceptor's post-commit barrier and the synchronized observer's lock), so no barrier here.
         foreach (var property in Volatile.Read(ref _properties))
         {
             if (property == change.Property)
