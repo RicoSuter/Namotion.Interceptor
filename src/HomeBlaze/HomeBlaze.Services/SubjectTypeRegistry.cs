@@ -12,25 +12,22 @@ namespace HomeBlaze.Services;
 public class SubjectTypeRegistry
 {
     private readonly TypeProvider _typeProvider;
-    private readonly Lazy<ConcurrentDictionary<string, Type>> _typesByName;
-    private readonly Lazy<ConcurrentDictionary<string, Type>> _typesByExtension;
+    private Snapshot? _snapshot;
 
     public SubjectTypeRegistry(TypeProvider typeProvider)
     {
         _typeProvider = typeProvider;
-        _typesByName = new Lazy<ConcurrentDictionary<string, Type>>(ScanTypes);
-        _typesByExtension = new Lazy<ConcurrentDictionary<string, Type>>(ScanExtensions);
     }
 
     /// <summary>
     /// Gets all registered subject types.
     /// </summary>
-    public IReadOnlyCollection<Type> RegisteredTypes => _typesByName.Value.Values.Distinct().ToList();
+    public IReadOnlyCollection<Type> RegisteredTypes => GetSnapshot().TypesByName.Values.Distinct().ToList();
 
     /// <summary>
     /// Gets all registered file extension mappings.
     /// </summary>
-    public IReadOnlyDictionary<string, Type> ExtensionMappings => _typesByExtension.Value;
+    public IReadOnlyDictionary<string, Type> ExtensionMappings => GetSnapshot().TypesByExtension;
 
     /// <summary>
     /// Resolves a type from a "Type" discriminator value.
@@ -40,16 +37,18 @@ public class SubjectTypeRegistry
         if (string.IsNullOrWhiteSpace(typeName))
             return null;
 
-        if (_typesByName.Value.TryGetValue(typeName, out var type))
+        var snapshot = GetSnapshot();
+
+        if (snapshot.TypesByName.TryGetValue(typeName, out var type))
             return type;
 
         // Try Type.GetType for fully qualified names
         type = Type.GetType(typeName);
         if (type != null && typeof(IInterceptorSubject).IsAssignableFrom(type))
         {
-            _typesByName.Value[typeName] = type;
+            snapshot.TypesByName[typeName] = type;
             if (type.FullName != null)
-                _typesByName.Value[type.FullName] = type;
+                snapshot.TypesByName[type.FullName] = type;
             return type;
         }
 
@@ -67,7 +66,8 @@ public class SubjectTypeRegistry
         if (!extension.StartsWith('.'))
             extension = "." + extension;
 
-        _typesByExtension.Value.TryGetValue(extension.ToLowerInvariant(), out var type);
+        var snapshot = GetSnapshot();
+        snapshot.TypesByExtension.TryGetValue(extension.ToLowerInvariant(), out var type);
         return type;
     }
 
@@ -76,7 +76,8 @@ public class SubjectTypeRegistry
     /// </summary>
     public bool IsRegistered(Type type)
     {
-        return type.FullName != null && _typesByName.Value.ContainsKey(type.FullName);
+        var snapshot = GetSnapshot();
+        return type.FullName != null && snapshot.TypesByName.ContainsKey(type.FullName);
     }
 
     /// <summary>
@@ -90,14 +91,28 @@ public class SubjectTypeRegistry
         if (!extension.StartsWith('.'))
             extension = "." + extension;
 
-        return _typesByExtension.Value.ContainsKey(extension.ToLowerInvariant());
+        var snapshot = GetSnapshot();
+        return snapshot.TypesByExtension.ContainsKey(extension.ToLowerInvariant());
     }
 
-    private ConcurrentDictionary<string, Type> ScanTypes()
+    private Snapshot GetSnapshot()
+    {
+        var types = _typeProvider.Types;
+        var snapshot = Volatile.Read(ref _snapshot);
+        if (snapshot is null || !ReferenceEquals(snapshot.Source, types))
+        {
+            snapshot = new Snapshot(types, ScanTypes(types), ScanExtensions(types));
+            Volatile.Write(ref _snapshot, snapshot);
+        }
+
+        return snapshot;
+    }
+
+    private static ConcurrentDictionary<string, Type> ScanTypes(IReadOnlyCollection<Type> types)
     {
         var dictionary = new ConcurrentDictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var type in _typeProvider.Types)
+        foreach (var type in types)
         {
             if (type.GetCustomAttributes(typeof(InterceptorSubjectAttribute), false).Length != 0 &&
                 typeof(IInterceptorSubject).IsAssignableFrom(type))
@@ -111,11 +126,11 @@ public class SubjectTypeRegistry
         return dictionary;
     }
 
-    private ConcurrentDictionary<string, Type> ScanExtensions()
+    private static ConcurrentDictionary<string, Type> ScanExtensions(IReadOnlyCollection<Type> types)
     {
         var dictionary = new ConcurrentDictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var type in _typeProvider.Types)
+        foreach (var type in types)
         {
             foreach (var attribute in type.GetCustomAttributes(typeof(FileExtensionAttribute), false).Cast<FileExtensionAttribute>())
             {
@@ -125,4 +140,9 @@ public class SubjectTypeRegistry
 
         return dictionary;
     }
+
+    private sealed record Snapshot(
+        IReadOnlyCollection<Type> Source,
+        ConcurrentDictionary<string, Type> TypesByName,
+        ConcurrentDictionary<string, Type> TypesByExtension);
 }
