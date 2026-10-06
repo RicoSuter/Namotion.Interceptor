@@ -41,12 +41,11 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     // Never disposed: disposing it unloads plugin assemblies that live subjects still use.
     private NuGetPluginLoader? _loader;
 
-    // Created eagerly, not in ExecuteAsync: BackgroundService.StartAsync dispatches ExecuteAsync via Task.Run,
-    // so it can return (and ApplyConfigurationAsync/AddPluginAsync/RetryAsync/RemovePluginAsync can already be
-    // called) before ExecuteAsync ever starts. Readonly, so every caller gets a valid, not-yet-cancelled token
-    // to link against without synchronization; ExecuteAsync links real host shutdown into this same source once
-    // it runs. Never disposed: operations may read it concurrently with shutdown, and the process is exiting anyway.
-    private readonly CancellationTokenSource _stoppingCts = new();
+    // Cancelled by StopAsync and replaced by StartAsync when already cancelled, so a restart does not leave
+    // the instance stuck cancelled. Operations link against this rather than the token BackgroundService hands
+    // ExecuteAsync because ExecuteAsync may not have run yet when they are called (StartAsync dispatches it via
+    // Task.Run). A replaced source is never disposed: a caller already reading its .Token may still be using it.
+    private CancellationTokenSource _stoppingCts = new();
 
     // Exposed for tests that seed a loaded plugin. Only change these under _loadLock: tests seed them
     // before any reconcile runs, and ReconcileAsync/LoadAsync read and write them while holding the lock.
@@ -106,10 +105,26 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Links real host shutdown into the pre-existing _stoppingCts so operations that already started
-        // (see its declaration) observe it too, instead of only whatever started after this line ran.
-        stoppingToken.Register(static state => ((CancellationTokenSource)state!).Cancel(), _stoppingCts);
         return ReconcileAndLogAsync(stoppingToken);
+    }
+
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        // A prior StopAsync left this cancelled; swap it before base.StartAsync schedules ExecuteAsync again.
+        if (Volatile.Read(ref _stoppingCts).IsCancellationRequested)
+        {
+            Volatile.Write(ref _stoppingCts, new CancellationTokenSource());
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Cancelled directly, not only via the token passed to ExecuteAsync: ExecuteAsync may not have been
+        // scheduled yet (base.StartAsync dispatches it via Task.Run), so that token might never exist yet.
+        Volatile.Read(ref _stoppingCts).Cancel();
+        return base.StopAsync(cancellationToken);
     }
 
     /// <summary>
@@ -118,7 +133,7 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Callers await this while processing file changes, which a package download must not hold up.
-        var stoppingToken = _stoppingCts.Token;
+        var stoppingToken = StoppingToken;
         _ = Task.Run(() => ReconcileAndLogAsync(stoppingToken), CancellationToken.None);
         return Task.CompletedTask;
     }
@@ -130,7 +145,7 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
         // Linked so a download already running when the host stops is cancelled rather than outliving it.
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stoppingCts.Token);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, StoppingToken);
         await ReconcileAsync(linkedCts.Token, updatePlugins: plugins =>
         {
             if (plugins.Any(plugin => plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase)))
@@ -145,17 +160,19 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     [Operation(Title = "Retry Failed Plugins")]
     public async Task RetryAsync(CancellationToken cancellationToken)
     {
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stoppingCts.Token);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, StoppingToken);
         await ReconcileAsync(linkedCts.Token, retryFailed: true);
     }
 
     internal Task RemovePluginAsync(string packageName)
     {
         // No caller-supplied token to link: the stopping token is the only cancellation source here.
-        return ReconcileAsync(_stoppingCts.Token, updatePlugins: plugins => plugins
+        return ReconcileAsync(StoppingToken, updatePlugins: plugins => plugins
             .Where(plugin => !plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase))
             .ToArray());
     }
+
+    private CancellationToken StoppingToken => Volatile.Read(ref _stoppingCts).Token;
 
     /// <summary>
     /// Brings the loaded plugins in line with the configuration: loads new entries (and failed ones when

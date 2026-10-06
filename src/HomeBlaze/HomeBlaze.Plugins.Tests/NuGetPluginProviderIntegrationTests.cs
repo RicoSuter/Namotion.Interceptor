@@ -20,6 +20,9 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     private const string Plugin1 = "MyCompany.SamplePlugin1.HomeBlaze";
     private const string Plugin2 = "MyCompany.SamplePlugin2.HomeBlaze";
 
+    // Guid-suffixed so nobody publishing a package with this exact name to nuget.org can flip the assertion.
+    private static readonly string MissingPackageId = $"Missing.Package.{Guid.NewGuid():N}";
+
     private readonly DirectoryInfo _dataDirectory = Directory.CreateTempSubdirectory("homeblaze-plugins-integration-");
 
     [Fact]
@@ -47,9 +50,7 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     {
         // Arrange
         var typeProvider = new TypeProvider();
-        var provider = CreateProvider(typeProvider);
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
-        await provider.ReconcileAsync(CancellationToken.None);
+        var provider = await CreateProviderWithPlugin1LoadedAsync(typeProvider);
 
         // Act
         await provider.AddPluginAsync(Plugin2, "1.0.0", CancellationToken.None);
@@ -64,9 +65,7 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     public async Task WhenLoadedPluginIsRemoved_ThenRestartIsRequired()
     {
         // Arrange
-        var provider = CreateProvider(new TypeProvider());
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
-        await provider.ReconcileAsync(CancellationToken.None);
+        var provider = await CreateProviderWithPlugin1LoadedAsync();
 
         // Act
         await provider.RemovePluginAsync(Plugin1);
@@ -80,9 +79,7 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     public async Task WhenRemovedRunningPluginIsAddedBackWithSameVersion_ThenRestartIsNotRequired()
     {
         // Arrange
-        var provider = CreateProvider(new TypeProvider());
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
-        await provider.ReconcileAsync(CancellationToken.None);
+        var provider = await CreateProviderWithPlugin1LoadedAsync();
         await provider.RemovePluginAsync(Plugin1);
 
         // Act
@@ -99,27 +96,23 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     public async Task WhenRunningPluginVersionChanges_ThenRestartIsRequired()
     {
         // Arrange
-        var provider = CreateProvider(new TypeProvider());
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
-        await provider.ReconcileAsync(CancellationToken.None);
+        var provider = await CreateProviderWithPlugin1LoadedAsync();
 
         // Act
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "9.9.9" }];
+        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "0.0.1-doesnotexist" }];
         await provider.ReconcileAsync(CancellationToken.None);
 
         // Assert
         Assert.True(provider.IsRestartRequired);
-        Assert.Equal("Version 9.9.9 takes effect after a restart.", provider.LoadedPlugins[Plugin1].StatusMessage);
+        Assert.Equal("Version 0.0.1-doesnotexist takes effect after a restart.", provider.LoadedPlugins[Plugin1].StatusMessage);
     }
 
     [Fact]
     public async Task WhenRunningPluginVersionChangeIsReverted_ThenRestartIsNotRequired()
     {
         // Arrange
-        var provider = CreateProvider(new TypeProvider());
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
-        await provider.ReconcileAsync(CancellationToken.None);
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "9.9.9" }];
+        var provider = await CreateProviderWithPlugin1LoadedAsync();
+        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "0.0.1-doesnotexist" }];
         await provider.ReconcileAsync(CancellationToken.None);
 
         // Act
@@ -135,9 +128,7 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     public async Task WhenFeedsChangeAfterSuccessfulLoad_ThenRestartIsRequired()
     {
         // Arrange
-        var provider = CreateProvider(new TypeProvider());
-        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
-        await provider.ReconcileAsync(CancellationToken.None);
+        var provider = await CreateProviderWithPlugin1LoadedAsync();
 
         // Act
         provider.Feeds = [.. provider.Feeds, new PluginFeedEntry { Name = "other", Url = "https://example.test/feed" }];
@@ -148,20 +139,36 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenPluginVersionIsFixedAndRetried_ThenItLoads()
+    public async Task WhenRetryAsyncRunsAfterFeedIsPopulated_ThenItLoads()
     {
-        // Arrange
-        var provider = CreateProvider(new TypeProvider());
-        provider.Plugins = [new PluginEntry { PackageName = Plugin2, Version = "9.9.9" }];
-        await provider.ReconcileAsync(CancellationToken.None);
-        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins[Plugin2].Status);
+        // Arrange: an initially empty local feed, so the load fails for a reason other than a version mismatch.
+        // Fixing it by changing the configured version would trigger a reload on its own (ReconcileAsync reloads
+        // a failed entry whose version changed even without retryFailed), which would not actually exercise
+        // RetryAsync's retryFailed path the way recovering from a feed outage does.
+        var feedDirectory = Directory.CreateTempSubdirectory("homeblaze-plugins-retry-feed-");
+        try
+        {
+            var provider = CreateProvider(new TypeProvider(), feedDirectory.FullName);
+            provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
+            await provider.ReconcileAsync(CancellationToken.None);
+            Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins[Plugin1].Status);
 
-        // Act
-        provider.Plugins = [new PluginEntry { PackageName = Plugin2, Version = "1.0.0" }];
-        await provider.RetryAsync(CancellationToken.None);
+            // Act: populate the feed without touching the configuration, then retry with the same version.
+            foreach (var packageName in new[] { Plugin1, "MyCompany.SamplePlugin1", "MyCompany.Abstractions" })
+            {
+                var fileName = $"{packageName}.1.0.0.nupkg";
+                File.Copy(Path.Combine(FindPluginsFolder(), fileName), Path.Combine(feedDirectory.FullName, fileName));
+            }
 
-        // Assert
-        Assert.Equal(ServiceStatus.Running, provider.LoadedPlugins[Plugin2].Status);
+            await provider.RetryAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(ServiceStatus.Running, provider.LoadedPlugins[Plugin1].Status);
+        }
+        finally
+        {
+            feedDirectory.Delete(recursive: true);
+        }
     }
 
     [Fact]
@@ -172,18 +179,18 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
         provider.Plugins =
         [
             new PluginEntry { PackageName = Plugin1, Version = "1.0.0" },
-            new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }
+            new PluginEntry { PackageName = MissingPackageId, Version = "1.0.0" }
         ];
         await provider.ReconcileAsync(CancellationToken.None);
         var loadedPluginBeforeRetry = provider.LoadedPlugins[Plugin1];
-        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins[MissingPackageId].Status);
 
         // Act
         await provider.RetryAsync(CancellationToken.None);
 
         // Assert
         Assert.Same(loadedPluginBeforeRetry, provider.LoadedPlugins[Plugin1]);
-        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins[MissingPackageId].Status);
     }
 
     [Fact]
@@ -205,15 +212,24 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
         Assert.Contains("handler failure", plugin.StatusMessage, StringComparison.OrdinalIgnoreCase);
     }
 
-    private NuGetPluginProvider CreateProvider(TypeProvider typeProvider)
+    private async Task<NuGetPluginProvider> CreateProviderWithPlugin1LoadedAsync(TypeProvider? typeProvider = null)
+    {
+        var provider = CreateProvider(typeProvider ?? new TypeProvider());
+        provider.Plugins = [new PluginEntry { PackageName = Plugin1, Version = "1.0.0" }];
+        await provider.ReconcileAsync(CancellationToken.None);
+        return provider;
+    }
+
+    private NuGetPluginProvider CreateProvider(TypeProvider typeProvider, string? localFeedPath = null)
     {
         var provider = new NuGetPluginProvider(typeProvider, NullLoggerFactory.Instance)
         {
-            // "samples" serves the sample packages themselves; the sample plugins also depend on ordinary
-            // NuGet packages (e.g. Bogus) that are not bundled locally, so nuget.org resolves those.
+            // "samples" (or the caller's own local feed) serves the sample packages themselves; the sample
+            // plugins also depend on ordinary NuGet packages (e.g. Bogus) that are not bundled locally, so
+            // nuget.org resolves those.
             Feeds =
             [
-                new PluginFeedEntry { Name = "samples", Url = FindPluginsFolder() },
+                new PluginFeedEntry { Name = "samples", Url = localFeedPath ?? FindPluginsFolder() },
                 new PluginFeedEntry { Name = "nuget.org", Url = "https://api.nuget.org/v3/index.json" }
             ],
             HostIdentifier = "HomeBlaze"
@@ -244,7 +260,14 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
 
     public void Dispose()
     {
-        _dataDirectory.Delete(recursive: true);
+        try
+        {
+            _dataDirectory.Delete(recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort: a loaded plugin assembly can still be locking a file in here (notably on Windows).
+        }
     }
 
     private sealed class TestDataDirectoryProvider(string dataDirectory) : IDataDirectoryProvider

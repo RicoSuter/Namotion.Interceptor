@@ -1,3 +1,4 @@
+using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Plugins.Models;
 using HomeBlaze.Services;
@@ -165,10 +166,8 @@ public class NuGetPluginProviderTests : IDisposable
     {
         // Arrange
         var provider = CreateProvider();
-        using var stoppingCts = new CancellationTokenSource();
-        await provider.StartAsync(stoppingCts.Token);
-        await provider.ExecuteTask!; // BackgroundService runs ExecuteAsync via Task.Run; wait for it so Cancel() below is linked.
-        stoppingCts.Cancel();
+        await provider.StartAsync(CancellationToken.None);
+        await provider.StopAsync(CancellationToken.None);
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
@@ -180,10 +179,8 @@ public class NuGetPluginProviderTests : IDisposable
     {
         // Arrange
         var provider = CreateProvider();
-        using var stoppingCts = new CancellationTokenSource();
-        await provider.StartAsync(stoppingCts.Token);
-        await provider.ExecuteTask!; // BackgroundService runs ExecuteAsync via Task.Run; wait for it so Cancel() below is linked.
-        stoppingCts.Cancel();
+        await provider.StartAsync(CancellationToken.None);
+        await provider.StopAsync(CancellationToken.None);
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.RetryAsync(CancellationToken.None));
@@ -194,13 +191,48 @@ public class NuGetPluginProviderTests : IDisposable
     {
         // Arrange
         var provider = CreateProviderWithLoadedPlugin("Loaded.Package", "1.0.0", null);
-        using var stoppingCts = new CancellationTokenSource();
-        await provider.StartAsync(stoppingCts.Token);
-        await provider.ExecuteTask!; // BackgroundService runs ExecuteAsync via Task.Run; wait for it so Cancel() below is linked.
-        stoppingCts.Cancel();
+        await provider.StartAsync(CancellationToken.None);
+        await provider.StopAsync(CancellationToken.None);
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.RemovePluginAsync("Loaded.Package"));
+    }
+
+    [Fact]
+    public async Task WhenProviderIsRestarted_ThenOperationsAreNotCancelled()
+    {
+        // Arrange
+        var provider = CreateProvider();
+        await provider.StartAsync(CancellationToken.None);
+        await provider.StopAsync(CancellationToken.None);
+
+        // Act
+        await provider.StartAsync(CancellationToken.None);
+
+        // Assert: reaches the normal missing-package failure instead of throwing from a stale cancellation.
+        await provider.AddPluginAsync("Missing.Package", "1.0.0", CancellationToken.None);
+        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+    }
+
+    [Fact]
+    public async Task WhenHostStopsWhileApplyingConfigurationInBackground_ThenReconcileIsCancelled()
+    {
+        // Arrange: hold the load lock so the background reconcile is still waiting on it when StopAsync runs.
+        var provider = CreateProvider();
+        provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }];
+        var loadLock = (SemaphoreSlim)typeof(NuGetPluginProvider)
+            .GetField("_loadLock", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(provider)!;
+        await loadLock.WaitAsync();
+
+        // Act
+        await provider.ApplyConfigurationAsync(CancellationToken.None);
+        await provider.StopAsync(CancellationToken.None);
+        loadLock.Release();
+
+        // Assert: if the waiting reconcile were not cancelled, releasing the lock would hand it straight over.
+        Assert.Equal(1, loadLock.CurrentCount);
+        Assert.Empty(provider.LoadedPlugins);
     }
 
     [Fact]
