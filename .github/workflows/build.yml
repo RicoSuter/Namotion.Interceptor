@@ -365,7 +365,8 @@ jobs:
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release -r linux-x64 /t:PublishContainer `
             -p:ContainerRuntimeIdentifiers= -p:ContainerImageTag=smoke `
-            -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz
+            -p:ContainerArchiveOutputPath=${{ runner.temp }}/homeblaze.tar.gz `
+            -p:LibraryPackageVersion=9.9.9
 
       - name: Smoke test image
         run: |
@@ -379,6 +380,9 @@ jobs:
           }
           docker logs homeblaze
           if (-not $healthy) { throw "HomeBlaze did not become healthy" }
+          $deps = docker exec homeblaze cat /app/HomeBlaze.deps.json
+          if (-not ($deps -match '"Namotion.Interceptor/9\.9\.9"')) { throw "deps.json does not report the library package version" }
+          if (-not ($deps -match '"HomeBlaze.Abstractions/1\.0\.0"')) { throw "deps.json does not report the pinned HomeBlaze version" }
           foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
             if (-not (Test-Path (Join-Path $data.FullName $path))) { throw "Missing seeded path $path" }
           }
@@ -444,6 +448,7 @@ jobs:
               }
             }
             $informationalVersion = $version
+            $libraryVersion = $version
           } else {
             $short = $env:GITHUB_SHA.Substring(0, 7)
             $tags = "sha-$short"
@@ -453,19 +458,23 @@ jobs:
               $tags = "edge;$tags"
             }
             $informationalVersion = "edge+$short"
+            $libraryVersion = (gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName) -replace '^v', ''
+            if ($LASTEXITCODE -ne 0) { throw "Could not read the latest release" }
           }
           echo "TAGS=$tags" >> $env:GITHUB_OUTPUT
           echo "INFORMATIONAL_VERSION=$informationalVersion" >> $env:GITHUB_OUTPUT
+          echo "LIBRARY_VERSION=$libraryVersion" >> $env:GITHUB_OUTPUT
 
       # Tags go through an environment variable because MSBuild splits semicolons on the command line.
-      # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version.
+      # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version. LibraryPackageVersion only changes the library versions reported in deps.json.
       - name: Publish multi-arch image
         env:
           ContainerImageTags: ${{ steps.tags.outputs.TAGS }}
         run: |
           dotnet publish src/HomeBlaze/HomeBlaze/HomeBlaze.csproj -c Release /t:PublishContainer `
             -p:ContainerRegistry=ghcr.io -p:ContainerRepository=ricosuter/homeblaze `
-            -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }}
+            -p:InformationalVersion=${{ steps.tags.outputs.INFORMATIONAL_VERSION }} `
+            -p:LibraryPackageVersion=${{ steps.tags.outputs.LIBRARY_VERSION }}
 
   pack:
     timeout-minutes: 15
