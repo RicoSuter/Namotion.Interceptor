@@ -35,11 +35,13 @@ internal enum SunSpecValueKind
 /// </summary>
 internal sealed class SunSpecPointMap
 {
+    /// <summary>Gets the Modbus register type.</summary>
     public required ModbusDataType DataType { get; init; }
 
     /// <summary>Gets the register count of a string, otherwise 0.</summary>
     public required int StringLength { get; init; }
 
+    /// <summary>Gets how the value is represented as a property.</summary>
     public required SunSpecValueKind Kind { get; init; }
 
     /// <summary>Gets the integer type of the raw value, or <see cref="float"/> and <see cref="string"/>.</summary>
@@ -60,6 +62,7 @@ internal sealed class SunSpecPointMap
     /// <summary>Gets whether the point is an accumulator.</summary>
     public required bool IsCumulative { get; init; }
 
+    /// <summary>Gets whether the point is read only (its access is not "RW").</summary>
     public required bool IsReadOnly { get; init; }
 
     /// <summary>Gets the display title, with an unmapped unit appended.</summary>
@@ -169,18 +172,22 @@ internal static class SunSpecPointMapping
     /// <summary>
     /// Maps a point, or returns <c>null</c> for points without a value mapping (<c>pad</c>, <c>ipv6addr</c>).
     /// </summary>
-    /// <exception cref="InvalidDataException">The point size does not match its type.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The point type is unknown, its size does not match its type, or its fixed scale factor is outside -28 to 28.
+    /// </exception>
     public static SunSpecPointMap? TryMap(SunSpecPointDefinition point)
     {
         if (!PointTypes.TryGetValue(point.Type, out var pointType))
         {
-            return null;
+            return point.Type is "pad" or "ipv6addr"
+                ? null
+                : throw new InvalidDataException($"Point {point.Name} has the unknown type {point.Type}.");
         }
 
         ValidateSize(point, pointType.DataType);
 
         var unit = MapUnit(point.Units);
-        var scale = unit.Factor * (point.ScaleFactor.Exponent is { } exponent ? PowerOfTen(exponent) : 1m);
+        var scale = unit.Factor * (point.ScaleFactor.Exponent is { } exponent ? PowerOfTen(point, exponent) : 1m);
         var kind = GetKind(point, pointType, unit, scale);
         var measurement = kind is SunSpecValueKind.Number or SunSpecValueKind.Duration
             ? new Measurement(unit.Unit, scale, point.ScaleFactor.PointName, unit.TitleSuffix)
@@ -225,7 +232,7 @@ internal static class SunSpecPointMapping
             ? SunSpecValueKind.Number
             : SunSpecValueKind.Integer);
 
-        if (kind is SunSpecValueKind.Enumeration or SunSpecValueKind.Flags && point.Symbols.Count == 0)
+        if ((kind is SunSpecValueKind.Enumeration or SunSpecValueKind.Flags) && point.Symbols.Count == 0)
         {
             return SunSpecValueKind.Integer;
         }
@@ -284,8 +291,13 @@ internal static class SunSpecPointMapping
         return reference.Length > 0;
     }
 
-    private static decimal PowerOfTen(int exponent)
+    private static decimal PowerOfTen(SunSpecPointDefinition point, int exponent)
     {
+        if (exponent is < -28 or > 28)
+        {
+            throw new InvalidDataException($"Point {point.Name} has the scale factor {exponent}, expected -28 to 28.");
+        }
+
         var result = 1m;
         for (var index = 0; index < Math.Abs(exponent); index++)
         {

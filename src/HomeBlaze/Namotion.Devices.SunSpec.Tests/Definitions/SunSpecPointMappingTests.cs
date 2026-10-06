@@ -7,14 +7,114 @@ namespace Namotion.Devices.SunSpec.Tests.Definitions;
 public class SunSpecPointMappingTests
 {
     private static SunSpecPointDefinition Point(
-        string type, int size = 1, string? units = null, string? scaleFactor = null, int? exponent = null, string? label = null)
-        => new() { Name = "P", Type = type, Size = size, Units = units, Label = label, ScaleFactor = new SunSpecScaleFactor(scaleFactor, exponent) };
+        string type, int size = 1, string? units = null, SunSpecScaleFactor scaleFactor = default, string? label = null,
+        IReadOnlyList<SunSpecSymbolDefinition>? symbols = null, string? access = null)
+        => new()
+        {
+            Name = "P",
+            Type = type,
+            Size = size,
+            Units = units,
+            Label = label,
+            ScaleFactor = scaleFactor,
+            Symbols = symbols ?? [],
+            Access = access
+        };
+
+    [Fact]
+    public void WhenEnumerationHasSymbols_ThenItIsAnEnumeration()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("enum16", symbols: [new SunSpecSymbolDefinition { Name = "OFF", Value = 1 }]))!;
+
+        // Assert
+        Assert.Equal(SunSpecValueKind.Enumeration, map.Kind);
+        Assert.Equal(typeof(ushort?), map.PropertyType);
+        Assert.Equal(ModbusNotAvailableValue.UnsignedMaximum, map.NotAvailableValue);
+    }
+
+    [Fact]
+    public void WhenPointIsScaleFactor_ThenItIsAScaleFactorWithoutUnit()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("sunssf", units: "SF", label: "W_SF"))!;
+
+        // Assert
+        Assert.Equal(SunSpecValueKind.ScaleFactor, map.Kind);
+        Assert.Equal(ModbusDataType.S16, map.DataType);
+        Assert.Equal(typeof(short?), map.PropertyType);
+        Assert.Equal(StateUnit.Default, map.Unit);
+        Assert.Equal("W_SF", map.Title);
+    }
+
+    [Fact]
+    public void WhenPointIsFloat_ThenItIsANumber()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("float32", size: 2, units: "V"))!;
+
+        // Assert
+        Assert.Equal(ModbusDataType.F32, map.DataType);
+        Assert.Equal(SunSpecValueKind.Number, map.Kind);
+        Assert.Equal(StateUnit.Volt, map.Unit);
+        Assert.Equal(ModbusNotAvailableValue.None, map.NotAvailableValue);
+    }
+
+    [Fact]
+    public void WhenPointIsReadWrite_ThenItIsNotReadOnly()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("uint16", access: "RW"))!;
+
+        // Assert
+        Assert.False(map.IsReadOnly);
+    }
+
+    [Fact]
+    public void WhenPointHasNoLabel_ThenTitleIsTheName()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("uint16", label: "  "))!;
+
+        // Assert
+        Assert.Equal("P", map.Title);
+    }
+
+    [Fact]
+    public void WhenUnitIsPercentSuffixForm_ThenReferenceIsAppendedToTheTitle()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "VNomPct", label: "Voltage"))!;
+
+        // Assert
+        Assert.Equal(StateUnit.Percent, map.Unit);
+        Assert.Equal(0.01m, map.Scale);
+        Assert.Equal("Voltage [of VNom]", map.Title);
+    }
+
+    [Fact]
+    public void WhenPointTypeIsUnknown_ThenMappingFails()
+    {
+        // Act & Assert
+        var exception = Assert.Throws<InvalidDataException>(() => SunSpecPointMapping.TryMap(Point("uint128")));
+        Assert.Contains("Point P has the unknown type uint128", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(29)]
+    [InlineData(-29)]
+    public void WhenFixedScaleFactorIsOutOfRange_ThenMappingFails(int exponent)
+    {
+        // Act & Assert
+        var exception = Assert.Throws<InvalidDataException>(() => SunSpecPointMapping.TryMap(Point("uint16", units: "V", scaleFactor: new(null, exponent))));
+        Assert.Contains("Point P ", exception.Message);
+    }
 
     [Fact]
     public void WhenPointIsScaledPower_ThenItIsADecimalWattValueWithScaleFactor()
     {
         // Act
-        var map = SunSpecPointMapping.TryMap(Point("int16", units: "W", scaleFactor: "W_SF", label: "Watts"))!;
+        var map = SunSpecPointMapping.TryMap(Point("int16", units: "W", scaleFactor: new("W_SF", null), label: "Watts"))!;
 
         // Assert
         Assert.Equal(ModbusDataType.S16, map.DataType);
@@ -31,7 +131,7 @@ public class SunSpecPointMappingTests
     public void WhenPointIsPercent_ThenItIsAFractionInPercent()
     {
         // Act
-        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "Pct", scaleFactor: "Pct_SF", label: "State of Charge"))!;
+        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "Pct", scaleFactor: new("Pct_SF", null), label: "State of Charge"))!;
 
         // Assert
         Assert.Equal(StateUnit.Percent, map.Unit);
@@ -82,7 +182,7 @@ public class SunSpecPointMappingTests
     public void WhenPointIsScaledSeconds_ThenItIsADurationWithScaleFactor()
     {
         // Act
-        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "Secs", scaleFactor: "Tms_SF", label: "Time"))!;
+        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "Secs", scaleFactor: new("Tms_SF", null), label: "Time"))!;
 
         // Assert
         Assert.Equal(SunSpecValueKind.Duration, map.Kind);
@@ -124,7 +224,7 @@ public class SunSpecPointMappingTests
     public void WhenPointHasNumericScaleFactor_ThenItBecomesAStaticScale()
     {
         // Act
-        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "V", exponent: -2))!;
+        var map = SunSpecPointMapping.TryMap(Point("uint16", units: "V", scaleFactor: new(null, -2)))!;
 
         // Assert
         Assert.Equal(0.01m, map.Scale);
@@ -135,7 +235,7 @@ public class SunSpecPointMappingTests
     public void WhenPointIsAccumulator_ThenItIsCumulativeWithoutNotAvailablePattern()
     {
         // Act
-        var map = SunSpecPointMapping.TryMap(Point("acc32", size: 2, units: "Wh", scaleFactor: "WH_SF"))!;
+        var map = SunSpecPointMapping.TryMap(Point("acc32", size: 2, units: "Wh", scaleFactor: new("WH_SF", null)))!;
 
         // Assert
         Assert.Equal(ModbusDataType.U32, map.DataType);
@@ -148,7 +248,7 @@ public class SunSpecPointMappingTests
     public void WhenPointIsUnsigned64Bit_ThenItUsesU64()
     {
         // Act
-        var map = SunSpecPointMapping.TryMap(Point("uint64", size: 4, units: "Wh", scaleFactor: "TotWh_SF"))!;
+        var map = SunSpecPointMapping.TryMap(Point("uint64", size: 4, units: "Wh", scaleFactor: new("TotWh_SF", null)))!;
 
         // Assert
         Assert.Equal(ModbusDataType.U64, map.DataType);
