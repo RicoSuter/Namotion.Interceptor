@@ -327,6 +327,92 @@ public class PathKeyResolutionTests
         Assert.Equal((object)key, ResolveProperty(container, $"ByAnything[{key.Text}]")?.Index);
     }
 
+    public static IEnumerable<object[]> IntegerKeyExtremes()
+    {
+        yield return [nameof(TestIntegerKeyedContainer.BySByte), sbyte.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.BySByte), sbyte.MaxValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByByte), byte.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByByte), byte.MaxValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByInt16), short.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByInt16), short.MaxValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByUInt16), ushort.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByUInt16), ushort.MaxValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByUInt32), uint.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByUInt32), uint.MaxValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByInt64), long.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByInt64), long.MaxValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByUInt64), ulong.MinValue];
+        yield return [nameof(TestIntegerKeyedContainer.ByUInt64), ulong.MaxValue];
+    }
+
+    [Theory]
+    [MemberData(nameof(IntegerKeyExtremes))]
+    public void WhenIntegerKeyIsAtTypeExtreme_ThenPathRoundTripsForThatWidth(string propertyName, object key)
+    {
+        // Arrange
+        var context = CreateContext();
+        var item = new TestItem(context) { Value = "v" };
+        var container = new TestIntegerKeyedContainer(context);
+        AssignIntegerKeyedDictionary(container, propertyName, key, item);
+
+        // Act
+        var path = GetValuePath(item);
+
+        // Assert
+        Assert.Equal($"{propertyName}[{Convert.ToString(key, CultureInfo.InvariantCulture)}].Value", path);
+        Assert.Same(item, ResolveProperty(container, path!)?.Property.Subject);
+    }
+
+    [Theory]
+    [InlineData("ByByte[256]")]
+    [InlineData("ByUInt32[-1]")]
+    public void WhenIntegerKeyIsOutOfRangeForItsWidth_ThenPathDoesNotResolve(string path)
+    {
+        // Arrange
+        var context = CreateContext();
+        var container = new TestIntegerKeyedContainer(context)
+        {
+            ByByte = new Dictionary<byte, TestItem> { [255] = new(context) },
+            ByUInt32 = new Dictionary<uint, TestItem> { [0] = new(context) }
+        };
+
+        // Act
+        var subject = ResolveSubject(container, path);
+
+        // Assert
+        Assert.Null(subject);
+    }
+
+    private static void AssignIntegerKeyedDictionary(TestIntegerKeyedContainer container, string propertyName, object key, TestItem item)
+    {
+        switch (propertyName)
+        {
+            case nameof(TestIntegerKeyedContainer.BySByte):
+                container.BySByte = new Dictionary<sbyte, TestItem> { [(sbyte)key] = item };
+                break;
+            case nameof(TestIntegerKeyedContainer.ByByte):
+                container.ByByte = new Dictionary<byte, TestItem> { [(byte)key] = item };
+                break;
+            case nameof(TestIntegerKeyedContainer.ByInt16):
+                container.ByInt16 = new Dictionary<short, TestItem> { [(short)key] = item };
+                break;
+            case nameof(TestIntegerKeyedContainer.ByUInt16):
+                container.ByUInt16 = new Dictionary<ushort, TestItem> { [(ushort)key] = item };
+                break;
+            case nameof(TestIntegerKeyedContainer.ByUInt32):
+                container.ByUInt32 = new Dictionary<uint, TestItem> { [(uint)key] = item };
+                break;
+            case nameof(TestIntegerKeyedContainer.ByInt64):
+                container.ByInt64 = new Dictionary<long, TestItem> { [(long)key] = item };
+                break;
+            case nameof(TestIntegerKeyedContainer.ByUInt64):
+                container.ByUInt64 = new Dictionary<ulong, TestItem> { [(ulong)key] = item };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(propertyName), propertyName, "Unknown integer-keyed property.");
+        }
+    }
+
     private readonly record struct LongTextKey(string Text) : ISpanFormattable
     {
         public string ToString(string? format, IFormatProvider? formatProvider) => Text;

@@ -1,9 +1,10 @@
 namespace Namotion.Interceptor.Registry.Paths;
 
 /// <summary>
-/// One segment of a path read by <see cref="PathSegmentReader"/>: a name with an optional index. The name and an
-/// index without doubled quotes point into the path, so reading them allocates nothing. A segment is only valid when
-/// <see cref="PathSegmentReader.TryRead"/> returned true; a default segment has no meaning.
+/// One segment of a path read by <see cref="PathSegmentReader"/>: a name with an optional index.
+/// <see cref="Index"/> points into the path without allocating, unless the key contained doubled quotes, in which
+/// case it points into an unescaped copy instead. <see cref="GetName"/> and <see cref="GetIndex"/> allocate strings.
+/// A segment is only valid when <see cref="PathSegmentReader.TryRead"/> returned true; a default segment has no meaning.
 /// </summary>
 internal readonly struct PathSegment
 {

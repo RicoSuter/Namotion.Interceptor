@@ -110,6 +110,32 @@ public partial class TestKeyedContainer
     }
 }
 
+/// <summary>
+/// Test model covering every integer dictionary key width the path resolver recognizes natively.
+/// </summary>
+[InterceptorSubject]
+public partial class TestIntegerKeyedContainer
+{
+    public partial Dictionary<sbyte, TestItem> BySByte { get; set; }
+    public partial Dictionary<byte, TestItem> ByByte { get; set; }
+    public partial Dictionary<short, TestItem> ByInt16 { get; set; }
+    public partial Dictionary<ushort, TestItem> ByUInt16 { get; set; }
+    public partial Dictionary<uint, TestItem> ByUInt32 { get; set; }
+    public partial Dictionary<long, TestItem> ByInt64 { get; set; }
+    public partial Dictionary<ulong, TestItem> ByUInt64 { get; set; }
+
+    public TestIntegerKeyedContainer()
+    {
+        BySByte = new Dictionary<sbyte, TestItem>();
+        ByByte = new Dictionary<byte, TestItem>();
+        ByInt16 = new Dictionary<short, TestItem>();
+        ByUInt16 = new Dictionary<ushort, TestItem>();
+        ByUInt32 = new Dictionary<uint, TestItem>();
+        ByInt64 = new Dictionary<long, TestItem>();
+        ByUInt64 = new Dictionary<ulong, TestItem>();
+    }
+}
+
 [InterceptorSubject]
 public partial class TestNumberedInlineContainer
 {
