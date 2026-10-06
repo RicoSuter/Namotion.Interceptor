@@ -189,6 +189,16 @@ jobs:
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
+      - name: Run HomeBlaze plugin provider integration tests
+        run: |
+          dotnet test src/HomeBlaze/HomeBlaze.Plugins.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
       - name: Upload NuGet plugins integration test coverage
         uses: actions/upload-artifact@v4
         with:
