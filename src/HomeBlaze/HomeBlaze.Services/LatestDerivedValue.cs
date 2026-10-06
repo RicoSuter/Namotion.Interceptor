@@ -10,7 +10,7 @@ namespace HomeBlaze.Services;
 /// The getter calls <see cref="BeginEvaluation"/> before it reads any state and passes the token to
 /// <see cref="Store"/> with its result.
 /// </remarks>
-public sealed class DerivedValueSnapshot<T>
+public sealed class LatestDerivedValue<T>
 {
     private readonly Lock _lock = new();
     private long _startedEvaluations;

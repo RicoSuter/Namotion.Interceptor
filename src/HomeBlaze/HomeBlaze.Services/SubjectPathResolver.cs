@@ -30,7 +30,9 @@ public class SubjectPathResolver : ILifecycleHandler, ISubjectPathResolver
     /// Resolves the current graph root. A delegate rather than the RootManager itself, because
     /// RootManager needs this resolver registered in the context before it loads the graph, and taking
     /// RootManager here would make that a constructor cycle. Nothing is read from it until a path is
-    /// actually resolved.
+    /// actually resolved. It must return the root before any subject that resolves a path in a
+    /// <c>[Derived]</c> getter is attached; otherwise that derived value is computed against a null root
+    /// and never recalculated.
     /// </param>
     public SubjectPathResolver(Func<IInterceptorSubject?> getRoot)
     {

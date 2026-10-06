@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
 using HomeBlaze.Components.Tests.Models;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Recorder;
 using Xunit;
@@ -36,6 +38,10 @@ public class WidgetTests
     {
         // Arrange
         var (devices, widget, _, _) = CreateGraph();
+        var changes = new ConcurrentQueue<SubjectPropertyChange>();
+        using var subscription = ((IInterceptorSubject)widget).Context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Enqueue);
 
         // Act
         var replacement = new TestDevice { Name = "Replacement" };
@@ -43,6 +49,9 @@ public class WidgetTests
 
         // Assert
         Assert.Same(replacement, widget.GetLastResolvedSubject());
+        Assert.Contains(changes, change =>
+            change.Property == new PropertyReference(widget, nameof(Widget.ResolvedSubject)) &&
+            ReferenceEquals(change.GetNewValue<IInterceptorSubject?>(), replacement));
     }
 
     [Fact]

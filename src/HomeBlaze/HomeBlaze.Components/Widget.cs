@@ -17,7 +17,7 @@ namespace HomeBlaze.Components;
 public partial class Widget : ITitleProvider, IConfigurable
 {
     private readonly SubjectPathResolver _pathResolver;
-    private readonly DerivedValueSnapshot<IInterceptorSubject?> _resolvedSubject = new();
+    private readonly LatestDerivedValue<IInterceptorSubject?> _resolvedSubject = new();
 
     /// <summary>
     /// Path to the subject to render.

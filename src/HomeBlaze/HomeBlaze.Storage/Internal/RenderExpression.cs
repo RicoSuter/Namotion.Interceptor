@@ -15,7 +15,7 @@ namespace HomeBlaze.Storage.Internal;
 public partial class RenderExpression : ITitleProvider
 {
     private readonly SubjectPathResolver _pathResolver;
-    private readonly DerivedValueSnapshot<object?> _value = new();
+    private readonly LatestDerivedValue<object?> _value = new();
 
     public string Path { get; }
     public MarkdownFile Parent { get; }
