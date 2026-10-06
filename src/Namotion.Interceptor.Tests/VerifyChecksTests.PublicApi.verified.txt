@@ -144,7 +144,7 @@ namespace Namotion.Interceptor
         public static Namotion.Interceptor.PropertyReference GetPropertyReference(this Namotion.Interceptor.IInterceptorSubject subject, string propertyName) { }
         public static void SetPropertyValueWithInterception(this Namotion.Interceptor.PropertyReference property, object? newValue, object? currentValue, System.Action<Namotion.Interceptor.IInterceptorSubject, object?> writeValue) { }
     }
-    public readonly struct PropertyValueMetadata : System.IEquatable<Namotion.Interceptor.PropertyValueMetadata>
+    public readonly struct PropertyValueMetadata
     {
         public System.DateTimeOffset? WriteTimestamp { get; }
     }

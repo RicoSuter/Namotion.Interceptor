@@ -142,9 +142,7 @@ internal sealed class DerivedPropertyData : IDerivedPropertyDependencies
             }
         }
 
-        // Cleared so the pool does not keep the dependencies' subjects alive.
-        dependencies.AsSpan(0, count).Clear();
-        ArrayPool<PropertyReference>.Shared.Return(dependencies);
+        ArrayPool<PropertyReference>.Shared.Return(dependencies, clearArray: true);
         return latest;
     }
 

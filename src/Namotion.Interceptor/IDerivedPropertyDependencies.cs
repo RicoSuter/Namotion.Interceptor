@@ -9,8 +9,9 @@ internal interface IDerivedPropertyDependencies
 {
     /// <summary>
     /// Gets the latest write timestamp among the recorded dependencies, as raw UTC ticks, or 0 when none
-    /// is recorded or none has been written, read with <see cref="PropertyReference.GetWriteTimestampTicksAfterValueRead"/>
-    /// so a dependency last written without a timestamp yields <see cref="PropertyWriteState.WrittenWithoutTimestampTicks"/>.
+    /// is recorded or none has been written. Each is read with
+    /// <see cref="PropertyReference.GetWriteTimestampTicksAfterValueRead"/>, so a dependency last written
+    /// without a timestamp yields <see cref="PropertyWriteState.WrittenWithoutTimestampTicks"/>.
     /// </summary>
     long GetLatestDependencyWriteTimestampTicks();
 }
