@@ -3,6 +3,7 @@ using HomeBlaze.Plugins.Models;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Testing;
 using Namotion.NuGet.Plugins.Configuration;
 using Xunit;
 
@@ -56,7 +57,7 @@ public class NuGetPluginProviderTests : IDisposable
 
         // Act
         provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "2.0.0" }];
-        await provider.ApplyConfigurationAsync(CancellationToken.None);
+        await provider.ReconcileAsync(CancellationToken.None);
 
         // Assert
         var plugin = provider.LoadedPlugins["Missing.Package"];
@@ -66,7 +67,7 @@ public class NuGetPluginProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenFeedsChangeAfterLoading_ThenRestartIsRequired()
+    public async Task WhenFeedsChangeBeforeAnyLoad_ThenRestartIsNotRequired()
     {
         // Arrange
         var provider = CreateProvider();
@@ -74,10 +75,105 @@ public class NuGetPluginProviderTests : IDisposable
 
         // Act
         provider.Feeds = [.. provider.Feeds, new PluginFeedEntry { Name = "other", Url = "Other" }];
-        await provider.ApplyConfigurationAsync(CancellationToken.None);
+        await provider.ReconcileAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(provider.IsRestartRequired);
+    }
+
+    [Fact]
+    public async Task WhenLoadedPluginIsRemoved_ThenRestartIsRequired()
+    {
+        // Arrange
+        var provider = CreateProviderWithLoadedPlugin("Loaded.Package", "1.0.0", "Skipped 1 types");
+
+        // Act
+        await provider.RemovePluginAsync("Loaded.Package");
 
         // Assert
         Assert.True(provider.IsRestartRequired);
+        Assert.Equal("Removed. Takes effect after a restart.", provider.LoadedPlugins["Loaded.Package"].StatusMessage);
+        Assert.Equal("Warning", provider.IconColor);
+    }
+
+    [Fact]
+    public async Task WhenRemovedPluginIsAddedAgain_ThenRestartIsNotRequired()
+    {
+        // Arrange
+        var provider = CreateProviderWithLoadedPlugin("Loaded.Package", "1.0.0", "Skipped 1 types");
+        await provider.RemovePluginAsync("Loaded.Package");
+
+        // Act
+        await provider.AddPluginAsync("Loaded.Package", "1.0.0", CancellationToken.None);
+
+        // Assert
+        Assert.False(provider.IsRestartRequired);
+        var plugin = provider.LoadedPlugins["Loaded.Package"];
+        Assert.Equal(ServiceStatus.Running, plugin.Status);
+        Assert.Equal("Skipped 1 types", plugin.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenLoadedPluginVersionChanges_ThenRestartIsRequired()
+    {
+        // Arrange
+        var provider = CreateProviderWithLoadedPlugin("Loaded.Package", "1.0.0", null);
+
+        // Act
+        provider.Plugins = [new PluginEntry { PackageName = "Loaded.Package", Version = "2.0.0" }];
+        await provider.ReconcileAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(provider.IsRestartRequired);
+        Assert.Equal("Version 2.0.0 takes effect after a restart.", provider.LoadedPlugins["Loaded.Package"].StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenVersionChangeIsReverted_ThenRestartIsNotRequired()
+    {
+        // Arrange
+        var provider = CreateProviderWithLoadedPlugin("Loaded.Package", "1.0.0", null);
+        provider.Plugins = [new PluginEntry { PackageName = "Loaded.Package", Version = "2.0.0" }];
+        await provider.ReconcileAsync(CancellationToken.None);
+
+        // Act
+        provider.Plugins = [new PluginEntry { PackageName = "Loaded.Package", Version = "1.0" }];
+        await provider.ReconcileAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(provider.IsRestartRequired);
+        Assert.Null(provider.LoadedPlugins["Loaded.Package"].StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenConfigurationIsApplied_ThenPluginsAreLoadedInBackground()
+    {
+        // Arrange
+        var provider = CreateProvider();
+        provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }];
+
+        // Act
+        await provider.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => provider.LoadedPlugins.ContainsKey("Missing.Package"));
+        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+    }
+
+    [Fact]
+    public async Task WhenDifferentPluginsAreAddedConcurrently_ThenBothAreConfigured()
+    {
+        // Arrange
+        var provider = CreateProvider();
+
+        // Act
+        await Task.WhenAll(
+            Task.Run(() => provider.AddPluginAsync("First.Package", "1.0.0", CancellationToken.None)),
+            Task.Run(() => provider.AddPluginAsync("Second.Package", "1.0.0", CancellationToken.None)));
+
+        // Assert
+        Assert.Equal(["First.Package", "Second.Package"], provider.Plugins.Select(plugin => plugin.PackageName).Order());
+        Assert.Equal(2, provider.LoadedPlugins.Count);
     }
 
     [Fact]
@@ -135,6 +231,25 @@ public class NuGetPluginProviderTests : IDisposable
         var context = InterceptorSubjectContext.Create();
         context.AddService<IDataDirectoryProvider>(new TestDataDirectoryProvider(_dataDirectory.FullName));
         ((IInterceptorSubject)provider).Context.AddFallbackContext(context);
+        return provider;
+    }
+
+    private NuGetPluginProvider CreateProviderWithLoadedPlugin(string packageName, string version, string? loadStatusMessage)
+    {
+        var provider = CreateProvider();
+        provider.Plugins = [new PluginEntry { PackageName = packageName, Version = version }];
+        provider.LoadedPlugins = new Dictionary<string, Plugin>(StringComparer.OrdinalIgnoreCase)
+        {
+            [packageName] = new Plugin(provider)
+            {
+                Name = packageName,
+                Version = version,
+                Status = ServiceStatus.Running,
+                StatusMessage = loadStatusMessage
+            }
+        };
+        provider.RequestedVersions[packageName] = version;
+        provider.LoadStatusMessages[packageName] = loadStatusMessage;
         return provider;
     }
 

@@ -10,13 +10,15 @@ using Namotion.Interceptor.Attributes;
 using Namotion.NuGet.Plugins;
 using Namotion.NuGet.Plugins.Configuration;
 using Namotion.NuGet.Plugins.Loading;
+using NuGet.Versioning;
 
 namespace HomeBlaze.Plugins;
 
 /// <summary>
 /// Loads NuGet packages as plugins and adds their assemblies to the <see cref="TypeProvider"/>.
-/// Adding a plugin takes effect immediately. Removing a plugin, changing its version or changing the
-/// feeds, host packages, host identifier or cache directory takes effect after a restart.
+/// Adding a plugin, and removing or changing a plugin that failed to load, takes effect immediately.
+/// Removing a loaded plugin, changing its version or changing the feeds, host packages, host identifier or
+/// cache directory after the first package was loaded takes effect after a restart.
 /// </summary>
 [InterceptorSubject]
 public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
@@ -29,12 +31,22 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     // Requested version per package of every load attempt, successful or failed.
     private readonly Dictionary<string, string?> _requestedVersions = new(StringComparer.OrdinalIgnoreCase);
 
-    // Captured on the first reconcile; the loader is always created from these options so it matches _loaderSettings.
+    // Status message of each loaded plugin at load time, shown again once a pending restart change is reverted.
+    private readonly Dictionary<string, string?> _loadStatusMessages = new(StringComparer.OrdinalIgnoreCase);
+
+    // Replaced on every reconcile until the loader exists; the loader is created from these options.
     private NuGetPluginLoaderOptions? _loaderOptions;
     private string? _loaderSettings;
 
     // Never disposed: disposing it unloads plugin assemblies that live subjects still use.
     private NuGetPluginLoader? _loader;
+
+    private CancellationToken _stoppingToken;
+
+    // Exposed for tests that seed a loaded plugin.
+    internal Dictionary<string, string?> RequestedVersions => _requestedVersions;
+
+    internal Dictionary<string, string?> LoadStatusMessages => _loadStatusMessages;
 
     public NuGetPluginProvider(TypeProvider typeProvider, ILoggerFactory loggerFactory)
     {
@@ -86,19 +98,22 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     [State]
     public partial bool IsRestartRequired { get; internal set; }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
-        {
-            await ReconcileAsync(stoppingToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _logger.LogError(exception, "Plugin loading failed.");
-        }
+        _stoppingToken = stoppingToken;
+        return ReconcileAndLogAsync(stoppingToken);
     }
 
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => ReconcileAsync(cancellationToken);
+    /// <summary>
+    /// Starts reconciling the plugins with the configuration in the background and returns without waiting for it.
+    /// </summary>
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
+    {
+        // Callers await this while processing file changes, which a package download must not hold up.
+        var stoppingToken = _stoppingToken;
+        _ = Task.Run(() => ReconcileAndLogAsync(stoppingToken), CancellationToken.None);
+        return Task.CompletedTask;
+    }
 
     [Operation(Title = "Add Plugin")]
     public async Task AddPluginAsync(string packageName, string version, CancellationToken cancellationToken)
@@ -106,13 +121,15 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        if (Plugins.Any(plugin => plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase)))
+        await ReconcileAsync(cancellationToken, updatePlugins: plugins =>
         {
-            throw new InvalidOperationException($"Plugin '{packageName}' is already configured.");
-        }
+            if (plugins.Any(plugin => plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Plugin '{packageName}' is already configured.");
+            }
 
-        Plugins = [.. Plugins, new PluginEntry { PackageName = packageName, Version = version }];
-        await ReconcileAsync(cancellationToken);
+            return [.. plugins, new PluginEntry { PackageName = packageName, Version = version }];
+        });
     }
 
     [Operation(Title = "Retry Failed Plugins")]
@@ -120,34 +137,44 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
 
     internal Task RemovePluginAsync(string packageName)
     {
-        Plugins = Plugins
+        return ReconcileAsync(CancellationToken.None, updatePlugins: plugins => plugins
             .Where(plugin => !plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-
-        return ReconcileAsync(CancellationToken.None);
+            .ToArray());
     }
 
     /// <summary>
     /// Brings the loaded plugins in line with the configuration: loads new entries (and failed ones when
     /// <paramref name="retryFailed"/> is set) and marks changes that need a restart.
     /// </summary>
-    internal async Task ReconcileAsync(CancellationToken cancellationToken, bool retryFailed = false)
+    /// <param name="cancellationToken">Cancels waiting for and loading packages.</param>
+    /// <param name="retryFailed">Whether plugins that failed to load are loaded again.</param>
+    /// <param name="updatePlugins">Replaces <see cref="Plugins"/> under the load lock before reconciling.</param>
+    internal async Task ReconcileAsync(
+        CancellationToken cancellationToken,
+        bool retryFailed = false,
+        Func<PluginEntry[], PluginEntry[]>? updatePlugins = null)
     {
         await _loadLock.WaitAsync(cancellationToken);
         try
         {
+            if (updatePlugins is not null)
+            {
+                Plugins = updatePlugins(Plugins);
+            }
+
             var dataDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory;
             var options = CreateLoaderOptions(dataDirectory);
             var settings = GetLoaderSettings(options);
 
-            if (_loaderOptions is null)
+            var isRestartRequired = false;
+            if (_loader is null)
             {
                 _loaderOptions = options;
                 _loaderSettings = settings;
             }
-            else if (settings != _loaderSettings)
+            else
             {
-                IsRestartRequired = true;
+                isRestartRequired = settings != _loaderSettings;
             }
 
             var plugins = new Dictionary<string, Plugin>(LoadedPlugins, StringComparer.OrdinalIgnoreCase);
@@ -169,14 +196,13 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
                     continue;
                 }
 
-                if (isRemoved)
-                {
-                    MarkRestartRequired(plugin, "Removed. Takes effect after a restart.");
-                }
-                else if (!IsRequestedVersion(entry!))
-                {
-                    MarkRestartRequired(plugin, $"Version {entry!.Version} takes effect after a restart.");
-                }
+                var restartMessage =
+                    isRemoved ? "Removed. Takes effect after a restart." :
+                    !IsRequestedVersion(entry!) ? $"Version {entry!.Version} takes effect after a restart." :
+                    null;
+
+                plugin.StatusMessage = restartMessage ?? _loadStatusMessages.GetValueOrDefault(packageName);
+                isRestartRequired |= restartMessage is not null;
             }
 
             var entriesToLoad = configured.Values
@@ -191,6 +217,7 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
             }
 
             LoadedPlugins = plugins;
+            IsRestartRequired = isRestartRequired;
         }
         finally
         {
@@ -246,12 +273,12 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
                 entries.Select(entry => new NuGetPluginReference(entry.PackageName, entry.Version)),
                 cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(exception, "Plugin loading failed.");
             foreach (var entry in entries)
             {
-                plugins[entry.PackageName] = CreateFailedPlugin(entry.PackageName, exception.Message);
+                SetFailedPlugin(plugins, entry.PackageName, exception.Message);
             }
 
             return;
@@ -259,13 +286,22 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
 
         foreach (var loadedPlugin in result.LoadedPlugins)
         {
-            plugins[loadedPlugin.PackageName] = RegisterTypes(loadedPlugin);
+            var plugin = RegisterTypes(loadedPlugin);
+            plugins[loadedPlugin.PackageName] = plugin;
+            if (plugin.Status == ServiceStatus.Running)
+            {
+                _loadStatusMessages[loadedPlugin.PackageName] = plugin.StatusMessage;
+            }
+            else
+            {
+                _loadStatusMessages.Remove(loadedPlugin.PackageName);
+            }
         }
 
         foreach (var failure in result.Failures)
         {
             _logger.LogError("Plugin '{Plugin}' failed to load: {Reason}", failure.PackageName, failure.Reason);
-            plugins[failure.PackageName] = CreateFailedPlugin(failure.PackageName, failure.Reason);
+            SetFailedPlugin(plugins, failure.PackageName, failure.Reason);
         }
 
         _logger.LogInformation("Plugin loading complete: {Loaded} loaded, {Failed} failed.",
@@ -277,6 +313,7 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         IReadOnlyList<Type> skippedTypes;
         try
         {
+            // TypesChanged handlers run here under _loadLock, so they must not call back into this provider's reconcile.
             skippedTypes = _typeProvider.AddAssemblies(loadedPlugin.Assemblies);
         }
         catch (AggregateException exception)
@@ -293,6 +330,9 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
             var plugin = CreateLoadedPlugin(loadedPlugin);
             plugin.Status = ServiceStatus.Error;
             plugin.StatusMessage = exception.Message;
+
+            // None of its types are registered, so unloading lets a retry load it again cleanly.
+            _loader!.UnloadPlugin(loadedPlugin);
             return plugin;
         }
 
@@ -315,9 +355,32 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         return loaded;
     }
 
+    private async Task ReconcileAndLogAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReconcileAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            // Nobody observes this task, so errors are logged here; once stopping they are expected and dropped.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogError(exception, "Plugin loading failed.");
+            }
+        }
+    }
+
     private bool IsRequestedVersion(PluginEntry entry)
     {
-        return string.Equals(_requestedVersions.GetValueOrDefault(entry.PackageName), entry.Version, StringComparison.OrdinalIgnoreCase);
+        return IsSameVersion(_requestedVersions.GetValueOrDefault(entry.PackageName), entry.Version);
+    }
+
+    private static bool IsSameVersion(string? version, string? otherVersion)
+    {
+        return NuGetVersion.TryParse(version, out var parsedVersion) && NuGetVersion.TryParse(otherVersion, out var parsedOtherVersion)
+            ? parsedVersion == parsedOtherVersion
+            : string.Equals(version, otherVersion, StringComparison.OrdinalIgnoreCase);
     }
 
     private string GetLoaderSettings(NuGetPluginLoaderOptions options)
@@ -334,10 +397,10 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         ]);
     }
 
-    private void MarkRestartRequired(Plugin plugin, string message)
+    private void SetFailedPlugin(Dictionary<string, Plugin> plugins, string packageName, string reason)
     {
-        plugin.StatusMessage = message;
-        IsRestartRequired = true;
+        plugins[packageName] = CreateFailedPlugin(packageName, reason);
+        _loadStatusMessages.Remove(packageName);
     }
 
     private Plugin CreateLoadedPlugin(NuGetPlugin plugin)
