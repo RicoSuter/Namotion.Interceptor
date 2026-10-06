@@ -19,6 +19,24 @@ public class ModbusValueConvertersTests
         Second = 2
     }
 
+    private enum Direction : short
+    {
+        Reverse = -2,
+        Forward = 1
+    }
+
+    private enum Offset : long
+    {
+        Negative = -2,
+        Positive = 2
+    }
+
+    private enum Marker : ulong
+    {
+        Low = 1,
+        High = 0x8000000000000001
+    }
+
     private static object? Convert(ModbusRegisterAttribute attribute, Type propertyType, byte[] raw, int exponent = 0)
         => ModbusValueConverters.Create(attribute, propertyType, "Test.Property")(raw, exponent);
 
@@ -391,5 +409,52 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() => Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(long?), new byte[8]));
+    }
+
+    [Fact]
+    public void WhenConvertingS64IntoUnsignedLong_ThenConfigurationExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() => Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(ulong?), new byte[8]));
+    }
+
+    [Fact]
+    public void WhenConvertingNegativeS64IntoDecimal_ThenSignIsKept()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(decimal?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(-2m, value);
+    }
+
+    [Fact]
+    public void WhenConvertingNegativeS16IntoShortBackedEnum_ThenNegativeMemberIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S16), typeof(Direction?), [0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(Direction.Reverse, value);
+    }
+
+    [Fact]
+    public void WhenConvertingNegativeS64IntoLongBackedEnum_ThenNegativeMemberIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(Offset?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(Offset.Negative, value);
+    }
+
+    [Fact]
+    public void WhenConvertingU64AboveLongMaximumIntoUnsignedLongBackedEnum_ThenValueIsNotTruncated()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(Marker?), [0x80, 0, 0, 0, 0, 0, 0, 0x01]);
+
+        // Assert
+        Assert.Equal(Marker.High, value);
     }
 }
