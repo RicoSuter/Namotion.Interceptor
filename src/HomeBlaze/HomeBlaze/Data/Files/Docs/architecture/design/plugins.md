@@ -165,7 +165,7 @@ sequenceDiagram
 The key steps:
 1. **Load the tree**: `RootManager` loads `Root.json` and the storages scan their files. A JSON file whose `$type` cannot be created yet becomes an [`UnknownSubject`](#unknown-types).
 2. **Load plugins**: every `NuGetPluginProvider` in the tree starts, loads its packages and adds their assemblies to `TypeProvider` with `AddAssemblies`.
-3. **Refresh**: `TypeProvider` raises `TypesChanged`. `SubjectTypeRegistry`, `SubjectComponentRegistry` and `ConfigurableSubjectSerializer` rebuild their caches when they next see a new type list, and every storage recreates its `UnknownSubject`s whose type now resolves.
+3. **Refresh**: `TypeProvider` raises `TypesChanged`. `SubjectTypeRegistry`, `SubjectComponentRegistry` and `ConfigurableSubjectSerializer` rebuild their caches when they next see a new type list, and every storage recreates its `UnknownSubject`s whose type now resolves. It also parses a markdown page again when one of its `subject(...)` blocks had a type that now resolves, which adds the embedded subject.
 4. **Settle**: whatever is still unknown after all providers have finished stays an `UnknownSubject` with its reason.
 5. **Startup completes**: the `StartupGate` on the subject context completes once the root is loaded, the queued hosted subject starts ran, the storages finished their first scan, every provider finished its initial load and the placeholder upgrades this triggered are done. Each of these defers the gate through `IStartupCompletion` until its work ran. Subjects that build a one-time view of the tree wait for it: the OPC UA server starts only then, so subjects of plugin types are in its address space.
 

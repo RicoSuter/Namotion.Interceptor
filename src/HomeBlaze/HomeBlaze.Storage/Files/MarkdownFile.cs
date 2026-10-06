@@ -68,6 +68,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public partial IDictionary<string, IInterceptorSubject> Children { get; private set; }
 
     /// <summary>
+    /// Type names of the subject blocks that could not be created at the last parse, because their type
+    /// is not loaded yet. The parser replaces the set after each parse and never changes a set it published.
+    /// </summary>
+    internal IReadOnlySet<string> UnresolvedSubjectTypeNames { get; set; } = NoTypeNames;
+
+    internal static readonly IReadOnlySet<string> NoTypeNames = new HashSet<string>();
+
+    /// <summary>
     /// File size in bytes.
     /// </summary>
     [State("Size", Position = 1)]

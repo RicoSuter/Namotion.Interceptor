@@ -390,6 +390,63 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         Assert.IsType<Motor>(storage.Children["Motor1"]);
     }
 
+    [Fact]
+    public async Task WhenTypeOfMarkdownSubjectBlockIsAddedLater_ThenTheEmbeddedSubjectAppears()
+    {
+        // Arrange
+        WriteFile("Dashboard.md", MotorBlockPage);
+        FluentStorageContainer? root = null;
+        var resolver = new SubjectPathResolver(() => root);
+        var (storage, typeProvider) = CreateStorage(resolver: resolver);
+        root = storage;
+        using var _ = storage;
+        typeProvider.AddAssembly(typeof(MarkdownFile).Assembly);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdownFile = Assert.IsType<MarkdownFile>(storage.Children["Dashboard.md"]);
+        Assert.DoesNotContain("motor", markdownFile.Children.Keys);
+
+        // Act
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+            markdownFile.Children.TryGetValue("motor", out var subject) && subject is Motor { Name: "Embedded Motor" });
+    }
+
+    [Fact]
+    public async Task WhenTypeOfMarkdownSubjectBlockIsNotLoaded_ThenItIsWarnedOncePerFileAndType()
+    {
+        // Arrange
+        WriteFile("Dashboard.md", MotorBlockPage);
+        var logger = new CapturingLogger<MarkdownContentParser>();
+        FluentStorageContainer? root = null;
+        var resolver = new SubjectPathResolver(() => root);
+        var (storage, typeProvider) = CreateStorage(
+            resolver: resolver, configureServices: services => services.AddSingleton<ILogger<MarkdownContentParser>>(logger));
+        root = storage;
+        using var _ = storage;
+        typeProvider.AddAssembly(typeof(MarkdownFile).Assembly);
+        await storage.ConnectAsync(CancellationToken.None);
+        var markdownFile = Assert.IsType<MarkdownFile>(storage.Children["Dashboard.md"]);
+
+        // Act
+        await markdownFile.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, logger.CountMessages("HomeBlaze.Samples.Motor"));
+    }
+
+    private const string MotorBlockPage = """
+        # Dashboard
+
+        ```subject(motor)
+        {
+          "$type": "HomeBlaze.Samples.Motor",
+          "name": "Embedded Motor"
+        }
+        ```
+        """;
+
     private static SemaphoreSlim GetHierarchyLock(FluentStorageContainer storage)
     {
         return (SemaphoreSlim)typeof(FluentStorageContainer)
@@ -416,7 +473,8 @@ public class FluentStorageContainerUpgradeTests : IDisposable
     }
 
     private (FluentStorageContainer Storage, TypeProvider TypeProvider) CreateStorage(
-        bool enableFileWatching = false, ILogger<FluentStorageContainer>? logger = null, SubjectPathResolver? resolver = null)
+        bool enableFileWatching = false, ILogger<FluentStorageContainer>? logger = null, SubjectPathResolver? resolver = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var typeProvider = new TypeProvider();
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
@@ -431,6 +489,8 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         {
             services.AddSingleton(resolver);
         }
+
+        configureServices?.Invoke(services);
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -448,7 +508,9 @@ public class FluentStorageContainerUpgradeTests : IDisposable
         _directory.Delete(recursive: true);
     }
 
-    private sealed class CapturingLogger : ILogger<FluentStorageContainer>
+    private sealed class CapturingLogger : CapturingLogger<FluentStorageContainer>;
+
+    private class CapturingLogger<T> : ILogger<T>
     {
         private readonly ConcurrentQueue<string> _messages = new();
 

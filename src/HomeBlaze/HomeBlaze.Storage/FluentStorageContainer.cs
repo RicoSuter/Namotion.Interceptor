@@ -649,7 +649,8 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Recreates every <see cref="UnknownSubject"/> that has a type name from its file and replaces it when the result differs.
+    /// Recreates every <see cref="UnknownSubject"/> that has a type name from its file and replaces it when the result differs,
+    /// and parses again every <see cref="MarkdownFile"/> with a subject block whose type is now loaded.
     /// </summary>
     internal async Task UpgradeUnknownSubjectsAsync()
     {
@@ -682,12 +683,35 @@ public partial class FluentStorageContainer :
                         _logger?.LogWarning(exception, "Failed to upgrade unknown subject: {Path}", path);
                     }
                 }
+
+                foreach (var (markdownFile, path) in _pathRegistry.GetSubjects<MarkdownFile>())
+                {
+                    if (!markdownFile.UnresolvedSubjectTypeNames.Any(IsTypeLoaded))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Parsing again adds the subject blocks that were skipped while their type was missing.
+                        await markdownFile.OnFileChangedAsync(CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger?.LogWarning(exception, "Failed to refresh markdown file: {Path}", path);
+                    }
+                }
             });
         }
         catch (Exception exception)
         {
             _logger?.LogError(exception, "Failed to upgrade unknown subjects in storage.");
         }
+    }
+
+    private bool IsTypeLoaded(string typeName)
+    {
+        return _typeProvider is null || _typeProvider.Types.Any(type => type.FullName == typeName);
     }
 
     // Callers hold _hierarchyLock.

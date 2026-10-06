@@ -8,6 +8,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Markdig;
 using Markdig.Renderers;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -26,6 +27,7 @@ public sealed partial class MarkdownContentParser
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
+    private readonly ILogger<MarkdownContentParser>? _logger;
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -151,10 +153,12 @@ public sealed partial class MarkdownContentParser
 
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
-        SubjectPathResolver pathResolver)
+        SubjectPathResolver pathResolver,
+        ILogger<MarkdownContentParser>? logger = null)
     {
         _serializer = serializer;
         _pathResolver = pathResolver;
+        _logger = logger;
     }
 
     // Source-generated regexes for performance.
@@ -207,6 +211,7 @@ public sealed partial class MarkdownContentParser
     {
         if (string.IsNullOrEmpty(content))
         {
+            parent.UnresolvedSubjectTypeNames = MarkdownFile.NoTypeNames;
             return new Dictionary<string, IInterceptorSubject>();
         }
 
@@ -283,6 +288,7 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var newChildren = new Dictionary<string, IInterceptorSubject>();
+        HashSet<string>? unresolvedTypeNames = null;
         var segmentIndex = 0;
 
         foreach (var segment in segments)
@@ -337,6 +343,14 @@ public sealed partial class MarkdownContentParser
                             // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                             newChildren[subj.Name] = (IInterceptorSubject)newSubject;
                         }
+                        else if (ExtractDiscriminator(subj.Json) is { Length: > 0 } unresolvedTypeName &&
+                                 (unresolvedTypeNames ??= new HashSet<string>(StringComparer.Ordinal)).Add(unresolvedTypeName) &&
+                                 !parent.UnresolvedSubjectTypeNames.Contains(unresolvedTypeName))
+                        {
+                            _logger?.LogWarning(
+                                "Subject block {Name} in {Path} is not shown because its type {Type} is not loaded. It appears once the type is loaded.",
+                                subj.Name, parent.FullPath, unresolvedTypeName);
+                        }
                     }
                     break;
             }
@@ -344,6 +358,8 @@ public sealed partial class MarkdownContentParser
             segmentIndex++;
         }
 
+        // The storage refreshes the file once one of these types is loaded, which adds the skipped blocks.
+        parent.UnresolvedSubjectTypeNames = unresolvedTypeNames ?? MarkdownFile.NoTypeNames;
         return newChildren;
     }
 
@@ -362,6 +378,26 @@ public sealed partial class MarkdownContentParser
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
+    }
+
+    private static string? ExtractDiscriminator(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("$type", out var typeElement) &&
+                typeElement.ValueKind == JsonValueKind.String)
+            {
+                return typeElement.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Invalid JSON has no type to wait for.
+        }
+
+        return null;
     }
 
     private static string? ExtractTypeName(string json)
