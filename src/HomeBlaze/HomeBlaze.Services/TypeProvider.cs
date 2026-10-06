@@ -23,12 +23,17 @@ public class TypeProvider
     public IReadOnlyCollection<Type> Types => Volatile.Read(ref _types);
 
     /// <summary>
-    /// Raised after types were added, outside the registration lock.
+    /// Raised synchronously on the thread that added the types, after <see cref="Types"/> already returns them.
+    /// Concurrent adds may raise this concurrently from different threads; handlers should read
+    /// <see cref="Types"/> rather than assume which add triggered them. Handlers should not throw: every
+    /// handler is invoked regardless, and any exceptions are rethrown together as an
+    /// <see cref="AggregateException"/> after all handlers ran.
     /// </summary>
     public event EventHandler? TypesChanged;
 
     /// <summary>
-    /// Adds exported types from an assembly.
+    /// Adds exported types from an assembly. Types already registered, and types whose full name matches
+    /// a different type from another assembly, are ignored.
     /// </summary>
     public TypeProvider AddAssembly(Assembly assembly)
     {
@@ -47,21 +52,27 @@ public class TypeProvider
 
     /// <summary>
     /// Adds types directly and raises <see cref="TypesChanged"/> once when any type was added.
-    /// Already registered types are ignored.
+    /// Already registered types are ignored. Types with a null <see cref="Type.FullName"/> (generic
+    /// parameters and other open constructed types; never produced by <see cref="Assembly.GetExportedTypes"/>)
+    /// are skipped entirely because they cannot be targeted by full name.
     /// </summary>
     /// <returns>Types skipped because a different type with the same full name is already registered.</returns>
     public IReadOnlyList<Type> AddTypes(IEnumerable<Type> types)
     {
         var candidateTypes = types as Type[] ?? types.ToArray();
         List<Type>? skippedTypes = null;
-        var addedCount = 0;
+        var addedTypes = new List<Type>(candidateTypes.Length);
 
         lock (_lock)
         {
-            var addedTypes = new List<Type>(candidateTypes.Length);
             foreach (var type in candidateTypes)
             {
-                var fullName = type.FullName ?? type.Name;
+                var fullName = type.FullName;
+                if (fullName is null)
+                {
+                    continue;
+                }
+
                 if (_typesByFullName.TryGetValue(fullName, out var registeredType))
                 {
                     if (registeredType != type)
@@ -86,13 +97,11 @@ public class TypeProvider
 
                 Volatile.Write(ref _types, combinedTypes);
             }
-
-            addedCount = addedTypes.Count;
         }
 
-        if (addedCount > 0)
+        if (addedTypes.Count > 0)
         {
-            TypesChanged?.Invoke(this, EventArgs.Empty);
+            RaiseTypesChanged();
         }
 
         return (IReadOnlyList<Type>?)skippedTypes ?? [];
@@ -107,6 +116,35 @@ public class TypeProvider
         catch (ReflectionTypeLoadException exception)
         {
             return exception.Types.Where(type => type is not null).ToArray()!;
+        }
+    }
+
+    // Invoked outside the registration lock. Each handler runs even if an earlier one throws, so one
+    // misbehaving subscriber cannot leave the others permanently stale on a later retry.
+    private void RaiseTypesChanged()
+    {
+        var handler = TypesChanged;
+        if (handler is null)
+        {
+            return;
+        }
+
+        List<Exception>? exceptions = null;
+        foreach (var invocation in handler.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler)invocation)(this, EventArgs.Empty);
+            }
+            catch (Exception exception)
+            {
+                (exceptions ??= []).Add(exception);
+            }
+        }
+
+        if (exceptions is not null)
+        {
+            throw new AggregateException(exceptions);
         }
     }
 }
