@@ -161,6 +161,49 @@ public class NuGetPluginProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenHostStopsBeforeAddingPlugin_ThenAddIsCancelled()
+    {
+        // Arrange
+        var provider = CreateProvider();
+        using var stoppingCts = new CancellationTokenSource();
+        await provider.StartAsync(stoppingCts.Token);
+        await provider.ExecuteTask!; // BackgroundService runs ExecuteAsync via Task.Run; wait for it so Cancel() below is linked.
+        stoppingCts.Cancel();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.AddPluginAsync("Missing.Package", "1.0.0", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenHostStopsBeforeRetrying_ThenRetryIsCancelled()
+    {
+        // Arrange
+        var provider = CreateProvider();
+        using var stoppingCts = new CancellationTokenSource();
+        await provider.StartAsync(stoppingCts.Token);
+        await provider.ExecuteTask!; // BackgroundService runs ExecuteAsync via Task.Run; wait for it so Cancel() below is linked.
+        stoppingCts.Cancel();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.RetryAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenHostStopsBeforeRemovingPlugin_ThenRemoveIsCancelled()
+    {
+        // Arrange
+        var provider = CreateProviderWithLoadedPlugin("Loaded.Package", "1.0.0", null);
+        using var stoppingCts = new CancellationTokenSource();
+        await provider.StartAsync(stoppingCts.Token);
+        await provider.ExecuteTask!; // BackgroundService runs ExecuteAsync via Task.Run; wait for it so Cancel() below is linked.
+        stoppingCts.Cancel();
+
+        // Act & Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.RemovePluginAsync("Loaded.Package"));
+    }
+
+    [Fact]
     public async Task WhenDifferentPluginsAreAddedConcurrently_ThenBothAreConfigured()
     {
         // Arrange

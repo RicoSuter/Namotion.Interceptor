@@ -41,9 +41,15 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     // Never disposed: disposing it unloads plugin assemblies that live subjects still use.
     private NuGetPluginLoader? _loader;
 
-    private CancellationToken _stoppingToken;
+    // Created eagerly, not in ExecuteAsync: BackgroundService.StartAsync dispatches ExecuteAsync via Task.Run,
+    // so it can return (and ApplyConfigurationAsync/AddPluginAsync/RetryAsync/RemovePluginAsync can already be
+    // called) before ExecuteAsync ever starts. Readonly, so every caller gets a valid, not-yet-cancelled token
+    // to link against without synchronization; ExecuteAsync links real host shutdown into this same source once
+    // it runs. Never disposed: operations may read it concurrently with shutdown, and the process is exiting anyway.
+    private readonly CancellationTokenSource _stoppingCts = new();
 
-    // Exposed for tests that seed a loaded plugin.
+    // Exposed for tests that seed a loaded plugin. Only change these under _loadLock: tests seed them
+    // before any reconcile runs, and ReconcileAsync/LoadAsync read and write them while holding the lock.
     internal Dictionary<string, string?> RequestedVersions => _requestedVersions;
 
     internal Dictionary<string, string?> LoadStatusMessages => _loadStatusMessages;
@@ -100,7 +106,9 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _stoppingToken = stoppingToken;
+        // Links real host shutdown into the pre-existing _stoppingCts so operations that already started
+        // (see its declaration) observe it too, instead of only whatever started after this line ran.
+        stoppingToken.Register(static state => ((CancellationTokenSource)state!).Cancel(), _stoppingCts);
         return ReconcileAndLogAsync(stoppingToken);
     }
 
@@ -110,7 +118,7 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
         // Callers await this while processing file changes, which a package download must not hold up.
-        var stoppingToken = _stoppingToken;
+        var stoppingToken = _stoppingCts.Token;
         _ = Task.Run(() => ReconcileAndLogAsync(stoppingToken), CancellationToken.None);
         return Task.CompletedTask;
     }
@@ -121,7 +129,9 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        await ReconcileAsync(cancellationToken, updatePlugins: plugins =>
+        // Linked so a download already running when the host stops is cancelled rather than outliving it.
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stoppingCts.Token);
+        await ReconcileAsync(linkedCts.Token, updatePlugins: plugins =>
         {
             if (plugins.Any(plugin => plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase)))
             {
@@ -133,11 +143,16 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
     }
 
     [Operation(Title = "Retry Failed Plugins")]
-    public Task RetryAsync(CancellationToken cancellationToken) => ReconcileAsync(cancellationToken, retryFailed: true);
+    public async Task RetryAsync(CancellationToken cancellationToken)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stoppingCts.Token);
+        await ReconcileAsync(linkedCts.Token, retryFailed: true);
+    }
 
     internal Task RemovePluginAsync(string packageName)
     {
-        return ReconcileAsync(CancellationToken.None, updatePlugins: plugins => plugins
+        // No caller-supplied token to link: the stopping token is the only cancellation source here.
+        return ReconcileAsync(_stoppingCts.Token, updatePlugins: plugins => plugins
             .Where(plugin => !plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase))
             .ToArray());
     }
