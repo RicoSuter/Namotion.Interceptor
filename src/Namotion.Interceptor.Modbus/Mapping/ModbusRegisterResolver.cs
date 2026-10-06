@@ -187,7 +187,7 @@ internal static class ModbusRegisterResolver
             if (!bindingsByProperty.TryGetValue(reference, out var scaleFactor) || scaleFactor.Attribute.DataType is not ModbusDataType.S16)
             {
                 throw ModbusConfigurationException.ForMapping(binding.Path,
-                    $"Scale factor property '{reference.Name}' must be an S16 register property that is mapped and not excluded.");
+                    $"Scale factor property '{reference.Name}' of {reference.Subject.GetType().Name} must be an S16 register property that is mapped and not excluded.");
             }
 
             binding.ScaleFactor = scaleFactor;

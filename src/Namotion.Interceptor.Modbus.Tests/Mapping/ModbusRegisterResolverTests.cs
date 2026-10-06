@@ -289,6 +289,18 @@ public partial class ModbusRegisterResolverTests
             => propertyName == nameof(Value) ? new PropertyReference(this, "Missing") : null;
     }
 
+    [InterceptorSubject]
+    public partial class DecliningProviderSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.S16)]
+        public partial short? Factor { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName) => null;
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -366,6 +378,34 @@ public partial class ModbusRegisterResolverTests
         // Assert
         Assert.Same(Find(bindings, parent, nameof(ProviderParent.CurrentScaleFactor)), Find(bindings, child, nameof(ProviderChild.Current)).ScaleFactor);
         Assert.Null(Find(bindings, child, nameof(ProviderChild.Status)).ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProviderReturnsNullForPropertyWithScaleFactorProperty_ThenAttributeScaleFactorIsLinked()
+    {
+        // Arrange
+        var subject = new DecliningProviderSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var value = Find(bindings, subject, nameof(DecliningProviderSubject.Value));
+        Assert.Same(Find(bindings, subject, nameof(DecliningProviderSubject.Factor)), value.ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProvidedScaleFactorIsNotMapped_ThenConfigurationExceptionNamesItsSubject()
+    {
+        // Arrange
+        var subject = new MissingProvidedScaleFactorSubject(CreateContext());
+
+        // Act
+        var exception = Assert.Throws<ModbusConfigurationException>(
+            () => ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>()));
+
+        // Assert
+        Assert.Contains($"'Missing' of {nameof(MissingProvidedScaleFactorSubject)}", exception.Message);
     }
 
     [Fact]
