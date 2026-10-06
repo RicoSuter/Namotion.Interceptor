@@ -32,6 +32,8 @@ public class StateUnitExtensionsTests
     [InlineData(StateUnit.Kilowatt, 0.5, "500 W")]
     [InlineData(StateUnit.Kilowatt, 0.001, "1 W")]
     [InlineData(StateUnit.Kilowatt, 5, "5 kW")]
+    [InlineData(StateUnit.VoltAmpere, 880.26, "880.26 VA")]
+    [InlineData(StateUnit.VoltAmpere, 1500, "1.5 kVA")]
     [InlineData(StateUnit.WattHour, 10500, "10.5 kWh")]
     [InlineData(StateUnit.WattHour, 500, "500 Wh")]
     [InlineData(StateUnit.KilowattHour, 0.8, "800 Wh")]
@@ -57,6 +59,9 @@ public class StateUnitExtensionsTests
     [InlineData(StateUnit.KilobytePerSecond, 500, "500 kB/s")]
     [InlineData(StateUnit.Volt, 230, "230 V")]
     [InlineData(StateUnit.DegreeCelsius, 23.5, "23.5°C")]
+    [InlineData(StateUnit.Kelvin, 1.5, "1.5 K")]
+    [InlineData(StateUnit.Minute, 30, "30 min")]
+    [InlineData(StateUnit.Hour, 1234, "1234 h")]
     public void WhenFormatWithUnit_ThenAutoScalesCorrectly(StateUnit unit, double value, string expected)
     {
         // Act

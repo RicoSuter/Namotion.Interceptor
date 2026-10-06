@@ -105,8 +105,8 @@ public class RegisteredSubjectProperty
         ?? throw new InvalidOperationException("The property is not an attribute.");
     
     /// <summary>
-    /// Checks whether this property has child subjects, which can be either
-    /// a subject reference, a collection of subjects, or a dictionary of subjects.
+    /// Checks whether this is a structural property, one that holds child subjects: a subject reference,
+    /// a collection of subjects, or a dictionary of subjects.
     /// </summary>
     public bool CanContainSubjects
     {
@@ -158,6 +158,17 @@ public class RegisteredSubjectProperty
     public object? GetValue()
     {
         return Reference.Metadata.GetValue?.Invoke(Subject);
+    }
+
+    /// <summary>
+    /// Gets the current value of the property together with the metadata of the write that produced it;
+    /// see <see cref="PropertyReference.GetValue(out PropertyValueMetadata)"/> for what the pair guarantees.
+    /// </summary>
+    /// <param name="metadata">The metadata of the write that produced the returned value, or of a later write.</param>
+    /// <returns>The value.</returns>
+    public object? GetValue(out PropertyValueMetadata metadata)
+    {
+        return Reference.GetValue(out metadata);
     }
     
     /// <summary>

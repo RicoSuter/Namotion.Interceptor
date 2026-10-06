@@ -1,4 +1,3 @@
-using System.Text;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -38,10 +37,17 @@ public static class PathExtensions
         Func<RegisteredSubjectProperty, string, object?> getPropertyValue,
         PathProviderBase pathProvider, object? source)
     {
-        return subject
-            .VisitPropertiesFromPathsWithTimestamp([path], timestamp,
-                (property, innerPath, _) => SetPropertyValue(property, timestamp, getPropertyValue(property, innerPath), source), pathProvider)
-            .Count == 1;
+        using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+        {
+            var (property, _) = TryResolve(subject, path, pathProvider, createMissingSubject: null);
+            if (property is null)
+            {
+                return false;
+            }
+
+            SetPropertyValue(property, timestamp, getPropertyValue(property, path), source);
+            return true;
+        }
     }
 
     /// <summary>
@@ -104,15 +110,17 @@ public static class PathExtensions
     /// <param name="paths">The source paths to apply values.</param>
     /// <param name="visitProperty">The callback to visit a property.</param>
     /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
+    /// <param name="subjectFactory">The subject factory to create missing referenced subjects within the path (optional).</param>
     /// <returns>The list of visited paths.</returns>
     public static IReadOnlyCollection<string> VisitPropertiesFromPaths(this IInterceptorSubject subject,
         IEnumerable<string> paths, Action<RegisteredSubjectProperty, string, object?> visitProperty,
         PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
     {
+        var createMissingSubject = CreateMissingSubjectHook(subjectFactory);
         var visitedPaths = new List<string>();
-        foreach (var (path, property, index) in subject.GetPropertiesFromPaths(paths, pathProvider, subjectFactory, useCache: false))
+        foreach (var path in paths)
         {
+            var (property, index) = TryResolve(subject, path, pathProvider, createMissingSubject);
             if (property is not null)
             {
                 visitProperty(property, path, index);
@@ -124,173 +132,73 @@ public static class PathExtensions
     }
 
     /// <summary>
-    /// Tries to get a property from the source path.
+    /// Tries to get a property from the source path. Only properties the provider includes are resolved.
     /// </summary>
     /// <param name="subject">The root subject.</param>
     /// <param name="path">The source path of the property to look up.</param>
     /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
-    /// <returns>The found subject property or null if it is not found and factory was null.</returns>
+    /// <param name="subjectFactory">
+    /// The subject factory to create missing referenced subjects within the path (optional). Missing collection and
+    /// dictionary items are not created; such a path is not found.
+    /// </param>
+    /// <returns>The found property and the key of its last segment, or nulls when not found.</returns>
     public static (RegisteredSubjectProperty? property, object? index) TryGetPropertyFromPath(
         this IInterceptorSubject subject, string path, PathProviderBase pathProvider, ISubjectFactory? subjectFactory = null)
-    {
-        var (_, property, index) = subject
-            .GetPropertiesFromPaths([path], pathProvider, subjectFactory, useCache: false)
-            .FirstOrDefault();
-
-        return (property, index);
-    }
+        => TryResolve(subject, path, pathProvider, CreateMissingSubjectHook(subjectFactory));
 
     /// <summary>
-    /// Tries to get multiple properties from the source paths.
+    /// Tries to get multiple properties from the source paths. Only properties the provider includes are resolved.
     /// </summary>
     /// <param name="rootSubject">The root subject.</param>
-    /// <param name="paths">The source path of the property to look up.</param>
+    /// <param name="paths">The source paths of the properties to look up.</param>
     /// <param name="pathProvider">The source path provider.</param>
-    /// <param name="subjectFactory">The subject factory to create missing subjects within the path (optional).</param>
-    /// <param name="useCache">Defines whether to use a method-scoped property path cache, only useful when passing multiple similar paths.</param>
-    /// <returns>The found subject properties.</returns>
+    /// <param name="subjectFactory">The subject factory to create missing referenced subjects within the path (optional).</param>
+    /// <returns>Each path with its property and last-segment key, or null property when not found; a path without segments yields nothing.</returns>
     public static IEnumerable<(string path, RegisteredSubjectProperty? property, object? index)> GetPropertiesFromPaths(
         this IInterceptorSubject rootSubject,
         IEnumerable<string> paths,
         PathProviderBase pathProvider,
-        ISubjectFactory? subjectFactory = null,
-        bool useCache = true)
+        ISubjectFactory? subjectFactory = null)
     {
-        var pathValueCache = useCache
-            ? new Dictionary<string, (RegisteredSubjectProperty property, IInterceptorSubject? subject)>()
-            : null;
-
+        var createMissingSubject = CreateMissingSubjectHook(subjectFactory);
         foreach (var path in paths)
         {
-            var segments = pathProvider.ParsePath(path);
-            if (segments.Count == 0)
+            if (path.AsSpan().IndexOfAnyExcept(pathProvider.PathSeparator) < 0)
             {
                 continue;
             }
 
-            var currentSubject = rootSubject;
-            var currentPath = new StringBuilder();
-            for (var i = 0; i < segments.Count; i++)
-            {
-                var (segment, index) = segments[i];
-                var isLastSegment = i == segments.Count - 1;
-
-                string? currentPathString = null;
-                if (pathValueCache is not null)
-                {
-                    if (currentPath.Length > 0) currentPath.Append(":/:.:");
-                    currentPath.Append(segment);
-                    if (index is not null)
-                    {
-                        currentPath.Append('[').Append(index).Append(']');
-                    }
-                    currentPathString = currentPath.ToString();
-                }
-
-                RegisteredSubjectProperty? property;
-                IInterceptorSubject? nextSubject;
-                if (pathValueCache?.TryGetValue(currentPathString!, out var entry) == true)
-                {
-                    // load property from cache
-                    property = entry.property;
-                    nextSubject = !isLastSegment
-                        ? entry.subject ?? TryGetPropertySubjectOrCreate(entry.property, index, subjectFactory)
-                        : null;
-                }
-                else
-                {
-                    // look up property in subject & add to cache
-                    var registeredSubject = currentSubject.TryGetRegisteredSubject();
-                    if (registeredSubject is null)
-                    {
-                        yield return (path, null, null);
-                        break;
-                    }
-
-                    // Attribute lookup is not supported - resolve as regular property
-                    property = pathProvider.TryGetPropertyFromSegment(registeredSubject, segment);
-
-                    if (property is null ||
-                        pathProvider.IsPropertyIncluded(property) == false)
-                    {
-                        yield return (path, null, null);
-                        break;
-                    }
-
-                    if (!isLastSegment)
-                    {
-                        nextSubject = TryGetPropertySubjectOrCreate(property, index, subjectFactory);
-                        if (nextSubject is null)
-                        {
-                            yield return (path, null, null);
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        nextSubject = null;
-                    }
-
-                    pathValueCache?.Add(currentPathString!, (property, nextSubject));
-                }
-
-                if (isLastSegment)
-                {
-                    yield return (path, property, index);
-                }
-                else
-                {
-                    currentSubject = nextSubject!;
-                }
-            }
+            var (property, index) = TryResolve(rootSubject, path, pathProvider, createMissingSubject);
+            yield return (path, property, index);
         }
     }
 
-    private static IInterceptorSubject? TryGetPropertySubjectOrCreate(RegisteredSubjectProperty registeredProperty, object? index, ISubjectFactory? subjectFactory)
+    private static (RegisteredSubjectProperty? property, object? index) TryResolve(
+        IInterceptorSubject subject, string path, PathProviderBase pathProvider,
+        Func<RegisteredSubjectProperty, IInterceptorSubject?>? createMissingSubject)
     {
-        IInterceptorSubject? nextSubject;
-        if (index is not null)
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
         {
-            // TODO: Move to common value handle extension methods
-            // nextSubject = index is not int
-            //     ? (registeredProperty.GetValue() as IDictionary)?[index] as IInterceptorSubject
-            //     : (registeredProperty.GetValue() as IList)?[(int)index] as IInterceptorSubject;
-
-            nextSubject = registeredProperty
-                .Children
-                .SingleOrDefault(c => Equals(c.Index, index))
-                .Subject;
-
-            if (nextSubject is null && subjectFactory is not null)
-            {
-                // create missing item collection or item dictionary
-
-                throw new InvalidOperationException("Missing collection items cannot be created.");
-                // TODO: Implement collection or dictionary creation from paths (need to know all paths).
-
-                // currentSubject = subjectFactory.CreateSubject(registeredProperty, null);
-                // var collection  = subjectFactory.CreateSubjectCollection(registeredProperty, currentSubject);
-                // registeredProperty.SetValue(collection);
-            }
-        }
-        else if (registeredProperty.Type.IsAssignableTo(typeof(IInterceptorSubject)))
-        {
-            // TODO: Use registeredProperty.IsSubjectReference here instead in if
-            // TODO(perf): Use nextSubject = registeredProperty.GetValue() as IInterceptorSubject;
-            nextSubject = registeredProperty.Children.SingleOrDefault().Subject;
-
-            if (nextSubject is null && subjectFactory is not null)
-            {
-                nextSubject = subjectFactory.CreateSubject(registeredProperty);
-                registeredProperty.SetValue(nextSubject);
-            }
-        }
-        else
-        {
-            nextSubject = null;
+            return (null, null);
         }
 
-        return nextSubject;
+        var result = pathProvider.TryGetPropertyFromPath(registeredSubject, path, includedPropertiesOnly: true, createMissingSubject);
+        return result is { } found ? (found.Property, found.Index) : (null, null);
+    }
+
+    private static Func<RegisteredSubjectProperty, IInterceptorSubject?>? CreateMissingSubjectHook(ISubjectFactory? subjectFactory)
+        => subjectFactory is null ? null : CreateMissingSubjectHookForFactory(subjectFactory);
+
+    // Separate from the null check: a lambda capturing a parameter allocates its closure on entry to the method that
+    // declares the parameter, even when the lambda is never created.
+    private static Func<RegisteredSubjectProperty, IInterceptorSubject?> CreateMissingSubjectHookForFactory(ISubjectFactory subjectFactory)
+        => property => CreateSubject(property, subjectFactory);
+
+    private static IInterceptorSubject CreateSubject(RegisteredSubjectProperty property, ISubjectFactory subjectFactory)
+    {
+        var subject = subjectFactory.CreateSubject(property);
+        property.SetValue(subject);
+        return subject;
     }
 }

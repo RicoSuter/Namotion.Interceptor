@@ -52,7 +52,7 @@ internal class SetPropertyTool
 
         if (result is null)
         {
-            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+            return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path));
         }
 
         var (property, _) = result.Value;

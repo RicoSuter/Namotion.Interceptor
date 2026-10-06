@@ -176,8 +176,12 @@ public class MqttMappingCacheTests
         await using var client = CreateClient(subject, mapper);
 
         // Act
-        var (_, resolvedDuringDetach) = DetachChildWhileInserting(
-            subject, _ => SyncResult(client.TryGetPropertyForTopicAsync("child/value"))?.Name);
+        var (_, resolvedDuringDetach) = DetachChildWhileInserting(subject, property =>
+        {
+            mapper.ResolvedPropertyOverride = property;
+            return SyncResult(client.TryGetPropertyForTopicAsync("child/value"))?.Name;
+        });
+        mapper.ResolvedPropertyOverride = null;
         var after = await client.TryGetPropertyForTopicAsync("child/value");
 
         // Assert
@@ -215,8 +219,12 @@ public class MqttMappingCacheTests
         await using var server = CreateServer(subject, mapper);
 
         // Act
-        var (_, resolvedDuringDetach) = DetachChildWhileInserting(
-            subject, _ => SyncResult(server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None))?.Name);
+        var (_, resolvedDuringDetach) = DetachChildWhileInserting(subject, property =>
+        {
+            mapper.ResolvedPropertyOverride = property;
+            return SyncResult(server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None))?.Name;
+        });
+        mapper.ResolvedPropertyOverride = null;
         var after = await server.TryGetPropertyForTopicAsync("child/value", CancellationToken.None);
 
         // Assert
@@ -381,6 +389,12 @@ public class MqttMappingCacheTests
 
         public int PropertyLookupCount => Volatile.Read(ref _propertyLookupCount);
 
+        /// <summary>
+        /// When set, property lookups return this property instead of resolving the key. Stands in for a lookup
+        /// that resolved before a detach began, since a path through a detaching subject no longer resolves.
+        /// </summary>
+        public RegisteredSubjectProperty? ResolvedPropertyOverride { get; set; }
+
         public bool TryGetMapping(
             RegisteredSubjectProperty property,
             IInterceptorSubject rootSubject,
@@ -396,7 +410,9 @@ public class MqttMappingCacheTests
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _propertyLookupCount);
-            return _inner.TryGetPropertyAsync(key, subject, cancellationToken);
+            return ResolvedPropertyOverride is { } property
+                ? ValueTask.FromResult<RegisteredSubjectProperty?>(property)
+                : _inner.TryGetPropertyAsync(key, subject, cancellationToken);
         }
     }
 }

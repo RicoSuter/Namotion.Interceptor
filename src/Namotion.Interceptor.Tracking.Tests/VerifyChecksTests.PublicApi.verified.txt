@@ -103,9 +103,9 @@ namespace Namotion.Interceptor.Tracking.Change
 }
 namespace Namotion.Interceptor.Tracking
 {
-    public interface IStartupCompletionDeferrer
+    public interface IStartupCompletion
     {
-        System.IDisposable DeferCompletion();
+        System.IDisposable Defer();
     }
     public static class InterceptorSubjectContextExtensions
     {
@@ -137,6 +137,7 @@ namespace Namotion.Interceptor.Tracking
     {
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInCollection(object value, int index) { }
         public static Namotion.Interceptor.IInterceptorSubject? FindSubjectInDictionary(object value, object key) { }
+        public static System.Type? GetDictionaryKeyType(System.Type dictionaryType) { }
         public static bool TryGetSubjectFromKeyValuePair(object keyValuePair, out object? key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.IInterceptorSubject? subject) { }
     }
     public static class SubjectPropertyTypeExtensions
@@ -174,6 +175,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle
         public event System.Action<Namotion.Interceptor.Tracking.Lifecycle.SubjectLifecycleChange>? SubjectDetaching;
         public void AttachSubjectToContext(Namotion.Interceptor.IInterceptorSubject subject) { }
         public void DetachSubjectFromContext(Namotion.Interceptor.IInterceptorSubject subject) { }
+        public bool TryRunWhileAttached(Namotion.Interceptor.IInterceptorSubject subject, System.Action whenAttached) { }
         public void WriteProperty<TProperty>(ref Namotion.Interceptor.Interceptors.PropertyWriteContext<TProperty> context, Namotion.Interceptor.Interceptors.WriteInterceptionDelegate<TProperty> next) { }
     }
     public static class LifecycleInterceptorExtensions

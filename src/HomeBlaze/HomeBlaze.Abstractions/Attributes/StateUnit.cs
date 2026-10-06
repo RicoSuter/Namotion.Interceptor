@@ -32,5 +32,9 @@ public enum StateUnit
     Hectopascal,
     Degree,
     UvIndex,
-    Byte
+    Byte,
+    Kelvin,
+    Minute,
+    Hour,
+    VoltAmpere
 }

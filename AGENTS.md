@@ -102,6 +102,7 @@ The library uses a fluent configuration API:
 - **Package Version**: released on NuGet, breaking changes are fine when justified but need user approval
 - **CI/CD**: GitHub Actions with xUnit testing, coverage reporting, and NuGet publishing
 - **Native AOT**: full compatibility where possible is the target (#516). New code prefers static alternatives to runtime code generation and reflection, and existing sites are fixed when a change already touches them.
+- **InternalsVisibleTo**: only for test and benchmark projects. A library uses another library's public API; the existing exceptions are removed when that code is touched next.
 
 ## Analyzer Policy
 
@@ -140,6 +141,7 @@ The library has specialized support for:
 - **Inline comments: the why a reader cannot derive.** Length is earned by preventing a plausible wrong edit, such as a lock discipline, a pooled buffer that must not be read after release, or an ordering constraint. It is not earned by defending a decision against alternatives, which belongs in the pull request or `docs/design/`. Never restate the line below.
 - **XML docs state the contract**, not the reasoning. `<remarks>` is for a caveat a caller must act on.
 - **One canonical location per concept**, cross-referenced. Three copies drift.
+- **No application references in the library.** Code, comments, tests and docs outside `src/HomeBlaze` never mention HomeBlaze; describe the scenario generically instead.
 
 ## Git Rules
 

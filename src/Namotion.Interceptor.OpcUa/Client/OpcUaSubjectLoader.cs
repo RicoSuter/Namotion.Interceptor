@@ -145,7 +145,7 @@ internal class OpcUaSubjectLoader
                 }
                 else
                 {
-                    MonitorValueNode(resolvedNodeId, property, monitoredItems);
+                    MonitorValueNode(resolvedNodeId, property, monitoredItems, cancellationToken);
                     var visitedNodes = new HashSet<NodeId>();
                     await LoadAttributeNodesAsync(property, resolvedNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
@@ -192,7 +192,7 @@ internal class OpcUaSubjectLoader
                 continue;
 
             processedBrowseNames.Add(attributeBrowseName);
-            MonitorValueNode(matchingNodeId, attribute, monitoredItems);
+            MonitorValueNode(matchingNodeId, attribute, monitoredItems, cancellationToken);
 
             // Recursive: attributes can have attributes
             await LoadAttributeNodesAsync(attribute, matchingNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
@@ -208,8 +208,8 @@ internal class OpcUaSubjectLoader
             if (!processedBrowseNames.Add(browseName))
                 continue;
 
-            // Safety net for name collisions: a lifecycle handler from another source (e.g. HomeBlaze's
-            // [StateAttribute]) may have registered a registry attribute under the same key as a standard
+            // Safety net for name collisions: a lifecycle handler from another source (e.g. an application
+            // handler that turns a .NET attribute into a registry attribute) may have registered a registry attribute under the same key as a standard
             // OPC UA browse-name child (e.g. Server.ServerStatus.State). Skip rather than crash on
             // duplicate AddAttribute; the existing registration wins.
             if (property.TryGetAttribute(browseName) is not null)
@@ -243,7 +243,7 @@ internal class OpcUaSubjectLoader
                 (_, o) => value = o,
                 _configuration.TypeResolver!.GetDynamicPropertyAttributes(childNode, session));
 
-            MonitorValueNode(childNodeId, dynamicAttribute, monitoredItems);
+            MonitorValueNode(childNodeId, dynamicAttribute, monitoredItems, cancellationToken);
 
             // Recursive with cycle detection
             await LoadAttributeNodesAsync(dynamicAttribute, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
@@ -397,13 +397,20 @@ internal class OpcUaSubjectLoader
             new OpcUaLookupKey(nodeReference, session, _subject), registeredSubject, cancellationToken).ConfigureAwait(false);
     }
 
-    private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
+    private void MonitorValueNode(
+        NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems, CancellationToken cancellationToken)
     {
         var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property, _subject);
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
 
         if (!_ownership.ClaimSource(property.Reference))
         {
+            // A disposal cancels before it disposes the ownership, which then rejects every claim.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
             _logger.LogError(
                 "Property {Subject}.{Property} already owned by another source. Skipping OPC UA monitoring.",
                 property.Subject.GetType().Name, property.Name);
@@ -432,7 +439,7 @@ internal class OpcUaSubjectLoader
         var valueProperty = valuePropertyResult?.Property;
         if (valueProperty != null)
         {
-            MonitorValueNode(nodeId, valueProperty, monitoredItems);
+            MonitorValueNode(nodeId, valueProperty, monitoredItems, cancellationToken);
         }
 
         // Also load HasProperty children as regular variable nodes
@@ -451,7 +458,7 @@ internal class OpcUaSubjectLoader
                 var childPropertyName = childProperty.ResolvePropertyName(_configuration.Mapper, _subject);
                 if (childPropertyName == childNode.BrowseName.Name)
                 {
-                    MonitorValueNode(childNodeId, childProperty, monitoredItems);
+                    MonitorValueNode(childNodeId, childProperty, monitoredItems, cancellationToken);
                     break;
                 }
             }

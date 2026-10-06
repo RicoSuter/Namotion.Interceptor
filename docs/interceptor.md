@@ -174,7 +174,7 @@ var name = person.Name
 
 ### Concurrent Reads and Writes
 
-A read never observes a half-written value, whatever the property's type. Each read is a separate observation, though: two property reads, or a value and its write timestamp read one after the other, can come from different writes, in either order. When you need a value together with its timestamp, take both from a change notification, which carries them for one write. No read returns several properties from one consistent state.
+A read of an intercepted property of a subject with a context never observes a half-written value, whatever the property's type. A subject without a context reads and writes its fields with no lock, and properties that are not intercepted are not covered. A generated property whose type is a reference type other than `object`, or a primitive or enum no wider than a pointer, is read without a lock because the runtime loads it atomically; every other read takes the subject's `SyncRoot`. Each read is a separate observation, though: two property reads, or a value and its write timestamp read one after the other, can come from different writes, in either order. When you need a value together with its timestamp, call `property.GetValue(out var metadata)` on a `PropertyReference`. The metadata, such as `metadata.WriteTimestamp`, describes the write that produced the value or a later one, and the XML remarks of `PropertyReference.GetValue(out PropertyValueMetadata)` list the exceptions. No read returns several properties from one consistent state.
 
 ### Implementing an Interceptor
 

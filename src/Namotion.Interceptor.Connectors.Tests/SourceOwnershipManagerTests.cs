@@ -59,6 +59,24 @@ public class SourceOwnershipManagerTests
     }
 
     [Fact]
+    public void WhenManagerIsDisposed_ThenClaimSourceReturnsFalseAndLeavesPropertyUnowned()
+    {
+        // Arrange
+        var (_, manager) = CreateSourceWithManager();
+        var property = CreatePropertyReference();
+        manager.Dispose();
+
+        // Act
+        var result = manager.ClaimSource(property);
+
+        // Assert
+        Assert.False(result);
+        Assert.Empty(manager.Properties);
+        Assert.Equal(0, manager.Count);
+        Assert.False(property.TryGetSource(out _));
+    }
+
+    [Fact]
     public void ReleaseSource_CallsOnReleasingCallback()
     {
         // Arrange

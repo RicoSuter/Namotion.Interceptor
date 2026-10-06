@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Namotion.Interceptor.Connectors.Mapping;
@@ -55,7 +56,7 @@ public sealed class FluentMappingRegistry<TMetadata>
     /// <summary>Resolves class-level (type) metadata for a type, walking the type hierarchy.</summary>
     public bool TryGetTypeMetadata(Type type, [NotNullWhen(true)] out TMetadata? metadata)
     {
-        foreach (var candidate in WalkTypeHierarchy(type))
+        foreach (var candidate in GetTypeHierarchy(type))
         {
             if (_typeMetadata.TryGetValue(candidate, out metadata))
                 return true;
@@ -67,7 +68,7 @@ public sealed class FluentMappingRegistry<TMetadata>
 
     private bool TryResolveProperty(Type subjectType, string member, out Entry entry)
     {
-        foreach (var candidate in WalkTypeHierarchy(subjectType))
+        foreach (var candidate in GetTypeHierarchy(subjectType))
         {
             if (_propertyMetadata.TryGetValue((candidate, member), out entry))
                 return true;
@@ -77,15 +78,22 @@ public sealed class FluentMappingRegistry<TMetadata>
         return false;
     }
 
-    // Most-derived first: the runtime type, then each base class up the chain, then interfaces.
-    private static IEnumerable<Type> WalkTypeHierarchy(Type type)
-    {
-        for (var current = type; current is not null; current = current.BaseType)
-            yield return current;
+    private static readonly ConcurrentDictionary<Type, Type[]> TypeHierarchies = new();
 
-        foreach (var interfaceType in type.GetInterfaces())
-            yield return interfaceType;
-    }
+    // Most-derived first: the runtime type, then each base class up the chain, then interfaces. Cached because
+    // resolution runs per property on every path lookup and GetInterfaces allocates.
+    private static Type[] GetTypeHierarchy(Type type)
+        => TypeHierarchies.GetOrAdd(type, static t =>
+        {
+            var hierarchy = new List<Type>();
+            for (var current = t; current is not null; current = current.BaseType)
+            {
+                hierarchy.Add(current);
+            }
+
+            hierarchy.AddRange(t.GetInterfaces());
+            return hierarchy.ToArray();
+        });
 
     private readonly record struct Entry(string? Segment, TMetadata Metadata);
 }

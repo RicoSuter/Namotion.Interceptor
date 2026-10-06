@@ -48,6 +48,8 @@ namespace HomeBlaze.History.Abstractions
         public bool Contains(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
         public HomeBlaze.History.Abstractions.HistoryCoverage? Intersect(HomeBlaze.History.Abstractions.HistoryCoverage other) { }
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> Clip(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, HomeBlaze.History.Abstractions.HistoryCoverage window) { }
+        public static System.DateTimeOffset? CoverageStartAt(System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, System.DateTimeOffset instant) { }
+        public static System.TimeSpan CoveredDuration(System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> ranges, HomeBlaze.History.Abstractions.HistoryCoverage window) { }
         public static System.Collections.Immutable.ImmutableArray<HomeBlaze.History.Abstractions.HistoryCoverage> Normalize(System.Collections.Generic.IEnumerable<HomeBlaze.History.Abstractions.HistoryCoverage> ranges) { }
     }
     public readonly struct HistoryMove : System.IEquatable<HomeBlaze.History.Abstractions.HistoryMove>

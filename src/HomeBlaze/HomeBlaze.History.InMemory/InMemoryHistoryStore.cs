@@ -94,7 +94,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
     public long EvictedCount =>
         Interlocked.Read(ref _retiredEvictedCount) + _buffers.Values.Sum(buffer => buffer.EvictedCount);
     public int TrackedPropertyCount => _buffers.Count;
-    public long TotalSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
+    public long RetainedSampleCount => _buffers.Values.Sum(buffer => (long)buffer.Count);
 
     // Per path: the PropertyBuffer and its Lock, the dictionary entry, and the key string's object
     // header. The key's characters are counted separately.
@@ -374,7 +374,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
         }
 
         var coverage = ranges[0];
-        if (asOf < coverage.From || asOf > coverage.To)
+        if (asOf < coverage.From || asOf >= coverage.To)
         {
             return null;
         }
@@ -474,25 +474,27 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             query.From, query.To, bucket, query.MaxPoints);
         var bucketStart = firstBucketStart;
 
-        // When work was clipped to the newest buckets, advance carry to the clipped boundary. Otherwise
-        // fall back to this store's own held value when the merger supplied no seed, for Last as well as
-        // TimeWeightedAverage: both carry forward, and restricting the look-back to one of them left a
-        // direct Last query returning nulls for a value the store was holding all along.
+        // When MaxPoints clipped older buckets, the look-back at the clipped boundary replaces the seed even
+        // when nothing is held there, since the seed may not survive a coverage gap in between. Otherwise
+        // this store's own held value stands in when the merger supplied no seed.
         if (InMemoryHistoryAggregation.IsCarryDependent(aggregation) &&
             (bucketStart > alignedFrom || query.CarrySeed is null))
         {
             var prior = GetSampleAtOrBefore(query.PropertyPath, bucketStart);
-            if (prior is not null)
-            {
-                carriedNumber = prior.Number;
-                carriedJson = prior.Json;
-            }
+            carriedNumber = prior?.Number;
+            carriedJson = prior?.Json;
         }
 
-        // The whole window is read once, then walked with a cursor. Querying per bucket took the
+        // The covered window is read once, then walked with a cursor. Querying per bucket took the
         // buffer's lock and allocated a fresh list for every bucket, so a 1000-bucket chart cost 1000
         // lock acquisitions and 1000 allocations to read samples that one pass already has in order.
-        var windowSamples = CollectionsMarshal.AsSpan(RangeAcrossChain(chain, firstBucketStart, query.To));
+        // Clamping the read to coverage leaves every bucket slice holding covered samples only.
+        var readWindow = coverageRanges.IsEmpty
+            ? null
+            : coverageRanges[0].Intersect(new HistoryCoverage(firstBucketStart, query.To));
+        var windowSamples = readWindow is { } window
+            ? CollectionsMarshal.AsSpan(RangeAcrossChain(chain, window.From, window.To))
+            : [];
         var cursor = 0;
 
         var allPoints = new List<HistoryPoint>();
@@ -501,8 +503,7 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             var bucketEnd = bucketStart + bucket;
 
             // Samples are ascending, so the bucket's slice starts at the cursor and runs to the first
-            // sample at or after bucketEnd. The cursor advances past skipped buckets too, so an
-            // uncovered stretch cannot leave older samples in the next bucket's slice.
+            // sample at or after bucketEnd.
             var sliceEnd = cursor;
             while (sliceEnd < windowSamples.Length && windowSamples[sliceEnd].Timestamp < bucketEnd)
             {
@@ -512,10 +513,10 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
             var bucketSamples = windowSamples[cursor..sliceEnd];
             cursor = sliceEnd;
 
-            // Clipped to the query window: the newest bucket runs past To whenever To is not
-            // bucket-aligned, and coverage cannot reach into the future (see HistoryDispatchPlanner).
-            var coveredRange = new HistoryCoverage(bucketStart, bucketEnd < query.To ? bucketEnd : query.To);
-            if (coverageRanges.IsEmpty || !coverageRanges[0].Contains(coveredRange))
+            // Measured over [bucket start, min(bucket end, To)) within coverage (partial buckets: history.md).
+            var clippedEnd = bucketEnd < query.To ? bucketEnd : query.To;
+            var measured = readWindow?.Intersect(new HistoryCoverage(bucketStart, clippedEnd));
+            if (measured is not { } covered)
             {
                 carriedNumber = null;
                 carriedJson = null;
@@ -524,15 +525,33 @@ public sealed class InMemoryHistoryStore : IHistoryStore, IHistoryRecorder
                 continue;
             }
 
-            var point = InMemoryHistoryAggregation.AggregateBucket(
-                aggregation,
-                bucketStart,
-                bucketEnd,
-                bucketSamples,
-                isUlong,
-                ref carriedNumber,
-                ref carriedJson);
+            // A held value survives neither a coverage start nor a coverage end inside the bucket.
+            var startsInside = covered.From > bucketStart;
+            var endsInside = covered.To < clippedEnd;
+            if (startsInside)
+            {
+                carriedNumber = null;
+                carriedJson = null;
+            }
+
+            var isPartial = startsInside || endsInside;
+            var point = isPartial && aggregation is (HistoryAggregations.Count or HistoryAggregations.Sum)
+                ? new HistoryPoint(bucketStart, null, null)
+                : InMemoryHistoryAggregation.AggregateBucket(
+                    aggregation,
+                    bucketStart,
+                    covered,
+                    bucketSamples,
+                    isUlong,
+                    ref carriedNumber,
+                    ref carriedJson);
             allPoints.Add(point);
+
+            if (endsInside)
+            {
+                carriedNumber = null;
+                carriedJson = null;
+            }
 
             bucketStart = bucketEnd;
         }

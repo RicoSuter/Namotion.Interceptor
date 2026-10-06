@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -113,37 +114,19 @@ public class ConfigurationAttributeInitializerTests
     [Fact]
     public void WhenStateAndSecretConfigurationAndLoggingAvailable_ThenWarns()
     {
-        // Arrange: register a capturing logger factory into the context, the way RootManager makes
+        // Arrange: register a recording logger factory into the context, the way RootManager makes
         // host logging available to the context at startup.
         var context = CreateContext();
-        var loggerFactory = new CapturingLoggerFactory();
-        context.AddService<ILoggerFactory>(loggerFactory);
+        var logger = new RecordingLogger();
+        context.AddService<ILoggerFactory>(new RecordingLoggerFactory(logger));
 
         // Act
         _ = new InvalidSecretStateSubject(context);
 
         // Assert: the conflict is surfaced as a warning naming the offending property.
-        var warning = Assert.Single(loggerFactory.Entries, entry => entry.Level == LogLevel.Warning);
-        Assert.Contains("LeakySecret", warning.Message);
-        Assert.Contains("[State]", warning.Message);
-    }
-
-    private sealed class CapturingLoggerFactory : ILoggerFactory
-    {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(Entries);
-        public void AddProvider(ILoggerProvider provider) { }
-        public void Dispose() { }
-
-        private sealed class CapturingLogger(List<(LogLevel Level, string Message)> entries) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-                Func<TState, Exception?, string> formatter)
-                => entries.Add((logLevel, formatter(state, exception)));
-        }
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("LeakySecret", warning);
+        Assert.Contains("[State]", warning);
     }
 }
 
