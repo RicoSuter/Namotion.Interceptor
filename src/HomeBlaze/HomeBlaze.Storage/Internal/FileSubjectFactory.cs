@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentStorage.Blobs;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
@@ -82,6 +83,13 @@ internal sealed class FileSubjectFactory
         CancellationToken cancellationToken)
     {
         var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
+        var typeName = TryReadTypeName(json);
+        if (typeName is null)
+        {
+            return new JsonFile(storage, blob.FullPath);
+        }
+
+        string reason;
         try
         {
             var subject = _serializer.Deserialize(json);
@@ -90,14 +98,36 @@ internal sealed class FileSubjectFactory
                 // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                 return (IInterceptorSubject)subject;
             }
+
+            reason = UnknownSubject.TypeNotLoadedReason;
         }
         catch (Exception exception)
         {
-            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", blob.FullPath);
+            _logger?.LogError(exception, "Failed to create subject of type {Type} from: {Path}", typeName, blob.FullPath);
+            reason = (exception.InnerException ?? exception).Message;
         }
 
-        // Create JsonFile for plain JSON
-        return new JsonFile(storage, blob.FullPath);
+        var unknownSubject = new UnknownSubject(storage, blob.FullPath, typeName, reason);
+        UpdateFileMetadata(unknownSubject, blob);
+        return unknownSubject;
+    }
+
+    private static string? TryReadTypeName(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("$type", out var typeElement) &&
+                   typeElement.ValueKind == JsonValueKind.String &&
+                   !string.IsNullOrWhiteSpace(typeElement.GetString())
+                ? typeElement.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

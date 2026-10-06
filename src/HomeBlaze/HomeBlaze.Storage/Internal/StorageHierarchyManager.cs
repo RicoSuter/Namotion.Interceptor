@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
@@ -19,14 +20,15 @@ internal sealed class StorageHierarchyManager
 
     /// <summary>
     /// Computes the dictionary key for a child subject.
-    /// Configurable subjects from .json files use filename without extension.
+    /// Configurable subjects and their unknown-type placeholders from .json files use filename without extension.
     /// All other files use filename with extension.
     /// </summary>
     private static string GetChildKey(string fullPath, IInterceptorSubject subject)
     {
         var fileName = Path.GetFileName(fullPath);
-        
-        if (subject is IConfigurable &&
+
+        // A placeholder takes the key of the subject it stands in for, so its path survives the upgrade.
+        if (subject is IConfigurable or UnknownSubject &&
             Path.GetExtension(fullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
         {
             return Path.GetFileNameWithoutExtension(fullPath);
