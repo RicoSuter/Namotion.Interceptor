@@ -44,6 +44,7 @@ namespace Namotion.Interceptor.Tracking.Change
         public void Dispose() { }
         public bool TryDequeue(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item, System.Threading.CancellationToken cancellationToken) { }
         public bool TryDequeueImmediate(out Namotion.Interceptor.Tracking.Change.SubjectPropertyChange item) { }
+        public System.Threading.Tasks.ValueTask<bool> WaitToDequeueAsync(System.Threading.CancellationToken cancellationToken) { }
     }
     public static class PropertyChangeSubscriptionExtensions
     {
