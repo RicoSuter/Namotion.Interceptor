@@ -1117,9 +1117,16 @@ Add fields and constructor code (add `using HomeBlaze.Storage.Files;` and `using
 
 In the constructor: `_typeProvider = serviceProvider.GetService<TypeProvider>();`
 
-In `ConnectAsync`, wrap the scan and subscribe after it:
+In `ConnectAsync`, subscribe before the scan and run the scan under the lock. Subscribing first means a type added during the scan is not missed: its upgrade waits for the lock and then sees the scanned placeholders.
 
 ```csharp
+            if (_typeProvider is not null)
+            {
+                // Removing first keeps a reconnect from subscribing twice.
+                _typeProvider.TypesChanged -= OnTypesChanged;
+                _typeProvider.TypesChanged += OnTypesChanged;
+            }
+
             await _hierarchyLock.WaitAsync(cancellationToken);
             try
             {
@@ -1128,13 +1135,6 @@ In `ConnectAsync`, wrap the scan and subscribe after it:
             finally
             {
                 _hierarchyLock.Release();
-            }
-
-            if (_typeProvider is not null)
-            {
-                // Removing first keeps a reconnect from subscribing twice.
-                _typeProvider.TypesChanged -= OnTypesChanged;
-                _typeProvider.TypesChanged += OnTypesChanged;
             }
 ```
 
