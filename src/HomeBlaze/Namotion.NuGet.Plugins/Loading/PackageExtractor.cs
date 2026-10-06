@@ -100,9 +100,20 @@ internal class PackageExtractor
         }
         finally
         {
-            if (Directory.Exists(temporaryPath))
+            // Best-effort: a leftover temp directory is harmless because lookups only ever use the exact
+            // "{name}/{version}" path, and failing here would mask a successful move or the original extraction error.
+            try
             {
-                Directory.Delete(temporaryPath, recursive: true);
+                if (Directory.Exists(temporaryPath))
+                {
+                    Directory.Delete(temporaryPath, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
         }
 
