@@ -6,6 +6,7 @@
 @using HomeBlaze.Services.Components
 @using Microsoft.AspNetCore.Components.Sections
 @using Namotion.Interceptor.Blazor
+@using Namotion.Interceptor.Registry
 @using Toolbelt.Blazor.HotKeys2
 
 @inherits HomeBlazorComponentBase
@@ -118,6 +119,7 @@
     private double _splitDimension = 50;
     private SubjectEditPanel? _editPanel;
     private HotKeysContext? _hotKeysContext;
+    private PropertyChangeWatcher? _parentWatcher;
 
     private enum PageEditMode
     {
@@ -153,10 +155,11 @@
         _title = "";
 
         var path = Path;
-        if (string.IsNullOrEmpty(path) || Root is null)
-            return;
+        var subject = string.IsNullOrEmpty(path) || Root is null
+            ? null
+            : PathResolver.ResolveSubject(path, PathStyle.Route);
 
-        var subject = PathResolver.ResolveSubject(path, PathStyle.Route);
+        WatchParents(subject);
         if (subject != null)
         {
             if (subject is ITitleProvider titleProvider)
@@ -169,6 +172,40 @@
             }
 
             _subject = subject;
+        }
+    }
+
+    private void WatchParents(IInterceptorSubject? subject)
+    {
+        if (_parentWatcher is null)
+        {
+            if (Root is null)
+            {
+                return;
+            }
+
+            _parentWatcher = new PropertyChangeWatcher(Root.Context, InvokeAsync, OnParentChanged);
+        }
+
+        // Storage replaces a subject at the same path by assigning the property that holds it, which leaves
+        // this page on the detached instance until the path is resolved again.
+        var parents = subject?.TryGetRegisteredSubject()?.Parents ?? [];
+        var properties = new PropertyReference[parents.Length];
+        for (var i = 0; i < parents.Length; i++)
+        {
+            properties[i] = parents[i].Property.Reference;
+        }
+
+        _parentWatcher.Watch(properties);
+    }
+
+    private void OnParentChanged()
+    {
+        var previousSubject = _subject;
+        LoadSubject();
+        if (!ReferenceEquals(previousSubject, _subject))
+        {
+            StateHasChanged();
         }
     }
 
@@ -210,6 +247,9 @@
         if (_editPanel != null)
         {
             await _editPanel.SaveAsync(CancellationToken.None);
+
+            // Saving a placeholder's file replaces it with the real subject at the same path.
+            LoadSubject();
             _componentKey++;
             StateHasChanged();
         }
@@ -254,6 +294,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        _parentWatcher?.Dispose();
+
         if (_hotKeysContext != null)
         {
             await _hotKeysContext.DisposeAsync();

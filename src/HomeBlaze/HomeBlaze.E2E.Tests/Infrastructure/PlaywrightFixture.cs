@@ -25,6 +25,11 @@ public class PlaywrightFixture : IAsyncLifetime
 
     public string ServerAddress => _factory?.ServerAddress ?? throw new InvalidOperationException("Server not started");
 
+    /// <summary>
+    /// The services of the server the browser talks to.
+    /// </summary>
+    public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
+
     public async Task InitializeAsync()
     {
         // Start the test server with Kestrel
