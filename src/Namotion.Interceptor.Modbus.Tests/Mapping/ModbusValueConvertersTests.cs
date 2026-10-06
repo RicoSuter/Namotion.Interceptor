@@ -480,4 +480,106 @@ public class ModbusValueConvertersTests
         Assert.NotNull(value);
         Assert.Equal(0.455, value.Value, 10);
     }
+
+    [Fact]
+    public void WhenU16TargetsTimeSpan_ThenValueIsSeconds()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(TimeSpan), [0x00, 0x5A]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(90), value);
+    }
+
+    [Fact]
+    public void WhenU32MillisecondsTargetsTimeSpanWithScale_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U32) { Scale = 0.001 }, typeof(TimeSpan?), [0x00, 0x00, 0x05, 0xDC]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), value);
+    }
+
+    [Fact]
+    public void WhenS16TargetsTimeSpanWithDynamicScaleFactor_ThenPowerOfTenIsApplied()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S16) { ScaleFactorProperty = "Factor" },
+            typeof(TimeSpan?), [0xFF, 0xF1], exponent: -1);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(-1.5), value);
+    }
+
+    [Fact]
+    public void WhenTimeSpanIsFinerThanATick_ThenItIsTruncated()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 1e-9 }, typeof(TimeSpan), [0x00, 0x96]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromTicks(1), value);
+    }
+
+    [Fact]
+    public void WhenRawMatchesNotAvailableValueForTimeSpan_ThenNullIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum },
+            typeof(TimeSpan?), [0xFF, 0xFF]);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenIntegerIsOutsideTimeSpanRange_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(TimeSpan?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]));
+    }
+
+    [Fact]
+    public void WhenF32TargetsTimeSpan_ThenValueIsSeconds()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan), [0x3F, 0xC0, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(1.5), value);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x7F, 0xC0, 0x00, 0x00 })] // NaN
+    [InlineData(new byte[] { 0x7F, 0x80, 0x00, 0x00 })] // +Infinity
+    [InlineData(new byte[] { 0x60, 0xAD, 0x78, 0xEC })] // 1e20, beyond the TimeSpan range
+    public void WhenFloatCannotBeTimeSpanForNullableTimeSpan_ThenNullIsReturned(byte[] raw)
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan?), raw);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenNaNFloatTargetsNonNullableTimeSpan_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan), [0x7F, 0xC0, 0x00, 0x00]));
+    }
+
+    [Theory]
+    [InlineData(ModbusDataType.Boolean)]
+    [InlineData(ModbusDataType.String)]
+    public void WhenDataTypeCannotBeTimeSpan_ThenConfigurationExceptionIsThrown(ModbusDataType dataType)
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() =>
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Length = dataType == ModbusDataType.String ? 1 : 0 },
+                typeof(TimeSpan?), "Test.Property", hasDynamicScale: false));
+    }
 }

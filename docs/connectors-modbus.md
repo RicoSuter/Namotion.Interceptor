@@ -56,7 +56,7 @@ To create a source for a subject at runtime, for example in a device subject tha
 |---|---|---|
 | `AddressSpace` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
 | `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit and 64-bit values |
-| `Scale` | `1.0` | Static factor, requires a `float`, `double` or `decimal` property |
+| `Scale` | `1.0` | Static factor, requires a `float`, `double`, `decimal` or `TimeSpan` property |
 | `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Combines with `Scale` (value = raw * scale * 10^exponent), and the named property must not be excluded |
 | `Length` | 0 | Register count of `String` values, 1 to 125 |
 | `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF, 0x7FFFFFFF or 0x7FFFFFFFFFFFFFFF), `SignedMinimum` (0x8000, 0x80000000 or 0x8000000000000000) or `UnsignedMaximum` (0xFFFF, 0xFFFFFFFF or 0xFFFFFFFFFFFFFFFF) |
@@ -67,8 +67,9 @@ Addresses are raw protocol addresses, without the `3xxxx`/`4xxxx` documentation 
 Values convert as follows:
 
 - Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`, U64 into `ulong` but not `long`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
-- Scaled values require a `float`, `double` or `decimal` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
-- F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
+- Scaled values require a `float`, `double`, `decimal` or `TimeSpan` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
+- F32 converts to `float`, `double`, `decimal` or `TimeSpan`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property, and on a `TimeSpan?` property also a value beyond the `TimeSpan` range.
+- `TimeSpan` takes the value a `decimal` property would get as seconds, truncated to whole ticks; use `Scale` for other units, such as `Scale = 0.001` for milliseconds.
 - String reads two ASCII characters per register up to the first NUL and trims trailing spaces.
 - `NotAvailableValue` requires a nullable property and an integer data type, and is checked before scaling.
 - With a dynamic scale factor, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes. A scale factor reading as its own `NotAvailableValue` is unknown, so its dependents are not updated until it is available again.

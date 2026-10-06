@@ -20,6 +20,9 @@ internal static class ModbusValueConverters
     private static readonly decimal[] PowersOfTen = CreatePowersOfTen();
     private static readonly decimal[] NegativePowersOfTen = CreateNegativePowersOfTen();
 
+    private static readonly decimal MinimumTimeSpanSeconds = (decimal)TimeSpan.MinValue.Ticks / TimeSpan.TicksPerSecond;
+    private static readonly decimal MaximumTimeSpanSeconds = (decimal)TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerSecond;
+
     public static ModbusValueReader Create(ModbusRegisterAttribute attribute, Type propertyType, string propertyPath, bool hasDynamicScale)
     {
         var underlyingType = Nullable.GetUnderlyingType(propertyType);
@@ -72,7 +75,7 @@ internal static class ModbusValueConverters
     }
 
     private static bool IsScalableTarget(Type targetType)
-        => targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float);
+        => targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float) || targetType == typeof(TimeSpan);
 
     private static ModbusValueReader CreateFloatReader(
         ModbusRegisterAttribute attribute, Type targetType, string propertyPath,
@@ -110,7 +113,35 @@ internal static class ModbusValueConverters
             };
         }
 
-        throw ModbusConfigurationException.ForMapping(propertyPath, $"F32 requires a float, double or decimal property, not {targetType.Name}.");
+        if (targetType == typeof(TimeSpan))
+        {
+            return CreateFloatTimeSpanReader(attribute, propertyPath, isNullable, hasDynamicScale);
+        }
+
+        throw ModbusConfigurationException.ForMapping(propertyPath, $"F32 requires a float, double, decimal or TimeSpan property, not {targetType.Name}.");
+    }
+
+    private static ModbusValueReader CreateFloatTimeSpanReader(
+        ModbusRegisterAttribute attribute, string propertyPath, bool isNullable, bool hasDynamicScale)
+    {
+        var wordOrder = attribute.WordOrder;
+        var decimalScale = ToDecimalScale(propertyPath, attribute.Scale);
+        return (raw, exponent) =>
+        {
+            var value = ModbusRegisterCodec.ReadSingle(raw, wordOrder);
+            if (!isNullable)
+            {
+                return ToTimeSpan((decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent));
+            }
+
+            // Also true for NaN, which fails every comparison.
+            if (!(Math.Abs(value) < DecimalFloatLimit))
+            {
+                return null;
+            }
+
+            return TryToTimeSpan((decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent), out var timeSpan) ? timeSpan : null;
+        };
     }
 
     private static ModbusValueReader CreateScaledIntegerReader(
@@ -127,6 +158,14 @@ internal static class ModbusValueConverters
             return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
                 : (decimal)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+        }
+
+        if (targetType == typeof(TimeSpan))
+        {
+            var decimalScale = ToDecimalScale(propertyPath, staticScale);
+            return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
+                ? null
+                : ToTimeSpan((decimal)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent));
         }
 
         if (targetType == typeof(double))
@@ -261,6 +300,22 @@ internal static class ModbusValueConverters
         return staticScale == 1m ? power : staticScale * power;
     }
 
+    private static object ToTimeSpan(decimal seconds)
+        => TryToTimeSpan(seconds, out var value) ? value : throw new OverflowException($"{seconds} seconds is outside the TimeSpan range.");
+
+    // Truncates to whole ticks.
+    private static bool TryToTimeSpan(decimal seconds, out TimeSpan value)
+    {
+        if (seconds < MinimumTimeSpanSeconds || seconds > MaximumTimeSpanSeconds)
+        {
+            value = default;
+            return false;
+        }
+
+        value = TimeSpan.FromTicks((long)(seconds * TimeSpan.TicksPerSecond));
+        return true;
+    }
+
     private static decimal ToDecimalScale(string propertyPath, double scale)
     {
         try
@@ -308,7 +363,7 @@ internal static class ModbusValueConverters
     {
         if (isScaled)
         {
-            throw ModbusConfigurationException.ForMapping(propertyPath, $"Scaling requires a float, double or decimal property, not {targetType.Name}.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"Scaling requires a float, double, decimal or TimeSpan property, not {targetType.Name}.");
         }
     }
 }

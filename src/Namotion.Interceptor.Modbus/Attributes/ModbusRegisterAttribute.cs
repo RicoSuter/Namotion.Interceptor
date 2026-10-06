@@ -40,7 +40,7 @@ public class ModbusRegisterAttribute : Attribute
 
     /// <summary>
     /// Gets the static factor the raw value is multiplied with, in addition to the dynamic scale factor when one applies:
-    /// value = raw * Scale * 10^exponent. Requires a floating point or decimal property.
+    /// value = raw * Scale * 10^exponent. Requires a floating point, decimal or <see cref="TimeSpan"/> property, where a <see cref="TimeSpan"/> takes the value as seconds.
     /// </summary>
     public double Scale { get; init; } = 1.0;
 

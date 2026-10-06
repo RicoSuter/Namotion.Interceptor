@@ -301,6 +301,19 @@ public partial class ModbusRegisterResolverTests
         public PropertyReference? TryGetScaleFactorProperty(string propertyName) => null;
     }
 
+    [InterceptorSubject]
+    public partial class DurationProviderSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial TimeSpan? Duration { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.S16)]
+        public partial short? DurationScaleFactor { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Duration) ? new PropertyReference(this, nameof(DurationScaleFactor)) : null;
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -392,6 +405,21 @@ public partial class ModbusRegisterResolverTests
         // Assert
         var value = Find(bindings, subject, nameof(DecliningProviderSubject.Value));
         Assert.Same(Find(bindings, subject, nameof(DecliningProviderSubject.Factor)), value.ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProviderSuppliesScaleFactorOfTimeSpan_ThenReaderAppliesIt()
+    {
+        // Arrange
+        var subject = new DurationProviderSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var duration = Find(bindings, subject, nameof(DurationProviderSubject.Duration));
+        Assert.Same(Find(bindings, subject, nameof(DurationProviderSubject.DurationScaleFactor)), duration.ScaleFactor);
+        Assert.Equal(TimeSpan.FromSeconds(1.5), duration.Reader(new byte[] { 0x00, 0x0F }, -1));
     }
 
     [Fact]
