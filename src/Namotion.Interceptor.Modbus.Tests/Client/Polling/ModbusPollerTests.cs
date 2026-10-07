@@ -583,7 +583,7 @@ public partial class ModbusPollerTests
         Assert.NotNull(metrics.LastPollDuration);
     }
 
-    private static (ModbusPoller Poller, FakeRegisterReader Reader, ModbusPollingMetrics Metrics) CreateLongString(string text)
+    private static (ModbusPoller Poller, FakeRegisterReader Reader, ModbusPollingMetrics Metrics) CreateLongString(string text, ILogger? logger = null)
     {
         var subject = new LongStringSubject(CreateContext());
         var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
@@ -591,7 +591,7 @@ public partial class ModbusPollerTests
         var reader = new FakeRegisterReader();
         SetLongString(reader, text);
         reader.SetRegister(LongStringLength, 7);
-        return (CreatePoller(bindings, 0, metrics, NullLogger.Instance), reader, metrics);
+        return (CreatePoller(bindings, 0, metrics, logger ?? NullLogger.Instance), reader, metrics);
     }
 
     // Two characters per register, padded with NUL like a device would.
@@ -733,5 +733,138 @@ public partial class ModbusPollerTests
         Assert.Equal(1, metrics.TotalFailedRequests);
         Assert.Equal(0, metrics.UnavailablePropertyCount);
         Assert.Equal(3, metrics.BatchCount);
+    }
+
+    [Fact]
+    public async Task WhenSecondReadOfLongStringFailsTransiently_ThenItIsSkippedForThatCycleOnly()
+    {
+        // Arrange (request 2 is the first request of the second read)
+        var (poller, reader, metrics) = CreateLongString(new string('A', 300));
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        var changed = new string('B', 300);
+        SetLongString(reader, changed);
+        reader.Requests.Clear();
+        reader.RequestReceived = index =>
+        {
+            if (index == 2)
+            {
+                reader.Reject(0, exceptionCode: 6);
+            }
+        };
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        reader.RequestReceived = null;
+        reader.Accept(0);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var recoveredCycle = Apply(poller);
+
+        // Assert
+        Assert.Empty(failedCycle);
+        Assert.Equal(changed, Assert.Single(recoveredCycle).Value);
+        Assert.Equal(1, metrics.TotalFailedRequests);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
+        Assert.Equal(3, metrics.BatchCount);
+    }
+
+    [Fact]
+    public async Task WhenFirstReadOfLongStringIsTorn_ThenNothingIsAppliedUntilTwoReadsAgree()
+    {
+        // Arrange (the device switches to the new value after answering the first request)
+        var next = new string('B', 300);
+        var (poller, reader, _) = CreateLongString(new string('A', 300));
+        reader.RequestReceived = index =>
+        {
+            if (index == 1)
+            {
+                SetLongString(reader, next);
+            }
+        };
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var tornCycle = Apply(poller);
+        var tornCycleRequests = reader.Requests.ToArray();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var nextCycle = Apply(poller);
+
+        // Assert
+        Assert.Equal(7, Assert.Single(tornCycle).Value);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, AfterRequest }, tornCycleRequests);
+        Assert.Equal(next, nextCycle[nameof(LongStringSubject.Text)]);
+    }
+
+    [Fact]
+    public async Task WhenOnlyALaterRequestOfTheSecondReadDiffers_ThenThePreviousValueIsKept()
+    {
+        // Arrange (the device changes the end of the string after answering the first read)
+        var previous = new string('A', 300);
+        var first = new string('A', 260) + "First";
+        var second = new string('A', 260) + "Second";
+        var (poller, reader, _) = CreateLongString(previous);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        SetLongString(reader, first);
+        reader.Requests.Clear();
+        reader.RequestReceived = index =>
+        {
+            if (index == 2)
+            {
+                SetLongString(reader, second);
+            }
+        };
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var mismatchCycle = Apply(poller);
+        var mismatchCycleRequests = reader.Requests.ToArray();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var nextCycle = Apply(poller);
+
+        // Assert
+        Assert.Empty(mismatchCycle);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, mismatchCycleRequests);
+        Assert.Equal(second, Assert.Single(nextCycle).Value);
+    }
+
+    [Fact]
+    public async Task WhenLongStringReadsKeepDisagreeing_ThenAWarningIsLoggedOncePerStreak()
+    {
+        // Arrange (the device changes the string before answering every request)
+        var logger = new RecordingLogger();
+        var (poller, reader, _) = CreateLongString("Initial", logger);
+        void ChangeOnEveryRequest(int index) => SetLongString(reader, $"Value {index}");
+
+        async Task ReadCyclesAsync(int count)
+        {
+            for (var cycle = 0; cycle < count; cycle++)
+            {
+                await poller.ReadAsync(reader, CancellationToken.None);
+                Apply(poller);
+            }
+        }
+
+        // Act
+        reader.RequestReceived = ChangeOnEveryRequest;
+        await ReadCyclesAsync(2);
+        var warningsBeforeThreshold = logger.Warnings.Count;
+        await ReadCyclesAsync(3);
+        var warningsOfFirstStreak = logger.Warnings.Count;
+
+        reader.RequestReceived = null;
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var settledCycle = Apply(poller);
+
+        reader.RequestReceived = ChangeOnEveryRequest;
+        await ReadCyclesAsync(3);
+
+        // Assert
+        Assert.Equal(0, warningsBeforeThreshold);
+        Assert.Equal(1, warningsOfFirstStreak);
+        Assert.True(settledCycle.ContainsKey(nameof(LongStringSubject.Text)));
+        Assert.Equal(2, logger.Warnings.Count);
+        Assert.All(logger.Warnings, warning => Assert.Contains("Text (HoldingRegister 0 to 149, unit 1)", warning));
     }
 }

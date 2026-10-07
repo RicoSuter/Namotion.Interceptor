@@ -70,6 +70,11 @@ internal sealed class ModbusRegisterBinding
     public bool IsUnavailable { get; set; }
 
     /// <summary>
+    /// Gets or sets the number of cycles in a row in which the two reads of a binding larger than one request disagreed.
+    /// </summary>
+    public int ConsecutiveMismatchCount { get; set; }
+
+    /// <summary>
     /// Gets or sets whether this binding is read in a request of its own, set after a request spanning it was
     /// rejected. Holds until the next connect creates new bindings.
     /// </summary>

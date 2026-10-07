@@ -20,6 +20,8 @@ internal sealed class ModbusPoller
     private readonly ILogger _logger;
 
     // Keyed by request rather than batch instance so a replan does not log a still failing request again.
+    private const int MismatchWarningThreshold = 3;
+
     private readonly HashSet<(byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count)> _failingBatches = [];
     private ModbusReadBatch[] _batches;
 
@@ -227,6 +229,7 @@ internal sealed class ModbusPoller
     /// </summary>
     private async Task ReadSplitBindingAsync(IModbusRegisterReader reader, ModbusReadBatch batch, CancellationToken cancellationToken)
     {
+        Debug.Assert(batch.Bindings.Length == 1, "A batch of several requests holds exactly one binding.");
         var binding = batch.Bindings[0];
         for (var index = 0; index < batch.RequestCount; index++)
         {
@@ -237,7 +240,7 @@ internal sealed class ModbusPoller
 
         if (binding.HasLast && binding.CurrentRaw.AsSpan().SequenceEqual(binding.LastRaw))
         {
-            binding.HasCurrent = true;
+            MarkConfirmed(binding);
             return;
         }
 
@@ -247,16 +250,43 @@ internal sealed class ModbusPoller
             var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, address, count, cancellationToken).ConfigureAwait(false);
             if (!data.Span[..(count * 2)].SequenceEqual(binding.CurrentRaw.AsSpan((address - binding.Address) * 2, count * 2)))
             {
-                if (_logger.IsEnabled(LogLevel.Debug))
-                {
-                    _logger.LogDebug("Modbus mapping {Path} changed while it was read; it is read again next cycle.", binding.Path);
-                }
-
+                RecordMismatch(binding);
                 return;
             }
         }
 
+        MarkConfirmed(binding);
+    }
+
+    private static void MarkConfirmed(ModbusRegisterBinding binding)
+    {
         binding.HasCurrent = true;
+        binding.ConsecutiveMismatchCount = 0;
+    }
+
+    /// <summary>
+    /// Logs a warning once the two reads of a binding disagreed in <see cref="MismatchWarningThreshold"/> cycles in a row,
+    /// and again only after a value was confirmed in between.
+    /// </summary>
+    private void RecordMismatch(ModbusRegisterBinding binding)
+    {
+        // Saturates at the threshold, so the warning is logged once per streak.
+        if (binding.ConsecutiveMismatchCount < MismatchWarningThreshold)
+        {
+            binding.ConsecutiveMismatchCount++;
+            if (binding.ConsecutiveMismatchCount == MismatchWarningThreshold)
+            {
+                _logger.LogWarning(
+                    "Modbus mapping {Path} ({AddressSpace} {Address} to {LastAddress}, unit {UnitId}) changed between its two reads in {CycleCount} cycles in a row and keeps its previous value until two reads agree.",
+                    binding.Path, binding.AddressSpace, binding.Address, binding.Address + binding.Count - 1, binding.UnitId, MismatchWarningThreshold);
+                return;
+            }
+        }
+
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.LogDebug("Modbus mapping {Path} changed while it was read; it is read again next cycle.", binding.Path);
+        }
     }
 
     /// <summary>

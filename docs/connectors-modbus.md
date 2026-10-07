@@ -163,7 +163,7 @@ public partial class Battery
 | `RequestTimeout` | 5 s | Timeout of the TCP connect and of each request; a request timeout counts as a lost connection |
 | `RetryTime` | 10 s | Delay before reconnecting after a lost connection or a failed connect attempt |
 | `BufferTime` | 8 ms | Change queue buffer time |
-| `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbours, 0 to 124 |
+| `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbors, 0 to 124 |
 
 The time spans must be positive (`BufferTime` may be zero) and at most 1 hour.
 
@@ -171,9 +171,9 @@ The time spans must be positive (`BufferTime` may be zero) and at most 1 hour.
 
 Mappings are grouped by unit ID and space, sorted by address and merged into requests of at most 125 registers or 2000 bits. With the default gap of 0 only contiguous mappings are merged, because many devices reject reads that touch unmapped addresses. Each cycle reads all requests first and then applies only values whose raw registers changed, so an unchanged cycle converts nothing and raises no change events. All values of a cycle share one timestamp, since Modbus carries none.
 
-A string may be longer than one request. Such a mapping is never merged with its neighbours and is read in consecutive requests of at most 125 registers. Modbus cannot read more than 125 registers atomically, so when the value changed it is read a second time in the same cycle and applied only when both reads agree; otherwise it keeps its previous value and is read again in the next cycle. A request of such a mapping that fails is handled like a failed request of its own: the mapping is skipped for that cycle, or marked unavailable when the device rejects it.
+A string may be longer than one request. Such a mapping is never merged with its neighbors and is read in consecutive requests of at most 125 registers. Modbus cannot read more than 125 registers atomically, so when the value changed it is read a second time in the same cycle and applied only when both reads agree; otherwise it keeps its previous value and is read again in the next cycle. A string whose two reads disagree in three cycles in a row, typically one the device updates continuously, is logged as a warning once until a value is applied again. A request of such a mapping that fails is handled like a failed request of its own: the mapping is skipped for that cycle, or marked unavailable when the device rejects it.
 
-The initial load reads every mapping once before the source reports `Synchronized`. A mapping the device rejects, or whose request fails transiently during that load, keeps its previous value until it is read; `Synchronized` does not mean every mapping holds a current device value.
+The initial load reads every mapping once before the source reports `Synchronized`. A mapping the device rejects, whose request fails transiently during that load, or a long string whose two reads disagree, keeps its previous value until it is read; `Synchronized` does not mean every mapping holds a current device value.
 
 ## Local Writes
 
@@ -196,7 +196,7 @@ Mapped properties are owned by the source, so local changes reach it but are not
 | Member | Meaning |
 |---|---|
 | `TotalPolls` | Completed poll cycles, including the initial load of every connect |
-| `TotalFailedRequests` | Planned read requests answered with a Modbus exception response; one-by-one re-reads and discovery reads are not counted |
+| `TotalFailedRequests` | Failed read requests of the poll cycles, answered with a Modbus exception response; one-by-one re-reads of a rejected request and discovery reads are not counted |
 | `BatchCount` | Read requests per poll cycle, not counting the second read of a changed long string |
 | `UnavailablePropertyCount` | Mappings the device rejected, not read until the next connect |
 | `LastPollDuration` | Duration of the last poll cycle or initial load, `null` before the first one |
