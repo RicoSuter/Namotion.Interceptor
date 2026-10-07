@@ -145,15 +145,38 @@ public class SunSpecDeviceTests
     }
 
     [Theory]
-    [InlineData(false, false, 0)]
-    [InlineData(true, false, 10)]
-    [InlineData(false, true, 10)]
-    public void WhenTheSourceStops_ThenItPausesOnePollingIntervalOnlyAfterAFailureOrAChainChange(bool hasFailed, bool hasChainChanged, int expectedSeconds)
+    [InlineData("ConfigurationChanged", 0)]
+    [InlineData("Failed", 10_000)]
+    [InlineData("ChainChanged", 10_000)]
+    [InlineData("Rediscovery", 1_000)]
+    public void WhenTheSourceStops_ThenTheReconnectDelayDependsOnWhy(string restart, int expectedMilliseconds)
     {
+        // Arrange
+        var pollingInterval = TimeSpan.FromSeconds(10);
+
         // Act
-        var delay = SunSpecDevice.GetReconnectDelay(hasFailed, hasChainChanged, TimeSpan.FromSeconds(10));
+        var delay = SunSpecDevice.GetReconnectDelay(Enum.Parse<SunSpecDevice.SourceRestart>(restart), pollingInterval);
 
         // Assert
-        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), delay);
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedMilliseconds), delay);
+    }
+
+    [Theory]
+    [InlineData(240, true, true, 60)]
+    [InlineData(240, false, true, 60)]
+    [InlineData(240, false, false, 240)]
+    [InlineData(240, true, false, 480)]
+    [InlineData(2400, true, false, 3600)]
+    public void WhenADiscoveryCompletes_ThenTheRediscoveryIntervalBacksOffUntilTheFoundUnitsChange(
+        int currentSeconds, bool isPlannedRediscovery, bool haveFoundUnitsChanged, int expectedSeconds)
+    {
+        // Arrange
+        var initial = TimeSpan.FromSeconds(60);
+
+        // Act
+        var interval = SunSpecDevice.GetNextRediscoveryInterval(TimeSpan.FromSeconds(currentSeconds), initial, isPlannedRediscovery, haveFoundUnitsChanged);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), interval);
     }
 }

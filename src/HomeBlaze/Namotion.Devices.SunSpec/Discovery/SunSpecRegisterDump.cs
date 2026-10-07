@@ -9,6 +9,9 @@ namespace Namotion.Devices.SunSpec.Discovery;
 /// </summary>
 internal static class SunSpecRegisterDump
 {
+    /// <summary>
+    /// Gets the JSON of <paramref name="chain"/>: the unit ID, the marker address, and each model's address and registers.
+    /// </summary>
     public static string Write(byte unitId, SunSpecChain chain)
     {
         var buffer = new ArrayBufferWriter<byte>();

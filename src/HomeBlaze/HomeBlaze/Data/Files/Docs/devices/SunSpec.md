@@ -26,9 +26,11 @@ Values the device does not implement are shown as empty, and so are registers be
 | Unit IDs | 1 | Comma-separated Modbus unit IDs, 1 to 247 |
 | Polling Interval | 10 s | 1 s to 1 h |
 | Model Definitions Folder | data directory `SunSpec/Models` | SunSpec JSON files for models without a built-in class |
-| Log register dump | off | Logs all registers of the chain on discovery |
+| Log register dump | off | Logs all registers of the chain when it is discovered |
 
 A configuration change restarts the connection.
+
+Only configure unit IDs that exist. A unit ID the device does not answer at all (a timeout rather than an error response, common when connecting to a device directly instead of through a gateway) fails the connection for all units.
 
 ## Status
 
@@ -39,7 +41,7 @@ A configuration change restarts the connection.
 | Running | Connected and polling | Empty, or the missing units, such as "Unit 2 not found" or "No SunSpec unit found" |
 | Error | The connection failed (stays set while reconnecting), or the configuration is invalid | The last error, or the configuration error |
 
-While a configured unit is missing, the device discovers its units again every polling interval, but at most once a minute. A unit that a gateway cannot reach (Modbus exceptions 10 and 11) is skipped; the other units are still read. When a polled model ID no longer matches the discovered chain, for example after a firmware update, the device disconnects, waits one polling interval and discovers the chain again.
+While a configured unit is missing, the device discovers its units again: first after one minute (or one polling interval, when longer), then twice as long after each attempt that still misses a unit, up to once an hour. The interval starts over when a unit is found or lost, or the configuration changes. Each attempt briefly reconnects; the status stays Running meanwhile. A unit that a gateway cannot reach (Modbus exceptions 10 and 11) is skipped; the other units are still read. When a polled model ID no longer matches the discovered chain, for example after a firmware update, the device disconnects, waits one polling interval and discovers the chain again.
 
 ## Power Directions
 
@@ -51,7 +53,7 @@ Models that are newer than the built-in catalog, or vendor models published in t
 
 ## Register Dump
 
-Enable "Log register dump" to log the raw registers of every model in the chain. The dump can be replayed in tests, which is the easiest way to report a device that is not read correctly.
+Enable "Log register dump" to log the raw registers of every model in the chain. The dump is logged on the first discovery after a configuration change and whenever the chain changes. The dump can be replayed in tests, which is the easiest way to report a device that is not read correctly.
 
 ## SolarEdge
 

@@ -53,6 +53,11 @@ public partial class SunSpecDevice :
     // Decoupled from the polling interval so a (re)connect or a lost connection shows within a second.
     private static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(1);
 
+    private static readonly TimeSpan MaximumRediscoveryInterval = TimeSpan.FromHours(1);
+
+    // Gives a device that accepts a single client time to release the previous connection.
+    private static readonly TimeSpan RediscoveryReconnectDelay = TimeSpan.FromSeconds(1);
+
     private readonly ILogger<SunSpecDevice> _logger;
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
     private readonly SunSpecDefinitionDirectory _definitionDirectory = new();
@@ -60,6 +65,11 @@ public partial class SunSpecDevice :
     // Set before a source starts; read by its discovery on the source's thread.
     private byte[] _unitIds = [];
     private SunSpecModelCatalog _catalog = SunSpecModelCatalog.Empty;
+    private TimeSpan _initialRediscoveryInterval;
+    private bool _isPlannedRediscovery;
+
+    // Written by a discovery, read by the next one; reset on a configuration change.
+    private HashSet<byte> _missingUnitIds = [];
 
     // Written by the discovery, read by the status loop: false while a discovery replaces model subjects, whose
     // polled model IDs would otherwise look like a chain change.
@@ -69,13 +79,25 @@ public partial class SunSpecDevice :
     private string? _discoveryStatusMessage;
     private bool _hasMissingUnits;
     private long _lastDiscoveryTimestamp;
+    private long _rediscoveryIntervalTicks;
+
+    /// <summary>
+    /// Why a source stopped, which decides how the next one starts.
+    /// </summary>
+    internal enum SourceRestart
+    {
+        ConfigurationChanged,
+        Failed,
+        ChainChanged,
+        Rediscovery
+    }
 
     // Protects a device from a hand-edited configuration that would poll it continuously; only tests lower it.
     internal TimeSpan MinimumPollingInterval { get; init; } = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
 
     /// <summary>
-    /// Gets the minimum time between discoveries while a configured unit is missing; the effective polling interval
-    /// applies when it is longer. Only tests lower it.
+    /// Gets or sets the first interval between discoveries while a configured unit is missing; the effective polling
+    /// interval applies when it is longer. Only tests lower it.
     /// </summary>
     internal TimeSpan MinimumRediscoveryInterval { get; set; } = TimeSpan.FromSeconds(60);
 
@@ -172,14 +194,32 @@ public partial class SunSpecDevice :
         DiscoveryCount++;
         Volatile.Write(ref _isChainGuardArmed, false);
 
-        var units = await SunSpecDiscovery.DiscoverAsync(Units, _unitIds, context, _catalog, IsRegisterDumpEnabled, _logger, cancellationToken).ConfigureAwait(false);
+        var units = new Dictionary<int, SunSpecUnit>();
+        foreach (var unitId in _unitIds)
+        {
+            var unit = Units.GetValueOrDefault(unitId) ?? new SunSpecUnit(unitId);
+            if (await SunSpecDiscovery.DiscoverUnitAsync(unit, _missingUnitIds.Contains(unitId), context, _catalog, IsRegisterDumpEnabled, _logger, cancellationToken).ConfigureAwait(false))
+            {
+                units[unitId] = unit;
+            }
+        }
+
+        var haveFoundUnitsChanged = !SunSpecDiscovery.HaveSameUnitIds(Units, units);
         if (!SunSpecDiscovery.HaveSameUnits(Units, units))
         {
             Units = units;
         }
 
+        _missingUnitIds = _unitIds.Where(unitId => !units.ContainsKey(unitId)).ToHashSet();
+        var rediscoveryInterval = GetNextRediscoveryInterval(
+            TimeSpan.FromTicks(Volatile.Read(ref _rediscoveryIntervalTicks)), _initialRediscoveryInterval, _isPlannedRediscovery, haveFoundUnitsChanged);
+
+        // A reconnect of the same source discovers again, which is not a planned rediscovery.
+        _isPlannedRediscovery = false;
+
+        Volatile.Write(ref _rediscoveryIntervalTicks, rediscoveryInterval.Ticks);
         Volatile.Write(ref _discoveryStatusMessage, SunSpecDiscovery.GetStatusMessage(_unitIds, units));
-        Volatile.Write(ref _hasMissingUnits, units.Count < _unitIds.Length);
+        Volatile.Write(ref _hasMissingUnits, _missingUnitIds.Count > 0);
         Volatile.Write(ref _lastDiscoveryTimestamp, Stopwatch.GetTimestamp());
         SunSpecDiscovery.CompleteModels(units.Values, context);
         Volatile.Write(ref _isChainGuardArmed, true);
@@ -280,6 +320,7 @@ public partial class SunSpecDevice :
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var restart = SourceRestart.ConfigurationChanged;
         while (!stoppingToken.IsCancellationRequested)
         {
             var hostAddress = HostAddress;
@@ -288,10 +329,11 @@ public partial class SunSpecDevice :
                 Status = ServiceStatus.Stopped;
                 StatusMessage = "No host address configured";
                 await WaitForConfigurationChangeAsync(Timeout.InfiniteTimeSpan, stoppingToken).ConfigureAwait(false);
+                restart = SourceRestart.ConfigurationChanged;
                 continue;
             }
 
-            await RunSourceAsync(hostAddress, stoppingToken).ConfigureAwait(false);
+            restart = await RunSourceAsync(hostAddress, restart, stoppingToken).ConfigureAwait(false);
         }
 
         IsConnected = false;
@@ -299,42 +341,34 @@ public partial class SunSpecDevice :
         StatusMessage = null;
     }
 
-    private async Task RunSourceAsync(string hostAddress, CancellationToken stoppingToken)
+    private async Task<SourceRestart> RunSourceAsync(string hostAddress, SourceRestart previousRestart, CancellationToken stoppingToken)
     {
         // Captured once, so a configuration edit applies only through the restart it signals.
         var pollingInterval = GetEffectivePollingInterval();
+        if (previousRestart == SourceRestart.ConfigurationChanged)
+        {
+            ResetDiscoveryState(pollingInterval);
+        }
+
+        var isPlannedRediscovery = previousRestart == SourceRestart.Rediscovery;
+        _isPlannedRediscovery = isPlannedRediscovery;
         var source = await TryCreateSourceAsync(hostAddress, pollingInterval, stoppingToken).ConfigureAwait(false);
         if (source is null)
         {
-            return;
+            return SourceRestart.ConfigurationChanged;
         }
 
-        var hasFailed = false;
-        var hasChainChanged = false;
+        var restart = SourceRestart.ConfigurationChanged;
         try
         {
-            Status = ServiceStatus.Starting;
-            StatusMessage = "Connecting...";
+            if (!isPlannedRediscovery)
+            {
+                Status = ServiceStatus.Starting;
+                StatusMessage = "Connecting...";
+            }
 
             await this.AttachHostedServiceAsync(source, stoppingToken).ConfigureAwait(false);
-
-            // Source diagnostics are not tracked properties, so they are mirrored into this device's state.
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                UpdateStatus(source.Diagnostics);
-                if (HasChainChanged(hostAddress))
-                {
-                    hasChainChanged = true;
-                    break;
-                }
-
-                // A restart reruns the discovery.
-                if (IsRediscoveryDue(hostAddress, pollingInterval) ||
-                    await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
-                {
-                    break;
-                }
-            }
+            restart = await MonitorSourceAsync(source, hostAddress, isPlannedRediscovery, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -345,45 +379,120 @@ public partial class SunSpecDevice :
             _logger.LogError(exception, "SunSpec device {HostAddress} failed.", hostAddress);
             Status = ServiceStatus.Error;
             StatusMessage = exception.Message;
-            hasFailed = true;
+            restart = SourceRestart.Failed;
         }
         finally
         {
-            await ReleaseSourceAsync(source, hostAddress, stoppingToken).ConfigureAwait(false);
+            await ReleaseSourceAsync(source, hostAddress, isConnectionStateKept: restart == SourceRestart.Rediscovery, stoppingToken).ConfigureAwait(false);
         }
 
-        var reconnectDelay = GetReconnectDelay(hasFailed, hasChainChanged, pollingInterval);
-        if (reconnectDelay > TimeSpan.Zero)
+        var reconnectDelay = GetReconnectDelay(restart, pollingInterval);
+        if (reconnectDelay > TimeSpan.Zero &&
+            await WaitForConfigurationChangeAsync(reconnectDelay, stoppingToken).ConfigureAwait(false))
         {
-            await WaitForConfigurationChangeAsync(reconnectDelay, stoppingToken).ConfigureAwait(false);
+            restart = SourceRestart.ConfigurationChanged;
         }
+
+        return restart;
+    }
+
+    /// <summary>
+    /// Mirrors the source diagnostics into this device's state, which are not tracked properties, until the source must
+    /// restart or the configuration changes.
+    /// </summary>
+    private async Task<SourceRestart> MonitorSourceAsync(
+        ModbusSubjectClientSource source, string hostAddress, bool isPlannedRediscovery, CancellationToken stoppingToken)
+    {
+        // A planned rediscovery keeps the previous connection's state until this one is up or fails, so the device does
+        // not appear to restart.
+        var isKeepingStatus = isPlannedRediscovery;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var diagnostics = source.Diagnostics;
+            var isOperational = diagnostics.IsOperational == true;
+            isKeepingStatus &= !isOperational && diagnostics.LastError is null;
+            if (!isKeepingStatus)
+            {
+                UpdateStatus(diagnostics);
+            }
+
+            if (HasChainChanged(hostAddress))
+            {
+                return SourceRestart.ChainChanged;
+            }
+
+            if (IsRediscoveryDue(hostAddress, isOperational))
+            {
+                return SourceRestart.Rediscovery;
+            }
+
+            if (await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
+            {
+                break;
+            }
+        }
+
+        return SourceRestart.ConfigurationChanged;
     }
 
     /// <summary>
     /// Gets how long to wait before the next connect: one polling interval after a failure or a chain change, which
-    /// may come from a device still rebuilding its chain, and none otherwise.
+    /// may come from a device still rebuilding its chain, a short moment after a planned rediscovery, and none after a
+    /// configuration change.
     /// </summary>
-    internal static TimeSpan GetReconnectDelay(bool hasFailed, bool hasChainChanged, TimeSpan pollingInterval)
-        => hasFailed || hasChainChanged ? pollingInterval : TimeSpan.Zero;
+    internal static TimeSpan GetReconnectDelay(SourceRestart restart, TimeSpan pollingInterval) => restart switch
+    {
+        SourceRestart.Failed or SourceRestart.ChainChanged => pollingInterval,
+        SourceRestart.Rediscovery => RediscoveryReconnectDelay,
+        _ => TimeSpan.Zero
+    };
 
     /// <summary>
-    /// Gets whether a configured unit is missing while connected and the last discovery is at least
-    /// <see cref="MinimumRediscoveryInterval"/> (or the polling interval, when longer) ago.
+    /// Gets the interval until the next rediscovery after a discovery: <paramref name="initial"/> when the found units
+    /// changed, twice <paramref name="current"/> (at most an hour) after a planned rediscovery that found the same
+    /// units, and <paramref name="current"/> otherwise.
     /// </summary>
-    private bool IsRediscoveryDue(string hostAddress, TimeSpan pollingInterval)
+    internal static TimeSpan GetNextRediscoveryInterval(TimeSpan current, TimeSpan initial, bool isPlannedRediscovery, bool haveFoundUnitsChanged)
     {
-        if (!IsConnected || !Volatile.Read(ref _hasMissingUnits))
+        if (haveFoundUnitsChanged)
+        {
+            return initial;
+        }
+
+        if (!isPlannedRediscovery)
+        {
+            return current;
+        }
+
+        var doubled = current * 2;
+        return doubled < MaximumRediscoveryInterval ? doubled : MaximumRediscoveryInterval;
+    }
+
+    // A configuration change starts the rediscovery back-off over and reports missing units and chains again.
+    private void ResetDiscoveryState(TimeSpan pollingInterval)
+    {
+        _initialRediscoveryInterval = pollingInterval > MinimumRediscoveryInterval ? pollingInterval : MinimumRediscoveryInterval;
+        Volatile.Write(ref _rediscoveryIntervalTicks, _initialRediscoveryInterval.Ticks);
+        _missingUnitIds = [];
+        foreach (var unit in Units.Values)
+        {
+            unit.ChainDescription = null;
+        }
+    }
+
+    /// <summary>
+    /// Gets whether a configured unit is missing while connected and the rediscovery interval passed since the last
+    /// discovery.
+    /// </summary>
+    private bool IsRediscoveryDue(string hostAddress, bool isOperational)
+    {
+        if (!isOperational || !Volatile.Read(ref _hasMissingUnits) ||
+            Stopwatch.GetElapsedTime(Volatile.Read(ref _lastDiscoveryTimestamp)) < TimeSpan.FromTicks(Volatile.Read(ref _rediscoveryIntervalTicks)))
         {
             return false;
         }
 
-        var interval = pollingInterval > MinimumRediscoveryInterval ? pollingInterval : MinimumRediscoveryInterval;
-        if (Stopwatch.GetElapsedTime(Volatile.Read(ref _lastDiscoveryTimestamp)) < interval)
-        {
-            return false;
-        }
-
-        _logger.LogInformation("SunSpec device {HostAddress} misses configured units; discovering its units again.", hostAddress);
+        _logger.LogDebug("SunSpec device {HostAddress} misses configured units; discovering its units again.", hostAddress);
         return true;
     }
 
@@ -412,10 +521,6 @@ public partial class SunSpecDevice :
                         MaximumRegisterGap = MaximumRegisterGap
                     },
                     _logger);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return null;
             }
             catch (Exception exception)
             {
@@ -471,7 +576,7 @@ public partial class SunSpecDevice :
         return false;
     }
 
-    private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress, CancellationToken stoppingToken)
+    private async Task ReleaseSourceAsync(ModbusSubjectClientSource source, string hostAddress, bool isConnectionStateKept, CancellationToken stoppingToken)
     {
         try
         {
@@ -495,7 +600,10 @@ public partial class SunSpecDevice :
             _logger.LogWarning(exception, "Failed to dispose the Modbus source of {HostAddress}.", hostAddress);
         }
 
-        IsConnected = false;
+        if (!isConnectionStateKept)
+        {
+            IsConnected = false;
+        }
     }
 
     private async Task<bool> WaitForConfigurationChangeAsync(TimeSpan timeout, CancellationToken cancellationToken)

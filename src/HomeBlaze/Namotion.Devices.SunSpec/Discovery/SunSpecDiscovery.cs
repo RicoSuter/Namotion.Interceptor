@@ -20,27 +20,6 @@ internal static class SunSpecDiscovery
     private const int GatewayTargetFailedToRespond = 11;
 
     /// <summary>
-    /// Discovers every unit, keeping the subjects of units and models that did not change. A unit without a marker, with
-    /// a malformed chain or behind a gateway that cannot reach it is logged and left out.
-    /// </summary>
-    public static async Task<Dictionary<int, SunSpecUnit>> DiscoverAsync(
-        Dictionary<int, SunSpecUnit> currentUnits, IReadOnlyList<byte> unitIds, ModbusDiscoveryContext context,
-        SunSpecModelCatalog catalog, bool isRegisterDumpEnabled, ILogger logger, CancellationToken cancellationToken)
-    {
-        var units = new Dictionary<int, SunSpecUnit>();
-        foreach (var unitId in unitIds)
-        {
-            var unit = currentUnits.GetValueOrDefault(unitId) ?? new SunSpecUnit(unitId);
-            if (await DiscoverUnitAsync(unit, context, catalog, isRegisterDumpEnabled, logger, cancellationToken).ConfigureAwait(false))
-            {
-                units[unitId] = unit;
-            }
-        }
-
-        return units;
-    }
-
-    /// <summary>
     /// Gets the status message of a connected device: which configured units were not found, or <c>null</c> when all were.
     /// </summary>
     public static string? GetStatusMessage(IReadOnlyList<byte> unitIds, Dictionary<int, SunSpecUnit> units)
@@ -58,6 +37,12 @@ internal static class SunSpecDiscovery
             _ => $"Units {string.Join(", ", missingUnitIds)} not found"
         };
     }
+
+    /// <summary>
+    /// Gets whether both dictionaries hold the same unit IDs.
+    /// </summary>
+    public static bool HaveSameUnitIds(Dictionary<int, SunSpecUnit> current, Dictionary<int, SunSpecUnit> next)
+        => current.Count == next.Count && next.Keys.All(current.ContainsKey);
 
     /// <summary>
     /// Gets whether both dictionaries hold the same unit subjects under the same unit IDs.
@@ -122,9 +107,16 @@ internal static class SunSpecDiscovery
     internal static void ApplyDiscoveredModelId(ISunSpecModel model, object source)
         => new PropertyReference(model, nameof(ISunSpecModel.ModelIdRegister)).SetValueFromSource(source, null, null, (ushort?)model.ModelId);
 
-    private static async Task<bool> DiscoverUnitAsync(
-        SunSpecUnit unit, ModbusDiscoveryContext context, SunSpecModelCatalog catalog, bool isRegisterDumpEnabled, ILogger logger, CancellationToken cancellationToken)
+    /// <summary>
+    /// Discovers a unit, keeping the subjects of models that did not change, and returns whether it was found. A unit
+    /// without a marker, with a malformed chain or behind a gateway that cannot reach it is logged and left out; at debug
+    /// level when <paramref name="wasMissing"/>, so a unit that stays missing is reported once.
+    /// </summary>
+    public static async Task<bool> DiscoverUnitAsync(
+        SunSpecUnit unit, bool wasMissing, ModbusDiscoveryContext context, SunSpecModelCatalog catalog, bool isRegisterDumpEnabled, ILogger logger,
+        CancellationToken cancellationToken)
     {
+        var skipLevel = wasMissing ? LogLevel.Debug : LogLevel.Warning;
         SunSpecChain? chain;
         try
         {
@@ -133,7 +125,7 @@ internal static class SunSpecDiscovery
 
             if (chain is null)
             {
-                logger.LogWarning("SunSpec unit {UnitId} has no \"SunS\" marker at 40000, 50000 or 0, so it is skipped.", unit.UnitId);
+                logger.Log(skipLevel, "SunSpec unit {UnitId} has no \"SunS\" marker at 40000, 50000 or 0, so it is skipped.", unit.UnitId);
                 return false;
             }
 
@@ -143,17 +135,16 @@ internal static class SunSpecDiscovery
         }
         catch (InvalidDataException exception)
         {
-            logger.LogError(exception, "SunSpec unit {UnitId} has a malformed model chain, so it is skipped.", unit.UnitId);
+            logger.Log(wasMissing ? LogLevel.Debug : LogLevel.Error, exception, "SunSpec unit {UnitId} has a malformed model chain, so it is skipped.", unit.UnitId);
             return false;
         }
         catch (ModbusResponseException exception) when (exception.ExceptionCode is GatewayPathUnavailable or GatewayTargetFailedToRespond)
         {
-            logger.LogWarning(exception, "SunSpec unit {UnitId} cannot be reached through the gateway (Modbus exception {ExceptionCode}), so it is skipped.", unit.UnitId, exception.ExceptionCode);
+            logger.Log(skipLevel, exception, "SunSpec unit {UnitId} cannot be reached through the gateway (Modbus exception {ExceptionCode}), so it is skipped.", unit.UnitId, exception.ExceptionCode);
             return false;
         }
 
-        LogChain(unit, chain, logger);
-        if (isRegisterDumpEnabled)
+        if (LogChain(unit, chain, logger) && isRegisterDumpEnabled)
         {
             logger.LogInformation("SunSpec register dump of unit {UnitId}: {Dump}", unit.UnitId, SunSpecRegisterDump.Write(unit.UnitId, chain));
         }
@@ -175,12 +166,13 @@ internal static class SunSpecDiscovery
         }
     }
 
-    private static void LogChain(SunSpecUnit unit, SunSpecChain chain, ILogger logger)
+    // Returns whether the chain changed since it was logged last, and only then logs it.
+    private static bool LogChain(SunSpecUnit unit, SunSpecChain chain, ILogger logger)
     {
         var description = string.Join(",", chain.Models.Select(model => $"{model.ModelId}@{model.Address}+{model.Length}"));
         if (description == unit.ChainDescription)
         {
-            return;
+            return false;
         }
 
         unit.ChainDescription = description;
@@ -191,6 +183,8 @@ internal static class SunSpecDiscovery
                 "SunSpec unit {UnitId}: model {ModelId} at {Address}, length {Length}, read as {ModelType}.",
                 unit.UnitId, model.ModelId, model.BaseAddress, model.Length, model.GetType().Name);
         }
+
+        return true;
     }
 
     // The connector rejects a mapping whose scale factor is excluded, so a property scaled by an unavailable one is

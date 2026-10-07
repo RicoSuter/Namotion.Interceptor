@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using FluentModbus;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.SunSpec.Models;
@@ -5,6 +8,8 @@ using Namotion.Devices.SunSpec.Tests.Models;
 using Namotion.Devices.SunSpec.Tests.Testing;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Devices.SunSpec.Tests.Discovery;
 
@@ -68,6 +73,42 @@ public class SunSpecDiscoveryTests
             WaitTimeout,
             message: "Unit 2 should be discovered and read once it has a chain.");
         Assert.Equal([1, 2], device.Units.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenAPlannedRediscoveryRuns_ThenTheStatusStaysRunningAndTheMissingUnitIsWarnedOnce()
+    {
+        // Arrange
+        using var server = new SunSpecTestServer(1, 2);
+        server.Start((1, CreateChain()));
+        var logger = new RecordingLogger<SunSpecDevice>();
+        await using var host = await HostedSunSpecDevice.StartAsync(server.Port, device =>
+        {
+            device.UnitIds = [1, 2];
+            device.MinimumRediscoveryInterval = TimeSpan.FromMilliseconds(200);
+        }, logger);
+        var device = host.Device;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.IsConnected && device.StatusMessage == "Unit 2 not found",
+            WaitTimeout,
+            message: "Unit 1 should be discovered without unit 2.");
+
+        var discoveryCount = device.DiscoveryCount;
+        var statusChanges = new ConcurrentQueue<string>();
+        using var subscription = host.Context.GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Where(change => ReferenceEquals(change.Property.Subject, device) &&
+                             change.Property.Name is nameof(SunSpecDevice.IsConnected) or nameof(SunSpecDevice.Status) or nameof(SunSpecDevice.StatusMessage))
+            .Subscribe(change => statusChanges.Enqueue($"{change.Property.Name}: {change.GetNewValue<object?>()}"));
+
+        // Act
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.DiscoveryCount >= discoveryCount + 2,
+            WaitTimeout,
+            message: "Two planned rediscoveries should run.");
+
+        // Assert
+        Assert.Empty(statusChanges);
+        Assert.Single(logger.Warnings, warning => warning.Contains("unit 2 has no \"SunS\" marker", StringComparison.Ordinal));
     }
 
     [Theory]

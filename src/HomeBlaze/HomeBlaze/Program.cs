@@ -18,14 +18,14 @@ using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
+using Namotion.Devices.SunSpec;
+using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
 using Namotion.Devices.Ecowitt;
 using Namotion.Devices.Ecowitt.HomeBlaze;
 using Namotion.Devices.Luxtronik;
 using Namotion.Devices.Luxtronik.HomeBlaze;
-using Namotion.Devices.SunSpec;
-using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
@@ -96,6 +96,8 @@ typeProvider
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
+    .AddAssembly(typeof(SunSpecDevice).Assembly)
+    .AddAssembly(typeof(SunSpecDeviceWidget).Assembly)
     .AddAssembly(typeof(WallboxCharger).Assembly)
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
@@ -105,9 +107,7 @@ typeProvider
     .AddAssembly(typeof(HomeBlaze.History.Sqlite.SqliteHistoryStoreSubject).Assembly)       // HomeBlaze.History.Sqlite
     .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
     .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
-    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly)                                  // Namotion.Devices.Luxtronik.HomeBlaze
-    .AddAssembly(typeof(SunSpecDevice).Assembly)                                            // Namotion.Devices.SunSpec
-    .AddAssembly(typeof(SunSpecDeviceWidget).Assembly);                                     // Namotion.Devices.SunSpec.HomeBlaze
+    .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly);                                 // Namotion.Devices.Luxtronik.HomeBlaze
 
 // Register HomeBlaze.Plugins subject types
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);

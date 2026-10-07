@@ -104,6 +104,11 @@
 
     private bool IsUnitIdsValid => ParseUnitIds(_unitIds) is not null;
 
+    // Compares the parsed IDs, so reformatting the text (such as "1,2" to "1, 2") is not a change.
+    private bool HasUnitIdsChanged => ParseUnitIds(_unitIds) is { } unitIds && ParseUnitIds(_originalUnitIds) is { } originalUnitIds
+        ? !unitIds.SequenceEqual(originalUnitIds)
+        : _unitIds != _originalUnitIds;
+
     public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
                            _port is >= 1 and <= 65535 &&
                            IsPollingIntervalValid &&
@@ -112,7 +117,7 @@
     public bool IsDirty => _name != _originalName ||
                            _hostAddress != _originalHostAddress ||
                            _port != _originalPort ||
-                           _unitIds != _originalUnitIds ||
+                           HasUnitIdsChanged ||
                            _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
                            _modelDefinitionsPath != _originalModelDefinitionsPath ||
                            _isRegisterDumpEnabled != _originalIsRegisterDumpEnabled;

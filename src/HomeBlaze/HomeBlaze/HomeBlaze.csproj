@@ -7,12 +7,12 @@
         <ProjectReference Include="..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Luxtronik\Namotion.Devices.Luxtronik.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Luxtronik.HomeBlaze\Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
-        <ProjectReference Include="..\Namotion.Devices.SunSpec\Namotion.Devices.SunSpec.csproj" />
-        <ProjectReference Include="..\Namotion.Devices.SunSpec.HomeBlaze\Namotion.Devices.SunSpec.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom\Namotion.Devices.MyStrom.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom.HomeBlaze\Namotion.Devices.MyStrom.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Shelly\Namotion.Devices.Shelly.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Shelly.HomeBlaze\Namotion.Devices.Shelly.HomeBlaze.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.SunSpec\Namotion.Devices.SunSpec.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.SunSpec.HomeBlaze\Namotion.Devices.SunSpec.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Wallbox\Namotion.Devices.Wallbox.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Wallbox.HomeBlaze\Namotion.Devices.Wallbox.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Ecowitt\Namotion.Devices.Ecowitt.csproj" />

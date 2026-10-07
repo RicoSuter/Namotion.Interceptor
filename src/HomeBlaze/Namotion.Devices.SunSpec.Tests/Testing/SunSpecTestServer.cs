@@ -11,7 +11,7 @@ namespace Namotion.Devices.SunSpec.Tests.Testing;
 internal sealed class SunSpecTestServer : IDisposable
 {
     private readonly byte[] _unitIds;
-    private readonly Lock _rangesLock = new();
+    private readonly Lock _stateLock = new();
     private readonly Dictionary<byte, (int Start, int End)> _ranges = [];
     private readonly Dictionary<byte, ModbusExceptionCode> _unitExceptions = [];
     private ModbusTcpServer? _server;
@@ -39,7 +39,7 @@ internal sealed class SunSpecTestServer : IDisposable
         }
 
         server.RequestValidator = ValidateRequest;
-        lock (_rangesLock)
+        lock (_stateLock)
         {
             // The ranges of a previous run would make the fresh server accept reads of units without a chain.
             _ranges.Clear();
@@ -78,7 +78,7 @@ internal sealed class SunSpecTestServer : IDisposable
         lock (server.Lock)
         {
             var holdingRegisters = server.GetHoldingRegisters(unitId);
-            lock (_rangesLock)
+            lock (_stateLock)
             {
                 if (_ranges.TryGetValue(unitId, out var previous))
                 {
@@ -116,7 +116,7 @@ internal sealed class SunSpecTestServer : IDisposable
     /// </summary>
     public void SetUnitException(byte unitId, ModbusExceptionCode exceptionCode)
     {
-        lock (_rangesLock)
+        lock (_stateLock)
         {
             _unitExceptions[unitId] = exceptionCode;
         }
@@ -133,7 +133,7 @@ internal sealed class SunSpecTestServer : IDisposable
             return ModbusExceptionCode.IllegalFunction;
         }
 
-        lock (_rangesLock)
+        lock (_stateLock)
         {
             if (_unitExceptions.TryGetValue(unitId, out var exceptionCode))
             {
