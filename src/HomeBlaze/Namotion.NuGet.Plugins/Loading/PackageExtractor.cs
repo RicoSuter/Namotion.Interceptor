@@ -83,6 +83,7 @@ internal class PackageExtractor
         // Extracted beside the target and moved into place, so a concurrent or interrupted extraction never
         // exposes a partial package.
         var temporaryPath = $"{packagePath}.extracting-{Guid.NewGuid():N}";
+        Directory.CreateDirectory(temporaryPath);
         try
         {
             ZipFile.ExtractToDirectory(stream, temporaryPath);
