@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking;
 using Namotion.NuGet.Plugins;
 using Namotion.NuGet.Plugins.Configuration;
 using Namotion.NuGet.Plugins.Loading;

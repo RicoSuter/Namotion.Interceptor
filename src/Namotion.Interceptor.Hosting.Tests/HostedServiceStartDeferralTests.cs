@@ -382,6 +382,36 @@ public class HostedServiceStartDeferralTests
         Assert.True(await attaching.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
+    [Fact]
+    public async Task WhenReleasingOneCompletionDeferralThrows_ThenTheOtherCompletionDeferralsAreStillReleased()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        var lastReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Context.AddService<IStartupCompletion>(new ReleaseThrowingCompletion());
+        fixture.Context.AddService<IStartupCompletion>(new ReleaseSignalingCompletion(lastReleased));
+        await fixture.Handler.StartAsync(CancellationToken.None);
+        var subject = new Person(fixture.Context);
+
+        // Act
+        await subject.AttachHostedServiceAsync(new ProbeService(() => "started"), CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert
+        await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await lastReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private sealed class ReleaseThrowingCompletion : IStartupCompletion
+    {
+        public IDisposable Defer() => new CompletionDeferral(() => throw new InvalidOperationException("Release failed."));
+    }
+
+    private sealed class ReleaseSignalingCompletion(TaskCompletionSource released) : IStartupCompletion
+    {
+        public IDisposable Defer() => new CompletionDeferral(() => released.TrySetResult());
+    }
+
     private sealed class Fixture : IAsyncDisposable, IStartupCompletion
     {
         private readonly ServiceProvider _provider;

@@ -4,41 +4,11 @@ using Namotion.Interceptor.Tracking;
 namespace HomeBlaze.Services;
 
 /// <summary>
-/// Defers and awaits startup completion through the services of a subject context.
+/// Awaits the <see cref="StartupGate"/> of a subject context and releases startup deferrals, which
+/// <see cref="StartupCompletionExtensions.DeferStartupCompletion"/> takes, once their work completed.
 /// </summary>
 public static class StartupGateExtensions
 {
-    /// <summary>
-    /// Defers every <see cref="IStartupCompletion"/> reachable from <paramref name="context"/> until the returned
-    /// handle is disposed. Take it before queueing the work and dispose it once the work ran, also on failure.
-    /// Disposing it more than once releases the deferrals once.
-    /// </summary>
-    public static IDisposable DeferStartupCompletion(this IInterceptorSubjectContext context)
-    {
-        var startupCompletions = context.GetServices<IStartupCompletion>();
-        if (startupCompletions.IsEmpty)
-        {
-            return NoOpDeferral.Instance;
-        }
-
-        var deferrals = new IDisposable[startupCompletions.Length];
-        var count = 0;
-        try
-        {
-            for (; count < startupCompletions.Length; count++)
-            {
-                deferrals[count] = startupCompletions[count].Defer();
-            }
-        }
-        catch
-        {
-            ReleaseAll(deferrals.AsSpan(0, count));
-            throw;
-        }
-
-        return new StartupDeferral(deferrals);
-    }
-
     /// <summary>
     /// Releases <paramref name="deferral"/> once <paramref name="task"/> has completed in any way, right away
     /// when <paramref name="task"/> is null.
@@ -82,40 +52,5 @@ public static class StartupGateExtensions
     public static bool IsStartupCompleted(this IInterceptorSubjectContext context)
     {
         return context.TryGetService<StartupGate>()?.Completed.IsCompleted ?? true;
-    }
-
-    private static void ReleaseAll(ReadOnlySpan<IDisposable> deferrals)
-    {
-        List<Exception>? exceptions = null;
-        foreach (var deferral in deferrals)
-        {
-            // One deferral throwing must not strand the others: a leaked deferral keeps startup open forever.
-            try
-            {
-                deferral.Dispose();
-            }
-            catch (Exception exception)
-            {
-                (exceptions ??= []).Add(exception);
-            }
-        }
-
-        if (exceptions is not null)
-        {
-            throw new AggregateException(exceptions);
-        }
-    }
-
-    private sealed class StartupDeferral(IDisposable[] deferrals) : IDisposable
-    {
-        private IDisposable[]? _deferrals = deferrals;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _deferrals, null) is { } deferralsToRelease)
-            {
-                ReleaseAll(deferralsToRelease);
-            }
-        }
     }
 }
