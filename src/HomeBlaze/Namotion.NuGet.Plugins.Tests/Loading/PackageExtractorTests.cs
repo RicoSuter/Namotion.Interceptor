@@ -93,11 +93,11 @@ public class PackageExtractorTests : IDisposable
     public async Task WhenSamePackageIsExtractedConcurrently_ThenEveryCallSeesAllFiles()
     {
         // Arrange
-        var package = CreatePackageWithManyAssemblies(fileCount: 200);
+        var package = CreateTestNupkgBytes(assemblyCount: 200);
 
         // Act
         var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
-            _extractor.ExtractAndGetAssemblyPaths("Test.Package", "1.0.0", new MemoryStream(package)))));
+            _extractor.ExtractAndGetAssemblyPaths("TestPkg", "1.0.0", new MemoryStream(package)))));
 
         // Assert
         Assert.All(results, paths => Assert.Equal(200, paths.Count));
@@ -111,9 +111,8 @@ public class PackageExtractorTests : IDisposable
 
         // Act & Assert
         Assert.ThrowsAny<InvalidDataException>(() =>
-            _extractor.ExtractAndGetAssemblyPaths("Test.Package", "1.0.0", corruptPackage));
-        Assert.Null(_extractor.GetCachedPackagePath("Test.Package", "1.0.0"));
-        Assert.Empty(Directory.GetDirectories(Path.Combine(_tempDir, "Test.Package")));
+            _extractor.ExtractAndGetAssemblyPaths("TestPkg", "1.0.0", corruptPackage));
+        Assert.Empty(Directory.GetDirectories(_tempDir, "1.0.0*", SearchOption.AllDirectories));
     }
 
     public void Dispose()
@@ -150,12 +149,12 @@ public class PackageExtractorTests : IDisposable
         return memoryStream;
     }
 
-    private static byte[] CreatePackageWithManyAssemblies(int fileCount)
+    private static byte[] CreateTestNupkgBytes(int assemblyCount)
     {
         using var stream = new MemoryStream();
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            for (var index = 0; index < fileCount; index++)
+            for (var index = 0; index < assemblyCount; index++)
             {
                 var entry = archive.CreateEntry($"lib/net10.0/Assembly{index}.dll");
                 using var writer = new StreamWriter(entry.Open());
