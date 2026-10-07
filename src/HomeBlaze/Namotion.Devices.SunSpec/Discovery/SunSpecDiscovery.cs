@@ -1,9 +1,12 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.SunSpec.Models;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Modbus;
 using Namotion.Interceptor.Modbus.Attributes;
 using Namotion.Interceptor.Modbus.Client;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Devices.SunSpec.Discovery;
 
@@ -34,23 +37,86 @@ internal static class SunSpecDiscovery
     }
 
     /// <summary>
+    /// Gets the status message of a connected device: which configured units were not found, or <c>null</c> when all were.
+    /// </summary>
+    public static string? GetStatusMessage(IReadOnlyList<byte> unitIds, Dictionary<int, SunSpecUnit> units)
+    {
+        if (units.Count == 0)
+        {
+            return "No SunSpec unit found";
+        }
+
+        var missingUnitIds = unitIds.Where(unitId => !units.ContainsKey(unitId)).ToArray();
+        return missingUnitIds.Length switch
+        {
+            0 => null,
+            1 => $"Unit {missingUnitIds[0]} not found",
+            _ => $"Units {string.Join(", ", missingUnitIds)} not found"
+        };
+    }
+
+    /// <summary>
     /// Gets whether both dictionaries hold the same unit subjects under the same unit IDs.
     /// </summary>
     public static bool HaveSameUnits(Dictionary<int, SunSpecUnit> current, Dictionary<int, SunSpecUnit> next)
         => current.Count == next.Count && next.All(pair => current.TryGetValue(pair.Key, out var unit) && ReferenceEquals(unit, pair.Value));
 
     /// <summary>
-    /// Adds the properties of dynamic models, which needs them attached, and excludes the registers that lie beyond the
-    /// length a device reports for a model, so they are not read from the next model.
+    /// Adds the properties of dynamic models, which needs them attached, excludes the properties a device does not
+    /// provide (see <see cref="GetUnavailableProperties"/>), and applies each discovered model ID to the model's ID
+    /// register.
     /// </summary>
     public static void CompleteModels(IEnumerable<SunSpecUnit> units, ModbusDiscoveryContext context)
     {
         foreach (var model in units.SelectMany(unit => unit.Devices).SelectMany(device => device.GetModels()))
         {
             (model as SunSpecDynamicModel)?.EnsureProperties();
-            ExcludeRegistersBeyondLength(model, context);
+            foreach (var property in GetUnavailableProperties(model))
+            {
+                context.ExcludeProperty(property);
+            }
+
+            ApplyDiscoveredModelId(model, context.Source);
         }
     }
+
+    /// <summary>
+    /// Gets the register properties a device does not provide for a model: those beyond the length it reports, which
+    /// would otherwise be read from the next model, and those scaled by an unavailable scale factor, including the
+    /// points of nested groups.
+    /// </summary>
+    internal static IReadOnlyCollection<PropertyReference> GetUnavailableProperties(ISunSpecModel model)
+    {
+        if (model.TryGetRegisteredSubject() is not { } registered)
+        {
+            return [];
+        }
+
+        // Offsets count from the ID register, so the points of a model end at offset Length + 2.
+        var end = model.Length + 2;
+        var unavailable = new HashSet<PropertyReference>(PropertyReference.Comparer);
+        foreach (var property in registered.Properties)
+        {
+            if (GetRegisterAttribute(property) is { } attribute && attribute.Address + GetRegisterCount(attribute) > end)
+            {
+                unavailable.Add(property.Reference);
+            }
+        }
+
+        if (unavailable.Count > 0)
+        {
+            AddScaledProperties(registered, unavailable);
+        }
+
+        return unavailable;
+    }
+
+    /// <summary>
+    /// Sets the model ID register to the ID the discovery read, replacing a value polled by a previous source that
+    /// would otherwise look like a chain change.
+    /// </summary>
+    internal static void ApplyDiscoveredModelId(ISunSpecModel model, object source)
+        => new PropertyReference(model, nameof(ISunSpecModel.ModelIdRegister)).SetValueFromSource(source, null, null, (ushort?)model.ModelId);
 
     private static async Task<bool> DiscoverUnitAsync(
         SunSpecUnit unit, ModbusDiscoveryContext context, SunSpecModelCatalog catalog, bool isRegisterDumpEnabled, ILogger logger, CancellationToken cancellationToken)
@@ -118,24 +184,67 @@ internal static class SunSpecDiscovery
         }
     }
 
-    private static void ExcludeRegistersBeyondLength(ISunSpecModel model, ModbusDiscoveryContext context)
+    // The connector rejects a mapping whose scale factor is excluded, so a property scaled by an unavailable one is
+    // unavailable too; repeated until stable because a newly unavailable property may scale others.
+    private static void AddScaledProperties(RegisteredSubject model, HashSet<PropertyReference> unavailable)
     {
-        if (model.TryGetRegisteredSubject() is not { } registered)
+        var scaledProperties = new List<(PropertyReference Property, PropertyReference ScaleFactor)>();
+        CollectScaledProperties(model, scaledProperties, []);
+
+        bool hasChanged;
+        do
+        {
+            hasChanged = false;
+            foreach (var (property, scaleFactor) in scaledProperties)
+            {
+                if (unavailable.Contains(scaleFactor) && unavailable.Add(property))
+                {
+                    hasChanged = true;
+                }
+            }
+        }
+        while (hasChanged);
+    }
+
+    private static void CollectScaledProperties(
+        RegisteredSubject subject, List<(PropertyReference Property, PropertyReference ScaleFactor)> scaledProperties, HashSet<RegisteredSubject> visited)
+    {
+        if (!visited.Add(subject))
         {
             return;
         }
 
-        // Offsets count from the ID register, so the points of a model end at offset Length + 2.
-        var end = model.Length + 2;
-        foreach (var property in registered.Properties)
+        foreach (var property in subject.Properties)
         {
-            var attribute = property.ReflectionAttributes.OfType<ModbusRegisterAttribute>().FirstOrDefault();
-            if (attribute is not null && attribute.Address + GetRegisterCount(attribute) > end)
+            if (GetRegisterAttribute(property) is { } attribute && GetScaleFactor(property, attribute) is { } scaleFactor)
             {
-                context.ExcludeProperty(property.Reference);
+                scaledProperties.Add((property.Reference, scaleFactor));
+            }
+
+            foreach (var child in property.Children)
+            {
+                if (child.Subject.TryGetRegisteredSubject() is { } registeredChild)
+                {
+                    CollectScaledProperties(registeredChild, scaledProperties, visited);
+                }
             }
         }
     }
+
+    // Resolved like the connector resolves it: the subject's provider first, then the attribute.
+    private static PropertyReference? GetScaleFactor(RegisteredSubjectProperty property, ModbusRegisterAttribute attribute)
+    {
+        var subject = property.Reference.Subject;
+        if (subject is IModbusScaleFactorProvider provider && provider.TryGetScaleFactorProperty(property.Name) is { } provided)
+        {
+            return provided;
+        }
+
+        return attribute.ScaleFactorProperty is { } name ? new PropertyReference(subject, name) : null;
+    }
+
+    private static ModbusRegisterAttribute? GetRegisterAttribute(RegisteredSubjectProperty property)
+        => property.ReflectionAttributes.OfType<ModbusRegisterAttribute>().FirstOrDefault();
 
     private static int GetRegisterCount(ModbusRegisterAttribute attribute) => attribute.DataType switch
     {

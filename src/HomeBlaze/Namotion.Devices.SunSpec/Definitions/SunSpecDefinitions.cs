@@ -58,6 +58,8 @@ internal static class SunSpecDefinitions
             throw new JsonException($"Model ID {definition.Id} is outside 1 to 65534.");
         }
 
+        ValidateNoNullElements(definition.Id, definition.Group);
+
         var points = definition.Group.Points;
         if (points.Count < 2 || points[0].Name != "ID" || points[1].Name != "L")
         {
@@ -65,6 +67,28 @@ internal static class SunSpecDefinitions
         }
 
         ValidateGroup(definition.Id, definition.Group, isTopLevel: true);
+    }
+
+    // RespectNullableAnnotations does not cover collection elements, so null points, groups and symbols are rejected here.
+    private static void ValidateNoNullElements(int modelId, SunSpecGroupDefinition group)
+    {
+        foreach (var point in group.Points)
+        {
+            if (point is null || point.Symbols.Any(symbol => symbol is null))
+            {
+                throw new JsonException($"Group {group.Name} of model {modelId} has a null point or symbol.");
+            }
+        }
+
+        foreach (var child in group.Groups)
+        {
+            if (child is null)
+            {
+                throw new JsonException($"Group {group.Name} of model {modelId} has a null group.");
+            }
+
+            ValidateNoNullElements(modelId, child);
+        }
     }
 
     private static void ValidateGroup(int modelId, SunSpecGroupDefinition group, bool isTopLevel)

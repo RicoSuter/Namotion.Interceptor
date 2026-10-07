@@ -47,7 +47,7 @@ public partial class SunSpecDevice :
     // Bridges the ID and length registers between models and pad registers; a SunSpec map is contiguous.
     private const int MaximumRegisterGap = 2;
 
-    private const string ConnectionRefusedMessage = "Connection refused: the device may accept only one Modbus TCP client.";
+    private const string ConnectionRefusedMessage = "Connection refused: the device may accept only one Modbus TCP client";
 
     // Decoupled from the polling interval so a (re)connect or a lost connection shows within a second.
     private static readonly TimeSpan StatusRefreshInterval = TimeSpan.FromSeconds(1);
@@ -63,6 +63,9 @@ public partial class SunSpecDevice :
     // Written by the discovery, read by the status loop: false while a discovery replaces model subjects, whose
     // polled model IDs would otherwise look like a chain change.
     private bool _isChainGuardArmed;
+
+    // Written by the discovery, read by the status loop.
+    private string? _discoveryStatusMessage;
 
     // Protects a device from a hand-edited configuration that would poll it continuously; only tests lower it.
     internal TimeSpan MinimumPollingInterval { get; init; } = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
@@ -166,6 +169,7 @@ public partial class SunSpecDevice :
             Units = units;
         }
 
+        Volatile.Write(ref _discoveryStatusMessage, SunSpecDiscovery.GetStatusMessage(_unitIds, units));
         SunSpecDiscovery.CompleteModels(units.Values, context);
         Volatile.Write(ref _isChainGuardArmed, true);
     }
@@ -196,13 +200,13 @@ public partial class SunSpecDevice :
         unitIds = [];
         if (configured is null || configured.Length == 0)
         {
-            error = "No unit IDs configured.";
+            error = "No unit IDs configured";
             return false;
         }
 
         if (configured.Any(unitId => unitId is < 1 or > 247))
         {
-            error = "Unit IDs must be between 1 and 247.";
+            error = "Unit IDs must be between 1 and 247";
             return false;
         }
 
@@ -249,7 +253,7 @@ public partial class SunSpecDevice :
         if (IsConnected)
         {
             Status = ServiceStatus.Running;
-            StatusMessage = Units.Count == 0 ? "No SunSpec unit found" : null;
+            StatusMessage = Volatile.Read(ref _discoveryStatusMessage);
         }
         else if (diagnostics.LastError is { } lastError)
         {
@@ -342,14 +346,14 @@ public partial class SunSpecDevice :
     {
         if (TryGetUnitIds(UnitIds, out var unitIds, out var error))
         {
-            _unitIds = unitIds;
-            _catalog = new SunSpecModelCatalog(_definitionDirectory.Load(GetModelDefinitionsDirectory(), SunSpecModelFactory.IsGenerated, _logger));
-
-            // The models still hold the previous source's polls, so they are only compared again after this source's discovery.
-            Volatile.Write(ref _isChainGuardArmed, false);
-
             try
             {
+                _unitIds = unitIds;
+                _catalog = new SunSpecModelCatalog(_definitionDirectory.Load(GetModelDefinitionsDirectory(), SunSpecModelFactory.IsGenerated, _logger));
+
+                // The models still hold the previous source's polls, so they are only compared again after this source's discovery.
+                Volatile.Write(ref _isChainGuardArmed, false);
+
                 return this.CreateModbusClientSource(
                     new ModbusClientConfiguration
                     {
@@ -361,7 +365,7 @@ public partial class SunSpecDevice :
                     },
                     _logger);
             }
-            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+            catch (Exception exception)
             {
                 _logger.LogError(exception, "SunSpec device {HostAddress} has an invalid configuration.", hostAddress);
                 error = exception.Message;

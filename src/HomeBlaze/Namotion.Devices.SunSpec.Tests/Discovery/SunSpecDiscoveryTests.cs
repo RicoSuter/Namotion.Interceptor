@@ -38,7 +38,7 @@ public class SunSpecDiscoveryTests
         Assert.Equal(50000, device.Units[1].MarkerAddress);
         Assert.Contains(logger.Warnings, warning => warning.Contains("unit 2 has no \"SunS\" marker", StringComparison.Ordinal));
         Assert.Equal(ServiceStatus.Running, device.Status);
-        Assert.Null(device.StatusMessage);
+        Assert.Equal("Unit 2 not found", device.StatusMessage);
     }
 
     [Fact]
@@ -60,6 +60,60 @@ public class SunSpecDiscoveryTests
             message: "Unit 1 should be discovered and read.");
         Assert.Equal([1], device.Units.Keys);
         Assert.Contains(logger.Errors, error => error.Contains("unit 2 has a malformed model chain", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenAModelIsTooShortForAScaleFactor_ThenThePointsItScalesAreSkippedAndTheRestIsRead()
+    {
+        // Arrange: model 121 is 30 registers long; at 29 its last point, ECPNomHz_SF, is missing.
+        var chain = new SunSpecTestChain()
+            .AddModel(1, new Dictionary<string, object?> { ["Mn"] = "Vendor" })
+            .AddModel(121, new Dictionary<string, object?> { ["WMax"] = 5000, ["WMax_SF"] = 0, ["ECPNomHz"] = 50 }, length: 29)
+            .AddModel(103, new Dictionary<string, object?> { ["W"] = 1500, ["W_SF"] = 0 });
+        using var server = new SunSpecTestServer();
+        server.Start((1, chain));
+
+        // Act
+        await using var host = await HostedSunSpecDevice.StartAsync(server.Port);
+        var device = host.Device;
+
+        // Assert
+        ISunSpecModel[] GetModels() => device.Units.GetValueOrDefault(1)?.Devices[0].Models ?? [];
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.IsConnected &&
+                  GetModels().OfType<SunSpecModel121>().FirstOrDefault()?.WMax == 5000m &&
+                  GetModels().OfType<SunSpecInverter>().FirstOrDefault()?.W == 1500m,
+            WaitTimeout,
+            message: "The shortened model and the model after it should be read.");
+        var settings = GetModels().OfType<SunSpecModel121>().Single();
+        Assert.Null(settings.ECPNomHz);
+        Assert.Null(settings.ECPNomHz_SF);
+        Assert.Equal(ServiceStatus.Running, device.Status);
+    }
+
+    [Fact]
+    public async Task WhenTheModelDefinitionsPathIsInvalid_ThenStatusIsErrorUntilTheConfigurationIsFixed()
+    {
+        // Arrange
+        using var server = new SunSpecTestServer();
+        server.Start((1, CreateChain()));
+        await using var host = await HostedSunSpecDevice.StartAsync(server.Port, device => device.ModelDefinitionsPath = "invalid\0path");
+        var device = host.Device;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.Status == ServiceStatus.Error && device.StatusMessage is not null,
+            WaitTimeout,
+            message: "An invalid definitions path should be reported as an error.");
+
+        // Act
+        device.ModelDefinitionsPath = null;
+        await device.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.IsConnected && device.Units.GetValueOrDefault(1)?.Devices[0].Common?.Mn == "Vendor",
+            WaitTimeout,
+            message: "The device should connect once the path is fixed.");
+        Assert.Equal(ServiceStatus.Running, device.Status);
     }
 
     [Fact]

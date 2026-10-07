@@ -12,6 +12,19 @@ public sealed class SunSpecDefinitionDirectoryTests : IDisposable
             { "name": "W", "type": "int16", "size": 1 }, { "name": "W", "type": "int16", "size": 1 } ] } }
         """;
 
+    private const string NullGroupJson = """{ "id": 64997, "group": null }""";
+
+    private const string NullPointJson = """
+        { "id": 64997, "group": { "name": "vendor", "points": [
+            { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 }, null ] } }
+        """;
+
+    private const string NullPointNameJson = """
+        { "id": 64997, "group": { "name": "vendor", "points": [
+            { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 },
+            { "name": null, "type": "int16", "size": 1 } ] } }
+        """;
+
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"sunspec-definitions-{Guid.NewGuid():N}");
 
     public SunSpecDefinitionDirectoryTests()
@@ -68,6 +81,9 @@ public sealed class SunSpecDefinitionDirectoryTests : IDisposable
     [Theory]
     [InlineData("{ not json")]
     [InlineData(DuplicateNameJson)]
+    [InlineData(NullGroupJson)]
+    [InlineData(NullPointJson)]
+    [InlineData(NullPointNameJson)]
     public void WhenADefinitionIsInvalid_ThenItIsIgnoredWithAWarning(string json)
     {
         // Arrange
