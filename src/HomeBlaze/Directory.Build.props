@@ -6,10 +6,9 @@
 
     <!-- Keep the default 1.0.0 rather than inheriting the library version. Plugins are compiled
          against these assemblies and bind by assembly version, so lowering it to 0.1.0 makes an
-         already published plugin fail to resolve HomeBlaze.Components.Abstractions at load time.
-         PackageVersion is reset so LibraryPackageVersion does not change the versions deps.json reports for
-         these assemblies, which plugins are checked against; the SDK then defaults it to Version. -->
+         already published plugin fail to resolve HomeBlaze.Components.Abstractions at load time. -->
     <Version>1.0.0</Version>
+    <!-- Keeps LibraryPackageVersion out of deps.json for these assemblies; the SDK defaults it to Version. -->
     <PackageVersion></PackageVersion>
   </PropertyGroup>
 </Project>

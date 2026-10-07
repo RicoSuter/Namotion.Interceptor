@@ -371,6 +371,7 @@ jobs:
           docker logs homeblaze
           if (-not $healthy) { throw "HomeBlaze did not become healthy" }
           $deps = docker exec homeblaze cat /app/HomeBlaze.deps.json
+          if ($LASTEXITCODE -ne 0) { throw "Could not read deps.json from the container" }
           if (-not ($deps -match '"Namotion.Interceptor/9\.9\.9"')) { throw "deps.json does not report the library package version" }
           if (-not ($deps -match '"HomeBlaze.Abstractions/1\.0\.0"')) { throw "deps.json does not report the pinned HomeBlaze version" }
           foreach ($path in @("Root.json", "Files/Plugins.json", "Files/Servers/SqliteHistory.json", "Files/Docs")) {
@@ -456,7 +457,8 @@ jobs:
           echo "LIBRARY_VERSION=$libraryVersion" >> $env:GITHUB_OUTPUT
 
       # Tags go through an environment variable because MSBuild splits semicolons on the command line.
-      # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version. LibraryPackageVersion only changes the library versions reported in deps.json.
+      # Version is not overridden: HomeBlaze pins it to 1.0.0 because plugins bind by assembly version.
+      # LibraryPackageVersion only sets the library versions in deps.json.
       - name: Publish multi-arch image
         env:
           ContainerImageTags: ${{ steps.tags.outputs.TAGS }}

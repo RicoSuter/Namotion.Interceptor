@@ -17,8 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     
     <Version>0.1.0</Version>
-    <!-- Lets an application build report the released library version in deps.json, which plugin loaders compare
-         against the versions plugins were built with. pack sets PackageVersion directly instead. -->
+    <!-- Library version reported in deps.json, which plugin loaders check plugins against. Pack overrides it globally. -->
     <PackageVersion Condition="'$(LibraryPackageVersion)' != ''">$(LibraryPackageVersion)</PackageVersion>
   </PropertyGroup>
 </Project>
