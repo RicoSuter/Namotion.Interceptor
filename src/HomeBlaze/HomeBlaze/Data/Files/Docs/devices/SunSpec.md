@@ -70,3 +70,45 @@ Enable "Log register dump" to log the raw registers of every model in the chain.
 ## Network
 
 Modbus TCP has no authentication. Keep the port inside your network and never forward it on the router.
+
+## Implementation Details
+
+### Model Classes and the Generator
+
+The model classes in `Namotion.Devices.SunSpec/Models/Generated` are generated from the official SunSpec JSON definitions, which are embedded unmodified in the library (`Definitions/Json`, pinned to a commit of [sunspec/models](https://github.com/sunspec/models)). The console tool `Namotion.Devices.SunSpec.Generator` writes one `[InterceptorSubject]` class per model, with a `[ModbusRegister]` and a `[State]` attribute per point:
+
+- Point names are used verbatim as property names (`W`, `W_SF`, `TotWhImp`), group classes and enums use the class name as prefix (`SunSpecMpptModuleGroup`, `SunSpecInverterSt`).
+- Scaled measurements are `decimal?`, durations `TimeSpan?`, text `string?`, enumerations and bit fields generated enums, all other integers their raw type. Percentages get `Scale = 0.01` on top of their scale factor, so they arrive as fractions.
+- `overrides.json` gives friendly names to the models a home installation is likely to meet and merges families with the same layout into one class (`SunSpecInverter` for 101 to 103, `SunSpecAcMeter` for 201 to 204). All other models are `SunSpecModel{Id}`.
+- Capabilities such as `IPowerMeter` or `IBatteryState` are hand-written partial classes next to the generated ones (`Models/SunSpecInverter.cs`).
+
+To update the definitions, copy the files of a newer commit, update the commit in `Definitions/Json/README.md` and run `dotnet run --project src/HomeBlaze/Namotion.Devices.SunSpec.Generator -- src/HomeBlaze/Namotion.Devices.SunSpec/Models/Generated`. A test fails when the checked-in classes differ from the generator output, and the generator fails when a family's layouts differ or a generated name collides.
+
+### Scale Factors
+
+Scaling stays in the Modbus connector, so a value and its scale factor always come from the same poll and never tear. A point scaled by a scale factor of its own block uses `ScaleFactorProperty`; a repeating group whose scale factors live in its parent (the module groups of model 160) implements `IModbusScaleFactorProvider` and returns a reference to the parent's property. The connector resolves these links once per connect; see [Modbus connector: register mapping](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connectors-modbus.md) for the rules.
+
+### Discovery
+
+`SunSpecDevice` owns the Modbus source and implements `IModbusDiscovery`, so discovery runs on every connect before the registers are bound:
+
+1. For each unit ID the chain reader probes 40000, 50000 and 0 for the "SunS" marker and walks the model headers (ID and length) until the end marker 0xFFFF, in reads of at most 125 registers. A chain longer than 500 models or past the address space is rejected for that unit.
+2. Each Common model starts a logical device. Each model becomes a generated class, a dynamic model (user definition) or an unknown model; an existing subject is kept when its address, ID and length are unchanged, so the UI and history keep their references across reconnects.
+3. Repeating groups are resolved from the counts the device reports and created as child subjects.
+4. Registers beyond the length a device reports for a model, and the values scaled by them, are excluded from polling.
+5. Each discovered model ID is written to the model's `ModelIdRegister`, which is polled with the model (register gap 2). The status loop compares it with the discovered ID and restarts the connection when the device's chain changed.
+
+### Dynamic and Unknown Models
+
+A user definition is parsed and validated when the source starts (point and group names must be unique and must not hide built-in members); parsed definitions are cached by file content, so an unchanged file keeps its subjects across restarts. A dynamic model adds one registry property per point at runtime, with the same register and state attributes the generator writes, so it is polled and displayed like a generated model. An unknown model only maps its ID register.
+
+### Tests
+
+The tests run against `SunSpecTestServer`, a FluentModbus server that lays out chains from the definitions and rejects reads outside the chain like a real device, and against device dumps from [pysunspec2](https://github.com/sunspec/pysunspec2). A register dump logged by this device can be replayed with `SunSpecTestChain.FromDump`.
+
+## References
+
+- [SunSpec Alliance](https://sunspec.org) (information model specifications)
+- [sunspec/models](https://github.com/sunspec/models) (JSON model definitions)
+- [sunspec/pysunspec2](https://github.com/sunspec/pysunspec2) (reference implementation and test data)
+- [SolarEdge SunSpec technical note](https://knowledge-center.solaredge.com/sites/kc/files/sunspec-implementation-technical-note.pdf)
