@@ -388,3 +388,6 @@ src/HomeBlaze/HomeBlaze/Data/OpcUa/
 # Performance pass artifacts
 benchmark_*.md
 .claude/scheduled_tasks.lock
+
+# Brainstorming companion mockups
+.superpowers/
