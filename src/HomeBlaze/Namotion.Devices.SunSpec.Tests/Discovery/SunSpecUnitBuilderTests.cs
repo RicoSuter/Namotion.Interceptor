@@ -1,8 +1,10 @@
+using System.Text;
 using Namotion.Devices.SunSpec.Definitions;
 using Namotion.Devices.SunSpec.Discovery;
 using Namotion.Devices.SunSpec.Models;
 using Namotion.Devices.SunSpec.Tests.Models;
 using Namotion.Devices.SunSpec.Tests.Testing;
+using Namotion.Interceptor.Registry;
 
 namespace Namotion.Devices.SunSpec.Tests.Discovery;
 
@@ -160,6 +162,62 @@ public class SunSpecUnitBuilderTests
         // Assert
         var dynamicModel = Assert.IsType<SunSpecDynamicModel>(second[0].Models[0]);
         Assert.Equal(unknownModel.BaseAddress, dynamicModel.BaseAddress);
+    }
+
+    [Fact]
+    public async Task WhenAUserDefinitionHasTheIdOfAGeneratedModel_ThenTheGeneratedClassWins()
+    {
+        // Arrange
+        var definition = SunSpecDefinitions.Parse(new MemoryStream(Encoding.UTF8.GetBytes(SunSpecDynamicModelTests.DefinitionJson.Replace("64999", "103"))));
+        var catalog = new SunSpecModelCatalog(new Dictionary<int, SunSpecModelDefinition> { [103] = definition });
+        var chain = new SunSpecTestChain().AddModel(1).AddModel(103);
+        var result = await InMemoryRegisters.ReadAsync(chain);
+
+        // Act
+        var first = SunSpecUnitBuilder.Build(1, result!, [], catalog);
+        var second = SunSpecUnitBuilder.Build(1, result!, first, catalog);
+
+        // Assert
+        var inverter = Assert.IsType<SunSpecInverter>(first[0].Models[0]);
+        Assert.True(catalog.IsCurrent(inverter, result!.Models[1]));
+        Assert.Same(inverter, second[0].Models[0]);
+    }
+
+    [Fact]
+    public async Task WhenModelsMoveToAnotherLogicalDevice_ThenTheyStayAttachedWithTheirDynamicProperties()
+    {
+        // Arrange
+        var definition = SunSpecDynamicModelTests.ParseDefinition();
+        var catalog = new SunSpecModelCatalog(new Dictionary<int, SunSpecModelDefinition> { [64999] = definition });
+        var placeholder = new ushort[68];
+        placeholder[0] = 64998;
+        placeholder[1] = 66;
+        var dynamicValues = new Dictionary<string, object?> { ["N"] = 1, ["channel"] = new[] { new Dictionary<string, object?> { ["A"] = 10 } } };
+
+        // The Common model replaces a model of the same length, so the models behind it keep their addresses.
+        var firstChain = new SunSpecTestChain().AddModel(1).AddRawModel(placeholder).AddModel(103).AddModel(64999, dynamicValues, definition: definition);
+        var secondChain = new SunSpecTestChain().AddModel(1).AddModel(1).AddModel(103).AddModel(64999, dynamicValues, definition: definition);
+
+        var unit = TestRoot.Attach(new SunSpecUnit(1));
+        unit.Devices = await BuildAsync(firstChain, catalog: catalog);
+        var inverter = Assert.IsType<SunSpecInverter>(unit.Devices[0].Models[1]);
+        var dynamicModel = Assert.IsType<SunSpecDynamicModel>(unit.Devices[0].Models[2]);
+        dynamicModel.EnsureProperties();
+
+        // Act
+        unit.Devices = await BuildAsync(secondChain, unit.Devices, catalog);
+        dynamicModel.EnsureProperties();
+
+        // Assert
+        Assert.Equal(2, unit.Devices.Length);
+        Assert.Same(inverter, unit.Devices[1].Models[0]);
+        Assert.Same(dynamicModel, unit.Devices[1].Models[1]);
+        Assert.NotNull(inverter.TryGetRegisteredSubject());
+        var registered = dynamicModel.TryGetRegisteredSubject();
+        Assert.NotNull(registered);
+        Assert.NotNull(registered.TryGetProperty("W"));
+        var channel = Assert.Single((SunSpecDynamicGroup[])registered.TryGetProperty("Channel")!.GetValue()!);
+        Assert.NotNull(channel.TryGetRegisteredSubject()!.TryGetProperty("A"));
     }
 
     [Fact]

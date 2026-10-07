@@ -42,7 +42,12 @@ internal static class SunSpecUnitBuilder
         {
             var device = index < current.Length ? current[index] : new SunSpecLogicalDevice(unitId, index);
             UpdateDevice(device, groups[index].Common, groups[index].Models);
-            devices[index] = device;
+
+            // The current array is published, and collections are replaced, never mutated.
+            if (!ReferenceEquals(devices, current))
+            {
+                devices[index] = device;
+            }
         }
 
         return devices;

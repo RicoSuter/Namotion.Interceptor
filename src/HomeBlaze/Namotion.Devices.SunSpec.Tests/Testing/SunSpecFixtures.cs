@@ -42,7 +42,7 @@ internal static class SunSpecFixtures
             {
                 JsonValueKind.Null => null,
                 JsonValueKind.String => property.Value.GetString(),
-                JsonValueKind.Number => property.Value.TryGetInt64(out var number) ? number : (object)property.Value.GetUInt64(),
+                JsonValueKind.Number => ToInteger(property),
                 JsonValueKind.Array => property.Value.EnumerateArray()
                     .Select(item => (IReadOnlyDictionary<string, object?>)ToValues(item, ignoredPoints))
                     .ToList(),
@@ -51,5 +51,17 @@ internal static class SunSpecFixtures
         }
 
         return values;
+    }
+
+    private static object ToInteger(JsonProperty property)
+    {
+        if (property.Value.TryGetInt64(out var number))
+        {
+            return number;
+        }
+
+        return property.Value.TryGetUInt64(out var unsignedNumber)
+            ? unsignedNumber
+            : throw new InvalidDataException($"The value {property.Value.GetRawText()} of {property.Name} is not an integer raw register value.");
     }
 }

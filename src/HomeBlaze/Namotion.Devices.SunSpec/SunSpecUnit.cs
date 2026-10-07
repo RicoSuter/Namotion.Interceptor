@@ -31,7 +31,8 @@ public partial class SunSpecUnit : IModbusUnitIdProvider, ITitleProvider
     public partial int? MarkerAddress { get; internal set; }
 
     /// <summary>
-    /// Gets the logical devices in chain order; each starts with its Common model.
+    /// Gets the logical devices in chain order; each starts with its Common model, except the first one when the chain
+    /// does not start with a Common model.
     /// </summary>
     public partial SunSpecLogicalDevice[] Devices { get; internal set; }
 

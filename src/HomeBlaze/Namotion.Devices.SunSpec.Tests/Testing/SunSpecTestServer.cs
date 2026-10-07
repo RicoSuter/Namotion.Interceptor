@@ -38,6 +38,12 @@ internal sealed class SunSpecTestServer : IDisposable
         }
 
         server.RequestValidator = ValidateRequest;
+        lock (_rangesLock)
+        {
+            // The ranges of a previous run would make the fresh server accept reads of units without a chain.
+            _ranges.Clear();
+        }
+
         _server = server;
         foreach (var (unitId, chain) in chains)
         {

@@ -56,6 +56,118 @@ public class SunSpecChainReaderTests
         // Assert
         Assert.Equal(302, Assert.Single(result!.Models).Registers.Length);
         Assert.All(reads, read => Assert.InRange(read.Count, 1, 125));
+
+        var chunks = reads.Where(read => read.Address is >= 40004 and < 40304).ToList();
+        Assert.True(chunks.Count > 1);
+        var nextAddress = 40004;
+        foreach (var chunk in chunks)
+        {
+            Assert.Equal(nextAddress, chunk.Address);
+            nextAddress += chunk.Count;
+        }
+
+        Assert.Equal(40304, nextAddress);
+    }
+
+    [Fact]
+    public async Task WhenSeveralBasesHaveAMarker_ThenTheMarkerAt40000Wins()
+    {
+        // Arrange
+        var readers = new[] { 0, 50000, 40000 }
+            .Select(markerAddress => InMemoryRegisters.CreateReader(new SunSpecTestChain(markerAddress).AddModel(1)))
+            .ToArray();
+        SunSpecRegisterReader reader = async (address, count, cancellationToken) =>
+        {
+            foreach (var inner in readers)
+            {
+                if (await inner(address, count, cancellationToken) is { } registers)
+                {
+                    return registers;
+                }
+            }
+
+            return null;
+        };
+
+        // Act
+        var result = await SunSpecChainReader.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(40000, result!.MarkerAddress);
+    }
+
+    [Fact]
+    public async Task WhenAMarkerProbeReturnsTheWrongRegisterCount_ThenTheNextBaseIsTried()
+    {
+        // Arrange
+        var inner = InMemoryRegisters.CreateReader(new SunSpecTestChain(50000).AddModel(1));
+        SunSpecRegisterReader reader = async (address, count, cancellationToken)
+            => address == 40000 ? [0x5375] : await inner(address, count, cancellationToken);
+
+        // Act
+        var result = await SunSpecChainReader.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(50000, result!.MarkerAddress);
+        Assert.Equal(1, Assert.Single(result.Models).ModelId);
+    }
+
+    [Fact]
+    public async Task WhenEndModelHasNoLengthRegister_ThenTheChainEndsNormally()
+    {
+        // Arrange
+        var chain = new SunSpecTestChain().AddModel(1).AddModel(103);
+        var endAddress = chain.NextAddress;
+        var inner = InMemoryRegisters.CreateReader(chain);
+        SunSpecRegisterReader reader = (address, count, cancellationToken)
+            => address == endAddress && count == 2 ? Task.FromResult<ushort[]?>(null) : inner(address, count, cancellationToken);
+
+        // Act
+        var result = await SunSpecChainReader.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { 1, 103 }, result!.Models.Select(model => model.ModelId));
+    }
+
+    [Fact]
+    public async Task WhenEndModelHeaderAndIdReadsAreRejected_ThenTheChainIsMalformed()
+    {
+        // Arrange
+        var chain = new SunSpecTestChain().AddModel(1);
+        var endAddress = chain.NextAddress;
+        var inner = InMemoryRegisters.CreateReader(chain);
+        SunSpecRegisterReader reader = (address, count, cancellationToken)
+            => address == endAddress ? Task.FromResult<ushort[]?>(null) : inner(address, count, cancellationToken);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => SunSpecChainReader.ReadAsync(reader, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenHeaderReadIsRejectedButTheIdIsNoEndModel_ThenTheChainIsMalformed()
+    {
+        // Arrange
+        var chain = new SunSpecTestChain().AddModel(1).AddModel(103);
+        var inner = InMemoryRegisters.CreateReader(chain);
+        SunSpecRegisterReader reader = (address, count, cancellationToken)
+            => address == 40070 && count == 2 ? Task.FromResult<ushort[]?>(null) : inner(address, count, cancellationToken);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => SunSpecChainReader.ReadAsync(reader, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenChainReachesTheEndOfTheAddressSpaceWithoutEndModel_ThenTheChainIsMalformed()
+    {
+        // Arrange
+        var registers = new ushort[65536 - 50002];
+        registers[0] = 64950;
+        registers[1] = (ushort)(registers.Length - 2);
+        var chain = new SunSpecTestChain(50000).AddRawModel(registers);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => InMemoryRegisters.ReadAsync(chain));
+        Assert.Contains("at 65536", exception.Message);
     }
 
     [Fact]

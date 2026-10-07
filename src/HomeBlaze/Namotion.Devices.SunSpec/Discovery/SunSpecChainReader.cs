@@ -38,7 +38,8 @@ internal static class SunSpecChainReader
     /// </summary>
     /// <exception cref="InvalidDataException">
     /// The chain is malformed: it overruns the address space, has more than <see cref="MaximumModelCount"/> models, or a
-    /// read inside it is rejected or returns the wrong number of registers.
+    /// read inside it is rejected or returns the wrong number of registers. A rejected read of a model's ID and length
+    /// registers is accepted when the ID register alone holds the end model ID.
     /// </exception>
     public static async Task<SunSpecChain?> ReadAsync(SunSpecRegisterReader read, CancellationToken cancellationToken)
     {
@@ -67,8 +68,8 @@ internal static class SunSpecChainReader
                 throw new InvalidDataException($"The model chain runs past address 65535 at {address}.");
             }
 
-            var header = await ReadRequiredAsync(read, address, 2, cancellationToken).ConfigureAwait(false);
-            if (header[0] == EndModelId)
+            var header = await ReadHeaderAsync(read, address, cancellationToken).ConfigureAwait(false);
+            if (header is null || header[0] == EndModelId)
             {
                 return models;
             }
@@ -100,11 +101,33 @@ internal static class SunSpecChainReader
         }
     }
 
+    // Returns the ID and length registers, or null for an end model without a length register.
+    private static async Task<ushort[]?> ReadHeaderAsync(SunSpecRegisterReader read, int address, CancellationToken cancellationToken)
+    {
+        var header = await read(address, 2, cancellationToken).ConfigureAwait(false);
+        if (header is not null)
+        {
+            return EnsureCount(header, address, 2);
+        }
+
+        // Some devices implement only the single end register and reject a read that goes past it.
+        var modelId = await read(address, 1, cancellationToken).ConfigureAwait(false);
+        return modelId is [EndModelId] ? null : throw CreateRejectedException(address, 2);
+    }
+
     private static async Task<ushort[]> ReadRequiredAsync(SunSpecRegisterReader read, int address, int count, CancellationToken cancellationToken)
     {
         var registers = await read(address, count, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidDataException($"The device rejected reading {count} registers at {address} inside the model chain.");
+            ?? throw CreateRejectedException(address, count);
 
+        return EnsureCount(registers, address, count);
+    }
+
+    private static InvalidDataException CreateRejectedException(int address, int count)
+        => new($"The device rejected reading {count} registers at {address} inside the model chain.");
+
+    private static ushort[] EnsureCount(ushort[] registers, int address, int count)
+    {
         if (registers.Length != count)
         {
             throw new InvalidDataException($"The device returned {registers.Length} instead of {count} registers at {address}.");
