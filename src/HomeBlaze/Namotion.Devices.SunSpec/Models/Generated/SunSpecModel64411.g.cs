@@ -49,15 +49,6 @@ public partial class SunSpecModel64411 : ISunSpecModel, ITitleProvider, ISunSpec
         IA = null;
         IB = null;
         IC = null;
-        VHarA = null;
-        VHarB = null;
-        VHarC = null;
-        IHarA = null;
-        IHarB = null;
-        IHarC = null;
-        IIntHarA = null;
-        IIntHarB = null;
-        IIntHarC = null;
         VThdA = null;
         VThdB = null;
         VThdC = null;
@@ -247,69 +238,6 @@ public partial class SunSpecModel64411 : ISunSpecModel, ITitleProvider, ISunSpec
     [ModbusRegister(29, ModbusDataType.S32, ScaleFactorProperty = nameof(A_SF), NotAvailableValue = ModbusNotAvailableValue.SignedMinimum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Measured Current Phase C", Unit = StateUnit.Ampere)]
     public partial decimal? IC { get; internal set; }
-
-    /// <summary>
-    /// Voltage Harmonics Pct, Phase A (comma seperated string for harmonics 1-50)
-    /// </summary>
-    [ModbusRegister(31, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Voltage Harmonics Phase A")]
-    public partial string? VHarA { get; internal set; }
-
-    /// <summary>
-    /// Voltage Harmonics Pct, Phase B (comma seperated string for harmonics 1-50)
-    /// </summary>
-    [ModbusRegister(181, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Voltage Harmonics Phase B")]
-    public partial string? VHarB { get; internal set; }
-
-    /// <summary>
-    /// Voltage Harmonics Pct, Phase C (comma seperated string for harmonics 1-50)
-    /// </summary>
-    [ModbusRegister(331, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Voltage Harmonics Phase C")]
-    public partial string? VHarC { get; internal set; }
-
-    /// <summary>
-    /// Current Harmonics Pct, Phase A (comma seperated string for harmonics 1-50)
-    /// </summary>
-    [ModbusRegister(481, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Current Harmonics Phase A")]
-    public partial string? IHarA { get; internal set; }
-
-    /// <summary>
-    /// Current Harmonics Pct, Phase B (comma seperated string for harmonics 1-50)
-    /// </summary>
-    [ModbusRegister(631, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Current Harmonics Phase B")]
-    public partial string? IHarB { get; internal set; }
-
-    /// <summary>
-    /// Current Harmonics Pct, Phase C (comma seperated string for harmonics 1-50)
-    /// </summary>
-    [ModbusRegister(781, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Current Harmonics Phase C")]
-    public partial string? IHarC { get; internal set; }
-
-    /// <summary>
-    /// Current Interharmonics Pct, Phase A (comma seperated string for interharmonics 1-50)
-    /// </summary>
-    [ModbusRegister(931, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Current Interharmonics Phase A")]
-    public partial string? IIntHarA { get; internal set; }
-
-    /// <summary>
-    /// Current Interharmonics Pct, Phase B (comma seperated string for interharmonics 1-50)
-    /// </summary>
-    [ModbusRegister(1081, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Current Interharmonics Phase B")]
-    public partial string? IIntHarB { get; internal set; }
-
-    /// <summary>
-    /// Current Interharmonics Pct, Phase C (comma seperated string for interharmonics 1-50)
-    /// </summary>
-    [ModbusRegister(1231, ModbusDataType.String, Length = 150, Access = ModbusAccess.ReadOnly)]
-    [State(Title = "Current Interharmonics Phase C")]
-    public partial string? IIntHarC { get; internal set; }
 
     /// <summary>
     /// Voltage THD Phase A

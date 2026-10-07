@@ -281,6 +281,7 @@ public class SunSpecPointMappingTests
     [Theory]
     [InlineData("pad", 1)]
     [InlineData("ipv6addr", 8)]
+    [InlineData("string", 126)]
     public void WhenPointHasNoValueMapping_ThenItIsSkipped(string type, int size)
     {
         // Act
@@ -315,7 +316,7 @@ public class SunSpecPointMappingTests
 
         // Assert
         Assert.NotEmpty(points);
-        Assert.Equal(["ipv6addr", "pad"], skippedTypes);
+        Assert.Equal(["ipv6addr", "pad", "string"], skippedTypes);
 
         static IEnumerable<SunSpecPointDefinition> GetPoints(SunSpecGroupDefinition group)
             => group.Points.Concat(group.Groups.SelectMany(GetPoints));

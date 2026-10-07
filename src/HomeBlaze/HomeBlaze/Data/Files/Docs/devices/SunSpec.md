@@ -66,6 +66,7 @@ Enable "Log register dump" to log the raw registers of every model in the chain.
 ## Known Limitations
 
 - Some timestamps, which SunSpec stores as seconds since 2000, are shown as durations.
+- Text points longer than 125 registers are not read, because one Modbus request reads at most 125 registers. Of the built-in models, only the harmonics text points of model 64411 are affected.
 
 ## Network
 
