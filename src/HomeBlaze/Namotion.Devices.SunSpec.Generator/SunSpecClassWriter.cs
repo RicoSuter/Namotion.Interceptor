@@ -23,10 +23,6 @@ internal static class SunSpecClassWriter
         "Namotion.Interceptor.Attributes", "Namotion.Interceptor.Modbus", "Namotion.Interceptor.Modbus.Attributes"
     ];
 
-    private static readonly string[] ModelMembers = ["ModelId", "BaseAddress", "Length", "Title", "ModelIdRegister"];
-
-    private static readonly string[] GroupMembers = ["Parent", "BaseAddress", "Index", "Title"];
-
     private sealed record PointPlan(string Name, string TypeName, string Documentation, string RegisterAttribute, string? StateAttribute);
 
     private sealed record GroupPropertyPlan(string PropertyName, string GroupName, string ClassName, bool IsSingle, string Documentation);
@@ -40,7 +36,7 @@ internal static class SunSpecClassWriter
 
     // The model or group class being written. Points whose scale factor lives in an enclosing group are collected in
     // ProvidedScaleFactors with the expression reaching that scale factor.
-    private sealed class OwnerScope(string prefix, string[] reservedMembers, IReadOnlyList<AncestorInfo> ancestors)
+    private sealed class OwnerScope(string prefix, IEnumerable<string> reservedMembers, IReadOnlyList<AncestorInfo> ancestors)
     {
         public string Prefix { get; } = prefix;
 
@@ -140,7 +136,7 @@ internal static class SunSpecClassWriter
         AddTypeName(state.TypeNames, className);
 
         var modelsText = (plan.IsFamily ? "models " : "model ") + string.Join(", ", plan.ModelIds);
-        var scope = new OwnerScope(className, ModelMembers, []);
+        var scope = new OwnerScope(className, SunSpecMemberNames.Model, []);
         var points = CollectPoints(top, isTopLevel: true, scope, state);
         var groups = CollectGroups(top, className, scope, [new AncestorInfo(className, top)], state, modelsText);
 
@@ -221,7 +217,7 @@ internal static class SunSpecClassWriter
     private static void WriteGroupClass(CodeWriter writer, GroupPlan plan, FileState state)
     {
         var group = plan.Definition;
-        var scope = new OwnerScope(plan.ClassName[..^"Group".Length], GroupMembers, plan.Ancestors);
+        var scope = new OwnerScope(plan.ClassName[..^"Group".Length], SunSpecMemberNames.Group, plan.Ancestors);
         var points = CollectPoints(group, isTopLevel: false, scope, state);
         var childAncestors = plan.Ancestors.Prepend(new AncestorInfo(plan.ClassName, group)).ToArray();
         var groups = CollectGroups(group, plan.ClassName, scope, childAncestors, state, plan.ModelsText);
@@ -275,19 +271,8 @@ internal static class SunSpecClassWriter
     {
         var ownPointNames = group.Points.Select(point => point.Name).ToHashSet(StringComparer.Ordinal);
         var points = new List<PointPlan>();
-        var offset = 0;
-        for (var index = 0; index < group.Points.Count; index++)
+        foreach (var (point, pointOffset, map) in SunSpecPointMapping.GetPropertyPoints(group, isTopLevel))
         {
-            var point = group.Points[index];
-            var pointOffset = offset;
-            offset += point.Size;
-
-            // The ID and L points of a model are covered by ModelIdRegister and Length.
-            if ((isTopLevel && index < 2) || SunSpecPointMapping.TryMap(point) is not { } map)
-            {
-                continue;
-            }
-
             var name = CSharpText.ToIdentifier(point.Name);
             AddMember(scope.Members, name, scope.Prefix);
 

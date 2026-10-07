@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Json;
 
@@ -18,6 +19,9 @@ internal static class SunSpecDefinitions
     /// Parses and validates a definition.
     /// </summary>
     /// <exception cref="JsonException">The JSON is invalid or the definition is malformed.</exception>
+    /// <exception cref="InvalidDataException">
+    /// A point cannot be mapped, or a point or group property name is reserved or used twice in its group.
+    /// </exception>
     public static SunSpecModelDefinition Parse(Stream stream)
     {
         var definition = JsonSerializer.Deserialize(stream, SunSpecDefinitionJsonContext.Default.SunSpecModelDefinition)
@@ -73,6 +77,8 @@ internal static class SunSpecDefinitions
             }
         }
 
+        ValidatePropertyNames(modelId, group, isTopLevel);
+
         foreach (var child in group.Groups)
         {
             if (child.Count.IsFill && !isTopLevel)
@@ -81,6 +87,36 @@ internal static class SunSpecDefinitions
             }
 
             ValidateGroup(modelId, child, isTopLevel: false);
+        }
+    }
+
+    // The point and group properties of a subject must not replace each other or the subject's own members.
+    private static void ValidatePropertyNames(int modelId, SunSpecGroupDefinition group, bool isTopLevel)
+    {
+        var reservedNames = isTopLevel ? SunSpecMemberNames.Model : SunSpecMemberNames.Group;
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var propertyPoint in SunSpecPointMapping.GetPropertyPoints(group, isTopLevel))
+        {
+            ValidatePropertyName(modelId, group, $"point {propertyPoint.Point.Name}", propertyPoint.Point.Name, reservedNames, names);
+        }
+
+        foreach (var child in group.Groups)
+        {
+            ValidatePropertyName(modelId, group, $"group {child.Name}", SunSpecNames.ToPascalCase(child.Name), reservedNames, names);
+        }
+    }
+
+    private static void ValidatePropertyName(
+        int modelId, SunSpecGroupDefinition group, string member, string propertyName, FrozenSet<string> reservedNames, HashSet<string> names)
+    {
+        if (reservedNames.Contains(propertyName))
+        {
+            throw new InvalidDataException($"The {member} in group {group.Name} of model {modelId} uses the reserved property name {propertyName}.");
+        }
+
+        if (!names.Add(propertyName))
+        {
+            throw new InvalidDataException($"The {member} in group {group.Name} of model {modelId} uses the property name {propertyName} more than once.");
         }
     }
 }

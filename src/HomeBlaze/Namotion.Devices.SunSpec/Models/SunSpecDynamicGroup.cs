@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.SunSpec.Definitions;
 using Namotion.Interceptor;
@@ -11,9 +10,10 @@ namespace Namotion.Devices.SunSpec.Models;
 /// A group instance of a <see cref="SunSpecDynamicModel"/>. Its points become dynamic properties once it is attached.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusScaleFactorProvider, ITitleProvider, ISunSpecGroupOwner, ISunSpecDynamicSubject
+public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusScaleFactorProvider, ITitleProvider, ISunSpecGroupOwner
 {
-    private readonly ConcurrentDictionary<string, object?> _values = new(StringComparer.Ordinal);
+    // A field rather than a property, so it does not show up as a registry property.
+    private readonly SunSpecGroupDefinition _definition;
 
     // Discovery state, only touched by the discovery on the source's thread.
     private SunSpecGroupInstance? _layout;
@@ -22,7 +22,7 @@ public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusSc
     internal SunSpecDynamicGroup(IInterceptorSubject parent, SunSpecGroupDefinition definition, int baseAddress, int index)
     {
         Parent = parent;
-        Definition = definition;
+        _definition = definition;
         BaseAddress = baseAddress;
         Index = index;
     }
@@ -31,8 +31,6 @@ public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusSc
     /// Gets the model or group containing this group.
     /// </summary>
     public IInterceptorSubject Parent { get; }
-
-    internal SunSpecGroupDefinition Definition { get; }
 
     /// <inheritdoc />
     public int BaseAddress { get; }
@@ -43,15 +41,14 @@ public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusSc
     public int Index { get; }
 
     /// <inheritdoc />
-    public string Title => $"{Definition.Label ?? SunSpecNames.ToPascalCase(Definition.Name)} {Index + 1}";
+    public string Title => $"{_definition.Label ?? SunSpecNames.ToPascalCase(_definition.Name)} {Index + 1}";
 
-    ConcurrentDictionary<string, object?> ISunSpecDynamicSubject.Values => _values;
+    internal SunSpecGroupDefinition GetDefinition() => _definition;
 
     /// <inheritdoc />
     public PropertyReference? TryGetScaleFactorProperty(string propertyName)
     {
-        var point = Definition.Points.FirstOrDefault(candidate => candidate.Name == propertyName);
-        if (point?.ScaleFactor.PointName is not { } scaleFactorName || ContainsPoint(Definition, scaleFactorName))
+        if (GetEnclosingScaleFactorName(propertyName) is not { } scaleFactorName)
         {
             return null;
         }
@@ -59,7 +56,7 @@ public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusSc
         // The scale factor lives in the nearest enclosing group defining it.
         for (var ancestor = Parent; ancestor is not null; ancestor = (ancestor as SunSpecDynamicGroup)?.Parent)
         {
-            if (GetDefinition(ancestor) is { } group && ContainsPoint(group, scaleFactorName))
+            if (GetGroupDefinition(ancestor) is { } group && ContainsPoint(group, scaleFactorName))
             {
                 return new PropertyReference(ancestor, scaleFactorName);
             }
@@ -68,39 +65,44 @@ public partial class SunSpecDynamicGroup : IModbusBaseAddressProvider, IModbusSc
         return null;
     }
 
-    private static SunSpecGroupDefinition? GetDefinition(IInterceptorSubject subject) => subject switch
-    {
-        SunSpecDynamicGroup dynamicGroup => dynamicGroup.Definition,
-        SunSpecDynamicModel dynamicModel => dynamicModel.Definition.Group,
-        _ => null
-    };
-
-    void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
-    {
-        _layout = instance;
-        if (_hasProperties)
-        {
-            SunSpecDynamicProperties.UpdateGroups(this, Definition, instance);
-        }
-    }
+    // Only stored: EnsureProperties applies it once the properties holding the nested groups exist.
+    void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance) => _layout = instance;
 
     /// <summary>
     /// Adds the point and group properties once the group is attached, then applies the latest layout of its nested groups.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The group is not attached to a subject graph with a registry.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The group is not attached to a subject graph with a registry, or a property name is already in use.
+    /// </exception>
     internal void EnsureProperties()
     {
         if (!_hasProperties)
         {
-            SunSpecDynamicProperties.AddProperties(this, Definition, isTopLevel: false);
+            SunSpecDynamicProperties.AddProperties(this, _definition, isTopLevel: false);
             _hasProperties = true;
         }
 
         if (_layout is { } layout)
         {
-            SunSpecDynamicProperties.UpdateGroups(this, Definition, layout);
+            SunSpecDynamicProperties.UpdateGroups(this, _definition, layout);
         }
     }
+
+    // Returns the scale factor point of the point property, or null when there is none or it is in this group, where
+    // the register attribute already names it.
+    private string? GetEnclosingScaleFactorName(string propertyName)
+    {
+        var point = _definition.Points.FirstOrDefault(candidate => candidate.Name == propertyName);
+        var scaleFactorName = point is null ? null : SunSpecPointMapping.TryMap(point)?.ScaleFactorPointName;
+        return scaleFactorName is null || ContainsPoint(_definition, scaleFactorName) ? null : scaleFactorName;
+    }
+
+    private static SunSpecGroupDefinition? GetGroupDefinition(IInterceptorSubject subject) => subject switch
+    {
+        SunSpecDynamicGroup dynamicGroup => dynamicGroup.GetDefinition(),
+        SunSpecDynamicModel dynamicModel => dynamicModel.GetDefinition().Group,
+        _ => null
+    };
 
     private static bool ContainsPoint(SunSpecGroupDefinition group, string pointName)
         => group.Points.Any(candidate => candidate.Name == pointName);

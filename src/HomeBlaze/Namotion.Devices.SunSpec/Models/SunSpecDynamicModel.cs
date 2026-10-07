@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.SunSpec.Definitions;
 using Namotion.Interceptor.Attributes;
@@ -11,9 +10,10 @@ namespace Namotion.Devices.SunSpec.Models;
 /// A model read from a user-supplied SunSpec definition. Its points become dynamic properties once it is attached.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecDynamicModel : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner, ISunSpecDynamicSubject
+public partial class SunSpecDynamicModel : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
 {
-    private readonly ConcurrentDictionary<string, object?> _values = new(StringComparer.Ordinal);
+    // A field rather than a property, so it does not show up as a registry property.
+    private readonly SunSpecModelDefinition _definition;
 
     // Discovery state, only touched by the discovery on the source's thread.
     private SunSpecGroupInstance? _layout;
@@ -21,16 +21,14 @@ public partial class SunSpecDynamicModel : ISunSpecModel, ITitleProvider, ISunSp
 
     internal SunSpecDynamicModel(SunSpecModelDefinition definition, int baseAddress, int length)
     {
-        Definition = definition;
+        _definition = definition;
         BaseAddress = baseAddress;
         Length = length;
         ModelIdRegister = null;
     }
 
-    internal SunSpecModelDefinition Definition { get; }
-
     /// <inheritdoc />
-    public int ModelId => Definition.Id;
+    public int ModelId => _definition.Id;
 
     /// <inheritdoc />
     public int BaseAddress { get; }
@@ -39,39 +37,35 @@ public partial class SunSpecDynamicModel : ISunSpecModel, ITitleProvider, ISunSp
     public int Length { get; }
 
     /// <inheritdoc />
-    public string Title => Definition.Group.Label ?? $"Model {ModelId}";
+    public string Title => _definition.Group.Label ?? $"Model {ModelId}";
 
     /// <inheritdoc />
     [ModbusRegister(0, ModbusDataType.U16, Access = ModbusAccess.ReadOnly)]
     public partial ushort? ModelIdRegister { get; internal set; }
 
-    ConcurrentDictionary<string, object?> ISunSpecDynamicSubject.Values => _values;
+    internal SunSpecModelDefinition GetDefinition() => _definition;
 
-    void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
-    {
-        _layout = instance;
-        if (_hasProperties)
-        {
-            SunSpecDynamicProperties.UpdateGroups(this, Definition.Group, instance);
-        }
-    }
+    // Only stored: EnsureProperties applies it once the properties holding the groups exist.
+    void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance) => _layout = instance;
 
     /// <summary>
     /// Adds the point and group properties once the model is attached to a subject graph with a registry, then applies
     /// the latest group layout.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The model is not attached to a subject graph with a registry.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The model is not attached to a subject graph with a registry, or a property name is already in use.
+    /// </exception>
     internal void EnsureProperties()
     {
         if (!_hasProperties)
         {
-            SunSpecDynamicProperties.AddProperties(this, Definition.Group, isTopLevel: true);
+            SunSpecDynamicProperties.AddProperties(this, _definition.Group, isTopLevel: true);
             _hasProperties = true;
         }
 
         if (_layout is { } layout)
         {
-            SunSpecDynamicProperties.UpdateGroups(this, Definition.Group, layout);
+            SunSpecDynamicProperties.UpdateGroups(this, _definition.Group, layout);
         }
     }
 }

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.SunSpec.Definitions;
 using Namotion.Interceptor;
@@ -17,34 +18,36 @@ internal static class SunSpecDynamicProperties
     /// Adds a property per mapped point of <paramref name="group"/>, addressed relative to the subject's base address,
     /// and a property per nested group. The ID and length points of a top-level group are skipped.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The subject is not attached to a subject graph with a registry.</exception>
-    public static void AddProperties(ISunSpecDynamicSubject subject, SunSpecGroupDefinition group, bool isTopLevel)
+    /// <exception cref="InvalidOperationException">
+    /// The subject is not attached to a subject graph with a registry, or a property name is already in use.
+    /// </exception>
+    public static void AddProperties(IInterceptorSubject subject, SunSpecGroupDefinition group, bool isTopLevel)
     {
-        var registered = GetRegisteredSubject((IInterceptorSubject)subject);
+        var registered = GetRegisteredSubject(subject);
+        var points = SunSpecPointMapping.GetPropertyPoints(group, isTopLevel);
+        EnsureNamesAreFree(registered, group, points);
 
         var ownPointNames = group.Points.Select(point => point.Name).ToHashSet(StringComparer.Ordinal);
-        var offset = 0;
-        for (var index = 0; index < group.Points.Count; index++)
+        foreach (var (point, offset, map) in points)
         {
-            var point = group.Points[index];
-            var pointOffset = offset;
-            offset += point.Size;
-            if ((isTopLevel && index < 2) || SunSpecPointMapping.TryMap(point) is not { } map)
-            {
-                continue;
-            }
-
             // A scale factor in an enclosing group is resolved through the group's IModbusScaleFactorProvider instead.
             var scaleFactorProperty = map.ScaleFactorPointName is { } name && ownPointNames.Contains(name) ? name : null;
-            var registerAttribute = CreateRegisterAttribute(map, pointOffset, scaleFactorProperty);
+            var registerAttribute = CreateRegisterAttribute(map, offset, scaleFactorProperty);
             Attribute[] attributes = map.Kind == SunSpecValueKind.ScaleFactor ? [registerAttribute] : [registerAttribute, CreateStateAttribute(map)];
-            AddValueProperty(registered, point.Name, map.PropertyType, attributes);
+            AddValueProperty(registered, point.Name, map.PropertyType, null, attributes);
         }
 
         foreach (var child in group.Groups)
         {
-            var type = child.Count.IsSingle ? typeof(SunSpecDynamicGroup) : typeof(SunSpecDynamicGroup[]);
-            AddValueProperty(registered, SunSpecNames.ToPascalCase(child.Name), type, []);
+            var propertyName = SunSpecNames.ToPascalCase(child.Name);
+            if (child.Count.IsSingle)
+            {
+                AddValueProperty(registered, propertyName, typeof(SunSpecDynamicGroup), null, []);
+            }
+            else
+            {
+                AddValueProperty(registered, propertyName, typeof(SunSpecDynamicGroup[]), Array.Empty<SunSpecDynamicGroup>(), []);
+            }
         }
     }
 
@@ -52,13 +55,18 @@ internal static class SunSpecDynamicProperties
     /// Creates, keeps or removes the nested group subjects of an attached owner to match <paramref name="instance"/>,
     /// and adds the properties of new group subjects.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The owner is not attached to a subject graph with a registry.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The owner is not attached to a subject graph with a registry, or its group properties were not added.
+    /// </exception>
     public static void UpdateGroups(IInterceptorSubject owner, SunSpecGroupDefinition group, SunSpecGroupInstance instance)
     {
         var registered = GetRegisteredSubject(owner);
         foreach (var child in group.Groups)
         {
-            var property = registered.TryGetProperty(SunSpecNames.ToPascalCase(child.Name))!;
+            var propertyName = SunSpecNames.ToPascalCase(child.Name);
+            var property = registered.TryGetProperty(propertyName)
+                ?? throw new InvalidOperationException($"The group property {propertyName} has not been added to the subject.");
+
             var instances = instance.GetGroup(child.Name);
             SunSpecDynamicGroup[] groups;
             if (child.Count.IsSingle)
@@ -94,14 +102,28 @@ internal static class SunSpecDynamicProperties
         => subject.TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("The subject is not attached to a subject graph with a registry.");
 
-    private static void AddValueProperty(RegisteredSubject registered, string name, Type type, Attribute[] attributes)
+    // Checked before adding any property, because a property added under a used name would replace the existing one's metadata.
+    private static void EnsureNamesAreFree(RegisteredSubject registered, SunSpecGroupDefinition group, List<SunSpecPropertyPoint> points)
     {
-        registered.AddProperty(
-            name,
-            type,
-            subject => ((ISunSpecDynamicSubject)subject).Values.GetValueOrDefault(name),
-            (subject, value) => ((ISunSpecDynamicSubject)subject).Values[name] = value,
-            attributes);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var propertyNames = points
+            .Select(point => point.Point.Name)
+            .Concat(group.Groups.Select(child => SunSpecNames.ToPascalCase(child.Name)));
+
+        foreach (var name in propertyNames)
+        {
+            if (!names.Add(name) || registered.TryGetProperty(name) is not null)
+            {
+                throw new InvalidOperationException($"The property {name} of group {group.Name} is already defined on {registered.Subject.GetType().Name}.");
+            }
+        }
+    }
+
+    private static void AddValueProperty(RegisteredSubject registered, string name, Type type, object? initialValue, Attribute[] attributes)
+    {
+        // A reference write is atomic, so readers on other threads never see a torn value.
+        var holder = new StrongBox<object?>(initialValue);
+        registered.AddProperty(name, type, _ => holder.Value, (_, value) => holder.Value = value, attributes);
     }
 
     private static ModbusRegisterAttribute CreateRegisterAttribute(SunSpecPointMap map, int offset, string? scaleFactorProperty) => new(offset, map.DataType)

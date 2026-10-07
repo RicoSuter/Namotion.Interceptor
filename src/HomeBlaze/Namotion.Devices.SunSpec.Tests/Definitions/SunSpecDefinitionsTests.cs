@@ -74,4 +74,41 @@ public class SunSpecDefinitionsTests
         // Act & Assert
         Assert.Throws<JsonException>(() => SunSpecDefinitions.Parse(new MemoryStream(Encoding.UTF8.GetBytes(json))));
     }
+
+    [Theory]
+    [InlineData("""{ "name": "Title", "type": "uint16", "size": 1 }""", "", "point Title in group vendor of model 64999 uses the reserved property name Title")]
+    [InlineData("""{ "name": "ModelIdRegister", "type": "uint16", "size": 1 }""", "", "reserved property name ModelIdRegister")]
+    [InlineData("""{ "name": "W", "type": "int16", "size": 1 }, { "name": "W", "type": "int16", "size": 1 }""", "", "point W in group vendor of model 64999 uses the property name W more than once")]
+    [InlineData("""{ "name": "Channel", "type": "uint16", "size": 1 }""", """{ "name": "channel", "points": [ { "name": "A", "type": "uint16", "size": 1 } ] }""", "group channel in group vendor of model 64999 uses the property name Channel more than once")]
+    [InlineData("", """{ "name": "channel", "points": [ { "name": "Index", "type": "uint16", "size": 1 } ] }""", "point Index in group channel of model 64999 uses the reserved property name Index")]
+    public void WhenAPropertyNameCollides_ThenParsingFailsNamingIt(string points, string group, string expectedMessage)
+    {
+        // Arrange
+        var json = $$"""
+            { "id": 64999, "group": { "name": "vendor", "points": [
+                { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 }{{(points.Length > 0 ? ", " + points : "")}} ],
+              "groups": [ {{group}} ] } }
+            """;
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidDataException>(() => SunSpecDefinitions.Parse(new MemoryStream(Encoding.UTF8.GetBytes(json))));
+        Assert.Contains(expectedMessage, exception.Message);
+    }
+
+    [Fact]
+    public void WhenPadPointsShareAName_ThenParsingSucceeds()
+    {
+        // Arrange
+        const string json = """
+            { "id": 64999, "group": { "name": "vendor", "points": [
+                { "name": "ID", "type": "uint16", "size": 1 }, { "name": "L", "type": "uint16", "size": 1 },
+                { "name": "Pad", "type": "pad", "size": 1 }, { "name": "Pad", "type": "pad", "size": 1 } ] } }
+            """;
+
+        // Act
+        var definition = SunSpecDefinitions.Parse(new MemoryStream(Encoding.UTF8.GetBytes(json)));
+
+        // Assert
+        Assert.Equal(4, definition.Group.Points.Count);
+    }
 }

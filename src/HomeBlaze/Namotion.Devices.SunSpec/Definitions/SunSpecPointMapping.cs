@@ -90,6 +90,11 @@ internal sealed class SunSpecPointMap
 }
 
 /// <summary>
+/// A point that becomes a property, with its register offset within its group.
+/// </summary>
+internal readonly record struct SunSpecPropertyPoint(SunSpecPointDefinition Point, int Offset, SunSpecPointMap Map);
+
+/// <summary>
 /// Maps SunSpec point definitions to Modbus registers and properties, shared by the generator and the dynamic models.
 /// </summary>
 internal static class SunSpecPointMapping
@@ -168,6 +173,29 @@ internal static class SunSpecPointMapping
         ["Tmh"] = new(StateUnit.Default, 3600m, null, true),
         ["Tmd"] = new(StateUnit.Default, 86400m, null, true)
     };
+
+    /// <summary>
+    /// Gets the points of <paramref name="group"/> that become properties: the mapped points, except the ID and L points
+    /// of a top-level group, which the model's own members cover.
+    /// </summary>
+    /// <exception cref="InvalidDataException">A point cannot be mapped, see <see cref="TryMap"/>.</exception>
+    public static List<SunSpecPropertyPoint> GetPropertyPoints(SunSpecGroupDefinition group, bool isTopLevel)
+    {
+        var result = new List<SunSpecPropertyPoint>(group.Points.Count);
+        var offset = 0;
+        for (var index = 0; index < group.Points.Count; index++)
+        {
+            var point = group.Points[index];
+            var pointOffset = offset;
+            offset += point.Size;
+            if ((!isTopLevel || index >= 2) && TryMap(point) is { } map)
+            {
+                result.Add(new SunSpecPropertyPoint(point, pointOffset, map));
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// Maps a point, or returns <c>null</c> for points without a value mapping (<c>pad</c>, <c>ipv6addr</c>).
