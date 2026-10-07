@@ -7,11 +7,12 @@ namespace Namotion.Devices.SunSpec.Generator;
 /// </summary>
 public static class SunSpecCodeGenerator
 {
-    // Types the library defines by hand; a generated name must not collide with them.
-    private static readonly string[] ReservedTypeNames =
+    // Types written by hand in the library (some by later work), outside the generated files. Together with the
+    // Definitions types the generated files import, a generated type must not reuse their names.
+    private static readonly string[] HandWrittenTypeNames =
     [
-        "ISunSpecModel", "SunSpecDevice", "SunSpecUnit", "SunSpecLogicalDevice", "SunSpecUnknownModel",
-        "SunSpecDynamicModel", "SunSpecDynamicGroup", "SunSpecModelFactory"
+        "ISunSpecModel", "ISunSpecGroupOwner", "SunSpecGroups", "SunSpecDevice", "SunSpecUnit", "SunSpecLogicalDevice",
+        "SunSpecUnknownModel", "SunSpecDynamicModel", "SunSpecDynamicGroup", "SunSpecModelFactory"
     ];
 
     /// <summary>
@@ -19,14 +20,22 @@ public static class SunSpecCodeGenerator
     /// </summary>
     public static IReadOnlyDictionary<string, string> Generate()
     {
-        var overrides = SunSpecGeneratorOverrides.Load();
         var definitions = SunSpecDefinitions.GetBuiltInModelIds()
-            .Where(modelId => !overrides.ExcludedModels.Contains(modelId))
             .Select(modelId => SunSpecDefinitions.TryGetBuiltIn(modelId)!)
             .ToArray();
 
-        var plans = CreatePlans(definitions, overrides);
-        var typeNames = new HashSet<string>(ReservedTypeNames, StringComparer.Ordinal);
+        return Generate(definitions, SunSpecGeneratorOverrides.Load());
+    }
+
+    /// <summary>
+    /// Generates every file for <paramref name="definitions"/>, except the excluded ones, keyed by file name.
+    /// </summary>
+    /// <exception cref="InvalidDataException">A definition or the overrides cannot be generated.</exception>
+    internal static IReadOnlyDictionary<string, string> Generate(IReadOnlyList<SunSpecModelDefinition> definitions, SunSpecGeneratorOverrides overrides)
+    {
+        var included = definitions.Where(definition => !overrides.ExcludedModels.Contains(definition.Id)).ToArray();
+        var plans = CreatePlans(included, overrides);
+        var typeNames = GetReservedTypeNames();
         var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (var plan in plans)
         {
@@ -37,6 +46,17 @@ public static class SunSpecCodeGenerator
         return files;
     }
 
+    private static HashSet<string> GetReservedTypeNames()
+    {
+        var definitionsNamespace = typeof(SunSpecModelDefinition).Namespace;
+        var names = new HashSet<string>(HandWrittenTypeNames, StringComparer.Ordinal);
+        names.UnionWith(typeof(SunSpecModelDefinition).Assembly.GetTypes()
+            .Where(type => type.Namespace == definitionsNamespace && !type.IsNested)
+            .Select(type => type.Name));
+
+        return names;
+    }
+
     private static List<SunSpecClassPlan> CreatePlans(IReadOnlyList<SunSpecModelDefinition> definitions, SunSpecGeneratorOverrides overrides)
     {
         var definitionsById = definitions.ToDictionary(definition => definition.Id);
@@ -45,51 +65,69 @@ public static class SunSpecCodeGenerator
 
         foreach (var classOverride in overrides.Classes)
         {
-            var representative = definitionsById[classOverride.Representative ?? classOverride.Models.Single()];
-            foreach (var modelId in classOverride.Models)
+            var representativeId = GetRepresentativeId(classOverride);
+            var models = classOverride.Models.Select(modelId => GetClassModel(classOverride, modelId, definitionsById, overrides)).ToArray();
+            var representative = definitionsById[representativeId];
+            foreach (var model in models)
             {
-                if (!assignedModels.Add(modelId))
+                if (!assignedModels.Add(model.Id))
                 {
-                    throw new InvalidDataException($"Model {modelId} is assigned to more than one class.");
+                    throw new InvalidDataException($"Model {model.Id} is assigned to more than one class.");
                 }
 
-                EnsureSameLayout(representative.Group, definitionsById[modelId].Group, modelId);
+                SunSpecFamilyLayout.EnsureSameLayout(representative, model);
             }
 
-            plans.Add(new SunSpecClassPlan(classOverride.Name, classOverride.Models, representative));
+            plans.Add(new SunSpecClassPlan(CSharpText.ToIdentifier(classOverride.Name), models, representative));
         }
 
         foreach (var definition in definitions.Where(definition => !assignedModels.Contains(definition.Id)))
         {
-            plans.Add(new SunSpecClassPlan($"SunSpecModel{definition.Id}", [definition.Id], definition));
+            plans.Add(new SunSpecClassPlan($"SunSpecModel{definition.Id}", [definition], definition));
         }
 
         return plans.OrderBy(plan => plan.ModelIds[0]).ToList();
     }
 
-    private static void EnsureSameLayout(SunSpecGroupDefinition expected, SunSpecGroupDefinition actual, int modelId)
+    private static int GetRepresentativeId(SunSpecClassOverride classOverride)
     {
-        var isSame = expected.Points.Count == actual.Points.Count &&
-                     expected.Groups.Count == actual.Groups.Count &&
-                     expected.Count == actual.Count &&
-                     expected.Points.Zip(actual.Points).All(pair => pair.First.Type == pair.Second.Type && pair.First.Size == pair.Second.Size);
-
-        if (!isSame)
+        if (classOverride.Models.Count == 0)
         {
-            throw new InvalidDataException($"Model {modelId} does not share the layout of its class representative in group {expected.Name}.");
+            throw new InvalidDataException($"Class {classOverride.Name} in overrides.json lists no models.");
         }
 
-        foreach (var (expectedGroup, actualGroup) in expected.Groups.Zip(actual.Groups))
+        if (classOverride.Representative is not { } representative)
         {
-            EnsureSameLayout(expectedGroup, actualGroup, modelId);
+            return classOverride.Models.Count == 1
+                ? classOverride.Models[0]
+                : throw new InvalidDataException($"Class {classOverride.Name} in overrides.json lists several models but no representative.");
         }
+
+        return classOverride.Models.Contains(representative)
+            ? representative
+            : throw new InvalidDataException($"The representative {representative} of class {classOverride.Name} in overrides.json is not one of its models.");
+    }
+
+    private static SunSpecModelDefinition GetClassModel(
+        SunSpecClassOverride classOverride, int modelId, Dictionary<int, SunSpecModelDefinition> definitionsById, SunSpecGeneratorOverrides overrides)
+    {
+        if (overrides.ExcludedModels.Contains(modelId))
+        {
+            throw new InvalidDataException($"Class {classOverride.Name} in overrides.json lists model {modelId}, which is excluded.");
+        }
+
+        return definitionsById.TryGetValue(modelId, out var definition)
+            ? definition
+            : throw new InvalidDataException($"Class {classOverride.Name} in overrides.json lists model {modelId}, which has no definition.");
     }
 }
 
 /// <summary>
-/// One generated model class and the model IDs it represents.
+/// One generated model class: the models it represents and the representative whose layout it is generated from.
 /// </summary>
-internal sealed record SunSpecClassPlan(string ClassName, IReadOnlyList<int> ModelIds, SunSpecModelDefinition Definition)
+internal sealed record SunSpecClassPlan(string ClassName, IReadOnlyList<SunSpecModelDefinition> Models, SunSpecModelDefinition Definition)
 {
-    public bool IsFamily => ModelIds.Count > 1;
+    public IReadOnlyList<int> ModelIds { get; } = Models.Select(model => model.Id).ToArray();
+
+    public bool IsFamily => Models.Count > 1;
 }

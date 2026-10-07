@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Devices.SunSpec.Definitions;
@@ -33,7 +34,7 @@ internal static class SunSpecClassWriter
     private sealed record AncestorInfo(string ClassName, SunSpecGroupDefinition Group);
 
     // Ancestors start with the direct parent, which the generated code reaches as Parent, then Parent.Parent and so on.
-    private sealed record GroupPlan(SunSpecGroupDefinition Definition, string ClassName, string ParentClassName, IReadOnlyList<AncestorInfo> Ancestors, string ModelIds);
+    private sealed record GroupPlan(SunSpecGroupDefinition Definition, string ClassName, string ParentClassName, IReadOnlyList<AncestorInfo> Ancestors, string ModelsText);
 
     private sealed record EnumPlan(string Name, SunSpecPointDefinition Point, SunSpecPointMap Map);
 
@@ -131,15 +132,20 @@ internal static class SunSpecClassWriter
     {
         var top = plan.Definition.Group;
         var className = plan.ClassName;
-        var modelIds = string.Join(", ", plan.ModelIds);
+        if (top.Points.Count < 2 || top.Points[0].Name != "ID" || top.Points[1].Name != "L")
+        {
+            throw new InvalidDataException($"Model {plan.Definition.Id} does not start with the ID and L points.");
+        }
+
         AddTypeName(state.TypeNames, className);
 
+        var modelsText = (plan.IsFamily ? "models " : "model ") + string.Join(", ", plan.ModelIds);
         var scope = new OwnerScope(className, ModelMembers, []);
         var points = CollectPoints(top, isTopLevel: true, scope, state);
-        var groups = CollectGroups(top, className, scope, [new AncestorInfo(className, top)], state, modelIds);
+        var groups = CollectGroups(top, className, scope, [new AncestorInfo(className, top)], state, modelsText);
 
         writer.Line();
-        writer.Summary($"SunSpec model {modelIds}: {CSharpText.XmlText(Label(top))}.{Description(top)}");
+        writer.Summary(ModelSummary(plan));
         writer.Line("[InterceptorSubject]");
         writer.Line($"public partial class {className} : ISunSpecModel, ITitleProvider{(groups.Count > 0 ? ", ISunSpecGroupOwner" : "")}");
         writer.Open();
@@ -165,9 +171,7 @@ internal static class SunSpecClassWriter
         writer.Line();
         writer.Line("/// <inheritdoc />");
         writer.Line("public int Length { get; }");
-        writer.Line();
-        writer.Line("/// <inheritdoc />");
-        writer.Line($"public string Title => {CSharpText.Literal(Label(top))};");
+        WriteModelTitle(writer, plan);
         writer.Line();
         writer.Line("/// <inheritdoc />");
         writer.Line("[ModbusRegister(0, ModbusDataType.U16, Access = ModbusAccess.ReadOnly)]");
@@ -178,13 +182,49 @@ internal static class SunSpecClassWriter
         writer.Close();
     }
 
+    // A family's description is specific to its representative, so only single models carry one.
+    private static string ModelSummary(SunSpecClassPlan plan)
+    {
+        var top = plan.Definition.Group;
+        if (!plan.IsFamily)
+        {
+            return $"SunSpec model {plan.Definition.Id}: {CSharpText.XmlText(Label(top))}.{Description(top)}";
+        }
+
+        var members = plan.Models.Select(model => $"{model.Id} ({CSharpText.XmlText(Label(model.Group))})");
+        return $"SunSpec models {string.Join(", ", members)}.";
+    }
+
+    // A family returns the label of the model it was created for; the representative's label is the fallback.
+    private static void WriteModelTitle(CodeWriter writer, SunSpecClassPlan plan)
+    {
+        var representativeTitle = CSharpText.Literal(Label(plan.Definition.Group));
+        writer.Line();
+        writer.Line("/// <inheritdoc />");
+        if (!plan.IsFamily)
+        {
+            writer.Line($"public string Title => {representativeTitle};");
+            return;
+        }
+
+        writer.Line("public string Title => ModelId switch");
+        writer.Open();
+        foreach (var model in plan.Models.Where(model => model.Id != plan.Definition.Id))
+        {
+            writer.Line($"{model.Id} => {CSharpText.Literal(Label(model.Group))},");
+        }
+
+        writer.Line($"_ => {representativeTitle}");
+        writer.Close(";");
+    }
+
     private static void WriteGroupClass(CodeWriter writer, GroupPlan plan, FileState state)
     {
         var group = plan.Definition;
         var scope = new OwnerScope(plan.ClassName[..^"Group".Length], GroupMembers, plan.Ancestors);
         var points = CollectPoints(group, isTopLevel: false, scope, state);
         var childAncestors = plan.Ancestors.Prepend(new AncestorInfo(plan.ClassName, group)).ToArray();
-        var groups = CollectGroups(group, plan.ClassName, scope, childAncestors, state, plan.ModelIds);
+        var groups = CollectGroups(group, plan.ClassName, scope, childAncestors, state, plan.ModelsText);
 
         var interfaces = new List<string> { "IModbusBaseAddressProvider", "ITitleProvider" };
         if (scope.ProvidedScaleFactors.Count > 0)
@@ -198,7 +238,7 @@ internal static class SunSpecClassWriter
         }
 
         writer.Line();
-        writer.Summary($"{CSharpText.XmlText(Label(group))} group of SunSpec model {plan.ModelIds}.{Description(group)}");
+        writer.Summary($"{CSharpText.XmlText(Label(group))} group of SunSpec {plan.ModelsText}.{Description(group)}");
         writer.Line("[InterceptorSubject]");
         writer.Line($"public partial class {plan.ClassName} : {string.Join(", ", interfaces)}");
         writer.Open();
@@ -314,19 +354,19 @@ internal static class SunSpecClassWriter
 
     private static List<GroupPropertyPlan> CollectGroups(
         SunSpecGroupDefinition group, string ownerClassName, OwnerScope scope,
-        IReadOnlyList<AncestorInfo> childAncestors, FileState state, string modelIds)
+        IReadOnlyList<AncestorInfo> childAncestors, FileState state, string modelsText)
     {
         var groups = new List<GroupPropertyPlan>();
         foreach (var child in group.Groups)
         {
-            var propertyName = SunSpecNames.ToPascalCase(child.Name);
+            var propertyName = CSharpText.ToIdentifier(SunSpecNames.ToPascalCase(child.Name));
             AddMember(scope.Members, propertyName, scope.Prefix);
 
             var className = $"{scope.Prefix}{propertyName}Group";
             AddTypeName(state.TypeNames, className);
 
             groups.Add(new GroupPropertyPlan(propertyName, child.Name, className, child.Count.IsSingle, CSharpText.XmlText(child.Description ?? Label(child))));
-            state.GroupClasses.Add(new GroupPlan(child, className, ownerClassName, childAncestors, modelIds));
+            state.GroupClasses.Add(new GroupPlan(child, className, ownerClassName, childAncestors, modelsText));
         }
 
         return groups;
@@ -495,24 +535,51 @@ internal static class SunSpecClassWriter
         for (var index = 0; index < plan.Point.Symbols.Count; index++)
         {
             var symbol = plan.Point.Symbols[index];
-            var name = CSharpText.ToEnumMemberName(symbol.Name);
-            if (!memberNames.Add(name))
-            {
-                name = $"{name}_{CSharpText.Integer(symbol.Value)}";
-                memberNames.Add(name);
-            }
-
+            var name = GetEnumMemberName(plan.Name, symbol, memberNames);
             if (index > 0)
             {
                 writer.Line();
             }
 
-            writer.Summary(CSharpText.XmlText(symbol.Label ?? symbol.Description ?? symbol.Name));
+            if (GetSymbolDocumentation(symbol) is { } documentation)
+            {
+                writer.Summary(CSharpText.XmlText(documentation));
+            }
+
             writer.Line($"{name} = {EnumValue(plan.Name, symbol, isFlags, is16Bit)},");
         }
 
         writer.Close();
     }
+
+    // A member name used by an earlier symbol gets the symbol value appended.
+    private static string GetEnumMemberName(string enumName, SunSpecSymbolDefinition symbol, HashSet<string> memberNames)
+    {
+        var name = CSharpText.ToEnumMemberName(symbol.Name);
+        if (memberNames.Add(name))
+        {
+            return name;
+        }
+
+        var fallbackName = $"{name}_{CSharpText.Integer(symbol.Value)}";
+        return memberNames.Add(fallbackName)
+            ? fallbackName
+            : throw new InvalidDataException($"Symbol {symbol.Name} of {enumName} collides as {name} and as {fallbackName} with other members.");
+    }
+
+    // Returns the label or else the description, or null when neither adds anything to the symbol name.
+    private static string? GetSymbolDocumentation(SunSpecSymbolDefinition symbol)
+    {
+        if (IsDocumentation(symbol.Label, symbol.Name))
+        {
+            return symbol.Label;
+        }
+
+        return IsDocumentation(symbol.Description, symbol.Name) ? symbol.Description : null;
+    }
+
+    private static bool IsDocumentation([NotNullWhen(true)] string? text, string name)
+        => !string.IsNullOrWhiteSpace(text) && text.Trim() != name;
 
     // A bit field symbol value is a bit number; an enumeration symbol value is the raw value.
     private static string EnumValue(string enumName, SunSpecSymbolDefinition symbol, bool isFlags, bool is16Bit)

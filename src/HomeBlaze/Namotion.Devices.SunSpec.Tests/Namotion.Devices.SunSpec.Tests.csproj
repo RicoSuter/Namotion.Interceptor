@@ -27,7 +27,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Devices.SunSpec\Namotion.Devices.SunSpec.csproj" />
-    <ProjectReference Include="..\Namotion.Devices.SunSpec.Generator\Namotion.Devices.SunSpec.Generator.csproj" />
+    <!-- Aliased because the generator compiles the library's internal Definitions types too. -->
+    <ProjectReference Include="..\Namotion.Devices.SunSpec.Generator\Namotion.Devices.SunSpec.Generator.csproj" Aliases="SunSpecGenerator" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
