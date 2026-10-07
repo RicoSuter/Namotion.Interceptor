@@ -115,7 +115,7 @@ public class SunSpecDeviceIntegrationTests
         await using var host = await HostedSunSpecDevice.StartAsync(server.Port);
 
         // Assert
-        SunSpecModel701? GetMeasurement() => host.Device.Units.GetValueOrDefault(1)?.Devices[0].Models.OfType<SunSpecModel701>().FirstOrDefault();
+        SunSpecDerAcMeasurement? GetMeasurement() => host.Device.Units.GetValueOrDefault(1)?.Devices[0].Models.OfType<SunSpecDerAcMeasurement>().FirstOrDefault();
         await AsyncTestHelpers.WaitUntilAsync(() => GetMeasurement()?.TotWhInj == 150000m, WaitTimeout, message: "The 64-bit energy should be read.");
         var measurement = GetMeasurement()!;
         Assert.Equal(9800m, measurement.W);

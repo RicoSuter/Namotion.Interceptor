@@ -16,7 +16,7 @@ public class SunSpecModelCompletionTests
     public void WhenTheModelHasItsFullLength_ThenNoPropertyIsUnavailable()
     {
         // Arrange
-        var model = TestRoot.Attach(new SunSpecModel121(ModelAddress, 30));
+        var model = TestRoot.Attach(new SunSpecBasicSettings(ModelAddress, 30));
 
         // Act
         var unavailable = SunSpecDiscovery.GetUnavailableProperties(model);
@@ -29,15 +29,15 @@ public class SunSpecModelCompletionTests
     public void WhenAScaleFactorIsBeyondTheReportedLength_ThenThePropertiesItScalesAreUnavailableToo()
     {
         // Arrange: model 121 is 30 registers long; at 29 its last point, ECPNomHz_SF, is missing.
-        var model = TestRoot.Attach(new SunSpecModel121(ModelAddress, 29));
+        var model = TestRoot.Attach(new SunSpecBasicSettings(ModelAddress, 29));
 
         // Act
         var unavailable = SunSpecDiscovery.GetUnavailableProperties(model);
 
         // Assert
         Assert.Equal(2, unavailable.Count);
-        Assert.Contains(new PropertyReference(model, nameof(SunSpecModel121.ECPNomHz_SF)), unavailable);
-        Assert.Contains(new PropertyReference(model, nameof(SunSpecModel121.ECPNomHz)), unavailable);
+        Assert.Contains(new PropertyReference(model, nameof(SunSpecBasicSettings.ECPNomHz_SF)), unavailable);
+        Assert.Contains(new PropertyReference(model, nameof(SunSpecBasicSettings.ECPNomHz)), unavailable);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class SunSpecModelCompletionTests
     public void WhenTheModelIdRegisterHoldsAPreviousPoll_ThenTheDiscoveredModelIdReplacesIt()
     {
         // Arrange
-        var model = TestRoot.Attach(new SunSpecModel121(ModelAddress, 30));
+        var model = TestRoot.Attach(new SunSpecBasicSettings(ModelAddress, 30));
         model.ModelIdRegister = 122;
 
         // Act

@@ -13,7 +13,7 @@ A SunSpec device describes itself with a chain of models after the "SunS" marker
 
 - **Units**: one entry per unit ID. A meter or battery can sit behind the same connection under another unit ID.
 - **Logical devices**: each Common model (model 1) starts a new device, so an inverter and the meters connected to it appear as separate devices with their own manufacturer, model and serial number.
-- **Models**: every SunSpec model of the official catalog has a typed class. Inverters (101 to 103, 111 to 113) and meters (201 to 204, 211 to 214) report power and energy, storage (713) reports the battery level.
+- **Models**: every SunSpec model of the official catalog has a typed class. Inverters (101 to 103, 111 to 113), the DER AC measurement (701) and meters (201 to 204, 211 to 214) report power and energy; storage (713) and batteries (802) report the battery level. Common models such as nameplate (120), settings (121), status (122), batteries (802 to 805) and weather sensors (302, 307) have named classes, all others are `SunSpecModel{Id}`.
 
 Values the device does not implement are shown as empty, and so are registers beyond the length a model reports and the values scaled by them. Percentages are fractions from 0 to 1 (shown as percent), and durations (`Secs`, `mSecs` and similar units) are time spans.
 

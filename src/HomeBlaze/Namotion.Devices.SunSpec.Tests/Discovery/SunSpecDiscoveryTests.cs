@@ -176,11 +176,11 @@ public class SunSpecDiscoveryTests
         ISunSpecModel[] GetModels() => device.Units.GetValueOrDefault(1)?.Devices[0].Models ?? [];
         await AsyncTestHelpers.WaitUntilAsync(
             () => device.IsConnected &&
-                  GetModels().OfType<SunSpecModel121>().FirstOrDefault()?.WMax == 5000m &&
+                  GetModels().OfType<SunSpecBasicSettings>().FirstOrDefault()?.WMax == 5000m &&
                   GetModels().OfType<SunSpecInverter>().FirstOrDefault()?.W == 1500m,
             WaitTimeout,
             message: "The shortened model and the model after it should be read.");
-        var settings = GetModels().OfType<SunSpecModel121>().Single();
+        var settings = GetModels().OfType<SunSpecBasicSettings>().Single();
         Assert.Null(settings.ECPNomHz);
         Assert.Null(settings.ECPNomHz_SF);
         Assert.Equal(ServiceStatus.Running, device.Status);
