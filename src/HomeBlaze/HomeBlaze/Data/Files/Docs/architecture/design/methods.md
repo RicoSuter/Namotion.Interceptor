@@ -8,7 +8,7 @@ status: Partial
 
 ## Overview [Implemented] / [Planned]
 
-Subjects expose executable behavior through methods marked with `[Operation]` (state-changing) or `[Query]` (read-only). These are first-class citizens of the knowledge graph — discoverable via registry, invocable from the UI, MCP tools, and protocol methods (e.g., OPC UA).
+Subjects expose executable behavior through methods marked with `[Operation]` (state-changing) or `[Query]` (read-only). These are first-class citizens of the knowledge graph: discoverable via registry, invocable from the UI, MCP tools, and protocol methods (e.g., OPC UA).
 
 ## Current State [Implemented]
 
@@ -40,7 +40,7 @@ Operations invoked on a remote instance (e.g., operator on central UNS invokes a
 
 ### Design Goals
 
-- **Every invocation executes.** Operations are not deduplicated or last-writer-wins like property sync. Two operators invoking the same operation from different UNS instances must both execute — they are separate commands, not conflicting state.
+- **Every invocation executes.** Operations are not deduplicated or last-writer-wins like property sync. Two operators invoking the same operation from different UNS instances must both execute: they are separate commands, not conflicting state.
 - **Results flow back to the caller.** The invoking instance receives the return value or error from the owning instance.
 - **Operations map to protocol methods.** OPC UA methods on server subjects should proxy to the underlying operation.
 
@@ -59,8 +59,8 @@ For most operations, at-most-once (fail on disconnect) is acceptable. For critic
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Method attributes | `[Operation]` (state-changing) and `[Query]` (read-only) | Clear semantic distinction enables different authorization defaults and UI treatment |
-| Migration to Namotion.Interceptor.Reflection | Planned — attributes and discovery to move into dedicated package | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
-| RPC semantics | Execute-all, not last-writer-wins | Operations are commands, not state — every invocation matters |
+| Migration to Namotion.Interceptor.Reflection | Planned: attributes and discovery to move into dedicated package | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
+| RPC semantics | Execute-all, not last-writer-wins | Operations are commands, not state: every invocation matters |
 
 ## Open Questions
 

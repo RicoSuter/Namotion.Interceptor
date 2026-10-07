@@ -12,9 +12,9 @@ This document describes the target architecture of HomeBlaze using the arc42 tem
 
 HomeBlaze is a modular .NET platform for building real-time digital twins: trackable object graphs that mirror physical or virtual systems. Built on Namotion.Interceptor, it provides automatic property interception, change tracking, and a Blazor-based operator UI out of the box.
 
-Each HomeBlaze instance acts as a digital twin of its domain — a live model that stays synchronized with the physical or virtual system it represents.
+Each HomeBlaze instance acts as a digital twin of its domain: a live model that stays synchronized with the physical or virtual system it represents.
 
-Any domain — industrial plants, smart buildings, IoT networks — can be modeled as **subjects** (intercepted objects with tracked properties and operations). HomeBlaze hosts these subjects, connects them to external systems via protocol connectors (OPC UA, MQTT, WebSocket), and exposes them through a **Unified Namespace (UNS)** — a single, aggregated view of all operational data.
+Any domain (industrial plants, smart buildings, IoT networks) can be modeled as **subjects** (intercepted objects with tracked properties and operations). HomeBlaze hosts these subjects, connects them to external systems via protocol connectors (OPC UA, MQTT, WebSocket), and exposes them through a **Unified Namespace (UNS)**: a single, aggregated view of all operational data.
 
 On top of the UNS, HomeBlaze builds a **knowledge graph** that extends live state with property history, documents, metadata, and AI-queryable structure. Both human operators and AI agents can browse, query, and act on this knowledge graph.
 
@@ -22,11 +22,11 @@ On top of the UNS, HomeBlaze builds a **knowledge graph** that extends live stat
 
 | Priority | Requirement |
 |----------|------------|
-| 1 | **Unified Namespace** — All subjects across all domains accessible through a single, browsable graph with typed properties, metadata, and operations |
-| 2 | **Horizontal Scaling** — Multiple instances each own a domain slice and sync upward to a central instance via WebSocket |
-| 3 | **High Availability** — Active-standby pairs with automatic failover via device connection promotion |
-| 4 | **AI-Ready Knowledge Graph** — Browsable subjects, queryable properties, executable operations, property history, documents, and reactive change streams |
-| 5 | **Same Binary Everywhere** — Role determined by loaded plugins and connector configuration, not separate binaries |
+| 1 | **Unified Namespace**: All subjects across all domains accessible through a single, browsable graph with typed properties, metadata, and operations |
+| 2 | **Horizontal Scaling**: Multiple instances each own a domain slice and sync upward to a central instance via WebSocket |
+| 3 | **High Availability**: Active-standby pairs with automatic failover via device connection promotion |
+| 4 | **AI-Ready Knowledge Graph**: Browsable subjects, queryable properties, executable operations, property history, documents, and reactive change streams |
+| 5 | **Same Binary Everywhere**: Role determined by loaded plugins and connector configuration, not separate binaries |
 
 ### Stakeholders
 
@@ -113,19 +113,19 @@ HomeBlaze owns the knowledge graph and its synchronization, including:
 - Metadata and annotations (property attributes, user-defined dynamic attributes)
 - Documents (storage subjects)
 - Operations (methods on subjects, proxied across instances)
-- Events and messaging (domain events published by subjects, system-wide message bus — see [Messages](design/messages.md))
+- Events and messaging (domain events published by subjects, system-wide message bus; see [Messages](design/messages.md))
 - AI agents (built-in subjects and external via MCP)
 
 It does not currently own:
 
 - Device firmware or PLC programs
-- Alarm management (planned as a future building block — see [Alarms](design/alarms.md))
+- Alarm management (planned as a future building block; see [Alarms](design/alarms.md))
 
 ---
 
 ## 4. Building Block View
 
-### Level 1 — Top-Level Building Blocks
+### Level 1: Top-Level Building Blocks
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -155,11 +155,11 @@ It does not currently own:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-Every HomeBlaze instance contains the same building blocks. What makes a satellite different from a central instance is which plugins are loaded and which connectors are active. All building blocks above the core — connectors, agents, device subjects, domain logic, UI components — are delivered as plugins (NuGet packages).
+Every HomeBlaze instance contains the same building blocks. What makes a satellite different from a central instance is which plugins are loaded and which connectors are active. All building blocks above the core (connectors, agents, device subjects, domain logic, UI components) are delivered as plugins (NuGet packages).
 
 Detailed designs: [AI](design/ai.md), [History](design/history.md), [Messages](design/messages.md), [Methods](design/methods.md), [Plugins](design/plugins.md), [Security](design/security.md), [Observability](design/observability.md), [Storage](design/storage.md), [Deployment](design/deployment.md), [Scalability](design/scalability.md), [Resilience](design/resilience.md), [Upgrade and Migration](design/upgrade-and-migration.md), [System Testing](design/testing.md), [Audit](design/audit.md), [Alarms](design/alarms.md), [Versioning](design/versioning.md).
 
-### Level 2 — Knowledge Graph
+### Level 2: Knowledge Graph
 
 The knowledge graph is the central data structure. It unifies live state, history, metadata, documents, and operations into a single queryable model.
 
@@ -194,13 +194,13 @@ The **Unified Namespace (UNS)** is the live state layer: all subject properties 
 |-------|----------|--------|
 | Unified Namespace (live) | Typed properties, derived properties, metadata attributes, operations | Registry, MCP tools, connectors |
 | Time-Series Store | Property history, configurable retention | `get_property_history` MCP tool, plugin-based (see [History](design/history.md)) |
-| File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects — the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `query` + `invoke_method` |
+| File Storage | **Subject files** (`.json` with `$type`) are deserialized into typed subjects: the file is the persistence format. **Documents** (Markdown, PDFs, images, manuals) become document subjects visible as-is in the graph. See [Storage](design/storage.md) | Subject files via configuration system, documents via `query` + `invoke_method` |
 
-Subjects can also carry user-defined metadata — annotations, tags, and links to other subjects — stored as dynamic attributes on the registry. These are persisted in configuration files and reapplied on restart, allowing operators to enrich the knowledge graph without modifying subject code. See [Storage](design/storage.md) for details.
+Subjects can also carry user-defined metadata (annotations, tags, and links to other subjects) stored as dynamic attributes on the registry. These are persisted in configuration files and reapplied on restart, allowing operators to enrich the knowledge graph without modifying subject code. See [Storage](design/storage.md) for details.
 
 **How each consumer accesses the knowledge graph:**
 
-The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`), type listing (`list_types`), method discovery (`list_methods`), and method invocation (`invoke_method`) — usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) enriches these tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
+The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`), type listing (`list_types`), method discovery (`list_methods`), and method invocation (`invoke_method`); it is usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) enriches these tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
 
 | Consumer | Access Pattern |
 |----------|---------------|
@@ -209,9 +209,9 @@ The knowledge graph is accessed through two layers of MCP tools. The base layer 
 | Connectors | Read/write interceptors feed property changes in and out, operations map to protocol methods (e.g. OPC UA methods) |
 | WebSocket sync | SubjectUpdate messages replicate the subject graph and proxy operations between instances |
 
-### Level 2 — Connector Layer
+### Level 2: Connector Layer
 
-Connectors operate at two levels. The core `Namotion.Interceptor` packages provide protocol implementations (OPC UA sync, MQTT messaging, WebSocket replication). HomeBlaze wraps these as manageable subjects with configuration, lifecycle, and UI — and adds higher-level features like automatic device discovery.
+Connectors operate at two levels. The core `Namotion.Interceptor` packages provide protocol implementations (OPC UA sync, MQTT messaging, WebSocket replication). HomeBlaze wraps these as manageable subjects with configuration, lifecycle, and UI, and adds higher-level features like automatic device discovery.
 
 **Core connectors (Namotion.Interceptor)**
 
@@ -231,9 +231,9 @@ Connectors operate at two levels. The core `Namotion.Interceptor` packages provi
 
 All core connectors use the same interceptor pattern: inbound data from external systems is applied to subject properties with source tagging (to prevent feedback loops where a change echoes back to its origin), and outbound changes flow through a change queue that batches and distributes updates. See the [connectors documentation](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connectors.md) for protocol-level details.
 
-### Level 2 — Multi-Instance and High Availability
+### Level 2: Multi-Instance and High Availability
 
-Horizontal scaling and resilience use two complementary channels. **State sync** uses the WebSocket connector — a satellite syncs its full subject graph to the central instance; a standby syncs from its primary. Both use the SubjectUpdate protocol with Welcome snapshots for initial state and incremental updates for ongoing changes. **Event distribution** uses a message broker (e.g., MQTT) — subjects publish domain events to the broker, and any instance can subscribe. This keeps state replication (continuous, last-writer-wins) separate from event delivery (discrete, ordered, must not be lost). See [Messages](design/messages.md) for details.
+Horizontal scaling and resilience use two complementary channels. **State sync** uses the WebSocket connector: a satellite syncs its full subject graph to the central instance; a standby syncs from its primary. Both use the SubjectUpdate protocol with Welcome snapshots for initial state and incremental updates for ongoing changes. **Event distribution** uses a message broker (e.g., MQTT): subjects publish domain events to the broker, and any instance can subscribe. This keeps state replication (continuous, last-writer-wins) separate from event delivery (discrete, ordered, must not be lost). See [Messages](design/messages.md) for details.
 
 ```
 ┌──────────────────┐           ┌───────────────────┐
@@ -251,7 +251,7 @@ Horizontal scaling and resilience use two complementary channels. **State sync**
 | Satellite to Central | WebSocket client on satellite, server on central | State flows up, writes and operations flow down |
 | Primary to Standby | WebSocket server on primary, client on standby | Full state replication |
 
-On failover, the standby detects the primary is unreachable and performs a **fencing check** — it verifies it can still reach the field devices. This prevents false promotion during network partitions (if both primary and devices are unreachable, the standby assumes a network partition and does not promote). If fencing passes, the standby activates device connections, reads current device state to close any sync gap, and becomes the new primary. State converges because external devices are the authoritative source of truth — no distributed consensus is needed.
+On failover, the standby detects the primary is unreachable and performs a **fencing check**: it verifies it can still reach the field devices. This prevents false promotion during network partitions (if both primary and devices are unreachable, the standby assumes a network partition and does not promote). If fencing passes, the standby activates device connections, reads current device state to close any sync gap, and becomes the new primary. State converges because external devices are the authoritative source of truth: no distributed consensus is needed.
 
 ---
 
@@ -279,7 +279,7 @@ Satellite (Domain A)               Central                        Operator UI
        |                              |      to all consumers         |
 ```
 
-Incremental updates flow continuously — property values, structural changes (subjects added/removed via plug-and-play or auto-discovery), and operation invocations propagate across the topology. The full subject graph is live and reactive, changing dynamically as devices are discovered, plugins are loaded, or subjects are reconfigured.
+Incremental updates flow continuously: property values, structural changes (subjects added/removed via plug-and-play or auto-discovery), and operation invocations propagate across the topology. The full subject graph is live and reactive, changing dynamically as devices are discovered, plugins are loaded, or subjects are reconfigured.
 
 ### Write Path (Consumer to Device)
 
@@ -365,7 +365,7 @@ Built-in agents access the same tools directly (in-process) and can additionally
 
 ## 6. Scalability and Deployment
 
-HomeBlaze scales in stages. Each stage adds capability without redesigning what came before — same binary, same subjects, different configuration.
+HomeBlaze scales in stages. Each stage adds capability without redesigning what came before: same binary, same subjects, different configuration.
 
 ### Stage 1: Single Instance
 
@@ -455,19 +455,19 @@ The architecture is designed for the scales above but has not yet been load-test
 
 | Area | Current Behavior | Potential Bottleneck | Mitigation |
 |------|-----------------|---------------------|------------|
-| **Registry iteration** | `GetAllProperties()` walks the full object graph recursively | O(subjects × properties) — expensive for discovery, path traversal, and MCP queries | Index properties by type and path prefix; cache filtered property sets |
+| **Registry iteration** | `GetAllProperties()` walks the full object graph recursively | O(subjects × properties): expensive for discovery, path traversal, and MCP queries | Index properties by type and path prefix; cache filtered property sets |
 | **Path resolution** | `PathProviderBase.TryGetPropertyFromSegment()` scans all properties linearly | O(n) per path segment lookup | Build segment→property dictionary per subject on first access |
 | **Welcome snapshot** | `SubjectUpdate.CreateCompleteUpdate()` serializes the entire reachable graph into a single in-memory structure | Large memory allocation and serialization time for 100K+ properties | Chunked/streaming Welcome; compress wire format |
 | **Property filtering** | `IsPropertyIncluded()` called per property on every update, no caching | Repeated evaluation across multiple updates | Cache inclusion decisions per (property, processor) pair |
 | **Derived property cascades** | Single source write triggers recalculation of all transitive dependents | Deep dependency chains (A→B→C→D) cascade synchronously | Bounded propagation depth; lazy evaluation for deep chains |
 | **Global locks** | `SubjectRegistry._knownSubjects` and `LifecycleInterceptor._attachedSubjects` serialize lifecycle operations | Contention under high-concurrency structural changes (subject attach/detach) | Partition by subject subtree; use concurrent data structures |
-| **Change pipeline throughput** | Each connector has its own `ChangeQueueProcessor` with independent buffering (8ms default) and deduplication — connectors do not block each other | Individual slow sinks fall behind but don't affect others | Monitor per-connector queue depth; tune buffer time and batch size per workload |
+| **Change pipeline throughput** | Each connector has its own `ChangeQueueProcessor` with independent buffering (8ms default) and deduplication, so connectors do not block each other | Individual slow sinks fall behind but don't affect others | Monitor per-connector queue depth; tune buffer time and batch size per workload |
 
 These are potential bottlenecks identified from code analysis. Actual limits depend on hardware, change frequency, and graph shape. See [Scalability](design/scalability.md) for planned optimizations and [System Testing](design/testing.md) for the validation approach.
 
 For containerized environments, each HA pair maps to a StatefulSet with 2 replicas. Pod ordinal determines role (0 = primary, 1 = standby). Services route traffic to the primary pod via role labels. Headless services provide stable DNS for standby-to-primary connections.
 
-**Persistence model.** HomeBlaze does not persist live state — each instance recovers from its source of truth on restart. Satellites reconnect to field devices and re-read current values. Central instances receive Welcome snapshots from reconnecting satellites. Standbys receive Welcome snapshots from their primary. Only subject configuration (settings, topology) and time-series history are locally persisted. See [Storage](design/storage.md) for details.
+**Persistence model.** HomeBlaze does not persist live state: each instance recovers from its source of truth on restart. Satellites reconnect to field devices and re-read current values. Central instances receive Welcome snapshots from reconnecting satellites. Standbys receive Welcome snapshots from their primary. Only subject configuration (settings, topology) and time-series history are locally persisted. See [Storage](design/storage.md) for details.
 
 ---
 
@@ -485,12 +485,12 @@ For containerized environments, each HA pair maps to a StatefulSet with 2 replic
 | 8 | AI integration | Built-in agents (subjects) + external agents (MCP) | Two-mode model: in-process for automation, MCP for ad-hoc copilots |
 | 9 | MCP tool layering | `Namotion.Interceptor.Mcp` (base) + `HomeBlaze.AI` (rich) | Interceptor library stays usable independently; HomeBlaze adds domain-specific tools |
 | 10 | History | Plugin-based: abstractions (sink interface) + implementation (collector) | Any instance can optionally record history. Central UNS accumulates full history naturally via topology |
-| 11 | Documents | Subjects with Read/Write operations, linked via dynamic attributes | No special infrastructure — standard subject model |
+| 11 | Documents | Subjects with Read/Write operations, linked via dynamic attributes | No special infrastructure, standard subject model |
 | 12 | Plugin contract | Subject types only (NuGet packages) | Everything is a subject. No separate plugin interfaces |
-| 13 | Persistence | None for live state — recover from source of truth | External world is the persistence layer. Only configuration and history are locally persisted |
+| 13 | Persistence | None for live state: recover from source of truth | External world is the persistence layer. Only configuration and history are locally persisted |
 | 14 | Observability | OpenTelemetry + health subjects | Ops teams get standard tooling, AI agents can monitor the system itself |
 | 15 | Versioning | Plugins depend on stable abstractions packages, not host versions | Independent upgradeability |
-| 16 | No external database for live state | In-memory subject graph only; no graph DB or SQL DB | The in-memory graph is already the knowledge graph — reactive, typed, queryable. An external DB would duplicate state, add sync complexity, and introduce latency on the hot path. Recovery from source of truth eliminates the need for persistent live state. SQL/time-series databases are used only for history sinks |
+| 16 | No external database for live state | In-memory subject graph only; no graph DB or SQL DB | The in-memory graph is already the knowledge graph: reactive, typed, queryable. An external DB would duplicate state, add sync complexity, and introduce latency on the hot path. Recovery from source of truth eliminates the need for persistent live state. SQL/time-series databases are used only for history sinks |
 
 ---
 

@@ -23,7 +23,7 @@ The audit trail tracks who changed what and when across the knowledge graph. Thi
 
 - Must not significantly impact write path performance
 - Should work across instances (audit of cross-instance operation proxying)
-- AI agent actions need particular visibility — operators must be able to review what agents did and why
+- AI agent actions need particular visibility: operators must be able to review what agents did and why
 
 ## Open Questions
 

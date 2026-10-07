@@ -8,7 +8,7 @@ status: Planned
 
 ## Overview
 
-Individual connectors are tested via the `ConnectorTester` and integration tests at the Namotion.Interceptor layer. This document covers system-level testing of HomeBlaze deployments — verifying that full topologies (single node through multi-node HA) behave correctly under normal operation and failure conditions.
+Individual connectors are tested via the `ConnectorTester` and integration tests at the Namotion.Interceptor layer. This document covers system-level testing of HomeBlaze deployments, verifying that full topologies (single node through multi-node HA) behave correctly under normal operation and failure conditions.
 
 **This building block is planned but not yet implemented.**
 
@@ -16,8 +16,8 @@ Individual connectors are tested via the `ConnectorTester` and integration tests
 
 | Level | Tested By | Covered Here? |
 |-------|-----------|---------------|
-| Unit tests | xUnit, per project | No — standard .NET testing |
-| Connector resilience | `ConnectorTester` + `IChaosTarget` in Namotion.Interceptor | No — already tested at connector layer |
+| Unit tests | xUnit, per project | No: standard .NET testing |
+| Connector resilience | `ConnectorTester` + `IChaosTarget` in Namotion.Interceptor | No: already tested at connector layer |
 | Plugin / subject testing | Test helpers for plugin authors (see development docs) | No |
 | **System topology testing** | **HomeBlaze system tester** | **Yes** |
 | **Chaos testing** | **Fault injection across full topologies** | **Yes** |
@@ -66,11 +66,11 @@ The tester should support every deployment stage described in the [architecture 
 
 #### Chaos Testing
 
-Inspired by the `ConnectorTester` pattern — inject faults continuously while verifying system invariants:
+Inspired by the `ConnectorTester` pattern: inject faults continuously while verifying system invariants:
 
 | Fault | Injection |
 |-------|-----------|
-| Kill node | Hard process kill (SIGKILL equivalent) — no graceful shutdown |
+| Kill node | Hard process kill (SIGKILL equivalent), no graceful shutdown |
 | Disconnect node | Network-level disconnection (transport break, not process kill) |
 | Pause node | Freeze process (simulate GC pause, VM suspension, or CPU starvation) |
 | Storage unavailable | Storage backend returns errors on write |
@@ -85,7 +85,7 @@ During and after chaos, the tester verifies:
 | Invariant | Description |
 |-----------|-------------|
 | State convergence | After fault recovery, all instances converge to the same state (verified by comparing property values across nodes) |
-| No data loss (state) | Property values are not lost — they recover from source of truth (devices, peers) |
+| No data loss (state) | Property values are not lost; they recover from source of truth (devices, peers) |
 | Single primary | At most one primary per HA pair is active at any time (verified by checking device connection ownership) |
 | Event delivery | Events are delivered at least once to all subscribers (after broker recovery) |
 | Configuration consistency | Configuration files are not corrupted after faults |
@@ -137,7 +137,7 @@ In addition to functional correctness, the system tester should validate perform
 | Multi-connector independence | Attach multiple connectors under load, verify a slow connector does not block others |
 | Registry and path resolution | Measure `GetAllProperties()`, MCP `query`, and path segment lookup at each scale tier |
 
-Concrete performance targets should be established after initial baseline measurements — the goal of the first round is to understand where the actual limits are, not to hit predetermined numbers. See [Scalability](scalability.md) for known bottlenecks to validate.
+Concrete performance targets should be established after initial baseline measurements. The goal of the first round is to understand where the actual limits are, not to hit predetermined numbers. See [Scalability](scalability.md) for known bottlenecks to validate.
 
 ## Open Questions
 
@@ -146,4 +146,4 @@ Concrete performance targets should be established after initial baseline measur
 - Should simulated devices be shared (all nodes see same device) or per-satellite?
 - How long to wait for convergence after fault recovery (fixed timeout vs. polling with adaptive timeout)?
 - Should the tester produce a report or just pass/fail?
-- Integration with CI — can multi-node tests run in GitHub Actions (multiple processes, network simulation)?
+- Integration with CI: can multi-node tests run in GitHub Actions (multiple processes, network simulation)?

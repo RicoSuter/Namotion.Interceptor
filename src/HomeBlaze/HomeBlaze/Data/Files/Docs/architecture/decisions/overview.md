@@ -6,7 +6,7 @@ position: 3
 
 # Architecture Decisions
 
-This folder contains Architecture Decision Records (ADRs) — short documents capturing significant design choices with their context and consequences.
+This folder contains Architecture Decision Records (ADRs): short documents capturing significant design choices with their context and consequences.
 
 ADRs are created during implementation when a non-obvious decision is made. Each record follows this structure:
 

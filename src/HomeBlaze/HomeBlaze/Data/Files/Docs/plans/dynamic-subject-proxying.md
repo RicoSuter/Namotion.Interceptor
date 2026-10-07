@@ -23,15 +23,15 @@ When a satellite syncs its subject graph to the central UNS via WebSocket, the c
 
 ### Synced subjects are always dynamic proxies
 
-Concrete types on satellites contain device connection logic (HTTP clients, SDK calls, background services). A concrete `HueLight` on the central would try to talk to the Hue bridge — which it can't reach. Therefore, subjects received via WebSocket sync are always represented as dynamic proxies, never concrete device types.
+Concrete types on satellites contain device connection logic (HTTP clients, SDK calls, background services). A concrete `HueLight` on the central would try to talk to the Hue bridge, which it can't reach. Therefore, subjects received via WebSocket sync are always represented as dynamic proxies, never concrete device types.
 
-The exception is shared "dumb" model types — if both satellite and central reference the same model package containing POCOs without device logic, the concrete type can be used directly.
+The exception is shared "dumb" model types: if both satellite and central reference the same model package containing POCOs without device logic, the concrete type can be used directly.
 
 ### Two paths to the central
 
-**Path A: Pure dynamic** — Satellite has concrete `HueLight` with device connection logic. Central has no Hue plugin. Dynamic proxies with interfaces from the wire.
+**Path A: Pure dynamic**: Satellite has concrete `HueLight` with device connection logic. Central has no Hue plugin. Dynamic proxies with interfaces from the wire.
 
-**Path B: Shared models** — A shared NuGet package (e.g., `MyDevice.Models`) contains clean data model classes (just properties, no device logic). Both satellite and central reference it. Satellite maps real device subjects into the model; central receives the model as a concrete type.
+**Path B: Shared models**: A shared NuGet package (e.g., `MyDevice.Models`) contains clean data model classes (just properties, no device logic). Both satellite and central reference it. Satellite maps real device subjects into the model; central receives the model as a concrete type.
 
 Both paths must work. Dynamic proxying with interfaces is the universal fallback. Shared models are an optimization for when you control the plugin and want full static typing on the central.
 
@@ -75,13 +75,13 @@ The interface list per concrete .NET type is cached in a `ConcurrentDictionary<T
 
 Edge cases:
 
-- **Interface inheritance** (e.g., `ISwitchDevice : ISwitchState, ISwitchController`) — include all interfaces individually; the receiver resolves what it can
-- **Generic interfaces** (e.g., `IObservable<DeviceEvent>`) — skip for now, revisit later
-- **No qualifying interfaces** — `interfaces` field omitted from the wire
+- **Interface inheritance** (e.g., `ISwitchDevice : ISwitchState, ISwitchController`): include all interfaces individually; the receiver resolves what it can
+- **Generic interfaces** (e.g., `IObservable<DeviceEvent>`): skip for now, revisit later
+- **No qualifying interfaces**: `interfaces` field omitted from the wire
 
 ### Wire Format
 
-The `SubjectUpdate` gains an optional `interfaces` field per subject. Included only when a subject first appears (Welcome snapshot or structural change) — not on incremental property updates.
+The `SubjectUpdate` gains an optional `interfaces` field per subject. Included only when a subject first appears (Welcome snapshot or structural change); not on incremental property updates.
 
 ```json
 {
@@ -127,7 +127,7 @@ The `SubjectUpdate` gains an optional `interfaces` field per subject. Included o
 
 ### Registry Attributes on the Wire
 
-Registry attributes are transmitted in the existing `SubjectPropertyUpdate.Attributes` mechanism — no protocol change needed. Attribute values are objects containing metadata:
+Registry attributes are transmitted in the existing `SubjectPropertyUpdate.Attributes` mechanism. No protocol change needed. Attribute values are objects containing metadata:
 
 ```json
 "attributes": {
@@ -151,7 +151,7 @@ The WebSocket connector defaults to current behavior. Dynamic proxy creation is 
 
 ### DynamicWebSocketSubjectFactory
 
-Follows the same pattern as `OpcUaSubjectFactory` — a connector-specific factory with its own method signature, wrapping `ISubjectFactory` for the default path:
+Follows the same pattern as `OpcUaSubjectFactory`: a connector-specific factory with its own method signature, wrapping `ISubjectFactory` for the default path:
 
 ```csharp
 public class DynamicWebSocketSubjectFactory
@@ -208,11 +208,11 @@ The UI shows a warning badge on subjects with unresolved interfaces.
 
 When the `SubjectUpdateApplier` encounters properties that don't exist on the local subject (neither static nor already dynamic):
 
-1. `registeredSubject.AddProperty(name, inferredType, getter, setter)` — creates a dynamic property
+1. `registeredSubject.AddProperty(name, inferredType, getter, setter)` creates a dynamic property
 2. Set value on the new property
 3. Apply registry attributes from the wire (`state`, `configuration`, etc.) via `AddAttribute`
 
-This is part of using `DynamicWebSocketSubjectFactory` — opting into dynamic proxy creation also enables dynamic property creation for unknown fields. Otherwise the proxy would be missing data.
+This is part of using `DynamicWebSocketSubjectFactory`: opting into dynamic proxy creation also enables dynamic property creation for unknown fields. Otherwise the proxy would be missing data.
 
 ## Subject Graph Structure on Central
 
@@ -226,7 +226,7 @@ Central UNS
         +-- motor                   <- dynamic, implements [IMotor, ...]
 ```
 
-Satellite subtrees arrive via WebSocket into generic collection/dictionary properties (`Dictionary<string, IInterceptorSubject>`). The property type is `IInterceptorSubject`, so `DefaultSubjectFactory` can't create a concrete type — the `DynamicWebSocketSubjectFactory` creates dynamic proxies with interfaces.
+Satellite subtrees arrive via WebSocket into generic collection/dictionary properties (`Dictionary<string, IInterceptorSubject>`). The property type is `IInterceptorSubject`, so `DefaultSubjectFactory` can't create a concrete type; the `DynamicWebSocketSubjectFactory` creates dynamic proxies with interfaces.
 
 ## Data Flow Summary
 

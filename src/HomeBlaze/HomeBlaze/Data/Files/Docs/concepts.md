@@ -6,7 +6,7 @@ position: 1
 
 # Concepts
 
-HomeBlaze is a platform for building real-time digital twins — live object models that mirror physical and virtual systems. This page introduces the core ideas in five minutes.
+HomeBlaze is a platform for building real-time digital twins: live object models that mirror physical and virtual systems. This page introduces the core ideas in five minutes.
 
 ---
 
@@ -20,12 +20,12 @@ For the full architectural view, see [Architecture Overview](architecture/overvi
 
 ## Subjects
 
-A **subject** is an intercepted .NET object whose properties are automatically tracked. Any class decorated with `[InterceptorSubject]` becomes a subject — motors, sensors, files, folders, dashboards.
+A **subject** is an intercepted .NET object whose properties are automatically tracked. Any class decorated with `[InterceptorSubject]` becomes a subject: motors, sensors, files, folders, dashboards.
 
 Subjects have:
-- **Properties** — values the subject exposes (speed, temperature, status)
-- **Operations** — methods operators or agents can invoke
-- **Metadata** — display name, icon, authorization rules
+- **Properties**: values the subject exposes (speed, temperature, status)
+- **Operations**: methods operators or agents can invoke
+- **Metadata**: display name, icon, authorization rules
 
 See [Building Subjects](development/building-subjects.md) for how to author them in C#.
 
@@ -33,7 +33,7 @@ See [Building Subjects](development/building-subjects.md) for how to author them
 
 ## The Object Graph
 
-All subjects live in a tree — the **object graph** — rooted at a top-level storage container:
+All subjects live in a tree (the **object graph**), rooted at a top-level storage container:
 
 ```
 Root (FluentStorageContainer)
@@ -45,7 +45,7 @@ Root (FluentStorageContainer)
 │       └── Configuration.md (MarkdownFile)
 ```
 
-Folders become path segments. Files become subjects. Every subject has a **path** like `/demo/Conveyor` — see [Paths](administration/paths.md).
+Folders become path segments. Files become subjects. Every subject has a **path** like `/demo/Conveyor`; see [Paths](administration/paths.md).
 
 ---
 
