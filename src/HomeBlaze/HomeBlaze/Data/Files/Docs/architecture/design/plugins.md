@@ -136,7 +136,7 @@ graph TD
     SAMPLE2UI --> SAMPLE2
 ```
 
-This model ensures that when a plugin implements a host-defined interface (e.g., `ITemperatureSensor`), the type identity is shared. Plugin-private dependencies are fully isolated -- different plugins can use different versions of the same library without conflict.
+This model ensures that when a plugin implements a host-defined interface (e.g., `ITemperatureSensor`), the type identity is shared. Plugin-private dependencies are fully isolated, so different plugins can use different versions of the same library without conflict.
 
 ### Bootstrap Sequence
 
@@ -224,11 +224,11 @@ public partial class MyPluginProvider : BackgroundService, IConfigurable
 
 The sample plugins demonstrate the recommended headless/UI separation pattern and the host-shared package discovery mechanism:
 
-- **`MyCompany.Abstractions`** -- a shared contract package defining the `IMyDevice` interface. Declares itself as host-shared via `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "HomeBlaze")]`, so the loader automatically loads it into the default `AssemblyLoadContext` without any manual `HostPackages` configuration.
-- **`MyCompany.SamplePlugin1`** -- a headless library containing a temperature sensor device subject that generates fake sensor data using the Bogus library. Implements `IMyDevice` from `MyCompany.Abstractions`. This package has no Blazor or UI dependencies.
-- **`MyCompany.SamplePlugin1.HomeBlaze`** -- a Razor SDK project containing Blazor UI components (widget and edit components) for the sample temperature sensor. It references `MyCompany.SamplePlugin1` as a dependency and includes a `plugin.json` declaring `hostDependencies`.
-- **`MyCompany.SamplePlugin2`** -- a second headless library containing a light sensor device subject. Also implements `IMyDevice`.
-- **`MyCompany.SamplePlugin2.HomeBlaze`** -- a Razor SDK project containing Blazor UI components for the light sensor. Follows the same pattern as plugin 1.
+- **`MyCompany.Abstractions`**: a shared contract package defining the `IMyDevice` interface. Declares itself as host-shared via `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "HomeBlaze")]`, so the loader automatically loads it into the default `AssemblyLoadContext` without any manual `HostPackages` configuration.
+- **`MyCompany.SamplePlugin1`**: a headless library containing a temperature sensor device subject that generates fake sensor data using the Bogus library. Implements `IMyDevice` from `MyCompany.Abstractions`. This package has no Blazor or UI dependencies.
+- **`MyCompany.SamplePlugin1.HomeBlaze`**: a Razor SDK project containing Blazor UI components (widget and edit components) for the sample temperature sensor. It references `MyCompany.SamplePlugin1` as a dependency and includes a `plugin.json` declaring `hostDependencies`.
+- **`MyCompany.SamplePlugin2`**: a second headless library containing a light sensor device subject. Also implements `IMyDevice`.
+- **`MyCompany.SamplePlugin2.HomeBlaze`**: a Razor SDK project containing Blazor UI components for the light sensor. Follows the same pattern as plugin 1.
 
 All projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listing `MyCompany.SamplePlugin1.HomeBlaze` in `Plugins.json` transitively pulls in `MyCompany.SamplePlugin1` and `MyCompany.Abstractions`. The development `Data/Files/Plugins.json` loads both sample plugins from the local folder feed described in [Configuration](#configuration). Because both plugins share `MyCompany.Abstractions` in the default context, type identity is preserved: `IMyDevice` is the same type across all plugins.
 
@@ -236,9 +236,9 @@ All projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listi
 
 Plugin dependencies that need to be shared across plugins (e.g., contract/abstractions packages) must be loaded into the default `AssemblyLoadContext` to preserve type identity. The loader discovers host-shared packages through three complementary mechanisms:
 
-1. **Assembly attribute** -- The contract package author adds `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "HomeBlaze")]`. The value is a host identifier; the loader only recognizes this attribute when `HostIdentifier` is configured in the options and the attribute value matches (case-insensitive). The loader detects this via `System.Reflection.Metadata` without loading the assembly into any context.
-2. **`plugin.json` manifest** -- The plugin author includes a `plugin.json` file in the nupkg root with a `hostDependencies` array listing packages that should be host-shared. This is useful when the contract author has not added the attribute.
-3. **`HostPackages` configuration** -- The host author lists glob patterns in the loader options as a manual fallback.
+1. **Assembly attribute**: the contract package author adds `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "HomeBlaze")]`. The value is a host identifier; the loader only recognizes this attribute when `HostIdentifier` is configured in the options and the attribute value matches (case-insensitive). The loader detects this via `System.Reflection.Metadata` without loading the assembly into any context.
+2. **`plugin.json` manifest**: the plugin author includes a `plugin.json` file in the nupkg root with a `hostDependencies` array listing packages that should be host-shared. This is useful when the contract author has not added the attribute.
+3. **`HostPackages` configuration**: the host author lists glob patterns in the loader options as a manual fallback.
 
 These three sources are additive: a package is host-shared if any source declares it so. See the [Namotion.NuGet.Plugins README](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/src/HomeBlaze/Namotion.NuGet.Plugins/README.md) for full details on each mechanism.
 
@@ -250,7 +250,7 @@ The container image reports the released versions of the Namotion libraries in i
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Plugin contract | Subject types only | Everything is a subject -- no separate plugin interfaces |
+| Plugin contract | Subject types only | Everything is a subject, so there are no separate plugin interfaces |
 | Distribution | NuGet packages | Standard .NET ecosystem, versioning, feeds |
 | Loading modes | Build-time + runtime | Core compiled in, extensibility via dynamic loading |
 | Bootstrap | Provider subjects in the tree, placeholders for unknown types | Plugins load like any other subject; files whose type arrives later upgrade in place |

@@ -99,7 +99,7 @@ The `Session` child subject describes the current charging session.
 
 ## Cloud API
 
-The integration uses two Wallbox cloud API hosts: `user-api.wall-box.com` for authentication and `api.wall-box.com` for data/control. The API has rate limiting -- polling intervals below 60 seconds are not recommended.
+The integration uses two Wallbox cloud API hosts: `user-api.wall-box.com` for authentication and `api.wall-box.com` for data/control. The API has rate limiting, so polling intervals below 60 seconds are not recommended.
 
 | Endpoint | Host | Purpose |
 |----------|------|---------|
