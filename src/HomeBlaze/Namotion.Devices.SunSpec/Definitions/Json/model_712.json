@@ -1,0 +1,334 @@
+{
+    "group": {
+        "desc": "DER Watt-Var model.",
+        "groups": [
+            {
+                "comments": [
+                    "Stored curve sets - Number of curve sets contained in NCrv - The first set is read-only and indicates the current settings."
+                ],
+                "count": "NCrv",
+                "desc": "Stored curve sets.",
+                "groups": [
+                    {
+                        "comments": [
+                            "Stored curve sets - curve points for each stored curve - Number of curve points contained in NPt"
+                        ],
+                        "count": "NPt",
+                        "desc": "Stored curve points.",
+                        "label": "Stored Curve Points",
+                        "name": "Pt",
+                        "points": [
+                            {
+                                "access": "RW",
+                                "desc": "Curve active power point as percentage.",
+                                "label": "Active Power Point",
+                                "name": "W",
+                                "sf": "W_SF",
+                                "size": 1,
+                                "type": "int16",
+                                "units": "WMaxPct",
+                                "standards": [
+                                    "IEEE 1547-2018"
+                                ],
+                                "detail": "Internal curve conformance checks should be conducted when AdptCrvReq is set to 1, not on point writes. IEEE 1547 implementations must allow 0 values for all three load points."
+                            },
+                            {
+                                "access": "RW",
+                                "desc": "Curve reactive power point as set in DeptRef point.",
+                                "label": "Reactive Power Point",
+                                "name": "Var",
+                                "sf": "DeptRef_SF",
+                                "size": 1,
+                                "type": "int16",
+                                "units": "VarPct",
+                                "standards": [
+                                    "IEEE 1547-2018"
+                                ],
+                                "detail": "Internal curve conformance checks should be conducted when AdptCrvReq is set to 1, not on point writes. IEEE 1547 implementations must allow 0 values for all three load points"
+                            }
+                        ],
+                        "type": "group"
+                    }
+                ],
+                "label": "Stored Curves",
+                "name": "Crv",
+                "points": [
+                    {
+                        "access": "RW",
+                        "desc": "Number of active points.",
+                        "label": "Active Points",
+                        "mandatory": "M",
+                        "name": "ActPt",
+                        "size": 1,
+                        "type": "uint16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "Curve dependent reference.",
+                        "label": "Dependent Reference",
+                        "mandatory": "M",
+                        "name": "DeptRef",
+                        "size": 1,
+                        "symbols": [
+                            {
+                                "label": "Percent Max Watts",
+                                "name": "W_MAX_PCT",
+                                "value": 0
+                            },
+                            {
+                                "label": "Percent Max Vars",
+                                "name": "VAR_MAX_PCT",
+                                "value": 1
+                            },
+                            {
+                                "label": "Percent Available Vars",
+                                "name": "VAR_AVAL_PCT",
+                                "value": 2
+                            },
+                            {
+                                "label": "Percent Max Apparent Power",
+                                "name": "VA_MAX_PCT",
+                                "value": 3
+                            }
+                        ],
+                        "type": "enum16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "Power priority.",
+                        "label": "Power Priority",
+                        "name": "Pri",
+                        "size": 1,
+                        "symbols": [
+                            {
+                                "desc": "Active power priority.",
+                                "label": "Active Power Priority",
+                                "name": "ACTIVE",
+                                "value": 0
+                            },
+                            {
+                                "desc": "Reactive power priority.",
+                                "label": "Reactive Power Priority",
+                                "name": "REACTIVE",
+                                "value": 1
+                            }
+                        ],
+                        "type": "enum16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "desc": "Curve read-write access.",
+                        "label": "Curve Access",
+                        "mandatory": "M",
+                        "name": "ReadOnly",
+                        "size": 1,
+                        "static": "S",
+                        "symbols": [
+                            {
+                                "desc": "Curve has read-write access.",
+                                "label": "Read-Write Access",
+                                "name": "RW",
+                                "value": 0
+                            },
+                            {
+                                "desc": "Curve has read-only access.",
+                                "label": "Read-Only Access",
+                                "name": "R",
+                                "value": 1
+                            }
+                        ],
+                        "type": "enum16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    }
+                ],
+                "type": "group"
+            }
+        ],
+        "label": "DER Watt-Var",
+        "name": "DERWattVar",
+        "points": [
+            {
+                "desc": "DER Watt-Var model ID.",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 712,
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "DER Watt-Var model length.",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "DER Watt-Var control enable.",
+                "label": "DER Watt-Var Module Enable",
+                "mandatory": "M",
+                "name": "Ena",
+                "size": 1,
+                "symbols": [
+                    {
+                        "desc": "Function is disabled.",
+                        "label": "Disabled",
+                        "name": "DISABLED",
+                        "value": 0
+                    },
+                    {
+                        "desc": "Function is enabled.",
+                        "label": "Enabled",
+                        "name": "ENABLED",
+                        "value": 1
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Set active curve. 0 = No active curve.",
+                "label": "Set Active Curve Request",
+                "mandatory": "M",
+                "name": "AdptCrvReq",
+                "size": 1,
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Result of last set active curve operation.",
+                "label": "Set Active Curve Result",
+                "mandatory": "M",
+                "name": "AdptCrvRslt",
+                "size": 1,
+                "symbols": [
+                    {
+                        "desc": "Curve update in progress.",
+                        "label": "Update In Progress",
+                        "name": "IN_PROGRESS",
+                        "value": 0
+                    },
+                    {
+                        "desc": "Curve update completed successfully.",
+                        "label": "Update Complete",
+                        "name": "COMPLETED",
+                        "value": 1
+                    },
+                    {
+                        "desc": "Curve update failed.",
+                        "label": "Update Failed",
+                        "name": "FAILED",
+                        "value": 2
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Number of curve points supported.",
+                "label": "Number Of Points",
+                "mandatory": "M",
+                "name": "NPt",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Number of stored curves supported.",
+                "label": "Stored Curve Count",
+                "mandatory": "M",
+                "name": "NCrv",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Reversion time in seconds. 0 = No reversion time.",
+                "label": "Reversion Timeout",
+                "name": "RvrtTms",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": []
+            },
+            {
+                "desc": "Reversion time remaining in seconds.",
+                "label": "Reversion Time Left",
+                "name": "RvrtRem",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": []
+            },
+            {
+                "access": "RW",
+                "desc": "Default curve after reversion timeout.",
+                "label": "Reversion Curve",
+                "name": "RvrtCrv",
+                "size": 1,
+                "type": "uint16",
+                "standards": []
+            },
+            {
+                "desc": "Scale factor for curve active power points.",
+                "label": "Active Power Scale Factor",
+                "mandatory": "M",
+                "name": "W_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Scale factor for curve var points.",
+                "label": "Var Scale Factor",
+                "mandatory": "M",
+                "name": "DeptRef_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            }
+        ],
+        "type": "group"
+    },
+    "id": 712
+}

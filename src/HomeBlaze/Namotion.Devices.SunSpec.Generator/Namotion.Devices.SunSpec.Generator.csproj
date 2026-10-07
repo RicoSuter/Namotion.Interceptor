@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Namotion.Devices.SunSpec.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Namotion.Devices.SunSpec\Definitions\*.cs" LinkBase="Definitions" />
+    <EmbeddedResource Include="..\Namotion.Devices.SunSpec\Definitions\Json\model_*.json" LogicalName="SunSpec/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="overrides.json" LogicalName="SunSpec/overrides.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Namotion.Interceptor.Modbus\Namotion.Interceptor.Modbus.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

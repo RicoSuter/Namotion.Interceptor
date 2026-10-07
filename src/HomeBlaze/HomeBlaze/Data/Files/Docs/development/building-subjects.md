@@ -112,38 +112,43 @@ public partial class Motor
 ```csharp
 public enum StateUnit
 {
-    Default,           // No formatting
-    Percent,           // 75%
-    DegreeCelsius,     // 23.5 °C
-    Watt,              // 100 W
-    Kilowatt,          // 1.5 kW
-    WattHour,          // 500 Wh
-    Volt,              // 230 V
-    Ampere,            // 5 A
-    Hertz,             // 50 Hz
-    Lumen,             // 800 lm
-    Lux,               // 500 lx
-    Meter,             // 1.5 m
-    Kilometer,         // 12.3 km
-    Millimeter,        // 10 mm
-    MillimeterPerHour, // 5 mm/h
-    Kilobyte,          // 1024 KB
-    KilobytePerSecond, // 100 KB/s
-    MegabitPerSecond,  // 100 Mbps
-    LiterPerHour,      // 50 L/h
-    KilowattHour,      // 500 kWh
-    Milliampere,       // 100 mA
-    Currency,          // $10.00
-    HexColor,          // #FF0000
-    MeterPerSecond,    // 3.2 m/s
-    Hectopascal,       // 1013 hPa
-    Degree,            // 270° (angles such as wind direction)
-    UvIndex,           // 5 UV
-    Byte,              // 512 B
-    Kelvin,            // 1.5 K (temperature differences)
-    Minute,            // 30 min
-    Hour,              // 1234 h
-    VoltAmpere         // 880 VA (apparent power)
+    Default,                // No formatting
+    Percent,                // 75%
+    DegreeCelsius,          // 23.5 °C
+    Watt,                   // 100 W
+    Kilowatt,               // 1.5 kW
+    WattHour,               // 500 Wh
+    Volt,                   // 230 V
+    Ampere,                 // 5 A
+    Hertz,                  // 50 Hz
+    Lumen,                  // 800 lm
+    Lux,                    // 500 lx
+    Meter,                  // 1.5 m
+    Kilometer,              // 12.3 km
+    Millimeter,             // 10 mm
+    MillimeterPerHour,      // 5 mm/h
+    Kilobyte,               // 1024 KB
+    KilobytePerSecond,      // 100 KB/s
+    MegabitPerSecond,       // 100 Mbps
+    LiterPerHour,           // 50 L/h
+    KilowattHour,           // 500 kWh
+    Milliampere,            // 100 mA
+    Currency,               // $10.00
+    HexColor,               // #FF0000
+    MeterPerSecond,         // 3.2 m/s
+    Hectopascal,            // 1013 hPa
+    Degree,                 // 270° (angles such as wind direction)
+    UvIndex,                // 5 UV
+    Byte,                   // 512 B
+    Kelvin,                 // 1.5 K (temperature differences)
+    Minute,                 // 30 min
+    Hour,                   // 1234 h
+    VoltAmpere,             // 880 VA (apparent power)
+    VoltAmpereReactive,     // 1.5 kvar (reactive power)
+    VoltAmpereHour,         // 2.5 kVAh (apparent energy)
+    VoltAmpereReactiveHour, // 2.5 kvarh (reactive energy)
+    AmpereHour,             // 50 Ah (charge, battery capacity)
+    WattPerSquareMeter      // 850 W/m² (irradiance)
 }
 ```
 

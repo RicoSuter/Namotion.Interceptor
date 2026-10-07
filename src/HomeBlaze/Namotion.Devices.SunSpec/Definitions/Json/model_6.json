@@ -1,0 +1,710 @@
+{
+    "group": {
+        "desc": "Include a digital signature along with the control data",
+        "groups": [
+            {
+                "count": 0,
+                "name": "repeating",
+                "points": [
+                    {
+                        "access": "RW",
+                        "desc": "Digital Signature",
+                        "label": "DS",
+                        "mandatory": "M",
+                        "name": "DS",
+                        "size": 1,
+                        "type": "uint16"
+                    }
+                ],
+                "type": "group"
+            }
+        ],
+        "label": "Secure Write Sequential Request",
+        "name": "model_6",
+        "points": [
+            {
+                "desc": "Model identifier",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 6
+            },
+            {
+                "desc": "Model length",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Number of (offset, value) pairs being written",
+                "label": "X",
+                "mandatory": "M",
+                "name": "X",
+                "size": 1,
+                "type": "uint16",
+                "detail": "A max of 50 (offset, value) pairs are allocated"
+            },
+            {
+                "access": "RW",
+                "desc": "Starting offset for write operation",
+                "label": "Offset",
+                "mandatory": "M",
+                "name": "Off",
+                "size": 1,
+                "type": "uint16",
+                "detail": "X values to follow"
+            },
+            {
+                "access": "RW",
+                "desc": "Value to write to control register at offset",
+                "label": "Value1",
+                "mandatory": "M",
+                "name": "Val1",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val2",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val3",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val4",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val5",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val6",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val7",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val8",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val9",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val10",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val11",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val12",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val13",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val14",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val15",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val16",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val17",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val18",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val19",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val20",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val21",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val22",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val23",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val24",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val25",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val26",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val27",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val28",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val29",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val30",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val31",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val32",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val33",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val34",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val35",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val36",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val37",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val38",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val39",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val40",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val41",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val42",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val43",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val44",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val45",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val46",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val47",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val48",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val49",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val50",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val51",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val52",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val53",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val54",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val55",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val56",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val57",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val58",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val59",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val60",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val61",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val62",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val63",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val64",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val65",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val66",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val67",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val68",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val69",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val70",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val71",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val72",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val73",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val74",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val75",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val76",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val77",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val78",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val79",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Val80",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Timestamp value is the number of seconds since January 1, 2000",
+                "label": "Timestamp",
+                "mandatory": "M",
+                "name": "Ts",
+                "size": 2,
+                "type": "uint32"
+            },
+            {
+                "access": "RW",
+                "desc": "Millisecond counter 0-999",
+                "label": "Milliseconds",
+                "mandatory": "M",
+                "name": "Ms",
+                "size": 1,
+                "type": "uint16"
+            },
+            {
+                "access": "RW",
+                "desc": "Sequence number of request",
+                "label": "Sequence",
+                "mandatory": "M",
+                "name": "Seq",
+                "size": 1,
+                "type": "uint16",
+                "detail": "Shall be advanced for each request"
+            },
+            {
+                "access": "RW",
+                "desc": "Signing key used 0-5",
+                "label": "Role",
+                "mandatory": "M",
+                "name": "Role",
+                "size": 1,
+                "type": "uint16",
+                "detail": "Each controller is assigned a key index that maps to their access control role"
+            },
+            {
+                "access": "RW",
+                "mandatory": "M",
+                "name": "Rsrvd",
+                "size": 1,
+                "type": "pad"
+            },
+            {
+                "access": "RW",
+                "desc": "Algorithm used to compute the digital signature",
+                "label": "Algorithm",
+                "mandatory": "M",
+                "name": "Alg",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "NONE",
+                        "value": 0,
+                        "detail": "For test purposes only"
+                    },
+                    {
+                        "name": "AES-GMAC-64",
+                        "value": 1
+                    },
+                    {
+                        "name": "ECC-256",
+                        "value": 2
+                    }
+                ],
+                "type": "enum16",
+                "detail": "For future proof"
+            },
+            {
+                "access": "RW",
+                "desc": "Number of registers comprising the digital signature.",
+                "label": "N",
+                "mandatory": "M",
+                "name": "N",
+                "size": 1,
+                "type": "uint16",
+                "detail": "The value of N must be at least 4 (64 bits)"
+            }
+        ],
+        "type": "group"
+    },
+    "id": 6
+}
