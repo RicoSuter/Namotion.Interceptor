@@ -258,7 +258,9 @@ public partial class FluentStorageContainer :
                     "inmemory" => StorageFactory.Blobs.InMemory(),
                     _ => throw new NotSupportedException($"Storage type '{storageType}' is not supported")
                 };
-                _clientLocation = new StorageLocation(storageType, _storageDirectory);
+                _clientLocation = new StorageLocation(
+                    storageType == "filesystem" ? "disk" : storageType,
+                    _storageDirectory is null ? null : Path.TrimEndingDirectorySeparator(_storageDirectory));
                 previousClient?.Dispose();
 
                 _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
@@ -301,6 +303,18 @@ public partial class FluentStorageContainer :
 
         var blobs = await Client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
+        // By the registered path with its case: the registry's own lookup ignores case, so on a case-sensitive file
+        // system it would give two files whose names differ only in case the same subject.
+        Dictionary<string, IInterceptorSubject>? registeredSubjects = null;
+        if (reconcile)
+        {
+            registeredSubjects = new Dictionary<string, IInterceptorSubject>(_pathRegistry.Count, StringComparer.Ordinal);
+            foreach (var (subject, path) in _pathRegistry.GetSubjects<IInterceptorSubject>())
+            {
+                registeredSubjects[path] = subject;
+            }
+        }
+
         var entries = new List<(string Path, IInterceptorSubject? Subject)>(blobs.Count);
         var hashes = new List<(string Path, string Hash)>();
         foreach (var blob in blobs)
@@ -322,7 +336,8 @@ public partial class FluentStorageContainer :
 
             try
             {
-                var (subject, hash) = reconcile && _pathRegistry.TryGetSubjectWithExactPath(blob.FullPath, out var existingSubject)
+                var (subject, hash) = registeredSubjects is not null &&
+                    registeredSubjects.TryGetValue(StoragePathRegistry.NormalizePath(blob.FullPath), out var existingSubject)
                     ? await ReconcileFileAsync(blob, existingSubject, cancellationToken)
                     : await CreateFileSubjectAsync(blob, cancellationToken);
 
@@ -335,12 +350,14 @@ public partial class FluentStorageContainer :
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(ex, "Failed to create subject for blob: {Path}", blob.FullPath);
             }
         }
 
+        // A cancelled scan must not publish: the files it did not reach would lose their subjects.
+        cancellationToken.ThrowIfCancellationRequested();
         PublishScan(entries, hashes, reconcile);
         _scannedLocation = location;
         _logger?.LogInformation("Scan complete: Found {Count} subjects.", _pathRegistry.Count);
@@ -356,6 +373,14 @@ public partial class FluentStorageContainer :
         Blob blob, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var path = blob.FullPath;
+        var fullPath = GetFileSystemPath(path);
+
+        // The writer refreshes the subject itself, and the file may not hold the written content yet.
+        if (_fileWatcher is { } fileWatcher && fileWatcher.IsOwnWrite(fullPath))
+        {
+            return (subject, null);
+        }
+
         try
         {
             if (subject is UnknownSubject unknownSubject)
@@ -378,7 +403,7 @@ public partial class FluentStorageContainer :
                     return await CreateFileSubjectAsync(blob, cancellationToken);
                 }
 
-                await HandleFileChangedAsync(path, GetFileSystemPath(path));
+                await RefreshSubjectAsync(subject, path, fullPath);
 
                 // The synchronizer stores the hash of the content it applied to a configurable subject.
                 return (subject, subject is IConfigurable ? null : hash);
@@ -392,7 +417,7 @@ public partial class FluentStorageContainer :
             if (subject is IStorageFile file &&
                 (file.FileSize != (blob.Size ?? 0L) || file.LastModified != blob.LastModificationTime?.UtcDateTime))
             {
-                await HandleFileChangedAsync(path, GetFileSystemPath(path));
+                await RefreshSubjectAsync(subject, path, fullPath);
             }
 
             return (subject, null);
@@ -442,7 +467,7 @@ public partial class FluentStorageContainer :
             {
                 if (!listedSubjects.Contains(subject))
                 {
-                    _pathRegistry.Unregister(path);
+                    _pathRegistry.Unregister(subject);
                 }
             }
         }
@@ -563,9 +588,17 @@ public partial class FluentStorageContainer :
 
     private async Task HandleFileChangedAsync(string relativePath, string fullPath)
     {
-        if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
-            return;
+        if (_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
+        {
+            await RefreshSubjectAsync(existingSubject, relativePath, fullPath);
+        }
+    }
 
+    /// <summary>
+    /// Makes the subject of a changed file take its content. Callers hold the hierarchy lock.
+    /// </summary>
+    private async Task RefreshSubjectAsync(IInterceptorSubject existingSubject, string relativePath, string fullPath)
+    {
         // Checked before IStorageFile, which UnknownSubject also implements.
         if (existingSubject is UnknownSubject unknownSubject)
         {
@@ -682,7 +715,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
     {
-        _pathRegistry.Unregister(path);
+        _pathRegistry.Unregister(subject);
 
         var children = new Dictionary<string, IInterceptorSubject>(Children);
         _hierarchyManager.RemoveFromHierarchy(path, subject, children);
@@ -914,7 +947,7 @@ public partial class FluentStorageContainer :
             return;
         }
 
-        _pathRegistry.Unregister(path);
+        _pathRegistry.Unregister(unknownSubject);
         _pathRegistry.Register(replacement, path);
         if (hash is not null)
         {

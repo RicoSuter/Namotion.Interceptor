@@ -83,7 +83,7 @@ The first scan creates a subject for every file. A later scan of the same storag
 
 - A file whose content is unchanged keeps its subject untouched. JSON files are compared by the SHA256 hash of their content, other files by size and modification time.
 - A changed file keeps its subject, which takes the new content the way it does for a file watcher change: a configurable subject is reconfigured and applies its configuration, and a document reloads. When the file now needs a subject of another type, for example because its `$type` changed, a new subject replaces it.
-- An `UnknownSubject` is created again from its file, so it is replaced when its type can now be created.
+- An `UnknownSubject` is created again from its file, so it is replaced when its type can now be created. When the file still gives a placeholder, the `UnknownSubject` keeps its instance and takes over the new type name and reason.
 - New files get subjects, the subjects of deleted files are removed, and folders that still exist keep their `VirtualFolder`.
 
 Kept subjects keep their device connections and runtime state, and stay visible to consumers that only pick up subjects present when they start, such as the OPC UA server. A plugin provider in the storage keeps its loaded packages. Only when the storage type or its resolved directory differs from the last completed scan, for example after its connection string changed, does a scan create every subject again.

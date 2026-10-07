@@ -237,7 +237,10 @@ internal sealed class StorageFileWatcher : IDisposable
     /// </summary>
     internal void SimulateWatcherError(Exception exception) => OnWatcherError(this, new ErrorEventArgs(exception));
 
-    private bool IsOwnWrite(string fullPath)
+    /// <summary>
+    /// Returns whether <paramref name="fullPath"/> was marked by <see cref="MarkAsOwnWrite"/> within the grace period.
+    /// </summary>
+    public bool IsOwnWrite(string fullPath)
     {
         if (_pendingWrites.TryGetValue(fullPath, out var writeTime))
         {
