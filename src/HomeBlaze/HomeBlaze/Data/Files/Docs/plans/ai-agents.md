@@ -10,7 +10,7 @@ status: Planned
 
 **Prerequisites:**
 - [MCP Server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md): core `Namotion.Interceptor.Mcp` package
-- [HomeBlaze MCP Extensions](mcp-extensions.md) — HomeBlaze-specific tools, enrichers, type/path providers
+- [HomeBlaze MCP tools](../architecture/design/ai.md#mcp-tool-layering-implemented): HomeBlaze-specific tools, enrichers, type and path providers
 
 ## Problem
 
@@ -21,7 +21,7 @@ HomeBlaze exposes the knowledge graph to external AI agents via MCP, but has no 
 | Package | Contents |
 |---|---|
 | `HomeBlaze.AI.Abstractions` | `ILlmProvider`, `ILlmAgent` interfaces |
-| `HomeBlaze.AI` | Provider subjects, `LlmAgentBase`, `LlmAgent`, [MCP extensions](mcp-extensions.md) |
+| `HomeBlaze.AI` | Provider subjects, `LlmAgentBase`, `LlmAgent`, [MCP tools](../architecture/design/ai.md#mcp-tool-layering-implemented) |
 
 ### Dependency Flow
 
@@ -205,7 +205,7 @@ When an agent runs (timer or property change trigger):
 
 ### Tool Access
 
-Built-in agents reuse `McpToolInfo` handlers (from core MCP + [HomeBlaze MCP extensions](mcp-extensions.md)) wrapped as `AIFunction` objects — direct in-process calls, no MCP protocol overhead.
+Built-in agents reuse `McpToolInfo` handlers (from core MCP and the [HomeBlaze MCP tools](../architecture/design/ai.md#mcp-tool-layering-implemented)) wrapped as `AIFunction` objects. These are direct in-process calls without MCP protocol overhead.
 
 Stage 1 restricts write access:
 
