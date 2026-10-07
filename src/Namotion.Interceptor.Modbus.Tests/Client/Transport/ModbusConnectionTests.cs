@@ -160,12 +160,28 @@ public class ModbusConnectionTests
         server.Stop();
 
         // Act
-        var exception = await Record.ExceptionAsync(() =>
-            connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None));
+        var exception = await ReadUntilFailureAsync(connection, TimeSpan.FromSeconds(10));
 
         // Assert
         Assert.NotNull(exception);
         Assert.IsNotType<ModbusResponseException>(exception);
+    }
+
+    // The server closes its client sockets asynchronously, so a read issued right after Stop can still be answered.
+    private static async Task<Exception?> ReadUntilFailureAsync(ModbusConnection connection, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var exception = await Record.ExceptionAsync(() =>
+                connection.ReadAsync(1, ModbusAddressSpace.HoldingRegister, 0, 1, CancellationToken.None));
+            if (exception is not null)
+            {
+                return exception;
+            }
+        }
+
+        return null;
     }
 
     [Fact]

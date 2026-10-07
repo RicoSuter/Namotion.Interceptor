@@ -50,6 +50,12 @@ internal sealed class ModbusRegisterBinding
 
     public ModbusRegisterBinding? ScaleFactor { get; set; }
 
+    /// <summary>
+    /// Gets the property holding the scale factor of this mapping, from <see cref="ModbusRegisterAttribute.ScaleFactorProperty"/>
+    /// or an <see cref="IModbusScaleFactorProvider"/>, or <c>null</c> when the mapping has no dynamic scale factor.
+    /// </summary>
+    public PropertyReference? ScaleFactorReference { get; init; }
+
     // Poll-cycle state: only the read and the apply of one cycle touch it, and the source runs one cycle at a time.
     public byte[] CurrentRaw { get; }
 
@@ -62,6 +68,11 @@ internal sealed class ModbusRegisterBinding
     public bool ChangedThisCycle { get; set; }
 
     public bool IsUnavailable { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of cycles in a row in which the two reads of a binding larger than one request disagreed.
+    /// </summary>
+    public int ConsecutiveMismatchCount { get; set; }
 
     /// <summary>
     /// Gets or sets whether this binding is read in a request of its own, set after a request spanning it was

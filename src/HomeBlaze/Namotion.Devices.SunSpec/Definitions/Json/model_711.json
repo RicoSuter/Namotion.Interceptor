@@ -1,0 +1,299 @@
+{
+    "group": {
+        "desc": "DER Frequency Droop model.",
+        "groups": [
+            {
+                "comments": [
+                    "Stored control sets - Number of control sets contained in NCtl - The first set is read-only and indicates the current settings."
+                ],
+                "count": "NCtl",
+                "desc": "Stored control sets.",
+                "label": "Stored Controls",
+                "name": "Ctl",
+                "points": [
+                    {
+                        "access": "RW",
+                        "desc": "The deadband value for over-frequency conditions in Hz.",
+                        "label": "Over-Frequency Deadband",
+                        "mandatory": "M",
+                        "name": "DbOf",
+                        "sf": "Db_SF",
+                        "size": 2,
+                        "type": "uint32",
+                        "units": "Hz",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "The deadband value for under-frequency conditions in Hz.",
+                        "label": "Under-Frequency Deadband",
+                        "mandatory": "M",
+                        "name": "DbUf",
+                        "sf": "Db_SF",
+                        "size": 2,
+                        "type": "uint32",
+                        "units": "Hz",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "Frequency droop per-unit frequency change for over-frequency conditions corresponding to 1 per-unit power output change.",
+                        "label": "Over-Frequency Change Ratio",
+                        "mandatory": "M",
+                        "name": "KOf",
+                        "sf": "K_SF",
+                        "size": 1,
+                        "type": "uint16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "Frequency droop per-unit frequency change for under-frequency conditions corresponding to 1 per-unit power output change.",
+                        "label": "Under-Frequency Change Ratio",
+                        "mandatory": "M",
+                        "name": "KUf",
+                        "sf": "K_SF",
+                        "size": 1,
+                        "type": "uint16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "The open-loop response time in seconds.",
+                        "label": "Open-Loop Response Time",
+                        "mandatory": "M",
+                        "name": "RspTms",
+                        "sf": "RspTms_SF",
+                        "size": 2,
+                        "type": "uint32",
+                        "units": "Secs",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    },
+                    {
+                        "access": "RW",
+                        "desc": "The minimum active power output due to DER prime mover constraints, in percent of the DER active power rating. The valid range is -100 to 100. This setting applies only to the frequency droop control.",
+                        "label": "Minimum Active Power",
+                        "name": "PMin",
+                        "size": 1,
+                        "type": "int16",
+                        "units": "Pct",
+                        "standards": []
+                    },
+                    {
+                        "desc": "Control read-write access.",
+                        "label": "Control Access",
+                        "mandatory": "M",
+                        "name": "ReadOnly",
+                        "size": 1,
+                        "static": "S",
+                        "symbols": [
+                            {
+                                "desc": "Control has read-write access.",
+                                "label": "Read-Write Access",
+                                "name": "RW",
+                                "value": 0
+                            },
+                            {
+                                "desc": "Control has read-only access.",
+                                "label": "Read-Only Access",
+                                "name": "R",
+                                "value": 1
+                            }
+                        ],
+                        "type": "enum16",
+                        "standards": [
+                            "IEEE 1547-2018"
+                        ]
+                    }
+                ],
+                "type": "group"
+            }
+        ],
+        "label": "DER Frequency Droop",
+        "name": "DERFreqDroop",
+        "points": [
+            {
+                "desc": "DER Frequency Droop model ID.",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 711,
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "DER Frequency Droop model length.",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "DER Frequency-Watt (Frequency-Droop) control enable.",
+                "label": "DER Frequency Droop Module Enable",
+                "mandatory": "M",
+                "name": "Ena",
+                "size": 1,
+                "symbols": [
+                    {
+                        "desc": "Function is disabled.",
+                        "label": "Disabled",
+                        "name": "DISABLED",
+                        "value": 0
+                    },
+                    {
+                        "desc": "Function is enabled.",
+                        "label": "Enabled",
+                        "name": "ENABLED",
+                        "value": 1
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Set active control. 0 = No active control.",
+                "label": "Set Active Control Request",
+                "mandatory": "M",
+                "name": "AdptCtlReq",
+                "size": 1,
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Result of last set active control operation.",
+                "label": "Set Active Control Result",
+                "mandatory": "M",
+                "name": "AdptCtlRslt",
+                "size": 1,
+                "symbols": [
+                    {
+                        "desc": "Control update in progress.",
+                        "label": "Update In Progress",
+                        "name": "IN_PROGRESS",
+                        "value": 0
+                    },
+                    {
+                        "desc": "Control update completed successfully.",
+                        "label": "Update Complete",
+                        "name": "COMPLETED",
+                        "value": 1
+                    },
+                    {
+                        "desc": "Control update failed.",
+                        "label": "Update Failed",
+                        "name": "FAILED",
+                        "value": 2
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Number of stored controls supported.",
+                "label": "Stored Control Count",
+                "mandatory": "M",
+                "name": "NCtl",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Reversion time in seconds. 0 = No reversion time.",
+                "label": "Reversion Timeout",
+                "name": "RvrtTms",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": []
+            },
+            {
+                "desc": "Reversion time remaining in seconds.",
+                "label": "Reversion Time Left",
+                "name": "RvrtRem",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": []
+            },
+            {
+                "access": "RW",
+                "desc": "Default control after reversion timeout.",
+                "label": "Reversion Control",
+                "name": "RvrtCtl",
+                "size": 1,
+                "type": "uint16",
+                "standards": []
+            },
+            {
+                "desc": "Deadband scale factor.",
+                "label": "Deadband Scale Factor",
+                "mandatory": "M",
+                "name": "Db_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Frequency change scale factor.",
+                "label": "Frequency Change Scale Factor",
+                "mandatory": "M",
+                "name": "K_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Open loop response time scale factor.",
+                "label": "Open-Loop Scale Factor",
+                "mandatory": "M",
+                "name": "RspTms_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            }
+        ],
+        "type": "group"
+    },
+    "id": 711
+}

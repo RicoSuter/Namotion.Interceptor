@@ -1,0 +1,175 @@
+{
+    "group": {
+        "desc": "Enter service model.",
+        "label": "Enter Service",
+        "name": "DEREnterService",
+        "points": [
+            {
+                "desc": "Enter service model ID.",
+                "label": "Model ID",
+                "mandatory": "M",
+                "name": "ID",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 703,
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Enter service model length.",
+                "label": "Model Length",
+                "mandatory": "M",
+                "name": "L",
+                "size": 1,
+                "static": "S",
+                "type": "uint16",
+                "value": 17,
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Permit enter service.",
+                "label": "Permit Enter Service",
+                "name": "ES",
+                "size": 1,
+                "symbols": [
+                    {
+                        "name": "DISABLED",
+                        "value": 0
+                    },
+                    {
+                        "name": "ENABLED",
+                        "value": 1
+                    }
+                ],
+                "type": "enum16",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service voltage high threshold as percent of normal voltage.",
+                "label": "Enter Service Voltage High",
+                "name": "ESVHi",
+                "sf": "V_SF",
+                "size": 1,
+                "type": "uint16",
+                "units": "Pct",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service voltage low threshold as percent of normal voltage.",
+                "label": "Enter Service Voltage Low",
+                "name": "ESVLo",
+                "sf": "V_SF",
+                "size": 1,
+                "type": "uint16",
+                "units": "Pct",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service frequency high threshold.",
+                "label": "Enter Service Frequency High",
+                "name": "ESHzHi",
+                "sf": "Hz_SF",
+                "size": 2,
+                "type": "uint32",
+                "units": "Hz",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service frequency low threshold.",
+                "label": "Enter Service Frequency Low",
+                "name": "ESHzLo",
+                "sf": "Hz_SF",
+                "size": 2,
+                "type": "uint32",
+                "units": "Hz",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service delay time in seconds.",
+                "label": "Enter Service Delay Time",
+                "name": "ESDlyTms",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service random delay in seconds.",
+                "label": "Enter Service Random Delay",
+                "name": "ESRndTms",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": []
+            },
+            {
+                "access": "RW",
+                "desc": "Enter service ramp time in seconds.",
+                "label": "Enter Service Ramp Time",
+                "name": "ESRmpTms",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Enter service delay time remaining in seconds.",
+                "label": "Enter Service Delay Remaining",
+                "name": "ESDlyRemTms",
+                "size": 2,
+                "type": "uint32",
+                "units": "Secs",
+                "standards": []
+            },
+            {
+                "desc": "Voltage percentage scale factor.",
+                "label": "Voltage Scale Factor",
+                "name": "V_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            },
+            {
+                "desc": "Frequency scale factor.",
+                "label": "Frequency Scale Factor",
+                "name": "Hz_SF",
+                "size": 1,
+                "static": "S",
+                "type": "sunssf",
+                "standards": [
+                    "IEEE 1547-2018"
+                ]
+            }
+        ],
+        "type": "group"
+    },
+    "id": 703
+}

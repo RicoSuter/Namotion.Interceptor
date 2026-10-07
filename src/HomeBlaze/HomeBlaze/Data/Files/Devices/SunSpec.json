@@ -1,0 +1,8 @@
+{
+  "$type": "Namotion.Devices.SunSpec.SunSpecDevice",
+  "name": "Inverter",
+  "hostAddress": "",
+  "port": 1502,
+  "unitIds": [1],
+  "pollingInterval": "00:00:10"
+}

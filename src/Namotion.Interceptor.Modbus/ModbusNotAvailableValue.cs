@@ -8,12 +8,12 @@ public enum ModbusNotAvailableValue
     /// <summary>No pattern is treated as not available.</summary>
     None,
 
-    /// <summary>0x7FFF for 16-bit values, 0x7FFFFFFF for 32-bit values.</summary>
+    /// <summary>0x7FFF, 0x7FFFFFFF or 0x7FFFFFFFFFFFFFFF for 16-bit, 32-bit or 64-bit values.</summary>
     SignedMaximum,
 
-    /// <summary>0x8000 for 16-bit values, 0x80000000 for 32-bit values.</summary>
+    /// <summary>0x8000, 0x80000000 or 0x8000000000000000 for 16-bit, 32-bit or 64-bit values.</summary>
     SignedMinimum,
 
-    /// <summary>0xFFFF for 16-bit values, 0xFFFFFFFF for 32-bit values.</summary>
+    /// <summary>0xFFFF, 0xFFFFFFFF or 0xFFFFFFFFFFFFFFFF for 16-bit, 32-bit or 64-bit values.</summary>
     UnsignedMaximum
 }

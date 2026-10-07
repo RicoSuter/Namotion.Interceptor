@@ -55,6 +55,7 @@ Per-device documentation and setup guides.
 - [myStrom](devices/MyStrom.md): myStrom WiFi switches with power metering
 - [Philips Hue](devices/PhilipsHue.md): Hue Bridge: lights, rooms, motion and button sensors
 - [Shelly](devices/Shelly.md): Shelly Gen2+ devices via the RPC API
+- [SunSpec](devices/SunSpec.md): SunSpec inverters, meters and batteries (SolarEdge and others) via Modbus TCP, read only
 - [Wallbox](devices/Wallbox.md): Wallbox EV chargers via the cloud API
 
 ### Architecture
