@@ -93,7 +93,6 @@ public abstract class SubjectServerBase : SubjectConnectorBase
 - `WhenProcessingCompletesUnexpectedly_ThenItIsReportedAndRestarted`
 - `WhenInitializeAsyncThrows_ThenTheConnectorFaultsWithTheError`
 - `WhenStartServerAsyncThrows_ThenTheProcessorIsDisposed`
-- `WhenAnAttemptEnds_ThenTheServerTeardownRunsBeforeTheProcessorIsDisposed`
 - `WhenGetRestartDelayUsesTheDefault_ThenItGrowsAndIsCapped`
 
 Existing server tests are adapted where they use the removed OPC UA failure counter. Public API snapshots for Connectors, Mqtt and WebSocket are accepted.
@@ -113,4 +112,4 @@ Existing server tests are adapted where they use the removed OPC UA failure coun
 
 ## PR description notes
 
-Behavior changes to list: MQTT subscribes before the broker accepts clients; MQTT and WebSocket use exponential backoff instead of a fixed 5 s; a WebSocket processing loop that completes unexpectedly now restarts after the backoff; failure log messages come from the base class.
+Behavior changes to list: MQTT subscribes before the broker accepts clients; an OPC UA application build failure is retried instead of ending the connector; MQTT and WebSocket use exponential backoff instead of a fixed 5 s; a WebSocket processing loop that completes unexpectedly now restarts after the backoff; failure log messages come from the base class.
