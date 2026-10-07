@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Namotion.Devices.SunSpec.Definitions;
@@ -70,6 +71,12 @@ internal sealed class SunSpecPointDefinition
 
     [JsonPropertyName("access")]
     public string? Access { get; init; }
+
+    /// <summary>
+    /// Gets the fixed value the definition declares, such as the model length on the L point.
+    /// </summary>
+    [JsonPropertyName("value")]
+    public JsonElement Value { get; init; }
 
     [JsonPropertyName("symbols")]
     public IReadOnlyList<SunSpecSymbolDefinition> Symbols { get; init => field = value ?? []; } = [];
