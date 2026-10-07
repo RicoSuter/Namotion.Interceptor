@@ -9,7 +9,7 @@ status: Planned
 **Status: Planned**
 
 **Prerequisites:**
-- [MCP Server](../../../../../docs/plans/mcp-server.md) — core `Namotion.Interceptor.Mcp` package
+- [MCP Server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md): core `Namotion.Interceptor.Mcp` package
 - [HomeBlaze MCP Extensions](mcp-extensions.md) — HomeBlaze-specific tools, enrichers, type/path providers
 
 ## Problem
@@ -262,7 +262,7 @@ On failure (LLM API down, rate limited, timeout), set `Status` to error message,
 | Provider interface | `ILlmProvider` with `CreateChatClient()` only (no `Model`) | Consumer doesn't care which model — that's a provider config detail |
 | Provider as subject | Referenced by path | Centralized credentials, multiple agents share one provider |
 | Base class from day one | `LlmAgentBase` for specialized agents, `LlmAgent` for config-driven | Developers can subclass immediately, no waiting for later stages |
-| Tool reuse | Transport-agnostic `McpToolInfo` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](../../../../../docs/plans/mcp-server.md) |
+| Tool reuse | Transport-agnostic `McpToolInfo` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md) |
 | Safe by default | Read-only + notify, write access gated on authorization | Prevents accidental graph modification |
 | Pre-fetched context | Watch paths queried before LLM call | Reduces round-trips and API cost |
 | Per-run agent | Fresh `ChatClientAgent` per run, no session persistence | Simpler, cheaper, no conversation drift |

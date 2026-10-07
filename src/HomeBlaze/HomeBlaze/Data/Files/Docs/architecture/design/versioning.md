@@ -53,7 +53,7 @@ Public API analyzers ([PR #184](https://github.com/RicoSuter/Namotion.Intercepto
 
 ## Wire Protocol Versioning [Planned]
 
-Planned but not yet implemented. The WebSocket protocol (see [WebSocket connector](../../../../../../../../docs/connectors-websocket.md) and [SubjectUpdate format](../../../../../../../../docs/connectors-subject-updates.md)) is actively evolving (Commands/RPC, subscriptions, MessagePack). The Hello/Welcome handshake is prepared for version negotiation (version field), but no version checking or format negotiation is implemented yet. The versioning strategy will be designed once the surface stabilizes.
+Planned but not yet implemented. The WebSocket protocol (see [WebSocket connector](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connectors-websocket.md) and [SubjectUpdate format](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connectors-subject-updates.md)) is actively evolving (Commands/RPC, subscriptions, MessagePack). The Hello/Welcome handshake is prepared for version negotiation (version field), but no version checking or format negotiation is implemented yet. The versioning strategy will be designed once the surface stabilizes.
 
 Requirements for the future design: rolling upgrades must be possible, `SubjectUpdate` format changes must be backward compatible or versioned, approach should support additive changes without breaking existing clients.
 
