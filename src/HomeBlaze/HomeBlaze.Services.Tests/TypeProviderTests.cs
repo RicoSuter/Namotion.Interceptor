@@ -215,6 +215,54 @@ public class TypeProviderTests
         Assert.Empty(provider.Types);
     }
 
+    [Fact]
+    public void WhenTypeIsRegistered_ThenTryGetTypeFindsItByFullName()
+    {
+        // Arrange
+        var provider = new TypeProvider();
+        provider.AddTypes([typeof(TypeProvider)]);
+
+        // Act
+        var found = provider.TryGetType(typeof(TypeProvider).FullName!, out var type);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(typeof(TypeProvider), type);
+    }
+
+    [Fact]
+    public void WhenFullNameIsUnknown_ThenTryGetTypeReturnsFalse()
+    {
+        // Arrange
+        var provider = new TypeProvider();
+        provider.AddTypes([typeof(TypeProvider)]);
+
+        // Act
+        var found = provider.TryGetType("Unknown.Namespace.MissingType", out var type);
+
+        // Assert
+        Assert.False(found);
+        Assert.Null(type);
+    }
+
+    [Fact]
+    public void WhenSecondTypeOfDuplicateFullNameIsSkipped_ThenTryGetTypeReturnsTheFirst()
+    {
+        // Arrange
+        var provider = new TypeProvider();
+        var firstType = CreateDynamicType("TryGetTypeFirstAssembly", "Duplicate.Name.TryGetTypeDevice");
+        var secondType = CreateDynamicType("TryGetTypeSecondAssembly", "Duplicate.Name.TryGetTypeDevice");
+        provider.AddTypes([firstType]);
+        provider.AddTypes([secondType]);
+
+        // Act
+        var found = provider.TryGetType("Duplicate.Name.TryGetTypeDevice", out var type);
+
+        // Assert
+        Assert.True(found);
+        Assert.Equal(firstType, type);
+    }
+
     private static Type CreateDynamicType(string assemblyName, string typeName)
     {
         var assembly = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName(assemblyName), AssemblyBuilderAccess.Run);

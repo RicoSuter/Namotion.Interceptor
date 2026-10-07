@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace HomeBlaze.Services;
@@ -16,11 +18,24 @@ public class TypeProvider
     // a reader that is midway through an enumeration keeps walking the snapshot it started on.
     private Type[] _types = [];
 
+    // Published alongside _types under _lock so TryGetType stays lock-free: a frozen snapshot is rebuilt
+    // on every registration (rare) so every lookup (frequent, on request paths) is a single dictionary probe.
+    private FrozenDictionary<string, Type> _typesByFullNameSnapshot = FrozenDictionary<string, Type>.Empty;
+
     /// <summary>
     /// Gets all collected types. Returns the same instance until types are added, so callers can cache
     /// data derived from it per instance.
     /// </summary>
     public IReadOnlyCollection<Type> Types => Volatile.Read(ref _types);
+
+    /// <summary>
+    /// Looks up a registered type by its exact full name, without scanning <see cref="Types"/>.
+    /// </summary>
+    /// <returns><see langword="true"/> when a type with that full name is registered.</returns>
+    public bool TryGetType(string fullName, [NotNullWhen(true)] out Type? type)
+    {
+        return Volatile.Read(ref _typesByFullNameSnapshot).TryGetValue(fullName, out type);
+    }
 
     /// <summary>
     /// Raised synchronously on the thread that added the types, after <see cref="Types"/> already returns them.
@@ -95,6 +110,7 @@ public class TypeProvider
                 existingTypes.CopyTo(combinedTypes, 0);
                 addedTypes.CopyTo(combinedTypes, existingTypes.Length);
 
+                Volatile.Write(ref _typesByFullNameSnapshot, _typesByFullName.ToFrozenDictionary(StringComparer.Ordinal));
                 Volatile.Write(ref _types, combinedTypes);
             }
         }

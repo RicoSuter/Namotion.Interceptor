@@ -741,7 +741,7 @@ public partial class FluentStorageContainer :
 
     private bool IsTypeLoaded(string typeName)
     {
-        return _typeProvider is null || _typeProvider.Types.Any(type => type.FullName == typeName);
+        return _typeProvider is null || _typeProvider.TryGetType(typeName, out _);
     }
 
     // Callers hold _hierarchyLock.

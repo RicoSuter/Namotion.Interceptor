@@ -109,7 +109,7 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     public Type? FindType(string typeName)
     {
-        return _typeProvider.Types.FirstOrDefault(type => type.FullName == typeName);
+        return _typeProvider.TryGetType(typeName, out var type) ? type : null;
     }
 
     /// <summary>

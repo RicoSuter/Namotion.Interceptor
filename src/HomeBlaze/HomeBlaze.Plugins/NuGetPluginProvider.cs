@@ -397,8 +397,10 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
         {
             foreach (var skippedType in skippedTypes)
             {
-                var registeredAssembly = _typeProvider.Types
-                    .FirstOrDefault(type => type.FullName == skippedType.FullName)?.Assembly.GetName().Name;
+                var registeredAssembly = skippedType.FullName is not null
+                    && _typeProvider.TryGetType(skippedType.FullName, out var registeredType)
+                        ? registeredType.Assembly.GetName().Name
+                        : null;
                 _logger.LogWarning(
                     "Type {Type} from {Assembly} was skipped because {RegisteredAssembly} already provides a type with that name.",
                     skippedType.FullName, skippedType.Assembly.GetName().Name, registeredAssembly);
