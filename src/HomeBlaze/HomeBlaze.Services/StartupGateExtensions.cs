@@ -32,4 +32,46 @@ public static class StartupGateExtensions
     {
         return context.TryGetService<StartupGate>()?.Completed.IsCompleted ?? true;
     }
+
+    /// <summary>
+    /// Defers every <see cref="IStartupCompletion"/> registered in <paramref name="context"/> until the returned
+    /// handle is disposed. Take it before queueing the work and dispose it once the work ran, also on failure.
+    /// </summary>
+    public static IDisposable DeferStartupCompletion(this IInterceptorSubjectContext context)
+    {
+        var startupCompletions = context.GetServices<IStartupCompletion>();
+        if (startupCompletions.IsEmpty)
+        {
+            return NoOpDeferral.Instance;
+        }
+
+        if (startupCompletions.Length == 1)
+        {
+            return startupCompletions[0].Defer();
+        }
+
+        var deferrals = new IDisposable[startupCompletions.Length];
+        for (var index = 0; index < deferrals.Length; index++)
+        {
+            deferrals[index] = startupCompletions[index].Defer();
+        }
+
+        return new CompositeDeferral(deferrals);
+    }
+
+    private sealed class CompositeDeferral(IDisposable[] deferrals) : IDisposable
+    {
+        private IDisposable[]? _deferrals = deferrals;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _deferrals, null) is { } deferrals)
+            {
+                foreach (var deferral in deferrals)
+                {
+                    deferral.Dispose();
+                }
+            }
+        }
+    }
 }

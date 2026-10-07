@@ -230,24 +230,33 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // A nested attach composes: a service that attaches children during its own
                 // StartAsync defers completion for them before its own deferral is released, so the count never
                 // reaches zero in between.
-                PostStartService(hostedService, null, DeferStartupCompletion(hostedService, context));
+                PostStartService(hostedService, null, DeferStartupCompletion(context));
             }
         }
     }
 
-    // Caller holds _hostedServices and has just added hostedService. Without a queued start, keeping
-    // it registered would turn a later attach into a no-op, so the registration is undone on failure.
-    private IDisposable DeferStartupCompletion(IHostedService hostedService, IInterceptorSubjectContext context)
+    /// <summary>
+    /// Defers startup completion on every startup completion reachable from <paramref name="context"/>.
+    /// </summary>
+    /// <remarks>
+    /// Empty for an application that configures no startup completion (no source monitoring, for
+    /// example), which is the common case and costs one empty-array check per attach.
+    /// </remarks>
+    private static IDisposable[] DeferStartupCompletion(IInterceptorSubjectContext context)
     {
-        try
+        var startupCompletions = context.GetServices<IStartupCompletion>();
+        if (startupCompletions.IsEmpty)
         {
-            return context.DeferStartupCompletion();
+            return [];
         }
-        catch
+
+        var completionDeferrals = new IDisposable[startupCompletions.Length];
+        for (var index = 0; index < startupCompletions.Length; index++)
         {
-            _hostedServices.Remove(hostedService);
-            throw;
+            completionDeferrals[index] = startupCompletions[index].Defer();
         }
+
+        return completionDeferrals;
     }
 
     internal void DetachHostedService(IHostedService hostedService)
@@ -262,9 +271,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
     }
 
-    // Not async: a failure to defer startup completion throws synchronously, before anything is
-    // queued, so the caller can tell it apart from a start that failed.
-    internal Task AttachHostedServiceAsync(
+    internal async Task AttachHostedServiceAsync(
         IHostedService hostedService, IInterceptorSubjectContext context, CancellationToken cancellationToken)
     {
         // Inline caller continuations could block the action loop.
@@ -281,7 +288,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // being blocked does not block the startup-completion gate, so without a deferral
                 // ApplicationStarted can fire, drop the count to zero and let a wait complete
                 // vacuously while this start is still sitting in the queue.
-                PostStartService(hostedService, tcs, DeferStartupCompletion(hostedService, context));
+                PostStartService(hostedService, tcs, DeferStartupCompletion(context));
             }
             else
             {
@@ -289,7 +296,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             }
         }
 
-        return tcs.Task.WaitAsync(cancellationToken);
+        await tcs.Task.WaitAsync(cancellationToken);
     }
     
     internal async Task DetachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)
@@ -316,7 +323,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
     }
 
     private void PostStartService(
-        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable completionDeferral)
+        IHostedService hostedService, TaskCompletionSource? tcs, IDisposable[]? completionDeferrals = null)
     {
         // The action loop has a different execution flow from the code constructing the subject.
         var startDeferral = _startDeferral.Value;
@@ -369,16 +376,23 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // In a finally, so a start that throws or is cancelled releases its deferrals too.
                 // Leaking a deferral would block every synchronization wait on the tree forever - a
                 // hang rather than a wrong answer, which is the safer direction, but still a hang.
-                // The handle releases every deferral even when one throws.
-                try
+                if (completionDeferrals is not null)
                 {
-                    completionDeferral.Dispose();
-                }
-                catch (Exception releaseException)
-                {
-                    // Logged rather than swallowed, since this used to surface through the action loop.
-                    _logger?.LogError(
-                        releaseException, "Releasing a completion deferral threw and was ignored.");
+                    foreach (var completionDeferral in completionDeferrals)
+                    {
+                        try
+                        {
+                            completionDeferral.Dispose();
+                        }
+                        catch (Exception releaseException)
+                        {
+                            // One deferral throwing must not strand the others: a leaked deferral blocks
+                            // every wait on that tree forever. Logged rather than swallowed, since
+                            // this used to surface through the action loop.
+                            _logger?.LogError(
+                                releaseException, "Releasing a completion deferral threw and was ignored.");
+                        }
+                    }
                 }
             }
         }));
