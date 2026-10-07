@@ -1,7 +1,8 @@
 namespace Namotion.Interceptor.Modbus.Mapping;
 
 /// <summary>
-/// One read request covering <see cref="Count"/> registers or bits from <see cref="StartAddress"/>.
+/// Registers or bits from <see cref="StartAddress"/> read in one request, or, for a single binding larger than one
+/// request, in <see cref="RequestCount"/> consecutive requests.
 /// </summary>
 internal sealed class ModbusReadBatch
 {
@@ -12,6 +13,9 @@ internal sealed class ModbusReadBatch
         StartAddress = startAddress;
         Count = count;
         Bindings = bindings;
+        RequestCount = space.IsBitSpace()
+            ? 1
+            : (count + ModbusReadPlanner.MaximumRegistersPerRequest - 1) / ModbusReadPlanner.MaximumRegistersPerRequest;
     }
 
     public byte UnitId { get; }
@@ -23,4 +27,25 @@ internal sealed class ModbusReadBatch
     public int Count { get; }
 
     public ModbusRegisterBinding[] Bindings { get; }
+
+    /// <summary>
+    /// Gets the number of requests reading this batch. More than one only for a batch of a single binding.
+    /// </summary>
+    public int RequestCount { get; }
+
+    /// <summary>
+    /// Gets the start address and register count of the request at <paramref name="index"/>.
+    /// </summary>
+    public (int StartAddress, int Count) GetRequest(int index)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, RequestCount);
+        if (RequestCount == 1)
+        {
+            return (StartAddress, Count);
+        }
+
+        var offset = index * ModbusReadPlanner.MaximumRegistersPerRequest;
+        return (StartAddress + offset, Math.Min(ModbusReadPlanner.MaximumRegistersPerRequest, Count - offset));
+    }
 }

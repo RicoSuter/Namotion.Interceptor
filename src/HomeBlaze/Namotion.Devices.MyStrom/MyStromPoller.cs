@@ -163,7 +163,7 @@ internal sealed class MyStromPoller : BackgroundService
         {
             _device.IsOn = report.IsRelayOn;
             _device.MeasuredPower = Math.Round(report.Power, 1);
-            _device.MeasuredEnergyConsumed = Math.Round(report.EnergySinceBoot / 3600m, 2);
+            _device.TotalImportedEnergy = Math.Round(report.EnergySinceBoot / 3600m, 2);
             _device.Uptime = TimeSpan.FromSeconds(report.TimeSinceBoot);
             _device.IsConnected = true;
         }

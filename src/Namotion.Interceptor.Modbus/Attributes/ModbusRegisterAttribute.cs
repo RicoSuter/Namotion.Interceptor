@@ -34,24 +34,32 @@ public class ModbusRegisterAttribute : Attribute
     public ModbusAddressSpace AddressSpace { get; init; } = ModbusAddressSpace.HoldingRegister;
 
     /// <summary>
-    /// Gets the register order of 32-bit values. Ignored for other types.
+    /// Gets the register order of 32-bit and 64-bit values. Ignored for other types.
     /// </summary>
     public ModbusWordOrder WordOrder { get; init; } = ModbusWordOrder.HighWordFirst;
 
     /// <summary>
-    /// Gets the static factor the raw value is multiplied with. Requires a floating point or decimal property.
+    /// Gets the static factor the raw value is multiplied with, in addition to the dynamic scale factor when one applies:
+    /// value = raw * Scale * 10^exponent. Requires a floating point, decimal or <see cref="TimeSpan"/> property, where a <see cref="TimeSpan"/> takes the value as seconds.
     /// </summary>
     public double Scale { get; init; } = 1.0;
 
     /// <summary>
     /// Gets the name of an <see cref="ModbusDataType.S16"/> register property on the same subject holding a power-of-ten exponent:
-    /// value = raw * 10^exponent. Mutually exclusive with <see cref="Scale"/>.
+    /// value = raw * <see cref="Scale"/> * 10^exponent. For a scale factor on another subject, implement
+    /// <see cref="IModbusScaleFactorProvider"/> instead.
     /// </summary>
     public string? ScaleFactorProperty { get; init; }
 
     /// <summary>
-    /// Gets the register count of <see cref="ModbusDataType.String"/> values. Must be 0 for other types.
+    /// Gets the register count of <see cref="ModbusDataType.String"/> values, at least 1 and within the address space.
+    /// Must be 0 for other types.
     /// </summary>
+    /// <remarks>
+    /// A string longer than one request (125 registers) is read in consecutive requests, which Modbus cannot read
+    /// atomically: a changed value is read twice in the same cycle and only applied when both reads agree, so a string
+    /// that changes faster than one read pair is never applied.
+    /// </remarks>
     public int Length { get; init; }
 
     /// <summary>

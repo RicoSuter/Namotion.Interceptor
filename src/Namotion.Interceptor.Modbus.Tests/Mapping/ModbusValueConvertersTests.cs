@@ -19,8 +19,26 @@ public class ModbusValueConvertersTests
         Second = 2
     }
 
+    private enum Direction : short
+    {
+        Reverse = -2,
+        Forward = 1
+    }
+
+    private enum Offset : long
+    {
+        Negative = -2,
+        Positive = 2
+    }
+
+    private enum Marker : ulong
+    {
+        Low = 1,
+        High = 0x8000000000000001
+    }
+
     private static object? Convert(ModbusRegisterAttribute attribute, Type propertyType, byte[] raw, int exponent = 0)
-        => ModbusValueConverters.Create(attribute, propertyType, "Test.Property")(raw, exponent);
+        => ModbusValueConverters.Create(attribute, propertyType, "Test.Property", hasDynamicScale: attribute.ScaleFactorProperty is not null)(raw, exponent);
 
     [Fact]
     public void WhenScalingIntoDecimal_ThenResultIsExact()
@@ -208,6 +226,54 @@ public class ModbusValueConvertersTests
         Assert.Equal(0.15m, value);
     }
 
+    [Fact]
+    public void WhenFloatHasMoreThanSevenSignificantDigitsIntoDecimal_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), [0x4B, 0x80, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(16777216m, value);
+    }
+
+    [Fact]
+    public void WhenFloatHasMoreThanSevenSignificantDigitsIntoTimeSpan_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan?), [0x4B, 0x80, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(16777216), value);
+    }
+
+    [Fact]
+    public void WhenFloatIsNotExactInBinaryIntoDecimal_ThenShortestRoundTripValueIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), [0x43, 0x66, 0x19, 0x9A]);
+
+        // Assert
+        Assert.Equal(230.1m, value);
+    }
+
+    [Fact]
+    public void WhenLargeFloatIntoDecimal_ThenShortestRoundTripValueIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal?), [0x60, 0xAD, 0x78, 0xEC]);
+
+        // Assert
+        Assert.Equal(100000000000000000000m, value);
+    }
+
+    [Fact]
+    public void WhenInfiniteFloatTargetsNonNullableDecimal_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(decimal), [0x7F, 0x80, 0x00, 0x00]));
+    }
+
     [Theory]
     [InlineData(ModbusDataType.U16)]
     [InlineData(ModbusDataType.F32)]
@@ -215,7 +281,7 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
-            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Scale = 1e30 }, typeof(decimal?), "Test.Property"));
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Scale = 1e30 }, typeof(decimal?), "Test.Property", hasDynamicScale: false));
     }
 
     [Theory]
@@ -253,7 +319,7 @@ public class ModbusValueConvertersTests
                     Length = dataType == ModbusDataType.String ? 1 : 0,
                     NotAvailableValue = ModbusNotAvailableValue.SignedMaximum
                 },
-                propertyType, "Test.Property"));
+                propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Fact]
@@ -294,7 +360,7 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
-            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.1 }, propertyType, "Test.Property"));
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.1 }, propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Theory]
@@ -308,7 +374,7 @@ public class ModbusValueConvertersTests
     {
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
-            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType), propertyType, "Test.Property"));
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType), propertyType, "Test.Property", hasDynamicScale: false));
     }
 
     [Fact]
@@ -318,7 +384,7 @@ public class ModbusValueConvertersTests
         Assert.Throws<ModbusConfigurationException>(() =>
             ModbusValueConverters.Create(
                 new ModbusRegisterAttribute(0, ModbusDataType.U16) { NotAvailableValue = ModbusNotAvailableValue.SignedMaximum },
-                typeof(int), "Test.Property"));
+                typeof(int), "Test.Property", hasDynamicScale: false));
     }
 
     [Theory]
@@ -331,6 +397,237 @@ public class ModbusValueConvertersTests
         // Act & Assert
         Assert.Throws<ModbusConfigurationException>(() =>
             ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Length = dataType == ModbusDataType.String ? 1 : 0 },
-                propertyType, "Test.Property"));
+                propertyType, "Test.Property", hasDynamicScale: false));
+    }
+
+    [Fact]
+    public void WhenConvertingMaximumU64IntoDecimal_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(decimal?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // Assert
+        Assert.Equal(18446744073709551615m, value);
+    }
+
+    [Fact]
+    public void WhenConvertingU64IntoUnsignedLong_ThenValueIsKept()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(ulong?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // Assert
+        Assert.Equal(ulong.MaxValue, value);
+    }
+
+    [Fact]
+    public void WhenConvertingS64IntoLong_ThenSignIsKept()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(long?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(-2L, value);
+    }
+
+    [Fact]
+    public void WhenScalingU64WithDynamicScaleFactor_ThenPowerOfTenIsApplied()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64) { ScaleFactorProperty = "Factor" },
+            typeof(decimal?), [0, 0, 0, 0, 0, 0, 0, 150], exponent: 3);
+
+        // Assert
+        Assert.Equal(150000m, value);
+    }
+
+    [Fact]
+    public void WhenU64IsUnsignedMaximumPattern_ThenValueIsNull()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64) { NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum },
+            typeof(decimal?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenConvertingU64IntoLong_ThenConfigurationExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() => Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(long?), new byte[8]));
+    }
+
+    [Fact]
+    public void WhenConvertingS64IntoUnsignedLong_ThenConfigurationExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() => Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(ulong?), new byte[8]));
+    }
+
+    [Fact]
+    public void WhenConvertingNegativeS64IntoDecimal_ThenSignIsKept()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(decimal?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(-2m, value);
+    }
+
+    [Fact]
+    public void WhenConvertingNegativeS16IntoShortBackedEnum_ThenNegativeMemberIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S16), typeof(Direction?), [0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(Direction.Reverse, value);
+    }
+
+    [Fact]
+    public void WhenConvertingNegativeS64IntoLongBackedEnum_ThenNegativeMemberIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S64), typeof(Offset?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE]);
+
+        // Assert
+        Assert.Equal(Offset.Negative, value);
+    }
+
+    [Fact]
+    public void WhenConvertingU64AboveLongMaximumIntoUnsignedLongBackedEnum_ThenValueIsNotTruncated()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(Marker?), [0x80, 0, 0, 0, 0, 0, 0, 0x01]);
+
+        // Assert
+        Assert.Equal(Marker.High, value);
+    }
+
+    [Fact]
+    public void WhenScaleIsCombinedWithDynamicScaleFactorIntoDecimal_ThenBothApplyExactly()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.01, ScaleFactorProperty = "Factor" },
+            typeof(decimal?), [0x11, 0xC6], exponent: -2);
+
+        // Assert
+        Assert.Equal(0.455m, value);
+    }
+
+    [Fact]
+    public void WhenScaleIsCombinedWithDynamicScaleFactorIntoDouble_ThenBothApply()
+    {
+        // Act
+        var value = (double?)Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 0.01, ScaleFactorProperty = "Factor" },
+            typeof(double?), [0x11, 0xC6], exponent: -2);
+
+        // Assert
+        Assert.NotNull(value);
+        Assert.Equal(0.455, value.Value, 10);
+    }
+
+    [Fact]
+    public void WhenU16TargetsTimeSpan_ThenValueIsSeconds()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16), typeof(TimeSpan), [0x00, 0x5A]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(90), value);
+    }
+
+    [Fact]
+    public void WhenU32MillisecondsTargetsTimeSpanWithScale_ThenValueIsExact()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U32) { Scale = 0.001 }, typeof(TimeSpan?), [0x00, 0x00, 0x05, 0xDC]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), value);
+    }
+
+    [Fact]
+    public void WhenS16TargetsTimeSpanWithDynamicScaleFactor_ThenPowerOfTenIsApplied()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.S16) { ScaleFactorProperty = "Factor" },
+            typeof(TimeSpan?), [0xFF, 0xF1], exponent: -1);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(-1.5), value);
+    }
+
+    [Fact]
+    public void WhenTimeSpanIsFinerThanATick_ThenItIsTruncated()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { Scale = 1e-9 }, typeof(TimeSpan), [0x00, 0x96]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromTicks(1), value);
+    }
+
+    [Fact]
+    public void WhenRawMatchesNotAvailableValueForTimeSpan_ThenNullIsReturned()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.U16) { NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum },
+            typeof(TimeSpan?), [0xFF, 0xFF]);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenIntegerIsOutsideTimeSpanRange_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.U64), typeof(TimeSpan?), [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]));
+    }
+
+    [Fact]
+    public void WhenF32TargetsTimeSpan_ThenValueIsSeconds()
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan), [0x3F, 0xC0, 0x00, 0x00]);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(1.5), value);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x7F, 0xC0, 0x00, 0x00 })] // NaN
+    [InlineData(new byte[] { 0x7F, 0x80, 0x00, 0x00 })] // +Infinity
+    [InlineData(new byte[] { 0x60, 0xAD, 0x78, 0xEC })] // 1e20, beyond the TimeSpan range
+    public void WhenFloatCannotBeTimeSpanForNullableTimeSpan_ThenNullIsReturned(byte[] raw)
+    {
+        // Act
+        var value = Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan?), raw);
+
+        // Assert
+        Assert.Null(value);
+    }
+
+    [Fact]
+    public void WhenNaNFloatTargetsNonNullableTimeSpan_ThenOverflowExceptionIsThrown()
+    {
+        // Act & Assert
+        Assert.Throws<OverflowException>(() =>
+            Convert(new ModbusRegisterAttribute(0, ModbusDataType.F32), typeof(TimeSpan), [0x7F, 0xC0, 0x00, 0x00]));
+    }
+
+    [Theory]
+    [InlineData(ModbusDataType.Boolean)]
+    [InlineData(ModbusDataType.String)]
+    public void WhenDataTypeCannotBeTimeSpan_ThenConfigurationExceptionIsThrown(ModbusDataType dataType)
+    {
+        // Act & Assert
+        Assert.Throws<ModbusConfigurationException>(() =>
+            ModbusValueConverters.Create(new ModbusRegisterAttribute(0, dataType) { Length = dataType == ModbusDataType.String ? 1 : 0 },
+                typeof(TimeSpan?), "Test.Property", hasDynamicScale: false));
     }
 }

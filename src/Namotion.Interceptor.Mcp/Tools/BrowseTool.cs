@@ -94,7 +94,7 @@ internal class BrowseTool
             var resolved = pathProvider.TryGetSubjectFromPath(rootRegisteredSubject, path!);
             if (resolved is null)
             {
-                return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+                return Task.FromResult<object?>(McpToolHelper.GetPathNotFoundError(pathProvider, path!));
             }
 
             startSubject = resolved;
@@ -207,7 +207,8 @@ internal class BrowseTool
                     foreach (var child in property.Children)
                     {
                         var childRegistered = child.Subject.TryGetRegisteredSubject();
-                        if (childRegistered is null ||
+                        if (child.Index is null ||
+                            childRegistered is null ||
                             McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, excludeTypes) ||
                             !visited.Add(child.Subject))
                         {
@@ -220,8 +221,8 @@ internal class BrowseTool
                             break;
                         }
 
+                        var key = PathExtensions.FormatPathIndex(child.Index);
                         subjectCount++;
-                        var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
                         children[key] = BuildSubjectNode(childRegistered, rootSubject, pathProvider,
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, excludeTypes,

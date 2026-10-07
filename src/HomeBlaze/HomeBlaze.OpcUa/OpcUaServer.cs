@@ -283,6 +283,12 @@ public partial class OpcUaServer
             BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
         };
 
+        // Separate from the client store: the server cleans its own store on start.
+        if (OpcUaCertificateStoreLocation.Resolve(this, "Server") is { } certificateStorePath)
+        {
+            configuration.CertificateStoreBasePath = certificateStorePath;
+        }
+
         return targetSubject.CreateOpcUaServer(configuration, _logger);
     }
 

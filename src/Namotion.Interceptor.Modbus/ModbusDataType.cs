@@ -24,5 +24,11 @@ public enum ModbusDataType
     F32,
 
     /// <summary>ASCII string, two characters per register, <see cref="Attributes.ModbusRegisterAttribute.Length"/> registers.</summary>
-    String
+    String,
+
+    /// <summary>Unsigned 64-bit integer, four registers.</summary>
+    U64,
+
+    /// <summary>Signed 64-bit integer, four registers.</summary>
+    S64
 }

@@ -1,0 +1,26 @@
+{
+  "excludedModels": [63001, 63002],
+  "classes": [
+    { "name": "SunSpecCommon", "models": [1] },
+    { "name": "SunSpecInverter", "models": [101, 102, 103], "representative": 103 },
+    { "name": "SunSpecFloatInverter", "models": [111, 112, 113], "representative": 113 },
+    { "name": "SunSpecNameplate", "models": [120] },
+    { "name": "SunSpecBasicSettings", "models": [121] },
+    { "name": "SunSpecInverterStatus", "models": [122] },
+    { "name": "SunSpecImmediateControls", "models": [123] },
+    { "name": "SunSpecStorageControls", "models": [124] },
+    { "name": "SunSpecMppt", "models": [160] },
+    { "name": "SunSpecAcMeter", "models": [201, 202, 203, 204], "representative": 203 },
+    { "name": "SunSpecFloatAcMeter", "models": [211, 212, 213, 214], "representative": 213 },
+    { "name": "SunSpecIrradiance", "models": [302] },
+    { "name": "SunSpecWeatherStation", "models": [307] },
+    { "name": "SunSpecDerAcMeasurement", "models": [701] },
+    { "name": "SunSpecDerCapacity", "models": [702] },
+    { "name": "SunSpecStorageCapacity", "models": [713] },
+    { "name": "SunSpecDerDcMeasurement", "models": [714] },
+    { "name": "SunSpecBattery", "models": [802] },
+    { "name": "SunSpecLithiumIonBank", "models": [803] },
+    { "name": "SunSpecLithiumIonString", "models": [804] },
+    { "name": "SunSpecLithiumIonModule", "models": [805] }
+  ]
+}

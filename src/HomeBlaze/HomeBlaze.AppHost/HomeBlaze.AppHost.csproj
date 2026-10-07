@@ -1,0 +1,17 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.5.4">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <AspireUseCliBundle>true</AspireUseCliBundle>
+        <UserSecretsId>3dc9421e-7d2a-4338-898b-99cb8152f843</UserSecretsId>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Aspire.Hosting.Seq" />
+    </ItemGroup>
+
+</Project>

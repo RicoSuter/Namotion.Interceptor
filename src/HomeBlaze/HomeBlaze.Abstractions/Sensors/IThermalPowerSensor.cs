@@ -20,5 +20,5 @@ public interface IThermalPowerSensor
     /// The total thermal energy produced.
     /// </summary>
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 351)]
-    decimal? ThermalEnergyProduced { get; }
+    decimal? TotalProducedThermalEnergy { get; }
 }

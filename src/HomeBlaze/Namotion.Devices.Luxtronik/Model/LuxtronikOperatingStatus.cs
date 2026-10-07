@@ -25,7 +25,7 @@ public partial class LuxtronikOperatingStatus
         BufferType = null;
         MinimumOffTime = null;
         MinimumRunTime = null;
-        OperatingHours = null;
+        TotalOperatingHours = null;
     }
 
     /// <summary>
@@ -75,7 +75,7 @@ public partial class LuxtronikOperatingStatus
     /// </summary>
     [LuxtronikInputRegister(10404, ModbusDataType.U32, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 7)]
-    public partial decimal? OperatingHours { get; internal set; }
+    public partial decimal? TotalOperatingHours { get; internal set; }
 
     /// <summary>
     /// Gets the brine, well or fan pump output (VBO).

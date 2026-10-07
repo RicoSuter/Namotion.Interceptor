@@ -242,6 +242,11 @@ public partial class OpcUaClient
                 : null,
         };
 
+        if (OpcUaCertificateStoreLocation.Resolve(this, "Client") is { } certificateStorePath)
+        {
+            configuration.CertificateStoreBasePath = certificateStorePath;
+        }
+
         return root.CreateOpcUaClientSource(configuration, _logger);
     }
 

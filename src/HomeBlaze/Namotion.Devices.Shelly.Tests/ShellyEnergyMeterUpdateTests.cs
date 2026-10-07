@@ -56,22 +56,30 @@ public class ShellyEnergyMeterUpdateTests
     }
 
     [Fact]
-    public void WhenUpdateFromStatus_ThenMeasuredPowerEqualsTotalActivePower()
+    public void WhenUpdateFromStatus_ThenMeterValuesMapped()
     {
         // Arrange
         var meter = new ShellyEnergyMeter();
-        var status = new ShellyEmStatus { TotalActivePower = 1011.0m };
+        var status = new ShellyEmStatus
+        {
+            TotalActivePower = 1011.0m,
+            TotalApparentPower = 1028.0m,
+            TotalCurrent = 4.4m,
+            NeutralCurrent = 0.3m
+        };
 
         // Act
         meter.UpdateFromStatus(status);
 
         // Assert
         Assert.Equal(1011.0m, meter.MeasuredPower);
-        Assert.Equal(meter.TotalActivePower, meter.MeasuredPower);
+        Assert.Equal(1028.0m, meter.ApparentPower);
+        Assert.Equal(4.4m, meter.ElectricalCurrent);
+        Assert.Equal(0.3m, meter.NeutralCurrent);
     }
 
     [Fact]
-    public void WhenUpdateFromDataStatus_ThenTotalValuesMapped()
+    public void WhenUpdateFromDataStatus_ThenDeviceCountersMappedAndNettedCountersUntouched()
     {
         // Arrange
         var meter = new ShellyEnergyMeter();
@@ -91,12 +99,53 @@ public class ShellyEnergyMeterUpdateTests
         meter.UpdateFromDataStatus(dataStatus);
 
         // Assert
-        Assert.Equal(15000.5m, meter.MeasuredEnergyConsumed);
-        Assert.Equal(2000.3m, meter.TotalReturnedEnergy);
-        Assert.Equal(5000.1m, meter.Phases[0].TotalActiveEnergy);
-        Assert.Equal(700.0m, meter.Phases[0].TotalReturnedEnergy);
-        Assert.Equal(6000.2m, meter.Phases[1].TotalActiveEnergy);
-        Assert.Equal(4000.2m, meter.Phases[2].TotalActiveEnergy);
+        Assert.Equal(15000.5m, meter.TotalImportedPhaseEnergy);
+        Assert.Equal(2000.3m, meter.TotalExportedPhaseEnergy);
+        Assert.Equal(5000.1m, meter.Phases[0].TotalImportedEnergy);
+        Assert.Equal(700.0m, meter.Phases[0].TotalExportedEnergy);
+        Assert.Equal(6000.2m, meter.Phases[1].TotalImportedEnergy);
+        Assert.Equal(800.0m, meter.Phases[1].TotalExportedEnergy);
+        Assert.Equal(4000.2m, meter.Phases[2].TotalImportedEnergy);
+        Assert.Equal(500.3m, meter.Phases[2].TotalExportedEnergy);
+        Assert.Null(meter.IsTotalEnergyPhaseNetted);
+        Assert.Null(meter.TotalImportedEnergy);
+        Assert.Null(meter.TotalExportedEnergy);
+    }
+
+    [Fact]
+    public void WhenUpdateFromDataStatusWithoutPhaseNetting_ThenCountersFollowPhaseSums()
+    {
+        // Arrange
+        var meter = new ShellyEnergyMeter();
+        meter.UsePhaseEnergy();
+
+        // Act
+        meter.UpdateFromDataStatus(new ShellyEmDataStatus { TotalActiveEnergy = 15000.5m, TotalActiveReturnedEnergy = 2000.3m });
+
+        // Assert
+        Assert.False(meter.IsTotalEnergyPhaseNetted);
+        Assert.Equal(15000.5m, meter.TotalImportedEnergy);
+        Assert.Equal(2000.3m, meter.TotalExportedEnergy);
+    }
+
+    [Fact]
+    public void WhenUpdateFromDataStatusWhilePhaseNetted_ThenNettedCountersAreKept()
+    {
+        // Arrange
+        var meter = new ShellyEnergyMeter
+        {
+            IsTotalEnergyPhaseNetted = true,
+            TotalImportedEnergy = 14000.0m,
+            TotalExportedEnergy = 1000.0m
+        };
+
+        // Act
+        meter.UpdateFromDataStatus(new ShellyEmDataStatus { TotalActiveEnergy = 15000.5m, TotalActiveReturnedEnergy = 2000.3m });
+
+        // Assert
+        Assert.Equal(14000.0m, meter.TotalImportedEnergy);
+        Assert.Equal(1000.0m, meter.TotalExportedEnergy);
+        Assert.Equal(15000.5m, meter.TotalImportedPhaseEnergy);
     }
 
     [Fact]

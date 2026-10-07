@@ -93,6 +93,10 @@ namespace Namotion.Interceptor.Modbus
     {
         int BaseAddress { get; }
     }
+    public interface IModbusScaleFactorProvider
+    {
+        Namotion.Interceptor.PropertyReference? TryGetScaleFactorProperty(string propertyName);
+    }
     public interface IModbusUnitIdProvider
     {
         byte UnitId { get; }
@@ -122,6 +126,8 @@ namespace Namotion.Interceptor.Modbus
         S32 = 4,
         F32 = 5,
         String = 6,
+        U64 = 7,
+        S64 = 8,
     }
     public enum ModbusNotAvailableValue
     {

@@ -15,6 +15,11 @@ public static class StateUnitExtensions
     private static readonly (StateUnit Unit, string Suffix, decimal Factor)[][] UnitFamilies =
     [
         [(StateUnit.Watt, "W", 1m), (StateUnit.Kilowatt, "kW", 1000m)],
+        [(StateUnit.VoltAmpere, "VA", 1m), (default, "kVA", 1000m)],
+        [(StateUnit.VoltAmpereReactive, "var", 1m), (default, "kvar", 1000m)],
+        [(StateUnit.VoltAmpereHour, "VAh", 1m), (default, "kVAh", 1000m)],
+        [(StateUnit.VoltAmpereReactiveHour, "varh", 1m), (default, "kvarh", 1000m)],
+        [(StateUnit.AmpereHour, "Ah", 1m), (default, "kAh", 1000m)],
         [(StateUnit.WattHour, "Wh", 1m), (StateUnit.KilowattHour, "kWh", 1000m)],
         [(StateUnit.Millimeter, "mm", 1m), (StateUnit.Meter, "m", 1000m), (StateUnit.Kilometer, "km", 1_000_000m)],
         [(StateUnit.Milliampere, "mA", 1m), (StateUnit.Ampere, "A", 1000m)],
@@ -178,6 +183,7 @@ public static class StateUnitExtensions
         StateUnit.Degree => ("°", false),
         StateUnit.Watt => ("W", true),
         StateUnit.Kilowatt => ("kW", true),
+        StateUnit.VoltAmpere => ("VA", true),
         StateUnit.WattHour => ("Wh", true),
         StateUnit.Volt => ("V", true),
         StateUnit.Ampere => ("A", true),
@@ -202,6 +208,11 @@ public static class StateUnitExtensions
         StateUnit.Kelvin => ("K", true),
         StateUnit.Minute => ("min", true),
         StateUnit.Hour => ("h", true),
+        StateUnit.VoltAmpereReactive => ("var", true),
+        StateUnit.VoltAmpereHour => ("VAh", true),
+        StateUnit.VoltAmpereReactiveHour => ("varh", true),
+        StateUnit.AmpereHour => ("Ah", true),
+        StateUnit.WattPerSquareMeter => ("W/m²", true),
         _ => null
     };
 

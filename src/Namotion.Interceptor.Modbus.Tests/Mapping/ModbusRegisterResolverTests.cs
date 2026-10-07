@@ -70,6 +70,27 @@ public partial class ModbusRegisterResolverTests
     }
 
     [InterceptorSubject]
+    public partial class LongStringSubject
+    {
+        [ModbusRegister(65386, ModbusDataType.String, Length = 150)]
+        public partial string? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class LongStringOverflowSubject
+    {
+        [ModbusRegister(65387, ModbusDataType.String, Length = 150)]
+        public partial string? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class StringLongerThanAddressSpaceSubject
+    {
+        [ModbusRegister(0, ModbusDataType.String, Length = 65537)]
+        public partial string? Value { get; set; }
+    }
+
+    [InterceptorSubject]
     public partial class LengthOnIntegerSubject
     {
         [ModbusRegister(0, ModbusDataType.U16, Length = 2)]
@@ -235,6 +256,85 @@ public partial class ModbusRegisterResolverTests
         public partial CycleSubject? Next { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class ProviderParent
+    {
+        [ModbusRegister(0, ModbusDataType.S16)]
+        public partial short? CurrentScaleFactor { get; set; }
+
+        public partial ProviderChild? Child { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class ProviderChild : IModbusBaseAddressProvider, IModbusScaleFactorProvider
+    {
+        public ProviderChild(ProviderParent parent)
+        {
+            Parent = parent;
+        }
+
+        public ProviderParent Parent { get; }
+
+        public int BaseAddress => 10;
+
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial decimal? Current { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.U16)]
+        public partial int? Status { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Current) ? new PropertyReference(Parent, nameof(ProviderParent.CurrentScaleFactor)) : null;
+    }
+
+    [InterceptorSubject]
+    public partial class ConflictingProviderSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.S16)]
+        public partial short? Factor { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Value) ? new PropertyReference(this, nameof(Factor)) : null;
+    }
+
+    [InterceptorSubject]
+    public partial class MissingProvidedScaleFactorSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial decimal? Value { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Value) ? new PropertyReference(this, "Missing") : null;
+    }
+
+    [InterceptorSubject]
+    public partial class DecliningProviderSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16, ScaleFactorProperty = nameof(Factor))]
+        public partial decimal? Value { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.S16)]
+        public partial short? Factor { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName) => null;
+    }
+
+    [InterceptorSubject]
+    public partial class DurationProviderSubject : IModbusScaleFactorProvider
+    {
+        [ModbusRegister(0, ModbusDataType.U16)]
+        public partial TimeSpan? Duration { get; set; }
+
+        [ModbusRegister(1, ModbusDataType.S16)]
+        public partial short? DurationScaleFactor { get; set; }
+
+        public PropertyReference? TryGetScaleFactorProperty(string propertyName)
+            => propertyName == nameof(Duration) ? new PropertyReference(this, nameof(DurationScaleFactor)) : null;
+    }
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -282,6 +382,94 @@ public partial class ModbusRegisterResolverTests
         // Assert
         var power = Find(bindings, root, nameof(ResolverRoot.Power));
         Assert.Same(Find(bindings, root, nameof(ResolverRoot.PowerScaleFactor)), power.ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenScaleIsCombinedWithScaleFactorProperty_ThenBindingIsLinked()
+    {
+        // Arrange
+        var subject = new ScaleAndScaleFactorSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var value = Find(bindings, subject, nameof(ScaleAndScaleFactorSubject.Value));
+        Assert.Same(Find(bindings, subject, nameof(ScaleAndScaleFactorSubject.Factor)), value.ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProviderSuppliesScaleFactorOfAnotherSubject_ThenBindingIsLinked()
+    {
+        // Arrange
+        var parent = new ProviderParent(CreateContext());
+        var child = new ProviderChild(parent);
+        parent.Child = child;
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(parent, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        Assert.Same(Find(bindings, parent, nameof(ProviderParent.CurrentScaleFactor)), Find(bindings, child, nameof(ProviderChild.Current)).ScaleFactor);
+        Assert.Null(Find(bindings, child, nameof(ProviderChild.Status)).ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProviderReturnsNullForPropertyWithScaleFactorProperty_ThenAttributeScaleFactorIsLinked()
+    {
+        // Arrange
+        var subject = new DecliningProviderSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var value = Find(bindings, subject, nameof(DecliningProviderSubject.Value));
+        Assert.Same(Find(bindings, subject, nameof(DecliningProviderSubject.Factor)), value.ScaleFactor);
+    }
+
+    [Fact]
+    public void WhenProviderSuppliesScaleFactorForTimeSpanProperty_ThenReaderAppliesIt()
+    {
+        // Arrange
+        var subject = new DurationProviderSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var duration = Find(bindings, subject, nameof(DurationProviderSubject.Duration));
+        Assert.Same(Find(bindings, subject, nameof(DurationProviderSubject.DurationScaleFactor)), duration.ScaleFactor);
+        Assert.Equal(TimeSpan.FromSeconds(1.5), duration.Reader(new byte[] { 0x00, 0x0F }, -1));
+    }
+
+    [Fact]
+    public void WhenProvidedScaleFactorIsNotMapped_ThenConfigurationExceptionNamesItsSubject()
+    {
+        // Arrange
+        var subject = new MissingProvidedScaleFactorSubject(CreateContext());
+
+        // Act
+        var exception = Assert.Throws<ModbusConfigurationException>(
+            () => ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>()));
+
+        // Assert
+        Assert.Contains($"'Missing' of {nameof(MissingProvidedScaleFactorSubject)}", exception.Message);
+    }
+
+    [Fact]
+    public void WhenStringIsLongerThanOneRequestAndEndsAtTheLastAddress_ThenBindingIsCreated()
+    {
+        // Arrange
+        var subject = new LongStringSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var binding = Assert.Single(bindings);
+        Assert.Equal((65386, 150), (binding.Address, binding.Count));
+        Assert.Equal(300, binding.CurrentRaw.Length);
     }
 
     [Fact]
@@ -400,13 +588,14 @@ public partial class ModbusRegisterResolverTests
 
     public static TheoryData<Func<IInterceptorSubjectContext, IInterceptorSubject>> InvalidSubjects => new()
     {
-        context => new ScaleAndScaleFactorSubject(context),
         context => new MissingScaleFactorSubject(context),
         context => new FloatScaleFactorSubject(context),
         context => new U16ScaleFactorSubject(context),
         context => new U32ScaleFactorSubject(context),
         context => new StringWithoutLengthSubject(context),
         context => new LengthOnIntegerSubject(context),
+        context => new LongStringOverflowSubject(context),
+        context => new StringLongerThanAddressSpaceSubject(context),
         context => new BooleanInRegisterSubject(context),
         context => new IntegerInCoilSubject(context),
         context => new AddressOverflowSubject(context),
@@ -417,6 +606,8 @@ public partial class ModbusRegisterResolverTests
         context => new UndefinedSpaceSubject(context),
         context => new UndefinedWordOrderSubject(context),
         context => new UndefinedNotAvailableValueSubject(context),
+        context => new ConflictingProviderSubject(context),
+        context => new MissingProvidedScaleFactorSubject(context),
     };
 
     [Theory]

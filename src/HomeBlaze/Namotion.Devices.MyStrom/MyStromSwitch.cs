@@ -73,7 +73,10 @@ public partial class MyStromSwitch :
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    public partial decimal? MeasuredEnergyConsumed { get; internal set; }
+    public partial decimal? TotalImportedEnergy { get; internal set; }
+
+    [Derived]
+    public decimal? TotalExportedEnergy => null;
 
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
@@ -144,7 +147,7 @@ public partial class MyStromSwitch :
         LastUpdated = null;
         IsOn = null;
         MeasuredPower = null;
-        MeasuredEnergyConsumed = null;
+        TotalImportedEnergy = null;
         Temperature = null;
         Uptime = null;
     }

@@ -214,13 +214,13 @@ public partial class LuxtronikHeatPump :
     public decimal? Power => Energy.ElectricalPower;
 
     [Derived]
-    public decimal? EnergyConsumed => Energy.TotalElectricalEnergy;
+    public decimal? TotalConsumedEnergy => Energy.TotalElectricalEnergy;
 
     [Derived]
     public decimal? ThermalPower => Energy.ThermalPower;
 
     [Derived]
-    public decimal? ThermalEnergyProduced => Energy.TotalThermalEnergy;
+    public decimal? TotalProducedThermalEnergy => Energy.TotalThermalEnergy;
 
     [Derived]
     [State]

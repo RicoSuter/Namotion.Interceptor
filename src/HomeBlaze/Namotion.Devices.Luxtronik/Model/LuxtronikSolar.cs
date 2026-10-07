@@ -17,7 +17,7 @@ public partial class LuxtronikSolar
     /// </summary>
     public LuxtronikSolar()
     {
-        OperatingHours = null;
+        TotalOperatingHours = null;
     }
 
     /// <summary>
@@ -25,5 +25,5 @@ public partial class LuxtronikSolar
     /// </summary>
     [LuxtronikInputRegister(10416, ModbusDataType.U32, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 1)]
-    public partial decimal? OperatingHours { get; internal set; }
+    public partial decimal? TotalOperatingHours { get; internal set; }
 }
