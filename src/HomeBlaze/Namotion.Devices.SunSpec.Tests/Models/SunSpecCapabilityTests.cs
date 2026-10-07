@@ -73,4 +73,53 @@ public class SunSpecCapabilityTests
         // Assert
         Assert.Equal(0.455m, ((IBatteryState)storage).BatteryLevel);
     }
+
+    [Fact]
+    public void WhenDerGenerates_ThenPowerMeterReportsExport()
+    {
+        // Arrange
+        var measurement = TestRoot.Attach(new SunSpecDerAcMeasurement(40070, 153));
+
+        // Act
+        measurement.W = 3000m;
+        measurement.TotWhInj = 50000m;
+        measurement.TotWhAbs = 7000m;
+        measurement.Hz = 49.98m;
+        measurement.TmpAmb = 21m;
+        measurement.TmpCab = 38.5m;
+
+        // Assert
+        IPowerMeter powerMeter = measurement;
+        Assert.Equal(-3000m, powerMeter.MeasuredPower);
+        Assert.Equal(50000m, powerMeter.TotalExportedEnergy);
+        Assert.Equal(7000m, powerMeter.TotalImportedEnergy);
+        Assert.Equal(49.98m, ((IElectricalFrequencySensor)measurement).ElectricalFrequency);
+        Assert.Equal(38.5m, ((ITemperatureSensor)measurement).Temperature);
+    }
+
+    [Fact]
+    public void WhenDerAbsorbs_ThenPowerMeterReportsImport()
+    {
+        // Arrange
+        var measurement = TestRoot.Attach(new SunSpecDerAcMeasurement(40070, 153));
+
+        // Act
+        measurement.W = -1200m;
+
+        // Assert
+        Assert.Equal(1200m, ((IPowerMeter)measurement).MeasuredPower);
+    }
+
+    [Fact]
+    public void WhenBatteryReportsStateOfCharge_ThenBatteryLevelIsTheFraction()
+    {
+        // Arrange
+        var battery = TestRoot.Attach(new SunSpecBattery(40300, 62));
+
+        // Act
+        battery.SoC = 0.8m;
+
+        // Assert
+        Assert.Equal(0.8m, ((IBatteryState)battery).BatteryLevel);
+    }
 }

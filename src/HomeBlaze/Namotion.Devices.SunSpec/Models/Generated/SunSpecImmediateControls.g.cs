@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 123: Immediate Controls. Immediate Inverter Controls
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel123 : ISunSpecModel, ITitleProvider
+public partial class SunSpecImmediateControls : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel123(int baseAddress, int length)
+    public SunSpecImmediateControls(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -88,7 +88,7 @@ public partial class SunSpecModel123 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(4, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Conn", IsDiscrete = true)]
-    public partial SunSpecModel123Conn? Conn { get; internal set; }
+    public partial SunSpecImmediateControlsConn? Conn { get; internal set; }
 
     /// <summary>
     /// Set power output to specified level.
@@ -123,7 +123,7 @@ public partial class SunSpecModel123 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(9, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "WMaxLim_Ena", IsDiscrete = true)]
-    public partial SunSpecModel123WMaxLim_Ena? WMaxLim_Ena { get; internal set; }
+    public partial SunSpecImmediateControlsWMaxLim_Ena? WMaxLim_Ena { get; internal set; }
 
     /// <summary>
     /// Set power factor to specific value - cosine of angle.
@@ -158,7 +158,7 @@ public partial class SunSpecModel123 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(14, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "OutPFSet_Ena", IsDiscrete = true)]
-    public partial SunSpecModel123OutPFSet_Ena? OutPFSet_Ena { get; internal set; }
+    public partial SunSpecImmediateControlsOutPFSet_Ena? OutPFSet_Ena { get; internal set; }
 
     /// <summary>
     /// Reactive power in percent of WMax.
@@ -207,14 +207,14 @@ public partial class SunSpecModel123 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(21, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "VArPct_Mod", IsDiscrete = true)]
-    public partial SunSpecModel123VArPct_Mod? VArPct_Mod { get; internal set; }
+    public partial SunSpecImmediateControlsVArPct_Mod? VArPct_Mod { get; internal set; }
 
     /// <summary>
     /// Percent limit VAr enable/disable control.
     /// </summary>
     [ModbusRegister(22, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "VArPct_Ena", IsDiscrete = true)]
-    public partial SunSpecModel123VArPct_Ena? VArPct_Ena { get; internal set; }
+    public partial SunSpecImmediateControlsVArPct_Ena? VArPct_Ena { get; internal set; }
 
     /// <summary>
     /// Scale factor for power output percent.
@@ -238,7 +238,7 @@ public partial class SunSpecModel123 : ISunSpecModel, ITitleProvider
 /// <summary>
 /// Connection control.
 /// </summary>
-public enum SunSpecModel123Conn : ushort
+public enum SunSpecImmediateControlsConn : ushort
 {
     DISCONNECT = 0,
 
@@ -248,7 +248,7 @@ public enum SunSpecModel123Conn : ushort
 /// <summary>
 /// Throttle enable/disable control.
 /// </summary>
-public enum SunSpecModel123WMaxLim_Ena : ushort
+public enum SunSpecImmediateControlsWMaxLim_Ena : ushort
 {
     DISABLED = 0,
 
@@ -258,7 +258,7 @@ public enum SunSpecModel123WMaxLim_Ena : ushort
 /// <summary>
 /// Fixed power factor enable/disable control.
 /// </summary>
-public enum SunSpecModel123OutPFSet_Ena : ushort
+public enum SunSpecImmediateControlsOutPFSet_Ena : ushort
 {
     DISABLED = 0,
 
@@ -268,7 +268,7 @@ public enum SunSpecModel123OutPFSet_Ena : ushort
 /// <summary>
 /// VAR percent limit mode.
 /// </summary>
-public enum SunSpecModel123VArPct_Mod : ushort
+public enum SunSpecImmediateControlsVArPct_Mod : ushort
 {
     NONE = 0,
 
@@ -282,7 +282,7 @@ public enum SunSpecModel123VArPct_Mod : ushort
 /// <summary>
 /// Percent limit VAr enable/disable control.
 /// </summary>
-public enum SunSpecModel123VArPct_Ena : ushort
+public enum SunSpecImmediateControlsVArPct_Ena : ushort
 {
     DISABLED = 0,
 

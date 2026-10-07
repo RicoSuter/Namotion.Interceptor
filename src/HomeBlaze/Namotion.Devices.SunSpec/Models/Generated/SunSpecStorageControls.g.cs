@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 124: Storage. Basic Storage Controls
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel124 : ISunSpecModel, ITitleProvider
+public partial class SunSpecStorageControls : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel124(int baseAddress, int length)
+    public SunSpecStorageControls(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -95,7 +95,7 @@ public partial class SunSpecModel124 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(5, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "StorCtl_Mod", IsDiscrete = true)]
-    public partial SunSpecModel124StorCtl_Mod? StorCtl_Mod { get; internal set; }
+    public partial SunSpecStorageControlsStorCtl_Mod? StorCtl_Mod { get; internal set; }
 
     /// <summary>
     /// Setpoint for maximum charging VA.
@@ -137,7 +137,7 @@ public partial class SunSpecModel124 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(11, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "ChaSt", IsDiscrete = true)]
-    public partial SunSpecModel124ChaSt? ChaSt { get; internal set; }
+    public partial SunSpecStorageControlsChaSt? ChaSt { get; internal set; }
 
     /// <summary>
     /// Percent of max discharge rate.
@@ -179,7 +179,7 @@ public partial class SunSpecModel124 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(17, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "ChaGriSet", IsDiscrete = true)]
-    public partial SunSpecModel124ChaGriSet? ChaGriSet { get; internal set; }
+    public partial SunSpecStorageControlsChaGriSet? ChaGriSet { get; internal set; }
 
     /// <summary>
     /// Scale factor for maximum charge.
@@ -234,7 +234,7 @@ public partial class SunSpecModel124 : ISunSpecModel, ITitleProvider
 /// Activate hold/discharge/charge storage control mode.
 /// </summary>
 [Flags]
-public enum SunSpecModel124StorCtl_Mod : ushort
+public enum SunSpecStorageControlsStorCtl_Mod : ushort
 {
     CHARGE = 0x1,
 
@@ -244,7 +244,7 @@ public enum SunSpecModel124StorCtl_Mod : ushort
 /// <summary>
 /// Charge status of storage device.
 /// </summary>
-public enum SunSpecModel124ChaSt : ushort
+public enum SunSpecStorageControlsChaSt : ushort
 {
     OFF = 1,
 
@@ -264,7 +264,7 @@ public enum SunSpecModel124ChaSt : ushort
 /// <summary>
 /// ChaGriSet
 /// </summary>
-public enum SunSpecModel124ChaGriSet : ushort
+public enum SunSpecStorageControlsChaGriSet : ushort
 {
     PV = 0,
 

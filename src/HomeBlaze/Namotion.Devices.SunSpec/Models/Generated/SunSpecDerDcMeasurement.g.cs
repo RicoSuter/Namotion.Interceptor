@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 714: DER DC Measurement. DER DC measurement.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel714 : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
+public partial class SunSpecDerDcMeasurement : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel714(int baseAddress, int length)
+    public SunSpecDerDcMeasurement(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -132,11 +132,11 @@ public partial class SunSpecModel714 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// <summary>
     /// Prt
     /// </summary>
-    public partial SunSpecModel714PrtGroup[] Prt { get; internal set; }
+    public partial SunSpecDerDcMeasurementPrtGroup[] Prt { get; internal set; }
 
     void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
     {
-        Prt = SunSpecGroups.Update(Prt, instance.GetGroup("Prt"), group => new SunSpecModel714PrtGroup(this, group.Address, group.Index));
+        Prt = SunSpecGroups.Update(Prt, instance.GetGroup("Prt"), group => new SunSpecDerDcMeasurementPrtGroup(this, group.Address, group.Index));
     }
 }
 
@@ -144,12 +144,12 @@ public partial class SunSpecModel714 : ISunSpecModel, ITitleProvider, ISunSpecGr
 /// Prt group of SunSpec model 714.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel714PrtGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
+public partial class SunSpecDerDcMeasurementPrtGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
 {
     /// <summary>
     /// Initializes the instance <paramref name="index"/> of this group in <paramref name="parent"/> at <paramref name="baseAddress"/>.
     /// </summary>
-    public SunSpecModel714PrtGroup(SunSpecModel714 parent, int baseAddress, int index)
+    public SunSpecDerDcMeasurementPrtGroup(SunSpecDerDcMeasurement parent, int baseAddress, int index)
     {
         Parent = parent;
         BaseAddress = baseAddress;
@@ -170,7 +170,7 @@ public partial class SunSpecModel714PrtGroup : IModbusBaseAddressProvider, ITitl
     /// <summary>
     /// Gets the model or group containing this group.
     /// </summary>
-    public SunSpecModel714 Parent { get; }
+    public SunSpecDerDcMeasurement Parent { get; }
 
     /// <inheritdoc />
     public int BaseAddress { get; }
@@ -188,7 +188,7 @@ public partial class SunSpecModel714PrtGroup : IModbusBaseAddressProvider, ITitl
     /// </summary>
     [ModbusRegister(0, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Port Type", IsDiscrete = true)]
-    public partial SunSpecModel714PrtPrtTyp? PrtTyp { get; internal set; }
+    public partial SunSpecDerDcMeasurementPrtPrtTyp? PrtTyp { get; internal set; }
 
     /// <summary>
     /// Port ID.
@@ -251,23 +251,23 @@ public partial class SunSpecModel714PrtGroup : IModbusBaseAddressProvider, ITitl
     /// </summary>
     [ModbusRegister(22, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "DC Port Status", IsDiscrete = true)]
-    public partial SunSpecModel714PrtDCSta? DCSta { get; internal set; }
+    public partial SunSpecDerDcMeasurementPrtDCSta? DCSta { get; internal set; }
 
     /// <summary>
     /// DC port alarm.
     /// </summary>
     [ModbusRegister(23, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "DC Port Alarm", IsDiscrete = true)]
-    public partial SunSpecModel714PrtDCAlrm? DCAlrm { get; internal set; }
+    public partial SunSpecDerDcMeasurementPrtDCAlrm? DCAlrm { get; internal set; }
 
     PropertyReference? IModbusScaleFactorProvider.TryGetScaleFactorProperty(string propertyName) => propertyName switch
     {
-        nameof(DCA) => new PropertyReference(Parent, nameof(SunSpecModel714.DCA_SF)),
-        nameof(DCV) => new PropertyReference(Parent, nameof(SunSpecModel714.DCV_SF)),
-        nameof(DCW) => new PropertyReference(Parent, nameof(SunSpecModel714.DCW_SF)),
-        nameof(DCWhInj) => new PropertyReference(Parent, nameof(SunSpecModel714.DCWH_SF)),
-        nameof(DCWhAbs) => new PropertyReference(Parent, nameof(SunSpecModel714.DCWH_SF)),
-        nameof(Tmp) => new PropertyReference(Parent, nameof(SunSpecModel714.Tmp_SF)),
+        nameof(DCA) => new PropertyReference(Parent, nameof(SunSpecDerDcMeasurement.DCA_SF)),
+        nameof(DCV) => new PropertyReference(Parent, nameof(SunSpecDerDcMeasurement.DCV_SF)),
+        nameof(DCW) => new PropertyReference(Parent, nameof(SunSpecDerDcMeasurement.DCW_SF)),
+        nameof(DCWhInj) => new PropertyReference(Parent, nameof(SunSpecDerDcMeasurement.DCWH_SF)),
+        nameof(DCWhAbs) => new PropertyReference(Parent, nameof(SunSpecDerDcMeasurement.DCWH_SF)),
+        nameof(Tmp) => new PropertyReference(Parent, nameof(SunSpecDerDcMeasurement.Tmp_SF)),
         _ => null
     };
 }
@@ -275,7 +275,7 @@ public partial class SunSpecModel714PrtGroup : IModbusBaseAddressProvider, ITitl
 /// <summary>
 /// Port type.
 /// </summary>
-public enum SunSpecModel714PrtPrtTyp : ushort
+public enum SunSpecDerDcMeasurementPrtPrtTyp : ushort
 {
     /// <summary>
     /// Photovoltaic
@@ -316,7 +316,7 @@ public enum SunSpecModel714PrtPrtTyp : ushort
 /// <summary>
 /// DC port status.
 /// </summary>
-public enum SunSpecModel714PrtDCSta : ushort
+public enum SunSpecDerDcMeasurementPrtDCSta : ushort
 {
     /// <summary>
     /// Off
@@ -343,7 +343,7 @@ public enum SunSpecModel714PrtDCSta : ushort
 /// DC port alarm.
 /// </summary>
 [Flags]
-public enum SunSpecModel714PrtDCAlrm : uint
+public enum SunSpecDerDcMeasurementPrtDCAlrm : uint
 {
     /// <summary>
     /// Ground Fault

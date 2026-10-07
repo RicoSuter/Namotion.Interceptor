@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 702: DER Capacity. DER capacity model.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel702 : ISunSpecModel, ITitleProvider
+public partial class SunSpecDerCapacity : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel702(int baseAddress, int length)
+    public SunSpecDerCapacity(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -232,28 +232,28 @@ public partial class SunSpecModel702 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(21, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Normal Operating Category", IsDiscrete = true)]
-    public partial SunSpecModel702NorOpCatRtg? NorOpCatRtg { get; internal set; }
+    public partial SunSpecDerCapacityNorOpCatRtg? NorOpCatRtg { get; internal set; }
 
     /// <summary>
     /// Abnormal operating performance category as specified in IEEE 1547-2018.
     /// </summary>
     [ModbusRegister(22, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Abnormal Operating Category", IsDiscrete = true)]
-    public partial SunSpecModel702AbnOpCatRtg? AbnOpCatRtg { get; internal set; }
+    public partial SunSpecDerCapacityAbnOpCatRtg? AbnOpCatRtg { get; internal set; }
 
     /// <summary>
     /// Supported control mode functions.
     /// </summary>
     [ModbusRegister(23, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Supported Control Modes", IsDiscrete = true)]
-    public partial SunSpecModel702CtrlModes? CtrlModes { get; internal set; }
+    public partial SunSpecDerCapacityCtrlModes? CtrlModes { get; internal set; }
 
     /// <summary>
     /// Intentional island categories.
     /// </summary>
     [ModbusRegister(25, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Intentional Island Categories", IsDiscrete = true)]
-    public partial SunSpecModel702IntIslandCatRtg? IntIslandCatRtg { get; internal set; }
+    public partial SunSpecDerCapacityIntIslandCatRtg? IntIslandCatRtg { get; internal set; }
 
     /// <summary>
     /// Maximum active power setting used to adjust maximum active power setting.
@@ -386,7 +386,7 @@ public partial class SunSpecModel702 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(44, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Intentional Island Categories", IsDiscrete = true)]
-    public partial SunSpecModel702IntIslandCat? IntIslandCat { get; internal set; }
+    public partial SunSpecDerCapacityIntIslandCat? IntIslandCat { get; internal set; }
 
     /// <summary>
     /// Active power scale factor.
@@ -434,7 +434,7 @@ public partial class SunSpecModel702 : ISunSpecModel, ITitleProvider
 /// <summary>
 /// Normal operating performance category as specified in IEEE 1547-2018.
 /// </summary>
-public enum SunSpecModel702NorOpCatRtg : ushort
+public enum SunSpecDerCapacityNorOpCatRtg : ushort
 {
     /// <summary>
     /// Category A
@@ -450,7 +450,7 @@ public enum SunSpecModel702NorOpCatRtg : ushort
 /// <summary>
 /// Abnormal operating performance category as specified in IEEE 1547-2018.
 /// </summary>
-public enum SunSpecModel702AbnOpCatRtg : ushort
+public enum SunSpecDerCapacityAbnOpCatRtg : ushort
 {
     /// <summary>
     /// Category I
@@ -472,7 +472,7 @@ public enum SunSpecModel702AbnOpCatRtg : ushort
 /// Supported control mode functions.
 /// </summary>
 [Flags]
-public enum SunSpecModel702CtrlModes : uint
+public enum SunSpecDerCapacityCtrlModes : uint
 {
     /// <summary>
     /// Limit Maximum Active Power
@@ -549,7 +549,7 @@ public enum SunSpecModel702CtrlModes : uint
 /// Intentional island categories.
 /// </summary>
 [Flags]
-public enum SunSpecModel702IntIslandCatRtg : ushort
+public enum SunSpecDerCapacityIntIslandCatRtg : ushort
 {
     /// <summary>
     /// Uncategorized
@@ -576,7 +576,7 @@ public enum SunSpecModel702IntIslandCatRtg : ushort
 /// Intentional island categories.
 /// </summary>
 [Flags]
-public enum SunSpecModel702IntIslandCat : ushort
+public enum SunSpecDerCapacityIntIslandCat : ushort
 {
     /// <summary>
     /// Uncategorized

@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 805: Lithium-Ion Module Model.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel805 : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
+public partial class SunSpecLithiumIonModule : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel805(int baseAddress, int length)
+    public SunSpecLithiumIonModule(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -251,11 +251,11 @@ public partial class SunSpecModel805 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// <summary>
     /// LithiumIonModuleCell
     /// </summary>
-    public partial SunSpecModel805LithiumIonModuleCellGroup[] LithiumIonModuleCell { get; internal set; }
+    public partial SunSpecLithiumIonModuleLithiumIonModuleCellGroup[] LithiumIonModuleCell { get; internal set; }
 
     void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
     {
-        LithiumIonModuleCell = SunSpecGroups.Update(LithiumIonModuleCell, instance.GetGroup("lithium-ion-module-cell"), group => new SunSpecModel805LithiumIonModuleCellGroup(this, group.Address, group.Index));
+        LithiumIonModuleCell = SunSpecGroups.Update(LithiumIonModuleCell, instance.GetGroup("lithium-ion-module-cell"), group => new SunSpecLithiumIonModuleLithiumIonModuleCellGroup(this, group.Address, group.Index));
     }
 }
 
@@ -263,12 +263,12 @@ public partial class SunSpecModel805 : ISunSpecModel, ITitleProvider, ISunSpecGr
 /// LithiumIonModuleCell group of SunSpec model 805.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel805LithiumIonModuleCellGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
+public partial class SunSpecLithiumIonModuleLithiumIonModuleCellGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
 {
     /// <summary>
     /// Initializes the instance <paramref name="index"/> of this group in <paramref name="parent"/> at <paramref name="baseAddress"/>.
     /// </summary>
-    public SunSpecModel805LithiumIonModuleCellGroup(SunSpecModel805 parent, int baseAddress, int index)
+    public SunSpecLithiumIonModuleLithiumIonModuleCellGroup(SunSpecLithiumIonModule parent, int baseAddress, int index)
     {
         Parent = parent;
         BaseAddress = baseAddress;
@@ -281,7 +281,7 @@ public partial class SunSpecModel805LithiumIonModuleCellGroup : IModbusBaseAddre
     /// <summary>
     /// Gets the model or group containing this group.
     /// </summary>
-    public SunSpecModel805 Parent { get; }
+    public SunSpecLithiumIonModule Parent { get; }
 
     /// <inheritdoc />
     public int BaseAddress { get; }
@@ -313,12 +313,12 @@ public partial class SunSpecModel805LithiumIonModuleCellGroup : IModbusBaseAddre
     /// </summary>
     [ModbusRegister(2, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Cell Status", IsDiscrete = true)]
-    public partial SunSpecModel805LithiumIonModuleCellCellSt? CellSt { get; internal set; }
+    public partial SunSpecLithiumIonModuleLithiumIonModuleCellCellSt? CellSt { get; internal set; }
 
     PropertyReference? IModbusScaleFactorProvider.TryGetScaleFactorProperty(string propertyName) => propertyName switch
     {
-        nameof(CellV) => new PropertyReference(Parent, nameof(SunSpecModel805.CellV_SF)),
-        nameof(CellTmp) => new PropertyReference(Parent, nameof(SunSpecModel805.Tmp_SF)),
+        nameof(CellV) => new PropertyReference(Parent, nameof(SunSpecLithiumIonModule.CellV_SF)),
+        nameof(CellTmp) => new PropertyReference(Parent, nameof(SunSpecLithiumIonModule.Tmp_SF)),
         _ => null
     };
 }
@@ -327,7 +327,7 @@ public partial class SunSpecModel805LithiumIonModuleCellGroup : IModbusBaseAddre
 /// Status of the cell.
 /// </summary>
 [Flags]
-public enum SunSpecModel805LithiumIonModuleCellCellSt : uint
+public enum SunSpecLithiumIonModuleLithiumIonModuleCellCellSt : uint
 {
     CELL_IS_BALANCING = 0x1,
 }

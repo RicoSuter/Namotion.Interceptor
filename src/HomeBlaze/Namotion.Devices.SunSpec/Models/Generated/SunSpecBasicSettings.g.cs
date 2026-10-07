@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 121: Basic Settings. Inverter Controls Basic Settings
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel121 : ISunSpecModel, ITitleProvider
+public partial class SunSpecBasicSettings : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel121(int baseAddress, int length)
+    public SunSpecBasicSettings(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -185,14 +185,14 @@ public partial class SunSpecModel121 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(17, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "VArAct", IsDiscrete = true)]
-    public partial SunSpecModel121VArAct? VArAct { get; internal set; }
+    public partial SunSpecBasicSettingsVArAct? VArAct { get; internal set; }
 
     /// <summary>
     /// Calculation method for total apparent power. 1=vector 2=arithmetic.
     /// </summary>
     [ModbusRegister(18, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "ClcTotVA", IsDiscrete = true)]
-    public partial SunSpecModel121ClcTotVA? ClcTotVA { get; internal set; }
+    public partial SunSpecBasicSettingsClcTotVA? ClcTotVA { get; internal set; }
 
     /// <summary>
     /// Setpoint for maximum ramp rate as percentage of nominal maximum ramp rate. This setting will limit the rate that watts delivery to the grid can increase or decrease in response to intermittent PV generation.
@@ -213,7 +213,7 @@ public partial class SunSpecModel121 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(21, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "ConnPh", IsDiscrete = true)]
-    public partial SunSpecModel121ConnPh? ConnPh { get; internal set; }
+    public partial SunSpecBasicSettingsConnPh? ConnPh { get; internal set; }
 
     /// <summary>
     /// Scale factor for real power.
@@ -279,7 +279,7 @@ public partial class SunSpecModel121 : ISunSpecModel, ITitleProvider
 /// <summary>
 /// VAR action on change between charging and discharging: 1=switch 2=maintain VAR characterization.
 /// </summary>
-public enum SunSpecModel121VArAct : ushort
+public enum SunSpecBasicSettingsVArAct : ushort
 {
     SWITCH = 1,
 
@@ -289,7 +289,7 @@ public enum SunSpecModel121VArAct : ushort
 /// <summary>
 /// Calculation method for total apparent power. 1=vector 2=arithmetic.
 /// </summary>
-public enum SunSpecModel121ClcTotVA : ushort
+public enum SunSpecBasicSettingsClcTotVA : ushort
 {
     VECTOR = 1,
 
@@ -299,7 +299,7 @@ public enum SunSpecModel121ClcTotVA : ushort
 /// <summary>
 /// Identity of connected phase for single phase inverters. A=1 B=2 C=3.
 /// </summary>
-public enum SunSpecModel121ConnPh : ushort
+public enum SunSpecBasicSettingsConnPh : ushort
 {
     A = 1,
 

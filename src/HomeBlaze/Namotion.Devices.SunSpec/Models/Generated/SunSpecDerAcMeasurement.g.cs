@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 701: DER AC Measurement. DER AC measurement model.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel701 : ISunSpecModel, ITitleProvider
+public partial class SunSpecDerAcMeasurement : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel701(int baseAddress, int length)
+    public SunSpecDerAcMeasurement(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -120,42 +120,42 @@ public partial class SunSpecModel701 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(2, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "AC Wiring Type", IsDiscrete = true)]
-    public partial SunSpecModel701ACType? ACType { get; internal set; }
+    public partial SunSpecDerAcMeasurementACType? ACType { get; internal set; }
 
     /// <summary>
     /// Operating state of the DER.
     /// </summary>
     [ModbusRegister(3, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Operating State", IsDiscrete = true)]
-    public partial SunSpecModel701St? St { get; internal set; }
+    public partial SunSpecDerAcMeasurementSt? St { get; internal set; }
 
     /// <summary>
     /// Inverter state.
     /// </summary>
     [ModbusRegister(4, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Inverter State", IsDiscrete = true)]
-    public partial SunSpecModel701InvSt? InvSt { get; internal set; }
+    public partial SunSpecDerAcMeasurementInvSt? InvSt { get; internal set; }
 
     /// <summary>
     /// Grid connection state of the DER.
     /// </summary>
     [ModbusRegister(5, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Grid Connection State", IsDiscrete = true)]
-    public partial SunSpecModel701ConnSt? ConnSt { get; internal set; }
+    public partial SunSpecDerAcMeasurementConnSt? ConnSt { get; internal set; }
 
     /// <summary>
     /// Active alarms for the DER.
     /// </summary>
     [ModbusRegister(6, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Alarm Bitfield", IsDiscrete = true)]
-    public partial SunSpecModel701Alrm? Alrm { get; internal set; }
+    public partial SunSpecDerAcMeasurementAlrm? Alrm { get; internal set; }
 
     /// <summary>
     /// Current operational characteristics of the DER.
     /// </summary>
     [ModbusRegister(8, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "DER Operational Characteristics", IsDiscrete = true)]
-    public partial SunSpecModel701DERMode? DERMode { get; internal set; }
+    public partial SunSpecDerAcMeasurementDERMode? DERMode { get; internal set; }
 
     /// <summary>
     /// Total active power. Active power is positive for DER generation and negative for absorption.
@@ -526,7 +526,7 @@ public partial class SunSpecModel701 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(111, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Throttle Source Information", IsDiscrete = true)]
-    public partial SunSpecModel701ThrotSrc? ThrotSrc { get; internal set; }
+    public partial SunSpecDerAcMeasurementThrotSrc? ThrotSrc { get; internal set; }
 
     /// <summary>
     /// Current scale factor.
@@ -599,7 +599,7 @@ public partial class SunSpecModel701 : ISunSpecModel, ITitleProvider
 /// <summary>
 /// AC wiring type.
 /// </summary>
-public enum SunSpecModel701ACType : ushort
+public enum SunSpecDerAcMeasurementACType : ushort
 {
     /// <summary>
     /// Single Phase
@@ -620,7 +620,7 @@ public enum SunSpecModel701ACType : ushort
 /// <summary>
 /// Operating state of the DER.
 /// </summary>
-public enum SunSpecModel701St : ushort
+public enum SunSpecDerAcMeasurementSt : ushort
 {
     /// <summary>
     /// Off
@@ -636,7 +636,7 @@ public enum SunSpecModel701St : ushort
 /// <summary>
 /// Inverter state.
 /// </summary>
-public enum SunSpecModel701InvSt : ushort
+public enum SunSpecDerAcMeasurementInvSt : ushort
 {
     OFF = 0,
 
@@ -658,7 +658,7 @@ public enum SunSpecModel701InvSt : ushort
 /// <summary>
 /// Grid connection state of the DER.
 /// </summary>
-public enum SunSpecModel701ConnSt : ushort
+public enum SunSpecDerAcMeasurementConnSt : ushort
 {
     /// <summary>
     /// Disconnected
@@ -675,7 +675,7 @@ public enum SunSpecModel701ConnSt : ushort
 /// Active alarms for the DER.
 /// </summary>
 [Flags]
-public enum SunSpecModel701Alrm : uint
+public enum SunSpecDerAcMeasurementAlrm : uint
 {
     /// <summary>
     /// Ground Fault
@@ -767,7 +767,7 @@ public enum SunSpecModel701Alrm : uint
 /// Current operational characteristics of the DER.
 /// </summary>
 [Flags]
-public enum SunSpecModel701DERMode : uint
+public enum SunSpecDerAcMeasurementDERMode : uint
 {
     /// <summary>
     /// Grid Following
@@ -789,7 +789,7 @@ public enum SunSpecModel701DERMode : uint
 /// Active throttling source.
 /// </summary>
 [Flags]
-public enum SunSpecModel701ThrotSrc : uint
+public enum SunSpecDerAcMeasurementThrotSrc : uint
 {
     MAX_W = 0x1,
 

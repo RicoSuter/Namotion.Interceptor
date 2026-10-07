@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 120: Nameplate. Inverter Controls Nameplate Ratings
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel120 : ISunSpecModel, ITitleProvider
+public partial class SunSpecNameplate : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel120(int baseAddress, int length)
+    public SunSpecNameplate(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -75,7 +75,7 @@ public partial class SunSpecModel120 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(2, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "DERTyp", IsDiscrete = true)]
-    public partial SunSpecModel120DERTyp? DERTyp { get; internal set; }
+    public partial SunSpecNameplateDERTyp? DERTyp { get; internal set; }
 
     /// <summary>
     /// Continuous power output capability of the inverter.
@@ -240,7 +240,7 @@ public partial class SunSpecModel120 : ISunSpecModel, ITitleProvider
 /// <summary>
 /// Type of DER device. Default value is 4 to indicate PV device.
 /// </summary>
-public enum SunSpecModel120DERTyp : ushort
+public enum SunSpecNameplateDERTyp : ushort
 {
     PV = 4,
 

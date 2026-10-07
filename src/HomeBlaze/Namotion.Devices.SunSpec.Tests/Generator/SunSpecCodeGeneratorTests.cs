@@ -15,7 +15,9 @@ public class SunSpecCodeGeneratorTests
         // Assert: 112 definitions, minus the two test models, minus the 10 family members merged into 4 classes, plus the factory.
         Assert.Equal(101, Files.Count);
         Assert.Contains("SunSpecInverter.g.cs", Files.Keys);
-        Assert.Contains("SunSpecModel302.g.cs", Files.Keys);
+        Assert.Contains("SunSpecModel303.g.cs", Files.Keys);
+        Assert.Contains("SunSpecDerAcMeasurement.g.cs", Files.Keys);
+        Assert.DoesNotContain("SunSpecModel701.g.cs", Files.Keys);
         Assert.DoesNotContain("SunSpecModel101.g.cs", Files.Keys);
         Assert.DoesNotContain("SunSpecModel63001.g.cs", Files.Keys);
     }
@@ -33,6 +35,18 @@ public class SunSpecCodeGeneratorTests
         Assert.Contains("public partial SunSpecStorageCapacitySta? Sta { get; internal set; }", content);
         Assert.Contains("public enum SunSpecStorageCapacitySta : ushort", content);
         Assert.Contains("public int ModelId => 713;", content);
+    }
+
+    [Fact]
+    public void WhenGeneratingBattery_ThenStateOfChargeIsAPercentage()
+    {
+        // Act
+        var content = Files["SunSpecBattery.g.cs"];
+
+        // Assert
+        Assert.Contains("[ModbusRegister(11, ModbusDataType.U16, Scale = 0.01, ScaleFactorProperty = nameof(SoC_SF), NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]", content);
+        Assert.Contains("public partial decimal? SoC { get; internal set; }", content);
+        Assert.Contains("public int ModelId => 802;", content);
     }
 
     [Fact]

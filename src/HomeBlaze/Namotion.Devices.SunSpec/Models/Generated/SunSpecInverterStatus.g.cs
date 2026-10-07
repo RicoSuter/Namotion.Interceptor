@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 122: Measurements_Status. Inverter Controls Extended Measurements and Status
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel122 : ISunSpecModel, ITitleProvider
+public partial class SunSpecInverterStatus : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel122(int baseAddress, int length)
+    public SunSpecInverterStatus(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -70,21 +70,21 @@ public partial class SunSpecModel122 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(2, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "PVConn", IsDiscrete = true)]
-    public partial SunSpecModel122PVConn? PVConn { get; internal set; }
+    public partial SunSpecInverterStatusPVConn? PVConn { get; internal set; }
 
     /// <summary>
     /// Storage inverter present/available status.
     /// </summary>
     [ModbusRegister(3, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "StorConn", IsDiscrete = true)]
-    public partial SunSpecModel122StorConn? StorConn { get; internal set; }
+    public partial SunSpecInverterStatusStorConn? StorConn { get; internal set; }
 
     /// <summary>
     /// ECP connection status: disconnected=0 connected=1.
     /// </summary>
     [ModbusRegister(4, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "ECPConn", IsDiscrete = true)]
-    public partial SunSpecModel122ECPConn? ECPConn { get; internal set; }
+    public partial SunSpecInverterStatusECPConn? ECPConn { get; internal set; }
 
     /// <summary>
     /// AC lifetime active (real) energy output.
@@ -159,14 +159,14 @@ public partial class SunSpecModel122 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(33, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "StSetLimMsk", IsDiscrete = true)]
-    public partial SunSpecModel122StSetLimMsk? StSetLimMsk { get; internal set; }
+    public partial SunSpecInverterStatusStSetLimMsk? StSetLimMsk { get; internal set; }
 
     /// <summary>
     /// Which inverter controls are currently active.
     /// </summary>
     [ModbusRegister(35, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "StActCtl", IsDiscrete = true)]
-    public partial SunSpecModel122StActCtl? StActCtl { get; internal set; }
+    public partial SunSpecInverterStatusStActCtl? StActCtl { get; internal set; }
 
     /// <summary>
     /// Source of time synchronization.
@@ -187,7 +187,7 @@ public partial class SunSpecModel122 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(43, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "RtSt", IsDiscrete = true)]
-    public partial SunSpecModel122RtSt? RtSt { get; internal set; }
+    public partial SunSpecInverterStatusRtSt? RtSt { get; internal set; }
 
     /// <summary>
     /// Isolation resistance.
@@ -207,7 +207,7 @@ public partial class SunSpecModel122 : ISunSpecModel, ITitleProvider
 /// PV inverter present/available status.
 /// </summary>
 [Flags]
-public enum SunSpecModel122PVConn : ushort
+public enum SunSpecInverterStatusPVConn : ushort
 {
     CONNECTED = 0x1,
 
@@ -222,7 +222,7 @@ public enum SunSpecModel122PVConn : ushort
 /// Storage inverter present/available status.
 /// </summary>
 [Flags]
-public enum SunSpecModel122StorConn : ushort
+public enum SunSpecInverterStatusStorConn : ushort
 {
     CONNECTED = 0x1,
 
@@ -237,7 +237,7 @@ public enum SunSpecModel122StorConn : ushort
 /// ECP connection status: disconnected=0 connected=1.
 /// </summary>
 [Flags]
-public enum SunSpecModel122ECPConn : ushort
+public enum SunSpecInverterStatusECPConn : ushort
 {
     DISCONNECTED = 0x1,
 
@@ -248,7 +248,7 @@ public enum SunSpecModel122ECPConn : ushort
 /// Setpoint limit(s) reached.
 /// </summary>
 [Flags]
-public enum SunSpecModel122StSetLimMsk : uint
+public enum SunSpecInverterStatusStSetLimMsk : uint
 {
     WMax = 0x1,
 
@@ -277,7 +277,7 @@ public enum SunSpecModel122StSetLimMsk : uint
 /// Which inverter controls are currently active.
 /// </summary>
 [Flags]
-public enum SunSpecModel122StActCtl : uint
+public enum SunSpecInverterStatusStActCtl : uint
 {
     FixedW = 0x1,
 
@@ -312,7 +312,7 @@ public enum SunSpecModel122StActCtl : uint
 /// Active ride-through status.
 /// </summary>
 [Flags]
-public enum SunSpecModel122RtSt : ushort
+public enum SunSpecInverterStatusRtSt : ushort
 {
     LVRT_ACTIVE = 0x1,
 

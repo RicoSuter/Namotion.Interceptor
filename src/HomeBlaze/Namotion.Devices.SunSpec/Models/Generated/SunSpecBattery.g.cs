@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 802: Battery Base Model.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
+public partial class SunSpecBattery : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel802(int baseAddress, int length)
+    public SunSpecBattery(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -197,14 +197,14 @@ public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(16, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Charge Status", IsDiscrete = true)]
-    public partial SunSpecModel802ChaSt? ChaSt { get; internal set; }
+    public partial SunSpecBatteryChaSt? ChaSt { get; internal set; }
 
     /// <summary>
     /// Battery control mode. Enumeration.
     /// </summary>
     [ModbusRegister(17, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Control Mode", IsDiscrete = true)]
-    public partial SunSpecModel802LocRemCtl? LocRemCtl { get; internal set; }
+    public partial SunSpecBatteryLocRemCtl? LocRemCtl { get; internal set; }
 
     /// <summary>
     /// Value is incremented every second with periodic resets to zero.
@@ -232,14 +232,14 @@ public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(21, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Battery Type", IsDiscrete = true)]
-    public partial SunSpecModel802Typ? Typ { get; internal set; }
+    public partial SunSpecBatteryTyp? Typ { get; internal set; }
 
     /// <summary>
     /// State of the battery bank. Enumeration.
     /// </summary>
     [ModbusRegister(22, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "State of the Battery Bank", IsDiscrete = true)]
-    public partial SunSpecModel802State? State { get; internal set; }
+    public partial SunSpecBatteryState? State { get; internal set; }
 
     /// <summary>
     /// Vendor specific battery bank state. Enumeration.
@@ -260,7 +260,7 @@ public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(26, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Battery Event 1 Bitfield", IsDiscrete = true)]
-    public partial SunSpecModel802Evt1? Evt1 { get; internal set; }
+    public partial SunSpecBatteryEvt1? Evt1 { get; internal set; }
 
     /// <summary>
     /// Alarms and warnings.
@@ -386,7 +386,7 @@ public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(48, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Inverter State Request", IsDiscrete = true)]
-    public partial SunSpecModel802ReqInvState? ReqInvState { get; internal set; }
+    public partial SunSpecBatteryReqInvState? ReqInvState { get; internal set; }
 
     /// <summary>
     /// AC Power requested by battery.
@@ -400,14 +400,14 @@ public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
     /// </summary>
     [ModbusRegister(50, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Set Operation", IsDiscrete = true)]
-    public partial SunSpecModel802SetOp? SetOp { get; internal set; }
+    public partial SunSpecBatterySetOp? SetOp { get; internal set; }
 
     /// <summary>
     /// Set the current state of the inverter.
     /// </summary>
     [ModbusRegister(51, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Set Inverter State", IsDiscrete = true)]
-    public partial SunSpecModel802SetInvState? SetInvState { get; internal set; }
+    public partial SunSpecBatterySetInvState? SetInvState { get; internal set; }
 
     /// <summary>
     /// Scale factor for charge capacity.
@@ -485,7 +485,7 @@ public partial class SunSpecModel802 : ISunSpecModel, ITitleProvider
 /// <summary>
 /// Charge status of storage device. Enumeration.
 /// </summary>
-public enum SunSpecModel802ChaSt : ushort
+public enum SunSpecBatteryChaSt : ushort
 {
     OFF = 1,
 
@@ -505,7 +505,7 @@ public enum SunSpecModel802ChaSt : ushort
 /// <summary>
 /// Battery control mode. Enumeration.
 /// </summary>
-public enum SunSpecModel802LocRemCtl : ushort
+public enum SunSpecBatteryLocRemCtl : ushort
 {
     REMOTE = 0,
 
@@ -515,7 +515,7 @@ public enum SunSpecModel802LocRemCtl : ushort
 /// <summary>
 /// Type of battery. Enumeration.
 /// </summary>
-public enum SunSpecModel802Typ : ushort
+public enum SunSpecBatteryTyp : ushort
 {
     NOT_APPLICABLE_UNKNOWN = 0,
 
@@ -545,7 +545,7 @@ public enum SunSpecModel802Typ : ushort
 /// <summary>
 /// State of the battery bank. Enumeration.
 /// </summary>
-public enum SunSpecModel802State : ushort
+public enum SunSpecBatteryState : ushort
 {
     DISCONNECTED = 1,
 
@@ -566,7 +566,7 @@ public enum SunSpecModel802State : ushort
 /// Alarms and warnings.
 /// </summary>
 [Flags]
-public enum SunSpecModel802Evt1 : uint
+public enum SunSpecBatteryEvt1 : uint
 {
     COMMUNICATION_ERROR = 0x1,
 
@@ -632,7 +632,7 @@ public enum SunSpecModel802Evt1 : uint
 /// <summary>
 /// Request from battery to start or stop the inverter. Enumeration.
 /// </summary>
-public enum SunSpecModel802ReqInvState : ushort
+public enum SunSpecBatteryReqInvState : ushort
 {
     NO_REQUEST = 0,
 
@@ -644,7 +644,7 @@ public enum SunSpecModel802ReqInvState : ushort
 /// <summary>
 /// Instruct the battery bank to perform an operation such as connecting. Enumeration.
 /// </summary>
-public enum SunSpecModel802SetOp : ushort
+public enum SunSpecBatterySetOp : ushort
 {
     CONNECT = 1,
 
@@ -654,7 +654,7 @@ public enum SunSpecModel802SetOp : ushort
 /// <summary>
 /// Set the current state of the inverter.
 /// </summary>
-public enum SunSpecModel802SetInvState : ushort
+public enum SunSpecBatterySetInvState : ushort
 {
     INVERTER_STOPPED = 1,
 

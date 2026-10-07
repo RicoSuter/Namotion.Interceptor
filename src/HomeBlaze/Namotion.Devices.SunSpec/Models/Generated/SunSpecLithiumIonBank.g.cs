@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 803: Lithium-Ion Battery Bank Model.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel803 : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
+public partial class SunSpecLithiumIonBank : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel803(int baseAddress, int length)
+    public SunSpecLithiumIonBank(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -251,11 +251,11 @@ public partial class SunSpecModel803 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// <summary>
     /// String
     /// </summary>
-    public partial SunSpecModel803StringGroup[] String { get; internal set; }
+    public partial SunSpecLithiumIonBankStringGroup[] String { get; internal set; }
 
     void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
     {
-        String = SunSpecGroups.Update(String, instance.GetGroup("string"), group => new SunSpecModel803StringGroup(this, group.Address, group.Index));
+        String = SunSpecGroups.Update(String, instance.GetGroup("string"), group => new SunSpecLithiumIonBankStringGroup(this, group.Address, group.Index));
     }
 }
 
@@ -263,12 +263,12 @@ public partial class SunSpecModel803 : ISunSpecModel, ITitleProvider, ISunSpecGr
 /// String group of SunSpec model 803.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel803StringGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
+public partial class SunSpecLithiumIonBankStringGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
 {
     /// <summary>
     /// Initializes the instance <paramref name="index"/> of this group in <paramref name="parent"/> at <paramref name="baseAddress"/>.
     /// </summary>
-    public SunSpecModel803StringGroup(SunSpecModel803 parent, int baseAddress, int index)
+    public SunSpecLithiumIonBankStringGroup(SunSpecLithiumIonBank parent, int baseAddress, int index)
     {
         Parent = parent;
         BaseAddress = baseAddress;
@@ -302,7 +302,7 @@ public partial class SunSpecModel803StringGroup : IModbusBaseAddressProvider, IT
     /// <summary>
     /// Gets the model or group containing this group.
     /// </summary>
-    public SunSpecModel803 Parent { get; }
+    public SunSpecLithiumIonBank Parent { get; }
 
     /// <inheritdoc />
     public int BaseAddress { get; }
@@ -327,14 +327,14 @@ public partial class SunSpecModel803StringGroup : IModbusBaseAddressProvider, IT
     /// </summary>
     [ModbusRegister(1, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "String Status", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrSt? StrSt { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrSt? StrSt { get; internal set; }
 
     /// <summary>
     /// Connection Failure Reason
     /// </summary>
     [ModbusRegister(3, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Connection Failure Reason", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrConFail? StrConFail { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrConFail? StrConFail { get; internal set; }
 
     /// <summary>
     /// Battery string state of charge, expressed as a percentage.
@@ -432,21 +432,21 @@ public partial class SunSpecModel803StringGroup : IModbusBaseAddressProvider, IT
     /// </summary>
     [ModbusRegister(17, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Disabled Reason", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrDisRsn? StrDisRsn { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrDisRsn? StrDisRsn { get; internal set; }
 
     /// <summary>
     /// Status of the contactor(s) for the string.
     /// </summary>
     [ModbusRegister(18, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Contactor Status", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrConSt? StrConSt { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrConSt? StrConSt { get; internal set; }
 
     /// <summary>
     /// Alarms, warnings and status values.
     /// </summary>
     [ModbusRegister(20, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "String Event 1", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrEvt1? StrEvt1 { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrEvt1? StrEvt1 { get; internal set; }
 
     /// <summary>
     /// Alarms, warnings and status values.
@@ -474,26 +474,26 @@ public partial class SunSpecModel803StringGroup : IModbusBaseAddressProvider, IT
     /// </summary>
     [ModbusRegister(28, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Enable/Disable String", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrSetEna? StrSetEna { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrSetEna? StrSetEna { get; internal set; }
 
     /// <summary>
     /// Connects and disconnects the string.
     /// </summary>
     [ModbusRegister(29, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Connect/Disconnect String", IsDiscrete = true)]
-    public partial SunSpecModel803StringStrSetCon? StrSetCon { get; internal set; }
+    public partial SunSpecLithiumIonBankStringStrSetCon? StrSetCon { get; internal set; }
 
     PropertyReference? IModbusScaleFactorProvider.TryGetScaleFactorProperty(string propertyName) => propertyName switch
     {
-        nameof(StrSoC) => new PropertyReference(Parent, nameof(SunSpecModel803.SoC_SF)),
-        nameof(StrSoH) => new PropertyReference(Parent, nameof(SunSpecModel803.SoH_SF)),
-        nameof(StrA) => new PropertyReference(Parent, nameof(SunSpecModel803.A_SF)),
-        nameof(StrCellVMax) => new PropertyReference(Parent, nameof(SunSpecModel803.CellV_SF)),
-        nameof(StrCellVMin) => new PropertyReference(Parent, nameof(SunSpecModel803.CellV_SF)),
-        nameof(StrCellVAvg) => new PropertyReference(Parent, nameof(SunSpecModel803.CellV_SF)),
-        nameof(StrModTmpMax) => new PropertyReference(Parent, nameof(SunSpecModel803.ModTmp_SF)),
-        nameof(StrModTmpMin) => new PropertyReference(Parent, nameof(SunSpecModel803.ModTmp_SF)),
-        nameof(StrModTmpAvg) => new PropertyReference(Parent, nameof(SunSpecModel803.ModTmp_SF)),
+        nameof(StrSoC) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.SoC_SF)),
+        nameof(StrSoH) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.SoH_SF)),
+        nameof(StrA) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.A_SF)),
+        nameof(StrCellVMax) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.CellV_SF)),
+        nameof(StrCellVMin) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.CellV_SF)),
+        nameof(StrCellVAvg) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.CellV_SF)),
+        nameof(StrModTmpMax) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.ModTmp_SF)),
+        nameof(StrModTmpMin) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.ModTmp_SF)),
+        nameof(StrModTmpAvg) => new PropertyReference(Parent, nameof(SunSpecLithiumIonBank.ModTmp_SF)),
         _ => null
     };
 }
@@ -502,7 +502,7 @@ public partial class SunSpecModel803StringGroup : IModbusBaseAddressProvider, IT
 /// Current status of the string.
 /// </summary>
 [Flags]
-public enum SunSpecModel803StringStrSt : uint
+public enum SunSpecLithiumIonBankStringStrSt : uint
 {
     STRING_ENABLED = 0x1,
 
@@ -512,7 +512,7 @@ public enum SunSpecModel803StringStrSt : uint
 /// <summary>
 /// Connection Failure Reason
 /// </summary>
-public enum SunSpecModel803StringStrConFail : ushort
+public enum SunSpecLithiumIonBankStringStrConFail : ushort
 {
     NO_FAILURE = 0,
 
@@ -536,7 +536,7 @@ public enum SunSpecModel803StringStrConFail : ushort
 /// <summary>
 /// Reason why the string is currently disabled.
 /// </summary>
-public enum SunSpecModel803StringStrDisRsn : ushort
+public enum SunSpecLithiumIonBankStringStrDisRsn : ushort
 {
     NONE = 0,
 
@@ -553,7 +553,7 @@ public enum SunSpecModel803StringStrDisRsn : ushort
 /// Status of the contactor(s) for the string.
 /// </summary>
 [Flags]
-public enum SunSpecModel803StringStrConSt : uint
+public enum SunSpecLithiumIonBankStringStrConSt : uint
 {
     CONTACTOR_0 = 0x1,
 
@@ -622,7 +622,7 @@ public enum SunSpecModel803StringStrConSt : uint
 /// Alarms, warnings and status values.
 /// </summary>
 [Flags]
-public enum SunSpecModel803StringStrEvt1 : uint
+public enum SunSpecLithiumIonBankStringStrEvt1 : uint
 {
     COMMUNICATION_ERROR = 0x1,
 
@@ -688,7 +688,7 @@ public enum SunSpecModel803StringStrEvt1 : uint
 /// <summary>
 /// Enables and disables the string.
 /// </summary>
-public enum SunSpecModel803StringStrSetEna : ushort
+public enum SunSpecLithiumIonBankStringStrSetEna : ushort
 {
     ENABLE_STRING = 1,
 
@@ -698,7 +698,7 @@ public enum SunSpecModel803StringStrSetEna : ushort
 /// <summary>
 /// Connects and disconnects the string.
 /// </summary>
-public enum SunSpecModel803StringStrSetCon : ushort
+public enum SunSpecLithiumIonBankStringStrSetCon : ushort
 {
     CONNECT_STRING = 1,
 

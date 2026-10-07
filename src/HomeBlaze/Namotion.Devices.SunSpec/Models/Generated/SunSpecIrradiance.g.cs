@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 302: Irradiance Model. Include to support various irradiance measurements
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel302 : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
+public partial class SunSpecIrradiance : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel302(int baseAddress, int length)
+    public SunSpecIrradiance(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -49,11 +49,11 @@ public partial class SunSpecModel302 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// <summary>
     /// Repeating
     /// </summary>
-    public partial SunSpecModel302RepeatingGroup[] Repeating { get; internal set; }
+    public partial SunSpecIrradianceRepeatingGroup[] Repeating { get; internal set; }
 
     void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
     {
-        Repeating = SunSpecGroups.Update(Repeating, instance.GetGroup("repeating"), group => new SunSpecModel302RepeatingGroup(this, group.Address, group.Index));
+        Repeating = SunSpecGroups.Update(Repeating, instance.GetGroup("repeating"), group => new SunSpecIrradianceRepeatingGroup(this, group.Address, group.Index));
     }
 }
 
@@ -61,12 +61,12 @@ public partial class SunSpecModel302 : ISunSpecModel, ITitleProvider, ISunSpecGr
 /// Repeating group of SunSpec model 302.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel302RepeatingGroup : IModbusBaseAddressProvider, ITitleProvider
+public partial class SunSpecIrradianceRepeatingGroup : IModbusBaseAddressProvider, ITitleProvider
 {
     /// <summary>
     /// Initializes the instance <paramref name="index"/> of this group in <paramref name="parent"/> at <paramref name="baseAddress"/>.
     /// </summary>
-    public SunSpecModel302RepeatingGroup(SunSpecModel302 parent, int baseAddress, int index)
+    public SunSpecIrradianceRepeatingGroup(SunSpecIrradiance parent, int baseAddress, int index)
     {
         Parent = parent;
         BaseAddress = baseAddress;
@@ -81,7 +81,7 @@ public partial class SunSpecModel302RepeatingGroup : IModbusBaseAddressProvider,
     /// <summary>
     /// Gets the model or group containing this group.
     /// </summary>
-    public SunSpecModel302 Parent { get; }
+    public SunSpecIrradiance Parent { get; }
 
     /// <inheritdoc />
     public int BaseAddress { get; }

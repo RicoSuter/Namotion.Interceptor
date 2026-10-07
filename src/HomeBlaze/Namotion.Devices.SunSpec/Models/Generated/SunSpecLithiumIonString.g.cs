@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 804: Lithium-Ion String Model.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel804 : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
+public partial class SunSpecLithiumIonString : ISunSpecModel, ITitleProvider, ISunSpecGroupOwner
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel804(int baseAddress, int length)
+    public SunSpecLithiumIonString(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
@@ -100,14 +100,14 @@ public partial class SunSpecModel804 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// </summary>
     [ModbusRegister(4, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "String Status", IsDiscrete = true)]
-    public partial SunSpecModel804St? St { get; internal set; }
+    public partial SunSpecLithiumIonStringSt? St { get; internal set; }
 
     /// <summary>
     /// Connection Failure Reason
     /// </summary>
     [ModbusRegister(6, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Connection Failure Reason", IsDiscrete = true)]
-    public partial SunSpecModel804ConFail? ConFail { get; internal set; }
+    public partial SunSpecLithiumIonStringConFail? ConFail { get; internal set; }
 
     /// <summary>
     /// Number of cells currently being balanced in the string.
@@ -233,14 +233,14 @@ public partial class SunSpecModel804 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// </summary>
     [ModbusRegister(26, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "Contactor Status", IsDiscrete = true)]
-    public partial SunSpecModel804ConSt? ConSt { get; internal set; }
+    public partial SunSpecLithiumIonStringConSt? ConSt { get; internal set; }
 
     /// <summary>
     /// Alarms, warnings and status values.
     /// </summary>
     [ModbusRegister(28, ModbusDataType.U32, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum, Access = ModbusAccess.ReadOnly)]
     [State(Title = "String Event 1", IsDiscrete = true)]
-    public partial SunSpecModel804Evt1? Evt1 { get; internal set; }
+    public partial SunSpecLithiumIonStringEvt1? Evt1 { get; internal set; }
 
     /// <summary>
     /// Alarms, warnings and status values.
@@ -275,7 +275,7 @@ public partial class SunSpecModel804 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// </summary>
     [ModbusRegister(37, ModbusDataType.U16, NotAvailableValue = ModbusNotAvailableValue.UnsignedMaximum)]
     [State(Title = "Connect/Disconnect String", IsDiscrete = true)]
-    public partial SunSpecModel804SetCon? SetCon { get; internal set; }
+    public partial SunSpecLithiumIonStringSetCon? SetCon { get; internal set; }
 
     /// <summary>
     /// Scale factor for string state of charge.
@@ -322,11 +322,11 @@ public partial class SunSpecModel804 : ISunSpecModel, ITitleProvider, ISunSpecGr
     /// <summary>
     /// LithiumIonStringModule
     /// </summary>
-    public partial SunSpecModel804LithiumIonStringModuleGroup[] LithiumIonStringModule { get; internal set; }
+    public partial SunSpecLithiumIonStringLithiumIonStringModuleGroup[] LithiumIonStringModule { get; internal set; }
 
     void ISunSpecGroupOwner.UpdateGroups(SunSpecGroupInstance instance)
     {
-        LithiumIonStringModule = SunSpecGroups.Update(LithiumIonStringModule, instance.GetGroup("lithium_ion_string_module"), group => new SunSpecModel804LithiumIonStringModuleGroup(this, group.Address, group.Index));
+        LithiumIonStringModule = SunSpecGroups.Update(LithiumIonStringModule, instance.GetGroup("lithium_ion_string_module"), group => new SunSpecLithiumIonStringLithiumIonStringModuleGroup(this, group.Address, group.Index));
     }
 }
 
@@ -334,12 +334,12 @@ public partial class SunSpecModel804 : ISunSpecModel, ITitleProvider, ISunSpecGr
 /// LithiumIonStringModule group of SunSpec model 804.
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel804LithiumIonStringModuleGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
+public partial class SunSpecLithiumIonStringLithiumIonStringModuleGroup : IModbusBaseAddressProvider, ITitleProvider, IModbusScaleFactorProvider
 {
     /// <summary>
     /// Initializes the instance <paramref name="index"/> of this group in <paramref name="parent"/> at <paramref name="baseAddress"/>.
     /// </summary>
-    public SunSpecModel804LithiumIonStringModuleGroup(SunSpecModel804 parent, int baseAddress, int index)
+    public SunSpecLithiumIonStringLithiumIonStringModuleGroup(SunSpecLithiumIonString parent, int baseAddress, int index)
     {
         Parent = parent;
         BaseAddress = baseAddress;
@@ -362,7 +362,7 @@ public partial class SunSpecModel804LithiumIonStringModuleGroup : IModbusBaseAdd
     /// <summary>
     /// Gets the model or group containing this group.
     /// </summary>
-    public SunSpecModel804 Parent { get; }
+    public SunSpecLithiumIonString Parent { get; }
 
     /// <inheritdoc />
     public int BaseAddress { get; }
@@ -468,14 +468,14 @@ public partial class SunSpecModel804LithiumIonStringModuleGroup : IModbusBaseAdd
 
     PropertyReference? IModbusScaleFactorProvider.TryGetScaleFactorProperty(string propertyName) => propertyName switch
     {
-        nameof(ModSoC) => new PropertyReference(Parent, nameof(SunSpecModel804.SoC_SF)),
-        nameof(ModSoH) => new PropertyReference(Parent, nameof(SunSpecModel804.SoH_SF)),
-        nameof(ModCellVMax) => new PropertyReference(Parent, nameof(SunSpecModel804.CellV_SF)),
-        nameof(ModCellVMin) => new PropertyReference(Parent, nameof(SunSpecModel804.CellV_SF)),
-        nameof(ModCellVAvg) => new PropertyReference(Parent, nameof(SunSpecModel804.CellV_SF)),
-        nameof(ModCellTmpMax) => new PropertyReference(Parent, nameof(SunSpecModel804.ModTmp_SF)),
-        nameof(ModCellTmpMin) => new PropertyReference(Parent, nameof(SunSpecModel804.ModTmp_SF)),
-        nameof(ModCellTmpAvg) => new PropertyReference(Parent, nameof(SunSpecModel804.ModTmp_SF)),
+        nameof(ModSoC) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.SoC_SF)),
+        nameof(ModSoH) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.SoH_SF)),
+        nameof(ModCellVMax) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.CellV_SF)),
+        nameof(ModCellVMin) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.CellV_SF)),
+        nameof(ModCellVAvg) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.CellV_SF)),
+        nameof(ModCellTmpMax) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.ModTmp_SF)),
+        nameof(ModCellTmpMin) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.ModTmp_SF)),
+        nameof(ModCellTmpAvg) => new PropertyReference(Parent, nameof(SunSpecLithiumIonString.ModTmp_SF)),
         _ => null
     };
 }
@@ -484,7 +484,7 @@ public partial class SunSpecModel804LithiumIonStringModuleGroup : IModbusBaseAdd
 /// Current status of the string.
 /// </summary>
 [Flags]
-public enum SunSpecModel804St : uint
+public enum SunSpecLithiumIonStringSt : uint
 {
     STRING_ENABLED = 0x1,
 
@@ -494,7 +494,7 @@ public enum SunSpecModel804St : uint
 /// <summary>
 /// Connection Failure Reason
 /// </summary>
-public enum SunSpecModel804ConFail : ushort
+public enum SunSpecLithiumIonStringConFail : ushort
 {
     NO_FAILURE = 0,
 
@@ -519,7 +519,7 @@ public enum SunSpecModel804ConFail : ushort
 /// Status of the contactor(s) for the string.
 /// </summary>
 [Flags]
-public enum SunSpecModel804ConSt : uint
+public enum SunSpecLithiumIonStringConSt : uint
 {
     CONTACTOR_0 = 0x1,
 
@@ -588,7 +588,7 @@ public enum SunSpecModel804ConSt : uint
 /// Alarms, warnings and status values.
 /// </summary>
 [Flags]
-public enum SunSpecModel804Evt1 : uint
+public enum SunSpecLithiumIonStringEvt1 : uint
 {
     COMMUNICATION_ERROR = 0x1,
 
@@ -654,7 +654,7 @@ public enum SunSpecModel804Evt1 : uint
 /// <summary>
 /// Connects and disconnects the string.
 /// </summary>
-public enum SunSpecModel804SetCon : ushort
+public enum SunSpecLithiumIonStringSetCon : ushort
 {
     CONNECT_STRING = 1,
 

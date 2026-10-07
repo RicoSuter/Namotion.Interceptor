@@ -17,12 +17,12 @@ namespace Namotion.Devices.SunSpec.Models;
 /// SunSpec model 307: Base Met. Base Meteorological Model
 /// </summary>
 [InterceptorSubject]
-public partial class SunSpecModel307 : ISunSpecModel, ITitleProvider
+public partial class SunSpecWeatherStation : ISunSpecModel, ITitleProvider
 {
     /// <summary>
     /// Initializes the model at <paramref name="baseAddress"/>, the address of its ID register, with <paramref name="length"/> registers after the ID and length registers.
     /// </summary>
-    public SunSpecModel307(int baseAddress, int length)
+    public SunSpecWeatherStation(int baseAddress, int length)
     {
         BaseAddress = baseAddress;
         Length = length;
