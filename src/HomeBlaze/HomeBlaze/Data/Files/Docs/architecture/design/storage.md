@@ -240,3 +240,7 @@ Live state has zero data loss: it recovers to the current device state, not the 
 - Dynamic metadata schema and validation
 - Configuration sync between instances (should central know satellite configs?)
 - Backup and restore procedures for each storage backend
+- On a case-sensitive file system, `StoragePathRegistry` keys its path lookup, content hash, and size entries by the lowercased path, so two files whose names differ only in case share one entry: a file-watcher change can refresh the wrong file's subject, and such a pair is reported as changed on every rescan
+- A reconnect that only reconciles the existing hierarchy still replaces the file watcher in `StartFileWatching` (called from `ConnectAsync`), dropping any event still in its coalescing window and any pending own-write mark
+- The registry mixes two content hash methods for JSON files, decoded text in the scan and in configuration writes versus raw bytes in `JsonSubjectSynchronizer`, so a file with a byte order mark is reported as changed on every rescan once the file watcher has refreshed it
+- In-memory storage creates a new, empty client on every `ConnectAsync`, so a reconnect drops all of its subjects; decide the intended behavior

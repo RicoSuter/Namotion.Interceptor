@@ -147,3 +147,4 @@ Concrete performance targets should be established after initial baseline measur
 - How long to wait for convergence after fault recovery (fixed timeout vs. polling with adaptive timeout)?
 - Should the tester produce a report or just pass/fail?
 - Integration with CI: can multi-node tests run in GitHub Actions (multiple processes, network simulation)?
+- The E2E test `SubjectSetupDialogTests.Validation_NameErrors_PreventAdvancing` has failed intermittently in CI; the cause is unknown, and it passed 10/10 locally

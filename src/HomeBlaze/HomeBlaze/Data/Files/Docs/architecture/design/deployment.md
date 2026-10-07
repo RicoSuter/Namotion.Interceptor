@@ -106,3 +106,4 @@ CI publishes HomeBlaze to GitHub Container Registry; the tags are listed in [Ins
 
 - Edge device provisioning and remote configuration updates
 - How plugin and library package versions relate to the image version, given that the host assembly version stays at 1.0.0 because plugins bind by assembly version
+- The container logs warnings for the ASP.NET Core data protection keys, which are not persisted to the data folder, and for `UseHttpsRedirection`'s target port; decide whether to persist the keys under `/data` and how HTTPS should be handled behind a reverse proxy
