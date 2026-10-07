@@ -4,31 +4,10 @@ using Namotion.Interceptor.Tracking;
 namespace HomeBlaze.Services;
 
 /// <summary>
-/// Awaits the <see cref="StartupGate"/> of a subject context, and releases a startup deferral taken with
-/// <see cref="StartupCompletionExtensions.DeferStartupCompletion"/> once its work has completed.
+/// Awaits the <see cref="StartupGate"/> of a subject context.
 /// </summary>
 public static class StartupGateExtensions
 {
-    /// <summary>
-    /// Releases <paramref name="deferral"/> once <paramref name="task"/> has completed in any way, right away
-    /// when <paramref name="task"/> is null.
-    /// </summary>
-    public static void ReleaseWhenCompleted(this IDisposable deferral, Task? task)
-    {
-        if (task is null)
-        {
-            deferral.Dispose();
-            return;
-        }
-
-        task.ContinueWith(
-            static (_, state) => ((IDisposable)state!).Dispose(),
-            deferral,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-    }
-
     /// <summary>
     /// Completes once the <see cref="StartupGate"/> of <paramref name="context"/> has completed, right away when
     /// the context has none. Faults or is cancelled like <see cref="StartupGate.Completed"/>.

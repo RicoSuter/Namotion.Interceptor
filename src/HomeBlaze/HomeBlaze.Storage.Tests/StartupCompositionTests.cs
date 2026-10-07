@@ -100,7 +100,7 @@ public partial class TypeLoadingService : BackgroundService, IConfigurable
     {
         var startupDeferral = ((IInterceptorSubject)this).Context.DeferStartupCompletion();
         await base.StartAsync(cancellationToken);
-        startupDeferral.ReleaseWhenCompleted(ExecuteTask);
+        StartupGate.ReleaseWhenCompleted(startupDeferral, ExecuteTask);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

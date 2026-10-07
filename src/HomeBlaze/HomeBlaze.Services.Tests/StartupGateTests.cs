@@ -8,6 +8,7 @@ using Moq;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services.Tests;
@@ -121,7 +122,7 @@ public class StartupGateTests : IDisposable
         // Arrange
         var gate = new StartupGate();
         var task = new TaskCompletionSource();
-        gate.Defer().ReleaseWhenCompleted(task.Task);
+        StartupGate.ReleaseWhenCompleted(gate.Defer(), task.Task);
         gate.CompleteRootLoad();
         Assert.False(gate.Completed.IsCompleted);
 
@@ -130,6 +131,36 @@ public class StartupGateTests : IDisposable
 
         // Assert
         await gate.Completed.WaitAsync(WaitTimeout);
+    }
+
+    [Fact]
+    public async Task WhenReleaseDeferralDisposalFailsInTheContinuation_ThenTheFailureIsLoggedInsteadOfUnobserved()
+    {
+        // Arrange
+        Exception? loggedException = null;
+        var logger = new TestLogger(exception => Volatile.Write(ref loggedException, exception));
+        var task = new TaskCompletionSource();
+
+        // Act
+        StartupGate.ReleaseWhenCompleted(new ThrowingDeferral(), task.Task, logger);
+        task.SetResult();
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref loggedException) is not null, WaitTimeout);
+        Assert.IsType<InvalidOperationException>(Volatile.Read(ref loggedException));
+    }
+
+    [Fact]
+    public void WhenReleaseDeferralDisposalFailsInTheContinuationAndNoLoggerIsGiven_ThenTheFailureIsIgnored()
+    {
+        // Arrange
+        var task = new TaskCompletionSource();
+
+        // Act
+        StartupGate.ReleaseWhenCompleted(new ThrowingDeferral(), task.Task);
+        task.SetResult();
+
+        // Assert: completing the task above does not throw or crash the test process.
     }
 
     [Fact]
@@ -317,6 +348,27 @@ public class StartupGateTests : IDisposable
         foreach (var configurationFile in _configurationFiles)
         {
             File.Delete(configurationFile);
+        }
+    }
+
+    private sealed class ThrowingDeferral : IDisposable
+    {
+        public void Dispose() => throw new InvalidOperationException("Release failed.");
+    }
+
+    private sealed class TestLogger(Action<Exception> onException) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (exception is not null)
+            {
+                onException(exception);
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services;
@@ -25,6 +26,39 @@ public sealed class StartupGate : IStartupCompletion
     /// Completes once startup has settled. Faults or is cancelled when the root fails to load.
     /// </summary>
     public Task Completed => _completed.Task;
+
+    /// <summary>
+    /// Releases <paramref name="deferral"/> once <paramref name="task"/> has completed in any way, right away
+    /// when <paramref name="task"/> is null. A failing <see cref="IDisposable.Dispose"/> raised while
+    /// <paramref name="task"/> is still running is logged to <paramref name="logger"/>, or ignored when
+    /// <paramref name="logger"/> is null.
+    /// </summary>
+    public static void ReleaseWhenCompleted(IDisposable deferral, Task? task, ILogger? logger = null)
+    {
+        if (task is null)
+        {
+            deferral.Dispose();
+            return;
+        }
+
+        task.ContinueWith(
+            static (_, state) =>
+            {
+                var (deferral, logger) = ((IDisposable Deferral, ILogger? Logger))state!;
+                try
+                {
+                    deferral.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    logger?.LogError(exception, "Failed to release a startup deferral.");
+                }
+            },
+            (deferral, logger),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
 
     /// <inheritdoc />
     public IDisposable Defer()

@@ -151,7 +151,7 @@ public partial class FluentStorageContainer :
         }
 
         // Bound to this start's ExecuteAsync, so an earlier start's ExecuteAsync ending late cannot release it.
-        startupDeferral.ReleaseWhenCompleted(ExecuteTask);
+        StartupGate.ReleaseWhenCompleted(startupDeferral, ExecuteTask, _logger);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
