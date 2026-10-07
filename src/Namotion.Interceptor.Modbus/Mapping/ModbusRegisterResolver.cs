@@ -89,8 +89,28 @@ internal static class ModbusRegisterResolver
             throw ModbusConfigurationException.ForMapping(path, $"Address {address} with {count} register(s) is outside 0 to {ModbusAddressSpaceExtensions.AddressCount - 1}.");
         }
 
-        var reader = ModbusValueConverters.Create(attribute, property.Type, path);
-        return new ModbusRegisterBinding(property.Reference, path, unitId, (int)address, attribute, reader);
+        var scaleFactorReference = GetScaleFactorReference(property, attribute, path);
+        var reader = ModbusValueConverters.Create(attribute, property.Type, path, hasDynamicScale: scaleFactorReference is not null);
+        return new ModbusRegisterBinding(property.Reference, path, unitId, (int)address, attribute, reader)
+        {
+            ScaleFactorReference = scaleFactorReference
+        };
+    }
+
+    private static PropertyReference? GetScaleFactorReference(RegisteredSubjectProperty property, ModbusRegisterAttribute attribute, string path)
+    {
+        var subject = property.Reference.Subject;
+        if (subject is IModbusScaleFactorProvider provider && provider.TryGetScaleFactorProperty(property.Name) is { } provided)
+        {
+            if (attribute.ScaleFactorProperty is not null)
+            {
+                throw ModbusConfigurationException.ForMapping(path, "ScaleFactorProperty and IModbusScaleFactorProvider are mutually exclusive.");
+            }
+
+            return provided;
+        }
+
+        return attribute.ScaleFactorProperty is { } name ? new PropertyReference(subject, name) : null;
     }
 
     private static void ValidateEnums(string path, ModbusRegisterAttribute attribute)
@@ -145,11 +165,6 @@ internal static class ModbusRegisterResolver
 
     private static void ValidateScale(string path, ModbusRegisterAttribute attribute)
     {
-        if (attribute.ScaleFactorProperty is not null && attribute.Scale is not 1.0)
-        {
-            throw ModbusConfigurationException.ForMapping(path, "Scale and ScaleFactorProperty are mutually exclusive.");
-        }
-
         if (!double.IsFinite(attribute.Scale) || attribute.Scale == 0)
         {
             throw ModbusConfigurationException.ForMapping(path, "Scale must be a finite, non-zero number.");
@@ -158,23 +173,21 @@ internal static class ModbusRegisterResolver
 
     private static void LinkScaleFactors(List<ModbusRegisterBinding> bindings)
     {
+        Dictionary<PropertyReference, ModbusRegisterBinding>? bindingsByProperty = null;
         foreach (var binding in bindings)
         {
-            var name = binding.Attribute.ScaleFactorProperty;
-            if (name is null)
+            if (binding.ScaleFactorReference is not { } reference)
             {
                 continue;
             }
 
-            var scaleFactor = bindings.FirstOrDefault(candidate =>
-                ReferenceEquals(candidate.Property.Subject, binding.Property.Subject) &&
-                candidate.Property.Name == name);
+            bindingsByProperty ??= bindings.ToDictionary(candidate => candidate.Property);
 
             // S16 only: a scale factor is a signed exponent, which a U16 register cannot hold.
-            if (scaleFactor?.Attribute.DataType is not ModbusDataType.S16)
+            if (!bindingsByProperty.TryGetValue(reference, out var scaleFactor) || scaleFactor.Attribute.DataType is not ModbusDataType.S16)
             {
                 throw ModbusConfigurationException.ForMapping(binding.Path,
-                    $"ScaleFactorProperty '{name}' must name an S16 register property on the same subject that is not excluded.");
+                    $"Scale factor property '{reference.Name}' of {reference.Subject.GetType().Name} must be an S16 register property that is mapped and not excluded.");
             }
 
             binding.ScaleFactor = scaleFactor;

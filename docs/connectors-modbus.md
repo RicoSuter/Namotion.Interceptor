@@ -7,11 +7,11 @@ Dependencies: [FluentModbus](https://github.com/Apollo3zehn/FluentModbus) (MIT)
 ## Key Features
 
 - Attribute-based mapping of holding registers, input registers, coils and discrete inputs
-- U16, S16, U32, S32, F32, String and Boolean values, all four 32-bit word orders
-- Static scaling and dynamic scale factors (value = raw * 10^exponent)
+- U16, S16, U32, S32, U64, S64, F32, String and Boolean values, all four word orders
+- Static scaling and dynamic scale factors, also combined (value = raw * scale * 10^exponent)
 - Conversion to integer and floating point types, `decimal`, `bool`, `string`, enums, flags enums and their nullable forms
 - "Not available" raw patterns mapped to `null`
-- Per-subject base addresses and unit IDs for reusable model classes
+- Per-subject base addresses, unit IDs and scale factor providers for reusable model classes
 - Contiguous read batching with a configurable gap, split until the next connect when the device rejects a request
 - Discovery hook for firmware gating and runtime discovery
 - Automatic reconnection and diagnostics
@@ -55,25 +55,29 @@ To create a source for a subject at runtime, for example in a device subject tha
 | Setting | Default | Meaning |
 |---|---|---|
 | `AddressSpace` | `HoldingRegister` | `HoldingRegister`, `InputRegister`, `Coil` or `DiscreteInput`. The bit spaces require `Boolean`, and `Boolean` requires a bit space |
-| `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit values |
-| `Scale` | `1.0` | Static factor, requires a `float`, `double` or `decimal` property |
-| `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Mutually exclusive with `Scale`, and the named property must not be excluded |
+| `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit and 64-bit values |
+| `Scale` | `1.0` | Static factor, requires a `float`, `double`, `decimal` or `TimeSpan` property |
+| `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Combines with `Scale` (value = raw * scale * 10^exponent), and the named property must not be excluded |
 | `Length` | 0 | Register count of `String` values, 1 to 125 |
-| `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF or 0x7FFFFFFF), `SignedMinimum` (0x8000 or 0x80000000) or `UnsignedMaximum` (0xFFFF or 0xFFFFFFFF) |
+| `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF, 0x7FFFFFFF or 0x7FFFFFFFFFFFFFFF), `SignedMinimum` (0x8000, 0x80000000 or 0x8000000000000000) or `UnsignedMaximum` (0xFFFF, 0xFFFFFFFF or 0xFFFFFFFFFFFFFFFF) |
 | `Access` | `ReadWrite` | Declares writability for a later write stage, not enforced yet |
 
 Addresses are raw protocol addresses, without the `3xxxx`/`4xxxx` documentation prefixes and without the +1 offset some tools use.
 
 Values convert as follows:
 
-- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
-- Scaled values require a `float`, `double` or `decimal` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
-- F32 converts to `float`, `double` or `decimal`. A NaN, an infinity or a value beyond the `decimal` range becomes `null` on a `decimal?` property.
+- Integer data types convert to any integer type that holds every value of the data type (U16 into `int` but not `short`, U64 into `ulong` but not `long`), to `float`, `double` and `decimal` (unscaled or scaled), to `bool` (non-zero is `true`) and to enums whose underlying type holds every value, including flags enums. Undefined enum values pass through.
+- Scaled values require a `float`, `double`, `decimal` or `TimeSpan` property. `decimal` properties scale in decimal arithmetic, so a raw 234 with `Scale = 0.1` is exactly `23.4`.
+- F32 converts to `float`, `double`, `decimal` or `TimeSpan`. A NaN, an infinity or a float beyond the `decimal` range becomes `null` on a `decimal?` or `TimeSpan?` property, as does a converted value beyond the `TimeSpan` range on a `TimeSpan?` property. Scaling that overflows `decimal` is an error.
+- `TimeSpan` takes the value a `decimal` property would get as seconds, truncated to whole ticks; use `Scale` for other units, such as `Scale = 0.001` for milliseconds.
 - String reads two ASCII characters per register up to the first NUL and trims trailing spaces.
 - `NotAvailableValue` requires a nullable property and an integer data type, and is checked before scaling.
-- With `ScaleFactorProperty`, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes. A scale factor reading as its own `NotAvailableValue` is unknown, so its dependents are not updated until it is available again.
+- With a dynamic scale factor, a mapped value is not applied until its scale factor was read once, and is applied again whenever the scale factor changes. A scale factor reading as its own `NotAvailableValue` is unknown, so its dependents are not updated until it is available again.
+- `Scale` combined with a scale factor multiplies both, so a percentage reported as 0 to 100 with an exponent can be converted to a fraction with `Scale = 0.01`.
 
 A subject implementing `IModbusBaseAddressProvider` makes its addresses relative to `BaseAddress`, so one class can describe a repeated block. Base addresses are not inherited by child subjects. `IModbusUnitIdProvider` sets the unit ID for a subject and its children, the nearest one taking precedence; otherwise `ModbusClientConfiguration.UnitId` applies. Base addresses and unit IDs are read on every connect, when the connector builds its read plan.
+
+A subject whose scale factors live on another subject, such as a repeated block sharing the scale factors of its enclosing block, implements `IModbusScaleFactorProvider`. Its `TryGetScaleFactorProperty(propertyName)` returns the S16 property holding the exponent of that mapping, or `null`. It is asked once per mapping on every connect. A mapping takes its scale factor from either the provider or `ScaleFactorProperty`, never both; the value is still converted with the scale factor of the same poll cycle.
 
 Device libraries can derive from `ModbusRegisterAttribute` to preset values such as `AddressSpace` and `NotAvailableValue`. A property carries at most one register attribute, derived ones included. Mappings may overlap, so one register can back several properties, for example a status word read both as an enum and as a flag.
 
@@ -81,7 +85,7 @@ Invalid mappings (for example `Scale` on an `int` property, or `Length` on a non
 
 ## Discovery
 
-A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces (`ReadHoldingRegistersAsync(address, count, unitId, cancellationToken)` and its siblings, from the configured unit ID unless one is given), `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Exclusions are reset on every connect. Exclude registers a device does not support instead of relying on its exception responses: devices differ, and a request that times out counts as a lost connection. Excluding a property does not clear its value, so a property excluded after it was read keeps its last reading unless discovery sets it to `null` with `SetValueFromSource`. Excluding a property that another mapping names as its `ScaleFactorProperty` makes every connect fail with `ModbusConfigurationException`. Discovery may also create, replace or clear child subjects: the bindings are resolved from the subject tree after `DiscoverAsync` returns, so the registers of a new child are read and the properties of a removed child are released.
+A root subject implementing `IModbusDiscovery` has `DiscoverAsync` called on every connect and reconnect, before the register bindings are resolved. The `ModbusDiscoveryContext` offers raw reads of all four spaces (`ReadHoldingRegistersAsync(address, count, unitId, cancellationToken)` and its siblings, from the configured unit ID unless one is given), `Source` for applying values with `SetValueFromSource`, and `ExcludeProperty` to leave a mapped property unread and unclaimed for this connection. Exclusions are reset on every connect. Exclude registers a device does not support instead of relying on its exception responses: devices differ, and a request that times out counts as a lost connection. Excluding a property does not clear its value, so a property excluded after it was read keeps its last reading unless discovery sets it to `null` with `SetValueFromSource`. Excluding a property that another mapping uses as its scale factor, through `ScaleFactorProperty` or `IModbusScaleFactorProvider`, makes every connect fail with `ModbusConfigurationException`. Discovery may also create, replace or clear child subjects: the bindings are resolved from the subject tree after `DiscoverAsync` returns, so the registers of a new child are read and the properties of a removed child are released.
 
 Await every context call before the next one and before `DiscoverAsync` returns: the context is not thread-safe (a read started while another is in flight throws `InvalidOperationException`), and once `DiscoverAsync` returns it throws `ObjectDisposedException` because polling then uses the connection. A rejected read throws `ModbusResponseException` with the Modbus exception code, and the connection stays usable. Its `IsPermanentRejection` is true for codes 1 to 3 (illegal function, data address or data value), meaning the device does not support the request; other codes, such as 6 (server busy), may pass on a later try. Throwing from `DiscoverAsync` fails the connect attempt, which is retried after `RetryTime`.
 

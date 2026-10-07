@@ -1,3 +1,4 @@
+using System.Globalization;
 using Namotion.Interceptor.Modbus.Attributes;
 
 namespace Namotion.Interceptor.Modbus.Mapping;
@@ -20,14 +21,16 @@ internal static class ModbusValueConverters
     private static readonly decimal[] PowersOfTen = CreatePowersOfTen();
     private static readonly decimal[] NegativePowersOfTen = CreateNegativePowersOfTen();
 
-    public static ModbusValueReader Create(ModbusRegisterAttribute attribute, Type propertyType, string propertyPath)
+    private static readonly decimal MinimumTimeSpanSeconds = (decimal)TimeSpan.MinValue.Ticks / TimeSpan.TicksPerSecond;
+    private static readonly decimal MaximumTimeSpanSeconds = (decimal)TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerSecond;
+
+    public static ModbusValueReader Create(ModbusRegisterAttribute attribute, Type propertyType, string propertyPath, bool hasDynamicScale)
     {
         var underlyingType = Nullable.GetUnderlyingType(propertyType);
         var targetType = underlyingType ?? propertyType;
         var isNullable = underlyingType is not null || !propertyType.IsValueType;
 
         var dataType = attribute.DataType;
-        var hasDynamicScale = attribute.ScaleFactorProperty is not null;
         var isScaled = hasDynamicScale || attribute.Scale is not 1.0;
 
         ValidateNotAvailableValue(attribute, isNullable, propertyPath);
@@ -73,7 +76,7 @@ internal static class ModbusValueConverters
     }
 
     private static bool IsScalableTarget(Type targetType)
-        => targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float);
+        => targetType == typeof(decimal) || targetType == typeof(double) || targetType == typeof(float) || targetType == typeof(TimeSpan);
 
     private static ModbusValueReader CreateFloatReader(
         ModbusRegisterAttribute attribute, Type targetType, string propertyPath,
@@ -107,11 +110,39 @@ internal static class ModbusValueConverters
                     return null;
                 }
 
-                return (decimal)value * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+                return ToDecimal(value) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
             };
         }
 
-        throw ModbusConfigurationException.ForMapping(propertyPath, $"F32 requires a float, double or decimal property, not {targetType.Name}.");
+        if (targetType == typeof(TimeSpan))
+        {
+            return CreateFloatTimeSpanReader(attribute, propertyPath, isNullable, hasDynamicScale);
+        }
+
+        throw ModbusConfigurationException.ForMapping(propertyPath, $"F32 requires a float, double, decimal or TimeSpan property, not {targetType.Name}.");
+    }
+
+    private static ModbusValueReader CreateFloatTimeSpanReader(
+        ModbusRegisterAttribute attribute, string propertyPath, bool isNullable, bool hasDynamicScale)
+    {
+        var wordOrder = attribute.WordOrder;
+        var decimalScale = ToDecimalScale(propertyPath, attribute.Scale);
+        return (raw, exponent) =>
+        {
+            var value = ModbusRegisterCodec.ReadSingle(raw, wordOrder);
+            if (!isNullable)
+            {
+                return ToTimeSpan(ToDecimal(value) * GetDecimalScale(hasDynamicScale, decimalScale, exponent));
+            }
+
+            // Also true for NaN, which fails every comparison.
+            if (!(Math.Abs(value) < DecimalFloatLimit))
+            {
+                return null;
+            }
+
+            return TryToTimeSpan(ToDecimal(value) * GetDecimalScale(hasDynamicScale, decimalScale, exponent), out var timeSpan) ? timeSpan : null;
+        };
     }
 
     private static ModbusValueReader CreateScaledIntegerReader(
@@ -127,19 +158,27 @@ internal static class ModbusValueConverters
             var decimalScale = ToDecimalScale(propertyPath, staticScale);
             return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+                : (decimal)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent);
+        }
+
+        if (targetType == typeof(TimeSpan))
+        {
+            var decimalScale = ToDecimalScale(propertyPath, staticScale);
+            return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
+                ? null
+                : ToTimeSpan((decimal)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) * GetDecimalScale(hasDynamicScale, decimalScale, exponent));
         }
 
         if (targetType == typeof(double))
         {
             return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : ApplyDoubleScale(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
+                : ApplyDoubleScale((double)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
         }
 
         return (raw, exponent) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
             ? null
-            : (float)ApplyDoubleScale(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
+            : (float)ApplyDoubleScale((double)ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), hasDynamicScale, staticScale, exponent);
     }
 
     private static ModbusValueReader CreateUnscaledIntegerReader(
@@ -160,7 +199,7 @@ internal static class ModbusValueConverters
                     return null;
                 }
 
-                return ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) != 0 ? True : False;
+                return ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder) != Int128.Zero ? True : False;
             };
         }
 
@@ -169,7 +208,7 @@ internal static class ModbusValueConverters
             RequireIntegralRange(propertyPath, dataType, Enum.GetUnderlyingType(targetType));
             return (raw, _) => ModbusRegisterCodec.IsNotAvailable(raw, dataType, wordOrder, notAvailableValue)
                 ? null
-                : Enum.ToObject(targetType, ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder));
+                : ToEnum(targetType, ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder));
         }
 
         var typeCode = Type.GetTypeCode(targetType);
@@ -179,7 +218,7 @@ internal static class ModbusValueConverters
             : BoxIntegral(ModbusRegisterCodec.ReadInteger(raw, dataType, wordOrder), typeCode);
     }
 
-    private static object BoxIntegral(long value, TypeCode typeCode) => typeCode switch
+    private static object BoxIntegral(Int128 value, TypeCode typeCode) => typeCode switch
     {
         TypeCode.Byte => (byte)value,
         TypeCode.SByte => (sbyte)value,
@@ -187,10 +226,14 @@ internal static class ModbusValueConverters
         TypeCode.UInt16 => (ushort)value,
         TypeCode.Int32 => (int)value,
         TypeCode.UInt32 => (uint)value,
-        TypeCode.Int64 => value,
+        TypeCode.Int64 => (long)value,
         TypeCode.UInt64 => (ulong)value,
         _ => throw new ArgumentOutOfRangeException(nameof(typeCode), typeCode, null)
     };
+
+    // Enum.ToObject has no Int128 overload; a negative value only occurs for a signed underlying type.
+    private static object ToEnum(Type enumType, Int128 value)
+        => value < Int128.Zero ? Enum.ToObject(enumType, (long)value) : Enum.ToObject(enumType, (ulong)value);
 
     private static void RequireIntegralRange(string propertyPath, ModbusDataType dataType, Type targetType)
     {
@@ -212,6 +255,8 @@ internal static class ModbusValueConverters
         ModbusDataType.S16 => (short.MinValue, short.MaxValue),
         ModbusDataType.U32 => (0m, uint.MaxValue),
         ModbusDataType.S32 => (int.MinValue, int.MaxValue),
+        ModbusDataType.U64 => (0m, ulong.MaxValue),
+        ModbusDataType.S64 => (long.MinValue, long.MaxValue),
         _ => null
     };
 
@@ -236,7 +281,8 @@ internal static class ModbusValueConverters
             return value * staticScale;
         }
 
-        return exponent < 0 ? value / Math.Pow(10, -exponent) : value * Math.Pow(10, exponent);
+        var scaled = exponent < 0 ? value / Math.Pow(10, -exponent) : value * Math.Pow(10, exponent);
+        return staticScale is 1.0 ? scaled : scaled * staticScale;
     }
 
     private static decimal GetDecimalScale(bool hasDynamicScale, decimal staticScale, int exponent)
@@ -251,7 +297,38 @@ internal static class ModbusValueConverters
             throw new OverflowException($"Scale factor exponent {exponent} is outside the decimal range.");
         }
 
-        return exponent < 0 ? NegativePowersOfTen[-exponent] : PowersOfTen[exponent];
+        var power = exponent < 0 ? NegativePowersOfTen[-exponent] : PowersOfTen[exponent];
+        return staticScale == 1m ? power : staticScale * power;
+    }
+
+    // A float holds about 7 digits: a direct cast rounds 16777216f to 16777220, a cast via double turns 230.1f into
+    // 230.100006103516. The shortest round-trip string keeps the value the device sent without binary noise.
+    private static decimal ToDecimal(float value)
+    {
+        if (!float.IsFinite(value))
+        {
+            throw new OverflowException($"F32 value {value} cannot be converted to decimal.");
+        }
+
+        Span<char> buffer = stackalloc char[32];
+        value.TryFormat(buffer, out var written, default, CultureInfo.InvariantCulture);
+        return decimal.Parse(buffer[..written], NumberStyles.Float, CultureInfo.InvariantCulture);
+    }
+
+    private static object ToTimeSpan(decimal seconds)
+        => TryToTimeSpan(seconds, out var value) ? value : throw new OverflowException($"{seconds} seconds is outside the TimeSpan range.");
+
+    // Truncates to whole ticks.
+    private static bool TryToTimeSpan(decimal seconds, out TimeSpan value)
+    {
+        if (seconds < MinimumTimeSpanSeconds || seconds > MaximumTimeSpanSeconds)
+        {
+            value = default;
+            return false;
+        }
+
+        value = TimeSpan.FromTicks((long)(seconds * TimeSpan.TicksPerSecond));
+        return true;
     }
 
     private static decimal ToDecimalScale(string propertyPath, double scale)
@@ -301,7 +378,7 @@ internal static class ModbusValueConverters
     {
         if (isScaled)
         {
-            throw ModbusConfigurationException.ForMapping(propertyPath, $"Scaling requires a float, double or decimal property, not {targetType.Name}.");
+            throw ModbusConfigurationException.ForMapping(propertyPath, $"Scaling requires a float, double, decimal or TimeSpan property, not {targetType.Name}.");
         }
     }
 }

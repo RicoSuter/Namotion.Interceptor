@@ -50,6 +50,12 @@ internal sealed class ModbusRegisterBinding
 
     public ModbusRegisterBinding? ScaleFactor { get; set; }
 
+    /// <summary>
+    /// Gets the property holding the scale factor of this mapping, from <see cref="ModbusRegisterAttribute.ScaleFactorProperty"/>
+    /// or an <see cref="IModbusScaleFactorProvider"/>, or <c>null</c> when the mapping has no dynamic scale factor.
+    /// </summary>
+    public PropertyReference? ScaleFactorReference { get; init; }
+
     // Poll-cycle state: only the read and the apply of one cycle touch it, and the source runs one cycle at a time.
     public byte[] CurrentRaw { get; }
 
