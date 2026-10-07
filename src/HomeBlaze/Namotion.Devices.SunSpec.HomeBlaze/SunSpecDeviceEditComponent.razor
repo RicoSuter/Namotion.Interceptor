@@ -1,0 +1,196 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SunSpecDevice))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_hostAddress"
+                  Label="Host Address (IP or hostname)"
+                  Required="true"
+                  RequiredError="Host address is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField Value="_port"
+                     ValueChanged="@((int value) => { _port = value; OnFieldChanged(); })"
+                     Label="Port"
+                     HelperText="502 by default; SolarEdge uses 1502"
+                     Min="1"
+                     Max="65535"
+                     Class="mt-4" />
+
+    <MudTextField @bind-Value="_unitIds"
+                  Label="Unit IDs"
+                  HelperText="Comma-separated, each between 1 and 247"
+                  Error="@(!IsUnitIdsValid)"
+                  ErrorText="Enter unit IDs between 1 and 247, separated by commas"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField Value="_pollingIntervalSeconds"
+                     ValueChanged="@((double value) => { _pollingIntervalSeconds = value; OnFieldChanged(); })"
+                     Label="Polling Interval (seconds)"
+                     HelperText="@($"Between {SunSpecDevice.MinimumPollingIntervalSeconds} and {SunSpecDevice.MaximumPollingIntervalSeconds} seconds")"
+                     Error="@(!IsPollingIntervalValid)"
+                     ErrorText="@($"The polling interval must be between {SunSpecDevice.MinimumPollingIntervalSeconds} and {SunSpecDevice.MaximumPollingIntervalSeconds} seconds")"
+                     Min="SunSpecDevice.MinimumPollingIntervalSeconds"
+                     Max="SunSpecDevice.MaximumPollingIntervalSeconds"
+                     Class="mt-4" />
+
+    <MudTextField @bind-Value="_modelDefinitionsPath"
+                  Label="Model Definitions Folder"
+                  HelperText="Optional; SunSpec JSON files for models without a built-in class. Empty means SunSpec/Models in the data directory."
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudSwitch Value="_isRegisterDumpEnabled"
+               ValueChanged="@((bool value) => { _isRegisterDumpEnabled = value; OnFieldChanged(); })"
+               Label="Log register dump on discovery"
+               Color="Color.Primary"
+               Class="mt-4" />
+
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mt-4">
+        Read only. Enable Modbus TCP on the device and keep its port inside your network.
+    </MudAlert>
+
+    @if (!IsCreating && Device is not null)
+    {
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudText>Status: @Device.Status @Device.StatusMessage</MudText>
+        @foreach (var logicalDevice in Device.Units.OrderBy(pair => pair.Key).SelectMany(pair => pair.Value.Devices))
+        {
+            <MudText>Unit @logicalDevice.UnitId: @logicalDevice.Title</MudText>
+            @if (logicalDevice.SoftwareVersion is not null)
+            {
+                <MudText Typo="Typo.body2" Class="ml-4">Firmware: @logicalDevice.SoftwareVersion</MudText>
+            }
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private SunSpecDevice? Device => Subject as SunSpecDevice;
+
+    private string _name = string.Empty;
+    private string? _hostAddress;
+    private int _port = 502;
+    private string _unitIds = "1";
+    private double _pollingIntervalSeconds = 10;
+    private string? _modelDefinitionsPath;
+    private bool _isRegisterDumpEnabled;
+
+    private string _originalName = string.Empty;
+    private string? _originalHostAddress;
+    private int _originalPort = 502;
+    private string _originalUnitIds = "1";
+    private double _originalPollingIntervalSeconds = 10;
+    private string? _originalModelDefinitionsPath;
+    private bool _originalIsRegisterDumpEnabled;
+
+    private bool IsPollingIntervalValid => _pollingIntervalSeconds is >= SunSpecDevice.MinimumPollingIntervalSeconds and <= SunSpecDevice.MaximumPollingIntervalSeconds;
+
+    private bool IsUnitIdsValid => ParseUnitIds(_unitIds) is not null;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress) &&
+                           _port is >= 1 and <= 65535 &&
+                           IsPollingIntervalValid &&
+                           IsUnitIdsValid;
+
+    public bool IsDirty => _name != _originalName ||
+                           _hostAddress != _originalHostAddress ||
+                           _port != _originalPort ||
+                           _unitIds != _originalUnitIds ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
+                           _modelDefinitionsPath != _originalModelDefinitionsPath ||
+                           _isRegisterDumpEnabled != _originalIsRegisterDumpEnabled;
+
+    public event Action<bool>? IsValidChanged;
+
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Device is not null)
+        {
+            _name = Device.Name;
+            _hostAddress = Device.HostAddress;
+            _port = Device.Port;
+            _unitIds = string.Join(", ", Device.UnitIds);
+            _pollingIntervalSeconds = Device.PollingInterval.TotalSeconds;
+            _modelDefinitionsPath = Device.ModelDefinitionsPath;
+            _isRegisterDumpEnabled = Device.IsRegisterDumpEnabled;
+            StoreOriginalValues();
+        }
+    }
+
+    // Returns null unless every entry is a unit ID between 1 and 247 and there is at least one.
+    private static int[]? ParseUnitIds(string? text)
+    {
+        var parts = (text ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        var unitIds = new int[parts.Length];
+        for (var index = 0; index < parts.Length; index++)
+        {
+            if (!int.TryParse(parts[index], out var unitId) || unitId is < 1 or > 247)
+            {
+                return null;
+            }
+
+            unitIds[index] = unitId;
+        }
+
+        return unitIds;
+    }
+
+    private void StoreOriginalValues()
+    {
+        _originalName = _name;
+        _originalHostAddress = _hostAddress;
+        _originalPort = _port;
+        _originalUnitIds = _unitIds;
+        _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        _originalModelDefinitionsPath = _modelDefinitionsPath;
+        _originalIsRegisterDumpEnabled = _isRegisterDumpEnabled;
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Device is not null && ParseUnitIds(_unitIds) is { } unitIds && IsValid)
+        {
+            Device.Name = _name;
+            Device.HostAddress = _hostAddress;
+            Device.Port = _port;
+            Device.UnitIds = unitIds;
+            Device.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            Device.ModelDefinitionsPath = string.IsNullOrWhiteSpace(_modelDefinitionsPath) ? null : _modelDefinitionsPath;
+            Device.IsRegisterDumpEnabled = _isRegisterDumpEnabled;
+            StoreOriginalValues();
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}
