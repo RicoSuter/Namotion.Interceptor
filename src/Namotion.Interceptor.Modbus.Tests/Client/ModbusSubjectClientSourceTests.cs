@@ -124,6 +124,26 @@ public partial class ModbusSubjectClientSourceTests
             => propertyName == nameof(Current) ? new PropertyReference(Block, nameof(ScaledBlock.CurrentScaleFactor)) : null;
     }
 
+    [InterceptorSubject]
+    public partial class LongStringDevice
+    {
+        [ModbusRegister(100, ModbusDataType.String, Length = 150)]
+        public partial string? Text { get; set; }
+
+        [ModbusRegister(250, ModbusDataType.U16)]
+        public partial int? After { get; set; }
+    }
+
+    private static void SetString(ModbusTestServer server, int address, int length, string text)
+    {
+        for (var register = 0; register < length; register++)
+        {
+            var high = register * 2 < text.Length ? text[register * 2] : '\0';
+            var low = register * 2 + 1 < text.Length ? text[register * 2 + 1] : '\0';
+            server.SetHoldingRegister(address + register, (ushort)((high << 8) | low));
+        }
+    }
+
     private static void SeedServer(ModbusTestServer server)
     {
         server.SetHoldingRegister<short>(0, 215);
@@ -941,6 +961,46 @@ public partial class ModbusSubjectClientSourceTests
             Assert.DoesNotContain(server.Requests, request =>
                 request.FunctionCode == ModbusFunctionCode.ReadHoldingRegisters &&
                 request.Address <= 40 && request.Address + request.Quantity > 40);
+        }
+        finally
+        {
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenStringIsLongerThanOneRequest_ThenItIsReadInConsecutiveRequestsAndUpdated()
+    {
+        // Arrange
+        using var server = new ModbusTestServer();
+        server.Start();
+        var initial = new string('A', 300);
+        var changed = new string('A', 260) + "Changed";
+        SetString(server, 100, 150, initial);
+
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
+        var device = new LongStringDevice(context);
+        var source = CreateSource(device, server);
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => device.Text == initial, TimeSpan.FromSeconds(30), message: "The long string should be loaded.");
+            var requestCountBeforeChange = server.Requests.Count;
+            SetString(server, 100, 150, changed);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => device.Text == changed, TimeSpan.FromSeconds(10), message: "The long string should update.");
+            var requests = server.Requests;
+            Assert.All(requests, request => Assert.Equal(ModbusFunctionCode.ReadHoldingRegisters, request.FunctionCode));
+            Assert.All(requests, request => Assert.Contains((request.Address, request.Quantity), new[] { (100, 125), (225, 25), (250, 1) }));
+
+            // Every cycle reads After right after the string, so the string's last request followed directly by its first
+            // one only comes from a confirming read, wherever in a cycle the snapshot before the change landed.
+            var readsAfterChange = requests.Skip(requestCountBeforeChange).Select(request => (request.Address, request.Quantity)).ToArray();
+            Assert.Contains(
+                Enumerable.Range(0, Math.Max(0, readsAfterChange.Length - 1)),
+                index => readsAfterChange[index] == (225, 25) && readsAfterChange[index + 1] == (100, 125));
         }
         finally
         {

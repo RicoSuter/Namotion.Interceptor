@@ -70,6 +70,27 @@ public partial class ModbusRegisterResolverTests
     }
 
     [InterceptorSubject]
+    public partial class LongStringSubject
+    {
+        [ModbusRegister(65386, ModbusDataType.String, Length = 150)]
+        public partial string? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class LongStringOverflowSubject
+    {
+        [ModbusRegister(65387, ModbusDataType.String, Length = 150)]
+        public partial string? Value { get; set; }
+    }
+
+    [InterceptorSubject]
+    public partial class StringLongerThanAddressSpaceSubject
+    {
+        [ModbusRegister(0, ModbusDataType.String, Length = 65537)]
+        public partial string? Value { get; set; }
+    }
+
+    [InterceptorSubject]
     public partial class LengthOnIntegerSubject
     {
         [ModbusRegister(0, ModbusDataType.U16, Length = 2)]
@@ -437,6 +458,21 @@ public partial class ModbusRegisterResolverTests
     }
 
     [Fact]
+    public void WhenStringIsLongerThanOneRequestAndEndsAtTheLastAddress_ThenBindingIsCreated()
+    {
+        // Arrange
+        var subject = new LongStringSubject(CreateContext());
+
+        // Act
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+
+        // Assert
+        var binding = Assert.Single(bindings);
+        Assert.Equal((65386, 150), (binding.Address, binding.Count));
+        Assert.Equal(300, binding.CurrentRaw.Length);
+    }
+
+    [Fact]
     public void WhenPropertyIsExcluded_ThenNoBindingIsCreated()
     {
         // Arrange
@@ -558,6 +594,8 @@ public partial class ModbusRegisterResolverTests
         context => new U32ScaleFactorSubject(context),
         context => new StringWithoutLengthSubject(context),
         context => new LengthOnIntegerSubject(context),
+        context => new LongStringOverflowSubject(context),
+        context => new StringLongerThanAddressSpaceSubject(context),
         context => new BooleanInRegisterSubject(context),
         context => new IntegerInCoilSubject(context),
         context => new AddressOverflowSubject(context),

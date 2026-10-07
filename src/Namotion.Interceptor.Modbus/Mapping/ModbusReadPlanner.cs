@@ -10,7 +10,8 @@ internal static class ModbusReadPlanner
 
     /// <summary>
     /// Plans the read requests. Bindings may overlap. An <see cref="ModbusRegisterBinding.IsIsolated"/> binding
-    /// always gets a request of its own.
+    /// always gets a request of its own. A binding larger than one request gets a batch of its own, read in
+    /// consecutive requests (see <see cref="ModbusReadBatch.RequestCount"/>).
     /// </summary>
     public static ModbusReadBatch[] Plan(IEnumerable<ModbusRegisterBinding> bindings, int maximumGap)
     {
@@ -34,6 +35,7 @@ internal static class ModbusReadPlanner
             var bindingEnd = binding.Address + binding.Count;
             var mergedEnd = Math.Max(end, bindingEnd);
 
+            // The size limit also keeps a binding larger than one request apart from whatever overlaps or follows it.
             if (CanShareRequest(previous, binding) &&
                 binding.Address - end <= maximumGap &&
                 mergedEnd - start <= GetLimit(binding.AddressSpace))

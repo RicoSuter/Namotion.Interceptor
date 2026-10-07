@@ -387,6 +387,12 @@ public class SunSpecModelRoundTripTests
         private static string CreateText(SunSpecPointDefinition point, int sequence)
         {
             var text = $"{sequence}:{point.Name}";
+            if (point.Size > 125)
+            {
+                // Filled up so that every request of a string longer than one Modbus request carries text.
+                return text.PadRight(point.Size * 2, '#');
+            }
+
             return text.Length > point.Size * 2 ? text[..(point.Size * 2)] : text;
         }
 

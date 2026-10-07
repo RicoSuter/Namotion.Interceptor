@@ -229,6 +229,40 @@ public partial class ModbusReadPlannerTests
         Assert.Same(isolated, Assert.Single(batches[1].Bindings));
     }
 
+    [Theory]
+    [InlineData(126, new[] { 10, 125, 135, 1 })]
+    [InlineData(150, new[] { 10, 125, 135, 25 })]
+    [InlineData(250, new[] { 10, 125, 135, 125 })]
+    [InlineData(300, new[] { 10, 125, 135, 125, 260, 50 })]
+    public void WhenStringIsLongerThanOneRequest_ThenItIsReadAloneInConsecutiveRequests(int length, int[] expectedRequests)
+    {
+        // Arrange
+        var longString = CreateBinding(10, ModbusDataType.String, length: length);
+        var bindings = new[] { CreateBinding(9), longString, CreateBinding(20), CreateBinding(10 + length) };
+
+        // Act
+        var batches = ModbusReadPlanner.Plan(bindings, maximumGap: 10);
+
+        // Assert
+        Assert.Equal(new[] { (9, 1), (10, length), (20, 1), (10 + length, 1) }, batches.Select(batch => (batch.StartAddress, batch.Count)));
+        var batch = batches[1];
+        Assert.Same(longString, Assert.Single(batch.Bindings));
+        var requests = Enumerable.Range(0, batch.RequestCount).Select(batch.GetRequest);
+        Assert.Equal(expectedRequests.Chunk(2).Select(request => (request[0], request[1])), requests);
+        Assert.All(batches.Where(other => other != batch), other => Assert.Equal(1, other.RequestCount));
+    }
+
+    [Fact]
+    public void WhenStringFillsOneRequest_ThenItIsMergedAsUsual()
+    {
+        // Act
+        var batches = ModbusReadPlanner.Plan([CreateBinding(0, ModbusDataType.String, length: 124), CreateBinding(124)], maximumGap: 0);
+
+        // Assert
+        var batch = Assert.Single(batches);
+        Assert.Equal((0, 125, 1), (batch.StartAddress, batch.Count, batch.RequestCount));
+    }
+
     [Fact]
     public void WhenThereAreNoBindings_ThenNoBatchesArePlanned()
     {

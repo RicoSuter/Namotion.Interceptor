@@ -152,9 +152,10 @@ internal static class ModbusRegisterResolver
 
         if (dataType == ModbusDataType.String)
         {
-            if (attribute.Length is < 1 or > ModbusReadPlanner.MaximumRegistersPerRequest)
+            // The address check in CreateBinding narrows this down to the registers left after the address.
+            if (attribute.Length is < 1 or > ModbusAddressSpaceExtensions.AddressCount)
             {
-                throw ModbusConfigurationException.ForMapping(path, $"String requires a Length between 1 and {ModbusReadPlanner.MaximumRegistersPerRequest} registers.");
+                throw ModbusConfigurationException.ForMapping(path, $"String requires a Length between 1 and {ModbusAddressSpaceExtensions.AddressCount} registers.");
             }
         }
         else if (attribute.Length != 0)

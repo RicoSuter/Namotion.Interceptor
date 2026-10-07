@@ -99,9 +99,6 @@ internal readonly record struct SunSpecPropertyPoint(SunSpecPointDefinition Poin
 /// </summary>
 internal static class SunSpecPointMapping
 {
-    // A string is read in one request, which reads at most 125 registers.
-    private const int MaximumStringLength = 125;
-
     private readonly record struct PointType(
         ModbusDataType DataType, Type RawType, ModbusNotAvailableValue NotAvailableValue, bool IsAccumulator, SunSpecValueKind? Kind);
 
@@ -201,8 +198,7 @@ internal static class SunSpecPointMapping
     }
 
     /// <summary>
-    /// Maps a point, or returns <c>null</c> for points without a value mapping: <c>pad</c>, <c>ipv6addr</c>, and strings
-    /// longer than one Modbus request can read (125 registers).
+    /// Maps a point, or returns <c>null</c> for points without a value mapping (<c>pad</c>, <c>ipv6addr</c>).
     /// </summary>
     /// <exception cref="InvalidDataException">
     /// The point type is unknown, its size does not match its type, or its fixed scale factor is outside -28 to 28.
@@ -217,11 +213,6 @@ internal static class SunSpecPointMapping
         }
 
         ValidateSize(point, pointType.DataType);
-
-        if (pointType.DataType == ModbusDataType.String && point.Size > MaximumStringLength)
-        {
-            return null;
-        }
 
         var unit = MapUnit(point.Units);
         var scale = unit.Factor * (point.ScaleFactor.Exponent is { } exponent ? PowerOfTen(point, exponent) : 1m);

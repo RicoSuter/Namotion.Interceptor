@@ -52,8 +52,14 @@ public class ModbusRegisterAttribute : Attribute
     public string? ScaleFactorProperty { get; init; }
 
     /// <summary>
-    /// Gets the register count of <see cref="ModbusDataType.String"/> values. Must be 0 for other types.
+    /// Gets the register count of <see cref="ModbusDataType.String"/> values, at least 1 and within the address space.
+    /// Must be 0 for other types.
     /// </summary>
+    /// <remarks>
+    /// A string longer than one request (125 registers) is read in consecutive requests, which Modbus cannot read
+    /// atomically: a changed value is read twice in the same cycle and only applied when both reads agree, so a string
+    /// that changes faster than one read pair is never applied.
+    /// </remarks>
     public int Length { get; init; }
 
     /// <summary>

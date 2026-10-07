@@ -19,6 +19,12 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
     /// </summary>
     public int ConnectionFailureFromRequest { get; set; }
 
+    /// <summary>
+    /// Gets or sets a callback invoked with the zero-based index of each request before it is answered, for example
+    /// to change registers between requests like a device would.
+    /// </summary>
+    public Action<int>? RequestReceived { get; set; }
+
     public void SetRegister(int address, ushort value, ModbusAddressSpace space = ModbusAddressSpace.HoldingRegister, byte unitId = 1)
         => _registers[(unitId, space, address)] = value;
 
@@ -35,6 +41,7 @@ internal sealed class FakeRegisterReader : IModbusRegisterReader
         byte unitId, ModbusAddressSpace space, int address, int count, CancellationToken cancellationToken)
     {
         Requests.Add((unitId, space, address, count));
+        RequestReceived?.Invoke(Requests.Count - 1);
         if (ConnectionFailure is not null && Requests.Count > ConnectionFailureFromRequest)
         {
             return Task.FromException<ReadOnlyMemory<byte>>(ConnectionFailure);

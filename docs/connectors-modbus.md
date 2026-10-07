@@ -58,7 +58,7 @@ To create a source for a subject at runtime, for example in a device subject tha
 | `WordOrder` | `HighWordFirst` | Register and byte order of 32-bit and 64-bit values |
 | `Scale` | `1.0` | Static factor, requires a `float`, `double`, `decimal` or `TimeSpan` property |
 | `ScaleFactorProperty` | none | Name of an S16 register property on the same subject holding a power-of-ten exponent. Combines with `Scale` (value = raw * scale * 10^exponent), and the named property must not be excluded |
-| `Length` | 0 | Register count of `String` values, 1 to 125 |
+| `Length` | 0 | Register count of `String` values, at least 1 and within the address space |
 | `NotAvailableValue` | `None` | Raw pattern mapped to `null`: `SignedMaximum` (0x7FFF, 0x7FFFFFFF or 0x7FFFFFFFFFFFFFFF), `SignedMinimum` (0x8000, 0x80000000 or 0x8000000000000000) or `UnsignedMaximum` (0xFFFF, 0xFFFFFFFF or 0xFFFFFFFFFFFFFFFF) |
 | `Access` | `ReadWrite` | Declares writability for a later write stage, not enforced yet |
 
@@ -163,7 +163,7 @@ public partial class Battery
 | `RequestTimeout` | 5 s | Timeout of the TCP connect and of each request; a request timeout counts as a lost connection |
 | `RetryTime` | 10 s | Delay before reconnecting after a lost connection or a failed connect attempt |
 | `BufferTime` | 8 ms | Change queue buffer time |
-| `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbours, 0 to 124 |
+| `MaximumRegisterGap` | 0 | Unmapped registers or bits a request may span to merge neighbors, 0 to 124 |
 
 The time spans must be positive (`BufferTime` may be zero) and at most 1 hour.
 
@@ -171,7 +171,9 @@ The time spans must be positive (`BufferTime` may be zero) and at most 1 hour.
 
 Mappings are grouped by unit ID and space, sorted by address and merged into requests of at most 125 registers or 2000 bits. With the default gap of 0 only contiguous mappings are merged, because many devices reject reads that touch unmapped addresses. Each cycle reads all requests first and then applies only values whose raw registers changed, so an unchanged cycle converts nothing and raises no change events. All values of a cycle share one timestamp, since Modbus carries none.
 
-The initial load reads every mapping once before the source reports `Synchronized`. A mapping the device rejects, or whose request fails transiently during that load, keeps its previous value until it is read; `Synchronized` does not mean every mapping holds a current device value.
+A string may be longer than one request. Such a mapping is never merged with its neighbors and is read in consecutive requests of at most 125 registers. Modbus cannot read more than 125 registers atomically, so a read equal to the last value needs no further requests, and any other read is read a second time in the same cycle and applied only when both reads agree. Two consecutive matching reads make a torn value, mixing registers from before and after a change, very unlikely but not impossible. When the reads disagree, the mapping keeps its previous value and is read again in the next cycle, so a change that lands during a read pair costs one more read pair. A string that changes faster than one read pair is never applied; when its reads disagree in three cycles in a row, typically because the device updates it continuously, a warning is logged once until two reads agree again. A request of such a mapping that fails is handled like a failed request of its own: the mapping is skipped for that cycle, or marked unavailable when the device rejects it, and the log names the request that failed.
+
+The initial load reads every mapping once before the source reports `Synchronized`. A mapping the device rejects, whose request fails transiently during that load, or a long string whose two reads disagree, keeps its previous value until it is read; `Synchronized` does not mean every mapping holds a current device value.
 
 ## Local Writes
 
@@ -194,8 +196,8 @@ Mapped properties are owned by the source, so local changes reach it but are not
 | Member | Meaning |
 |---|---|
 | `TotalPolls` | Completed poll cycles, including the initial load of every connect |
-| `TotalFailedRequests` | Planned read requests answered with a Modbus exception response; one-by-one re-reads and discovery reads are not counted |
-| `BatchCount` | Read requests per poll cycle |
+| `TotalFailedRequests` | Failed read requests of the poll cycles, answered with a Modbus exception response. Includes failed confirming reads of long strings, which `BatchCount` does not count; one-by-one re-reads of a rejected request and discovery reads are not counted |
+| `BatchCount` | Read requests per poll cycle, not counting the confirming reads of changed long strings |
 | `UnavailablePropertyCount` | Mappings the device rejected, not read until the next connect |
 | `LastPollDuration` | Duration of the last poll cycle or initial load, `null` before the first one |
 | `LastPollTime` | Time of the last poll cycle that read a value, `null` before any did. A cycle that read no value, for example because every request failed or no mapping is claimed, leaves it unchanged |
