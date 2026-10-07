@@ -77,6 +77,7 @@ When resolving paths in markdown pages:
 
 - **Parent navigation with multiple parents**: If a subject has multiple parents (rare), `../` returns null (ambiguous path).
 - **Detached subjects**: Subjects not attached to the graph have no path.
+- **Keys containing `%`**: `NavigationItem.PageUrl` and `MarkdownContentParser`'s link rewriting build `/pages/...` URLs by concatenating path segments without escaping, so a key with a literal `%` produces a broken link.
 
 ---
 

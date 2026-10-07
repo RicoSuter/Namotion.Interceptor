@@ -22,8 +22,26 @@ internal sealed class StorageFileWatcher : IDisposable
     private readonly ConcurrentDictionary<string, DateTimeOffset> _pendingWrites = new();
     private readonly Subject<FileSystemEventArgs> _fileEvents = new();
 
+    // Guards _watcher and _fileEventSubscription so a restart on the watcher's callback thread cannot
+    // interleave with Start or Dispose and leave a second watcher or subscription behind.
+    private readonly Lock _lock = new();
+
     private FileSystemWatcher? _watcher;
     private IDisposable? _fileEventSubscription;
+
+    // Read by the FileSystemWatcher's background callback thread and written by Dispose on an
+    // arbitrary thread; must be volatile so a callback in flight during Dispose observes it.
+    private volatile bool _disposed;
+
+    /// <summary>
+    /// Whether <see cref="Dispose"/> has been called on this watcher.
+    /// </summary>
+    internal bool IsDisposed => _disposed;
+
+    /// <summary>
+    /// The underlying file system watcher, or null when not started or disposed.
+    /// </summary>
+    internal FileSystemWatcher? Watcher => _watcher;
 
     public StorageFileWatcher(
         string basePath,
@@ -37,27 +55,30 @@ internal sealed class StorageFileWatcher : IDisposable
         _logger = logger;
     }
 
+    /// <summary>
+    /// Starts watching, replacing a previous start. Does nothing once disposed.
+    /// </summary>
     public void Start()
     {
-        _watcher = new FileSystemWatcher(_basePath)
+        lock (_lock)
         {
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
-                           NotifyFilters.LastWrite | NotifyFilters.Size,
-            IncludeSubdirectories = true,
-            InternalBufferSize = 64 * 1024, // 64KB buffer to reduce overflow risk
-            EnableRaisingEvents = true
-        };
+            if (_disposed)
+                return;
 
-        // Route all events to the Rx subject
-        _watcher.Created += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Changed += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Deleted += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Renamed += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Error += OnWatcherError;
+            StopCore();
+            StartCore();
+        }
+    }
 
+    // Callers hold _lock and have stopped any previous watcher and subscription.
+    private void StartCore()
+    {
         // Process events with coalescing: group by path, collect events in time window, then coalesce
         // Note: We don't filter temp files here - they're handled in coalescing logic
+        // Synchronize: events can arrive concurrently (an old watcher's callback overlapping a restart, or a
+        // simulated event), and GroupBy must not see overlapping OnNext calls.
         _fileEventSubscription = _fileEvents
+            .Synchronize()
             .Where(e => !IsOwnWrite(e.FullPath))
             .GroupBy(e => GetCanonicalPath(e.FullPath))
             .SelectMany(group => group
@@ -69,8 +90,45 @@ internal sealed class StorageFileWatcher : IDisposable
                 onNext: async e => await ProcessEventSafeAsync(e!),
                 onError: ex => _logger?.LogError(ex, "Error in file event stream"));
 
+        _watcher = new FileSystemWatcher(_basePath)
+        {
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
+                           NotifyFilters.LastWrite | NotifyFilters.Size,
+            IncludeSubdirectories = true,
+            InternalBufferSize = 64 * 1024 // 64KB buffer to reduce overflow risk
+        };
+
+        // Route all events to the Rx subject
+        _watcher.Created += OnWatcherEvent;
+        _watcher.Changed += OnWatcherEvent;
+        _watcher.Deleted += OnWatcherEvent;
+        _watcher.Renamed += OnWatcherEvent;
+        _watcher.Error += OnWatcherError;
+        _watcher.EnableRaisingEvents = true;
+
         _logger?.LogInformation("File watching enabled for: {Path}", _basePath);
     }
+
+    // Callers hold _lock.
+    private void StopCore()
+    {
+        if (_watcher != null)
+        {
+            _watcher.EnableRaisingEvents = false;
+            _watcher.Created -= OnWatcherEvent;
+            _watcher.Changed -= OnWatcherEvent;
+            _watcher.Deleted -= OnWatcherEvent;
+            _watcher.Renamed -= OnWatcherEvent;
+            _watcher.Error -= OnWatcherError;
+            _watcher.Dispose();
+            _watcher = null;
+        }
+
+        _fileEventSubscription?.Dispose();
+        _fileEventSubscription = null;
+    }
+
+    private void OnWatcherEvent(object sender, FileSystemEventArgs e) => _fileEvents.OnNext(e);
 
     /// <summary>
     /// Coalesces a batch of events for the same path into a single effective event.
@@ -169,7 +227,20 @@ internal sealed class StorageFileWatcher : IDisposable
     public string GetRelativePath(string fullPath)
         => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
 
-    private bool IsOwnWrite(string fullPath)
+    /// <summary>
+    /// Pushes a file system event into the processing pipeline as if the watcher had raised it.
+    /// </summary>
+    internal void SimulateFileEvent(FileSystemEventArgs e) => _fileEvents.OnNext(e);
+
+    /// <summary>
+    /// Handles an error as if the watcher had raised <see cref="FileSystemWatcher.Error"/>.
+    /// </summary>
+    internal void SimulateWatcherError(Exception exception) => OnWatcherError(this, new ErrorEventArgs(exception));
+
+    /// <summary>
+    /// Returns whether <paramref name="fullPath"/> was marked by <see cref="MarkAsOwnWrite"/> within the grace period.
+    /// </summary>
+    public bool IsOwnWrite(string fullPath)
     {
         if (_pendingWrites.TryGetValue(fullPath, out var writeTime))
         {
@@ -193,14 +264,25 @@ internal sealed class StorageFileWatcher : IDisposable
 
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
+        // A callback can still be in flight when Dispose runs on another thread; without this
+        // check it would restart and leave an undisposed FileSystemWatcher behind.
+        if (_disposed)
+            return;
+
         _logger?.LogError(e.GetException(), "FileSystemWatcher error (buffer overflow?), triggering rescan");
         Restart();
     }
 
     private void Restart()
     {
-        _watcher?.Dispose();
-        Start();
+        lock (_lock)
+        {
+            if (_disposed)
+                return;
+
+            StopCore();
+            StartCore();
+        }
 
         // Trigger rescan to catch any missed events
         _ = Task.Run(async () =>
@@ -218,9 +300,17 @@ internal sealed class StorageFileWatcher : IDisposable
 
     public void Dispose()
     {
-        _fileEventSubscription?.Dispose();
-        _fileEvents.Dispose();
-        _watcher?.Dispose();
-        _watcher = null;
+        // Set first so a concurrent watcher callback (possibly already running on the FileSystemWatcher's
+        // own callback thread) sees it before touching the watcher, subscription, or subject below.
+        _disposed = true;
+
+        lock (_lock)
+        {
+            StopCore();
+        }
+
+        // OnCompleted (not Dispose) so a callback that raced past the checks above and calls
+        // OnNext afterwards is a no-op instead of throwing ObjectDisposedException.
+        _fileEvents.OnCompleted();
     }
 }

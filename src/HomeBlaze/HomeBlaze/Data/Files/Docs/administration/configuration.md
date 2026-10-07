@@ -57,10 +57,13 @@ Data/
 ├── Root.json       root configuration
 ├── Files/          devices, dashboards, pages, Plugins.json, docs
 ├── History/Sqlite/ SQLite history
-└── OpcUa/          OPC UA certificates
+├── OpcUa/          OPC UA certificates
+└── Plugins/Cache/  downloaded plugin packages
 ```
 
 When running from source, the data folder is `src/HomeBlaze/HomeBlaze/Data`. The container image uses `/data`; see [Installation](installation.md#data-folder).
+
+`Plugins/Cache` only holds packages that HomeBlaze downloads again when they are missing, so it can be excluded from backups as long as the configured feeds still serve those package versions. Plugins are configured in plugin provider files such as `Files/Plugins.json`, which can live anywhere in the subject tree. Relative feed folders and a relative cache directory in these files resolve against the data folder. See [Plugin System Design](../architecture/design/plugins.md#configuration) for the fields.
 
 ---
 
@@ -105,28 +108,6 @@ Override example:
 ```
 
 The container image sets it to `/app/Seed`, which holds the starting set described in [Installation](installation.md#data-folder).
-
----
-
-## PluginConfigurationPath
-
-Path to the runtime plugin manifest (`Plugins.json`). A relative path resolves against the data folder.
-
-| Setting | Default |
-|---------|---------|
-| `PluginConfigurationPath` | `Files/Plugins.json` |
-
-Override example:
-
-```json
-{
-  "PluginConfigurationPath": "/etc/homeblaze/plugins.json"
-}
-```
-
-Relative feed URLs and the cache directory inside `Plugins.json` resolve against the application directory, not the data folder.
-
-For plugin loading details (build-time vs. runtime, dependency resolution), see [Plugin System Design](../architecture/design/plugins.md).
 
 ---
 
@@ -199,7 +180,6 @@ Any setting can be overridden by an environment variable using the ASP.NET Core 
 |---------|---------------------|
 | `HomeBlaze:RootConfigFile` | `HomeBlaze__RootConfigFile` |
 | `HomeBlaze:SeedDirectory` | `HomeBlaze__SeedDirectory` |
-| `PluginConfigurationPath` | `PluginConfigurationPath` |
 | `McpServer:Enabled` | `McpServer__Enabled` |
 | `McpServer:ReadOnly` | `McpServer__ReadOnly` |
 | `ConnectionStrings:seq` | `ConnectionStrings__seq` |

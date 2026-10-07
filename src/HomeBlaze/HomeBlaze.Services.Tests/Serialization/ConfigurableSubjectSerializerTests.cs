@@ -597,4 +597,28 @@ public class ConfigurableSubjectSerializerTests
     }
 
     #endregion
+
+    #region Runtime Type Registration Tests
+
+    [Fact]
+    public void WhenSubjectTypeIsAddedAfterFirstUse_ThenItSerializesAndDeserializes()
+    {
+        // Arrange
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(TestSubject)]);
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, new ServiceCollection().BuildServiceProvider());
+        var context = InterceptorSubjectContext.Create();
+        serializer.Serialize(new TestSubject(context));
+
+        // Act
+        typeProvider.AddTypes([typeof(ParentSubject)]);
+        var json = serializer.Serialize(new ParentSubject(context));
+        var deserialized = serializer.Deserialize(json);
+
+        // Assert
+        Assert.Contains(typeof(ParentSubject).FullName!, json);
+        Assert.IsType<ParentSubject>(deserialized);
+    }
+
+    #endregion
 }

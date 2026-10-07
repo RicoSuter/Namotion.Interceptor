@@ -2,10 +2,12 @@
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage
+@using HomeBlaze.Storage.Abstractions
 @using HomeBlaze.Storage.Files
 @using Namotion.Interceptor
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(JsonFile))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(UnknownSubject))]
 @implements ISubjectEditComponent
 
 <StandaloneCodeEditor @ref="_editor"
@@ -28,7 +30,7 @@
     [Parameter]
     public bool IsCreating { get; set; }
 
-    private JsonFile? File => Subject as JsonFile;
+    private IStorageFile? File => Subject as IStorageFile;
     private StandaloneCodeEditor? _editor;
     private string _originalContent = string.Empty;
     private string _currentContent = string.Empty;

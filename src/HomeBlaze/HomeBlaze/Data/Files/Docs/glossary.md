@@ -14,7 +14,7 @@ Terms and concepts used throughout HomeBlaze documentation and codebase. Each en
 
 ### Subject
 
-An intercepted object in the HomeBlaze object graph. Classes decorated with `[InterceptorSubject]` participate in property tracking, change detection, and UI integration. See [Concepts — Subjects](concepts.md#subjects) and [Building Subjects](development/building-subjects.md).
+An intercepted object in the HomeBlaze object graph. Classes decorated with `[InterceptorSubject]` participate in property tracking, change detection, and UI integration. See [Concepts: Subjects](concepts.md#subjects) and [Building Subjects](development/building-subjects.md).
 
 ```csharp
 [InterceptorSubject]
@@ -26,7 +26,7 @@ public partial class Motor : IInterceptorSubject
 
 ### Object Graph
 
-The hierarchical tree of all subjects in the system, rooted at a storage container. See [Concepts — The Object Graph](concepts.md#the-object-graph).
+The hierarchical tree of all subjects in the system, rooted at a storage container. See [Concepts: The Object Graph](concepts.md#the-object-graph).
 
 ### Property
 
@@ -36,7 +36,7 @@ A value on a subject. Properties are categorized by attribute:
 - **State**: Displayed in the UI (`[State]`)
 - **Derived**: Computed from other properties (`[Derived]`)
 
-See [Concepts — Three Kinds of Properties](concepts.md#three-kinds-of-properties).
+See [Concepts: Three Kinds of Properties](concepts.md#three-kinds-of-properties).
 
 ### Context
 
@@ -106,7 +106,7 @@ A Blazor component associated with a specific subject type, registered via `[Sub
 
 ### Widget
 
-A compact inline visualization of a subject. See [Subjects — Widgets](administration/subjects.md#widgets) and [Markdown Pages — Embedded Subjects](administration/pages.md#embedded-subjects).
+A compact inline visualization of a subject. See [Subjects: Widgets](administration/subjects.md#widgets) and [Markdown Pages: Embedded Subjects](administration/pages.md#embedded-subjects).
 
 ### Page
 
@@ -116,19 +116,19 @@ A full-page component for a subject type. Pages appear in the navigation when th
 
 ## Navigation
 
-Set via markdown frontmatter on `.md` files — see [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
+Set via markdown frontmatter on `.md` files; see [Markdown Pages: Frontmatter](administration/pages.md#frontmatter).
 
 ### Navigation Location
 
 Where a page appears in the application:
-- `NavBar` — Sidebar navigation (default)
-- `AppBar` — Top application bar
+- `NavBar`: Sidebar navigation (default)
+- `AppBar`: Top application bar
 
 ### AppBar Alignment
 
 For `AppBar` items:
-- `Left` — Left side of the top bar (default)
-- `Right` — Right side
+- `Left`: Left side of the top bar (default)
+- `Right`: Right side
 
 ---
 
@@ -150,7 +150,7 @@ The configuration file at the top of the data folder that defines the storage lo
 | `.md` | `MarkdownFile` | Interactive page with expressions |
 | Other | `GenericFile` | Basic file representation |
 
-See [Subjects — File Types](administration/subjects.md#file-types).
+See [Subjects: File Types](administration/subjects.md#file-types).
 
 ---
 
@@ -158,15 +158,15 @@ See [Subjects — File Types](administration/subjects.md#file-types).
 
 ### Frontmatter
 
-YAML metadata at the top of markdown files controlling navigation and display. See [Markdown Pages — Frontmatter](administration/pages.md#frontmatter).
+YAML metadata at the top of markdown files controlling navigation and display. See [Markdown Pages: Frontmatter](administration/pages.md#frontmatter).
 
 ### Live Expression
 
-Dynamic value binding in markdown using `{{ path }}` syntax — updates automatically when the source property changes. See [Markdown Pages — Live Expressions](administration/pages.md#live-expressions).
+Dynamic value binding in markdown using `{{ path }}` syntax; updates automatically when the source property changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
 
 ### Embedded Subject
 
-A subject defined inline within a markdown page using fenced `subject(name)` code blocks. See [Markdown Pages — Embedded Subjects](administration/pages.md#embedded-subjects).
+A subject defined inline within a markdown page using fenced `subject(name)` code blocks. See [Markdown Pages: Embedded Subjects](administration/pages.md#embedded-subjects).
 
 ---
 
@@ -180,11 +180,11 @@ Full prefix table, examples, and resolution order: [Paths](administration/paths.
 
 ### Canonical Notation
 
-For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths — Canonical](administration/paths.md#canonical).
+For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths: Canonical](administration/paths.md#canonical).
 
 ### Brackets for Collection Indices
 
-Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths — Brackets](administration/paths.md#brackets).
+Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths: Brackets](administration/paths.md#brackets).
 
 ---
 
@@ -266,10 +266,10 @@ See the `StateUnit` enum for the full list, and [Building Subjects](development/
 
 ## Related Documentation
 
-- [Concepts](concepts.md) — 5-minute mental model
-- [Architecture Overview](architecture/overview.md) — System design (arc42)
-- [Subjects, Storage & Files](administration/subjects.md) — Admin guide
-- [Configuration](administration/configuration.md) — App-level settings
-- [Paths](administration/paths.md) — Path syntax reference
-- [Markdown Pages](administration/pages.md) — Interactive page authoring
-- [Building Subjects](development/building-subjects.md) — Creating custom subject types
+- [Concepts](concepts.md): 5-minute mental model
+- [Architecture Overview](architecture/overview.md): System design (arc42)
+- [Subjects, Storage & Files](administration/subjects.md): Admin guide
+- [Configuration](administration/configuration.md): App-level settings
+- [Paths](administration/paths.md): Path syntax reference
+- [Markdown Pages](administration/pages.md): Interactive page authoring
+- [Building Subjects](development/building-subjects.md): Creating custom subject types

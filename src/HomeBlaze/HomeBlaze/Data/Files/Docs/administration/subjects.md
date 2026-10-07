@@ -54,9 +54,18 @@ For the design rationale (pluggable backends, recovery behavior), see [Storage D
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | Configured type or `JsonFile` | Subject defined by `$type` property |
+| `.json` | Configured type, `UnknownSubject` or `JsonFile` | Subject defined by its `$type` property, or JSON data |
 | `.md` | `MarkdownFile` | Interactive page with expressions |
 | Other | `GenericFile` | Basic file representation |
+
+A `.json` file becomes:
+
+- the subject of its `$type` when that type can be created,
+- an `UnknownSubject` when it has a `$type` that cannot be created, for example because the plugin providing the type is not loaded yet or creating the subject failed,
+- an `UnknownSubject` when it is not valid JSON but contains `"$type"`, with the parse error as reason,
+- a `JsonFile` otherwise, including invalid JSON without a `"$type"` marker.
+
+An `UnknownSubject` shows the reason with a warning icon, keeps its file unchanged and is replaced by the real subject once the type can be created. See [Unknown Types](../architecture/design/storage.md#unknown-types) for details.
 
 ---
 

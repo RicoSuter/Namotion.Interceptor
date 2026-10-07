@@ -12,7 +12,7 @@ HomeBlaze scales from single-instance (1K properties) to multi-instance (1M+ pro
 
 ## Architectural Scaling Limit: Central UNS
 
-The central UNS instance receives and holds the **full state of all connected satellites**. This is the primary architectural scaling ceiling — a single central node's memory, CPU, and network bandwidth determine the maximum aggregate graph size.
+The central UNS instance receives and holds the **full state of all connected satellites**. This is the primary architectural scaling ceiling: a single central node's memory, CPU, and network bandwidth determine the maximum aggregate graph size.
 
 For most deployments (up to ~500K–1M properties across all satellites) this works well: the model is simple, every query hits local state, and operators get a single unified view. Beyond that, the central node becomes the bottleneck.
 
@@ -24,14 +24,14 @@ For most deployments (up to ~500K–1M properties across all satellites) this wo
 
 ### Possible Directions (To Investigate After Load Testing)
 
-These are options to explore if and when load testing reveals the central UNS ceiling. None are designed yet — they are listed here so the directions are captured.
+These are options to explore if and when load testing reveals the central UNS ceiling. None are designed yet; they are listed here so the directions are captured.
 
 | Direction | Description | Trade-off |
 |-----------|-------------|-----------|
-| **Selective sync** | Satellites sync only a filtered subset of their graph upward (e.g., only `[State]` properties, or properties matching a configurable filter). Central has structure + metadata but not every raw value | Reduces central memory and bandwidth. Queries for non-synced properties must be routed to the satellite — adds latency and requires satellite availability |
+| **Selective sync** | Satellites sync only a filtered subset of their graph upward (e.g., only `[State]` properties, or properties matching a configurable filter). Central has structure + metadata but not every raw value | Reduces central memory and bandwidth. Queries for non-synced properties must be routed to the satellite, which adds latency and requires satellite availability |
 | **Hierarchical UNS** | Intermediate UNS nodes each aggregate a subset of satellites. A top-level UNS aggregates the intermediates | Distributes load across levels. Adds operational complexity (more nodes to manage) and query latency (extra hop) |
 | **Federated query** | Central is a directory/router, not a replica. Queries are routed to the owning satellite on demand | Central stays lightweight. But queries fail when satellites are offline, and cross-satellite queries require fan-out |
-| **Multiple independent UNS** | Separate domains that don't aggregate. Cross-domain queries handled by MCP or a routing layer | Simplest operationally — each UNS is independent. No single unified view across domains |
+| **Multiple independent UNS** | Separate domains that don't aggregate. Cross-domain queries handled by MCP or a routing layer | Simplest operationally: each UNS is independent. No single unified view across domains |
 
 The current full-sync model is the right starting point. It is simple, correct, and sufficient for the target scale. These directions should only be pursued once load testing establishes where the actual ceiling is.
 
@@ -43,7 +43,7 @@ The following optimizations improve performance within the current architecture.
 
 ### Problem
 
-Path resolution — mapping between external paths (MQTT topics, OPC UA node paths, MCP query paths) and subject properties — is a frequent operation with no shared infrastructure. Currently:
+Path resolution, mapping between external paths (MQTT topics, OPC UA node paths, MCP query paths) and subject properties, is a frequent operation with no shared infrastructure. Currently:
 
 | Connector | Caching Approach | Issue |
 |-----------|-----------------|-------|
@@ -114,7 +114,7 @@ Add optional indexes on the registry, maintained incrementally as subjects attac
 | By path prefix | Scoped queries, connector property selection |
 | By attribute | History collector selecting `[State]` properties, security checking `[SubjectAuthorize]` |
 
-Indexes would be context services, updated via lifecycle events. Only indexes that are actually registered are maintained — no overhead for unused indexes.
+Indexes would be context services, updated via lifecycle events. Only indexes that are actually registered are maintained; no overhead for unused indexes.
 
 ### Open Questions
 
@@ -134,7 +134,7 @@ Indexes would be context services, updated via lifecycle events. Only indexes th
 |----------|------|------|
 | Chunked Welcome | Stream subjects in batches, receiver assembles | Requires protocol change, partial state during assembly |
 | Compressed Welcome | Gzip/Brotli the JSON payload | Reduces wire time, but memory allocation for the uncompressed structure remains |
-| MessagePack format | Binary serialization instead of JSON | Smaller payload, faster serialization — but adds format negotiation complexity |
+| MessagePack format | Binary serialization instead of JSON | Smaller payload, faster serialization, but adds format negotiation complexity |
 | Lazy property inclusion | Only include properties that have been written at least once | Reduces payload for sparse graphs, but requires tracking "ever-written" state |
 
 ### Open Questions
@@ -162,8 +162,8 @@ The queue channel of `PropertyChangeInterceptor` distributes changes to all subs
 
 ## Priority
 
-1. **Centralized path cache** — addresses duplicated code across connectors and the O(n) scan bottleneck
-2. **Welcome snapshot compression** — low-effort improvement for multi-instance deployments
-3. **Registry indexing** — needed when MCP queries and history selection hit performance limits
-4. **Welcome chunking / MessagePack** — needed at large scale, requires protocol changes
-5. **Change pipeline partitioning** — only if load testing reveals a bottleneck
+1. **Centralized path cache**: addresses duplicated code across connectors and the O(n) scan bottleneck
+2. **Welcome snapshot compression**: low-effort improvement for multi-instance deployments
+3. **Registry indexing**: needed when MCP queries and history selection hit performance limits
+4. **Welcome chunking / MessagePack**: needed at large scale, requires protocol changes
+5. **Change pipeline partitioning**: only if load testing reveals a bottleneck

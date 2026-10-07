@@ -18,5 +18,5 @@ else
 
     private Widget? WidgetSubject => Subject as Widget;
 
-    private IInterceptorSubject? ResolvedSubject => WidgetSubject?.ResolvedSubject;
+    private IInterceptorSubject? ResolvedSubject => WidgetSubject?.GetLastResolvedSubject();
 }

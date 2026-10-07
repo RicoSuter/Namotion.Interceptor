@@ -1,0 +1,4 @@
+{
+  "$type": "HomeBlaze.E2E.Tests.TestSubjects.LateLoadedDevice",
+  "name": "E2E Late Loaded Device"
+}

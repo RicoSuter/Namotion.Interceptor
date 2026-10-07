@@ -18,7 +18,7 @@ Alarm and event management handles detection, notification, acknowledgment, and 
 - Alarm lifecycle: active, acknowledged, cleared
 - Alarm history and statistics
 - Integration with OPC UA Alarms & Conditions (industrial standard)
-- Notification channels (UI, email, push, webhook) — alarm notifications should use subjects implementing `INotificationPublisher` (see [Notifications](../../development/notifications.md)). Which channels receive which alarms must be configurable per alarm definition (e.g., critical alarms to email + push, warnings to UI only)
+- Notification channels (UI, email, push, webhook): alarm notifications should use subjects implementing `INotificationPublisher` (see [Notifications](../../development/notifications.md)). Which channels receive which alarms must be configurable per alarm definition (e.g., critical alarms to email + push, warnings to UI only)
 
 ## Open Questions
 

@@ -20,6 +20,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Plugins\HomeBlaze.Plugins.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
 
 </Project>

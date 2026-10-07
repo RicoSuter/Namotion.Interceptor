@@ -9,7 +9,7 @@ public class HomeBlazePathsTests
     public void WhenRootConfigFileIsNotSet_ThenDefaultsToDataRootJsonInWorkingDirectory()
     {
         // Arrange
-        var configuration = CreateConfiguration(rootConfigFile: null, pluginConfigurationPath: null);
+        var configuration = CreateConfiguration(rootConfigFile: null);
 
         // Act
         var path = HomeBlazePaths.GetRootConfigurationPath(configuration);
@@ -32,7 +32,7 @@ public class HomeBlazePathsTests
     public void WhenRootConfigFileIsEmpty_ThenDefaultsToDataRootJsonInWorkingDirectory()
     {
         // Arrange
-        var configuration = CreateConfiguration(rootConfigFile: "   ", pluginConfigurationPath: null);
+        var configuration = CreateConfiguration(rootConfigFile: "   ");
 
         // Act
         var path = HomeBlazePaths.GetRootConfigurationPath(configuration);
@@ -46,7 +46,7 @@ public class HomeBlazePathsTests
     {
         // Arrange
         var rootFile = Path.Combine(Path.GetTempPath(), "homeblaze-instance", "Root.json");
-        var configuration = CreateConfiguration(rootFile, pluginConfigurationPath: null);
+        var configuration = CreateConfiguration(rootFile);
 
         // Act
         var path = HomeBlazePaths.GetRootConfigurationPath(configuration);
@@ -55,67 +55,10 @@ public class HomeBlazePathsTests
         Assert.Equal(rootFile, path);
     }
 
-    [Fact]
-    public void WhenPluginConfigurationPathIsNotSet_ThenDefaultsToFilesPluginsJsonInDataDirectory()
-    {
-        // Arrange
-        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
-        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: null);
-
-        // Act
-        var path = HomeBlazePaths.GetPluginConfigurationPath(configuration);
-
-        // Assert
-        Assert.Equal(Path.Combine(dataDirectory, "Files", "Plugins.json"), path);
-    }
-
-    [Fact]
-    public void WhenPluginConfigurationPathIsEmpty_ThenDefaultsToFilesPluginsJsonInDataDirectory()
-    {
-        // Arrange
-        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
-        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), pluginConfigurationPath: "   ");
-
-        // Act
-        var path = HomeBlazePaths.GetPluginConfigurationPath(configuration);
-
-        // Assert
-        Assert.Equal(Path.Combine(dataDirectory, "Files", "Plugins.json"), path);
-    }
-
-    [Fact]
-    public void WhenPluginConfigurationPathIsRelative_ThenResolvesAgainstDataDirectory()
-    {
-        // Arrange
-        var dataDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-instance");
-        var configuration = CreateConfiguration(Path.Combine(dataDirectory, "Root.json"), "Other/Plugins.json");
-
-        // Act
-        var path = HomeBlazePaths.GetPluginConfigurationPath(configuration);
-
-        // Assert
-        Assert.Equal(Path.Combine(dataDirectory, "Other", "Plugins.json"), path);
-    }
-
-    [Fact]
-    public void WhenPluginConfigurationPathIsAbsolute_ThenItIsUsedAsIs()
-    {
-        // Arrange
-        var pluginFile = Path.Combine(Path.GetTempPath(), "elsewhere", "Plugins.json");
-        var configuration = CreateConfiguration(rootConfigFile: null, pluginFile);
-
-        // Act
-        var path = HomeBlazePaths.GetPluginConfigurationPath(configuration);
-
-        // Assert
-        Assert.Equal(pluginFile, path);
-    }
-
-    private static IConfiguration CreateConfiguration(string? rootConfigFile, string? pluginConfigurationPath)
+    private static IConfiguration CreateConfiguration(string? rootConfigFile)
     {
         var configuration = new Mock<IConfiguration>();
         configuration.Setup(instance => instance[HomeBlazePaths.RootConfigurationFileKey]).Returns(rootConfigFile);
-        configuration.Setup(instance => instance[HomeBlazePaths.PluginConfigurationPathKey]).Returns(pluginConfigurationPath);
         return configuration.Object;
     }
 }

@@ -14,7 +14,7 @@ HomeBlaze treats AI as a first-class concern with two complementary modes: **bui
 
 ### Two Agent Modes
 
-**Built-in agents** are `[InterceptorSubject]` classes that run inside the HomeBlaze process. They are visible in the knowledge graph like any other subject — operators can see their state, configuration, and activity. They use MAF (`ChatClientAgent`) for LLM interaction and tool dispatch, with `IChatClient` from `Microsoft.Extensions.AI` for multi-provider support.
+**Built-in agents** are `[InterceptorSubject]` classes that run inside the HomeBlaze process. They are visible in the knowledge graph like any other subject: operators can see their state, configuration, and activity. They use MAF (`ChatClientAgent`) for LLM interaction and tool dispatch, with `IChatClient` from `Microsoft.Extensions.AI` for multi-provider support.
 
 **External agents** connect via the MCP server. They use the standard MCP protocol and see the same tools. This is the integration point for Claude, ChatGPT, custom copilots, or any MCP-compatible client.
 
@@ -37,11 +37,11 @@ MCP tools are split across packages, configured via a single `McpServerConfigura
 | `HomeBlaze.AI` | `list_methods`, `invoke_method` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title` via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`) | HomeBlaze-specific features |
 | `HomeBlaze.History.Mcp` | `get_property_history`, and the planned `get_event_history` and `get_command_history` (see [Messages](messages.md)) | Ships with the history packages |
 
-This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes — a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes — included directly in `query` responses when `includeAttributes=true`.
+This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes: a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes, included directly in `query` responses when `includeAttributes=true`.
 
 Tool implementations are transport-agnostic `McpToolInfo` instances (metadata + plain function). Consumers wrap them as MCP tools (for external agents) or `AIFunction` objects (for built-in agents). One implementation, any delivery mode.
 
-HomeBlaze MCP uses slash (`/`) separator with `[InlinePaths]` flattening (e.g., `/Servers/OpcUaServer/Port`). See [MCP Server docs](../../../../../../../../docs/mcp.md) for the core MCP server design and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
+HomeBlaze MCP uses slash (`/`) separator with `[InlinePaths]` flattening (e.g., `/Servers/OpcUaServer/Port`). See [MCP Server docs](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md) for the core MCP server design and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
 
 ### Interaction Patterns
 
@@ -53,9 +53,9 @@ HomeBlaze MCP uses slash (`/`) separator with `[InlinePaths]` flattening (e.g., 
 
 A built-in agent is an `[InterceptorSubject]` subclassing `LlmAgentBase`. It has a provider reference (path to an `ILlmProvider` subject), agent configuration (instructions, watched paths, poll interval, filter rules), and observable state (status, last analysis, last run time). All visible and editable in the operator UI.
 
-`LlmAgentBase` provides the MAF composition, run loop, queue-one concurrency, and error handling. `LlmAgent` is the generic config-driven subclass — operators create instances via UI/JSON. Developers subclass `LlmAgentBase` directly for specialized agents with custom tools.
+`LlmAgentBase` provides the MAF composition, run loop, queue-one concurrency, and error handling. `LlmAgent` is the generic config-driven subclass: operators create instances via UI/JSON. Developers subclass `LlmAgentBase` directly for specialized agents with custom tools.
 
-Agent writes are local writes — they flow through the normal write path (local model -> UNS -> satellite -> device). No source tagging is needed because agents are not connectors — source tagging exists specifically to prevent feedback loops in bidirectional connector sync, not for attribution. Audit of agent actions is a separate concern (see [Audit](audit.md)).
+Agent writes are local writes: they flow through the normal write path (local model -> UNS -> satellite -> device). No source tagging is needed because agents are not connectors. Source tagging exists specifically to prevent feedback loops in bidirectional connector sync, not for attribution. Audit of agent actions is a separate concern (see [Audit](audit.md)).
 
 ## Evolution Path
 
@@ -78,6 +78,6 @@ Agent writes are local writes — they flow through the normal write path (local
 ## Open Questions
 
 - MCP push/subscription support for external agents (depends on protocol evolution)
-- Agent audit trail — how to attribute changes to specific agents (see [Audit](audit.md))
-- Authorization — which agents can access which subjects (see [Security](security.md))
-- **Capacity planning** — many built-in agents watching many paths means aggregate LLM API cost and rate limits. Budget/rate limiting per agent, queueing when multiple agents trigger simultaneously, and fallback behavior when the LLM API is unavailable all need design
+- Agent audit trail: how to attribute changes to specific agents (see [Audit](audit.md))
+- Authorization: which agents can access which subjects (see [Security](security.md))
+- **Capacity planning**: many built-in agents watching many paths means aggregate LLM API cost and rate limits. Budget/rate limiting per agent, queueing when multiple agents trigger simultaneously, and fallback behavior when the LLM API is unavailable all need design

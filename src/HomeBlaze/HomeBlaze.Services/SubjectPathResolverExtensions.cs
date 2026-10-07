@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Services;
@@ -45,24 +44,5 @@ public static class SubjectPathResolverExtensions
 
         var resolvedSubject = resolver.ResolveSubject(subjectPath, style, relativeTo);
         return resolvedSubject?.TryGetRegisteredProperty(propertyName)?.GetValue();
-    }
-
-    /// <summary>
-    /// Finds a child subject by index in a collection/dictionary property.
-    /// Used by SubjectBrowser and other navigation components.
-    /// </summary>
-    public static IInterceptorSubject? FindChildByIndex(RegisteredSubjectProperty property, string indexStr)
-    {
-        var value = property.GetValue();
-        if (value == null)
-            return null;
-
-        if (property.IsSubjectDictionary)
-            return SubjectLookup.FindSubjectInDictionary(value, indexStr);
-
-        if (property.IsSubjectCollection && int.TryParse(indexStr, out var index))
-            return SubjectLookup.FindSubjectInCollection(value, index);
-
-        return null;
     }
 }

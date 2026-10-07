@@ -8,7 +8,7 @@ status: Implemented
 
 ## Overview
 
-HomeBlaze persists several categories of data through a pluggable storage layer. Live state is NOT persisted — it recovers from the source of truth (devices, peers) on restart. Everything else flows through `IStorageContainer`.
+HomeBlaze persists several categories of data through a pluggable storage layer. Live state is NOT persisted: it recovers from the source of truth (devices, peers) on restart. Everything else flows through `IStorageContainer`.
 
 ## What Is Stored
 
@@ -19,7 +19,7 @@ HomeBlaze persists several categories of data through a pluggable storage layer.
 | Documents | PDFs, images, data files linked to subjects | Binary blobs | Yes |
 | Dynamic metadata | Annotations, tags, links between subjects | JSON (separate from subject config) | Yes |
 | Plugin configuration | NuGet feed URLs, package list | JSON | Yes |
-| Property values (live state) | Sensor readings, device status | — | No — recovers from field devices (satellites), peers via WebSocket Welcome snapshot (central/standby) |
+| Property values (live state) | Sensor readings, device status | N/A | No: recovers from field devices (satellites), peers via WebSocket Welcome snapshot (central/standby) |
 | Time-series history | Property change history | Via history sink (see [History](history.md)) | Yes (separate concern) |
 
 ### Recovery on Restart
@@ -29,7 +29,7 @@ Each layer recovers from its source of truth:
 | Instance | Recovers from | Mechanism |
 |----------|--------------|-----------|
 | Satellite | Field devices | Connectors reconnect, read current values |
-| Central UNS | Satellites | Satellites reconnect, send Welcome snapshot with full state. Disconnected satellites are not visible — central only shows live-connected data |
+| Central UNS | Satellites | Satellites reconnect, send Welcome snapshot with full state. Disconnected satellites are not visible. Central only shows live-connected data |
 | Standby | Primary | Reconnects, receives Welcome snapshot |
 
 ## Storage Abstraction [Implemented]
@@ -73,7 +73,20 @@ For filesystem backends, `StorageFileWatcher` provides:
 - Reactive file monitoring with debouncing (500ms coalesce window)
 - Self-write protection (2-second grace period to prevent feedback loops)
 - SHA256 content hashing for change detection
-- Automatic rescan on filesystem watcher buffer overflow
+- Automatic rescan on filesystem watcher errors such as a buffer overflow (see [Rescans](#rescans))
+
+### Rescans
+
+A storage scans its files when it connects, that is when it starts and whenever its own configuration is applied. A file watcher error, such as a buffer overflow after a git checkout or a backup restore, also triggers a rescan, because file events may have been missed.
+
+The first scan creates a subject for every file. A later scan of the same storage reconciles the current hierarchy with the files instead of creating it again:
+
+- A file whose content is unchanged keeps its subject untouched. JSON files are compared by the SHA256 hash of their content, other files by size and modification time.
+- A changed file keeps its subject, which takes the new content the way it does for a file watcher change: a configurable subject is reconfigured and applies its configuration, and a document reloads. When the file now needs a subject of another type, for example because its `$type` changed, a new subject replaces it.
+- An `UnknownSubject` is created again from its file, so it is replaced when its type can now be created. When the file still gives a placeholder, the `UnknownSubject` keeps its instance and takes over the new type name and reason.
+- New files get subjects, the subjects of deleted files are removed, and folders that still exist keep their `VirtualFolder`.
+
+Kept subjects keep their device connections and runtime state, and stay visible to consumers that only pick up subjects present when they start, such as the OPC UA server. A plugin provider in the storage keeps its loaded packages. Only when the storage type or its resolved directory differs from the last completed scan, for example after its connection string changed, does a scan create every subject again.
 
 ### File Hierarchy
 
@@ -86,19 +99,33 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 | Type | Extension | Description |
 |------|-----------|-------------|
 | `MarkdownFile` | `.md` | Markdown with YAML frontmatter, embedded subjects (```` ```subject(name) ````), and live expressions (`{{ path }}`) |
-| `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
-| `GenericFile` | Other | Fallback for unknown extensions — metadata only |
+| `JsonFile` | `.json` | JSON data without `$type`, including invalid JSON without a `"$type"` marker |
+| `UnknownSubject` | `.json` | Placeholder for a file whose `$type` cannot be created, or invalid JSON that contains `"$type"` (see [Unknown Types](#unknown-types)) |
+| `GenericFile` | Other | Fallback for unknown extensions (metadata only) |
 
 Plugin authors can register additional file types via `[FileExtension]`.
+
+### Unknown Types
+
+A `.json` file becomes:
+
+- the subject of its `$type` when that type can be created,
+- an `UnknownSubject` when its `$type` cannot be created, with a reason: the type is not loaded (for example because the plugin providing it has not loaded yet), the loaded type does not implement `IConfigurable`, or creating the subject failed, with the error,
+- an `UnknownSubject` with an empty type and the parse error as reason when it is not valid JSON but contains `"$type"`,
+- a `JsonFile` otherwise, including invalid JSON without a `"$type"` marker.
+
+An `UnknownSubject` shows a warning icon, the `$type` value and the reason. It keeps the path the real subject would have (the file name without `.json`), so references to that path work once the type arrives. Third-party JSON files that use a `$type` property of their own also show as `UnknownSubject`.
+
+The file of an `UnknownSubject` is never rewritten: it stays exactly as authored until the real subject takes over. Its raw JSON can be edited and the file deleted like any other file. Saving it, or changing it on disk, recreates the subject from the file, which yields the real subject when its type can now be created, or an `UnknownSubject` with the current reason. When `TypeProvider` raises `TypesChanged`, for example because a [plugin provider](plugins.md#plugin-providers) added types, each storage recreates its `UnknownSubject`s the same way and swaps a real subject in at the same path. One with an empty type, from invalid JSON, only changes when its file changes.
 
 ### Subject Files vs Documents [Implemented]
 
 Files in storage become subjects in the knowledge graph through two different paths:
 
-- **Subject files** — `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted.
-- **Documents** — all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
+- **Subject files**: `.json` files with a `$type` discriminator are deserialized into typed subjects (e.g., `Motor`, `OpcUaServer`). The file is the persistence format; the subject is what appears in the graph. Only `[Configuration]` properties are persisted. A file whose `$type` cannot be created yet appears as an `UnknownSubject` until the type is available.
+- **Documents**: all other files (Markdown, PDFs, images, plain JSON without `$type`) become document subjects (`MarkdownFile`, `JsonFile`, `GenericFile`, or custom types via `[FileExtension]` plugins). The file content is the document itself, visible as-is in the knowledge graph.
 
-Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools (`query` to find them, `invoke_method` to read/write). Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned — see below).
+Documents are browsable in the subject tree, editable in the Blazor UI (Monaco editor for text files), and accessible via MCP tools (`query` to find them, `invoke_method` to read/write). Linking documents to other subjects (e.g., "this PDF is the manual for motor CNC-01") is handled via dynamic metadata / annotations (planned, see below).
 
 ## Subject Configuration [Implemented]
 
@@ -106,7 +133,7 @@ Subjects marked with `[Configuration]` properties have their settings persisted 
 
 The `[State]` attribute marks runtime-only properties that are not persisted.
 
-`IConfigurationWriter` forms a chain resolved via the subject's parent hierarchy — the nearest parent that implements `IConfigurationWriter` handles persistence. This allows different storage containers to own different subtrees.
+`IConfigurationWriter` forms a chain resolved via the subject's parent hierarchy: the nearest parent that implements `IConfigurationWriter` handles persistence. This allows different storage containers to own different subtrees.
 
 ## Dynamic Metadata and Annotations [Planned]
 
@@ -114,12 +141,12 @@ User-created metadata (annotations, tags, links between subjects) are stored as 
 
 This enables operators and integrators to enrich the knowledge graph with domain-specific metadata without modifying subject code. Examples:
 
-- `tags: ["floor-2", "critical", "hvac"]` — cross-cutting grouping independent of folder hierarchy
-- `area: "Kitchen"` — physical location assignment (equivalent to Home Assistant areas)
-- `group: "cooling-system"` — logical grouping across different folders
-- `owner: "maintenance-team-b"` — organizational metadata
+- `tags: ["floor-2", "critical", "hvac"]`: cross-cutting grouping independent of folder hierarchy
+- `area: "Kitchen"`: physical location assignment (equivalent to Home Assistant areas)
+- `group: "cooling-system"`: logical grouping across different folders
+- `owner: "maintenance-team-b"`: organizational metadata
 
-All dynamic attributes are queryable through the registry, transmitted over the wire via WebSocket sync, and visible in the UI — no separate subsystem needed.
+All dynamic attributes are queryable through the registry, transmitted over the wire via WebSocket sync, and visible in the UI: no separate subsystem needed.
 
 ## HA and Multi-Instance Storage [Planned]
 
@@ -127,7 +154,7 @@ For single-instance deployments, local filesystem storage is sufficient. For HA 
 
 **Current state:** each node has its own local filesystem. No shared storage is implemented.
 
-**Planned approach:** use `FluentStorageContainer`'s pluggable backends to point HA pairs at shared storage (Azure Blob, S3, or similar). The storage abstraction already supports this — the missing pieces are:
+**Planned approach:** use `FluentStorageContainer`'s pluggable backends to point HA pairs at shared storage (Azure Blob, S3, or similar). The storage abstraction already supports this. The missing pieces are:
 - Ensuring concurrent read/write safety when two nodes share a backend
 - File locking or optimistic concurrency for configuration writes
 - Change notification across nodes (filesystem watcher only works locally; shared backends need a different notification mechanism)
@@ -136,7 +163,7 @@ For single-instance deployments, local filesystem storage is sufficient. For HA 
 
 ### Why This Architecture Is Resilient
 
-The "recover from source of truth" model means most data does NOT need backup for disaster recovery. Live state (property values, device status, derived properties) is never persisted — it is recovered automatically from external devices and peers on restart. This eliminates the largest and most complex category of data from the backup problem.
+The "recover from source of truth" model means most data does NOT need backup for disaster recovery. Live state (property values, device status, derived properties) is never persisted: it is recovered automatically from external devices and peers on restart. This eliminates the largest and most complex category of data from the backup problem.
 
 ### What Needs Backup
 
@@ -146,16 +173,16 @@ The "recover from source of truth" model means most data does NOT need backup fo
 | Knowledge files (Markdown, documents) | No | Operational documentation and runbooks lost |
 | Dynamic metadata / annotations | No | User-created tags, links, and enrichments lost |
 | Plugin configuration | No | Must reconfigure plugin list and feeds |
-| Time-series history | **No — this is the critical one** | Historical data is generated locally and cannot be recovered from devices. Once lost, it is gone |
-| Live state (property values) | **Yes** — recovers from devices/peers | No backup needed |
+| Time-series history | **No: this is the critical one** | Historical data is generated locally and cannot be recovered from devices. Once lost, it is gone |
+| Live state (property values) | **Yes**, recovers from devices/peers | No backup needed |
 | Audit trail (when implemented) | No | Compliance and debugging history lost |
 
 ### What Does NOT Need Backup
 
-- **Property values and device state** — recovered from field devices (satellites) or WebSocket Welcome snapshots (central/standby)
-- **Derived property values** — recomputed automatically from their dependencies
-- **Connector state** — reconnection re-establishes subscriptions and reads current values
-- **In-memory change queues** — transient by design; new changes flow immediately after restart
+- **Property values and device state**: recovered from field devices (satellites) or WebSocket Welcome snapshots (central/standby)
+- **Derived property values**: recomputed automatically from their dependencies
+- **Connector state**: reconnection re-establishes subscriptions and reads current values
+- **In-memory change queues**: transient by design; new changes flow immediately after restart
 
 ### Backup Approaches by Backend
 
@@ -164,7 +191,7 @@ The "recover from source of truth" model means most data does NOT need backup fo
 | Local filesystem | File copy, rsync, or filesystem snapshots | Copy files back, restart instance |
 | Azure Blob / S3 | Provider-native snapshots and versioning | Restore from snapshot, restart instance |
 | PostgreSQL | `pg_dump` or continuous archiving with point-in-time recovery | `pg_restore` to target state, restart instance |
-| GitOps | Already versioned — every change is a commit | `git revert` or `git checkout` to any previous state |
+| GitOps | Already versioned: every change is a commit | `git revert` or `git checkout` to any previous state |
 
 Time-series history has its own backup story, depending on the history sink:
 
@@ -180,7 +207,7 @@ No special DR mechanism is needed beyond restoring persisted files. The architec
 
 1. Restore configuration, knowledge files, and plugin config from backup to new nodes
 2. Restore history sink data from backup (if available)
-3. Start instances — subjects are instantiated from restored configuration
+3. Start instances: subjects are instantiated from restored configuration
 4. Connectors reconnect to field devices and recover current live state automatically
 5. Central receives Welcome snapshots from reconnecting satellites
 6. System is fully operational; only history between last backup and disaster is lost
@@ -192,7 +219,7 @@ The only unrecoverable data loss in a disaster is:
 - **Time-series history** recorded since the last history backup
 - **Audit trail entries** since the last backup (when implemented)
 
-Live state has zero data loss — it recovers to the current device state, not the backup-time state.
+Live state has zero data loss: it recovers to the current device state, not the backup-time state.
 
 ## Key Decisions
 
@@ -213,3 +240,7 @@ Live state has zero data loss — it recovers to the current device state, not t
 - Dynamic metadata schema and validation
 - Configuration sync between instances (should central know satellite configs?)
 - Backup and restore procedures for each storage backend
+- On a case-sensitive file system, `StoragePathRegistry` keys its path lookup, content hash, and size entries by the lowercased path, so two files whose names differ only in case share one entry: a file-watcher change can refresh the wrong file's subject, and such a pair is reported as changed on every rescan
+- A reconnect that only reconciles the existing hierarchy still replaces the file watcher in `StartFileWatching` (called from `ConnectAsync`), dropping any event still in its coalescing window and any pending own-write mark
+- The registry mixes two content hash methods for JSON files, decoded text in the scan and in configuration writes versus raw bytes in `JsonSubjectSynchronizer`, so a file with a byte order mark is reported as changed on every rescan once the file watcher has refreshed it
+- In-memory storage creates a new, empty client on every `ConnectAsync`, so a reconnect drops all of its subjects; decide the intended behavior

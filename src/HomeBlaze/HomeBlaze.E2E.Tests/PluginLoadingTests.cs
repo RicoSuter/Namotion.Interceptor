@@ -22,10 +22,11 @@ public class PluginLoadingTests
     }
 
     [Fact]
-    public async Task WhenPluginsLoaded_ThenBothSamplePluginsAppearInPluginManager()
+    public async Task WhenPluginsLoaded_ThenBothSamplePluginsAppearInPluginProvider()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
+        await _fixture.WaitForPluginsLoadedAsync();
 
         // Act - Navigate to browser and open the Plugins subject
         await NavigateToPluginsAsync(page);
@@ -43,6 +44,7 @@ public class PluginLoadingTests
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
+        await _fixture.WaitForPluginsLoadedAsync();
 
         // Act - Navigate to browser, open Plugins, then click on SamplePlugin1
         await NavigateToPluginsAsync(page);
@@ -54,6 +56,25 @@ public class PluginLoadingTests
         // Assert - The plugin detail pane should show HostDependencies containing MyCompany.Abstractions
         var hostDependencies = page.GetByText("MyCompany.Abstractions");
         await Assertions.Expect(hostDependencies).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenPluginIsLoaded_ThenItsDeviceFileShowsAsTheRealSubject()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await _fixture.WaitForPluginsLoadedAsync();
+
+        // Act
+        await page.GotoAsync(_fixture.ServerAddress);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        var browserLink = page.GetByRole(AriaRole.Link, new() { Name = "Browser" });
+        await Assertions.Expect(browserLink).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+        await browserLink.ClickAsync();
+
+        // Assert - the title comes from SampleDevice1, the placeholder would show the file name
+        await Assertions.Expect(page.GetByText("E2E Sample Sensor", new() { Exact = true }))
+            .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
     }
 
     private async Task NavigateToPluginsAsync(IPage page)

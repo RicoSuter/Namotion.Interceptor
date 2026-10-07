@@ -53,7 +53,7 @@ Public API analyzers ([PR #184](https://github.com/RicoSuter/Namotion.Intercepto
 
 ## Wire Protocol Versioning [Planned]
 
-Planned but not yet implemented. The WebSocket protocol (see [WebSocket connector](../../../../../../../../docs/connectors-websocket.md) and [SubjectUpdate format](../../../../../../../../docs/connectors-subject-updates.md)) is actively evolving (Commands/RPC, subscriptions, MessagePack). The Hello/Welcome handshake is prepared for version negotiation (version field), but no version checking or format negotiation is implemented yet. The versioning strategy will be designed once the surface stabilizes.
+Planned but not yet implemented. The WebSocket protocol (see [WebSocket connector](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connectors-websocket.md) and [SubjectUpdate format](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/connectors-subject-updates.md)) is actively evolving (Commands/RPC, subscriptions, MessagePack). The Hello/Welcome handshake is prepared for version negotiation (version field), but no version checking or format negotiation is implemented yet. The versioning strategy will be designed once the surface stabilizes.
 
 Requirements for the future design: rolling upgrades must be possible, `SubjectUpdate` format changes must be backward compatible or versioned, approach should support additive changes without breaking existing clients.
 
@@ -71,3 +71,6 @@ Requirements for the future design: rolling upgrades must be possible, `SubjectU
 - Wire protocol versioning strategy (deferred until surface stabilizes)
 - Plugin minimum abstraction version declaration mechanism
 - Cross-major-version migration tooling
+- Builds from source report the Namotion libraries as `0.1.0` in `deps.json`, because only the container image build passes the released version via `LibraryPackageVersion`, so a plugin built against released packages is rejected when loaded locally; deriving the version from git tags for every build would fix it
+- The HomeBlaze abstraction packages are not published to NuGet yet, the release `pack` job removes every package that is not `Namotion.Interceptor*` before publishing, so third parties cannot build plugins against released packages
+- Edge container images report the latest stable release's library versions in `deps.json` while being built from `master`, so a plugin built against newer, unreleased library API is rejected there

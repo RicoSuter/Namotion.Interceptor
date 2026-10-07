@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
+        <InternalsVisibleTo Include="HomeBlaze.OpcUa.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
         <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

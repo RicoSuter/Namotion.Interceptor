@@ -44,14 +44,14 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Message bus (`IMessageBus`) | Planned | Abstractions defined, implementation and DI wiring not yet done |
 | Domain events (`IEvent`) | Planned | Abstractions defined (`DeviceEvent`, `SwitchEvent`), no subjects publishing yet |
 | Commands (`ICommand`) | Planned | Abstraction defined |
-| Health check interface | Planned | Uniform health reporting for any subject — see [Observability](design/observability.md) |
-| Cross-instance event propagation | Planned | Events currently in-process only — see [Messages](design/messages.md) |
+| Health check interface | Planned | Uniform health reporting for any subject. See [Observability](design/observability.md) |
+| Cross-instance event propagation | Planned | Events currently in-process only. See [Messages](design/messages.md) |
 
 ## AI Integration
 
 | Building Block | Status | Notes |
 |---|---|---|
-| MCP server (core tools) | Implemented | `Namotion.Interceptor.Mcp` — `query`, `get_property`, `set_property`, `list_types` |
+| MCP server (core tools) | Implemented | `Namotion.Interceptor.Mcp`: `query`, `get_property`, `set_property`, `list_types` |
 | MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_method` via `McpServerConfiguration` extension points |
 | Built-in agents | Planned | Agent subjects with LLM integration. See [AI Agents plan](../plans/ai-agents.md) |
 
@@ -60,7 +60,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Building Block | Status | Notes |
 |---|---|---|
 | Plugin system (build-time NuGet) | Implemented | Standard package references |
-| Plugin system (runtime loading) | Planned | NuGet feed resolution at startup |
+| Plugin system (runtime loading) | Implemented | Plugin provider subjects load NuGet packages at runtime. See [Plugin System](design/plugins.md) |
 | Blazor operator UI | Implemented | Subject browser, dashboards, editors |
 | Multi-instance topology | Implemented | Satellite/central via WebSocket |
 | High availability (active-standby) | Planned | Failover with fencing |
@@ -69,11 +69,11 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Observability (HomeBlaze metrics and traces) | Planned | See [Observability](design/observability.md) |
 | Observability (health subjects) | Planned | |
 | Container image | Implemented | amd64 and arm64 images on GitHub Container Registry. See [Installation](../administration/installation.md#docker) |
-| Storage layer | Implemented | `IStorageContainer` + `FluentStorageContainer` (filesystem, in-memory). Shared/cloud backends planned — see [Storage](design/storage.md) |
-| Deployment (UI scaling, multi-primary) | Planned | Bidirectional WebSocket sync between peer UNS instances — see [Deployment](design/deployment.md) |
-| Scalability optimizations | Planned | Centralized path cache, registry indexing, Welcome compression — see [Scalability](design/scalability.md) |
-| Resilience hardening | Planned | Write durability, split-brain, graceful degradation — see [Resilience](design/resilience.md) |
-| Upgrade and migration | Planned | Config migration, backward compatibility, rolling upgrades — see [Upgrade and Migration](design/upgrade-and-migration.md) |
-| System testing | Planned | Topology-level testing and chaos injection — see [System Testing](design/testing.md) |
+| Storage layer | Implemented | `IStorageContainer` + `FluentStorageContainer` (filesystem, in-memory). Shared/cloud backends planned. See [Storage](design/storage.md) |
+| Deployment (UI scaling, multi-primary) | Planned | Bidirectional WebSocket sync between peer UNS instances. See [Deployment](design/deployment.md) |
+| Scalability optimizations | Planned | Centralized path cache, registry indexing, Welcome compression. See [Scalability](design/scalability.md) |
+| Resilience hardening | Planned | Write durability, split-brain, graceful degradation. See [Resilience](design/resilience.md) |
+| Upgrade and migration | Planned | Config migration, backward compatibility, rolling upgrades. See [Upgrade and Migration](design/upgrade-and-migration.md) |
+| System testing | Planned | Topology-level testing and chaos injection. See [System Testing](design/testing.md) |
 | Audit trail | Planned | Change attribution |
 | Alarms / events | Planned | |

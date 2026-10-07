@@ -17,6 +17,7 @@ namespace HomeBlaze.Components;
 public partial class Widget : ITitleProvider, IConfigurable
 {
     private readonly SubjectPathResolver _pathResolver;
+    private readonly LatestDerivedValue<IInterceptorSubject?> _resolvedSubject = new();
 
     /// <summary>
     /// Path to the subject to render.
@@ -29,9 +30,31 @@ public partial class Widget : ITitleProvider, IConfigurable
 
     /// <summary>
     /// The resolved subject from the path. Null if path is invalid or subject not found.
+    /// Resolves the path on every call; render code uses <see cref="GetLastResolvedSubject"/>.
     /// </summary>
     [Derived]
-    public IInterceptorSubject? ResolvedSubject => ResolveSubject();
+    public IInterceptorSubject? ResolvedSubject
+    {
+        get
+        {
+            var evaluation = _resolvedSubject.BeginEvaluation();
+            return _resolvedSubject.Store(evaluation, ResolveSubject());
+        }
+    }
+
+    /// <summary>
+    /// Gets the value <see cref="ResolvedSubject"/> was last evaluated to, read as that property, without
+    /// resolving the path again, so that a render tracking scope records the property instead of every
+    /// folder on the path. Resolves the path when the property has not been evaluated yet.
+    /// </summary>
+    public IInterceptorSubject? GetLastResolvedSubject()
+    {
+        return GetPropertyValue(nameof(ResolvedSubject), static subject =>
+        {
+            var widget = (Widget)subject;
+            return widget._resolvedSubject.TryGetValue(out var resolvedSubject) ? resolvedSubject : widget.ResolvedSubject;
+        });
+    }
 
     public Widget(SubjectPathResolver pathResolver)
     {

@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
@@ -27,6 +29,13 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
     </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>TestDataSourceDirectory</_Parameter1>
+      <_Parameter2>$(MSBuildProjectDirectory)/TestData</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
   <ItemGroup>

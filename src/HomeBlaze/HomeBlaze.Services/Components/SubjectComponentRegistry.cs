@@ -9,15 +9,11 @@ namespace HomeBlaze.Services.Components;
 public class SubjectComponentRegistry
 {
     private readonly TypeProvider _typeProvider;
-    private readonly Lazy<Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration>> _components;
-
-    // TODO: Clear cache when types are dynamically registered at runtime
-    private readonly ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> _resolvedCache = new();
+    private Snapshot? _snapshot;
 
     public SubjectComponentRegistry(TypeProvider typeProvider)
     {
         _typeProvider = typeProvider;
-        _components = new Lazy<Dictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration>>(LoadComponents);
     }
 
     /// <summary>
@@ -26,13 +22,20 @@ public class SubjectComponentRegistry
     /// </summary>
     public SubjectComponentRegistration? GetComponent(Type subjectType, SubjectComponentType type, string? name = null)
     {
-        return _resolvedCache.GetOrAdd((subjectType, type, name), key => ResolveComponent(key.Item1, key.Item2, key.Item3));
+        var snapshot = GetSnapshot();
+        return snapshot.ResolvedCache.GetOrAdd((subjectType, type, name),
+            static (key, components) => ResolveComponent(components, key.Item1, key.Item2, key.Item3),
+            snapshot.Components);
     }
 
-    private SubjectComponentRegistration? ResolveComponent(Type subjectType, SubjectComponentType type, string? name)
+    private static SubjectComponentRegistration? ResolveComponent(
+        Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> components,
+        Type subjectType,
+        SubjectComponentType type,
+        string? name)
     {
         // Try exact match first
-        var exact = _components.Value.GetValueOrDefault((subjectType, type, name));
+        var exact = components.GetValueOrDefault((subjectType, type, name));
         if (exact != null)
             return exact;
 
@@ -40,7 +43,7 @@ public class SubjectComponentRegistry
         var baseType = subjectType.BaseType;
         while (baseType != null && baseType != typeof(object))
         {
-            var baseMatch = _components.Value.GetValueOrDefault((baseType, type, name));
+            var baseMatch = components.GetValueOrDefault((baseType, type, name));
             if (baseMatch != null)
                 return baseMatch;
             baseType = baseType.BaseType;
@@ -49,7 +52,7 @@ public class SubjectComponentRegistry
         // Try interfaces (for IConfigurable fallback)
         foreach (var iface in subjectType.GetInterfaces())
         {
-            var ifaceMatch = _components.Value.GetValueOrDefault((iface, type, name));
+            var ifaceMatch = components.GetValueOrDefault((iface, type, name));
             if (ifaceMatch != null)
                 return ifaceMatch;
         }
@@ -62,7 +65,7 @@ public class SubjectComponentRegistry
     /// </summary>
     public IEnumerable<SubjectComponentRegistration> GetComponents(Type subjectType, SubjectComponentType type)
     {
-        return _components.Value.Values.Where(registration => registration.SubjectType == subjectType && registration.Type == type);
+        return GetSnapshot().Components.Values.Where(registration => registration.SubjectType == subjectType && registration.Type == type);
     }
 
     /// <summary>
@@ -71,7 +74,7 @@ public class SubjectComponentRegistry
     // TODO: Align HasComponent with GetComponent - currently only checks exact match while GetComponent supports inheritance/interface fallback
     public bool HasComponent(Type subjectType, SubjectComponentType type, string? name = null)
     {
-        return _components.Value.ContainsKey((subjectType, type, name));
+        return GetSnapshot().Components.ContainsKey((subjectType, type, name));
     }
 
     /// <summary>
@@ -79,14 +82,28 @@ public class SubjectComponentRegistry
     /// </summary>
     public IReadOnlyCollection<SubjectComponentRegistration> GetAllComponents()
     {
-        return _components.Value.Values.ToList();
+        return GetSnapshot().Components.Values.ToList();
     }
 
-    private Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> LoadComponents()
+    private Snapshot GetSnapshot()
+    {
+        var types = _typeProvider.Types;
+        var snapshot = Volatile.Read(ref _snapshot);
+        if (snapshot is null || !ReferenceEquals(snapshot.Source, types))
+        {
+            snapshot = new Snapshot(types, LoadComponents(types), new());
+            Volatile.Write(ref _snapshot, snapshot);
+        }
+
+        return snapshot;
+    }
+
+    private static Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> LoadComponents(
+        IReadOnlyCollection<Type> types)
     {
         var dictionary = new Dictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration>();
 
-        foreach (var type in _typeProvider.Types)
+        foreach (var type in types)
         {
             foreach (var attribute in type.GetCustomAttributes(typeof(SubjectComponentAttribute), false).Cast<SubjectComponentAttribute>())
             {
@@ -96,5 +113,17 @@ public class SubjectComponentRegistry
         }
 
         return dictionary;
+    }
+
+    private sealed class Snapshot(
+        IReadOnlyCollection<Type> source,
+        Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> components,
+        ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> resolvedCache)
+    {
+        public IReadOnlyCollection<Type> Source => source;
+
+        public Dictionary<(Type SubjectType, SubjectComponentType Type, string? Name), SubjectComponentRegistration> Components => components;
+
+        public ConcurrentDictionary<(Type, SubjectComponentType, string?), SubjectComponentRegistration?> ResolvedCache => resolvedCache;
     }
 }

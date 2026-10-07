@@ -3,9 +3,10 @@
 
 <PageTitle>Browser - HomeBlaze</PageTitle>
 
-<SubjectBrowser Path="@Path" />
+<SubjectBrowser />
 
 @code {
+    // Required by the {*Path} route; SubjectBrowser reads the escaped path from the URI itself.
     [Parameter]
     public string? Path { get; set; }
 }

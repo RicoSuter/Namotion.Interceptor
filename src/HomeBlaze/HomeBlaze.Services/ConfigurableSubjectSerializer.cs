@@ -21,20 +21,38 @@ public class ConfigurableSubjectSerializer
 {
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
-    private readonly JsonSerializerOptions _options;
+    private OptionsSnapshot? _optionsSnapshot;
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
-        _options = new JsonSerializerOptions
+    }
+
+    // A new instance is required, not just new options with the same resolver: System.Text.Json shares
+    // cached metadata across options instances that have equal settings and the same resolver instance,
+    // so reusing the resolver would silently keep serving the frozen $type list.
+    private JsonSerializerOptions Options
+    {
+        get
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            Converters = { new JsonStringEnumConverter() }
-        };
+            var types = _typeProvider.Types;
+            var snapshot = Volatile.Read(ref _optionsSnapshot);
+            if (snapshot is null || !ReferenceEquals(snapshot.Source, types))
+            {
+                snapshot = new OptionsSnapshot(types, new JsonSerializerOptions
+                {
+                    TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(_typeProvider),
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = true,
+                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                    Converters = { new JsonStringEnumConverter() }
+                });
+                Volatile.Write(ref _optionsSnapshot, snapshot);
+            }
+
+            return snapshot.Options;
+        }
     }
 
     /// <summary>
@@ -49,7 +67,7 @@ public class ConfigurableSubjectSerializer
                 nameof(subject));
         }
 
-        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), _options);
+        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), Options);
     }
 
     /// <summary>
@@ -73,23 +91,25 @@ public class ConfigurableSubjectSerializer
             return null;
         }
 
-        // Find the type in registered types
-        var type = _typeProvider.Types.FirstOrDefault(t => t.FullName == typeName);
-        if (type == null)
+        var type = FindType(typeName);
+        if (type == null || !typeof(IConfigurable).IsAssignableFrom(type))
         {
             return null;
         }
 
         using var startup = _serviceProvider.GetService<IInterceptorSubjectContext>()?.DeferHostedServiceStarts();
         // Create instance using ActivatorUtilities for DI-aware construction
-        var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurable;
-        if (subject == null)
-        {
-            return null;
-        }
-
+        var subject = (IConfigurable)ActivatorUtilities.CreateInstance(_serviceProvider, type);
         PopulateConfigurationProperties(subject, type, root);
         return subject;
+    }
+
+    /// <summary>
+    /// Finds the loaded type whose full name is <paramref name="typeName"/>, whether or not it is configurable.
+    /// </summary>
+    public Type? FindType(string typeName)
+    {
+        return _typeProvider.TryGetType(typeName, out var type) ? type : null;
     }
 
     /// <summary>
@@ -98,6 +118,10 @@ public class ConfigurableSubjectSerializer
     /// </summary>
     private void PopulateConfigurationProperties(IConfigurable subject, Type type, JsonElement root)
     {
+        // Read once so one deserialization uses one options instance, even if a concurrent
+        // type registration would otherwise cause mid-loop options to shift.
+        var options = Options;
+
         if (subject is IInterceptorSubject interceptorSubject)
         {
             var registered = interceptorSubject.TryGetRegisteredSubject();
@@ -113,7 +137,7 @@ public class ConfigurableSubjectSerializer
                     {
                         try
                         {
-                            var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
+                            var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, options);
                             property.SetValue(value);
                         }
                         catch (JsonException)
@@ -138,7 +162,7 @@ public class ConfigurableSubjectSerializer
             {
                 try
                 {
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, _options);
+                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, options);
                     property.SetValue(subject, value);
                 }
                 catch (JsonException)
@@ -159,6 +183,9 @@ public class ConfigurableSubjectSerializer
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
 
+        // Read once so one update uses one options instance.
+        var options = Options;
+
         foreach (var property in subject.GetConfigurationProperties())
         {
             var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
@@ -166,8 +193,7 @@ public class ConfigurableSubjectSerializer
             {
                 try
                 {
-                    // Use same _options for consistent deserialization behavior
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
+                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, options);
                     property.SetValue(value);
                 }
                 catch (JsonException)
@@ -176,5 +202,12 @@ public class ConfigurableSubjectSerializer
                 }
             }
         }
+    }
+
+    private sealed class OptionsSnapshot(IReadOnlyCollection<Type> source, JsonSerializerOptions options)
+    {
+        public IReadOnlyCollection<Type> Source => source;
+
+        public JsonSerializerOptions Options => options;
     }
 }

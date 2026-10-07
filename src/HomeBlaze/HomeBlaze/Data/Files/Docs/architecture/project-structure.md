@@ -245,12 +245,11 @@ Storage.Abs.   Components.Abs.   Abstractions
 See [Plugin System Design](design/plugins.md) for full architecture documentation.
 
 **Features**:
-- **PluginManager**: `[InterceptorSubject]` owning plugin configuration (`Plugins`, `Feeds`, `HostPackages`) and runtime state (`LoadedPlugins`)
-- **PluginLoader**: Core DI service wrapping `NuGetPluginLoader`, reads `Files/Plugins.json` in the data folder at startup
-- **Plugin**: `[InterceptorSubject]` representing each loaded plugin with `[Derived] Title` and `[Operation] RemovePlugin`
+- **NuGetPluginProvider**: `[InterceptorSubject]` that loads NuGet plugins at runtime and adds their assemblies to `TypeProvider`; owns plugin configuration (`Plugins`, `Feeds`, `HostPackages`, `HostIdentifier`, `CacheDirectory`) and runtime state (`LoadedPlugins`, `IsRestartRequired`)
+- **Plugin**: `[InterceptorSubject]` representing each configured plugin with `[Derived] Title` and a `Remove Plugin` operation
 - **Models**: `PluginEntry`, `PluginFeedEntry` DTOs in `HomeBlaze.Plugins.Models` namespace
 
-**Dependencies**: `Namotion.Interceptor`, `Namotion.NuGet.Plugins`, `HomeBlaze.Abstractions`
+**Dependencies**: `Namotion.Interceptor`, `Namotion.NuGet.Plugins`, `HomeBlaze.Abstractions`, `HomeBlaze.Services`
 
 **Use when**: Adding runtime NuGet plugin support to a HomeBlaze application.
 
@@ -282,9 +281,6 @@ services.AddHomeBlazeHostServices();
 
 // HomeBlaze.Host - Full Blazor host (also calls AddHomeBlazeHostServices)
 services.AddHomeBlazeHost();
-
-// HomeBlaze.Plugins - Runtime NuGet plugin loading
-services.AddHomeBlazePlugins(pluginConfigPath);
 ```
 
 | Method | Services |
@@ -292,7 +288,6 @@ services.AddHomeBlazePlugins(pluginConfigPath);
 | `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager` |
 | `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `NavigationItemResolver`, `DeveloperModeService` |
 | `AddHomeBlazeHost()` | MudBlazor services + all above |
-| `AddHomeBlazePlugins(path)` | `PluginLoader` (reads `Files/Plugins.json`, loads NuGet plugins at startup) |
 
 ---
 

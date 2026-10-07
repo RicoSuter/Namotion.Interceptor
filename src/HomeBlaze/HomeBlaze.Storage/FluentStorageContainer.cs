@@ -4,12 +4,15 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
+using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 
 namespace HomeBlaze.Storage;
 
@@ -33,10 +36,34 @@ public partial class FluentStorageContainer :
     private readonly ILogger<FluentStorageContainer>? _logger;
 
     private readonly ConfigurableSubjectSerializer _serializer;
+    private readonly TypeProvider? _typeProvider;
+
+    // Serializes everything that swaps the client, the file watcher or children: connects, scans, file
+    // watcher events, refreshes after writes, adds, deletes and placeholder upgrades. Configuration refreshes of subjects
+    // (ApplyConfigurationAsync) run under it, so a slow apply delays the other storage events. Not
+    // reentrant: code running under it must not call RunLockedAsync or the public write, add or delete
+    // methods. Never disposed: it holds no resource, and disposing would break an in-flight Release.
+    private readonly SemaphoreSlim _hierarchyLock = new(1, 1);
+
+    // Checked under _hierarchyLock so no locked action starts after Dispose.
+    private volatile bool _disposed;
+
+    // 1 while an upgrade pass is queued but has not yet read the path registry.
+    private int _upgradePending;
 
     private StorageFileWatcher? _fileWatcher;
     private string? _storageDirectory;
     private JsonSubjectSynchronizer? _jsonSyncHelper;
+
+    // What the client lists, and what the last completed scan listed. A scan reconciles the hierarchy only when
+    // both are the same storage: the files of another storage are not the files the current subjects stand for.
+    private StorageLocation? _clientLocation;
+    private StorageLocation? _scannedLocation;
+
+    /// <summary>
+    /// The active file watcher, if any.
+    /// </summary>
+    internal StorageFileWatcher? FileWatcher => _fileWatcher;
 
     /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
@@ -98,6 +125,7 @@ public partial class FluentStorageContainer :
         _subjectFactory = new FileSubjectFactory(typeRegistry, serializer, serviceProvider, logger);
         _hierarchyManager = new StorageHierarchyManager(logger);
         _serializer = serializer;
+        _typeProvider = serviceProvider.GetService<TypeProvider>();
         _logger = logger;
 
         StorageType = "disk";
@@ -107,9 +135,71 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Disconnected;
     }
         
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        // Taken before base.StartAsync while the hosted service start still defers startup, so startup cannot
+        // complete in between. Held until the first scan attached the files.
+        var startupDeferral = ((IInterceptorSubject)this).Context.DeferStartupCompletion();
+        try
+        {
+            await base.StartAsync(cancellationToken);
+        }
+        catch
+        {
+            startupDeferral.Dispose();
+            throw;
+        }
+
+        // Bound to this start's ExecuteAsync, so an earlier start's ExecuteAsync ending late cannot release it.
+        StartupGate.ReleaseWhenCompleted(startupDeferral, ExecuteTask, _logger);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await ConnectAsync(stoppingToken);
+
+        var context = ((IInterceptorSubject)this).Context;
+        if (!context.IsStartupCompleted())
+        {
+            // Not awaited: startup waits for this ExecuteAsync to finish.
+            _ = WarnAboutMissingSubjectBlockTypesAfterStartupAsync(context, stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Warns about markdown subject blocks whose type is still not loaded once startup completed. While it runs,
+    /// the parser only logs them as information because plugins may still add the types.
+    /// </summary>
+    private async Task WarnAboutMissingSubjectBlockTypesAfterStartupAsync(
+        IInterceptorSubjectContext context, CancellationToken stoppingToken)
+    {
+        try
+        {
+            await context.WaitForStartupAsync(stoppingToken);
+            await RunLockedAsync(() =>
+            {
+                foreach (var (markdownFile, path) in _pathRegistry.GetSubjects<MarkdownFile>())
+                {
+                    if (markdownFile.UnresolvedSubjectTypeNames.Count > 0)
+                    {
+                        _logger?.LogWarning(
+                            "Subject blocks in {Path} are not shown because their types {Types} are still not loaded after startup completed.",
+                            path, string.Join(", ", markdownFile.UnresolvedSubjectTypeNames));
+                    }
+                }
+
+                return Task.CompletedTask;
+            }, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopped before startup completed: nothing to report.
+        }
+        catch (Exception exception)
+        {
+            // Includes a failed startup, which the root manager reports itself.
+            _logger?.LogDebug(exception, "Skipped reporting markdown subject blocks with missing types.");
+        }
     }
 
     /// <summary>
@@ -152,26 +242,44 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Initializing;
         try
         {
-            _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
-            _client = StorageType switch
+            await RunLockedAsync(async () =>
             {
-                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(_storageDirectory!),
-                "inmemory" => StorageFactory.Blobs.InMemory(),
-                _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
-            };
+                // Subscribing before the scan means a type added during the scan is not missed: its upgrade
+                // waits for the lock and then sees the scanned placeholders.
+                SubscribeToTypeChanges();
 
-            _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
+                _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
 
-            Status = StorageStatus.Connected;
-            _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
-                isInMemory ? "(in-memory)" : _storageDirectory);
+                var storageType = StorageType;
+                var previousClient = _client;
+                _client = storageType switch
+                {
+                    "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(_storageDirectory!),
+                    "inmemory" => StorageFactory.Blobs.InMemory(),
+                    _ => throw new NotSupportedException($"Storage type '{storageType}' is not supported")
+                };
+                _clientLocation = new StorageLocation(
+                    storageType == "filesystem" ? "disk" : storageType,
+                    _storageDirectory is null ? null : Path.TrimEndingDirectorySeparator(_storageDirectory));
+                previousClient?.Dispose();
 
-            await ScanAsync(cancellationToken);
+                _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
 
-            if (EnableFileWatching && !isInMemory)
-            {
-                StartFileWatching();
-            }
+                Status = StorageStatus.Connected;
+                _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
+                    isInMemory ? "(in-memory)" : _storageDirectory);
+
+                await ScanAsync(cancellationToken);
+
+                if (EnableFileWatching && !isInMemory)
+                {
+                    StartFileWatching();
+                }
+                else
+                {
+                    Interlocked.Exchange(ref _fileWatcher, null)?.Dispose();
+                }
+            }, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -182,17 +290,33 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Scans the storage and builds the subject hierarchy.
+    /// Lists the storage and publishes its subject hierarchy. Callers hold the hierarchy lock. When the last
+    /// completed scan listed the same storage, the hierarchy is reconciled: a listed file keeps its subject, which
+    /// takes changed content in place (see <see cref="ReconcileFileAsync"/>), a listed folder keeps its
+    /// <see cref="VirtualFolder"/>, and only the subjects of other files are created. Otherwise every subject is created.
     /// </summary>
     private async Task ScanAsync(CancellationToken cancellationToken)
     {
-        _logger?.LogInformation("Scanning storage...");
+        var location = _clientLocation;
+        var reconcile = location == _scannedLocation;
+        _logger?.LogInformation(reconcile ? "Rescanning storage..." : "Scanning storage...");
 
         var blobs = await Client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
-        _pathRegistry.Clear();
+        // By the registered path with its case: the registry's own lookup ignores case, so on a case-sensitive file
+        // system it would give two files whose names differ only in case the same subject.
+        Dictionary<string, IInterceptorSubject>? registeredSubjects = null;
+        if (reconcile)
+        {
+            registeredSubjects = new Dictionary<string, IInterceptorSubject>(_pathRegistry.Count, StringComparer.Ordinal);
+            foreach (var (subject, path) in _pathRegistry.GetSubjects<IInterceptorSubject>())
+            {
+                registeredSubjects[path] = subject;
+            }
+        }
 
-        var children = new Dictionary<string, IInterceptorSubject>();
+        var entries = new List<(string Path, IInterceptorSubject? Subject)>(blobs.Count);
+        var hashes = new List<(string Path, string Hash)>();
         foreach (var blob in blobs)
         {
             // Filter out hidden files/folders (e.g. .DS_Store, .idea)
@@ -206,66 +330,239 @@ public partial class FluentStorageContainer :
 
             if (blob.IsFolder)
             {
-                _hierarchyManager.PlaceInHierarchy(blob.FullPath, null, children, this);
+                entries.Add((blob.FullPath, null));
                 continue;
             }
 
             try
             {
-                var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
+                var (subject, hash) = registeredSubjects is not null &&
+                    registeredSubjects.TryGetValue(StoragePathRegistry.NormalizePath(blob.FullPath), out var existingSubject)
+                    ? await ReconcileFileAsync(blob, existingSubject, cancellationToken)
+                    : await CreateFileSubjectAsync(blob, cancellationToken);
+
                 if (subject != null)
                 {
-                    _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, this);
-                    _pathRegistry.Register(subject, blob.FullPath);
-
-                    if (Path.GetExtension(blob.FullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+                    entries.Add((blob.FullPath, subject));
+                    if (hash != null)
                     {
-                        try
-                        {
-                            var content = await Client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-                            _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", blob.FullPath);
-                        }
+                        hashes.Add((blob.FullPath, hash));
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(ex, "Failed to create subject for blob: {Path}", blob.FullPath);
             }
         }
 
-        Children = children;
+        // A cancelled scan must not publish: the files it did not reach would lose their subjects.
+        cancellationToken.ThrowIfCancellationRequested();
+        PublishScan(entries, hashes, reconcile);
+        _scannedLocation = location;
         _logger?.LogInformation("Scan complete: Found {Count} subjects.", _pathRegistry.Count);
     }
 
-    private void StartFileWatching()
+    /// <summary>
+    /// Returns the subject for a listed file that has <paramref name="subject"/>, and the hash to store when it
+    /// changed. Unchanged content (same JSON hash, or same size and modification time) keeps the subject as is.
+    /// Changed content is taken in place as a file watcher change would, unless the file now needs a subject of
+    /// another type, which is created. A placeholder tries its type again, as a rebuild would.
+    /// </summary>
+    private async Task<(IInterceptorSubject? Subject, string? Hash)> ReconcileFileAsync(
+        Blob blob, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        _fileWatcher = new StorageFileWatcher(
-            _storageDirectory!,
-            ProcessFileEventAsync,
-            () => ScanAsync(CancellationToken.None),
-            _logger);
+        var path = blob.FullPath;
+        var fullPath = GetFileSystemPath(path);
 
-        _fileWatcher.Start();
+        // The writer refreshes the subject itself, and the file may not hold the written content yet.
+        if (_fileWatcher is { } fileWatcher && fileWatcher.IsOwnWrite(fullPath))
+        {
+            return (subject, null);
+        }
+
+        try
+        {
+            if (subject is UnknownSubject unknownSubject)
+            {
+                var replacement = await CreatePlaceholderReplacementAsync(blob, unknownSubject, cancellationToken);
+                return (replacement ?? unknownSubject, await TryReadHashAsync(path, cancellationToken));
+            }
+
+            if (IsJsonPath(path))
+            {
+                var json = await Client.ReadTextAsync(path, cancellationToken: cancellationToken);
+                var hash = StoragePathRegistry.ComputeHash(json);
+                if (!_pathRegistry.HasHashChanged(path, hash))
+                {
+                    return (subject, null);
+                }
+
+                if (!_subjectFactory.CreatesSameType(subject, path, json))
+                {
+                    return await CreateFileSubjectAsync(blob, cancellationToken);
+                }
+
+                await RefreshSubjectAsync(subject, path, fullPath);
+
+                // The synchronizer stores the hash of the content it applied to a configurable subject.
+                return (subject, subject is IConfigurable ? null : hash);
+            }
+
+            if (!_subjectFactory.CreatesSameType(subject, path, null))
+            {
+                return await CreateFileSubjectAsync(blob, cancellationToken);
+            }
+
+            if (subject is IStorageFile file &&
+                (file.FileSize != (blob.Size ?? 0L) || file.LastModified != blob.LastModificationTime?.UtcDateTime))
+            {
+                await RefreshSubjectAsync(subject, path, fullPath);
+            }
+
+            return (subject, null);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger?.LogWarning(exception, "Failed to reconcile {Path}, keeping its subject.", path);
+            return (subject, null);
+        }
     }
 
-    private Task ProcessFileEventAsync(FileSystemEventArgs e)
+    private async Task<(IInterceptorSubject? Subject, string? Hash)> CreateFileSubjectAsync(
+        Blob blob, CancellationToken cancellationToken)
     {
-        var relativePath = _fileWatcher!.GetRelativePath(e.FullPath);
+        var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
+        var hash = subject != null && IsJsonPath(blob.FullPath)
+            ? await TryReadHashAsync(blob.FullPath, cancellationToken)
+            : null;
 
-        return e.ChangeType switch
+        return (subject, hash);
+    }
+
+    /// <summary>
+    /// Registers the scanned subjects and publishes their hierarchy. With <paramref name="reconcile"/>, subjects that
+    /// are no longer listed are unregistered and the current hierarchy's folders are reused; otherwise the registry
+    /// and hierarchy start empty. Callers hold the hierarchy lock.
+    /// </summary>
+    private void PublishScan(
+        List<(string Path, IInterceptorSubject? Subject)> entries,
+        List<(string Path, string Hash)> hashes,
+        bool reconcile)
+    {
+        // No await from here on: a subject is attached as soon as its folder's children are assigned, and must be
+        // registered by then.
+        if (reconcile)
         {
-            WatcherChangeTypes.Created => HandleFileCreatedAsync(relativePath),
-            WatcherChangeTypes.Changed => HandleFileChangedAsync(relativePath, e.FullPath),
-            WatcherChangeTypes.Deleted => HandleFileDeletedAsync(relativePath),
-            WatcherChangeTypes.Renamed when e is RenamedEventArgs re =>
-                HandleFileRenamedAsync(relativePath, _fileWatcher.GetRelativePath(re.OldFullPath)),
-            _ => Task.CompletedTask
-        };
+            var listedSubjects = new HashSet<IInterceptorSubject>(entries.Count, ReferenceEqualityComparer.Instance);
+            foreach (var (_, subject) in entries)
+            {
+                if (subject != null)
+                {
+                    listedSubjects.Add(subject);
+                }
+            }
+
+            foreach (var (subject, path) in _pathRegistry.GetSubjects<IInterceptorSubject>())
+            {
+                if (!listedSubjects.Contains(subject))
+                {
+                    _pathRegistry.Unregister(subject);
+                }
+            }
+        }
+        else
+        {
+            _pathRegistry.Clear();
+        }
+
+        foreach (var (path, subject) in entries)
+        {
+            if (subject != null && !_pathRegistry.TryGetPath(subject, out _))
+            {
+                _pathRegistry.Register(subject, path);
+            }
+        }
+
+        foreach (var (path, hash) in hashes)
+        {
+            _pathRegistry.UpdateHash(path, hash);
+        }
+
+        var children = _hierarchyManager.BuildHierarchy(
+            entries, reconcile ? Children : new Dictionary<string, IInterceptorSubject>(), this);
+
+        if (!ReferenceEquals(children, Children))
+        {
+            Children = children;
+        }
+    }
+
+    // Callers hold _hierarchyLock.
+    private async Task<string?> TryReadHashAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var content = await Client.ReadTextAsync(path, cancellationToken: cancellationToken);
+            return StoragePathRegistry.ComputeHash(content);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger?.LogWarning(exception, "Failed to compute hash for: {Path}", path);
+            return null;
+        }
+    }
+
+    private static bool IsJsonPath(string path)
+        => Path.GetExtension(path).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase);
+
+    // Callers hold _hierarchyLock.
+    private void StartFileWatching()
+    {
+        StorageFileWatcher? watcher = null;
+        watcher = new StorageFileWatcher(
+            _storageDirectory!,
+            e => ProcessFileEventAsync(watcher!, e),
+            () => RunLockedAsync(() => ScanAsync(CancellationToken.None)),
+            _logger);
+
+        // Exchanged rather than assigned because StopAsync clears the field without the lock.
+        Interlocked.Exchange(ref _fileWatcher, watcher)?.Dispose();
+        watcher.Start();
+    }
+
+    private Task ProcessFileEventAsync(StorageFileWatcher watcher, FileSystemEventArgs e)
+        => RunLockedAsync(() =>
+        {
+            // Close over the watcher that raised the event rather than reading the mutable _fileWatcher
+            // field, which a concurrent reconnect may have already reassigned or cleared.
+            var relativePath = watcher.GetRelativePath(e.FullPath);
+
+            return e.ChangeType switch
+            {
+                WatcherChangeTypes.Created => HandleFileCreatedAsync(relativePath),
+                WatcherChangeTypes.Changed => HandleFileChangedAsync(relativePath, e.FullPath),
+                WatcherChangeTypes.Deleted => HandleFileDeletedAsync(relativePath),
+                WatcherChangeTypes.Renamed when e is RenamedEventArgs re =>
+                    HandleFileRenamedAsync(relativePath, watcher.GetRelativePath(re.OldFullPath)),
+                _ => Task.CompletedTask
+            };
+        });
+
+    private async Task RunLockedAsync(Func<Task> action, CancellationToken cancellationToken = default)
+    {
+        await _hierarchyLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_disposed)
+            {
+                await action();
+            }
+        }
+        finally
+        {
+            _hierarchyLock.Release();
+        }
     }
 
     private async Task HandleFileCreatedAsync(string relativePath)
@@ -277,17 +574,9 @@ public partial class FluentStorageContainer :
 
         if (subject != null)
         {
-            if (Path.GetExtension(relativePath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+            if (IsJsonPath(relativePath) && await TryReadHashAsync(relativePath, CancellationToken.None) is { } hash)
             {
-                try
-                {
-                    var content = await _client!.ReadTextAsync(relativePath);
-                    _pathRegistry.UpdateHash(relativePath, StoragePathRegistry.ComputeHash(content));
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", relativePath);
-                }
+                _pathRegistry.UpdateHash(relativePath, hash);
             }
 
             // Use reusable helper to add to hierarchy
@@ -299,10 +588,30 @@ public partial class FluentStorageContainer :
 
     private async Task HandleFileChangedAsync(string relativePath, string fullPath)
     {
-        if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
-            return;
+        if (_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
+        {
+            await RefreshSubjectAsync(existingSubject, relativePath, fullPath);
+        }
+    }
 
-        if (existingSubject is IStorageFile storageFile)
+    /// <summary>
+    /// Makes the subject of a changed file take its content. Callers hold the hierarchy lock.
+    /// </summary>
+    private async Task RefreshSubjectAsync(IInterceptorSubject existingSubject, string relativePath, string fullPath)
+    {
+        // Checked before IStorageFile, which UnknownSubject also implements.
+        if (existingSubject is UnknownSubject unknownSubject)
+        {
+            try
+            {
+                await RecreateAsync(relativePath, unknownSubject, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to recreate unknown subject: {Path}", relativePath);
+            }
+        }
+        else if (existingSubject is IStorageFile storageFile)
         {
             try
             {
@@ -369,26 +678,27 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
-    public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
-    {
-        var fullPath = GetFileSystemPath(path);
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+    public Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
+        => RunLockedAsync(async () =>
+        {
+            var fullPath = GetFileSystemPath(path);
+            _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        var json = _subjectFactory.Serialize(subject);
-        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
+            var json = _subjectFactory.Serialize(subject);
+            _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+            await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
 
-        // Update hierarchy - extracted to reusable method
-        AddToHierarchy(path, subject);
+            // Update hierarchy - extracted to reusable method
+            AddToHierarchy(path, subject);
 
-        _logger?.LogInformation("Added subject to storage: {Path}", path);
-    }
+            _logger?.LogInformation("Added subject to storage: {Path}", path);
+        }, cancellationToken);
 
     /// <summary>
     /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
+    /// Callers hold the hierarchy lock.
     /// </summary>
-    // TODO: Consider adding synchronization (lock) for thread safety if AddSubjectAsync/DeleteSubjectAsync can be called concurrently
     private void AddToHierarchy(string path, IInterceptorSubject subject)
     {
         var children = new Dictionary<string, IInterceptorSubject>(Children);
@@ -401,10 +711,11 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// Removes a subject from the hierarchy. Reusable helper for delete operations and file watcher events.
+    /// Callers hold the hierarchy lock.
     /// </summary>
     private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
     {
-        _pathRegistry.Unregister(path);
+        _pathRegistry.Unregister(subject);
 
         var children = new Dictionary<string, IInterceptorSubject>(Children);
         _hierarchyManager.RemoveFromHierarchy(path, subject, children);
@@ -448,35 +759,34 @@ public partial class FluentStorageContainer :
         await Client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
         _logger?.LogDebug("Wrote blob to storage: {Path}", path);
 
-        // Notify the file subject to reload its in-memory state
-        if (_pathRegistry.TryGetSubject(path, out var subject) && subject is IStorageFile file)
-        {
-            await file.OnFileChangedAsync(cancellationToken);
-        }
+        // The own-write mark suppresses the watcher event, so the subject now registered at the path is
+        // refreshed here. It may not be the caller: a placeholder upgraded meanwhile stays in use by the UI.
+        await RunLockedAsync(() => HandleFileChangedAsync(path, fullPath), cancellationToken);
     }
 
     /// <summary>
     /// IStorageContainer - Deletes a blob from storage and removes from Children.
     /// </summary>
-    public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
-    {
-        // Get subject BEFORE deleting (needed for hierarchy removal)
-        if (!_pathRegistry.TryGetSubject(path, out var subject))
+    public Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
+        => RunLockedAsync(async () =>
         {
-            _logger?.LogWarning("Cannot delete blob - subject not found in registry: {Path}", path);
-            return;
-        }
+            // Get subject BEFORE deleting (needed for hierarchy removal)
+            if (!_pathRegistry.TryGetSubject(path, out var subject))
+            {
+                _logger?.LogWarning("Cannot delete blob - subject not found in registry: {Path}", path);
+                return;
+            }
 
-        var fullPath = GetFileSystemPath(path);
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+            var fullPath = GetFileSystemPath(path);
+            _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        await Client.DeleteAsync(path, cancellationToken: cancellationToken);
+            await Client.DeleteAsync(path, cancellationToken: cancellationToken);
 
-        // Remove from hierarchy - uses reusable helper
-        RemoveFromHierarchy(path, subject);
+            // Remove from hierarchy - uses reusable helper
+            RemoveFromHierarchy(path, subject);
 
-        _logger?.LogDebug("Deleted blob from storage: {Path}", path);
-    }
+            _logger?.LogDebug("Deleted blob from storage: {Path}", path);
+        }, cancellationToken);
 
     /// <summary>
     /// Opens the create subject wizard to add a new subject to this storage.
@@ -497,10 +807,204 @@ public partial class FluentStorageContainer :
         await DeleteBlobAsync(path, cancellationToken);
     }
 
+    private void SubscribeToTypeChanges()
+    {
+        if (_typeProvider is not null)
+        {
+            // Removing first keeps a reconnect from subscribing twice.
+            _typeProvider.TypesChanged -= OnTypesChanged;
+            _typeProvider.TypesChanged += OnTypesChanged;
+
+            // Dispose does not take the lock, so it may have unsubscribed just before the line above.
+            if (_disposed)
+            {
+                _typeProvider.TypesChanged -= OnTypesChanged;
+            }
+        }
+    }
+
+    private void UnsubscribeFromTypeChanges()
+    {
+        if (_typeProvider is not null)
+        {
+            _typeProvider.TypesChanged -= OnTypesChanged;
+        }
+    }
+
+    private void OnTypesChanged(object? sender, EventArgs e)
+    {
+        // Raised on the thread adding the types, so the pass runs elsewhere. A pass that has not yet read
+        // the registry also covers these types, so no second one is queued.
+        if (Interlocked.Exchange(ref _upgradePending, 1) == 0)
+        {
+            // Deferred here, synchronously, while the provider that added the types still defers startup, so
+            // startup completes only once the real subjects replaced their placeholders.
+            var startupDeferral = ((IInterceptorSubject)this).Context.DeferStartupCompletion();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await UpgradeUnknownSubjectsAsync();
+                }
+                finally
+                {
+                    startupDeferral.Dispose();
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Recreates every <see cref="UnknownSubject"/> that has a type name from its file and replaces it when the result differs,
+    /// and parses again every <see cref="MarkdownFile"/> with a subject block whose type is now loaded.
+    /// </summary>
+    internal async Task UpgradeUnknownSubjectsAsync()
+    {
+        try
+        {
+            await RunLockedAsync(async () =>
+            {
+                // Cleared before reading the registry so types added during this pass queue another one.
+                Interlocked.Exchange(ref _upgradePending, 0);
+
+                if (_client is null)
+                {
+                    return;
+                }
+
+                foreach (var (unknownSubject, path) in _pathRegistry.GetSubjects<UnknownSubject>())
+                {
+                    // Invalid JSON does not heal when types change; file changes and writes recreate it.
+                    if (string.IsNullOrEmpty(unknownSubject.TypeName))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        await RecreateAsync(path, unknownSubject, CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger?.LogWarning(exception, "Failed to upgrade unknown subject: {Path}", path);
+                    }
+                }
+
+                foreach (var (markdownFile, path) in _pathRegistry.GetSubjects<MarkdownFile>())
+                {
+                    if (!markdownFile.UnresolvedSubjectTypeNames.Any(IsTypeLoaded))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        // Parsing again adds the subject blocks that were skipped while their type was missing.
+                        await markdownFile.OnFileChangedAsync(CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger?.LogWarning(exception, "Failed to refresh markdown file: {Path}", path);
+                    }
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogError(exception, "Failed to upgrade unknown subjects in storage.");
+        }
+    }
+
+    private bool IsTypeLoaded(string typeName)
+    {
+        return _typeProvider is null || _typeProvider.TryGetType(typeName, out _);
+    }
+
+    // Callers hold _hierarchyLock.
+    private async Task RecreateAsync(string path, UnknownSubject unknownSubject, CancellationToken cancellationToken)
+    {
+        // Another swap may have replaced the placeholder while the caller waited for the lock.
+        if (!_pathRegistry.TryGetSubject(path, out var currentSubject) || !ReferenceEquals(currentSubject, unknownSubject))
+        {
+            return;
+        }
+
+        var replacement = await CreatePlaceholderReplacementAsync(new Blob(path), unknownSubject, cancellationToken);
+        if (replacement is null)
+        {
+            return;
+        }
+
+        // Read before the swap: a nested replacement is attached as soon as its folder's children are assigned,
+        // so no await may separate that from the registry update.
+        var hash = await TryReadHashAsync(path, cancellationToken);
+
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        if (!_hierarchyManager.ReplaceInHierarchy(path, unknownSubject, replacement, children))
+        {
+            // The placeholder lost its key to another entry when it was placed, so it has no place to take.
+            _logger?.LogDebug("Skipping recreation of {Path}: the placeholder is not in the hierarchy.", path);
+            return;
+        }
+
+        _pathRegistry.Unregister(unknownSubject);
+        _pathRegistry.Register(replacement, path);
+        if (hash is not null)
+        {
+            // After Register because Unregister drops the stored hash.
+            _pathRegistry.UpdateHash(path, hash);
+        }
+
+        Children = children;
+
+        _logger?.LogInformation("Recreated {Path} as {Type}.", path, replacement.GetType().FullName);
+    }
+
+    /// <summary>
+    /// Creates the subject of a placeholder's file. Returns null when the file still gives a placeholder, whose type
+    /// name and reason <paramref name="unknownSubject"/> then takes over, so the UI does not churn. Callers hold the
+    /// hierarchy lock.
+    /// </summary>
+    private async Task<IInterceptorSubject?> CreatePlaceholderReplacementAsync(
+        Blob blob, UnknownSubject unknownSubject, CancellationToken cancellationToken)
+    {
+        var replacement = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
+        if (replacement is not (null or UnknownSubject))
+        {
+            return replacement;
+        }
+
+        if (replacement is UnknownSubject candidate)
+        {
+            unknownSubject.TypeName = candidate.TypeName;
+            unknownSubject.Reason = candidate.Reason;
+        }
+
+        await unknownSubject.OnFileChangedAsync(cancellationToken);
+        return null;
+    }
+
+    private readonly record struct StorageLocation(string Type, string? Directory);
+
+    /// <summary>
+    /// Stops reacting to type and file changes. A later start connects again.
+    /// </summary>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Without the lock: a detached storage is stopped from the host's queue, which must not wait on a
+        // long-running storage event.
+        UnsubscribeFromTypeChanges();
+        Interlocked.Exchange(ref _fileWatcher, null)?.Dispose();
+
+        await base.StopAsync(cancellationToken);
+    }
 
     public override void Dispose()
     {
-        _fileWatcher?.Dispose();
+        _disposed = true;
+        UnsubscribeFromTypeChanges();
+
+        Interlocked.Exchange(ref _fileWatcher, null)?.Dispose();
         _client?.Dispose();
         _client = null;
         Status = StorageStatus.Disconnected;

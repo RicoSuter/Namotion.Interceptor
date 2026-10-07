@@ -1,6 +1,6 @@
 # Namotion.NuGet.Plugins
 
-A standalone .NET library for loading NuGet packages as plugins at runtime. It provides isolated assembly contexts, transitive dependency resolution, and semantic version compatibility validation -- all without runtime reflection or manual assembly management.
+A standalone .NET library for loading NuGet packages as plugins at runtime. It provides isolated assembly contexts, transitive dependency resolution, and semantic version compatibility validation, all without runtime reflection or manual assembly management.
 
 ## Features
 
@@ -81,14 +81,14 @@ foreach (var type in loader.GetTypes<ISensorDevice>())
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 | `IncludePrerelease` | `bool` | `false` | Whether to include pre-release package versions when resolving |
 
-The `CacheDirectory` option controls where extracted packages are stored. When omitted, a temporary directory with a unique name is created per loader instance -- packages are re-downloaded on every application restart. Set `CacheDirectory` to a stable path (e.g., `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "plugins")`) to cache packages across restarts. When using multiple `NuGetPluginLoader` instances in the same process, sharing a single `CacheDirectory` is recommended to avoid redundant downloads.
+The `CacheDirectory` option controls where extracted packages are stored. When omitted, a temporary directory with a unique name is created per loader instance: packages are re-downloaded on every application restart. Set `CacheDirectory` to a stable path (e.g., `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "plugins")`) to cache packages across restarts. When using multiple `NuGetPluginLoader` instances in the same process, sharing a single `CacheDirectory` is recommended to avoid redundant downloads.
 
 ## Host Dependency Resolution
 
 The host dependency map tells the loader which packages and versions the host application already provides. This serves two purposes:
 
-1. **Classification** -- dependencies already in the host are not loaded into plugin-private contexts.
-2. **Validation** -- the loader checks that plugin requirements are compatible with host versions.
+1. **Classification**: dependencies already in the host are not loaded into plugin-private contexts.
+2. **Validation**: the loader checks that plugin requirements are compatible with host versions.
 
 ### FromDepsJson (recommended)
 
@@ -150,7 +150,7 @@ Plugins typically need to share certain packages with the host application so th
 | Plugin author | `plugin.json` manifest | You depend on a third-party contract you don't own |
 | Host author | `IsHostPackage` predicate in loader options | Manual fallback / escape hatch |
 
-All three mechanisms are additive -- a package is host-shared if *any* source declares it so.
+All three mechanisms are additive: a package is host-shared if *any* source declares it so.
 
 ### IsHostPackage predicate
 
@@ -244,7 +244,7 @@ Everything else in the JSON file is consumer-defined and opaque to the loader. T
 }
 ```
 
-In this example, the loader reads `schemaVersion` and `hostDependencies`. The consuming application (e.g., HomeBlaze) reads `minimumHostVersion` and `diRegistrations` from `plugin.PluginManifest` -- no coupling between the loader and any specific consumer.
+In this example, the loader reads `schemaVersion` and `hostDependencies`. The host application reads `minimumHostVersion` and `diRegistrations` from `plugin.PluginManifest`, so the loader is not coupled to any specific host.
 
 ### Accessing the manifest
 
@@ -274,7 +274,7 @@ Feeds are tried in the order they are listed. When searching for a package:
 - If a feed **does not have the package** (not found): the next feed is tried.
 - If a feed **fails** (network error, authentication error): the error propagates immediately. Subsequent feeds are **not** tried as a fallback.
 
-This means feed order implies trust priority. An internal feed listed before nuget.org ensures internal packages are always resolved from the trusted source. If that feed is unreachable, loading fails rather than silently falling back to a public feed -- preventing dependency confusion attacks.
+This means feed order implies trust priority. An internal feed listed before nuget.org ensures internal packages are always resolved from the trusted source. If that feed is unreachable, loading fails rather than silently falling back to a public feed, which prevents dependency confusion attacks.
 
 Feeds can be remote NuGet V3 service index URLs or local folder paths. The NuGet SDK resolves packages from local directories natively, so a folder containing `.nupkg` files works as a feed without any special handling.
 
@@ -357,11 +357,11 @@ The loader distinguishes between two levels of failure:
 
 All failures are isolated to the affected plugin while other plugins continue loading normally:
 
-- **Version conflicts with host dependencies** -- reported in `NuGetPluginLoadResult.Failures`
-- **Incompatible version ranges for shared host packages** -- reported in `NuGetPluginLoadResult.Failures`
-- **Package not found or download error** -- reported in `NuGetPluginLoadResult.Failures`
-- **Dependency resolution failure** -- reported in `NuGetPluginLoadResult.Failures`
-- **Assembly load error within a plugin** -- reported in `NuGetPluginLoadResult.Failures`
+- **Version conflicts with host dependencies**: reported in `NuGetPluginLoadResult.Failures`
+- **Incompatible version ranges for shared host packages**: reported in `NuGetPluginLoadResult.Failures`
+- **Package not found or download error**: reported in `NuGetPluginLoadResult.Failures`
+- **Dependency resolution failure**: reported in `NuGetPluginLoadResult.Failures`
+- **Assembly load error within a plugin**: reported in `NuGetPluginLoadResult.Failures`
 
 ```csharp
 var result = await loader.LoadPluginsAsync(plugins, cancellationToken);
@@ -401,15 +401,15 @@ foreach (var plugin in result.LoadedPlugins)
 
 ## Limitations
 
-- **No native library support** -- the `runtimes/` folder inside NuGet packages is ignored; plugins with native dependencies (e.g., `libgit2sharp`) will not work.
-- **No hot-reload** -- changing a plugin requires unloading and reloading; there is no in-place update mechanism.
-- **No deps.json for AOT or single-file** -- AOT-compiled and single-file published applications do not generate `deps.json`. Use `HostDependencyResolver.FromAssemblies()` instead.
-- **No plugin-to-plugin direct dependencies** -- plugins cannot reference types from other plugins. Use `IsHostPackage` to share contracts via host-loaded packages, or use assembly attributes / plugin.json for automatic discovery.
-- **No plugin signing or trust verification** -- packages are loaded without signature validation.
-- **Host assemblies are permanent** -- external host packages loaded into the default `AssemblyLoadContext` cannot be unloaded by the .NET runtime. They accumulate across plugin reload cycles; a process restart clears them.
-- **`FromAssemblies()` version accuracy** -- the `HostDependencyResolver.FromAssemblies()` fallback uses assembly versions (e.g., `9.0.0.0`) which may diverge from NuGet package versions (e.g., `9.0.5`). Prefer `FromDepsJson()` when available.
-- **Framework reference assemblies** -- framework assemblies (e.g., `System.Text.Json` from the shared runtime) are not listed in `deps.json` as NuGet packages. They are detected at load time via the Trusted Platform Assemblies (TPA) list and do not participate in version conflict detection. In single-file or AOT-published applications, the TPA list is unavailable and framework assemblies will be treated as plugin-private unless explicitly configured via `HostDependencyResolver.FromAssemblies()`.
-- **Assembly version vs. NuGet version** -- third-party packages may have assembly versions that diverge from their NuGet package versions (e.g., assembly version `4.0.0.0` for NuGet version `13.0.3`). The version validation uses NuGet versions from `deps.json`, but runtime assembly binding uses assembly versions. This can cause `FileLoadException` at runtime for third-party host packages that bump their assembly version on every release, even when NuGet version validation passes. Microsoft packages handle this correctly via unification.
+- **No native library support**: the `runtimes/` folder inside NuGet packages is ignored; plugins with native dependencies (e.g., `libgit2sharp`) will not work.
+- **No hot-reload**: changing a plugin requires unloading and reloading; there is no in-place update mechanism.
+- **No deps.json for AOT or single-file**: AOT-compiled and single-file published applications do not generate `deps.json`. Use `HostDependencyResolver.FromAssemblies()` instead.
+- **No plugin-to-plugin direct dependencies**: plugins cannot reference types from other plugins. Use `IsHostPackage` to share contracts via host-loaded packages, or use assembly attributes / plugin.json for automatic discovery.
+- **No plugin signing or trust verification**: packages are loaded without signature validation.
+- **Host assemblies are permanent**: external host packages loaded into the default `AssemblyLoadContext` cannot be unloaded by the .NET runtime. They accumulate across plugin reload cycles; a process restart clears them.
+- **`FromAssemblies()` version accuracy**: the `HostDependencyResolver.FromAssemblies()` fallback uses assembly versions (e.g., `9.0.0.0`) which may diverge from NuGet package versions (e.g., `9.0.5`). Prefer `FromDepsJson()` when available.
+- **Framework reference assemblies**: framework assemblies (e.g., `System.Text.Json` from the shared runtime) are not listed in `deps.json` as NuGet packages. They are detected at load time via the Trusted Platform Assemblies (TPA) list and do not participate in version conflict detection. In single-file or AOT-published applications, the TPA list is unavailable and framework assemblies will be treated as plugin-private unless explicitly configured via `HostDependencyResolver.FromAssemblies()`.
+- **Assembly version vs. NuGet version**: third-party packages may have assembly versions that diverge from their NuGet package versions (e.g., assembly version `4.0.0.0` for NuGet version `13.0.3`). The version validation uses NuGet versions from `deps.json`, but runtime assembly binding uses assembly versions. This can cause `FileLoadException` at runtime for third-party host packages that bump their assembly version on every release, even when NuGet version validation passes. Microsoft packages handle this correctly via unification.
 
 ## Thread Safety
 
@@ -457,8 +457,8 @@ During transitive dependency resolution, the resolver skips dependencies that ar
 
 | Condition | Action |
 |---|---|
-| Package exists in `HostDependencyResolver` (from `DependencyContext`) | Skipped -- not resolved, not downloaded |
-| `IsHostPackage` predicate returns `true` | Skipped -- not resolved, not downloaded |
+| Package exists in `HostDependencyResolver` (from `DependencyContext`) | Skipped: not resolved, not downloaded |
+| `IsHostPackage` predicate returns `true` | Skipped: not resolved, not downloaded |
 
 This means the resolved dependency tree only contains the plugin itself and its genuinely private dependencies.
 
@@ -505,7 +505,7 @@ For each dependency in the resolved tree:
 Union of (a) + (b) + (c) -> classify as host
 ```
 
-Steps (a), (b), and (c) are additive. A package is host-shared if any source declares it so. The existing `HostDependencyResolver` (deps.json detection) continues to handle packages the host already references -- that path is unchanged and does not require discovery.
+Steps (a), (b), and (c) are additive. A package is host-shared if any source declares it so. The existing `HostDependencyResolver` (deps.json detection) continues to handle packages the host already references. That path is unchanged and does not require discovery.
 
 ### Assembly Isolation Model
 
@@ -535,21 +535,21 @@ flowchart TB
 
 Each plugin gets a collectible `AssemblyLoadContext` that overrides `Load()` with a three-step fallback:
 
-1. If the assembly name is classified as host (including framework assemblies detected at load time), return `null` -- this falls back to the default context, ensuring shared type identity.
+1. If the assembly name is classified as host (including framework assemblies detected at load time), return `null`: this falls back to the default context, ensuring shared type identity.
 2. If the assembly name matches a private dependency with a known file path, load it from the package cache.
 3. Otherwise, return `null` to let the default resolution handle it.
 
 The loader also registers a `Resolving` handler on `AssemblyLoadContext.Default` to resolve external host packages (predicate-matched or discovered packages that are not in the host's deps.json but need to be shared across all contexts).
 
-> **Design note:** External host packages loaded into the default `AssemblyLoadContext` share static state across all plugins. This is intentional -- it enables patterns like shared caches, connection pools, and singleton registrations. Plugin authors should be aware that static fields in host-shared packages are process-global.
+> **Design note:** External host packages loaded into the default `AssemblyLoadContext` share static state across all plugins. This is intentional: it enables patterns like shared caches, connection pools, and singleton registrations. Plugin authors should be aware that static fields in host-shared packages are process-global.
 
 #### Host assemblies
 
 Loaded into the default `AssemblyLoadContext`. This category includes:
 
-- **DependencyContext host packages** -- assemblies already present in the host process (NuGet packages and project references from the host's `DependencyContext`). Not downloaded, only version-validated. Their transitive dependencies are skipped during resolution.
-- **External host packages** -- packages matching the `IsHostPackage` predicate or discovered as host-shared via assembly attributes and plugin.json. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook. Their transitive dependencies are also skipped during resolution.
-- **Framework assemblies** -- assemblies from the .NET shared framework (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`) that appear in the Trusted Platform Assemblies (TPA) list. These are detected automatically at load time without explicit configuration, regardless of whether they have been loaded into the process yet.
+- **DependencyContext host packages**: assemblies already present in the host process (NuGet packages and project references from the host's `DependencyContext`). Not downloaded, only version-validated. Their transitive dependencies are skipped during resolution.
+- **External host packages**: packages matching the `IsHostPackage` predicate or discovered as host-shared via assembly attributes and plugin.json. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook. Their transitive dependencies are also skipped during resolution.
+- **Framework assemblies**: assemblies from the .NET shared framework (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`) that appear in the Trusted Platform Assemblies (TPA) list. These are detected automatically at load time without explicit configuration, regardless of whether they have been loaded into the process yet.
 
 Host assemblies are shared across the host application and all plugins. This ensures that when a plugin implements a host-defined interface (e.g., `ISensorDevice`), the type identity is the same across all contexts.
 
@@ -557,9 +557,9 @@ Host assemblies are shared across the host application and all plugins. This ens
 
 Loaded into an isolated, collectible `AssemblyLoadContext` per plugin. Everything not classified as a host assembly is plugin-private. Each plugin gets its own copy, enabling:
 
-- **Independent versions** -- Plugin A can use `Newtonsoft.Json 12.x` while Plugin B uses `13.x`
-- **No cross-contamination** -- a bug in one plugin's dependency does not affect others
-- **Clean unloading** -- disposing a plugin unloads its entire context
+- **Independent versions**: Plugin A can use `Newtonsoft.Json 12.x` while Plugin B uses `13.x`
+- **No cross-contamination**: a bug in one plugin's dependency does not affect others
+- **Clean unloading**: disposing a plugin unloads its entire context
 
 #### Plugins
 
@@ -620,8 +620,8 @@ public record NuGetPluginReference(
     string? Version = null);
 ```
 
-- `PackageName` -- the NuGet package ID.
-- `Version` -- the desired version (optional; resolves to latest if null).
+- `PackageName`: the NuGet package ID.
+- `Version`: the desired version (optional; resolves to latest if null).
 
 ### NuGetPluginLoadResult (`Namotion.NuGet.Plugins`)
 
@@ -731,9 +731,9 @@ Uses `Microsoft.Extensions.DependencyModel` to read dependency information. Both
 
 The following features are not yet implemented but may be added in future versions:
 
-- **Package signature verification** -- validate NuGet package signatures to ensure packages haven't been tampered with.
-- **Additional authentication schemes** -- support for bearer tokens and other credential types beyond API keys.
-- **Concurrent plugin loading** -- parallel resolution and download of independent plugins.
-- **Package extraction cancellation** -- `CancellationToken` support during package extraction.
-- **Native library support** -- override `LoadUnmanagedDll` in `PluginAssemblyLoadContext` to resolve native libraries from `runtimes/{rid}/native/` folders inside NuGet packages, enabling plugins with native dependencies (e.g., SkiaSharp, SQLite).
-- **Satellite assembly support** -- resolve culture-specific resource assemblies from `lib/{tfm}/{culture}/` folders for plugins that ship localized translations.
+- **Package signature verification**: validate NuGet package signatures to ensure packages haven't been tampered with.
+- **Additional authentication schemes**: support for bearer tokens and other credential types beyond API keys.
+- **Concurrent plugin loading**: parallel resolution and download of independent plugins.
+- **Package extraction cancellation**: `CancellationToken` support during package extraction.
+- **Native library support**: override `LoadUnmanagedDll` in `PluginAssemblyLoadContext` to resolve native libraries from `runtimes/{rid}/native/` folders inside NuGet packages, enabling plugins with native dependencies (e.g., SkiaSharp, SQLite).
+- **Satellite assembly support**: resolve culture-specific resource assemblies from `lib/{tfm}/{culture}/` folders for plugins that ship localized translations.

@@ -9,19 +9,19 @@ status: Planned
 **Status: Planned**
 
 **Prerequisites:**
-- [MCP Server](../../../../../docs/plans/mcp-server.md) — core `Namotion.Interceptor.Mcp` package
-- [HomeBlaze MCP Extensions](mcp-extensions.md) — HomeBlaze-specific tools, enrichers, type/path providers
+- [MCP Server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md): core `Namotion.Interceptor.Mcp` package
+- [HomeBlaze MCP tools](../architecture/design/ai.md#mcp-tool-layering-implemented): HomeBlaze-specific tools, enrichers, type and path providers
 
 ## Problem
 
-HomeBlaze exposes the knowledge graph to external AI agents via MCP, but has no built-in agent capability. Operators must run external tools (Claude Code, Claude Desktop) to get AI-powered analysis and automation. Built-in agents would run inside the HomeBlaze process as subjects — visible in the graph, configurable via the UI, reactive to property changes.
+HomeBlaze exposes the knowledge graph to external AI agents via MCP, but has no built-in agent capability. Operators must run external tools (Claude Code, Claude Desktop) to get AI-powered analysis and automation. Built-in agents would run inside the HomeBlaze process as subjects: visible in the graph, configurable via the UI, reactive to property changes.
 
 ## Package Structure
 
 | Package | Contents |
 |---|---|
 | `HomeBlaze.AI.Abstractions` | `ILlmProvider`, `ILlmAgent` interfaces |
-| `HomeBlaze.AI` | Provider subjects, `LlmAgentBase`, `LlmAgent`, [MCP extensions](mcp-extensions.md) |
+| `HomeBlaze.AI` | Provider subjects, `LlmAgentBase`, `LlmAgent`, [MCP tools](../architecture/design/ai.md#mcp-tool-layering-implemented) |
 
 ### Dependency Flow
 
@@ -33,9 +33,9 @@ HomeBlaze.AI → Namotion.Interceptor.Mcp → Namotion.Interceptor.Registry
 
 ## Design
 
-### ILlmProvider — Shared LLM Configuration
+### ILlmProvider: Shared LLM Configuration
 
-A provider subject holds credentials and creates `IChatClient` instances. Multiple agents reference one provider by path. Each LLM service has its own subject type — no string-based switching, and each type only exposes the configuration fields it needs.
+A provider subject holds credentials and creates `IChatClient` instances. Multiple agents reference one provider by path. Each LLM service has its own subject type: no string-based switching, and each type only exposes the configuration fields it needs.
 
 ```csharp
 // HomeBlaze.AI.Abstractions
@@ -86,9 +86,9 @@ public partial class OllamaProvider : ILlmProvider, ITitleProvider
 }
 ```
 
-New providers (Azure OpenAI, AWS Bedrock, etc.) are added as new subject types — in `HomeBlaze.AI` or in third-party plugins.
+New providers (Azure OpenAI, AWS Bedrock, etc.) are added as new subject types, in `HomeBlaze.AI` or in third-party plugins.
 
-### ILlmAgent — Agent Interface
+### ILlmAgent: Agent Interface
 
 ```csharp
 // HomeBlaze.AI.Abstractions
@@ -101,7 +101,7 @@ public interface ILlmAgent
 }
 ```
 
-### LlmAgentBase — Base Class
+### LlmAgentBase: Base Class
 
 Base class providing MAF `ChatClientAgent` composition, run loop, queue-one concurrency, error handling, and state properties. Developers subclass this directly for specialized agents with custom tools and domain logic.
 
@@ -130,9 +130,9 @@ public abstract partial class LlmAgentBase : BackgroundService, ILlmAgent, ITitl
 }
 ```
 
-### LlmAgent — Generic Configurable Agent
+### LlmAgent: Generic Configurable Agent
 
-A config-driven subclass of `LlmAgentBase`. Operators create instances via the UI or JSON files — no C# code needed per agent.
+A config-driven subclass of `LlmAgentBase`. Operators create instances via the UI or JSON files: no C# code needed per agent.
 
 ```csharp
 // HomeBlaze.AI
@@ -196,7 +196,7 @@ When an agent runs (timer or property change trigger):
 4. Build prompt:
    - System: Instructions (from GetInstructions())
    - User: "Current state of watched paths:" + pre-fetched state
-5. Call ChatClientAgent.RunAsync() — MAF handles the tool-calling loop internally:
+5. Call ChatClientAgent.RunAsync(). MAF handles the tool-calling loop internally:
    - May call read tools (query, get_property) to dig deeper
    - May call invoke_method to send notifications
    - Returns AgentResponse with analysis text
@@ -205,7 +205,7 @@ When an agent runs (timer or property change trigger):
 
 ### Tool Access
 
-Built-in agents reuse `McpToolInfo` handlers (from core MCP + [HomeBlaze MCP extensions](mcp-extensions.md)) wrapped as `AIFunction` objects — direct in-process calls, no MCP protocol overhead.
+Built-in agents reuse `McpToolInfo` handlers (from core MCP and the [HomeBlaze MCP tools](../architecture/design/ai.md#mcp-tool-layering-implemented)) wrapped as `AIFunction` objects. These are direct in-process calls without MCP protocol overhead.
 
 Stage 1 restricts write access:
 
@@ -237,13 +237,13 @@ bool IsMethodAllowed(string path, string method)
 
 This lets agents send alerts (email, push, webhook) without being able to modify the knowledge graph.
 
-### Concurrency — Queue One
+### Concurrency: Queue One
 
 A `_rerunRequested` flag handles concurrent triggers. If a trigger fires while the agent is already running, the flag is set. On completion, if the flag is set, clear it and run again with fresh state. No unbounded queue, no wasted LLM calls from cancellation, re-run always sees the latest state.
 
 ### Error Handling
 
-On failure (LLM API down, rate limited, timeout), set `Status` to error message, log, and wait for the next trigger. No retry — the poll loop provides implicit retry.
+On failure (LLM API down, rate limited, timeout), set `Status` to error message, log, and wait for the next trigger. No retry: the poll loop provides implicit retry.
 
 ## Evolution Path
 
@@ -258,11 +258,11 @@ On failure (LLM API down, rate limited, timeout), set `Status` to error message,
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | LLM framework | MAF `ChatClientAgent` wrapping `IChatClient` | Built-in tool-calling loop, session management, standard .NET AI abstraction |
-| Agent ↔ MAF | Composition — `LlmAgentBase` owns `ChatClientAgent` internally | Avoids fighting two frameworks' lifecycle models |
-| Provider interface | `ILlmProvider` with `CreateChatClient()` only (no `Model`) | Consumer doesn't care which model — that's a provider config detail |
+| Agent ↔ MAF | Composition: `LlmAgentBase` owns `ChatClientAgent` internally | Avoids fighting two frameworks' lifecycle models |
+| Provider interface | `ILlmProvider` with `CreateChatClient()` only (no `Model`) | Consumer doesn't care which model: that's a provider config detail |
 | Provider as subject | Referenced by path | Centralized credentials, multiple agents share one provider |
 | Base class from day one | `LlmAgentBase` for specialized agents, `LlmAgent` for config-driven | Developers can subclass immediately, no waiting for later stages |
-| Tool reuse | Transport-agnostic `McpToolInfo` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](../../../../../docs/plans/mcp-server.md) |
+| Tool reuse | Transport-agnostic `McpToolInfo` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](https://github.com/RicoSuter/Namotion.Interceptor/blob/master/docs/mcp.md) |
 | Safe by default | Read-only + notify, write access gated on authorization | Prevents accidental graph modification |
 | Pre-fetched context | Watch paths queried before LLM call | Reduces round-trips and API cost |
 | Per-run agent | Fresh `ChatClientAgent` per run, no session persistence | Simpler, cheaper, no conversation drift |

@@ -1,4 +1,7 @@
+using System.Reflection;
+using System.Text.Json;
 using FluentStorage.Blobs;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -70,6 +73,35 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
+    /// Returns whether creating a subject for the file at <paramref name="path"/> would give one of the type of
+    /// <paramref name="subject"/>, so the subject can take the file's current content in place. <paramref name="json"/>
+    /// is the content of a JSON file and is ignored for other files. Content that is not valid JSON counts as the
+    /// same type, so a subject is kept while its file is being written.
+    /// </summary>
+    public bool CreatesSameType(IInterceptorSubject subject, string path, string? json)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        if (extension != FileExtensions.Json)
+        {
+            return subject.GetType() == (_typeRegistry.ResolveTypeForExtension(extension) ?? typeof(GenericFile));
+        }
+
+        string? typeName;
+        try
+        {
+            typeName = json is null ? null : TryReadTypeName(json);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+
+        return typeName is null
+            ? subject is JsonFile
+            : subject is IConfigurable && _serializer.FindType(typeName) == subject.GetType();
+    }
+
+    /// <summary>
     /// Serializes a subject to JSON.
     /// </summary>
     public string Serialize(IInterceptorSubject subject)
@@ -82,6 +114,33 @@ internal sealed class FileSubjectFactory
         CancellationToken cancellationToken)
     {
         var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
+
+        string? typeName;
+        try
+        {
+            typeName = TryReadTypeName(json);
+        }
+        catch (JsonException exception)
+        {
+            // A file with a $type marker is a device file whose content is corrupt, not plain data:
+            // it stays visible as a placeholder so the scan does not silently misclassify it as a JsonFile.
+            if (!json.Contains("\"$type\"", StringComparison.Ordinal))
+            {
+                return new JsonFile(storage, blob.FullPath);
+            }
+
+            _logger?.LogWarning(exception, "Invalid JSON with a $type marker in: {Path}", blob.FullPath);
+            var invalidJsonSubject = new UnknownSubject(storage, blob.FullPath, string.Empty, $"Invalid JSON: {exception.Message}");
+            UpdateFileMetadata(invalidJsonSubject, blob);
+            return invalidJsonSubject;
+        }
+
+        if (typeName is null)
+        {
+            return new JsonFile(storage, blob.FullPath);
+        }
+
+        string reason;
         try
         {
             var subject = _serializer.Deserialize(json);
@@ -90,14 +149,36 @@ internal sealed class FileSubjectFactory
                 // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                 return (IInterceptorSubject)subject;
             }
+
+            reason = _serializer.FindType(typeName) is null
+                ? UnknownSubject.TypeNotLoadedReason
+                : UnknownSubject.TypeNotConfigurableReason;
         }
         catch (Exception exception)
         {
-            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", blob.FullPath);
+            _logger?.LogError(exception, "Failed to create subject of type {Type} from: {Path}", typeName, blob.FullPath);
+
+            // Prefer the constructor's own message over an inner cause; unwrap only reflection's wrapper.
+            reason = exception is TargetInvocationException { InnerException: { } inner } ? inner.Message : exception.Message;
         }
 
-        // Create JsonFile for plain JSON
-        return new JsonFile(storage, blob.FullPath);
+        var unknownSubject = new UnknownSubject(storage, blob.FullPath, typeName, reason);
+        UpdateFileMetadata(unknownSubject, blob);
+        return unknownSubject;
+    }
+
+    private static string? TryReadTypeName(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("$type", out var typeElement) ||
+            typeElement.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        var typeName = typeElement.GetString();
+        return string.IsNullOrWhiteSpace(typeName) ? null : typeName;
     }
 
     /// <summary>
@@ -130,7 +211,7 @@ internal sealed class FileSubjectFactory
             file.FileSize = blob.Size ?? 0L;
             if (blob.LastModificationTime.HasValue)
             {
-                file.LastModified = blob.LastModificationTime.Value.DateTime;
+                file.LastModified = blob.LastModificationTime.Value.UtcDateTime;
             }
         }
     }

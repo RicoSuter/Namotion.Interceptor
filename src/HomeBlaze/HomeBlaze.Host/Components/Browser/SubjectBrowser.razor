@@ -6,6 +6,7 @@
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
+@inject SubjectPathResolver PathResolver
 
 @implements IDisposable
 @implements IAsyncDisposable
@@ -43,17 +44,20 @@
 @code {
     private const decimal PaneWidth = 400;
 
-    [Parameter]
-    public string? Path { get; set; }
-
     private readonly List<SubjectPane> _panes = [];
     private readonly List<BreadcrumbItem> _breadcrumbs = [];
 
-    private string? _lastNavigatedUrl;
+    // The requested path below /browser with its segments escaped as in the URL, so that a key containing
+    // '/' or '%' stays one segment and is unescaped exactly once, by the path resolver. The panes follow it
+    // as far as it resolves and extend when the rest of it appears.
+    private string _targetPath = "";
+    private string? _lastNavigatedPath;
     private bool _scrollToLastPane;
 
     private IJSObjectReference? _jsModule;
     private ISubjectRegistry? _subjectRegistry;
+    private PropertyChangeWatcher? _childrenWatcher;
+    private PropertyReference? _nextProperty;
 
     protected override void OnInitialized()
     {
@@ -63,10 +67,10 @@
 
     protected override void OnParametersSet()
     {
-        // Only rebuild if this is the initial load (no panes yet)
-        // or if Path changed externally (not from our own navigation)
+        // Only the initial load builds here; later URL changes arrive through OnLocationChanged.
         if (_panes.Count == 0)
         {
+            _targetPath = NavigationManager.GetEscapedPathBelow(NavigationManager.Uri, "browser") ?? "";
             RebuildFromPath();
         }
     }
@@ -91,39 +95,51 @@
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
-        var uri = new Uri(e.Location);
-
-        // Skip if this is our own programmatic navigation
-        if (_lastNavigatedUrl != null && uri.AbsolutePath == _lastNavigatedUrl)
+        var path = NavigationManager.GetEscapedPathBelow(e.Location, "browser");
+        if (path is null)
         {
-            _lastNavigatedUrl = null;
             return;
         }
 
-        var segments = uri.AbsolutePath.TrimStart('/').Split('/');
-        if (segments.Length > 0 && segments[0] == "browser")
+        // Skip if this is our own programmatic navigation
+        if (_lastNavigatedPath != null && path == _lastNavigatedPath)
         {
-            var decodedSegments = segments.Skip(1).Select(Uri.UnescapeDataString);
-            Path = string.Join("/", decodedSegments);
-           
-            RebuildFromPath();
-            
-            InvokeAsync(StateHasChanged);
+            _lastNavigatedPath = null;
+            return;
         }
+
+        _targetPath = path;
+        RebuildFromPath();
+
+        InvokeAsync(StateHasChanged);
     }
 
     private void RebuildFromPath()
     {
-        _panes.Clear();
-        _breadcrumbs.Clear();
+        if (Root != null)
+        {
+            _subjectRegistry = Root.Context.GetService<ISubjectRegistry>();
+            _childrenWatcher ??= new PropertyChangeWatcher(
+                Root.Context, InvokeAsync, OnPaneChildrenChanged, exception => _ = DispatchExceptionAsync(exception));
+        }
 
-        if (Root == null) return;
+        _nextProperty = BuildPanes(_targetPath, _panes);
+        BuildBreadcrumbs(_panes, _breadcrumbs);
+        WatchPaneChildren();
+    }
 
-        // Get registry from root's context
-        _subjectRegistry = RootContext?.GetService<ISubjectRegistry>();
+    /// <summary>
+    /// Builds the panes for the part of the escaped path that resolves.
+    /// </summary>
+    /// <returns>The property that would hold the next pane when the path does not fully resolve, otherwise null.</returns>
+    private PropertyReference? BuildPanes(string path, List<SubjectPane> panes)
+    {
+        panes.Clear();
+
+        if (Root == null) return null;
 
         // Always show root as first pane
-        _panes.Add(new SubjectPane
+        panes.Add(new SubjectPane
         {
             Subject = Root,
             DisplayName = "Root",
@@ -132,97 +148,44 @@
             Index = null
         });
 
-        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
+        if (string.IsNullOrEmpty(path))
+            return null;
 
-        if (string.IsNullOrEmpty(Path))
-            return;
+        var resolution = PathResolver.ResolvePartially(path, PathStyle.Route, Root);
 
-        // Use RoutePathResolver to navigate the path and build panes
-        var pathSegments = Path.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Select(Uri.UnescapeDataString)
-            .ToArray();
-
-        IInterceptorSubject currentSubject = Root;
-        var currentPathParts = new List<string>();
-        var currentPath = "/";
-        var i = 0;
-
-        while (i < pathSegments.Length)
+        var parentPath = "";
+        foreach (var step in resolution.Steps)
         {
-            var propertyName = pathSegments[i++];
-            var registered = currentSubject.TryGetRegisteredSubject();
-            var property = registered?.TryGetProperty(propertyName);
+            var propertyName = step.Property.Name;
+            var panePath = step.Index is null
+                ? $"{parentPath}/{propertyName}"
+                : InlinePathsAttribute.IsInlinePathsProperty(step.Property.Subject.GetType(), propertyName)
+                    ? $"{parentPath}/{step.Index}"
+                    : $"{parentPath}/{propertyName}/{step.Index}";
 
-            if (property is not { CanContainSubjects: true })
-            {
-                // Try [InlinePaths] fallback
-                var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(currentSubject.GetType());
-                if (inlinePathsPropertyName != null)
-                {
-                    property = registered?.TryGetProperty(inlinePathsPropertyName);
-                    if (property is { CanContainSubjects: true })
-                    {
-                        // This segment is actually a child key, not a property name
-                        var childKey = propertyName;
-                        var child = SubjectPathResolverExtensions.FindChildByIndex(property, childKey);
-                        if (child != null)
-                        {
-                            currentPathParts.Add(childKey);
-                            currentPath = $"{currentPath}{childKey}/";
-                            var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                            var childDisplayName = GetChildDisplayName(property, child, childKey);
-                            _breadcrumbs.Add(new BreadcrumbItem(childDisplayName, breadcrumbPath));
-                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childDisplayName, Path = currentPath.TrimEnd('/'), PropertyName = inlinePathsPropertyName, Index = childKey });
-                            currentSubject = child;
-                            continue;
-                        }
-                    }
-                }
-                break;
-            }
+            var displayName = GetChildDisplayName(step.Property, step.Subject, step.Index);
+            panes.Add(new SubjectPane { Subject = step.Subject, DisplayName = displayName, Path = panePath, PropertyName = propertyName, Index = step.Index });
+            parentPath = panePath;
+        }
 
-            currentPathParts.Add(propertyName);
+        return resolution.NextProperty;
+    }
 
-            // Check for collections/dictionaries BEFORE subject references
-            // because IDictionary<string, IInterceptorSubject> is an interface (IsSubjectReference would be true)
-            // but it's actually a dictionary of subjects, not a single subject reference
-            if (property.IsSubjectDictionary || property.IsSubjectCollection)
-            {
-                // Collection/Dictionary - next segment is the index/key
-                if (i >= pathSegments.Length)
-                    break;
+    private static void BuildBreadcrumbs(List<SubjectPane> panes, List<BreadcrumbItem> breadcrumbs)
+    {
+        breadcrumbs.Clear();
+        if (panes.Count == 0)
+        {
+            return;
+        }
 
-                var indexStr = pathSegments[i++];
-                var child = SubjectPathResolverExtensions.FindChildByIndex(property, indexStr);
-                if (child == null)
-                    break;
+        breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
 
-                currentPathParts.Add(indexStr);
-                currentPath = $"{currentPath}{propertyName}/{indexStr}/";
-                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                var displayName = GetChildDisplayName(property, child, indexStr);
-                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = indexStr });
-                currentSubject = child;
-            }
-            else if (property.IsSubjectReference)
-            {
-                // Direct subject property
-                if (property.GetValue() is not IInterceptorSubject child)
-                    break;
-
-                currentPath = $"{currentPath}{propertyName}/";
-                var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
-                var displayName = GetChildDisplayName(property, child, index: null);
-                _breadcrumbs.Add(new BreadcrumbItem(displayName, breadcrumbPath));
-                _panes.Add(new SubjectPane { Subject = child, DisplayName = displayName, Path = currentPath.TrimEnd('/'), PropertyName = propertyName, Index = null });
-                currentSubject = child;
-            }
-            else
-            {
-                // Unknown property type with children - shouldn't happen
-                break;
-            }
+        var pathParts = new List<string>();
+        for (var i = 1; i < panes.Count; i++)
+        {
+            AddPathSegments(panes, pathParts, i);
+            breadcrumbs.Add(new BreadcrumbItem(panes[i].DisplayName, "/browser/" + string.Join("/", pathParts)));
         }
     }
 
@@ -354,75 +317,133 @@
 
     private void UpdateUrl()
     {
+        BuildBreadcrumbs(_panes, _breadcrumbs);
+
         var pathParts = new List<string>();
-
-        // Skip the first pane (root) when building path
-        foreach (var pane in _panes.Skip(1))
+        for (var i = 1; i < _panes.Count; i++)
         {
-            // For [InlinePaths] properties, only add the index (key), not the property name
-            var parentPane = _panes[_panes.IndexOf(pane) - 1];
-            var isInlinePathsProperty = pane.PropertyName != null &&
-                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
+            AddPathSegments(_panes, pathParts, i);
+        }
 
-            if (isInlinePathsProperty && pane.Index != null)
-            {
-                // Only add the key for [InlinePaths] properties
-                pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
-            }
-            else
-            {
-                // Add property name
-                if (pane.PropertyName != null)
-                {
-                    pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
-                }
+        // The open panes are now the requested path, so a missing tail of the previous one is no longer awaited.
+        _targetPath = string.Join("/", pathParts);
+        _nextProperty = null;
 
-                // Add index/key if present (for collections/dictionaries)
-                if (pane.Index != null)
-                {
-                    pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
-                }
+        // Stored so OnLocationChanged knows to ignore this navigation
+        _lastNavigatedPath = _targetPath;
+        NavigationManager.NavigateTo("/browser" + (pathParts.Count > 0 ? "/" + _targetPath : ""), replace: true);
+
+        WatchPaneChildren();
+    }
+
+    private static void AddPathSegments(List<SubjectPane> panes, List<string> pathParts, int paneIndex)
+    {
+        var pane = panes[paneIndex];
+
+        // For [InlinePaths] properties, only add the index (key), not the property name
+        var isInlinePathsProperty = pane.PropertyName != null &&
+            InlinePathsAttribute.IsInlinePathsProperty(panes[paneIndex - 1].Subject.GetType(), pane.PropertyName);
+
+        if (isInlinePathsProperty && pane.Index != null)
+        {
+            pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+            return;
+        }
+
+        if (pane.PropertyName != null)
+        {
+            pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
+        }
+
+        // Add index/key if present (for collections/dictionaries)
+        if (pane.Index != null)
+        {
+            pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+        }
+    }
+
+    private void WatchPaneChildren()
+    {
+        if (_childrenWatcher is null)
+        {
+            return;
+        }
+
+        // Each pane after the first is held by a property of the pane before it. Storage replaces a subject
+        // at the same path by assigning that property, which leaves the pane on the detached instance. While
+        // the path does not fully resolve, the property that would hold the next pane tells when it appears.
+        var nextProperty = _nextProperty;
+        var properties = new PropertyReference[Math.Max(_panes.Count - 1, 0) + (nextProperty.HasValue ? 1 : 0)];
+        for (var i = 1; i < _panes.Count; i++)
+        {
+            properties[i - 1] = new PropertyReference(_panes[i - 1].Subject, _panes[i].PropertyName!);
+        }
+
+        if (nextProperty.HasValue)
+        {
+            properties[^1] = nextProperty.Value;
+        }
+
+        _childrenWatcher.Watch(properties);
+
+        // A write after the panes were resolved but before the watch was published is not reported.
+        var currentPanes = new List<SubjectPane>(_panes.Count);
+        var currentNextProperty = BuildPanes(_targetPath, currentPanes);
+        if (!HaveSameSubjects(currentPanes, _panes) || currentNextProperty != nextProperty)
+        {
+            _childrenWatcher.Invalidate();
+        }
+    }
+
+    private void OnPaneChildrenChanged()
+    {
+        var panes = new List<SubjectPane>(_panes.Count);
+        var nextProperty = BuildPanes(_targetPath, panes);
+        if (HaveSameSubjects(panes, _panes) && nextProperty == _nextProperty)
+        {
+            return;
+        }
+
+        var isPaneRemoved = panes.Count < _panes.Count;
+        if (panes.Count > _panes.Count)
+        {
+            _scrollToLastPane = true;
+        }
+
+        _panes.Clear();
+        _panes.AddRange(panes);
+        BuildBreadcrumbs(_panes, _breadcrumbs);
+        _nextProperty = nextProperty;
+
+        if (isPaneRemoved)
+        {
+            // A subject on the path is gone, so the URL follows the panes that are left.
+            UpdateUrl();
+        }
+        else
+        {
+            WatchPaneChildren();
+        }
+
+        StateHasChanged();
+    }
+
+    private static bool HaveSameSubjects(List<SubjectPane> panes, List<SubjectPane> otherPanes)
+    {
+        if (panes.Count != otherPanes.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < panes.Count; i++)
+        {
+            if (!ReferenceEquals(panes[i].Subject, otherPanes[i].Subject))
+            {
+                return false;
             }
         }
 
-        var url = "/browser" + (pathParts.Any() ? "/" + string.Join("/", pathParts) : "");
-
-        // Store the URL so OnLocationChanged knows to ignore this navigation
-        _lastNavigatedUrl = url;
-        NavigationManager.NavigateTo(url, replace: true);
-
-        // Rebuild breadcrumbs
-        _breadcrumbs.Clear();
-        _breadcrumbs.Add(new BreadcrumbItem("Root", "/browser"));
-
-        var breadcrumbParts = new List<string>();
-        foreach (var pane in _panes.Skip(1))
-        {
-            // For [InlinePaths] properties, only add the index (key), not the property name
-            var parentPane = _panes[_panes.IndexOf(pane) - 1];
-            var isInlinePathsProp = pane.PropertyName != null &&
-                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
-
-            if (isInlinePathsProp && pane.Index != null)
-            {
-                // Only add the key for [InlinePaths] properties
-                breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
-            }
-            else
-            {
-                if (pane.PropertyName != null)
-                {
-                    breadcrumbParts.Add(Uri.EscapeDataString(pane.PropertyName));
-                }
-                if (pane.Index != null)
-                {
-                    breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
-                }
-            }
-
-            var breadcrumbPath = "/browser/" + string.Join("/", breadcrumbParts);
-            _breadcrumbs.Add(new BreadcrumbItem(pane.DisplayName, breadcrumbPath));
-        }
+        return true;
     }
 
     // Breadcrumbs and pane titles use the same label as the child list of the parent pane.
@@ -432,10 +453,14 @@
     public void Dispose()
     {
         NavigationManager.LocationChanged -= OnLocationChanged;
+        _childrenWatcher?.Dispose();
     }
 
     public async ValueTask DisposeAsync()
     {
+        // First, so a failing module disposal cannot leave the watcher observing every write in the graph.
+        Dispose();
+
         if (_jsModule != null)
         {
             try
@@ -447,7 +472,6 @@
                 // Circuit already disconnected, nothing to clean up
             }
         }
-        Dispose();
     }
 
     private class SubjectPane

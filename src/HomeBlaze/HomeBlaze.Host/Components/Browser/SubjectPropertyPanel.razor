@@ -69,7 +69,8 @@
 
         @* Methods Section (Operations & Queries) *@
         @{
-            var methods = GetMethods();
+            var registeredSubject = RegisteredSubject;
+            var methods = registeredSubject?.GetAllMethods() ?? [];
             if (methods.Count > 0)
             {
                 <MudStack Class="pl-4 pr-4">
@@ -77,7 +78,7 @@
                     {
                         var isQuery = method.Kind == MethodKind.Query;
                         var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                        var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
+                        var methodProperty = registeredSubject?.TryGetProperty(method.PropertyName);
                         var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                         <MudButton Variant="Variant.Filled"
@@ -195,7 +196,6 @@
 @code {
     private readonly HashSet<string> _expandedProperties = [];
 
-    private RegisteredSubject? _registeredSubject;
     private MethodMetadata? _executingMethod;
 
     [Parameter]
@@ -235,13 +235,10 @@
         TimeZone.Changed -= OnTimeZoneChanged;
     }
 
-    protected override void OnParametersSet()
-    {
-        base.OnParametersSet();
-        _registeredSubject = Subject != null && SubjectRegistry != null
-            ? SubjectRegistry.TryGetRegisteredSubject(Subject)
-            : null;
-    }
+    // Looked up on each use: the registry creates a new registration when the subject is detached and attached again.
+    private RegisteredSubject? RegisteredSubject => Subject != null
+        ? SubjectRegistry?.TryGetRegisteredSubject(Subject)
+        : null;
 
     private string GetSubjectTitle()
     {
@@ -281,10 +278,11 @@
 
     private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
     {
-        if (_registeredSubject == null)
+        var registeredSubject = RegisteredSubject;
+        if (registeredSubject == null)
             return [];
 
-        return _registeredSubject.Properties
+        return registeredSubject.Properties
             .Where(p => p.GetStateMetadata() != null && !p.IsAttribute && !p.CanContainSubjects
                      && p.GetConfigurationMetadata()?.IsSecret != true)
             .OrderBy(p => p.GetDisplayPosition());
@@ -292,10 +290,11 @@
 
     private IEnumerable<RegisteredSubjectProperty> GetChildProperties()
     {
-        if (_registeredSubject == null)
+        var registeredSubject = RegisteredSubject;
+        if (registeredSubject == null)
             return [];
 
-        return _registeredSubject.Properties
+        return registeredSubject.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
     }
@@ -479,9 +478,6 @@
             DialogService, SubjectRegistry, path, property.Name, property.Type, metadata?.IsCumulative ?? false, unit,
             metadata?.IsDiscrete ?? false);
     }
-
-    private IReadOnlyList<MethodMetadata> GetMethods() =>
-        _registeredSubject?.GetAllMethods() ?? [];
 
     private async Task ExecuteMethodAsync(MethodMetadata method)
     {

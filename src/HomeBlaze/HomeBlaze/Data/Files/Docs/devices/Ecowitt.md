@@ -13,11 +13,11 @@ Any Ecowitt gateway that exposes the local HTTP API:
 
 | Property | Description | Default |
 |----------|-------------|---------|
-| Name | Display name | — |
-| Host Address | Gateway IP address or hostname | — |
+| Name | Display name | None |
+| Host Address | Gateway IP address or hostname | None |
 | Polling Interval | How often to poll the gateway | 30 seconds |
 | Retry Interval | Wait time after connection failure | 60 seconds |
-| Hidden Sensors | Sensor keys to exclude from discovery | — |
+| Hidden Sensors | Sensor keys to exclude from discovery | None |
 
 ## Sensor Types
 

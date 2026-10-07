@@ -8,6 +8,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Markdig;
 using Markdig.Renderers;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -26,6 +27,7 @@ public sealed partial class MarkdownContentParser
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
+    private readonly ILogger<MarkdownContentParser>? _logger;
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -151,10 +153,12 @@ public sealed partial class MarkdownContentParser
 
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
-        SubjectPathResolver pathResolver)
+        SubjectPathResolver pathResolver,
+        ILogger<MarkdownContentParser>? logger = null)
     {
         _serializer = serializer;
         _pathResolver = pathResolver;
+        _logger = logger;
     }
 
     // Source-generated regexes for performance.
@@ -207,6 +211,8 @@ public sealed partial class MarkdownContentParser
     {
         if (string.IsNullOrEmpty(content))
         {
+            parent.UnresolvedSubjectTypeNames = MarkdownFile.NoTypeNames;
+            parent.SubjectBlockJson = MarkdownFile.NoSubjectBlockJson;
             return new Dictionary<string, IInterceptorSubject>();
         }
 
@@ -283,6 +289,8 @@ public sealed partial class MarkdownContentParser
         CancellationToken cancellationToken)
     {
         var newChildren = new Dictionary<string, IInterceptorSubject>();
+        var subjectBlockJson = new Dictionary<string, string>();
+        HashSet<string>? unresolvedTypeNames = null;
         var segmentIndex = 0;
 
         foreach (var segment in segments)
@@ -316,17 +324,22 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case SubjectParsedSegment subj:
-                    var typeName = ExtractTypeName(subj.Json);
+                    var typeName = ExtractDiscriminator(subj.Json);
                     if (oldChildren.TryGetValue(subj.Name, out var existing) &&
                         existing.GetType().FullName == typeName)
                     {
-                        // Same key + same type: update and apply config
-                        _serializer.UpdateConfiguration(existing, subj.Json);
-                        if (existing is IConfigurable configurable)
+                        // Same key + same type: keep the subject, and reconfigure it only when its JSON changed
+                        if (!parent.SubjectBlockJson.TryGetValue(subj.Name, out var previousJson) || previousJson != subj.Json)
                         {
-                            await configurable.ApplyConfigurationAsync(cancellationToken);
+                            _serializer.UpdateConfiguration(existing, subj.Json);
+                            if (existing is IConfigurable configurable)
+                            {
+                                await configurable.ApplyConfigurationAsync(cancellationToken);
+                            }
                         }
+
                         newChildren[subj.Name] = existing;
+                        subjectBlockJson[subj.Name] = subj.Json;
                     }
                     else
                     {
@@ -336,6 +349,18 @@ public sealed partial class MarkdownContentParser
                         {
                             // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                             newChildren[subj.Name] = (IInterceptorSubject)newSubject;
+                            subjectBlockJson[subj.Name] = subj.Json;
+                        }
+                        else if (typeName is { Length: > 0 } &&
+                                 (unresolvedTypeNames ??= new HashSet<string>(StringComparer.Ordinal)).Add(typeName) &&
+                                 !parent.UnresolvedSubjectTypeNames.Contains(typeName))
+                        {
+                            // Expected while plugins load, so it only warns once startup has completed; storages
+                            // warn about the blocks still missing then.
+                            _logger?.Log(
+                                IsStartupCompleted(parent) ? LogLevel.Warning : LogLevel.Information,
+                                "Subject block {Name} in {Path} is not shown because its type {Type} is not loaded. It appears once the type is loaded.",
+                                subj.Name, parent.FullPath, typeName);
                         }
                     }
                     break;
@@ -344,7 +369,16 @@ public sealed partial class MarkdownContentParser
             segmentIndex++;
         }
 
+        // The storage refreshes the file once one of these types is loaded, which adds the skipped blocks.
+        parent.UnresolvedSubjectTypeNames = unresolvedTypeNames ?? MarkdownFile.NoTypeNames;
+        parent.SubjectBlockJson = subjectBlockJson;
         return newChildren;
+    }
+
+    private static bool IsStartupCompleted(MarkdownFile parent)
+    {
+        // The file itself is not attached yet while its storage scans, the storage is.
+        return parent.Storage is not IInterceptorSubject storage || storage.Context.IsStartupCompleted();
     }
 
     private static string ComputeHash(string content)
@@ -364,20 +398,23 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private static string? ExtractTypeName(string json)
+    private static string? ExtractDiscriminator(string json)
     {
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("type", out var typeElement))
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                document.RootElement.TryGetProperty("$type", out var typeElement) &&
+                typeElement.ValueKind == JsonValueKind.String)
             {
                 return typeElement.GetString();
             }
         }
-        catch
+        catch (JsonException)
         {
-            // Invalid JSON - return null
+            // Invalid JSON has no type to wait for.
         }
+
         return null;
     }
 

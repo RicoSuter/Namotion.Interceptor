@@ -120,6 +120,23 @@ public class SubjectComponentRegistryTests
         Assert.NotNull(widget2);
     }
 
+    [Fact]
+    public void WhenComponentTypeIsAddedAfterFirstLookup_ThenItResolves()
+    {
+        // Arrange
+        var typeProvider = new TypeProvider();
+        var registry = new SubjectComponentRegistry(typeProvider);
+        Assert.Null(registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit));
+
+        // Act
+        typeProvider.AddTypes([typeof(TestEditComponent)]);
+
+        // Assert
+        var component = registry.GetComponent(typeof(TestSubject), SubjectComponentType.Edit);
+        Assert.NotNull(component);
+        Assert.Equal(typeof(TestEditComponent), component.ComponentType);
+    }
+
     // Test fixtures
     public class TestSubject { }
 

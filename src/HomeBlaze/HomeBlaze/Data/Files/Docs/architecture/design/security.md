@@ -28,8 +28,8 @@ Properties and operations are categorized by their nature, each with different d
 |--------|----------|-------------|---------------------|
 | State | Sensor readings, device status | Guest | Operator |
 | Configuration | Settings, parameters | User | Supervisor |
-| Query | Read-only methods | User | — |
-| Operation | State-changing methods | — | Operator |
+| Query | Read-only methods | User | N/A |
+| Operation | State-changing methods | N/A | Operator |
 
 ### Actions
 
@@ -41,7 +41,7 @@ Properties and operations are categorized by their nature, each with different d
 
 ### Role-Based
 
-Authorization is role-based with OR logic — any matching role grants access. Roles are managed through the Blazor UI (user management, role assignment).
+Authorization is role-based with OR logic: any matching role grants access. Roles are managed through the Blazor UI (user management, role assignment).
 
 ## Inter-Node Authentication [Planned]
 
@@ -51,7 +51,7 @@ Likely approach: mutual TLS or token-based authentication on WebSocket connectio
 
 ## MCP Access Control [Planned]
 
-Planned. When an external agent connects via MCP, the authorization context determines which subjects, properties, and operations are accessible. The same graph authorization model applies — the MCP session carries a role/identity.
+Planned. When an external agent connects via MCP, the authorization context determines which subjects, properties, and operations are accessible. The same graph authorization model applies: the MCP session carries a role/identity.
 
 ## Key Decisions
 
@@ -66,4 +66,4 @@ Planned. When an external agent connects via MCP, the authorization context dete
 - Inter-node authentication mechanism (TLS, tokens, certificates)
 - MCP session identity model
 - Authorization for cross-instance operation proxying
-- Audit integration — logging authorization decisions (see [Audit](audit.md))
+- Audit integration: logging authorization decisions (see [Audit](audit.md))

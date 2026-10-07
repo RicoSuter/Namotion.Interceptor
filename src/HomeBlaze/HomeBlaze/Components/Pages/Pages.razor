@@ -6,6 +6,7 @@
 @using HomeBlaze.Services.Components
 @using Microsoft.AspNetCore.Components.Sections
 @using Namotion.Interceptor.Blazor
+@using Namotion.Interceptor.Registry
 @using Toolbelt.Blazor.HotKeys2
 
 @inherits HomeBlazorComponentBase
@@ -15,6 +16,7 @@
 @inject SubjectPathResolver PathResolver
 @inject DeveloperModeService DeveloperMode
 @inject HotKeys HotKeys
+@inject NavigationManager NavigationManager
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -118,6 +120,8 @@
     private double _splitDimension = 50;
     private SubjectEditPanel? _editPanel;
     private HotKeysContext? _hotKeysContext;
+    private PropertyChangeWatcher? _pathWatcher;
+    private string? _escapedPath;
 
     private enum PageEditMode
     {
@@ -143,6 +147,7 @@
 
     protected override void OnParametersSet()
     {
+        _escapedPath = NavigationManager.GetEscapedPathBelow(NavigationManager.Uri, "pages");
         LoadSubject();
         _editMode = PageEditMode.View;
     }
@@ -152,11 +157,10 @@
         _subject = null;
         _title = "";
 
-        var path = Path;
-        if (string.IsNullOrEmpty(path) || Root is null)
-            return;
+        var resolution = ResolvePath();
+        WatchPath(resolution);
 
-        var subject = PathResolver.ResolveSubject(path, PathStyle.Route);
+        var subject = resolution.Subject;
         if (subject != null)
         {
             if (subject is ITitleProvider titleProvider)
@@ -169,6 +173,88 @@
             }
 
             _subject = subject;
+        }
+    }
+
+    private SubjectPathResolution ResolvePath()
+    {
+        var path = _escapedPath;
+        return string.IsNullOrEmpty(path) || Root is null
+            ? default
+            : PathResolver.ResolvePartially(path, PathStyle.Route);
+    }
+
+    private void WatchPath(SubjectPathResolution resolution)
+    {
+        if (_pathWatcher is null)
+        {
+            if (Root is null)
+            {
+                return;
+            }
+
+            _pathWatcher = new PropertyChangeWatcher(
+                Root.Context, InvokeAsync, OnPathChanged, exception => _ = DispatchExceptionAsync(exception));
+        }
+
+        // Storage replaces a subject at the same path by assigning the property that holds it, which leaves
+        // this page on the detached instance until the path is resolved again. That can happen to any subject
+        // on the path, so every holding property is watched. While the path does not fully resolve, the
+        // property that would hold its next segment tells when the subject appears.
+        var steps = resolution.Steps;
+        var nextProperty = resolution.NextProperty;
+        var properties = new PropertyReference[steps.Length + (nextProperty.HasValue ? 1 : 0)];
+        for (var i = 0; i < steps.Length; i++)
+        {
+            properties[i] = steps[i].Property.Reference;
+        }
+
+        if (nextProperty.HasValue)
+        {
+            properties[^1] = nextProperty.Value;
+        }
+
+        _pathWatcher.Watch(properties);
+
+        // A write after the path was resolved but before the watch was published is not reported.
+        if (!HasSameSubjects(ResolvePath(), resolution))
+        {
+            _pathWatcher.Invalidate();
+        }
+    }
+
+    private static bool HasSameSubjects(SubjectPathResolution resolution, SubjectPathResolution otherResolution)
+    {
+        var steps = resolution.Steps;
+        var otherSteps = otherResolution.Steps;
+        if (steps.Length != otherSteps.Length ||
+            !ReferenceEquals(resolution.Subject, otherResolution.Subject) ||
+            !ReferenceEquals(resolution.DeepestSubject, otherResolution.DeepestSubject) ||
+            resolution.NextProperty != otherResolution.NextProperty)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < steps.Length; i++)
+        {
+            if (!ReferenceEquals(steps[i].Subject, otherSteps[i].Subject))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void OnPathChanged()
+    {
+        var previousSubject = _subject;
+        LoadSubject();
+        if (!ReferenceEquals(previousSubject, _subject))
+        {
+            // A new key so page components do not carry state over from the replaced subject.
+            _componentKey++;
+            StateHasChanged();
         }
     }
 
@@ -210,6 +296,9 @@
         if (_editPanel != null)
         {
             await _editPanel.SaveAsync(CancellationToken.None);
+
+            // Saving a placeholder's file replaces it with the real subject at the same path.
+            LoadSubject();
             _componentKey++;
             StateHasChanged();
         }
@@ -254,6 +343,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        _pathWatcher?.Dispose();
+
         if (_hotKeysContext != null)
         {
             await _hotKeysContext.DisposeAsync();

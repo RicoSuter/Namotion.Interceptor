@@ -32,6 +32,15 @@ internal sealed class StoragePathRegistry
     public bool TryGetSubject(string path, out IInterceptorSubject subject)
         => _pathToSubject.TryGetValue(NormalizeForLookup(path), out subject!);
 
+    /// <summary>
+    /// Returns a snapshot of the registered subjects of type <typeparamref name="T"/> with their original paths.
+    /// </summary>
+    public List<(T Subject, string Path)> GetSubjects<T>() where T : IInterceptorSubject
+        => _subjectPaths
+            .Where(entry => entry.Key is T)
+            .Select(entry => ((T)entry.Key, entry.Value))
+            .ToList();
+
     public void Register(IInterceptorSubject subject, string path)
     {
         var originalPath = NormalizePath(path);  // Preserves case
@@ -41,9 +50,9 @@ internal sealed class StoragePathRegistry
     }
 
     /// <summary>
-    /// Normalizes paths: forward slashes, remove leading slashes. Preserves case.
+    /// Normalizes paths the way registered paths are stored: forward slashes, no leading slashes, case preserved.
     /// </summary>
-    private static string NormalizePath(string path)
+    public static string NormalizePath(string path)
         => path.Replace('\\', '/').TrimStart('/');
 
     /// <summary>
@@ -53,16 +62,23 @@ internal sealed class StoragePathRegistry
     private static string NormalizeForLookup(string path)
         => path.Replace('\\', '/').TrimStart('/').ToLowerInvariant();
 
-    public void Unregister(string path)
+    /// <summary>
+    /// Unregisters <paramref name="subject"/>. The path's lookup, hash and size are removed only while the
+    /// lookup still finds this subject, so another subject registered at a path differing only in case keeps them.
+    /// </summary>
+    public void Unregister(IInterceptorSubject subject)
     {
-        var lookupKey = NormalizeForLookup(path);
-        if (_pathToSubject.TryRemove(lookupKey, out var subject))
+        if (!_subjectPaths.TryRemove(subject, out var path))
         {
-            _subjectPaths.TryRemove(subject, out _);
+            return;
         }
 
-        _contentHashes.TryRemove(lookupKey, out _);
-        _fileSizes.TryRemove(lookupKey, out _);
+        var lookupKey = NormalizeForLookup(path);
+        if (_pathToSubject.TryRemove(new KeyValuePair<string, IInterceptorSubject>(lookupKey, subject)))
+        {
+            _contentHashes.TryRemove(lookupKey, out _);
+            _fileSizes.TryRemove(lookupKey, out _);
+        }
     }
 
     public void UpdateHash(string path, string hash)

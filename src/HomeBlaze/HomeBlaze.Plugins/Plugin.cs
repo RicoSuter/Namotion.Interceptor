@@ -7,11 +7,11 @@ namespace HomeBlaze.Plugins;
 [InterceptorSubject]
 public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
 {
-    private readonly PluginManager _manager;
+    private readonly NuGetPluginProvider _provider;
 
-    public Plugin(PluginManager manager)
+    public Plugin(NuGetPluginProvider provider)
     {
-        _manager = manager;
+        _provider = provider;
         Name = "";
         Version = "";
         Description = "";
@@ -70,8 +70,5 @@ public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
     public partial string[] HostDependencies { get; internal set; }
 
     [Operation(Title = "Remove Plugin", RequiresConfirmation = true)]
-    public void RemovePlugin()
-    {
-        _manager.RemovePlugin(Name);
-    }
+    public Task RemovePluginAsync() => _provider.RemovePluginAsync(Name);
 }

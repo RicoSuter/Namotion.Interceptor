@@ -52,4 +52,20 @@ public class ServiceCollectionExtensionsTests
         Assert.Contains(resolver, lifecycleHandlers);
         Assert.Single(lifecycleHandlers.OfType<SubjectPathResolver>());
     }
+
+    [Fact]
+    public void WhenHomeBlazeServicesAreAdded_ThenTheStartupGateIsRegisteredBeforeTheGraphLoads()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddHomeBlazeServices();
+
+        // Assert
+        using var serviceProvider = services.BuildServiceProvider();
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+        var gate = Assert.IsType<StartupGate>(Assert.Single(context.GetServices<Namotion.Interceptor.Tracking.IStartupCompletion>()));
+        Assert.Same(gate, context.TryGetService<StartupGate>());
+    }
 }

@@ -1,7 +1,12 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
+using HomeBlaze.Plugins;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.E2E.Tests.Infrastructure;
 
@@ -19,6 +24,11 @@ public class PlaywrightFixture : IAsyncLifetime
     public IBrowser Browser => _browser ?? throw new InvalidOperationException("Browser not initialized");
 
     public string ServerAddress => _factory?.ServerAddress ?? throw new InvalidOperationException("Server not started");
+
+    /// <summary>
+    /// The services of the server the browser talks to.
+    /// </summary>
+    public IServiceProvider ServerServices => _factory?.ServerServices ?? throw new InvalidOperationException("Server not started");
 
     public async Task InitializeAsync()
     {
@@ -64,6 +74,25 @@ public class PlaywrightFixture : IAsyncLifetime
 
         _playwright?.Dispose();
         _factory?.Dispose();
+    }
+
+    /// <summary>
+    /// Waits until the plugin provider in the subject tree has loaded every plugin it lists and all of them are running.
+    /// </summary>
+    public async Task WaitForPluginsLoadedAsync()
+    {
+        var factory = _factory ?? throw new InvalidOperationException("Server not started");
+        var root = await factory.ServerServices.GetRequiredService<RootManager>().RootLoaded;
+        var registry = root.Context.GetService<ISubjectRegistry>();
+
+        // Plugins load in the background after startup and may first download dependencies from nuget.org.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => registry.KnownSubjects.Keys.OfType<NuGetPluginProvider>().FirstOrDefault() is { } provider &&
+                provider.Plugins.Length > 0 &&
+                provider.LoadedPlugins.Count == provider.Plugins.Length &&
+                provider.LoadedPlugins.Values.All(plugin => plugin.Status == ServiceStatus.Running),
+            timeout: TimeSpan.FromMinutes(2),
+            message: "The plugins in the test data were not all loaded and running");
     }
 
     /// <summary>
