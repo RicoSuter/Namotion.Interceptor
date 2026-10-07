@@ -64,6 +64,22 @@ public partial class ModbusPollerTests
         public partial decimal? Scaled { get; set; }
     }
 
+    [InterceptorSubject]
+    public partial class LongStringSubject
+    {
+        [ModbusRegister(0, ModbusDataType.String, Length = LongStringLength)]
+        public partial string? Text { get; set; }
+
+        [ModbusRegister(LongStringLength, ModbusDataType.U16)]
+        public partial int? After { get; set; }
+    }
+
+    private const int LongStringLength = 150;
+
+    private static readonly (byte, ModbusAddressSpace, int, int) FirstChunk = (1, ModbusAddressSpace.HoldingRegister, 0, 125);
+    private static readonly (byte, ModbusAddressSpace, int, int) SecondChunk = (1, ModbusAddressSpace.HoldingRegister, 125, 25);
+    private static readonly (byte, ModbusAddressSpace, int, int) AfterRequest = (1, ModbusAddressSpace.HoldingRegister, LongStringLength, 1);
+
     private static IInterceptorSubjectContext CreateContext()
         => InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry().WithLifecycle();
 
@@ -565,5 +581,157 @@ public partial class ModbusPollerTests
         Assert.Equal(2, metrics.BatchCount);
         Assert.NotNull(metrics.LastPollTime);
         Assert.NotNull(metrics.LastPollDuration);
+    }
+
+    private static (ModbusPoller Poller, FakeRegisterReader Reader, ModbusPollingMetrics Metrics) CreateLongString(string text)
+    {
+        var subject = new LongStringSubject(CreateContext());
+        var bindings = ModbusRegisterResolver.Resolve(subject, 1, new HashSet<PropertyReference>());
+        var metrics = new ModbusPollingMetrics();
+        var reader = new FakeRegisterReader();
+        SetLongString(reader, text);
+        reader.SetRegister(LongStringLength, 7);
+        return (CreatePoller(bindings, 0, metrics, NullLogger.Instance), reader, metrics);
+    }
+
+    // Two characters per register, padded with NUL like a device would.
+    private static void SetLongString(FakeRegisterReader reader, string text)
+    {
+        for (var register = 0; register < LongStringLength; register++)
+        {
+            var high = register * 2 < text.Length ? text[register * 2] : '\0';
+            var low = register * 2 + 1 < text.Length ? text[register * 2 + 1] : '\0';
+            reader.SetRegister(register, (ushort)((high << 8) | low));
+        }
+    }
+
+    [Fact]
+    public async Task WhenLongStringIsReadForTheFirstTime_ThenItIsConfirmedByASecondReadAndApplied()
+    {
+        // Arrange
+        var text = new string('A', 300);
+        var (poller, reader, metrics) = CreateLongString(text);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.Equal(text, applied[nameof(LongStringSubject.Text)]);
+        Assert.Equal(7, applied[nameof(LongStringSubject.After)]);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+        Assert.Equal(3, metrics.BatchCount);
+    }
+
+    [Fact]
+    public async Task WhenLongStringIsUnchanged_ThenItIsReadOnceAndNothingIsApplied()
+    {
+        // Arrange
+        var (poller, reader, _) = CreateLongString("Unchanged");
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        reader.Requests.Clear();
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.Empty(applied);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenLongStringChangesAndBothReadsAgree_ThenTheNewValueIsApplied()
+    {
+        // Arrange
+        var (poller, reader, _) = CreateLongString(new string('A', 300));
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        var changed = new string('A', 260) + "Changed in the second request";
+        SetLongString(reader, changed);
+        reader.Requests.Clear();
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.Equal(changed, Assert.Single(applied).Value);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenLongStringChangesBetweenItsRequests_ThenThePreviousValueIsKeptUntilTwoReadsAgree()
+    {
+        // Arrange (the device switches to the new value after answering the first request, so the first read is torn)
+        var previous = new string('A', 300);
+        var next = new string('B', 300);
+        var (poller, reader, _) = CreateLongString(previous);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        reader.Requests.Clear();
+        reader.RequestReceived = index =>
+        {
+            if (index == 1)
+            {
+                SetLongString(reader, next);
+            }
+        };
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var tornCycle = Apply(poller);
+        var tornCycleRequests = reader.Requests.ToArray();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var nextCycle = Apply(poller);
+
+        // Assert
+        Assert.Empty(tornCycle);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, AfterRequest }, tornCycleRequests);
+        Assert.Equal(next, Assert.Single(nextCycle).Value);
+    }
+
+    [Fact]
+    public async Task WhenRequestOfLongStringIsRejected_ThenItIsMarkedUnavailableAndOthersContinue()
+    {
+        // Arrange
+        var (poller, reader, metrics) = CreateLongString("Text");
+        reader.Reject(130);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+        reader.Requests.Clear();
+        await poller.ReadAsync(reader, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(7, Assert.Single(applied).Value);
+        Assert.Equal(1, metrics.TotalFailedRequests);
+        Assert.Equal(1, metrics.UnavailablePropertyCount);
+        Assert.Equal(1, metrics.BatchCount);
+        Assert.Equal(new[] { AfterRequest }, reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenRequestOfLongStringFailsTransiently_ThenItIsSkippedForThatCycleOnly()
+    {
+        // Arrange
+        var (poller, reader, metrics) = CreateLongString("Text");
+        reader.Reject(130, exceptionCode: 6);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        reader.Accept(130);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var recoveredCycle = Apply(poller);
+
+        // Assert
+        Assert.Equal(7, Assert.Single(failedCycle).Value);
+        Assert.Equal("Text", Assert.Single(recoveredCycle).Value);
+        Assert.Equal(1, metrics.TotalFailedRequests);
+        Assert.Equal(0, metrics.UnavailablePropertyCount);
+        Assert.Equal(3, metrics.BatchCount);
     }
 }

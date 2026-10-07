@@ -34,7 +34,7 @@ internal sealed class ModbusPoller
         _metrics = metrics;
         _logger = logger;
         _batches = ModbusReadPlanner.Plan(_bindings, maximumRegisterGap);
-        _metrics.SetPlan(_batches.Length, unavailablePropertyCount: 0);
+        _metrics.SetPlan(CountRequests(_batches), unavailablePropertyCount: 0);
     }
 
     public IReadOnlyList<ModbusRegisterBinding> Bindings => _bindings;
@@ -73,12 +73,16 @@ internal sealed class ModbusPoller
         {
             try
             {
-                var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, batch.StartAddress, batch.Count, cancellationToken).ConfigureAwait(false);
-
-                // The reader may hand out a pooled buffer that its next read overwrites, so copy before reading on.
-                foreach (var binding in batch.Bindings)
+                if (batch.RequestCount == 1)
                 {
-                    CopyToBinding(binding, data.Span, batch.StartAddress);
+                    var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, batch.StartAddress, batch.Count, cancellationToken).ConfigureAwait(false);
+
+                    // The reader may hand out a pooled buffer that its next read overwrites, so copy before reading on.
+                    CopyToBindings(batch, data.Span);
+                }
+                else
+                {
+                    await ReadSplitBindingAsync(reader, batch, cancellationToken).ConfigureAwait(false);
                 }
 
                 hasReadData = true;
@@ -109,7 +113,7 @@ internal sealed class ModbusPoller
         {
             var availableBindings = _bindings.Where(binding => !binding.IsUnavailable).ToArray();
             _batches = ModbusReadPlanner.Plan(availableBindings, _maximumRegisterGap);
-            _metrics.SetPlan(_batches.Length, _bindings.Length - availableBindings.Length);
+            _metrics.SetPlan(CountRequests(_batches), _bindings.Length - availableBindings.Length);
         }
 
         _metrics.RecordPoll(Stopwatch.GetElapsedTime(startTimestamp), DateTimeOffset.UtcNow, hasReadData);
@@ -216,6 +220,46 @@ internal sealed class ModbusPoller
     }
 
     /// <summary>
+    /// Reads the single binding of a batch larger than one request in consecutive requests. Modbus cannot read them
+    /// atomically, so a value that differs from the last one is read a second time and only becomes current when both
+    /// reads agree; otherwise the binding keeps its value and is read again next cycle. A failed request propagates
+    /// and leaves the binding without a current value.
+    /// </summary>
+    private async Task ReadSplitBindingAsync(IModbusRegisterReader reader, ModbusReadBatch batch, CancellationToken cancellationToken)
+    {
+        var binding = batch.Bindings[0];
+        for (var index = 0; index < batch.RequestCount; index++)
+        {
+            var (address, count) = batch.GetRequest(index);
+            var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, address, count, cancellationToken).ConfigureAwait(false);
+            data.Span[..(count * 2)].CopyTo(binding.CurrentRaw.AsSpan((address - binding.Address) * 2));
+        }
+
+        if (binding.HasLast && binding.CurrentRaw.AsSpan().SequenceEqual(binding.LastRaw))
+        {
+            binding.HasCurrent = true;
+            return;
+        }
+
+        for (var index = 0; index < batch.RequestCount; index++)
+        {
+            var (address, count) = batch.GetRequest(index);
+            var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, address, count, cancellationToken).ConfigureAwait(false);
+            if (!data.Span[..(count * 2)].SequenceEqual(binding.CurrentRaw.AsSpan((address - binding.Address) * 2, count * 2)))
+            {
+                if (_logger.IsEnabled(LogLevel.Debug))
+                {
+                    _logger.LogDebug("Modbus mapping {Path} changed while it was read; it is read again next cycle.", binding.Path);
+                }
+
+                return;
+            }
+        }
+
+        binding.HasCurrent = true;
+    }
+
+    /// <summary>
     /// Marks the binding of a rejected single-binding batch unavailable, or reads the bindings of a larger one one by one.
     /// Returns whether any binding was read.
     /// </summary>
@@ -293,8 +337,27 @@ internal sealed class ModbusPoller
         }
     }
 
+    private static int CountRequests(ModbusReadBatch[] batches)
+    {
+        var count = 0;
+        foreach (var batch in batches)
+        {
+            count += batch.RequestCount;
+        }
+
+        return count;
+    }
+
     private static (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) GetKey(ModbusReadBatch batch)
         => (batch.UnitId, batch.AddressSpace, batch.StartAddress, batch.Count);
+
+    private static void CopyToBindings(ModbusReadBatch batch, ReadOnlySpan<byte> data)
+    {
+        foreach (var binding in batch.Bindings)
+        {
+            CopyToBinding(binding, data, batch.StartAddress);
+        }
+    }
 
     private static void CopyToBinding(ModbusRegisterBinding binding, ReadOnlySpan<byte> data, int startAddress)
     {
