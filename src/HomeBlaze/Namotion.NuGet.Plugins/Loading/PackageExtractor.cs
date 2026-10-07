@@ -11,6 +11,8 @@ internal class PackageExtractor
         global::NuGet.Frameworks.NuGetFramework.Parse(
             $"net{Environment.Version.Major}.{Environment.Version.Minor}");
 
+    private const int MoveAttempts = 5;
+
     private readonly string _cacheDirectory;
 
     public PackageExtractor(string cacheDirectory)
@@ -73,14 +75,64 @@ internal class PackageExtractor
     private string ExtractToCache(string packageName, string packageVersion, Stream stream)
     {
         var packagePath = Path.Combine(_cacheDirectory, packageName, packageVersion);
-
-        if (!Directory.Exists(packagePath))
+        if (Directory.Exists(packagePath))
         {
-            Directory.CreateDirectory(packagePath);
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-            archive.ExtractToDirectory(packagePath);
+            return packagePath;
+        }
+
+        // Extracted beside the target and moved into place, so a concurrent or interrupted extraction never
+        // exposes a partial package.
+        var temporaryPath = $"{packagePath}.extracting-{Guid.NewGuid():N}";
+        Directory.CreateDirectory(temporaryPath);
+        try
+        {
+            ZipFile.ExtractToDirectory(stream, temporaryPath);
+            MoveIntoPlace(temporaryPath, packagePath);
+        }
+        finally
+        {
+            // Best effort: failing here would mask the outcome of the extraction.
+            try
+            {
+                if (Directory.Exists(temporaryPath))
+                {
+                    Directory.Delete(temporaryPath, recursive: true);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
         }
 
         return packagePath;
+    }
+
+    private static void MoveIntoPlace(string temporaryPath, string packagePath)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Move(temporaryPath, packagePath);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (Directory.Exists(packagePath))
+                {
+                    // Another extraction of the same package completed first.
+                    return;
+                }
+
+                if (attempt == MoveAttempts)
+                {
+                    throw;
+                }
+
+                // On Windows, virus scanners and indexers briefly hold freshly extracted files open, which
+                // blocks renaming their folder.
+                Thread.Sleep(attempt * 100);
+            }
+        }
     }
 }
