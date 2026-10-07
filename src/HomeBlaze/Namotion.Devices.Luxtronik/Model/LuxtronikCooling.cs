@@ -21,9 +21,9 @@ public partial class LuxtronikCooling
         Status = null;
         IsReleased = null;
         IsLocked = null;
-        OperatingHours = null;
-        ElectricalEnergy = null;
-        ThermalEnergy = null;
+        TotalOperatingHours = null;
+        TotalElectricalEnergy = null;
+        TotalThermalEnergy = null;
     }
 
     /// <summary>
@@ -52,19 +52,19 @@ public partial class LuxtronikCooling
     /// </summary>
     [LuxtronikInputRegister(10410, ModbusDataType.U32, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.Hour, IsCumulative = true, Position = 4)]
-    public partial decimal? OperatingHours { get; internal set; }
+    public partial decimal? TotalOperatingHours { get; internal set; }
 
     /// <summary>
     /// Gets the electrical energy consumed for cooling.
     /// </summary>
     [LuxtronikInputRegister(10316, ModbusDataType.S32, Scale = 100)]
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 5)]
-    public partial decimal? ElectricalEnergy { get; internal set; }
+    public partial decimal? TotalElectricalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the thermal energy produced for cooling.
     /// </summary>
     [LuxtronikInputRegister(10326, ModbusDataType.S32, Scale = 100, MinimumFirmware = "3.92.0")]
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 6)]
-    public partial decimal? ThermalEnergy { get; internal set; }
+    public partial decimal? TotalThermalEnergy { get; internal set; }
 }

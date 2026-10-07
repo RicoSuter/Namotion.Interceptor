@@ -46,9 +46,9 @@ public class LuxtronikHeatPumpTests
             Assert.Equal(6500m, heatPump.Energy.ThermalPower);
             Assert.Equal(6500m, heatPump.ThermalPower);
             Assert.Equal(1500m, heatPump.Power);
-            Assert.Equal(12345600m, heatPump.EnergyConsumed);
-            Assert.Equal(45678900m, heatPump.ThermalEnergyProduced);
-            Assert.Equal(12345m, heatPump.OperatingStatus.OperatingHours);
+            Assert.Equal(12345600m, heatPump.TotalConsumedEnergy);
+            Assert.Equal(45678900m, heatPump.TotalProducedThermalEnergy);
+            Assert.Equal(12345m, heatPump.OperatingStatus.TotalOperatingHours);
             Assert.Equal(35.0m, heatPump.Heating.SmartHomeControl.Setpoint);
             Assert.Equal(28.0m, heatPump.MixingCircuit1!.HeatingSmartHomeControl.Setpoint);
             Assert.Equal(30000m, heatPump.PowerConsumptionLimit.Limit);
@@ -86,8 +86,8 @@ public class LuxtronikHeatPumpTests
             Assert.Null(heatPump.Temperatures.HeatSourceInlet.Temperature);
             Assert.False(IsClaimed(heatPump.Temperatures.HeatSourceInlet, nameof(LuxtronikTemperatureSensor.Temperature)));
             Assert.Null(heatPump.Energy.TotalThermalEnergy);
-            Assert.Null(heatPump.ThermalEnergyProduced);
-            Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.OperatingHours)));
+            Assert.Null(heatPump.TotalProducedThermalEnergy);
+            Assert.False(IsClaimed(heatPump.OperatingStatus, nameof(LuxtronikOperatingStatus.TotalOperatingHours)));
             Assert.False(IsClaimed(heatPump.Heating.SmartHomeControl, nameof(LuxtronikSmartHomeControl.Level)));
             Assert.False(IsClaimed(heatPump.Heating, nameof(LuxtronikHeating.IsLocked)));
             Assert.True(IsClaimed(heatPump.Cooling!, nameof(LuxtronikCooling.IsLocked)));
@@ -189,8 +189,8 @@ public class LuxtronikHeatPumpTests
             var pool = Assert.IsType<LuxtronikPool>(heatPump.Pool);
             Assert.True(IsClaimed(pool, nameof(LuxtronikPool.Status)));
             Assert.Null(pool.Status);
-            Assert.True(IsClaimed(pool, nameof(LuxtronikPool.ElectricalEnergy)));
-            Assert.Null(pool.ElectricalEnergy);
+            Assert.True(IsClaimed(pool, nameof(LuxtronikPool.TotalElectricalEnergy)));
+            Assert.Null(pool.TotalElectricalEnergy);
             Assert.NotNull(heatPump.Cooling);
             Assert.NotNull(heatPump.MixingCircuit3);
             Assert.False(IsClaimed(heatPump.Functions, nameof(LuxtronikFunctions.IsHeatingEnabled)));

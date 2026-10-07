@@ -25,7 +25,7 @@ public class LuxtronikHeatPumpDeviceTests
         // Assert
         IPowerSensor powerSensor = heatPump;
         Assert.Equal(1500m, powerSensor.Power);
-        Assert.Equal(12345600m, powerSensor.EnergyConsumed);
+        Assert.Equal(12345600m, powerSensor.TotalConsumedEnergy);
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class LuxtronikHeatPumpDeviceTests
         // Assert
         IThermalPowerSensor thermalPowerSensor = heatPump;
         Assert.Equal(6500m, thermalPowerSensor.ThermalPower);
-        Assert.Equal(45678900m, thermalPowerSensor.ThermalEnergyProduced);
+        Assert.Equal(45678900m, thermalPowerSensor.TotalProducedThermalEnergy);
     }
 
     [Fact]

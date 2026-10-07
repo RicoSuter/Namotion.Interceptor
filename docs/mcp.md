@@ -27,7 +27,7 @@ services.AddMcpServer()
 app.MapMcp("/mcp");
 ```
 
-The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, custom MCP clients) connect to `/mcp` using the MCP protocol over HTTP with Server-Sent Events (SSE).
+The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, custom MCP clients) connect to `/mcp` using the MCP Streamable HTTP transport. The legacy SSE transport is disabled by default and cannot be enabled together with `Stateless = true`, so clients must use Streamable HTTP.
 
 ## Output Format
 
@@ -85,7 +85,7 @@ Items[myKey]                     (dictionary key)
 Folder/SubFolder/Device/Status   (property path)
 ```
 
-Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`).
+Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`). See [Path Syntax](registry.md#path-syntax) for how keys are written and read, including keys that need the bracket form. A path that does not resolve is answered with `Path not found: <path>`, or with `Invalid path syntax: <reason>` when it is malformed.
 
 ### `browse`
 
@@ -304,7 +304,7 @@ Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubject
 
 ## Connecting Claude Desktop (Local Development)
 
-When running with a local development HTTPS certificate, Claude Desktop requires `mcp-remote` as a proxy since the MCP protocol runs over HTTP/SSE.
+Claude Desktop connects to local servers through `mcp-remote`, which bridges its stdio transport to the Streamable HTTP endpoint. With a local development HTTPS certificate, TLS validation must be relaxed as shown below.
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
 

@@ -44,10 +44,12 @@
     <Project Path="HomeBlaze/HomeBlaze.Samples/HomeBlaze.Samples.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.OpcUa/HomeBlaze.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.OpcUa.Blazor/HomeBlaze.OpcUa.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.ServiceDefaults/HomeBlaze.ServiceDefaults.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services/HomeBlaze.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
     <Project Path="HomeBlaze/HomeBlaze/HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.AppHost/HomeBlaze.AppHost.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Abstractions/">
     <Project Path="HomeBlaze/HomeBlaze.Abstractions/HomeBlaze.Abstractions.csproj" />
@@ -77,6 +79,10 @@
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik/Namotion.Devices.Luxtronik.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.Tests/Namotion.Devices.Luxtronik.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze/Namotion.Devices.Luxtronik.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec/Namotion.Devices.SunSpec.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Generator/Namotion.Devices.SunSpec.Generator.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.HomeBlaze/Namotion.Devices.SunSpec.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.SunSpec.Tests/Namotion.Devices.SunSpec.Tests.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/History/">
     <Project Path="HomeBlaze/HomeBlaze.History/HomeBlaze.History.csproj" />

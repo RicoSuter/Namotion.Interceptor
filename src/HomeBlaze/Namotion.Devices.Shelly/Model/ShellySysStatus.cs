@@ -13,6 +13,9 @@ internal class ShellySysStatus
     [JsonPropertyName("uptime")]
     public long? Uptime { get; set; }
 
+    [JsonPropertyName("cfg_rev")]
+    public int? ConfigurationRevision { get; set; }
+
     [JsonPropertyName("available_updates")]
     public ShellyAvailableUpdates? AvailableUpdates { get; set; }
 }
@@ -30,19 +33,4 @@ internal class ShellyUpdateVersion
 {
     [JsonPropertyName("version")]
     public string? Version { get; set; }
-}
-
-/// <summary>
-/// WiFi status from Shelly.GetStatus "wifi" component.
-/// </summary>
-internal class ShellyWifiStatus
-{
-    [JsonPropertyName("sta_ip")]
-    public string? StationIp { get; set; }
-
-    [JsonPropertyName("ssid")]
-    public string? Ssid { get; set; }
-
-    [JsonPropertyName("rssi")]
-    public int? Rssi { get; set; }
 }

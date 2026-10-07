@@ -29,17 +29,17 @@ public partial class ShellyEnergyMeterPhase :
     [State(Unit = StateUnit.Watt, Position = 312)]
     public partial decimal? ActivePower { get; internal set; }
 
-    [State(Unit = StateUnit.Watt, Position = 313)]
+    [State(Unit = StateUnit.VoltAmpere, Position = 313)]
     public partial decimal? ApparentPower { get; internal set; }
 
     [State(Position = 350)]
     public partial decimal? PowerFactor { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 316)]
-    public partial decimal? TotalActiveEnergy { get; internal set; }
+    public partial decimal? TotalImportedEnergy { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 317)]
-    public partial decimal? TotalReturnedEnergy { get; internal set; }
+    public partial decimal? TotalExportedEnergy { get; internal set; }
 
     [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -61,8 +61,8 @@ public partial class ShellyEnergyMeterPhase :
         ActivePower = null;
         ApparentPower = null;
         PowerFactor = null;
-        TotalActiveEnergy = null;
-        TotalReturnedEnergy = null;
+        TotalImportedEnergy = null;
+        TotalExportedEnergy = null;
         LastUpdated = null;
     }
 }

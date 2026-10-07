@@ -37,7 +37,10 @@ public partial class ShellySwitch :
     public partial decimal? MeasuredPower { get; internal set; }
 
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    public partial decimal? MeasuredEnergyConsumed { get; internal set; }
+    public partial decimal? TotalImportedEnergy { get; internal set; }
+
+    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    public partial decimal? TotalExportedEnergy { get; internal set; }
 
     [State(Unit = StateUnit.Volt)]
     public partial decimal? ElectricalVoltage { get; internal set; }
@@ -75,7 +78,8 @@ public partial class ShellySwitch :
         IsOn = null;
         Source = null;
         MeasuredPower = null;
-        MeasuredEnergyConsumed = null;
+        TotalImportedEnergy = null;
+        TotalExportedEnergy = null;
         ElectricalVoltage = null;
         ElectricalCurrent = null;
         Temperature = null;

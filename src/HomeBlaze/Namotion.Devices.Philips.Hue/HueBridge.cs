@@ -113,11 +113,11 @@ public partial class HueBridge : BackgroundService,
     public decimal? Power => IsConnected ? 3.0m : null;
 
     [Derived]
-    public decimal? EnergyConsumed => null;
+    public decimal? TotalConsumedEnergy => null;
 
     [Derived]
     [State(Unit = StateUnit.Watt)]
-    public decimal? TotalPower =>
+    public decimal? CombinedPower =>
         IsConnected ? Power + Lights.Values.Sum(light => light.Power ?? 0m) : null;
 
     public HueBridge(ILogger<HueBridge> logger)

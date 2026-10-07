@@ -18,6 +18,8 @@ using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
+using Namotion.Devices.SunSpec;
+using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
 using Namotion.Devices.Ecowitt;
@@ -29,14 +31,19 @@ using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
 
 // Add all HomeBlaze services (cascades: Host -> Host.Services -> Services)
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
-var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
-    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+// Seeding must run before AddHomeBlazePlugins, which reads the plugin configuration during registration.
+var seededFileCount = DataDirectorySeeder.SeedIfMissing(
+    HomeBlazePaths.GetRootConfigurationPath(builder.Configuration),
+    builder.Configuration[HomeBlazePaths.SeedDirectoryKey]);
+
+var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configuration);
 
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
@@ -66,6 +73,11 @@ builder.Services
 
 var app = builder.Build();
 
+if (seededFileCount > 0)
+{
+    app.Logger.LogInformation("Seeded the data directory with {Count} default files.", seededFileCount);
+}
+
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
 var typeProvider = app.Services.GetRequiredService<TypeProvider>();
@@ -84,6 +96,8 @@ typeProvider
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
+    .AddAssembly(typeof(SunSpecDevice).Assembly)
+    .AddAssembly(typeof(SunSpecDeviceWidget).Assembly)
     .AddAssembly(typeof(WallboxCharger).Assembly)
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
@@ -132,6 +146,7 @@ if (mcpEnabled)
     app.MapMcp("/mcp");
 }
 
+app.MapDefaultEndpoints();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

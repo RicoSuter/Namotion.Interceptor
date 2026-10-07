@@ -8,6 +8,35 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
 public class PathResolutionTests
 {
+    [Theory]
+    [InlineData("get_property")]
+    [InlineData("set_property")]
+    [InlineData("browse")]
+    public async Task WhenPathSyntaxIsInvalid_ThenToolReturnsSyntaxError(string toolName)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var root = new TestContainer(context) { Name = "Root" };
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false
+        };
+        var tool = new McpToolFactory(root, config).CreateTools().First(t => t.Name == toolName);
+        var input = JsonSerializer.SerializeToElement(new { path = "Children[Servers", value = "x" });
+
+        // Act
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.Equal(
+            "Invalid path syntax: Unclosed '[' at position 8 in path 'Children[Servers'",
+            json.GetProperty("error").GetString());
+    }
+
     [Fact]
     public async Task WhenQueryWithDictionaryPath_ThenSubjectIsResolved()
     {

@@ -35,5 +35,11 @@ public enum StateUnit
     Byte,
     Kelvin,
     Minute,
-    Hour
+    Hour,
+    VoltAmpere,
+    VoltAmpereReactive,
+    VoltAmpereHour,
+    VoltAmpereReactiveHour,
+    AmpereHour,
+    WattPerSquareMeter
 }
