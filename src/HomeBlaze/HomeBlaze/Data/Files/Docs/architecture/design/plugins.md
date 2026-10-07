@@ -100,7 +100,7 @@ A provider creates its loader from its configuration when it first loads a packa
 | Add a plugin | Immediately. The package is loaded and its types become available. |
 | Remove a plugin, or change its version | After a restart. The plugin shows a message and `IsRestartRequired` is set. |
 | Remove or change a plugin that failed to load | Immediately, because none of its types were registered. |
-| Change `feeds`, `hostPackages`, `hostIdentifier` or `cacheDirectory` while no plugin has loaded | Immediately. The next load, for example by **Retry Failed Plugins**, uses the new settings. |
+| Change `feeds`, `hostPackages`, `hostIdentifier` or `cacheDirectory` while no plugin has loaded | Immediately. Plugins that failed to load are loaded again with the new settings. |
 | Change `feeds`, `hostPackages`, `hostIdentifier` or `cacheDirectory` after a plugin has loaded | After a restart. `IsRestartRequired` is set. |
 
 The same rules apply whether the change is made through the operations, the property editor, or by editing the JSON file on disk. Edits on disk are picked up by the storage and applied in the background, so a slow package download does not hold up other file changes. Reverting a pending change clears the restart message again.

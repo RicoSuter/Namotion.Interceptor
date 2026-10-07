@@ -17,6 +17,8 @@ namespace HomeBlaze.Plugins;
 /// <summary>
 /// Loads NuGet packages as plugins and adds their assemblies to the <see cref="TypeProvider"/>.
 /// Adding a plugin, and removing or changing a plugin that failed to load, takes effect immediately.
+/// Changing the feeds, host packages, host identifier or cache directory while no plugin has loaded also takes
+/// effect immediately and loads the failed plugins again.
 /// Removing a loaded plugin, changing its version or changing the feeds, host packages, host identifier or
 /// cache directory after a plugin has loaded takes effect after a restart.
 /// </summary>
@@ -215,9 +217,11 @@ public partial class NuGetPluginProvider : BackgroundService, IConfigurable, ITi
             var isRestartRequired = false;
             if (_loader is null || _loader.LoadedPlugins.Count == 0)
             {
-                if (_loader is not null && settings != _loaderSettings)
+                if (_loaderSettings is not null && settings != _loaderSettings)
                 {
-                    _loader.Dispose();
+                    // The new settings are the likely fix for plugins that failed with the old ones.
+                    retryFailed = true;
+                    _loader?.Dispose();
                     _loader = null;
                 }
 

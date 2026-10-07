@@ -172,7 +172,7 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenFeedsChangeAfterEveryPluginFailed_ThenRetryLoadsFromNewFeedWithoutRestart()
+    public async Task WhenFeedsChangeAfterEveryPluginFailed_ThenPluginLoadsFromNewFeedWithoutRestart()
     {
         // Arrange
         var emptyFeedDirectory = Directory.CreateTempSubdirectory("homeblaze-plugins-empty-feed-");
@@ -189,7 +189,7 @@ public class NuGetPluginProviderIntegrationTests : IDisposable
                 new PluginFeedEntry { Name = "samples", Url = FindPluginsFolder() },
                 .. provider.Feeds.Where(feed => feed.Name != "samples")
             ];
-            await provider.RetryAsync(CancellationToken.None);
+            await provider.ReconcileAsync(CancellationToken.None);
 
             // Assert
             Assert.Equal(ServiceStatus.Running, provider.LoadedPlugins[Plugin1].Status);

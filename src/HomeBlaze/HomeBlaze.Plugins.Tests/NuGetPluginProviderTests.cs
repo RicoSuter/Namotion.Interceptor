@@ -83,22 +83,41 @@ public class NuGetPluginProviderTests : IDisposable
     }
 
     [Fact]
-    public async Task WhenFeedsChangeAfterEveryPluginFailed_ThenRestartIsNotRequired()
+    public async Task WhenFeedsChangeAfterEveryPluginFailed_ThenFailedPluginsAreRetriedWithoutRestart()
     {
         // Arrange
         var provider = CreateProvider();
         provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }];
         await provider.ReconcileAsync(CancellationToken.None);
-        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+        var failedPlugin = provider.LoadedPlugins["Missing.Package"];
+        Assert.Equal(ServiceStatus.Error, failedPlugin.Status);
 
         // Act
         Directory.CreateDirectory(Path.Combine(_dataDirectory.FullName, "Other"));
         provider.Feeds = [new PluginFeedEntry { Name = "other", Url = "Other" }];
-        await provider.RetryAsync(CancellationToken.None);
+        await provider.ReconcileAsync(CancellationToken.None);
 
         // Assert
+        var plugin = provider.LoadedPlugins["Missing.Package"];
+        Assert.NotSame(failedPlugin, plugin);
+        Assert.Equal(ServiceStatus.Error, plugin.Status);
         Assert.False(provider.IsRestartRequired);
-        Assert.Equal(ServiceStatus.Error, provider.LoadedPlugins["Missing.Package"].Status);
+    }
+
+    [Fact]
+    public async Task WhenNothingChangesAfterEveryPluginFailed_ThenFailedPluginsAreNotRetried()
+    {
+        // Arrange
+        var provider = CreateProvider();
+        provider.Plugins = [new PluginEntry { PackageName = "Missing.Package", Version = "1.0.0" }];
+        await provider.ReconcileAsync(CancellationToken.None);
+        var failedPlugin = provider.LoadedPlugins["Missing.Package"];
+
+        // Act
+        await provider.ReconcileAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Same(failedPlugin, provider.LoadedPlugins["Missing.Package"]);
     }
 
     [Fact]
