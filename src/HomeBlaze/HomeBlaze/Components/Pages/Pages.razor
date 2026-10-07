@@ -16,6 +16,7 @@
 @inject SubjectPathResolver PathResolver
 @inject DeveloperModeService DeveloperMode
 @inject HotKeys HotKeys
+@inject NavigationManager NavigationManager
 
 <PageTitle>@_title - HomeBlaze</PageTitle>
 
@@ -120,6 +121,7 @@
     private SubjectEditPanel? _editPanel;
     private HotKeysContext? _hotKeysContext;
     private PropertyChangeWatcher? _pathWatcher;
+    private string? _escapedPath;
 
     private enum PageEditMode
     {
@@ -145,6 +147,7 @@
 
     protected override void OnParametersSet()
     {
+        _escapedPath = NavigationManager.GetEscapedPathBelow(NavigationManager.Uri, "pages");
         LoadSubject();
         _editMode = PageEditMode.View;
     }
@@ -175,7 +178,7 @@
 
     private SubjectPathResolution ResolvePath()
     {
-        var path = Path;
+        var path = _escapedPath;
         return string.IsNullOrEmpty(path) || Root is null
             ? default
             : PathResolver.ResolvePartially(path, PathStyle.Route);
@@ -195,15 +198,15 @@
         }
 
         // Storage replaces a subject at the same path by assigning the property that holds it, which leaves
-        // this page on the detached instance until the path is resolved again. While the path does not fully
-        // resolve, the property that would hold its next segment tells when the subject appears.
-        var deepestSubject = resolution.DeepestSubject;
+        // this page on the detached instance until the path is resolved again. That can happen to any subject
+        // on the path, so every holding property is watched. While the path does not fully resolve, the
+        // property that would hold its next segment tells when the subject appears.
+        var steps = resolution.Steps;
         var nextProperty = resolution.NextProperty;
-        var parents = deepestSubject?.TryGetRegisteredSubject()?.Parents ?? [];
-        var properties = new PropertyReference[parents.Length + (nextProperty.HasValue ? 1 : 0)];
-        for (var i = 0; i < parents.Length; i++)
+        var properties = new PropertyReference[steps.Length + (nextProperty.HasValue ? 1 : 0)];
+        for (var i = 0; i < steps.Length; i++)
         {
-            properties[i] = parents[i].Property.Reference;
+            properties[i] = steps[i].Property.Reference;
         }
 
         if (nextProperty.HasValue)
@@ -214,13 +217,32 @@
         _pathWatcher.Watch(properties);
 
         // A write after the path was resolved but before the watch was published is not reported.
-        var currentResolution = ResolvePath();
-        if (!ReferenceEquals(currentResolution.Subject, resolution.Subject) ||
-            !ReferenceEquals(currentResolution.DeepestSubject, deepestSubject) ||
-            currentResolution.NextProperty != nextProperty)
+        if (!HasSameSubjects(ResolvePath(), resolution))
         {
             _pathWatcher.Invalidate();
         }
+    }
+
+    private static bool HasSameSubjects(SubjectPathResolution resolution, SubjectPathResolution otherResolution)
+    {
+        var steps = resolution.Steps;
+        var otherSteps = otherResolution.Steps;
+        if (steps.Length != otherSteps.Length ||
+            !ReferenceEquals(resolution.DeepestSubject, otherResolution.DeepestSubject) ||
+            resolution.NextProperty != otherResolution.NextProperty)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < steps.Length; i++)
+        {
+            if (!ReferenceEquals(steps[i].Subject, otherSteps[i].Subject))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void OnPathChanged()

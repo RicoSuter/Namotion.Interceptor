@@ -40,9 +40,11 @@ public readonly struct SubjectPathResolution
 
     /// <summary>
     /// Gets the property of <see cref="DeepestSubject"/> that holds, or would hold, the first segment that does
-    /// not resolve, so a write to it can make the path resolve further. Null when the path fully resolves, or
-    /// when no write to a property of <see cref="DeepestSubject"/> can resolve the segment (an unknown
-    /// property name, or a route path that ends at a collection without an index).
+    /// not resolve, so a write to it can make the path resolve further. Null when the path fully resolves, when
+    /// the subject the path starts from does not exist, or when no write to a property of
+    /// <see cref="DeepestSubject"/> can resolve the segment: an unknown property name on a subject without an
+    /// <c>[InlinePaths]</c> property, a route path that ends at a collection or dictionary without an index,
+    /// or a canonical segment that names a collection or dictionary without a bracket index.
     /// </summary>
     public PropertyReference? NextProperty { get; }
 

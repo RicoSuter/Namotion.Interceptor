@@ -40,6 +40,33 @@ public class SubjectPathResolverReplacementTests : SubjectPathResolverTestBase
         Assert.True(HasResolvedTo(changes, secondReference, motor));
     }
 
+    [Fact]
+    public void WhenHolderOnPathIsReplaced_ThenDerivedReferenceResolvesThroughTheNewHolder()
+    {
+        // Arrange
+        var firstSensor = new TestContainerWithChildren { Name = "First sensor" };
+        var firstFolder = new TestContainerWithChildren { Name = "First" };
+        firstFolder.Children = new Dictionary<string, TestContainerWithChildren> { ["Sensor"] = firstSensor };
+        var reference = new TestPathReference { Resolver = Resolver, Path = "/Folder/Sensor" };
+        var root = new TestReferenceRoot(Context);
+        RootManager.Root = root;
+        root.Children = new Dictionary<string, IInterceptorSubject>
+        {
+            ["Folder"] = firstFolder,
+            ["Reference"] = reference
+        };
+        Assert.Same(firstSensor, reference.ResolvedSubject);
+
+        // Act
+        var secondSensor = new TestContainerWithChildren { Name = "Second sensor" };
+        var secondFolder = new TestContainerWithChildren { Name = "Second" };
+        secondFolder.Children = new Dictionary<string, TestContainerWithChildren> { ["Sensor"] = secondSensor };
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { ["Folder"] = secondFolder };
+
+        // Assert
+        Assert.Same(secondSensor, reference.ResolvedSubject);
+    }
+
     private static bool HasResolvedTo(IEnumerable<SubjectPropertyChange> changes, TestPathReference reference, IInterceptorSubject expected)
     {
         return changes.Any(change =>

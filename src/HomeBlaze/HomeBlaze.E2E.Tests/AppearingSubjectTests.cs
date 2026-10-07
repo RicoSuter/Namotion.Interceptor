@@ -28,12 +28,13 @@ public class AppearingSubjectTests
     public async Task WhenSubjectAtPagePathIsAdded_ThenPageShowsItWithoutNavigation()
     {
         // Arrange
-        var folderName = $"E2EAppearingPage{Guid.NewGuid():N}";
+        // A space and an escape sequence in the key, which must be unescaped exactly once.
+        var folderName = $"E2E Appearing %41 Page {Guid.NewGuid():N}";
         var root = await GetRootAsync();
         var motors = new List<Motor>();
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/{folderName}/Motor");
-        await Assertions.Expect(page.GetByText($"Subject not found at path: {folderName}/Motor"))
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{Uri.EscapeDataString(folderName)}/Motor");
+        await Assertions.Expect(page.GetByText("Subject not found at path"))
             .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
 
         try
@@ -45,7 +46,7 @@ public class AppearingSubjectTests
             // Assert
             await Assertions.Expect(page).ToHaveTitleAsync("E2E Appearing Motor - HomeBlaze", new() { Timeout = PageLoadTimeout });
             await Assertions.Expect(page.GetByText("Subject not found at path")).Not.ToBeVisibleAsync();
-            Assert.EndsWith($"/pages/{folderName}/Motor", page.Url);
+            Assert.EndsWith($"/pages/{Uri.EscapeDataString(folderName)}/Motor", page.Url);
         }
         finally
         {
@@ -57,11 +58,12 @@ public class AppearingSubjectTests
     public async Task WhenSubjectsOnBrowserDeepLinkAreAdded_ThenPanesExtendToTheRequestedSubject()
     {
         // Arrange
-        var folderName = $"E2EAppearingBrowser{Guid.NewGuid():N}";
+        // A space and an escape sequence in the key, which must be unescaped exactly once.
+        var folderName = $"E2E Appearing %41 Browser {Guid.NewGuid():N}";
         var root = await GetRootAsync();
         var motors = new List<Motor>();
         var page = await _fixture.CreatePageAsync();
-        await page.GotoAsync($"{_fixture.ServerAddress}browser/{folderName}/Motor");
+        await page.GotoAsync($"{_fixture.ServerAddress}browser/{Uri.EscapeDataString(folderName)}/Motor");
 
         var paneTitles = page.Locator("#scrollContainer h1");
         await Assertions.Expect(paneTitles).ToHaveCountAsync(1, new() { Timeout = PageLoadTimeout });
@@ -78,7 +80,7 @@ public class AppearingSubjectTests
             // Assert
             await Assertions.Expect(paneTitles).ToHaveCountAsync(3, new() { Timeout = PageLoadTimeout });
             await Assertions.Expect(paneTitles.Last).ToHaveTextAsync("E2E Appearing Motor");
-            Assert.EndsWith($"/browser/{folderName}/Motor", page.Url);
+            Assert.EndsWith($"/browser/{Uri.EscapeDataString(folderName)}/Motor", page.Url);
         }
         finally
         {
@@ -100,16 +102,21 @@ public class AppearingSubjectTests
 
     private static async Task RemoveAsync(IInterceptorSubject root, string folderName, List<Motor> motors)
     {
-        foreach (var motor in motors)
+        try
         {
-            await ((IStorageContainer)root).DeleteSubjectAsync(motor, CancellationToken.None);
+            foreach (var motor in motors)
+            {
+                await ((IStorageContainer)root).DeleteSubjectAsync(motor, CancellationToken.None);
+            }
         }
-
-        // The test data is reset by copying the source files over, so a folder a test adds stays on disk.
-        var directory = Path.Combine(AppContext.BaseDirectory, "TestData", folderName);
-        if (Directory.Exists(directory))
+        finally
         {
-            Directory.Delete(directory, recursive: true);
+            // The test data is reset by copying the source files over, so a folder a test adds stays on disk.
+            var directory = Path.Combine(AppContext.BaseDirectory, "TestData", folderName);
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
         }
     }
 }

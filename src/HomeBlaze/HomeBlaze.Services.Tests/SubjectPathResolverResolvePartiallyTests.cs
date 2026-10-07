@@ -117,6 +117,40 @@ public class SubjectPathResolverResolvePartiallyTests : SubjectPathResolverTestB
     }
 
     [Fact]
+    public void WhenCollectionIndexIsMissing_ThenReturnsCollectionProperty()
+    {
+        // Arrange
+        var item = new TestContainer { Name = "Item" };
+        var root = new TestContainerWithItems(Context) { Items = [item] };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolvePartially("/Items/5", PathStyle.Route);
+
+        // Assert
+        Assert.Null(result.Subject);
+        Assert.Same(root, result.DeepestSubject);
+        Assert.Equal(new PropertyReference(root, nameof(TestContainerWithItems.Items)), result.NextProperty);
+        Assert.Same(item, Resolver.ResolvePartially("/Items/0", PathStyle.Route).Subject);
+    }
+
+    [Fact]
+    public void WhenCanonicalSegmentNamesCollectionWithoutIndex_ThenReturnsNoNextProperty()
+    {
+        // Arrange
+        var root = new TestContainerWithItems(Context);
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolvePartially("/Items", PathStyle.Canonical);
+
+        // Assert
+        Assert.Null(result.Subject);
+        Assert.Same(root, result.DeepestSubject);
+        Assert.Null(result.NextProperty);
+    }
+
+    [Fact]
     public void WhenPropertyIsUnknownAndSubjectHasNoInlinePaths_ThenReturnsNoNextProperty()
     {
         // Arrange
