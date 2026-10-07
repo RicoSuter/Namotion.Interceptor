@@ -1,1 +1,12 @@
-{ "excludedModels": [63001, 63002], "classes": [] }
+{
+  "excludedModels": [63001, 63002],
+  "classes": [
+    { "name": "SunSpecCommon", "models": [1] },
+    { "name": "SunSpecInverter", "models": [101, 102, 103], "representative": 103 },
+    { "name": "SunSpecFloatInverter", "models": [111, 112, 113], "representative": 113 },
+    { "name": "SunSpecMppt", "models": [160] },
+    { "name": "SunSpecAcMeter", "models": [201, 202, 203, 204], "representative": 203 },
+    { "name": "SunSpecFloatAcMeter", "models": [211, 212, 213, 214], "representative": 213 },
+    { "name": "SunSpecStorageCapacity", "models": [713] }
+  ]
+}
