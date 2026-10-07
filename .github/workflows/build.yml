@@ -66,6 +66,7 @@ jobs:
               - 'src/HomeBlaze/HomeBlaze.Plugins/**'
               - 'src/HomeBlaze/HomeBlaze.Plugins.Tests/**'
               - 'src/HomeBlaze/HomeBlaze.Services/**'
+              - 'src/HomeBlaze/HomeBlaze.Storage/**'
             opcua:
               - *shared
               - 'src/Namotion.Interceptor.OpcUa*/**'
