@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -6,6 +7,8 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 public class PropertyChangeQueueSubscriptionWaitTests
 {
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task WhenQueueHasChange_ThenWaitCompletesSynchronouslyWithTrue()
     {
@@ -39,7 +42,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
         person.FirstName = "John";
 
         // Assert
-        Assert.True(await wait.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.True(await wait.WaitAsync(WaitTimeout));
         Assert.True(subscription.TryDequeueImmediate(out var change));
         Assert.Equal("John", change.GetNewValue<string?>());
     }
@@ -58,7 +61,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
         await cancellation.CancelAsync();
 
         // Assert
-        Assert.False(await wait.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.False(await wait.WaitAsync(WaitTimeout));
     }
 
     [Fact]
@@ -92,8 +95,8 @@ public class PropertyChangeQueueSubscriptionWaitTests
         // Act
         subscription.Dispose();
 
-        // Assert
-        Assert.True(await wait.WaitAsync(TimeSpan.FromSeconds(30)));
+        // Assert: the woken wait's result may be a spurious true; the next one reports completion.
+        await wait.WaitAsync(WaitTimeout);
         Assert.False(subscription.TryDequeueImmediate(out _));
         Assert.False(await subscription.WaitToDequeueAsync(CancellationToken.None));
     }
@@ -142,7 +145,7 @@ public class PropertyChangeQueueSubscriptionWaitTests
         for (var i = 1; i <= exchangeCount; i++)
         {
             person.FirstName = $"Name{i}";
-            if (!SpinWait.SpinUntil(() => Volatile.Read(ref received.Value) == i, TimeSpan.FromSeconds(10)))
+            if (!SpinWait.SpinUntil(() => Volatile.Read(ref received.Value) == i, WaitTimeout))
             {
                 break;
             }
@@ -151,10 +154,161 @@ public class PropertyChangeQueueSubscriptionWaitTests
         }
 
         await stop.CancelAsync();
-        await consumer.WaitAsync(TimeSpan.FromSeconds(30));
+        await consumer.WaitAsync(WaitTimeout);
 
         // Assert
         Assert.Equal(exchangeCount, completedExchanges);
+    }
+
+    [Fact]
+    public async Task WhenSeveralWritersWakeAnIdleConsumerAtOnce_ThenEveryChangeIsReceived()
+    {
+        // Arrange: each round starts with the consumer waiting on an empty queue and releases all writers
+        // together, so they race to wake it. Exactly one may complete the wait; a second completion would
+        // throw from inside a writer's property setter and fail its thread.
+        const int writerCount = 4;
+        const int roundCount = 2_000;
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var people = Enumerable.Range(0, writerCount).Select(_ => new Person(context)).ToArray();
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        using var cancellation = new CancellationTokenSource();
+        var received = new StrongBox<int>();
+        var consumer = Task.Run(() => ConsumeWithAwaitableWaitAsync(subscription, received, cancellation.Token));
+        using var roundEnd = new Barrier(writerCount, barrier =>
+        {
+            var expected = (int)(barrier.CurrentPhaseNumber + 1) * writerCount;
+            Assert.True(
+                SpinWait.SpinUntil(() => Volatile.Read(ref received.Value) == expected, WaitTimeout),
+                $"Consumer stalled at {Volatile.Read(ref received.Value)} of {expected} changes.");
+        });
+
+        try
+        {
+            // Act
+            await Task.WhenAll(people.Select(person => DedicatedThreadTestHelpers.RunOnDedicatedThreadAsync(() =>
+            {
+                for (var round = 0; round < roundCount; round++)
+                {
+                    person.FirstName = $"Name{round}";
+
+                    // Bounded, so a writer that threw fails the others instead of leaving them parked.
+                    Assert.True(roundEnd.SignalAndWait(WaitTimeout), "A writer did not reach the end of the round.");
+                }
+            })));
+
+            // Assert
+            Assert.Equal(writerCount * roundCount, Volatile.Read(ref received.Value));
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            await consumer.WaitAsync(WaitTimeout);
+        }
+    }
+
+    [Fact]
+    public async Task WhenCancellationAndAWriteRaceToEndAWait_ThenItEndsOnceAndTheNextWaitStillWakes()
+    {
+        // Arrange: the cancellation callback and the writer both try to end the same wait. Only one may
+        // complete it; a second completion would throw from the writer's setter or from the cancellation.
+        const int iterations = 2_000;
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+
+        for (var i = 0; i < iterations; i++)
+        {
+            using var cancellation = new CancellationTokenSource();
+            var racedWait = subscription.WaitToDequeueAsync(cancellation.Token);
+
+            // Act
+            var cancel = Task.Run(() => cancellation.CancelAsync(), CancellationToken.None);
+            person.FirstName = $"raced{i}";
+            await cancel.WaitAsync(WaitTimeout);
+            await racedWait.AsTask().WaitAsync(WaitTimeout);
+            Assert.Equal(1, DrainImmediately(subscription));
+
+            var nextWait = subscription.WaitToDequeueAsync(CancellationToken.None);
+            person.FirstName = $"next{i}";
+
+            // Assert
+            Assert.True(await nextWait.AsTask().WaitAsync(WaitTimeout));
+            Assert.Equal(1, DrainImmediately(subscription));
+        }
+    }
+
+    [Fact]
+    public async Task WhenACompletedWaitsTokenIsCancelledLater_ThenTheNextWaitIsNotEndedByIt()
+    {
+        // Arrange: the first wait is completed by a write, so its cancellation registration must have
+        // been released; a later wait with another token is still pending when the first token cancels.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        using var firstConsumer = new CancellationTokenSource();
+        var firstWait = subscription.WaitToDequeueAsync(firstConsumer.Token);
+        person.FirstName = "first";
+        Assert.True(await firstWait.AsTask().WaitAsync(WaitTimeout));
+        Assert.True(subscription.TryDequeueImmediate(out _));
+        var nextWait = subscription.WaitToDequeueAsync(CancellationToken.None);
+
+        // Act
+        await firstConsumer.CancelAsync();
+
+        // Assert
+        Assert.False(nextWait.IsCompleted);
+        person.FirstName = "next";
+        Assert.True(await nextWait.AsTask().WaitAsync(WaitTimeout));
+    }
+
+    [Fact]
+    public async Task WhenAWaitIsStillPending_ThenStartingAnotherThrows()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+        var person = new Person(context);
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var pendingWait = subscription.WaitToDequeueAsync(CancellationToken.None);
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(StartAnotherWait);
+        person.FirstName = "John";
+        Assert.True(await pendingWait.AsTask().WaitAsync(WaitTimeout));
+
+        void StartAnotherWait() => _ = subscription.WaitToDequeueAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WhenDisposeRacesAWait_ThenTheWaitCompletesAndCompletionIsReported()
+    {
+        // Arrange
+        const int iterations = 2_000;
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeSubscriptions();
+
+        for (var i = 0; i < iterations; i++)
+        {
+            var subscription = context.CreatePropertyChangeQueueSubscription();
+
+            // Act
+            var dispose = Task.Run(subscription.Dispose, CancellationToken.None);
+            var wait = subscription.WaitToDequeueAsync(CancellationToken.None);
+
+            // Assert: a lost wake-up would leave the wait pending past the timeout.
+            await wait.AsTask().WaitAsync(WaitTimeout);
+            await dispose.WaitAsync(WaitTimeout);
+            Assert.False(await subscription.WaitToDequeueAsync(CancellationToken.None));
+        }
+    }
+
+    private static int DrainImmediately(PropertyChangeQueueSubscription subscription)
+    {
+        var count = 0;
+        while (subscription.TryDequeueImmediate(out _))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private static async Task ConsumeWithAwaitableWaitAsync(

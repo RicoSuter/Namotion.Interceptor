@@ -362,8 +362,6 @@ public class SubjectTransactionEchoSuppressionTests : TransactionTestBase
         }
         finally
         {
-            // Await the consumer before disposing: Dispose tears down the subscription's signal,
-            // which a still-running TryDequeue may be about to wait on (ObjectDisposedException).
             await processorCts.CancelAsync();
             try { await processTask; } catch (OperationCanceledException) { }
             processor.Dispose();
