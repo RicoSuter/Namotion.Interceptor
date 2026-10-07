@@ -662,7 +662,7 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
-    public async Task WhenLongStringChangesDuringItsFirstRead_ThenTheSecondReadIsConfirmedNextCycleWithoutAnotherSecondRead()
+    public async Task WhenLongStringChangesDuringItsFirstRead_ThenThePreviousValueIsKeptAndTheNextCycleReadsAFullPairAgain()
     {
         // Arrange (the device switches to the new value after answering the first request, so the first read is torn)
         var previous = new string('A', 300);
@@ -683,65 +683,23 @@ public partial class ModbusPollerTests
         await poller.ReadAsync(reader, CancellationToken.None);
         var tornCycle = Apply(poller);
         var tornCycleRequests = reader.Requests.ToArray();
+        reader.RequestReceived = null;
         reader.Requests.Clear();
         await poller.ReadAsync(reader, CancellationToken.None);
         var nextCycle = Apply(poller);
 
         // Assert
         Assert.Empty(tornCycle);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, tornCycleRequests);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, AfterRequest }, tornCycleRequests);
         Assert.Equal(next, Assert.Single(nextCycle).Value);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
-    }
-
-    [Fact]
-    public async Task WhenCandidateDoesNotMatchTheNextFirstRead_ThenItIsReadAgainAndTheNewSecondReadBecomesTheCandidate()
-    {
-        // Arrange (cycle 1 is torn and keeps B as candidate; before cycle 2 the device moves on to C, and to D
-        // after answering cycle 2's first read)
-        var (poller, reader, _) = CreateLongString(new string('A', 300));
-        await poller.ReadAsync(reader, CancellationToken.None);
-        Apply(poller);
-        reader.Requests.Clear();
-        reader.RequestReceived = index =>
-        {
-            if (index == 1)
-            {
-                SetLongString(reader, new string('B', 300));
-            }
-        };
-        await poller.ReadAsync(reader, CancellationToken.None);
-        Apply(poller);
-        SetLongString(reader, new string('C', 300));
-        reader.Requests.Clear();
-        reader.RequestReceived = index =>
-        {
-            if (index == 2)
-            {
-                SetLongString(reader, new string('D', 300));
-            }
-        };
-
-        // Act
-        await poller.ReadAsync(reader, CancellationToken.None);
-        var mismatchCycle = Apply(poller);
-        var mismatchCycleRequests = reader.Requests.ToArray();
-        reader.RequestReceived = null;
-        reader.Requests.Clear();
-        await poller.ReadAsync(reader, CancellationToken.None);
-        var confirmedCycle = Apply(poller);
-
-        // Assert
-        Assert.Empty(mismatchCycle);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, mismatchCycleRequests);
-        Assert.Equal(new string('D', 300), Assert.Single(confirmedCycle).Value);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
     }
 
     [Fact]
     public async Task WhenConnectionIsLostInTheMiddleOfALongStringRead_ThenTheExceptionPropagatesAndTheLastValueIsKept()
     {
-        // Arrange
+        // Arrange (the poller is discarded after a lost connection: a reconnect creates fresh bindings, so only the
+        // applied value and the last raw value must survive)
         var previous = new string('A', 300);
         var (poller, reader, _) = CreateLongString(previous);
         await poller.ReadAsync(reader, CancellationToken.None);
@@ -886,6 +844,44 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
+    public async Task WhenLaterRequestOfTheConfirmingReadFailsTransiently_ThenNothingIsAppliedAndTheNextCycleRecovers()
+    {
+        // Arrange (request 3 is the second request of the confirming read)
+        var logger = new RecordingLogger();
+        var (poller, reader, metrics) = CreateLongString(new string('A', 300), logger);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        var changed = new string('B', 300);
+        SetLongString(reader, changed);
+        reader.Requests.Clear();
+        reader.RequestReceived = index =>
+        {
+            if (index == 3)
+            {
+                reader.Reject(130, exceptionCode: 6);
+            }
+        };
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var failedCycle = Apply(poller);
+        var failedCycleRequests = reader.Requests.ToArray();
+        reader.RequestReceived = null;
+        reader.Accept(130);
+        reader.Requests.Clear();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var recoveredCycle = Apply(poller);
+
+        // Assert
+        Assert.Empty(failedCycle);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, failedCycleRequests);
+        Assert.Equal(changed, Assert.Single(recoveredCycle).Value);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+        Assert.Equal(1, metrics.TotalFailedRequests);
+        Assert.Contains("read of 25 HoldingRegister from 125", Assert.Single(logger.Warnings));
+    }
+
+    [Fact]
     public async Task WhenFirstReadOfLongStringIsTorn_ThenNothingIsAppliedUntilTwoReadsAgree()
     {
         // Arrange (the device switches to the new value after answering the first request)
@@ -908,7 +904,7 @@ public partial class ModbusPollerTests
 
         // Assert
         Assert.Equal(7, Assert.Single(tornCycle).Value);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, tornCycleRequests);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, AfterRequest }, tornCycleRequests);
         Assert.Equal(next, nextCycle[nameof(LongStringSubject.Text)]);
     }
 

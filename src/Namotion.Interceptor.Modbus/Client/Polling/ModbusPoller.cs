@@ -22,11 +22,12 @@ internal sealed class ModbusPoller
     private readonly ILogger _logger;
 
     // Keyed by the registers a batch spans rather than by batch instance, so a replan does not log a still failing
-    // batch again. The value is the request that failed, which for a batch of several requests is one of them.
+    // batch again. The value is the request that failed, which for a batch of several requests is one of them; the
+    // recovery log names that same request on purpose, so the failure and recovery lines pair up.
     private readonly Dictionary<(byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count), (int StartAddress, int Count)> _failingBatches = [];
     private ModbusReadBatch[] _batches;
 
-    // Set by a failing request of a batch of several requests, so the failure handler can name that request.
+    // Set by a failing request of a batch of several requests, so the failure and recovery logs can name that request.
     private (int StartAddress, int Count) _failedSplitRequest;
 
     public ModbusPoller(
@@ -235,17 +236,15 @@ internal sealed class ModbusPoller
 
     /// <summary>
     /// Reads the single binding of a batch larger than one request in consecutive requests. Modbus cannot read them
-    /// atomically, so the binding only becomes current when two complete reads agree: the first read of a cycle equals
-    /// the last value or the candidate kept from the previous cycle, or else a second read in the same cycle equals it.
-    /// A second read that disagrees becomes the candidate and the binding keeps its value. A failed request propagates
-    /// and leaves the binding without a current value.
+    /// atomically, so a value that differs from the last one is read a second time in the same cycle and only becomes
+    /// current when both reads agree; otherwise the binding keeps its value and is read again next cycle. A failed
+    /// request propagates and leaves the binding without a current value.
     /// </summary>
     private async Task ReadSplitBindingAsync(IModbusRegisterReader reader, ModbusReadBatch batch, CancellationToken cancellationToken)
     {
         Debug.Assert(batch.Bindings.Length == 1, "A batch of several requests holds exactly one binding.");
         var binding = batch.Bindings[0];
         var current = binding.CurrentRaw;
-        byte[] candidate;
         (int StartAddress, int Count) request = default;
         try
         {
@@ -256,19 +255,21 @@ internal sealed class ModbusPoller
                 data.Span[..(request.Count * 2)].CopyTo(current.AsSpan((request.StartAddress - binding.Address) * 2));
             }
 
-            if (IsConfirmedByEarlierRead(binding))
+            if (binding.HasLast && current.AsSpan().SequenceEqual(binding.LastRaw))
             {
                 MarkConfirmed(binding);
                 return;
             }
 
-            candidate = binding.CandidateRaw ??= new byte[current.Length];
-            binding.HasCandidate = false;
             for (var index = 0; index < batch.RequestCount; index++)
             {
                 request = batch.GetRequest(index);
                 var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, request.StartAddress, request.Count, cancellationToken).ConfigureAwait(false);
-                data.Span[..(request.Count * 2)].CopyTo(candidate.AsSpan((request.StartAddress - binding.Address) * 2));
+                if (!data.Span[..(request.Count * 2)].SequenceEqual(current.AsSpan((request.StartAddress - binding.Address) * 2, request.Count * 2)))
+                {
+                    RecordMismatch(binding);
+                    return;
+                }
             }
         }
         catch (ModbusResponseException)
@@ -277,27 +278,12 @@ internal sealed class ModbusPoller
             throw;
         }
 
-        if (candidate.AsSpan().SequenceEqual(current))
-        {
-            MarkConfirmed(binding);
-            return;
-        }
-
-        binding.HasCandidate = true;
-        RecordMismatch(binding);
-    }
-
-    private static bool IsConfirmedByEarlierRead(ModbusRegisterBinding binding)
-    {
-        var current = binding.CurrentRaw.AsSpan();
-        return (binding.HasLast && current.SequenceEqual(binding.LastRaw)) ||
-            (binding is { HasCandidate: true, CandidateRaw: { } candidate } && current.SequenceEqual(candidate));
+        MarkConfirmed(binding);
     }
 
     private static void MarkConfirmed(ModbusRegisterBinding binding)
     {
         binding.HasCurrent = true;
-        binding.HasCandidate = false;
         binding.ConsecutiveMismatchCount = 0;
     }
 

@@ -995,11 +995,12 @@ public partial class ModbusSubjectClientSourceTests
             Assert.All(requests, request => Assert.Equal(ModbusFunctionCode.ReadHoldingRegisters, request.FunctionCode));
             Assert.All(requests, request => Assert.Contains((request.Address, request.Quantity), new[] { (100, 125), (225, 25), (250, 1) }));
 
-            // An unchanged cycle reads the string once before After, so two string reads in a row prove a confirming read.
+            // Every cycle reads After right after the string, so the string's last request followed directly by its first
+            // one only comes from a confirming read, wherever in a cycle the snapshot before the change landed.
             var readsAfterChange = requests.Skip(requestCountBeforeChange).Select(request => (request.Address, request.Quantity)).ToArray();
             Assert.Contains(
-                Enumerable.Range(0, Math.Max(0, readsAfterChange.Length - 2)),
-                index => readsAfterChange[index] == (100, 125) && readsAfterChange[index + 1] == (225, 25) && readsAfterChange[index + 2] == (100, 125));
+                Enumerable.Range(0, Math.Max(0, readsAfterChange.Length - 1)),
+                index => readsAfterChange[index] == (225, 25) && readsAfterChange[index + 1] == (100, 125));
         }
         finally
         {
