@@ -314,4 +314,52 @@ public class StorageHierarchyManagerTests
         Assert.False(replaced);
         Assert.Same(folder, children["Motor1"]);
     }
+
+    [Fact]
+    public void WhenBuildingTheSameEntriesAgain_ThenPreviousChildrenAndFoldersAreKept()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var file = CreateNonConfigurableSubject();
+        var nestedFile = CreateNonConfigurableSubject();
+        (string, IInterceptorSubject?)[] entries = [("file.txt", file), ("folder/", null), ("folder/nested.txt", nestedFile)];
+        var children = manager.BuildHierarchy(entries, new Dictionary<string, IInterceptorSubject>(), storage);
+        var folder = Assert.IsType<VirtualFolder>(children["folder"]);
+        var folderChildren = folder.Children;
+
+        // Act
+        var rebuiltChildren = manager.BuildHierarchy(entries, children, storage);
+
+        // Assert
+        Assert.Same(children, rebuiltChildren);
+        Assert.Same(folderChildren, folder.Children);
+        Assert.Same(nestedFile, folder.Children["nested.txt"]);
+    }
+
+    [Fact]
+    public void WhenBuildingChangedEntries_ThenFoldersAreReusedAndMissingFoldersDropped()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var nestedFile = CreateNonConfigurableSubject();
+        var addedFile = CreateNonConfigurableSubject();
+        var children = manager.BuildHierarchy(
+            [("kept/nested.txt", nestedFile), ("gone/other.txt", CreateNonConfigurableSubject())],
+            new Dictionary<string, IInterceptorSubject>(),
+            storage);
+        var keptFolder = Assert.IsType<VirtualFolder>(children["kept"]);
+
+        // Act
+        var rebuiltChildren = manager.BuildHierarchy(
+            [("kept/nested.txt", nestedFile), ("kept/added.txt", addedFile)], children, storage);
+
+        // Assert
+        Assert.NotSame(children, rebuiltChildren);
+        Assert.Equal(["kept"], rebuiltChildren.Keys);
+        Assert.Same(keptFolder, rebuiltChildren["kept"]);
+        Assert.Same(nestedFile, keptFolder.Children["nested.txt"]);
+        Assert.Same(addedFile, keptFolder.Children["added.txt"]);
+    }
 }

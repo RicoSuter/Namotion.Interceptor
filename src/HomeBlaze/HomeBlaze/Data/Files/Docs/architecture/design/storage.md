@@ -73,7 +73,20 @@ For filesystem backends, `StorageFileWatcher` provides:
 - Reactive file monitoring with debouncing (500ms coalesce window)
 - Self-write protection (2-second grace period to prevent feedback loops)
 - SHA256 content hashing for change detection
-- Automatic rescan on filesystem watcher buffer overflow
+- Automatic rescan on filesystem watcher errors such as a buffer overflow (see [Rescans](#rescans))
+
+### Rescans
+
+A storage scans its files when it connects, that is when it starts and whenever its own configuration is applied. A file watcher error, such as a buffer overflow after a git checkout or a backup restore, also triggers a rescan, because file events may have been missed.
+
+The first scan creates a subject for every file. A later scan of the same storage reconciles the current hierarchy with the files instead of creating it again:
+
+- A file whose content is unchanged keeps its subject untouched. JSON files are compared by the SHA256 hash of their content, other files by size and modification time.
+- A changed file keeps its subject, which takes the new content the way it does for a file watcher change: a configurable subject is reconfigured and applies its configuration, and a document reloads. When the file now needs a subject of another type, for example because its `$type` changed, a new subject replaces it.
+- An `UnknownSubject` is created again from its file, so it is replaced when its type can now be created.
+- New files get subjects, the subjects of deleted files are removed, and folders that still exist keep their `VirtualFolder`.
+
+Kept subjects keep their device connections and runtime state, and stay visible to consumers that only pick up subjects present when they start, such as the OPC UA server. A plugin provider in the storage keeps its loaded packages. Only when the storage type or its resolved directory differs from the last completed scan, for example after its connection string changed, does a scan create every subject again.
 
 ### File Hierarchy
 

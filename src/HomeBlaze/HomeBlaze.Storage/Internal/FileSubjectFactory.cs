@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using FluentStorage.Blobs;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -69,6 +70,35 @@ internal sealed class FileSubjectFactory
         UpdateFileMetadata(genericFile, blob);
         await genericFile.OnFileChangedAsync(cancellationToken);
         return genericFile;
+    }
+
+    /// <summary>
+    /// Returns whether creating a subject for the file at <paramref name="path"/> would give one of the type of
+    /// <paramref name="subject"/>, so the subject can take the file's current content in place. <paramref name="json"/>
+    /// is the content of a JSON file and is ignored for other files. Content that is not valid JSON counts as the
+    /// same type, so a subject is kept while its file is being written.
+    /// </summary>
+    public bool CreatesSameType(IInterceptorSubject subject, string path, string? json)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        if (extension != FileExtensions.Json)
+        {
+            return subject.GetType() == (_typeRegistry.ResolveTypeForExtension(extension) ?? typeof(GenericFile));
+        }
+
+        string? typeName;
+        try
+        {
+            typeName = json is null ? null : TryReadTypeName(json);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+
+        return typeName is null
+            ? subject is JsonFile
+            : subject is IConfigurable && _serializer.FindType(typeName) == subject.GetType();
     }
 
     /// <summary>
@@ -181,7 +211,7 @@ internal sealed class FileSubjectFactory
             file.FileSize = blob.Size ?? 0L;
             if (blob.LastModificationTime.HasValue)
             {
-                file.LastModified = blob.LastModificationTime.Value.DateTime;
+                file.LastModified = blob.LastModificationTime.Value.UtcDateTime;
             }
         }
     }

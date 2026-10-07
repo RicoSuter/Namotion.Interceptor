@@ -117,6 +117,110 @@ internal sealed class StorageHierarchyManager
     }
 
     /// <summary>
+    /// Builds the hierarchy of <paramref name="entries"/> in their order, with the keys and conflict rules of
+    /// <see cref="PlaceInHierarchy"/>; an entry without a subject is a folder. A folder at the same path in
+    /// <paramref name="previousChildren"/> is reused, and every folder's Children are assigned once, only when its
+    /// entries differ, children before parents. Returns <paramref name="previousChildren"/> itself when the root
+    /// entries are the same, otherwise new root children for the caller to assign.
+    /// </summary>
+    public Dictionary<string, IInterceptorSubject> BuildHierarchy(
+        IReadOnlyList<(string Path, IInterceptorSubject? Subject)> entries,
+        Dictionary<string, IInterceptorSubject> previousChildren,
+        IStorageContainer storage)
+    {
+        var root = new FolderBuilder(null, previousChildren);
+
+        // In creation order, which puts every folder after its parent.
+        var folders = new List<FolderBuilder>();
+        var foldersBySubject = new Dictionary<VirtualFolder, FolderBuilder>(ReferenceEqualityComparer.Instance);
+
+        foreach (var (entryPath, subject) in entries)
+        {
+            var path = NormalizePath(entryPath).TrimEnd('/');
+            var segments = path.Split('/');
+            var folderDepth = subject != null ? segments.Length - 1 : segments.Length;
+
+            var current = root;
+            for (var i = 0; i < folderDepth && current is not null; i++)
+            {
+                var folderName = segments[i];
+                if (current.Children.TryGetValue(folderName, out var existing))
+                {
+                    if (existing is VirtualFolder existingFolder && foldersBySubject.TryGetValue(existingFolder, out var builder))
+                    {
+                        current = builder;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning("Path conflict at {Segment} for {Path}", folderName, path);
+                        current = null;
+                    }
+
+                    continue;
+                }
+
+                var folder = current.PreviousChildren.TryGetValue(folderName, out var previous) && previous is VirtualFolder previousFolder
+                    ? previousFolder
+                    : new VirtualFolder(storage, string.Join('/', segments, 0, i + 1) + "/");
+
+                var folderBuilder = new FolderBuilder(folder, folder.Children);
+                current.Children[folderName] = folder;
+                folders.Add(folderBuilder);
+                foldersBySubject[folder] = folderBuilder;
+                current = folderBuilder;
+            }
+
+            if (current is not null && subject is not null)
+            {
+                var key = GetChildKey(path, subject);
+                if (!current.Children.TryAdd(key, subject))
+                {
+                    _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, key);
+                }
+            }
+        }
+
+        for (var i = folders.Count - 1; i >= 0; i--)
+        {
+            var folder = folders[i];
+            if (!HaveSameEntries(folder.PreviousChildren, folder.Children))
+            {
+                folder.Folder!.Children = folder.Children;
+            }
+        }
+
+        return HaveSameEntries(previousChildren, root.Children) ? previousChildren : root.Children;
+    }
+
+    private static bool HaveSameEntries(
+        Dictionary<string, IInterceptorSubject> previous, Dictionary<string, IInterceptorSubject> current)
+    {
+        if (previous.Count != current.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, subject) in current)
+        {
+            if (!previous.TryGetValue(key, out var previousSubject) || !ReferenceEquals(previousSubject, subject))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private sealed class FolderBuilder(VirtualFolder? folder, Dictionary<string, IInterceptorSubject> previousChildren)
+    {
+        public VirtualFolder? Folder { get; } = folder;
+
+        public Dictionary<string, IInterceptorSubject> PreviousChildren { get; } = previousChildren;
+
+        public Dictionary<string, IInterceptorSubject> Children { get; } = new();
+    }
+
+    /// <summary>
     /// Replaces <paramref name="subject"/> with <paramref name="replacement"/> at the path in one pass, so the
     /// containing folder never lacks the entry. Changes nothing and returns false when the entry at the path's
     /// key is not <paramref name="subject"/> itself, or when the replacement's key is taken by another entry.
