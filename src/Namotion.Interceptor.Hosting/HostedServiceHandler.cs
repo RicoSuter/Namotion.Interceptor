@@ -230,8 +230,23 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // A nested attach composes: a service that attaches children during its own
                 // StartAsync defers completion for them before its own deferral is released, so the count never
                 // reaches zero in between.
-                PostStartService(hostedService, null, context.DeferStartupCompletion());
+                PostStartService(hostedService, null, DeferStartupCompletion(hostedService, context));
             }
+        }
+    }
+
+    // Caller holds _hostedServices and has just added hostedService. Without a queued start, keeping
+    // it registered would turn a later attach into a no-op, so the registration is undone on failure.
+    private IDisposable DeferStartupCompletion(IHostedService hostedService, IInterceptorSubjectContext context)
+    {
+        try
+        {
+            return context.DeferStartupCompletion();
+        }
+        catch
+        {
+            _hostedServices.Remove(hostedService);
+            throw;
         }
     }
 
@@ -247,7 +262,9 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
         }
     }
 
-    internal async Task AttachHostedServiceAsync(
+    // Not async: a failure to defer startup completion throws synchronously, before anything is
+    // queued, so the caller can tell it apart from a start that failed.
+    internal Task AttachHostedServiceAsync(
         IHostedService hostedService, IInterceptorSubjectContext context, CancellationToken cancellationToken)
     {
         // Inline caller continuations could block the action loop.
@@ -264,7 +281,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
                 // being blocked does not block the startup-completion gate, so without a deferral
                 // ApplicationStarted can fire, drop the count to zero and let a wait complete
                 // vacuously while this start is still sitting in the queue.
-                PostStartService(hostedService, tcs, context.DeferStartupCompletion());
+                PostStartService(hostedService, tcs, DeferStartupCompletion(hostedService, context));
             }
             else
             {
@@ -272,7 +289,7 @@ internal class HostedServiceHandler : IHostedService, ILifecycleHandler, IDispos
             }
         }
 
-        await tcs.Task.WaitAsync(cancellationToken);
+        return tcs.Task.WaitAsync(cancellationToken);
     }
     
     internal async Task DetachHostedServiceAsync(IHostedService hostedService, CancellationToken cancellationToken)

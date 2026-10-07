@@ -92,6 +92,26 @@ public class StartupCompletionExtensionsTests
     }
 
     [Fact]
+    public void WhenADeferThrowsAndReleasingATakenDeferralThrows_ThenAnAggregateWithTheDeferFailureFirstPropagates()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var releaseFailure = new InvalidOperationException("Release failed.");
+        var deferFailure = new InvalidOperationException("Defer failed.");
+        var first = new CountingCompletion();
+        var releaseThrowing = new CountingCompletion(releaseFailure);
+        context.AddService<IStartupCompletion>(first);
+        context.AddService<IStartupCompletion>(releaseThrowing);
+        context.AddService<IStartupCompletion>(new ThrowingCompletion(deferFailure));
+
+        // Act & Assert
+        var exception = Assert.Throws<AggregateException>(() => context.DeferStartupCompletion());
+        Assert.Equal([deferFailure, releaseFailure], exception.InnerExceptions);
+        Assert.Equal(1, first.Released);
+        Assert.Equal(1, releaseThrowing.Released);
+    }
+
+    [Fact]
     public void WhenReleasingOneDeferralThrows_ThenTheOthersAreStillReleasedAndTheExceptionPropagates()
     {
         // Arrange

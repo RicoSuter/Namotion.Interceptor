@@ -60,7 +60,16 @@ public static class InterceptorHostingExtensions
             // queues the start and returns without waiting for it, so anything treating "the graph
             // has finished starting" as a completion point would otherwise pass it too early.
             var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            hostedServiceHandler?.AttachHostedService(hostedService, subject.Context);
+            try
+            {
+                hostedServiceHandler?.AttachHostedService(hostedService, subject.Context);
+            }
+            catch
+            {
+                // Not queued, so not attached: a later attach must be able to start it.
+                RemoveAttachedHostedService(subject, hostedService);
+                throw;
+            }
         }
 
         return wasAdded;
@@ -74,19 +83,7 @@ public static class InterceptorHostingExtensions
     /// <param name="hostedService">The hosted service to detach.</param>
     public static bool DetachHostedService(this IInterceptorSubject subject, IHostedService hostedService)
     {
-        bool wasRemoved = false;
-        subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
-            _ => null,
-            (_, value) =>
-            {
-                if (value is ImmutableArray<IHostedService> array && array.Contains(hostedService))
-                {
-                    wasRemoved = true;
-                    var newArray = array.Remove(hostedService);
-                    return newArray.Length > 0 ? newArray : null;
-                }
-                return value;
-            });
+        var wasRemoved = RemoveAttachedHostedService(subject, hostedService);
 
         if (wasRemoved)
         {
@@ -128,7 +125,20 @@ public static class InterceptorHostingExtensions
             var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
             if (hostedServiceHandler != null)
             {
-                await hostedServiceHandler.AttachHostedServiceAsync(hostedService, subject.Context, cancellationToken);
+                Task attaching;
+                try
+                {
+                    attaching = hostedServiceHandler.AttachHostedServiceAsync(hostedService, subject.Context, cancellationToken);
+                }
+                catch
+                {
+                    // Not queued, so not attached: a later attach must be able to start it. A start that
+                    // fails later leaves the service attached, as before.
+                    RemoveAttachedHostedService(subject, hostedService);
+                    throw;
+                }
+
+                await attaching;
             }
         }
 
@@ -143,6 +153,22 @@ public static class InterceptorHostingExtensions
         IHostedService hostedService,
         CancellationToken cancellationToken)
     {
+        var wasRemoved = RemoveAttachedHostedService(subject, hostedService);
+
+        if (wasRemoved)
+        {
+            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
+            if (hostedServiceHandler != null)
+            {
+                await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);
+            }
+        }
+
+        return wasRemoved;
+    }
+
+    private static bool RemoveAttachedHostedService(IInterceptorSubject subject, IHostedService hostedService)
+    {
         var wasRemoved = false;
         subject.Data.AddOrUpdate((null, AttachedHostedServicesKey),
             _ => null,
@@ -156,15 +182,6 @@ public static class InterceptorHostingExtensions
                 }
                 return value;
             });
-
-        if (wasRemoved)
-        {
-            var hostedServiceHandler = subject.Context.TryGetService<HostedServiceHandler>();
-            if (hostedServiceHandler != null)
-            {
-                await hostedServiceHandler.DetachHostedServiceAsync(hostedService, cancellationToken);
-            }
-        }
 
         return wasRemoved;
     }

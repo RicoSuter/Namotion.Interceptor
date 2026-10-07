@@ -4,8 +4,8 @@ using Namotion.Interceptor.Tracking;
 namespace HomeBlaze.Services;
 
 /// <summary>
-/// Awaits the <see cref="StartupGate"/> of a subject context and releases startup deferrals, which
-/// <see cref="StartupCompletionExtensions.DeferStartupCompletion"/> takes, once their work completed.
+/// Awaits the <see cref="StartupGate"/> of a subject context, and releases a startup deferral taken with
+/// <see cref="StartupCompletionExtensions.DeferStartupCompletion"/> once its work has completed.
 /// </summary>
 public static class StartupGateExtensions
 {

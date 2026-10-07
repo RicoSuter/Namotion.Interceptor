@@ -12,10 +12,12 @@ public static class StartupCompletionExtensions
     /// handle is disposed. Take it before queueing the work and dispose it once the work ran, also on failure.
     /// </summary>
     /// <remarks>
-    /// Disposing the handle more than once, also concurrently, releases the deferrals once. If releasing one
-    /// deferral throws, the others are still released and the failure is rethrown afterwards, several failures
-    /// as an <see cref="AggregateException"/>. If an <see cref="IStartupCompletion.Defer"/> throws, the
-    /// deferrals already taken are released before the exception propagates.
+    /// Disposing the handle more than once, also concurrently, releases the deferrals once. Disposing releases
+    /// every deferral even if one release throws, then rethrows the failure, several failures as an
+    /// <see cref="AggregateException"/>; a caller disposing it in a <c>finally</c> should catch and log.
+    /// If an <see cref="IStartupCompletion.Defer"/> throws, the deferrals already taken are released and the
+    /// exception propagates; if releasing one of those also throws, an <see cref="AggregateException"/> with
+    /// the <see cref="IStartupCompletion.Defer"/> failure first propagates instead.
     /// </remarks>
     /// <param name="context">The context whose startup completions to defer.</param>
     /// <returns>The handle that releases the deferrals; a shared instance when the context has no startup completion.</returns>

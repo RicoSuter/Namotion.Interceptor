@@ -13,6 +13,10 @@ namespace Namotion.Interceptor.Tracking;
 /// Defer before queueing the work and dispose the returned handle once it has run, including on
 /// failure. Deferrals are counted. Deferring never reopens a wait that has already completed.
 /// </para>
+/// <para>
+/// To defer every startup completion registered in a context at once, use
+/// <see cref="StartupCompletionExtensions.DeferStartupCompletion"/>.
+/// </para>
 /// </remarks>
 public interface IStartupCompletion
 {
