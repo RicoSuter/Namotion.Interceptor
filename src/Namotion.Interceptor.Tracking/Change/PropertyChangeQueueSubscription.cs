@@ -33,7 +33,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     }
 
     /// <summary>
-    /// Number of changes currently queued. Exact only from the consumer thread while no
+    /// Number of changes currently queued. Exact only from the consumer while no
     /// producers are racing; concurrent enqueues may or may not be included in the snapshot.
     /// </summary>
     public int Count => _queue.Count;
@@ -49,10 +49,8 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// stopped delivering. Use it to drain a subscription you own exclusively at that moment, for example
     /// while connecting, or paired with <see cref="WaitToDequeueAsync"/> in an asynchronous drain loop.
     /// <para>
-    /// This is for a hand-rolled drain loop, not for feeding the built-in change processor: that
-    /// processor creates and owns its own subscription and does not expose it, so there is nothing there
-    /// for this to drain. Returns false both when the queue is momentarily empty and when the
-    /// subscription has been disposed, so a polling loop needs its own stop condition.
+    /// Returns false both when the queue is momentarily empty and when the subscription has been
+    /// disposed, so a polling loop needs its own stop condition.
     /// </para>
     /// </remarks>
     public bool TryDequeueImmediate(out SubjectPropertyChange item) => _queue.TryDequeue(out item);
@@ -95,8 +93,11 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
     /// <summary>
     /// Attempts to dequeue a property change, waiting if the queue is empty.
-    /// Should only be called from a single consumer thread per subscription (not thread-safe for concurrent TryDequeue calls).
     /// </summary>
+    /// <remarks>
+    /// Blocks the calling thread while the queue is empty. On the thread pool, which replaces a blocked
+    /// thread only slowly, drain with <see cref="WaitToDequeueAsync"/> and <see cref="TryDequeueImmediate"/>.
+    /// </remarks>
     /// <param name="item">The dequeued property change if available.</param>
     /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
     /// <returns>True if an item was dequeued; false when cancellation is requested, or when the
@@ -154,8 +155,14 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// Waits without blocking a thread until a change may be available, for a consumer that drains with
     /// <see cref="TryDequeueImmediate"/>. Single consumer: it must not run concurrently with
     /// <see cref="TryDequeue"/> or another wait, and each returned task must be awaited once before the
-    /// next wait starts. A waiting consumer never resumes inline on the writing thread.
+    /// next wait starts.
     /// </summary>
+    /// <remarks>
+    /// The continuation never runs inline on the writing thread but is scheduled from it, so await with
+    /// <c>ConfigureAwait(false)</c> unless resuming on the captured context is required: posting to that
+    /// context then happens inside the property setter. <see cref="TryDequeueImmediate"/> takes no token, so
+    /// a drain loop checks cancellation before each dequeue.
+    /// </remarks>
     /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
     /// <returns>True when a change may be available, so the caller re-checks; false when cancellation is
     /// requested, or when the subscription is completed and its queue is empty.</returns>
@@ -164,6 +171,12 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
         if (cancellationToken.IsCancellationRequested || (_completed && _queue.IsEmpty))
         {
             return new ValueTask<bool>(false);
+        }
+
+        // Best effort: resetting a pending wait would leave its awaiter hanging silently.
+        if (Volatile.Read(ref _waiter) == AsyncWaiter)
+        {
+            throw new InvalidOperationException("The previous wait has not completed; await it before waiting again.");
         }
 
         var version = _asyncWaiter.Reset();
@@ -204,7 +217,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
         owner.RemoveQueueSubscription(this);
 
-        // Deliberately not disposing _signal: a concurrent producer may still call _signal.Set() after its _completed check (enqueue-vs-dispose fix).
+        // _signal is never disposed: a producer or consumer racing this call may still use it.
     }
 
     private sealed class AsyncDequeueWaiter : IValueTaskSource<bool>
@@ -225,10 +238,13 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
 
         public bool GetResult(short token)
         {
+            // Validated first: a stale or pending task must not release the live wait's registration.
+            var result = _core.GetResult(token);
+
             // Dispose waits out a running callback, so no stale callback can complete the next wait.
             _cancellation.Dispose();
             _cancellation = default;
-            return _core.GetResult(token);
+            return result;
         }
 
         public ValueTaskSourceStatus GetStatus(short token) => _core.GetStatus(token);
