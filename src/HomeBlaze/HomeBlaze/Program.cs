@@ -18,6 +18,8 @@ using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
+using Namotion.Devices.SunSpec;
+using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
 using Namotion.Devices.Wallbox.HomeBlaze;
 using Namotion.Devices.Ecowitt;
@@ -94,6 +96,8 @@ typeProvider
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly)
+    .AddAssembly(typeof(SunSpecDevice).Assembly)
+    .AddAssembly(typeof(SunSpecDeviceWidget).Assembly)
     .AddAssembly(typeof(WallboxCharger).Assembly)
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
