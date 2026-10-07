@@ -66,6 +66,7 @@ Enable "Log register dump" to log the raw registers of every model in the chain.
 ## Known Limitations
 
 - Some timestamps, which SunSpec stores as seconds since 2000, are shown as durations.
+- The nine harmonics text points of model 64411 (150 registers each) cost two requests each per poll, plus confirming reads when they change, and a text that changes faster than one pair of reads is not applied.
 
 ## Network
 

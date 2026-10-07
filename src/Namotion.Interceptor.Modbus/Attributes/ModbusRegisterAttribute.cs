@@ -57,7 +57,8 @@ public class ModbusRegisterAttribute : Attribute
     /// </summary>
     /// <remarks>
     /// A string longer than one request (125 registers) is read in consecutive requests, which Modbus cannot read
-    /// atomically: a changed value is read a second time and only applied when both reads agree.
+    /// atomically: a changed value is only applied once two complete reads agree, possibly in the next cycle, so a
+    /// string that changes faster than one read pair is never applied.
     /// </remarks>
     public int Length { get; init; }
 

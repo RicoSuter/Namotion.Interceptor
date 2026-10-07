@@ -53,7 +53,7 @@ internal sealed class ModbusSessionFactory
 
             _logger.LogInformation(
                 "Connected to Modbus server at {Host}:{Port}: {PropertyCount} properties in {BatchCount} read requests per poll.",
-                _configuration.Host, _configuration.Port, claimedBindings.Count, _metrics.BatchCount);
+                _configuration.Host, _configuration.Port, claimedBindings.Count, poller.RequestCount);
 
             return new ModbusSession(connection, poller);
         }

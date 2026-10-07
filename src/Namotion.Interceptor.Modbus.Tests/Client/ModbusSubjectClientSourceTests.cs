@@ -129,6 +129,9 @@ public partial class ModbusSubjectClientSourceTests
     {
         [ModbusRegister(100, ModbusDataType.String, Length = 150)]
         public partial string? Text { get; set; }
+
+        [ModbusRegister(250, ModbusDataType.U16)]
+        public partial int? After { get; set; }
     }
 
     private static void SetString(ModbusTestServer server, int address, int length, string text)
@@ -983,13 +986,20 @@ public partial class ModbusSubjectClientSourceTests
             // Act
             await source.StartAsync(CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(() => device.Text == initial, TimeSpan.FromSeconds(30), message: "The long string should be loaded.");
+            var requestCountBeforeChange = server.Requests.Count;
             SetString(server, 100, 150, changed);
 
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(() => device.Text == changed, TimeSpan.FromSeconds(10), message: "The long string should update.");
-            Assert.All(
-                server.Requests.Where(request => request.FunctionCode == ModbusFunctionCode.ReadHoldingRegisters),
-                request => Assert.Contains((request.Address, request.Quantity), new[] { (100, 125), (225, 25) }));
+            var requests = server.Requests;
+            Assert.All(requests, request => Assert.Equal(ModbusFunctionCode.ReadHoldingRegisters, request.FunctionCode));
+            Assert.All(requests, request => Assert.Contains((request.Address, request.Quantity), new[] { (100, 125), (225, 25), (250, 1) }));
+
+            // An unchanged cycle reads the string once before After, so two string reads in a row prove a confirming read.
+            var readsAfterChange = requests.Skip(requestCountBeforeChange).Select(request => (request.Address, request.Quantity)).ToArray();
+            Assert.Contains(
+                Enumerable.Range(0, Math.Max(0, readsAfterChange.Length - 2)),
+                index => readsAfterChange[index] == (100, 125) && readsAfterChange[index + 1] == (225, 25) && readsAfterChange[index + 2] == (100, 125));
         }
         finally
         {

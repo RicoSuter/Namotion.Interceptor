@@ -40,13 +40,14 @@ public sealed class ModbusPollingDiagnostics
 
     /// <summary>
     /// Gets the number of failed read requests of the poll cycles, answered with a Modbus exception response, since the
-    /// source started or the diagnostics were last reset. One-by-one re-reads of a rejected request and discovery reads
-    /// are not counted.
+    /// source started or the diagnostics were last reset. Includes failed confirming reads of long strings, which
+    /// <see cref="BatchCount"/> does not count. One-by-one re-reads of a rejected request and discovery reads are not
+    /// counted.
     /// </summary>
     public long TotalFailedRequests => _metrics.TotalFailedRequests;
 
     /// <summary>
-    /// Gets the number of read requests per poll cycle, not counting the second read of a changed long string.
+    /// Gets the number of read requests per poll cycle, not counting the confirming reads of changed long strings.
     /// </summary>
     public int BatchCount => _metrics.BatchCount;
 

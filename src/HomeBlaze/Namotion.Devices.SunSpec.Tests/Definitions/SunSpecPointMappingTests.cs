@@ -278,6 +278,18 @@ public class SunSpecPointMappingTests
         Assert.Equal(typeof(string), map.PropertyType);
     }
 
+    [Fact]
+    public void WhenStringIsLongerThanOneModbusRequest_ThenItIsMappedWithItsFullLength()
+    {
+        // Act
+        var map = SunSpecPointMapping.TryMap(Point("string", size: 150));
+
+        // Assert
+        Assert.NotNull(map);
+        Assert.Equal(ModbusDataType.String, map.DataType);
+        Assert.Equal(150, map.StringLength);
+    }
+
     [Theory]
     [InlineData("pad", 1)]
     [InlineData("ipv6addr", 8)]

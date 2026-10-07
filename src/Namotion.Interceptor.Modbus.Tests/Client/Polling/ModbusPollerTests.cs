@@ -662,7 +662,7 @@ public partial class ModbusPollerTests
     }
 
     [Fact]
-    public async Task WhenLongStringChangesBetweenItsRequests_ThenThePreviousValueIsKeptUntilTwoReadsAgree()
+    public async Task WhenLongStringChangesDuringItsFirstRead_ThenTheSecondReadIsConfirmedNextCycleWithoutAnotherSecondRead()
     {
         // Arrange (the device switches to the new value after answering the first request, so the first read is torn)
         var previous = new string('A', 300);
@@ -683,13 +683,129 @@ public partial class ModbusPollerTests
         await poller.ReadAsync(reader, CancellationToken.None);
         var tornCycle = Apply(poller);
         var tornCycleRequests = reader.Requests.ToArray();
+        reader.Requests.Clear();
         await poller.ReadAsync(reader, CancellationToken.None);
         var nextCycle = Apply(poller);
 
         // Assert
         Assert.Empty(tornCycle);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, AfterRequest }, tornCycleRequests);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, tornCycleRequests);
         Assert.Equal(next, Assert.Single(nextCycle).Value);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenCandidateDoesNotMatchTheNextFirstRead_ThenItIsReadAgainAndTheNewSecondReadBecomesTheCandidate()
+    {
+        // Arrange (cycle 1 is torn and keeps B as candidate; before cycle 2 the device moves on to C, and to D
+        // after answering cycle 2's first read)
+        var (poller, reader, _) = CreateLongString(new string('A', 300));
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        reader.Requests.Clear();
+        reader.RequestReceived = index =>
+        {
+            if (index == 1)
+            {
+                SetLongString(reader, new string('B', 300));
+            }
+        };
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        SetLongString(reader, new string('C', 300));
+        reader.Requests.Clear();
+        reader.RequestReceived = index =>
+        {
+            if (index == 2)
+            {
+                SetLongString(reader, new string('D', 300));
+            }
+        };
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var mismatchCycle = Apply(poller);
+        var mismatchCycleRequests = reader.Requests.ToArray();
+        reader.RequestReceived = null;
+        reader.Requests.Clear();
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var confirmedCycle = Apply(poller);
+
+        // Assert
+        Assert.Empty(mismatchCycle);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, mismatchCycleRequests);
+        Assert.Equal(new string('D', 300), Assert.Single(confirmedCycle).Value);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenConnectionIsLostInTheMiddleOfALongStringRead_ThenTheExceptionPropagatesAndTheLastValueIsKept()
+    {
+        // Arrange
+        var previous = new string('A', 300);
+        var (poller, reader, _) = CreateLongString(previous);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        var binding = poller.Bindings.Single(binding => binding.Property.Name == nameof(LongStringSubject.Text));
+        var lastRaw = binding.LastRaw.ToArray();
+        SetLongString(reader, new string('B', 300));
+        reader.Requests.Clear();
+        reader.ConnectionFailure = new IOException("Connection lost.");
+        reader.ConnectionFailureFromRequest = 1;
+
+        // Act
+        await Assert.ThrowsAsync<IOException>(() => poller.ReadAsync(reader, CancellationToken.None));
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.Empty(applied);
+        Assert.Equal(new[] { FirstChunk, SecondChunk }, reader.Requests);
+        Assert.True(binding.HasLast);
+        Assert.Equal(lastRaw, binding.LastRaw);
+    }
+
+    [Fact]
+    public async Task WhenReapplyIsRequestedForAnUnchangedLongString_ThenItIsAppliedAgain()
+    {
+        // Arrange
+        var text = new string('A', 300);
+        var (poller, reader, _) = CreateLongString(text);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        poller.RequestReapply(poller.Bindings.Single(binding => binding.Property.Name == nameof(LongStringSubject.Text)).Property);
+        reader.Requests.Clear();
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        var applied = Apply(poller);
+
+        // Assert
+        Assert.Equal(text, Assert.Single(applied).Value);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, AfterRequest }, reader.Requests);
+    }
+
+    [Fact]
+    public async Task WhenRequestOfLongStringFailsTransiently_ThenTheLogNamesTheFailedRequest()
+    {
+        // Arrange
+        var logger = new RecordingLogger();
+        var (poller, reader, _) = CreateLongString("Text", logger);
+        reader.Reject(130, exceptionCode: 6);
+
+        // Act
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+        reader.Accept(130);
+        await poller.ReadAsync(reader, CancellationToken.None);
+        Apply(poller);
+
+        // Assert
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains("read of 25 HoldingRegister from 125 (unit 1, first mapping Text)", warning);
+        var information = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Information).Message;
+        Assert.Contains("read of 25 HoldingRegister from 125 (unit 1) succeeds again", information);
     }
 
     [Fact]
@@ -792,7 +908,7 @@ public partial class ModbusPollerTests
 
         // Assert
         Assert.Equal(7, Assert.Single(tornCycle).Value);
-        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, AfterRequest }, tornCycleRequests);
+        Assert.Equal(new[] { FirstChunk, SecondChunk, FirstChunk, SecondChunk, AfterRequest }, tornCycleRequests);
         Assert.Equal(next, nextCycle[nameof(LongStringSubject.Text)]);
     }
 

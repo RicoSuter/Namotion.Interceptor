@@ -70,6 +70,18 @@ internal sealed class ModbusRegisterBinding
     public bool IsUnavailable { get; set; }
 
     /// <summary>
+    /// Gets or sets the confirming read of a binding larger than one request that disagreed with its first read, allocated on
+    /// the first disagreement. Holds a value only while <see cref="HasCandidate"/> is set.
+    /// </summary>
+    public byte[]? CandidateRaw { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether <see cref="CandidateRaw"/> holds a complete read that becomes current when the next first
+    /// read agrees with it.
+    /// </summary>
+    public bool HasCandidate { get; set; }
+
+    /// <summary>
     /// Gets or sets the number of cycles in a row in which the two reads of a binding larger than one request disagreed.
     /// </summary>
     public int ConsecutiveMismatchCount { get; set; }

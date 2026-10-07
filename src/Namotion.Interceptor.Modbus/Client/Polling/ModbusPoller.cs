@@ -12,6 +12,8 @@ namespace Namotion.Interceptor.Modbus.Client.Polling;
 /// </summary>
 internal sealed class ModbusPoller
 {
+    private const int MismatchWarningThreshold = 3;
+
     private readonly ModbusRegisterBinding[] _bindings;
     private readonly Dictionary<PropertyReference, ModbusRegisterBinding> _bindingsByProperty;
     private readonly int _maximumRegisterGap;
@@ -19,11 +21,13 @@ internal sealed class ModbusPoller
     private readonly ModbusPollingMetrics _metrics;
     private readonly ILogger _logger;
 
-    // Keyed by request rather than batch instance so a replan does not log a still failing request again.
-    private const int MismatchWarningThreshold = 3;
-
-    private readonly HashSet<(byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count)> _failingBatches = [];
+    // Keyed by the registers a batch spans rather than by batch instance, so a replan does not log a still failing
+    // batch again. The value is the request that failed, which for a batch of several requests is one of them.
+    private readonly Dictionary<(byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count), (int StartAddress, int Count)> _failingBatches = [];
     private ModbusReadBatch[] _batches;
+
+    // Set by a failing request of a batch of several requests, so the failure handler can name that request.
+    private (int StartAddress, int Count) _failedSplitRequest;
 
     public ModbusPoller(
         IReadOnlyCollection<ModbusRegisterBinding> bindings, int maximumRegisterGap,
@@ -36,12 +40,19 @@ internal sealed class ModbusPoller
         _metrics = metrics;
         _logger = logger;
         _batches = ModbusReadPlanner.Plan(_bindings, maximumRegisterGap);
-        _metrics.SetPlan(CountRequests(_batches), unavailablePropertyCount: 0);
+        RequestCount = CountRequests(_batches);
+        _metrics.SetPlan(RequestCount, unavailablePropertyCount: 0);
     }
 
     public IReadOnlyList<ModbusRegisterBinding> Bindings => _bindings;
 
     public IReadOnlyList<ModbusReadBatch> Batches => _batches;
+
+    /// <summary>
+    /// Gets the number of planned read requests per cycle, not counting the confirming reads of changed bindings larger
+    /// than one request.
+    /// </summary>
+    public int RequestCount { get; private set; }
 
     /// <summary>
     /// Gets the path of a mapped property, or its name when this poller does not map it.
@@ -89,11 +100,11 @@ internal sealed class ModbusPoller
 
                 hasReadData = true;
 
-                if (_failingBatches.Count > 0 && _failingBatches.Remove(GetKey(batch)))
+                if (_failingBatches.Count > 0 && _failingBatches.Remove(GetKey(batch), out var failedRequest))
                 {
                     _logger.LogInformation(
-                        "Modbus read of {AddressSpace} {Address} (unit {UnitId}) succeeds again.",
-                        batch.AddressSpace, batch.StartAddress, batch.UnitId);
+                        "Modbus read of {Count} {AddressSpace} from {Address} (unit {UnitId}) succeeds again.",
+                        failedRequest.Count, batch.AddressSpace, failedRequest.StartAddress, batch.UnitId);
                 }
             }
             catch (ModbusResponseException exception) when (exception.IsPermanentRejection)
@@ -107,7 +118,7 @@ internal sealed class ModbusPoller
             {
                 // Skipped for this cycle only: its values keep their last value and the plan stays as it is.
                 _metrics.RecordFailedRequest();
-                LogFailedRequestOnce(GetKey(batch), batch.Bindings[0].Path, exception);
+                LogFailedRequestOnce(GetKey(batch), GetFailedRequest(batch), batch.Bindings[0].Path, exception);
             }
         }
 
@@ -115,7 +126,8 @@ internal sealed class ModbusPoller
         {
             var availableBindings = _bindings.Where(binding => !binding.IsUnavailable).ToArray();
             _batches = ModbusReadPlanner.Plan(availableBindings, _maximumRegisterGap);
-            _metrics.SetPlan(CountRequests(_batches), _bindings.Length - availableBindings.Length);
+            RequestCount = CountRequests(_batches);
+            _metrics.SetPlan(RequestCount, _bindings.Length - availableBindings.Length);
         }
 
         _metrics.RecordPoll(Stopwatch.GetElapsedTime(startTimestamp), DateTimeOffset.UtcNow, hasReadData);
@@ -223,44 +235,69 @@ internal sealed class ModbusPoller
 
     /// <summary>
     /// Reads the single binding of a batch larger than one request in consecutive requests. Modbus cannot read them
-    /// atomically, so a value that differs from the last one is read a second time and only becomes current when both
-    /// reads agree; otherwise the binding keeps its value and is read again next cycle. A failed request propagates
+    /// atomically, so the binding only becomes current when two complete reads agree: the first read of a cycle equals
+    /// the last value or the candidate kept from the previous cycle, or else a second read in the same cycle equals it.
+    /// A second read that disagrees becomes the candidate and the binding keeps its value. A failed request propagates
     /// and leaves the binding without a current value.
     /// </summary>
     private async Task ReadSplitBindingAsync(IModbusRegisterReader reader, ModbusReadBatch batch, CancellationToken cancellationToken)
     {
         Debug.Assert(batch.Bindings.Length == 1, "A batch of several requests holds exactly one binding.");
         var binding = batch.Bindings[0];
-        for (var index = 0; index < batch.RequestCount; index++)
+        var current = binding.CurrentRaw;
+        byte[] candidate;
+        (int StartAddress, int Count) request = default;
+        try
         {
-            var (address, count) = batch.GetRequest(index);
-            var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, address, count, cancellationToken).ConfigureAwait(false);
-            data.Span[..(count * 2)].CopyTo(binding.CurrentRaw.AsSpan((address - binding.Address) * 2));
+            for (var index = 0; index < batch.RequestCount; index++)
+            {
+                request = batch.GetRequest(index);
+                var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, request.StartAddress, request.Count, cancellationToken).ConfigureAwait(false);
+                data.Span[..(request.Count * 2)].CopyTo(current.AsSpan((request.StartAddress - binding.Address) * 2));
+            }
+
+            if (IsConfirmedByEarlierRead(binding))
+            {
+                MarkConfirmed(binding);
+                return;
+            }
+
+            candidate = binding.CandidateRaw ??= new byte[current.Length];
+            binding.HasCandidate = false;
+            for (var index = 0; index < batch.RequestCount; index++)
+            {
+                request = batch.GetRequest(index);
+                var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, request.StartAddress, request.Count, cancellationToken).ConfigureAwait(false);
+                data.Span[..(request.Count * 2)].CopyTo(candidate.AsSpan((request.StartAddress - binding.Address) * 2));
+            }
+        }
+        catch (ModbusResponseException)
+        {
+            _failedSplitRequest = request;
+            throw;
         }
 
-        if (binding.HasLast && binding.CurrentRaw.AsSpan().SequenceEqual(binding.LastRaw))
+        if (candidate.AsSpan().SequenceEqual(current))
         {
             MarkConfirmed(binding);
             return;
         }
 
-        for (var index = 0; index < batch.RequestCount; index++)
-        {
-            var (address, count) = batch.GetRequest(index);
-            var data = await reader.ReadAsync(batch.UnitId, batch.AddressSpace, address, count, cancellationToken).ConfigureAwait(false);
-            if (!data.Span[..(count * 2)].SequenceEqual(binding.CurrentRaw.AsSpan((address - binding.Address) * 2, count * 2)))
-            {
-                RecordMismatch(binding);
-                return;
-            }
-        }
+        binding.HasCandidate = true;
+        RecordMismatch(binding);
+    }
 
-        MarkConfirmed(binding);
+    private static bool IsConfirmedByEarlierRead(ModbusRegisterBinding binding)
+    {
+        var current = binding.CurrentRaw.AsSpan();
+        return (binding.HasLast && current.SequenceEqual(binding.LastRaw)) ||
+            (binding is { HasCandidate: true, CandidateRaw: { } candidate } && current.SequenceEqual(candidate));
     }
 
     private static void MarkConfirmed(ModbusRegisterBinding binding)
     {
         binding.HasCurrent = true;
+        binding.HasCandidate = false;
         binding.ConsecutiveMismatchCount = 0;
     }
 
@@ -338,7 +375,8 @@ internal sealed class ModbusPoller
             catch (ModbusResponseException exception)
             {
                 // Keyed like the request of its own this binding gets from the next cycle on.
-                LogFailedRequestOnce((binding.UnitId, binding.AddressSpace, binding.Address, binding.Count), binding.Path, exception);
+                LogFailedRequestOnce(
+                    (binding.UnitId, binding.AddressSpace, binding.Address, binding.Count), (binding.Address, binding.Count), binding.Path, exception);
             }
         }
 
@@ -354,16 +392,17 @@ internal sealed class ModbusPoller
     }
 
     /// <summary>
-    /// Logs a failed request once until it succeeds again.
+    /// Logs a failed request once per batch until the batch succeeds again.
     /// </summary>
     private void LogFailedRequestOnce(
-        (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) key, string firstPath, ModbusResponseException exception)
+        (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) key, (int StartAddress, int Count) request,
+        string firstPath, ModbusResponseException exception)
     {
-        if (_failingBatches.Add(key))
+        if (_failingBatches.TryAdd(key, request))
         {
             _logger.LogWarning(exception,
                 "Modbus read of {Count} {AddressSpace} from {Address} (unit {UnitId}, first mapping {Path}) failed with exception code {ExceptionCode}.",
-                key.Count, key.AddressSpace, key.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
+                request.Count, key.AddressSpace, request.StartAddress, key.UnitId, firstPath, exception.ExceptionCode);
         }
     }
 
@@ -377,6 +416,9 @@ internal sealed class ModbusPoller
 
         return count;
     }
+
+    private (int StartAddress, int Count) GetFailedRequest(ModbusReadBatch batch)
+        => batch.RequestCount == 1 ? (batch.StartAddress, batch.Count) : _failedSplitRequest;
 
     private static (byte UnitId, ModbusAddressSpace AddressSpace, int StartAddress, int Count) GetKey(ModbusReadBatch batch)
         => (batch.UnitId, batch.AddressSpace, batch.StartAddress, batch.Count);

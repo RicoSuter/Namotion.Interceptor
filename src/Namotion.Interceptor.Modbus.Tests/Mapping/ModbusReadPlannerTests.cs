@@ -230,7 +230,9 @@ public partial class ModbusReadPlannerTests
     }
 
     [Theory]
+    [InlineData(126, new[] { 10, 125, 135, 1 })]
     [InlineData(150, new[] { 10, 125, 135, 25 })]
+    [InlineData(250, new[] { 10, 125, 135, 125 })]
     [InlineData(300, new[] { 10, 125, 135, 125, 260, 50 })]
     public void WhenStringIsLongerThanOneRequest_ThenItIsReadAloneInConsecutiveRequests(int length, int[] expectedRequests)
     {
