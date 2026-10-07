@@ -228,6 +228,7 @@
         var steps = resolution.Steps;
         var otherSteps = otherResolution.Steps;
         if (steps.Length != otherSteps.Length ||
+            !ReferenceEquals(resolution.Subject, otherResolution.Subject) ||
             !ReferenceEquals(resolution.DeepestSubject, otherResolution.DeepestSubject) ||
             resolution.NextProperty != otherResolution.NextProperty)
         {

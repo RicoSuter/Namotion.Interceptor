@@ -27,7 +27,7 @@ public static class NavigationManagerExtensions
             relativePath = relativePath[..end];
         }
 
-        if (!relativePath.StartsWith(prefix, StringComparison.Ordinal))
+        if (!relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
