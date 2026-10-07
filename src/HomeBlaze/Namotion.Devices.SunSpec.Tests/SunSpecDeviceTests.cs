@@ -143,4 +143,17 @@ public class SunSpecDeviceTests
         Assert.Equal(ServiceStatus.Starting, device.Status);
         Assert.Equal("Connecting...", device.StatusMessage);
     }
+
+    [Theory]
+    [InlineData(false, false, 0)]
+    [InlineData(true, false, 10)]
+    [InlineData(false, true, 10)]
+    public void WhenTheSourceStops_ThenItPausesOnePollingIntervalOnlyAfterAFailureOrAChainChange(bool hasFailed, bool hasChainChanged, int expectedSeconds)
+    {
+        // Act
+        var delay = SunSpecDevice.GetReconnectDelay(hasFailed, hasChainChanged, TimeSpan.FromSeconds(10));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), delay);
+    }
 }

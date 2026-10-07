@@ -13,6 +13,7 @@ internal sealed class SunSpecTestServer : IDisposable
     private readonly byte[] _unitIds;
     private readonly Lock _rangesLock = new();
     private readonly Dictionary<byte, (int Start, int End)> _ranges = [];
+    private readonly Dictionary<byte, ModbusExceptionCode> _unitExceptions = [];
     private ModbusTcpServer? _server;
 
     public SunSpecTestServer(params byte[] unitIds)
@@ -110,6 +111,17 @@ internal sealed class SunSpecTestServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Answers every request to a unit with <paramref name="exceptionCode"/>, such as a gateway error.
+    /// </summary>
+    public void SetUnitException(byte unitId, ModbusExceptionCode exceptionCode)
+    {
+        lock (_rangesLock)
+        {
+            _unitExceptions[unitId] = exceptionCode;
+        }
+    }
+
     public void Dispose() => Stop();
 
     private ModbusTcpServer GetServer() => _server ?? throw new InvalidOperationException("The test server is not started.");
@@ -123,6 +135,11 @@ internal sealed class SunSpecTestServer : IDisposable
 
         lock (_rangesLock)
         {
+            if (_unitExceptions.TryGetValue(unitId, out var exceptionCode))
+            {
+                return exceptionCode;
+            }
+
             return _ranges.TryGetValue(unitId, out var range) && address >= range.Start && address + quantity <= range.End
                 ? ModbusExceptionCode.OK
                 : ModbusExceptionCode.IllegalDataAddress;

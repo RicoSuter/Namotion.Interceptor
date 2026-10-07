@@ -15,9 +15,13 @@ namespace Namotion.Devices.SunSpec.Discovery;
 /// </summary>
 internal static class SunSpecDiscovery
 {
+    // Modbus exception codes of a gateway that cannot reach the unit behind it.
+    private const int GatewayPathUnavailable = 10;
+    private const int GatewayTargetFailedToRespond = 11;
+
     /// <summary>
-    /// Discovers every unit, keeping the subjects of units and models that did not change. A unit without a marker or
-    /// with a malformed chain is logged and left out.
+    /// Discovers every unit, keeping the subjects of units and models that did not change. A unit without a marker, with
+    /// a malformed chain or behind a gateway that cannot reach it is logged and left out.
     /// </summary>
     public static async Task<Dictionary<int, SunSpecUnit>> DiscoverAsync(
         Dictionary<int, SunSpecUnit> currentUnits, IReadOnlyList<byte> unitIds, ModbusDiscoveryContext context,
@@ -142,6 +146,11 @@ internal static class SunSpecDiscovery
             logger.LogError(exception, "SunSpec unit {UnitId} has a malformed model chain, so it is skipped.", unit.UnitId);
             return false;
         }
+        catch (ModbusResponseException exception) when (exception.ExceptionCode is GatewayPathUnavailable or GatewayTargetFailedToRespond)
+        {
+            logger.LogWarning(exception, "SunSpec unit {UnitId} cannot be reached through the gateway (Modbus exception {ExceptionCode}), so it is skipped.", unit.UnitId, exception.ExceptionCode);
+            return false;
+        }
 
         LogChain(unit, chain, logger);
         if (isRegisterDumpEnabled)
@@ -152,8 +161,8 @@ internal static class SunSpecDiscovery
         return true;
     }
 
-    // A permanent rejection means the registers do not exist, which the chain reader handles; anything else, such as a
-    // lost connection, fails the connect attempt.
+    // A permanent rejection means the registers do not exist, which the chain reader handles; a gateway error skips the
+    // unit in DiscoverUnitAsync; anything else, such as a lost connection, fails the connect attempt.
     private static async Task<ushort[]?> ReadAsync(ModbusDiscoveryContext context, byte unitId, int address, int count, CancellationToken cancellationToken)
     {
         try

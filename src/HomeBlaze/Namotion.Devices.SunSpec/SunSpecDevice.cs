@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Net.Sockets;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
@@ -18,7 +19,7 @@ namespace Namotion.Devices.SunSpec;
 
 /// <summary>
 /// A SunSpec device (inverter, meter, storage) read over Modbus TCP. Discovers the model chain of every configured
-/// unit ID on each connect. Read only.
+/// unit ID on each connect, and again periodically while a configured unit is missing. Read only.
 /// </summary>
 [Category("Devices")]
 [Description("SunSpec device (inverter, meter, storage) via Modbus TCP, read only")]
@@ -66,9 +67,17 @@ public partial class SunSpecDevice :
 
     // Written by the discovery, read by the status loop.
     private string? _discoveryStatusMessage;
+    private bool _hasMissingUnits;
+    private long _lastDiscoveryTimestamp;
 
     // Protects a device from a hand-edited configuration that would poll it continuously; only tests lower it.
     internal TimeSpan MinimumPollingInterval { get; init; } = TimeSpan.FromSeconds(MinimumPollingIntervalSeconds);
+
+    /// <summary>
+    /// Gets the minimum time between discoveries while a configured unit is missing; the effective polling interval
+    /// applies when it is longer. Only tests lower it.
+    /// </summary>
+    internal TimeSpan MinimumRediscoveryInterval { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Gets how often <see cref="DiscoverAsync"/> ran.
@@ -170,6 +179,8 @@ public partial class SunSpecDevice :
         }
 
         Volatile.Write(ref _discoveryStatusMessage, SunSpecDiscovery.GetStatusMessage(_unitIds, units));
+        Volatile.Write(ref _hasMissingUnits, units.Count < _unitIds.Length);
+        Volatile.Write(ref _lastDiscoveryTimestamp, Stopwatch.GetTimestamp());
         SunSpecDiscovery.CompleteModels(units.Values, context);
         Volatile.Write(ref _isChainGuardArmed, true);
     }
@@ -299,6 +310,7 @@ public partial class SunSpecDevice :
         }
 
         var hasFailed = false;
+        var hasChainChanged = false;
         try
         {
             Status = ServiceStatus.Starting;
@@ -310,7 +322,14 @@ public partial class SunSpecDevice :
             while (!stoppingToken.IsCancellationRequested)
             {
                 UpdateStatus(source.Diagnostics);
-                if (HasChainChanged(hostAddress) ||
+                if (HasChainChanged(hostAddress))
+                {
+                    hasChainChanged = true;
+                    break;
+                }
+
+                // A restart reruns the discovery.
+                if (IsRediscoveryDue(hostAddress, pollingInterval) ||
                     await WaitForConfigurationChangeAsync(StatusRefreshInterval, stoppingToken).ConfigureAwait(false))
                 {
                     break;
@@ -333,10 +352,39 @@ public partial class SunSpecDevice :
             await ReleaseSourceAsync(source, hostAddress, stoppingToken).ConfigureAwait(false);
         }
 
-        if (hasFailed)
+        var reconnectDelay = GetReconnectDelay(hasFailed, hasChainChanged, pollingInterval);
+        if (reconnectDelay > TimeSpan.Zero)
         {
-            await WaitForConfigurationChangeAsync(pollingInterval, stoppingToken).ConfigureAwait(false);
+            await WaitForConfigurationChangeAsync(reconnectDelay, stoppingToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Gets how long to wait before the next connect: one polling interval after a failure or a chain change, which
+    /// may come from a device still rebuilding its chain, and none otherwise.
+    /// </summary>
+    internal static TimeSpan GetReconnectDelay(bool hasFailed, bool hasChainChanged, TimeSpan pollingInterval)
+        => hasFailed || hasChainChanged ? pollingInterval : TimeSpan.Zero;
+
+    /// <summary>
+    /// Gets whether a configured unit is missing while connected and the last discovery is at least
+    /// <see cref="MinimumRediscoveryInterval"/> (or the polling interval, when longer) ago.
+    /// </summary>
+    private bool IsRediscoveryDue(string hostAddress, TimeSpan pollingInterval)
+    {
+        if (!IsConnected || !Volatile.Read(ref _hasMissingUnits))
+        {
+            return false;
+        }
+
+        var interval = pollingInterval > MinimumRediscoveryInterval ? pollingInterval : MinimumRediscoveryInterval;
+        if (Stopwatch.GetElapsedTime(Volatile.Read(ref _lastDiscoveryTimestamp)) < interval)
+        {
+            return false;
+        }
+
+        _logger.LogInformation("SunSpec device {HostAddress} misses configured units; discovering its units again.", hostAddress);
+        return true;
     }
 
     /// <summary>
@@ -364,6 +412,10 @@ public partial class SunSpecDevice :
                         MaximumRegisterGap = MaximumRegisterGap
                     },
                     _logger);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return null;
             }
             catch (Exception exception)
             {

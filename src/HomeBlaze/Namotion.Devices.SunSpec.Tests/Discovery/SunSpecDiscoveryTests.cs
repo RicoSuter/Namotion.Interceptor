@@ -1,3 +1,4 @@
+using FluentModbus;
 using HomeBlaze.Abstractions;
 using Namotion.Devices.SunSpec.Models;
 using Namotion.Devices.SunSpec.Tests.Models;
@@ -38,6 +39,59 @@ public class SunSpecDiscoveryTests
         Assert.Equal(50000, device.Units[1].MarkerAddress);
         Assert.Contains(logger.Warnings, warning => warning.Contains("unit 2 has no \"SunS\" marker", StringComparison.Ordinal));
         Assert.Equal(ServiceStatus.Running, device.Status);
+        Assert.Equal("Unit 2 not found", device.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenAMissingUnitGetsItsChain_ThenItIsDiscoveredWithoutAConfigurationChange()
+    {
+        // Arrange
+        using var server = new SunSpecTestServer(1, 2);
+        server.Start((1, CreateChain()));
+        await using var host = await HostedSunSpecDevice.StartAsync(server.Port, device =>
+        {
+            device.UnitIds = [1, 2];
+            device.MinimumRediscoveryInterval = TimeSpan.FromMilliseconds(500);
+        });
+        var device = host.Device;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.IsConnected && device.StatusMessage == "Unit 2 not found",
+            WaitTimeout,
+            message: "Unit 1 should be discovered without unit 2.");
+
+        // Act
+        server.WriteChain(CreateChain(), unitId: 2);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.IsConnected && device.Units.GetValueOrDefault(2)?.Devices[0].Common?.Mn == "Vendor",
+            WaitTimeout,
+            message: "Unit 2 should be discovered and read once it has a chain.");
+        Assert.Equal([1, 2], device.Units.Keys.Order());
+    }
+
+    [Theory]
+    [InlineData(ModbusExceptionCode.GatewayPathUnavailable)]
+    [InlineData(ModbusExceptionCode.GatewayTargetDeviceFailedToRespond)]
+    public async Task WhenAGatewayCannotReachAUnit_ThenOnlyTheOtherUnitsAreDiscovered(ModbusExceptionCode exceptionCode)
+    {
+        // Arrange
+        using var server = new SunSpecTestServer(1, 2);
+        server.SetUnitException(2, exceptionCode);
+        server.Start((1, CreateChain()));
+        var logger = new RecordingLogger<SunSpecDevice>();
+
+        // Act
+        await using var host = await HostedSunSpecDevice.StartAsync(server.Port, device => device.UnitIds = [1, 2], logger);
+        var device = host.Device;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => device.IsConnected && device.Units.GetValueOrDefault(1)?.Devices[0].Common?.Mn == "Vendor",
+            WaitTimeout,
+            message: "Unit 1 should be discovered and read.");
+        Assert.Equal([1], device.Units.Keys);
+        Assert.Contains(logger.Warnings, warning => warning.Contains("unit 2 cannot be reached through the gateway", StringComparison.Ordinal));
         Assert.Equal("Unit 2 not found", device.StatusMessage);
     }
 
