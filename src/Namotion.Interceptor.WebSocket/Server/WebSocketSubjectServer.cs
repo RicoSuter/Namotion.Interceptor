@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// <summary>
 /// Standalone WebSocket server that exposes subject updates to connected clients.
 /// Uses Kestrel for cross-platform support without elevation.
-/// On Kill, restarts both the HTTP listener and the processing layer (matching real crash behavior).
+/// On Kill, restarts both the HTTP listener and the processing layer.
 /// A Kill that arrives between attempts, such as during the restart backoff, has no attempt to cancel
 /// and does nothing.
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
@@ -82,24 +82,11 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
     protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
         var attemptToken = attempt.Token;
-        Task? heartbeatTask = null;
-
-        var teardown = new AttemptTeardown(async () =>
-        {
-            // The heartbeat runs until the attempt is cancelled.
-            await attempt.CancelAsync().ConfigureAwait(false);
-            if (heartbeatTask is not null)
-            {
-                await heartbeatTask.ConfigureAwait(false);
-            }
-
-            await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
-            await StopApplicationAsync().ConfigureAwait(false);
-        });
+        var teardown = new AttemptTeardown(this, attempt);
 
         try
         {
-            // Built per attempt because IHost does not support Start/Stop cycles, so a kill tears down and
+            // Built per attempt because IHost does not support Start/Stop cycles: a kill tears down and
             // rebuilds the whole Kestrel instance, matching real crash behavior.
             var app = BuildWebApplication(attemptToken, out var listenUrl);
             _app = app;
@@ -107,7 +94,7 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
             _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
             await app.StartAsync(attemptToken).ConfigureAwait(false);
 
-            heartbeatTask = RunHeartbeatAsync(attempt, attemptToken);
+            teardown.HeartbeatTask = RunHeartbeatAsync(attempt, attemptToken);
             return teardown;
         }
         catch
@@ -130,6 +117,16 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
         catch (Exception exception)
         {
             _logger.LogError(exception, "WebSocket heartbeat loop failed.");
+
+            // The attempt is still live here: its teardown awaits this task before the attempt is disposed.
+            if (!attemptToken.IsCancellationRequested)
+            {
+                await attempt.CancelAsync().ConfigureAwait(false);
+            }
+
+            // Rethrown so the teardown's await surfaces this exception and the base records it as
+            // LastError, instead of the generic "completed unexpectedly" it would record otherwise.
+            throw;
         }
 
         // A heartbeat that ends while the attempt is live ends processing too, which restarts the attempt.
@@ -153,7 +150,7 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
         try
         {
             // Use a short timeout to avoid the default 30-second ASP.NET graceful shutdown. Connections are
-            // already closed, so Kestrel should stop quickly. The timeout is just a safety net.
+            // already closed, so Kestrel should stop quickly.
             using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try
             {
@@ -161,7 +158,7 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
             }
             catch (OperationCanceledException)
             {
-                // Shutdown timed out, so DisposeAsync will force-release the port.
+                // Shutdown timed out; the disposal below force-releases the port.
             }
         }
         finally
@@ -172,9 +169,38 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
         }
     }
 
-    private sealed class AttemptTeardown(Func<Task> teardown) : IAsyncDisposable
+    private sealed class AttemptTeardown : IAsyncDisposable
     {
-        public async ValueTask DisposeAsync() => await teardown().ConfigureAwait(false);
+        private readonly WebSocketSubjectServer _server;
+        private readonly ConnectorRunAttempt _attempt;
+
+        public AttemptTeardown(WebSocketSubjectServer server, ConnectorRunAttempt attempt)
+        {
+            _server = server;
+            _attempt = attempt;
+        }
+
+        public Task? HeartbeatTask { get; set; }
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                // The heartbeat runs until the attempt is cancelled.
+                await _attempt.CancelAsync().ConfigureAwait(false);
+                if (HeartbeatTask is not null)
+                {
+                    await HeartbeatTask.ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                // Guards the app release documented on StopApplicationAsync: a cancel or heartbeat fault
+                // above must not skip it.
+                await _server._handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+                await _server.StopApplicationAsync().ConfigureAwait(false);
+            }
+        }
     }
 
     private WebApplication BuildWebApplication(CancellationToken requestHandlingToken, out string listenUrl)
