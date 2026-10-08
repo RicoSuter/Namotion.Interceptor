@@ -79,11 +79,11 @@ Ranked by importance. Budgets total the target length; they were set after measu
 
 - Projects: `sample/Server/Connectors.Server.csproj` (coffee machine, simulator, embedded WebSocket handler at `/ws`, grinder source with a simulated grinder device, status page) and `sample/Client/Connectors.Client.csproj` (mirrored machine via the WebSocket client source, status page, `POST /brew/{recipe}`)
 - Ports: server 5310, client 5311, terminal capture of a second client 5312
-- Pages: both serve `/` polling `/status` every 500 ms: role kicker, status headline, boiler temperature bar, pump pressure bar, cups brewed and water level; the client adds its connection state and a Brew Espresso button. Pages are designed for an 800 by 720 column so a split recording shows both side by side.
+- Pages: both serve `/` polling `/status` every 250 ms: role kicker, status headline, boiler temperature bar, pump pressure bar, cups brewed and water level; the server shows its client count, the client its source state and a Brew Espresso button. Pages are designed for an 800 by 720 column so a split recording shows both side by side. The server also has `POST /reset`, a demo helper that cools the boiler to 20 °C.
 - Simulator: default `CoffeeMachineSimulatorService` on the server only; the client runs no simulator
 - Demos: each records one split page (two iframes, server left, client right) at 1600 by 720 so both processes stay in sync on one clip.
-  - `heat`: both apps start cold; the boiler heats from 20 °C to 93 °C on both sides; holds on Ready.
-  - `brew`: waits for Ready, clicks Brew Espresso on the client; the server and client show Brewing Espresso, pressure rising to 9 bar, then Ready with one cup brewed; holds.
+  - `heat`: prepare resets the boiler to 20 °C; both sides heat to 93 °C; marks `open`, `warm`, `ready`; holds on Ready.
+  - `brew`: prepare waits for Ready; clicks Brew Espresso on the client; the server and client show Brewing Espresso, pressure rising to 9 bar, then Ready with one more cup; marks `open`, `click`, `brewing`, `pressure`, `done`; holds.
 - Terminal captures: `run-client` runs a second client while both apps are running and stops after it claimed its properties.
 
 ## Coffee machine recap
