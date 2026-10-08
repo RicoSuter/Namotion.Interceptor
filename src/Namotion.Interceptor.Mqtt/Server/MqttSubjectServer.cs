@@ -132,7 +132,7 @@ public class MqttSubjectServer : SubjectServerBase, IFaultInjectable, IAsyncDisp
     }
 
     /// <inheritdoc />
-    protected override Task<IAsyncDisposable?> InitializeAsync(CancellationToken stoppingToken)
+    protected sealed override Task<IAsyncDisposable?> InitializeAsync(CancellationToken stoppingToken)
     {
         var optionsBuilder = new MqttServerOptionsBuilder()
             .WithDefaultEndpoint()
@@ -194,11 +194,11 @@ public class MqttSubjectServer : SubjectServerBase, IFaultInjectable, IAsyncDisp
     }
 
     /// <inheritdoc />
-    protected override ChangeQueueProcessor CreateChangeQueueProcessor(Action<long> dropHandler) =>
+    protected sealed override ChangeQueueProcessor CreateChangeQueueProcessor(Action<long> dropHandler) =>
         CreateOutboundProcessor(dropHandler);
 
     /// <inheritdoc />
-    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
+    protected sealed override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
         var server = _mqttServer ?? throw new InvalidOperationException("The broker is created by InitializeAsync.");
 
@@ -226,17 +226,8 @@ public class MqttSubjectServer : SubjectServerBase, IFaultInjectable, IAsyncDisp
             throw;
         }
 
-        var teardown = new AttemptTeardown(server, stoppingToken);
-        try
-        {
-            _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
-            return teardown;
-        }
-        catch
-        {
-            await teardown.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
+        _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
+        return new AttemptTeardown(server, stoppingToken);
     }
 
     private sealed class RunTeardown : IAsyncDisposable
