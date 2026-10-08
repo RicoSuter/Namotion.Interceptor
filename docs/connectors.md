@@ -264,7 +264,7 @@ RunAsync
       ├── Task.Delay(retryTime)            ← retries only; the subscription keeps capturing during the wait
       ├── drain owned writes → retry queue ← park writes captured since the last attempt (caps memory)
       ├── StartBuffering()
-      ├── StartListeningAsync()            ← your hook: connect + spawn monitor
+      ├── StartListeningAsync()            ← your hook: claim properties, connect, spawn monitor
       ├── LoadInitialStateAndResume()      ← calls your LoadInitialStateAsync, then replays buffer
       ├── drain owned writes → retry queue ← park connect-window writes
       ├── ReconcileRetryQueueAsync()       ← restore / send / drop queued writes vs current state
@@ -377,6 +377,8 @@ public sealed class DatabaseSource : SubjectSourceBase
 }
 ```
 
+The example omits ownership for brevity. A real source claims its properties at the start of `StartListeningAsync`, before opening the connection, as shown in [SourceOwnershipManager](#sourceownershipmanager); only claimed properties have their local writes sent or retried.
+
 **Constructor parameters**: `bufferTime` (default 8ms) controls the change queue batching window. Changes within this window are coalesced into a single `WriteChangesAsync` call. `retryTime` (default 10s) controls the delay between retry attempts when `StartListeningAsync` or the pump loop fails.
 
 **Build the payload from `changes` only**: never read subject properties in `WriteChangesAsync`. Under transactions the built-in writer calls the source on the committing flow, where property reads and writes throw `InvalidOperationException`, because sibling and landed-model state is outside the frozen snapshot and can make the payload inconsistent with it. Capture any other subject state the write needs before `CommitAsync`, and see [Transactions](tracking-transactions.md) for the full committing access boundary.
@@ -469,7 +471,11 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### SourceOwnershipManager
 
-Sources claim ownership of properties inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and for subtrees bound later when they follow [structural changes](#structural-changes). The `SourceOwnershipManager` class simplifies this by handling:
+Sources claim ownership of properties inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and for subtrees bound later when they follow [structural changes](#structural-changes).
+
+Claim a property as soon as its binding is known. When the binding comes from local configuration, that is before connecting: the base class parks a local write in the write retry queue only if the property is owned by this source when the change queue drains, so a write made while the connection keeps failing is discarded if the claim comes after the connect. Claiming early also makes ownership depend on configuration rather than on which source connects first. A source that learns its bindings from the remote side, for example from a server handshake or a browse, can only claim after connecting; local writes to those properties made before the first successful synchronization are not retained.
+
+The `SourceOwnershipManager` class simplifies this by handling:
 - Property ownership tracking (which properties this source is responsible for)
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
