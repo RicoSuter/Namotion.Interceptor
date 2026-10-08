@@ -73,11 +73,17 @@ public sealed class CoffeeMachineSimulator
             return;
         }
 
+        // State is set to Brewing before ActiveRecipeName (each property write is locked separately), so a
+        // step can observe Brewing with no active recipe yet; skip drawing water until the recipe is set.
+        if (_machine.ActiveRecipeName is not { } activeRecipeName || !_machine.Recipes.TryGetValue(activeRecipeName, out var recipe))
+        {
+            return;
+        }
+
         var water = FlowRate * seconds;
         _brewedWater += water;
         _machine.WaterTank.Level -= water / WaterTank.CapacityInMilliliters * 100;
 
-        var recipe = _machine.Recipes[_machine.ActiveRecipeName!];
         if (_brewedWater >= recipe.WaterAmount)
         {
             _brewedWater = 0;

@@ -81,6 +81,22 @@ public class CoffeeMachineSimulatorTests
     }
 
     [Fact]
+    public void WhenBrewingWithoutActiveRecipe_ThenStepDoesNotThrowAndDrawsNoWater()
+    {
+        // Arrange
+        var machine = CreateMachine();
+        machine.State = CoffeeMachineState.Brewing;
+        machine.Pump.IsRunning = true;
+        var simulator = new CoffeeMachineSimulator(machine);
+
+        // Act
+        Run(simulator, TimeSpan.FromSeconds(3));
+
+        // Assert
+        Assert.Equal(100, machine.WaterTank.Level);
+    }
+
+    [Fact]
     public void WhenEventIsScheduled_ThenItIsAppliedOnceAtItsTime()
     {
         // Arrange
