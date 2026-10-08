@@ -6,6 +6,8 @@ export const palette = {
   separator: '#48484a',
   text: '#f5f5f7',
   secondaryText: '#a1a1a6',
+  /** Neutral connector between nodes (system gray 2): visible on the background without competing with the nodes. */
+  edge: '#636366',
   blue: '#0a84ff',
   cyan: '#64d2ff',
   green: '#30d158',

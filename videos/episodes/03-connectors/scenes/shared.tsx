@@ -1,5 +1,6 @@
 import {Circle, Node, Rect, Txt, type NodeProps} from '@revideo/2d';
 import {all, createSignal, delay, spring, transformVectorAsPoint, Vector2, type ThreadGenerator} from '@revideo/core';
+import type {Arrow} from '../../../theme/components/Arrow';
 import {BrowserFrame} from '../../../theme/components/BrowserFrame';
 import {Card} from '../../../theme/components/Card';
 import type {ClipRange} from '../../../theme/clips';
@@ -98,6 +99,17 @@ export function* travel(parent: Node, from: Vector2, to: Vector2, color: AccentC
   yield* all(particle.opacity(1, 0.15), progress(1, duration, moveEasing));
   yield* particle.opacity(0, 0.2);
   particle.remove();
+}
+
+/**
+ * Moves a node along an arrow's curve from one fraction of its length to another. The node and the arrow must
+ * share a parent; the node keeps its final position afterwards.
+ */
+export function* ride(node: Node, arrow: Arrow, from: number, to: number, duration: number): ThreadGenerator {
+  const progress = createSignal(from);
+  node.position(() => arrow.line.getPointAtPercentage(progress()).position.add(arrow.position()));
+  yield* progress(to, duration, moveEasing);
+  node.position(node.position());
 }
 
 /** Converts a world point into the local space of a node, for placing things next to diagram nodes. */
