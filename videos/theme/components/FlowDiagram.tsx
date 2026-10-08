@@ -1,5 +1,5 @@
 import {Circle, Node, Rect, Txt, type NodeProps} from '@revideo/2d';
-import {all, createSignal, delay, sequence, spring, type ThreadGenerator} from '@revideo/core';
+import {all, createRef, createSignal, delay, sequence, spring, type ThreadGenerator} from '@revideo/core';
 import {edgeStep, layoutFlow, type FlowDefinition, type FlowLayout} from '../flowLayout';
 import {palette} from '../palette';
 import {arrivalSpring, enterEasing, fonts, fontSize, moveEasing} from '../style';
@@ -14,6 +14,7 @@ export interface FlowDiagramProps extends NodeProps {
 export class FlowDiagram extends Node {
   private readonly definition: FlowDefinition;
   private readonly nodes = new Map<string, Rect>();
+  private readonly texts = new Map<string, {label: Txt; detail: Txt | null}>();
   private readonly arrows: Arrow[] = [];
 
   public constructor(props: FlowDiagramProps) {
@@ -47,19 +48,22 @@ export class FlowDiagram extends Node {
     for (const definition of this.definition.nodes) {
       const box = flowLayout.boxes.get(definition.id)!;
       const accent = palette[definition.color ?? 'blue'];
+      const label = createRef<Txt>();
+      const detail = createRef<Txt>();
       const node = (
         <Card radius={20} layout direction={'column'} justifyContent={'center'} alignItems={'center'}
           gap={6} x={box.x} y={box.y} width={box.width} height={box.height} opacity={0} scale={0.86}>
           <Rect layout alignItems={'center'} gap={12}>
             <Circle size={12} fill={accent} />
-            <Txt fontFamily={fonts.text} fontWeight={600} fontSize={fontSize.label} fill={palette.text} text={definition.label} />
+            <Txt ref={label} fontFamily={fonts.text} fontWeight={600} fontSize={fontSize.label} fill={palette.text} text={definition.label} />
           </Rect>
           {definition.detail ? (
-            <Txt fontFamily={fonts.text} fontSize={fontSize.detail} fill={palette.secondaryText} text={definition.detail} />
+            <Txt ref={detail} fontFamily={fonts.text} fontSize={fontSize.detail} fill={palette.secondaryText} text={definition.detail} />
           ) : null}
         </Card>
       ) as Card;
       this.nodes.set(definition.id, node);
+      this.texts.set(definition.id, {label: label(), detail: definition.detail ? detail() : null});
       this.add(node);
     }
   }
@@ -71,6 +75,30 @@ export class FlowDiagram extends Node {
       throw new Error(`Flow diagram has no node '${id}'`);
     }
     return node;
+  }
+
+  /**
+   * Replaces a node's label or detail with a short cross fade, for example when a node takes a new role.
+   * The node keeps its size, so the new text should be about as long as the old one.
+   */
+  public *retext(id: string, text: {label?: string; detail?: string}, duration = 0.6): ThreadGenerator {
+    this.node(id);
+    const texts = this.texts.get(id)!;
+    const changes: Array<[Txt, string]> = [];
+    if (text.label !== undefined) {
+      changes.push([texts.label, text.label]);
+    }
+    if (text.detail !== undefined) {
+      if (!texts.detail) {
+        throw new Error(`Flow diagram node '${id}' has no detail line to replace`);
+      }
+      changes.push([texts.detail, text.detail]);
+    }
+    yield* all(...changes.map(([node]) => node.opacity(0, duration / 2, moveEasing)));
+    for (const [node, value] of changes) {
+      node.text(value);
+    }
+    yield* all(...changes.map(([node]) => node.opacity(1, duration / 2, enterEasing)));
   }
 
   /** Brings in the nodes of a step with a spring, then draws the edges of that step. */
