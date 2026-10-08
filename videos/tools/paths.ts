@@ -13,6 +13,8 @@ export interface EpisodePaths {
   generatedDirectory: string;
   audioDirectory: string;
   clipsDirectory: string;
+  /** Clip durations in seconds by clip name, written by capture. */
+  clipsFile: string;
   terminalDirectory: string;
   timingFile: string;
 }
@@ -29,6 +31,7 @@ export function episodePaths(episode: string): EpisodePaths {
     generatedDirectory,
     audioDirectory: join(generatedDirectory, 'audio'),
     clipsDirectory: join(generatedDirectory, 'clips'),
+    clipsFile: join(generatedDirectory, 'clips', 'clips.json'),
     terminalDirectory: join(generatedDirectory, 'terminal'),
     timingFile: join(generatedDirectory, 'timing.json'),
   };

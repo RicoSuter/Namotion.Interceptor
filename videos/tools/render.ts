@@ -24,17 +24,22 @@ if (existsSync(paths.terminalDirectory)) {
   }
 }
 
+const clips: Record<string, number> = existsSync(paths.clipsFile) ? JSON.parse(readFileSync(paths.clipsFile, 'utf8')) : {};
+
 // The renderer resolves the project file and the public/ media folder from the working directory.
 process.chdir(videosRoot);
 mkdirSync(outputDirectory, {recursive: true});
 const videoFile = await renderVideo({
   projectFile: `./episodes/${paths.episode}/project.ts`,
-  variables: {timing, terminal},
+  variables: {timing, terminal, clips},
   settings: {
     outFile: `${paths.episode}-${preset}.mp4` as const,
     logProgress: true,
     // Ubuntu blocks Chrome's user namespace sandbox; the browser only loads this local project.
     puppeteer: {args: ['--no-sandbox']},
+    // The default browser encoder offers no quality control; the ffmpeg exporter goes through tools/encoder.mjs.
+    projectSettings: {exporter: {name: '@revideo/core/ffmpeg', options: {format: 'mp4'}}},
+    ffmpeg: {ffmpegPath: join(videosRoot, 'tools', 'encoder.mjs')},
     viteConfig: {define: {__RENDER_PRESET__: JSON.stringify(preset)}},
   },
 });

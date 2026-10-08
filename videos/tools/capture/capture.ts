@@ -1,7 +1,8 @@
-import {existsSync, mkdirSync, readdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {basename, join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {loadCaptureConfig, validateEpisode} from '../episode';
+import {probeVideoDuration} from '../ffmpeg';
 import {episodeArgument, episodePaths} from '../paths';
 import {startApp, type RunningApp} from './app';
 import type {Demo} from './config';
@@ -29,6 +30,8 @@ if (demoFiles.length > 0) {
   if (!config.app) {
     throw new Error('Demos need an app entry in capture.ts');
   }
+  // Keep durations of clips that --only did not record again.
+  const durations: Record<string, number> = existsSync(paths.clipsFile) ? JSON.parse(readFileSync(paths.clipsFile, 'utf8')) : {};
   let app: RunningApp | undefined;
   try {
     app = await startApp(config.app, paths.episodeDirectory);
@@ -36,7 +39,14 @@ if (demoFiles.length > 0) {
       const name = basename(file, '.ts');
       console.log(`demo: ${name}`);
       const module = (await import(pathToFileURL(join(demosDirectory, file)).href)) as {default: Demo};
-      await recordDemo(module.default, join(paths.clipsDirectory, `${name}.mp4`), app.baseUrl, config.viewport ?? {width: 1280, height: 800});
+      const clipFile = join(paths.clipsDirectory, `${name}.mp4`);
+      await recordDemo(module.default, clipFile, {
+        baseUrl: app.baseUrl,
+        viewport: config.viewport ?? {width: 1280, height: 800},
+        deviceScaleFactor: config.deviceScaleFactor ?? 2,
+      });
+      durations[name] = probeVideoDuration(clipFile);
+      writeFileSync(paths.clipsFile, JSON.stringify(durations, null, 2));
     }
   } finally {
     app?.stop();

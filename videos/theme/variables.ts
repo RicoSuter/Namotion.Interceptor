@@ -14,6 +14,17 @@ export function useTerminal(name: string): string {
   return text;
 }
 
-export function clipUrl(name: string): string {
-  return `/generated/${useTiming().episode}/clips/${name}.mp4`;
+export interface Clip {
+  url: string;
+  /** Seconds, probed at capture time. */
+  duration: number;
+}
+
+export function useClip(name: string): Clip {
+  const durations = useScene().variables.get('clips', {} as Record<string, number>)();
+  const duration = durations[name];
+  if (duration === undefined) {
+    throw new Error(`Clip '${name}' missing. Run 'npm run capture -- ${useTiming().episode}'.`);
+  }
+  return {url: `/generated/${useTiming().episode}/clips/${name}.mp4`, duration};
 }

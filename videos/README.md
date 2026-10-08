@@ -28,9 +28,13 @@ Output goes to `output/`: the MP4, an SRT subtitle file, `<episode>-contact.png`
 ## Layout
 
 - `episodes/<episode>/`: `script.yaml` (narration and storyboard), `scenes/`, `demos/`, `capture.ts`, `sample/`
-- `theme/`: shared scene runtime and components
+- `theme/`: shared scene runtime, style tokens (`palette.ts`, `style.ts`, `fonts.ts`) and components in `theme/components/`
 - `domain/`: the coffee machine model and simulator used by all samples
 - `tools/`: validate, TTS, capture and render commands
 - `tools/tts/lexicon.yaml`: spoken forms for terms the voice mispronounces
+
+## Demos
+
+Demo pages are recorded at `deviceScaleFactor` 2 by default (set it in `capture.ts`), so a 1280 by 800 page becomes a 2560 by 1600 clip that stays crisp when the camera zooms in. Design pages for video: large type and the theme palette. Capture registers Inter and JetBrains Mono in every demo page, so pages can name those fonts without shipping them. Capture writes clip durations to `clips/clips.json`; `BrowserFrame.play` uses them to fit a clip to its beat (up to 4x faster, otherwise the start is trimmed).
 
 Generated media lives in `public/generated/` and rendered videos in `output/`; both are gitignored.

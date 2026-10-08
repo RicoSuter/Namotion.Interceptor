@@ -26,7 +26,10 @@ export interface CaptureConfig {
     readyPath: string;
     environment?: Record<string, string>;
   };
+  /** Demo page size in CSS pixels. Defaults to 1280 by 800. */
   viewport?: {width: number; height: number};
+  /** Device pixels per CSS pixel for demo recordings. Defaults to 2 so text stays crisp when scaled. */
+  deviceScaleFactor?: number;
   terminal?: TerminalCapture[];
 }
 
