@@ -11,7 +11,7 @@ export const smallShadow = {shadowColor: 'rgba(0, 0, 0, 0.35)', shadowBlur: 16, 
 
 export const fonts = {text: 'Inter', code: 'JetBrains Mono'} as const;
 
-export const fontSize = {caption: 34, label: 30, detail: 22, code: 30, terminal: 30, title: 112, kicker: 28} as const;
+export const fontSize = {label: 30, detail: 22, code: 30, terminal: 30, title: 112, kicker: 28} as const;
 
 export const spacing = {xs: 8, s: 16, m: 24, l: 40, xl: 64, xxl: 96} as const;
 

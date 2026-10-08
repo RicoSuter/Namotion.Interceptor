@@ -42,7 +42,7 @@ When the user asks for a revision of an earlier stage (changed docs, new chapter
 - **Code on screen comes only from compiled files** via `#region` markers, never typed into scenes.
 - **Values on screen come from the running sample**: clips, terminal captures, or numbers that match the domain defaults and simulator constants.
 - **Motion language** (checked at gate 2 and in review):
-  1. No bullet slides. The voice explains, the screen shows. On-screen text is limited to captions, titles and short labels.
+  1. No bullet slides. The voice explains, the screen shows. On-screen text is limited to titles, short labels and key term callouts. Nothing subtitles the picture: the narration goes into the MP4 as a soft subtitle track that is off by default.
   2. Something meaningful moves at least every 3 to 4 seconds.
   3. Transformations, not cuts: code morphs into its next version, a node expands into the live UI, a diagram grows by steps.
   4. The camera moves toward the current subject. Hard cuts only at chapter boundaries.
@@ -86,7 +86,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
   - `narration`: one spoken line. The beat lasts as long as its audio plus 0.4 s.
   - `hold`: extra seconds after the narration, or the whole length of a silent beat. A beat needs `narration`, `hold`, or both.
   - `visual`: the storyboard. What appears, what moves where, what the camera does.
-  - `components`: one or more of `CodeCard`, `FlowDiagram`, `SequenceDiagram`, `ObjectGraph`, `LiveChart`, `LayerStack`, `BrowserFrame`, `Terminal`, `ChapterCard`, `Caption`, `Card`, `Camera`. `ObjectGraph`, `LiveChart` and `LayerStack` are allowed by the schema but have no implementation in `theme/components/` yet (see Stage 4).
+  - `components`: one or more of `CodeCard`, `FlowDiagram`, `SequenceDiagram`, `ObjectGraph`, `LiveChart`, `LayerStack`, `BrowserFrame`, `Terminal`, `ChapterCard`, `Card`, `Camera`. `ObjectGraph`, `LiveChart` and `LayerStack` are allowed by the schema but have no implementation in `theme/components/` yet (see Stage 4).
   - `code: {file, region}`: file relative to the episode folder (`sample/Program.cs`, `../../domain/Coffee/Boiler.cs`).
   - `demo`: name of `demos/<name>.ts`. `terminal`: name of a terminal capture in `capture.ts`.
 
@@ -95,8 +95,8 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 - Spoken English: short sentences, one idea per beat, active voice, "you" for the viewer.
 - 8 to 25 words per beat (about 3 to 10 seconds). Split longer thoughts into several beats so the picture can change with them.
 - Budget about 200 words per minute, the measured pace of the default voice (the smoke episode measured about 200, the connectors episode about 210): a 10 minute episode is about 1800 to 2000 words. Per chapter, words = budget seconds x 3.3.
-- Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); captions show the narration text as written. Better: let the code card show the identifier and narrate what it does.
-- Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, captions keep the original.
+- Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); subtitles show the narration text as written. Better: let the code card show the identifier and narrate what it does.
+- Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, subtitles keep the original.
 - Open the first chapter with a hook: the problem and a glimpse of the result. End with a short recap of what the viewer can now do, plus optional pointers.
 
 ### Storyboard checks
@@ -246,7 +246,7 @@ Scene rules:
 - [ ] Call `narrator.beat(id, ...animations)` for every beat id of `script.yaml` exactly once, in script order. The animations all start with the beat and run in parallel; order them with `delay`, `chain`, `sequence`. Size long animations with `narrator.duration(id)`.
 - [ ] Between beats do only zero-time work: add or `remove()` nodes, `yield* flow.build()`, `yield browser`. A `waitFor` or animation outside a beat shifts the picture against the narration, subtitles and contact sheet.
 - [ ] Add content to `camera` so it zooms; add `ChapterCard`s to `view` so they stay full screen. Fade an element out inside a beat and `remove()` it after that beat.
-- [ ] Frame: 1920 by 1080, origin in the center. The caption pill sits above y 492, so keep content above y 370 (cards centered around y -40 to -70).
+- [ ] Frame: 1920 by 1080, origin in the center. Nothing is drawn over the picture (subtitles are a soft track), so use the whole frame: center diagrams, cards and windows vertically around y 0, and point camera targets at the subject itself, not above it.
 - [ ] Import code with `import source from '<path>?raw'` and `extractRegion(source, '<Region>')`; reference the same file and region in the beat's `code:` so validate checks it.
 - [ ] Use the domain and sample values in labels (93 °C target, 9 bar, Espresso).
 
@@ -266,9 +266,8 @@ All in `theme/components/`; read the file before using a component in a new way.
 | `Card` | Rect props plus `fill`; rounded, soft shadow | standard node signals (`opacity`, `scale`, `position`) |
 | `WindowFrame` | `{width, height, title?, address?, bodyFill?}`; add content to `.body` | standard node signals |
 | `Arrow` | `{curve, color?, lineWidth?, headSize?, dashed?, drawn?}`; curves from `theme/geometry.ts` (`sideCurve`, `messageCurve`) | `grow(duration)` |
-| `Caption` | owned by `Narrator`; never add one | shown per beat automatically |
 
-Tokens: `palette` (`background`, `card`, `elevated`, `separator`, `text`, `secondaryText`, accents `blue`, `cyan`, `green`, `orange`, `pink`, `purple`); `style.ts` has `radius`, `shadow`, `smallShadow`, `fonts`, `fontSize` (caption 34, label 30, detail 22, code 30, terminal 30, title 112), `spacing`, `durations` (0.3, 0.6, 1.2), `moveEasing` for moves and the camera, `enterEasing` for arrivals, `arrivalSpring` for `spring(arrivalSpring, from, to, setter)`.
+Tokens: `palette` (`background`, `card`, `elevated`, `separator`, `text`, `secondaryText`, accents `blue`, `cyan`, `green`, `orange`, `pink`, `purple`); `style.ts` has `radius`, `shadow`, `smallShadow`, `fonts`, `fontSize` (label 30, detail 22, code 30, terminal 30, title 112), `spacing`, `durations` (0.3, 0.6, 1.2), `moveEasing` for moves and the camera, `enterEasing` for arrivals, `arrivalSpring` for `spring(arrivalSpring, from, to, setter)`.
 
 `ObjectGraph`, `LiveChart` and `LayerStack` are not implemented. Compose the beat from existing components (an object tree as a `'down'` `FlowDiagram`, values in a `Card`), or implement the component in `theme/components/` following `FlowDiagram` and `Card`, show it in the smoke episode, and commit it separately.
 
@@ -292,7 +291,7 @@ Run in order from `videos/`:
 | `npm run validate -- <episode>` | `<episode>: N beats, W words, about M min of narration` |
 | `npm run capture -- <episode>` | `public/generated/<episode>/terminal/*.txt`, `clips/*.mp4` and `clips/clips.json`. `--only <name>` recaptures one demo or terminal |
 | `npm run tts -- <episode>` | `public/generated/<episode>/audio/*.wav` and `timing.json`; prints seconds per chapter and the total |
-| `npm run render -- <episode>` | draft at 15 fps: `output/<episode>-draft.mp4`, `output/<episode>.srt`, `output/<episode>-contact.png`, `output/<episode>-review.md`, `output/<episode>-frames/` |
+| `npm run render -- <episode>` | draft at 15 fps: `output/<episode>-draft.mp4` with the narration as a soft subtitle track (`mov_text`, English, off by default), the same subtitles as `output/<episode>.srt`, `output/<episode>-contact.png`, `output/<episode>-review.md`, `output/<episode>-frames/` |
 | `npm run render -- <episode> --final` | `output/<episode>-final.mp4` at 30 fps, plus the same review files |
 
 - Speech synthesis takes 1 to 3 s per 1 s of speech on the first run, depending on the GPU (about 10 minutes for a 10 minute episode on an RTX 3080). Audio is cached by text, voice and settings, so later runs only synthesize changed lines. TTS reads only the script, so it can run as soon as the script exists.
@@ -315,7 +314,7 @@ FFMPEG=$(node -e "import('@ffmpeg-installer/ffmpeg').then(m => console.log(m.def
    Beat start times and durations are in `public/generated/<episode>/timing.json`.
 4. Check every frame for:
    - [ ] still beats from the report (add a camera move, a focus step, a pulse, or split the beat);
-   - [ ] overlaps between elements, or with the caption pill;
+   - [ ] overlaps between elements;
    - [ ] clipped text: code cut at the card edge, labels outside their nodes, content outside the frame;
    - [ ] unreadable sizes (under 22 px at 1080p), low contrast, crowded frames;
    - [ ] empty or black frames, a picture that contradicts the narration, values that do not match the sample;

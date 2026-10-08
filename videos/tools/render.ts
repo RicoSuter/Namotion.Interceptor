@@ -4,6 +4,7 @@ import {renderVideo} from '@revideo/renderer';
 import type {Timing} from '../theme/timing';
 import {validateEpisode} from './episode';
 import {probeVideoDuration, runFfmpeg} from './ffmpeg';
+import {disableSubtitleTracks} from './mp4';
 import {toSrt} from './narration';
 import {episodeArgument, episodePaths, outputDirectory, videosRoot} from './paths';
 import {writeReview} from './review';
@@ -45,13 +46,23 @@ const videoFile = await renderVideo({
   },
 });
 
-writeFileSync(join(outputDirectory, `${paths.episode}.srt`), toSrt(timing));
+const subtitleFile = join(outputDirectory, `${paths.episode}.srt`);
+writeFileSync(subtitleFile, toSrt(timing));
 const absoluteVideoFile = join(videosRoot, videoFile);
-// The renderer ends the audio track with the last clip; pad it so audio and video streams have the same length.
-// The bundled ffmpeg ignores -shortest with apad and copied video, so the length is set explicitly.
-const paddedVideoFile = join(outputDirectory, `${paths.episode}-${preset}.padded.mp4`);
-runFfmpeg(['-i', absoluteVideoFile, '-c:v', 'copy', '-af', 'apad', '-t', probeVideoDuration(absoluteVideoFile).toString(), paddedVideoFile]);
-renameSync(paddedVideoFile, absoluteVideoFile);
+// One pass copies the video, pads the audio and adds the narration as a soft subtitle track. The renderer ends
+// the audio track with the last clip; the bundled ffmpeg ignores -shortest with apad and copied video, so the
+// length is set explicitly.
+const finishedVideoFile = join(outputDirectory, `${paths.episode}-${preset}.finished.mp4`);
+runFfmpeg([
+  '-i', absoluteVideoFile, '-i', subtitleFile,
+  '-map', '0:v', '-map', '0:a?', '-map', '1:s',
+  '-c:v', 'copy', '-af', 'apad', '-c:s', 'mov_text',
+  '-metadata:s:s:0', 'language=eng', '-disposition:s:0', '0',
+  '-t', probeVideoDuration(absoluteVideoFile).toString(), finishedVideoFile,
+]);
+// The bundled mov muxer enables the first subtitle track despite its disposition.
+disableSubtitleTracks(finishedVideoFile);
+renameSync(finishedVideoFile, absoluteVideoFile);
 writeReview(absoluteVideoFile, timing, outputDirectory);
 console.log(`Rendered ${absoluteVideoFile}`);
 console.log(`Review ${join(outputDirectory, `${paths.episode}-review.md`)} and ${join(outputDirectory, `${paths.episode}-contact.png`)}`);

@@ -39,7 +39,7 @@ videos/
 │   ├── tts/                   # Python (uv): Chatterbox, lexicon, cache, timing.json
 │   ├── capture/               # starts companion sample, runs Playwright demos and terminal capture
 │   ├── schema/                # zod schema for script.yaml
-│   └── render.ts              # headless render to MP4 and SRT, draft and final presets
+│   └── render.ts              # headless render to MP4 (with a soft subtitle track) and SRT, draft and final presets
 ├── domain/                    # shared .NET coffee machine model and simulator
 ├── episodes/
 │   ├── smoke/                 # 20 s episode exercising every theme component
@@ -73,7 +73,7 @@ scenes + theme + timing + code regions + clips ──> tools/render ──> outp
 - `script.yaml` is validated against the zod schema before TTS and render: unknown components, missing code regions and demo references without a script fail fast.
 - The code region loader fails the render when a marker is missing.
 - Audio is cached by the hash of text, voice and settings. Only changed lines are regenerated, which also keeps unchanged audio identical across renders.
-- `tools/tts/lexicon.yaml` rewrites terms before synthesis (for example `OPC UA` to "O P C U A", `kW` to "kilowatt"). Captions show the original text.
+- `tools/tts/lexicon.yaml` rewrites terms before synthesis (for example `OPC UA` to "O P C U A", `kW` to "kilowatt"). Subtitles show the original text.
 - Narration avoids saying "Namotion". The intro may name the library; elsewhere the voice says "the library" or the feature name ("the tracking package"), and package and namespace identifiers stay on screen only, not read aloud, unless reading one is needed to follow along. Its lexicon pronunciation is set after listening to the intro draft.
 - Render presets: draft at 1080p and 15 fps, final at 1080p and 30 fps (the renderer ignores resolution scaling). Every render also writes a contact sheet, one frame per beat in a PNG grid, and a report of actual duration per chapter.
 
@@ -90,7 +90,6 @@ scenes + theme + timing + code regions + clips ──> tools/render ──> outp
 | `BrowserFrame` | Playwright clips | window chrome around the clip |
 | `Terminal` | captured terminal output | typed commands, streamed output |
 | `ChapterCard` | chapter transitions | kinetic gradient title over a moving gradient background |
-| `Caption` | subtitle synced to narration | line by line |
 
 Diagrams are typed TypeScript objects (nodes, edges, participants, messages, step numbers). Layout comes from elkjs, with optional manual position overrides. Mermaid diagrams in the docs are translated into this format so they can animate step by step.
 
@@ -100,7 +99,7 @@ Prebuilt layouts: code with diagram, code with browser, full-screen diagram.
 
 Rules the skill checks at the storyboard gate:
 
-1. No bullet slides. The voice explains, the screen shows. On-screen text is limited to captions, titles and short labels.
+1. No bullet slides. The voice explains, the screen shows. On-screen text is limited to titles, short labels and key term callouts. The narration is a soft subtitle track in the MP4, off by default, and is never burned into the picture.
 2. Something meaningful moves at least every 3 to 4 seconds. The render report runs ffmpeg freeze detection on the video and lists beats that stay still for 4 seconds or more.
 3. Show transformations instead of cuts: code morphs into its next version, a property flies from code into a diagram node, a node expands into the live UI.
 4. The camera moves continuously toward the current subject. Hard cuts only at chapter boundaries.

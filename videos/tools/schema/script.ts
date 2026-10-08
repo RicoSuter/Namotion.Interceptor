@@ -13,7 +13,6 @@ export const componentNames = [
   'BrowserFrame',
   'Terminal',
   'ChapterCard',
-  'Caption',
   'Card',
   'Camera',
 ] as const;

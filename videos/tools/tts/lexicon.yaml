@@ -1,4 +1,4 @@
-# Spoken forms for terms the voice mispronounces. Captions keep the original text.
+# Spoken forms for terms the voice mispronounces. Subtitles keep the original text.
 - {match: OPC UA, say: O P C U A}
 - {match: MQTT, say: M Q T T}
 - {match: GraphQL, say: Graph Q L}

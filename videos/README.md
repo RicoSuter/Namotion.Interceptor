@@ -23,7 +23,7 @@ npm run render -- <episode>     # draft at 15 fps, plus contact sheet and review
 npm run render -- <episode> --final
 ```
 
-Output goes to `output/`: the MP4, an SRT subtitle file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
+Output goes to `output/`: the MP4 with the narration as a soft subtitle track (English, off by default; nothing is burned into the picture), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
 
 ## Layout
 

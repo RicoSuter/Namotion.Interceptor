@@ -1,15 +1,13 @@
 import {Audio, type View2D} from '@revideo/2d';
 import {useLogger, useThread, waitFor, type ThreadGenerator} from '@revideo/core';
-import {Caption} from './components/Caption';
 import {findBeat, type Timing} from './timing';
 
-/** Plays each beat's narration, shows its caption and keeps the beat on screen for its timed duration. */
+/**
+ * Plays each beat's narration and keeps the beat on screen for its timed duration. The narration text is not
+ * drawn: render muxes it into the video as a soft subtitle track.
+ */
 export class Narrator {
-  private readonly caption = new Caption({});
-
-  public constructor(private readonly view: View2D, private readonly timing: Timing) {
-    view.add(this.caption);
-  }
+  public constructor(private readonly view: View2D, private readonly timing: Timing) {}
 
   /** Seconds the beat stays on screen. */
   public duration(id: string): number {
@@ -29,9 +27,7 @@ export class Narrator {
       // Resolves within the frame; reading media properties earlier logs an asynchronous property warning.
       yield audio;
     }
-    this.caption.moveToTop();
     const deadline = useThread().time() + beat.duration;
-    yield this.caption.show(beat.caption);
     for (const animation of animations) {
       yield watchDeadline(id, animation, deadline);
     }

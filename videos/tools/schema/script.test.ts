@@ -53,6 +53,14 @@ describe('parseScript', () => {
     expect(() => parseScript(yaml)).toThrow(/Invalid script.yaml/);
   });
 
+  it('WhenBeatListsCaption_ThenThrows', () => {
+    // Arrange
+    const yaml = validScript.replace('[ChapterCard]', '[ChapterCard, Caption]');
+
+    // Act & Assert
+    expect(() => parseScript(yaml)).toThrow(/Invalid script.yaml/);
+  });
+
   it('WhenBeatIdIsNotKebabCase_ThenThrows', () => {
     // Arrange
     const yaml = validScript.replace('id: hello', 'id: Hello_World');

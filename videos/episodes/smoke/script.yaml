@@ -7,7 +7,7 @@ chapters:
       - id: intro-title
         narration: This short episode puts every part of the video theme on screen once.
         visual: A chapter card with a soft gradient wash; the title letters rise in.
-        components: [ChapterCard, Caption]
+        components: [ChapterCard]
   - id: code
     title: Code
     beats:
