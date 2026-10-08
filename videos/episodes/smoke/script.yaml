@@ -1,25 +1,72 @@
 episode: smoke
 title: Pipeline smoke test
 chapters:
-  - id: boiler
-    title: The boiler
+  - id: intro
+    title: Smoke test
+    beats:
+      - id: intro-title
+        narration: This short episode puts every part of the video theme on screen once.
+        visual: A chapter card with a soft gradient wash; the title letters rise in.
+        components: [ChapterCard, Caption]
+  - id: code
+    title: Code
     beats:
       - id: boiler-class
         narration: A boiler is a plain class with partial properties.
-        visual: The Boiler class types into a dark code card.
-        components: [CodeCard]
+        visual: The Boiler class types into a code card.
+        components: [CodeCard, Camera]
         code: {file: ../../domain/Coffee/Boiler.cs, region: Boiler}
       - id: boiler-derived
         narration: Is hot is derived, so it updates on its own whenever the temperature changes.
-        visual: The IsHot lines are selected, everything else dims.
-        components: [CodeCard]
+        visual: The IsHot lines stay bright while the rest dims, and the camera leans in.
+        components: [CodeCard, Camera]
         code: {file: ../../domain/Coffee/Boiler.cs, region: Boiler}
-      - id: boiler-pause
-        hold: 1
-        visual: The card holds before the end.
-        components: [CodeCard]
-      - id: boiler-live
+      - id: tank-morph
+        narration: A water tank follows the same pattern, with a level and a derived flag for when it runs low.
+        visual: The card morphs from the Boiler into the WaterTank class.
+        components: [CodeCard, Camera]
+        code: {file: ../../domain/Coffee/WaterTank.cs, region: WaterTank}
+  - id: flow
+    title: Data flow
+    beats:
+      - id: flow-build
+        narration: The simulator writes the boiler temperature, and the machine derives whether it is ready.
+        visual: Flow diagram nodes spring in step by step and curved edges draw between them.
+        components: [FlowDiagram]
+      - id: flow-pulse
+        narration: Every change travels along these edges, all the way to the status page.
+        visual: Particles travel along the edges while the camera follows them.
+        components: [FlowDiagram, Camera]
+  - id: sequence
+    title: One update
+    beats:
+      - id: sequence-write
+        narration: Step by step, the simulator sets the temperature, and the boiler reports that it is hot.
+        visual: Sequence diagram lifelines grow; two messages arrive with curved arrows.
+        components: [SequenceDiagram]
+      - id: sequence-read
+        narration: The status page asks for the state, and the machine answers with ready.
+        visual: A request and a dashed reply; the active participant is highlighted.
+        components: [SequenceDiagram]
+  - id: live
+    title: Live
+    beats:
+      - id: live-terminal
+        narration: Start the sample with dotnet run.
+        hold: 1.2
+        visual: A terminal types the command and streams the startup log.
+        components: [Terminal]
+        terminal: run-sample
+      - id: live-browser
         narration: In the running app, the boiler heats up until the machine reports ready.
-        visual: The status page recording plays next to the code card.
-        components: [CodeCard, BrowserFrame]
+        visual: The status page recording plays in a browser window, fitted to the beat.
+        components: [BrowserFrame, Camera]
         demo: status
+  - id: outro
+    title: Outro
+    beats:
+      - id: outro-title
+        narration: That is the whole theme, ready for real episodes.
+        hold: 1
+        visual: A closing chapter card.
+        components: [ChapterCard, Card]
