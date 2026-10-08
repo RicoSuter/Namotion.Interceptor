@@ -23,7 +23,8 @@ The remaining libraries (Registry, Validation, Hosting, Dynamic, Connectors, MQT
 | Narration | AI voice, [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT), run locally on the GPU. Behind a `synthesize(text) -> wav` interface so Kokoro can replace it. |
 | Live demos | Hybrid. Browser parts are scripted Playwright recordings of the running companion sample, shown in a styled browser frame. Terminal parts are real output captured as text and animated in the scene. |
 | Code on screen | Loaded from compiled companion samples via region markers, never typed into scenes. |
-| Visual style | Dark IDE base (calm, Catppuccin-like palette) with bold gradient accents (gradient chapter cards, glow on the active element, slow gradient background on transitions). |
+| Visual style | Clean and professional, in the spirit of macOS: dark calm palette, soft shadows instead of borders, generous corner radii and whitespace, smooth curved arrows with rounded caps, Inter for text and JetBrains Mono for code. Gradient only as a subtle background wash on chapter cards; no neon glow. |
+| Episode independence | Every episode is self-contained: a short recap of the coffee machine where needed, no assumed prior episodes. Other episodes are mentioned only as optional pointers. |
 | Location | `videos/` in this repository. Sources are committed; rendered output stays local and is gitignored. |
 | Skill flow | Gated: outline approval, then script and storyboard approval, then build, produce and draft review. |
 
@@ -80,9 +81,9 @@ scenes + theme + timing + code regions + clips ──> tools/render ──> outp
 
 | Component | Purpose | Animation |
 |---|---|---|
-| `CodeCard` | code regions from the sample | type in, morph between versions, highlight and glow lines, zoom to a line |
+| `CodeCard` | code regions from the sample | type in, morph between versions, highlight lines (others dim), zoom to a line |
 | `FlowDiagram` | DI wiring, interceptor chain, connector pipeline, flowcharts | nodes and edges appear per step, particles travel along edges |
-| `SequenceDiagram` | interactions such as write, interceptors, tracking, derived update, connector | lifelines appear, one message per beat, the active participant glows |
+| `SequenceDiagram` | interactions such as write, interceptors, tracking, derived update, connector | lifelines appear, one message per beat, the active participant is highlighted |
 | `ObjectGraph` | subject trees with live values | values tick, changed nodes flash, attach and detach animate, derived values ripple upward |
 | `LiveChart` | values over time | streaming line or sparkline |
 | `LayerStack` | package architecture | blocks build up; library episodes open by zooming into their layer |
@@ -105,7 +106,7 @@ Rules the skill checks at the storyboard gate:
 4. The camera moves continuously toward the current subject. Hard cuts only at chapter boundaries.
 5. Values on screen come from the running sample.
 
-Effects in `theme/`: shared-element transitions, data particles on edges, change ripples, spring physics for arriving elements, an ambient gradient background (subtle in the body, strong on chapter cards), focus pull (blur and dim what is not relevant), kinetic titles.
+Effects in `theme/`: shared-element transitions, data particles on edges, change ripples, spring physics for arriving elements, an ambient gradient background (barely visible in the body, a soft wash on chapter cards), focus pull (blur and dim what is not relevant), kinetic titles. Edges are smooth curves with rounded caps; boxes have no outlines, only soft shadows.
 
 ## Shared domain: coffee machine
 
@@ -148,7 +149,7 @@ How a subject method reaches its context for the transaction (generated `IInterc
 
 Invoked with one doc or a group of docs, for example `/learning-video docs/tracking.md` or `/learning-video docs/connectors-opcua*.md`. It creates or resumes `videos/episodes/<nn>-<name>/`, detects the current stage, and continues or revises from there.
 
-1. **Analyze.** Read the docs, the shared domain, existing episodes (continuity, no repeated explanations) and the actual public API (no invented members).
+1. **Analyze.** Read the docs, the shared domain, existing episodes (consistent naming and visuals; each episode still stands alone) and the actual public API (no invented members).
 2. **Outline, gate 1.** Write `outline.md`: chapters ranked by importance (setup, core feature, real sample, advanced) with time budgets totaling 10 to 15 minutes, plus the doc sections left out. Stop for approval.
 3. **Script and storyboard, gate 2.** Write `script.yaml`, check it against the motion language and the narration rule on "Namotion", estimate duration from word count and flag chapters over budget. Stop for approval.
 4. **Build.** Extend the shared domain if needed, write the companion sample with region markers, build it, write scenes, diagrams and demo scripts.
@@ -185,3 +186,7 @@ Node 24 and uv (installed in `~/.local`), ffmpeg from the `@ffmpeg-installer` np
 - Publishing (YouTube, release assets) and committing rendered MP4s.
 - Episodes beyond intro, Tracking and OPC UA.
 - Exposing subject methods through connectors.
+
+## Spike: Connectors episode
+
+Before the theme plan, a spike runs the whole pipeline uninterrupted on `docs/connectors.md` to produce a complete 10 minute video. The skill's gates are auto-approved during the spike; the outline, script and video are reviewed together afterwards. Voice, styling and animation adjustments happen on top of the spike. Its live sample is the coffee machine served by the WebSocket connector (embedded mode) in one process and mirrored by a WebSocket client in a second process, where a brew started on the client reaches the server.
