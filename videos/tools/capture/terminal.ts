@@ -6,6 +6,16 @@ export function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
 }
 
+/** Drops what a stopped process printed after the line that matched, such as its shutdown messages. */
+export function cutAfterMatch(output: string, until: RegExp | null): string {
+  const match = until?.exec(output);
+  if (!match) {
+    return output;
+  }
+  const lineEnd = output.indexOf('\n', match.index + match[0].length);
+  return lineEnd < 0 ? output : output.slice(0, lineEnd + 1);
+}
+
 /** Runs the command and returns a transcript: the prompt line followed by its combined output. */
 export function runTerminalCapture(capture: TerminalCapture, episodeDirectory: string): Promise<string> {
   const cwd = resolve(episodeDirectory, capture.cwd ?? '.');
@@ -39,7 +49,7 @@ export function runTerminalCapture(capture: TerminalCapture, episodeDirectory: s
         reject(new Error(`Terminal capture '${capture.name}' exited with ${code}:\n${output}`));
         return;
       }
-      resolvePromise(`$ ${[capture.command, ...capture.args].join(' ')}\n${stripAnsi(output)}`);
+      resolvePromise(`$ ${[capture.command, ...capture.args].join(' ')}\n${cutAfterMatch(stripAnsi(output), until)}`);
     });
   });
 }
