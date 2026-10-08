@@ -14,6 +14,8 @@ export const componentNames = [
   'Terminal',
   'ChapterCard',
   'Caption',
+  'Card',
+  'Camera',
 ] as const;
 
 const kebabCase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
