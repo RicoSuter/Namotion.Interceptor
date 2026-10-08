@@ -114,11 +114,6 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
         {
             return;
         }
-        catch (Exception)
-        {
-            // Rethrown so the teardown surfaces it and the base records it as the failure.
-            throw;
-        }
         finally
         {
             // The attempt is still live here: its teardown awaits this task before the attempt is disposed.
