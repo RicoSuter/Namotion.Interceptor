@@ -226,9 +226,17 @@ public class MqttSubjectServer : SubjectServerBase, IFaultInjectable, IAsyncDisp
             throw;
         }
 
-        _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
-
-        return new AttemptTeardown(server, stoppingToken);
+        var teardown = new AttemptTeardown(server, stoppingToken);
+        try
+        {
+            _logger.LogInformation("MQTT server started on port {Port}.", _configuration.BrokerPort);
+            return teardown;
+        }
+        catch
+        {
+            await teardown.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     private sealed class RunTeardown : IAsyncDisposable
@@ -395,7 +403,6 @@ public class MqttSubjectServer : SubjectServerBase, IFaultInjectable, IAsyncDisp
 
         _propertyToTopic.Clear();
         _pathToProperty.Clear();
-        Metrics.MarkNotOperational();
         shutdownCts.Dispose();
     }
 
