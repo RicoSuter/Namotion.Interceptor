@@ -5,7 +5,7 @@ import {loadCaptureConfig, validateEpisode} from '../episode';
 import {probeVideoDuration} from '../ffmpeg';
 import {episodeArgument, episodePaths} from '../paths';
 import {startApp, type RunningApp} from './app';
-import type {Demo} from './config';
+import {demoContext, resolveApps, type Demo, type TerminalCapture} from './config';
 import {recordDemo} from './record';
 import {runTerminalCapture} from './terminal';
 
@@ -14,34 +14,49 @@ const onlyIndex = process.argv.indexOf('--only');
 const only = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined;
 await validateEpisode(paths.episodeDirectory);
 const config = await loadCaptureConfig(paths.episodeDirectory);
+const apps = resolveApps(config);
 
-mkdirSync(paths.terminalDirectory, {recursive: true});
-for (const capture of config.terminal ?? []) {
-  if (only && capture.name !== only) continue;
-  console.log(`terminal: ${capture.name}`);
-  writeFileSync(join(paths.terminalDirectory, `${capture.name}.txt`), await runTerminalCapture(capture, paths.episodeDirectory));
-}
-
+const terminals = (config.terminal ?? []).filter(capture => !only || capture.name === only);
 const demosDirectory = join(paths.episodeDirectory, 'demos');
 const demoFiles = existsSync(demosDirectory)
   ? readdirSync(demosDirectory).filter(file => file.endsWith('.ts') && (!only || basename(file, '.ts') === only))
   : [];
-if (demoFiles.length > 0) {
-  if (!config.app) {
-    throw new Error('Demos need an app entry in capture.ts');
+
+mkdirSync(paths.terminalDirectory, {recursive: true});
+async function captureTerminal(capture: TerminalCapture): Promise<void> {
+  console.log(`terminal: ${capture.name}`);
+  writeFileSync(join(paths.terminalDirectory, `${capture.name}.txt`), await runTerminalCapture(capture, paths.episodeDirectory));
+}
+
+for (const capture of terminals.filter(capture => !capture.whileAppsRun)) {
+  await captureTerminal(capture);
+}
+
+const terminalsWhileAppsRun = terminals.filter(capture => capture.whileAppsRun);
+if (demoFiles.length > 0 || terminalsWhileAppsRun.length > 0) {
+  if (apps.length === 0) {
+    throw new Error('Demos and terminal captures with whileAppsRun need an app or apps entry in capture.ts');
   }
-  // Keep durations of clips that --only did not record again.
-  const durations: Record<string, number> = existsSync(paths.clipsFile) ? JSON.parse(readFileSync(paths.clipsFile, 'utf8')) : {};
-  let app: RunningApp | undefined;
+  const running: Array<RunningApp & {name: string}> = [];
   try {
-    app = await startApp(config.app, paths.episodeDirectory);
+    for (const app of apps) {
+      console.log(`app: ${app.name}`);
+      running.push({...(await startApp(app, paths.episodeDirectory)), name: app.name});
+    }
+    for (const capture of terminalsWhileAppsRun) {
+      await captureTerminal(capture);
+    }
+
+    // Keep durations of clips that --only did not record again.
+    const durations: Record<string, number> = existsSync(paths.clipsFile) ? JSON.parse(readFileSync(paths.clipsFile, 'utf8')) : {};
+    const context = demoContext(running);
     for (const file of demoFiles) {
       const name = basename(file, '.ts');
       console.log(`demo: ${name}`);
       const module = (await import(pathToFileURL(join(demosDirectory, file)).href)) as {default: Demo};
       const clipFile = join(paths.clipsDirectory, `${name}.mp4`);
       await recordDemo(module.default, clipFile, {
-        baseUrl: app.baseUrl,
+        context,
         viewport: config.viewport ?? {width: 1280, height: 800},
         deviceScaleFactor: config.deviceScaleFactor ?? 2,
       });
@@ -49,6 +64,9 @@ if (demoFiles.length > 0) {
       writeFileSync(paths.clipsFile, JSON.stringify(durations, null, 2));
     }
   } finally {
-    app?.stop();
+    // Clients first, so a server does not log their disconnects as errors.
+    for (const app of running.reverse()) {
+      app.stop();
+    }
   }
 }

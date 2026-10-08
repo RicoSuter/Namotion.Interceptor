@@ -1,13 +1,13 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {resolve} from 'node:path';
-import type {CaptureConfig} from './config';
+import type {AppConfig} from './config';
 
 export interface RunningApp {
   baseUrl: string;
   stop(): void;
 }
 
-export async function startApp(app: NonNullable<CaptureConfig['app']>, episodeDirectory: string): Promise<RunningApp> {
+export async function startApp(app: AppConfig, episodeDirectory: string): Promise<RunningApp> {
   const baseUrl = `http://localhost:${app.port}`;
   const child: ChildProcess = spawn(
     'dotnet',

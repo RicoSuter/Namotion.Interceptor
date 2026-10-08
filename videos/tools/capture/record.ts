@@ -3,11 +3,11 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium, type CDPSession} from 'playwright';
 import {runFfmpeg} from '../ffmpeg';
-import type {Demo} from './config';
+import type {Demo, DemoContext} from './config';
 import {themeFontsScript} from './fonts';
 
 export interface RecordOptions {
-  baseUrl: string;
+  context: DemoContext;
   /** Page size in CSS pixels. */
   viewport: {width: number; height: number};
   /** Device pixels per CSS pixel; the clip is recorded at the device resolution. */
@@ -40,7 +40,7 @@ export async function recordDemo(demo: Demo, outputFile: string, options: Record
     const session = await context.newCDPSession(page);
     const recording = captureFrames(session, framesDirectory, viewport, deviceScaleFactor);
     try {
-      await demo(page, {baseUrl: options.baseUrl});
+      await demo(page, options.context);
     } finally {
       recording.stop();
     }
