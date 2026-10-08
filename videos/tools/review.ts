@@ -6,6 +6,13 @@ import {runFfmpeg} from './ffmpeg';
 /** Seconds without visible motion before a beat is flagged. */
 export const stillnessBudget = 4;
 
+/**
+ * Freeze detection on the picture's detail only: subtracting a blurred copy removes the slow, smooth motion of the
+ * background layer, which would otherwise count as motion in every beat, and keeps edges, text and particles.
+ */
+const stillnessFilter = `format=gray,split[picture][copy];[copy]gblur=sigma=32[blurred];`
+  + `[picture][blurred]blend=all_mode=difference,freezedetect=n=0.001:d=${stillnessBudget}`;
+
 /** Seconds a freeze must reach into a beat before the beat is reported, so frame-edge contact does not count. */
 const boundaryTolerance = 0.1;
 
@@ -69,7 +76,7 @@ export function writeReview(videoFile: string, timing: Timing, outputDirectory: 
     '-vf', `tile=${columns}x${rows}:padding=8:color=0x11111b`, '-frames:v', '1',
     join(outputDirectory, `${timing.episode}-contact.png`)]);
 
-  const log = runFfmpeg(['-i', videoFile, '-vf', `freezedetect=n=0.001:d=${stillnessBudget}`, '-map', '0:v:0', '-f', 'null', '-']);
+  const log = runFfmpeg(['-i', videoFile, '-vf', stillnessFilter, '-map', '0:v:0', '-f', 'null', '-']);
   const stillBeats = assignFreezes(parseFreezes(log, timing.totalDuration), timing);
 
   const chapters = [...new Set(timing.beats.map(beat => beat.chapter))];
