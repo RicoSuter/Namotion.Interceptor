@@ -71,7 +71,8 @@ scenes + theme + timing + code regions + clips ──> tools/render ──> outp
 - `script.yaml` is validated against the zod schema before TTS and render: unknown components, missing code regions and demo references without a script fail fast.
 - The code region loader fails the render when a marker is missing.
 - Audio is cached by the hash of text, voice and settings. Only changed lines are regenerated, which also keeps unchanged audio identical across renders.
-- `tools/tts/lexicon.yaml` rewrites terms before synthesis (for example `OPC UA` to "O P C U A", `kW` to "kilowatt"). Captions show the original text. The pronunciation of "Namotion" is set here after listening to the smoke episode.
+- `tools/tts/lexicon.yaml` rewrites terms before synthesis (for example `OPC UA` to "O P C U A", `kW` to "kilowatt"). Captions show the original text.
+- Narration avoids saying "Namotion". The intro may name the library; elsewhere the voice says "the library" or the feature name ("the tracking package"), and package and namespace identifiers stay on screen only, not read aloud, unless reading one is needed to follow along. Its lexicon pronunciation is set after listening to the intro draft.
 - Render presets: draft at 540p and 15 fps, final at 1080p and 30 fps. Every render also writes a contact sheet, one frame per beat in a PNG grid, and a report of actual duration per chapter.
 
 ## Theme components
@@ -148,7 +149,7 @@ Invoked with one doc or a group of docs, for example `/learning-video docs/track
 
 1. **Analyze.** Read the docs, the shared domain, existing episodes (continuity, no repeated explanations) and the actual public API (no invented members).
 2. **Outline, gate 1.** Write `outline.md`: chapters ranked by importance (setup, core feature, real sample, advanced) with time budgets totaling 10 to 15 minutes, plus the doc sections left out. Stop for approval.
-3. **Script and storyboard, gate 2.** Write `script.yaml`, check it against the motion language, estimate duration from word count and flag chapters over budget. Stop for approval.
+3. **Script and storyboard, gate 2.** Write `script.yaml`, check it against the motion language and the narration rule on "Namotion", estimate duration from word count and flag chapters over budget. Stop for approval.
 4. **Build.** Extend the shared domain if needed, write the companion sample with region markers, build it, write scenes, diagrams and demo scripts.
 5. **Produce.** Run TTS, capture and a draft render.
 6. **Review.** Present the contact sheet, chapter durations and stillness report. Apply feedback by editing only the affected beats and re-render. Final render on request.
