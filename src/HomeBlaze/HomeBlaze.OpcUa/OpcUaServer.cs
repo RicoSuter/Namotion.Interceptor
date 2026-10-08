@@ -185,15 +185,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (_serverService is { } service)
-                {
-                    var diagnostics = service.Diagnostics;
-                    IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
-                    OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
-                    ActiveSessionCount = diagnostics.ActiveSessionCount;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+                UpdateDiagnostics();
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -201,6 +194,39 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
         }
 
         await StopServerAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Mirrors the attached server's diagnostics into <see cref="Status"/>, <see cref="StatusMessage"/>
+    /// and the throughput/session state. The server retries setup failures internally, so <see cref="Status"/>
+    /// has to come from its diagnostics rather than from a successful attach. Only runs while
+    /// <see cref="_serverService"/> is set, so it never overwrites the Stopping, Stopped or Error status
+    /// the start/stop paths set for a missing path or an unresolved subject.
+    /// </summary>
+    private void UpdateDiagnostics()
+    {
+        if (_serverService is { } service)
+        {
+            var diagnostics = service.Diagnostics;
+            IncomingChangesPerSecond = diagnostics.Throughput.IncomingPerSecond;
+            OutgoingChangesPerSecond = diagnostics.Throughput.OutgoingPerSecond;
+            ActiveSessionCount = diagnostics.ActiveSessionCount;
+
+            if (diagnostics.IsOperational == true)
+            {
+                Status = ServiceStatus.Running;
+                StatusMessage = null;
+            }
+            else if (diagnostics.LastError is { } lastError)
+            {
+                Status = ServiceStatus.Error;
+                StatusMessage = lastError.Message;
+            }
+            else
+            {
+                Status = ServiceStatus.Starting;
+            }
+        }
     }
 
     public async Task ApplyConfigurationAsync(CancellationToken cancellationToken)
@@ -274,8 +300,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
             await this.AttachHostedServiceAsync(_serverService, cancellationToken);
 
-            Status = ServiceStatus.Running;
-            _logger.LogInformation("OPC UA server started for path: {Path}", Path);
+            UpdateDiagnostics();
+            _logger.LogInformation("OPC UA server attached for path: {Path}", Path);
         }
         catch (Exception ex)
         {
