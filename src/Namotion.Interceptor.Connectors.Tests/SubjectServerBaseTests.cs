@@ -18,7 +18,7 @@ public class SubjectServerBaseTests
         var person = CreatePerson();
         using var server = new TestServer(person)
         {
-            OnStart = (_, _) =>
+            OnStart = (_, _, _) =>
             {
                 // A write made while the server starts, before it would accept clients.
                 person.LastName = "During start";
@@ -48,7 +48,7 @@ public class SubjectServerBaseTests
         // Arrange
         using var server = new TestServer(CreatePerson())
         {
-            OnStart = (_, attemptNumber) => attemptNumber < 3
+            OnStart = (_, _, attemptNumber) => attemptNumber < 3
                 ? throw new InvalidOperationException("start failed")
                 : Task.CompletedTask
         };
@@ -74,7 +74,7 @@ public class SubjectServerBaseTests
         var failure = new InvalidOperationException("start failed");
         using var server = new TestServer(CreatePerson())
         {
-            OnStart = (_, _) => throw failure
+            OnStart = (_, _, _) => throw failure
         };
 
         try
@@ -100,7 +100,7 @@ public class SubjectServerBaseTests
         // Arrange
         using var server = new TestServer(CreatePerson())
         {
-            OnStart = (_, attemptNumber) => attemptNumber < 3
+            OnStart = (_, _, attemptNumber) => attemptNumber < 3
                 ? throw new InvalidOperationException("start failed")
                 : Task.CompletedTask
         };
@@ -157,7 +157,7 @@ public class SubjectServerBaseTests
         // Arrange: cancelling the attempt from inside the start makes processing end without a stop or a kill.
         using var server = new TestServer(CreatePerson())
         {
-            OnStart = async (attempt, attemptNumber) =>
+            OnStart = async (attempt, _, attemptNumber) =>
             {
                 if (attemptNumber == 1)
                 {
@@ -209,7 +209,7 @@ public class SubjectServerBaseTests
         // Arrange: the hour-long delay keeps the loop on the first attempt, so the captured processor is that attempt's.
         using var server = new TestServer(CreatePerson())
         {
-            OnStart = (_, _) => throw new InvalidOperationException("start failed"),
+            OnStart = (_, _, _) => throw new InvalidOperationException("start failed"),
             RestartDelay = _ => TimeSpan.FromHours(1)
         };
 
@@ -223,6 +223,7 @@ public class SubjectServerBaseTests
             var processor = server.LastProcessor!;
             await Assert.ThrowsAsync<ObjectDisposedException>(
                 () => processor.ProcessAsync(new CancellationToken(canceled: true)));
+            Assert.Equal(1, server.StartCount);
         }
         finally
         {
@@ -244,6 +245,130 @@ public class SubjectServerBaseTests
 
         // Assert
         Assert.False(server.OperationalAtTeardown);
+    }
+
+    [Fact]
+    public async Task WhenStoppedDuringStartServerAsyncWithANonCancellationException_ThenNoErrorIsRecorded()
+    {
+        // Arrange: StartServerAsync blocks until the host stops, then fails with an exception that is
+        // not itself a cancellation, mimicking a transport abort during shutdown rather than a clean one.
+        using var server = new TestServer(CreatePerson())
+        {
+            OnStart = async (_, stoppingToken, _) =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                throw new InvalidOperationException("start aborted by stop");
+            }
+        };
+
+        // Act
+        await server.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => server.StartCount == 1);
+        await server.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(server.Diagnostics.LastError);
+        Assert.Empty(server.RequestedDelays);
+        Assert.True(server.ExecuteTask!.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task WhenTheServerTeardownThrows_ThenTheFailureIsRecordedAndRestartedAfterTheDelay()
+    {
+        // Arrange: attempt 1 ends itself by self-cancelling, not by a stop or a kill, so its teardown's
+        // exception can only reach the generic catch through the finally block in the code under test.
+        var teardownFailure = new InvalidOperationException("teardown failed");
+        using var server = new TestServer(CreatePerson())
+        {
+            OnStart = async (attempt, _, attemptNumber) =>
+            {
+                if (attemptNumber == 1)
+                {
+                    await attempt.CancelAsync();
+                }
+            },
+            OnTeardown = () => throw teardownFailure
+        };
+
+        try
+        {
+            // Act
+            await server.StartAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(() => server.StartCount == 2);
+            Assert.Same(teardownFailure, server.Diagnostics.LastError);
+            Assert.Equal(new[] { 1 }, server.RequestedDelays);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenForceKilledWhileStartServerAsyncWaits_ThenRestartsWithoutError()
+    {
+        // Arrange: StartServerAsync blocks on the attempt's own token, so the kill lands before the
+        // change processor ever starts, exercising the kill classification that is not narrowed to
+        // OperationCanceledException.
+        using var server = new TestServer(CreatePerson())
+        {
+            OnStart = async (attempt, _, attemptNumber) =>
+            {
+                if (attemptNumber == 1)
+                {
+                    await Task.Delay(Timeout.Infinite, attempt.Token);
+                }
+            },
+            RestartDelay = _ => TimeSpan.FromHours(1)
+        };
+
+        try
+        {
+            // Act
+            await server.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => server.StartCount == 1);
+            await server.ForceKillAsync();
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.StartCount == 2 && server.Diagnostics.IsOperational == true,
+                message: "A force-killed attempt should restart immediately.");
+            Assert.Null(server.Diagnostics.LastError);
+            Assert.Empty(server.RequestedDelays);
+        }
+        finally
+        {
+            await server.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WhenStoppedDuringTheRestartDelay_ThenTheHostedTaskCompletesSuccessfully()
+    {
+        // Arrange
+        using var server = new TestServer(CreatePerson())
+        {
+            OnStart = (_, _, _) => throw new InvalidOperationException("start failed"),
+            RestartDelay = _ => TimeSpan.FromHours(1)
+        };
+
+        // Act
+        await server.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => server.RequestedDelays.Count == 1);
+        await server.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(server.ExecuteTask!.IsCompletedSuccessfully);
+        Assert.Equal(1, server.StartCount);
     }
 
     [Theory]
@@ -294,9 +419,11 @@ public class SubjectServerBaseTests
 
         public override ConnectorDiagnostics Diagnostics { get; }
 
-        public Func<ConnectorRunAttempt, int, Task>? OnStart { get; init; }
+        public Func<ConnectorRunAttempt, CancellationToken, int, Task>? OnStart { get; init; }
 
         public Action? OnInitialize { get; init; }
+
+        public Action? OnTeardown { get; init; }
 
         public Func<int, TimeSpan> RestartDelay { get; init; } = _ => TimeSpan.Zero;
 
@@ -350,15 +477,19 @@ public class SubjectServerBaseTests
             return processor;
         }
 
-        protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt)
+        protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
         {
             var attemptNumber = Interlocked.Increment(ref _startCount);
             if (OnStart is not null)
             {
-                await OnStart(attempt, attemptNumber);
+                await OnStart(attempt, stoppingToken, attemptNumber);
             }
 
-            return new Teardown(() => OperationalAtTeardown = Diagnostics.IsOperational);
+            return new Teardown(() =>
+            {
+                OperationalAtTeardown = Diagnostics.IsOperational;
+                OnTeardown?.Invoke();
+            });
         }
 
         protected override TimeSpan GetRestartDelay(int consecutiveFailures)

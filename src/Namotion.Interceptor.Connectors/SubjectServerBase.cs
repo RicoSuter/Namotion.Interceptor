@@ -32,7 +32,8 @@ public abstract class SubjectServerBase : SubjectConnectorBase
     }
 
     /// <summary>
-    /// Gets the number of failed attempts since the last successful start.
+    /// Gets the number of failed attempts since an attempt last started successfully. A server that
+    /// starts and then fails keeps this at one.
     /// </summary>
     protected int ConsecutiveFailures => Volatile.Read(ref _consecutiveFailures);
 
@@ -41,7 +42,8 @@ public abstract class SubjectServerBase : SubjectConnectorBase
     /// accept clients. A failure ends the connector and is not retried.
     /// </summary>
     /// <param name="stoppingToken">The connector's stopping token.</param>
-    /// <returns>A teardown disposed after the last attempt, or <c>null</c> if there is nothing to release.</returns>
+    /// <returns>A teardown disposed after the last attempt, or <c>null</c> if there is nothing to release.
+    /// A teardown that throws ends the connector with the error recorded.</returns>
     protected virtual Task<IAsyncDisposable?> InitializeAsync(CancellationToken stoppingToken) =>
         Task.FromResult<IAsyncDisposable?>(null);
 
@@ -50,20 +52,26 @@ public abstract class SubjectServerBase : SubjectConnectorBase
     /// attempt, before <see cref="StartServerAsync"/>, and disposed when the attempt ends.
     /// </summary>
     /// <param name="dropHandler">The outbound drop reporter, to pass to the processor.</param>
-    /// <returns>The processor, already subscribed to property changes.</returns>
+    /// <returns>The processor, already subscribed to property changes. The base runs and disposes it;
+    /// do not call <see cref="ChangeQueueProcessor.ProcessAsync"/>.</returns>
     protected abstract ChangeQueueProcessor CreateChangeQueueProcessor(Action<long> dropHandler);
 
     /// <summary>
     /// Starts the protocol server for one attempt. Called once the change subscription exists, and
     /// returns once clients can connect. If it throws, it releases what it acquired before rethrowing.
+    /// A teardown it returns that throws is recorded the same way, and the attempt restarts after
+    /// <see cref="GetRestartDelay"/>, unless the connector is stopping.
     /// </summary>
     /// <param name="attempt">The attempt this start belongs to.</param>
+    /// <param name="stoppingToken">The connector's stopping token, which tells a stop apart from the
+    /// end of an attempt.</param>
     /// <returns>A teardown disposed when the attempt ends, or <c>null</c> if there is nothing to release.</returns>
-    protected abstract Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt);
+    protected abstract Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken);
 
     /// <summary>
     /// Gets the delay before the next attempt after a failed one. The default grows exponentially from
-    /// one second to a 30 second cap and adds up to two seconds of random jitter.
+    /// one second to a 30 second cap and adds up to two seconds of random jitter. Not called after a
+    /// stop or a force-kill.
     /// </summary>
     /// <param name="consecutiveFailures">The number of failed attempts in a row, starting at 1.</param>
     /// <returns>The delay; zero restarts immediately.</returns>
@@ -105,7 +113,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
             {
                 // An attempt that fails synchronously would otherwise restart inline, and the first attempt
                 // runs inside the host's StartAsync.
-                await Task.Yield();
+                await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
             }
         }
     }
@@ -124,7 +132,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
             IAsyncDisposable? serverTeardown = null;
             try
             {
-                serverTeardown = await StartServerAsync(attempt).ConfigureAwait(false);
+                serverTeardown = await StartServerAsync(attempt, stoppingToken).ConfigureAwait(false);
                 Interlocked.Exchange(ref _consecutiveFailures, 0);
 
                 // LastError is deliberately left in place: clearing it on recovery would erase the only
@@ -146,7 +154,9 @@ public abstract class SubjectServerBase : SubjectConnectorBase
         {
             return TimeSpan.Zero;
         }
-        catch (OperationCanceledException) when (attempt.WasForceKilled)
+        // A kill tears the server down with arbitrary exceptions, as a stop does, so this filter is not
+        // narrowed to OperationCanceledException.
+        catch (Exception) when (attempt.WasForceKilled)
         {
             LogForceKill();
             return TimeSpan.Zero;
@@ -157,6 +167,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
             // the stopping token tells a shutdown apart from a genuine fault.
             if (stoppingToken.IsCancellationRequested)
             {
+                _logger.LogDebug(exception, "Server {Server} faulted while stopping.", GetType().Name);
                 return TimeSpan.Zero;
             }
 
@@ -193,7 +204,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
 
         var restartDelay = GetRestartDelay(consecutiveFailures);
         _logger.LogError(exception,
-            "Server {Server} failed (attempt {Attempt}). Restarting in {Delay}.",
+            "Server {Server} failed ({ConsecutiveFailures} in a row). Restarting in {Delay}.",
             GetType().Name, consecutiveFailures, restartDelay);
 
         return restartDelay;
