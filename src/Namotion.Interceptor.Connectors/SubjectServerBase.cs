@@ -121,32 +121,25 @@ public abstract class SubjectServerBase : SubjectConnectorBase
             using var outboundRegistration = Metrics.OutboundChanges.Register(
                 () => changeQueueProcessor.QueueDepth, capacity: null);
 
+            IAsyncDisposable? serverTeardown = null;
             try
             {
-                var serverTeardown = await StartServerAsync(attempt).ConfigureAwait(false);
-                try
-                {
-                    Interlocked.Exchange(ref _consecutiveFailures, 0);
+                serverTeardown = await StartServerAsync(attempt).ConfigureAwait(false);
+                Interlocked.Exchange(ref _consecutiveFailures, 0);
 
-                    // LastError is deliberately left in place: clearing it on recovery would erase the only
-                    // evidence of a transient fault.
-                    Metrics.MarkOperational();
+                // LastError is deliberately left in place: clearing it on recovery would erase the only
+                // evidence of a transient fault.
+                Metrics.MarkOperational();
 
-                    await changeQueueProcessor.ProcessAsync(attempt.Token).ConfigureAwait(false);
-                }
-                finally
-                {
-                    if (serverTeardown is not null)
-                    {
-                        await serverTeardown.DisposeAsync().ConfigureAwait(false);
-                    }
-                }
+                await changeQueueProcessor.ProcessAsync(attempt.Token).ConfigureAwait(false);
             }
             finally
             {
-                // Covers a StartServerAsync failure too, not just a started attempt's teardown: liveness
-                // must leave null once a start has been attempted, even when it never reached MarkOperational.
                 Metrics.MarkNotOperational();
+                if (serverTeardown is not null)
+                {
+                    await serverTeardown.DisposeAsync().ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

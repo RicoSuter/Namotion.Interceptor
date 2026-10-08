@@ -230,6 +230,22 @@ public class SubjectServerBaseTests
         }
     }
 
+    [Fact]
+    public async Task WhenAnAttemptEnds_ThenTheServerIsNotOperationalBeforeItsTeardownRuns()
+    {
+        // Arrange
+        using var server = new TestServer(CreatePerson());
+
+        await server.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => server.Diagnostics.IsOperational == true);
+
+        // Act
+        await server.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.False(server.OperationalAtTeardown);
+    }
+
     [Theory]
     [InlineData(1, 1)]
     [InlineData(2, 2)]
@@ -292,6 +308,8 @@ public class SubjectServerBaseTests
 
         public ChangeQueueProcessor? LastProcessor { get; private set; }
 
+        public bool? OperationalAtTeardown { get; private set; }
+
         public int StartCount => Volatile.Read(ref _startCount);
 
         public int CurrentConsecutiveFailures => ConsecutiveFailures;
@@ -340,7 +358,7 @@ public class SubjectServerBaseTests
                 await OnStart(attempt, attemptNumber);
             }
 
-            return null;
+            return new Teardown(() => OperationalAtTeardown = Diagnostics.IsOperational);
         }
 
         protected override TimeSpan GetRestartDelay(int consecutiveFailures)
