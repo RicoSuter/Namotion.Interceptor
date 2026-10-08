@@ -184,8 +184,14 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
             {
                 // Guards the app release documented on StopApplicationAsync: a cancel or heartbeat fault
                 // above must not skip it.
-                await _server._handler.CloseAllConnectionsAsync().ConfigureAwait(false);
-                await _server.StopApplicationAsync().ConfigureAwait(false);
+                try
+                {
+                    await _server._handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    await _server.StopApplicationAsync().ConfigureAwait(false);
+                }
             }
         }
     }
