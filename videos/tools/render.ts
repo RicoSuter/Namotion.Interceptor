@@ -1,7 +1,9 @@
-import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
-import {basename, join} from 'node:path';
+import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
+import {basename, dirname, join} from 'node:path';
 import {renderVideo} from '@revideo/renderer';
+import {backgroundVariants, defaultBackground, type BackgroundVariant} from '../theme/backgrounds';
 import type {Timing} from '../theme/timing';
+import {beatRanges} from './beatRanges';
 import {validateEpisode} from './episode';
 import {probeVideoDuration, runFfmpeg} from './ffmpeg';
 import {disableSubtitleTracks} from './mp4';
@@ -11,7 +13,12 @@ import {writeReview} from './review';
 
 const paths = episodePaths(episodeArgument());
 const preset = process.argv.includes('--final') ? 'final' : 'draft';
-await validateEpisode(paths.episodeDirectory);
+const script = await validateEpisode(paths.episodeDirectory);
+const background = (option('--background') ?? script.background ?? defaultBackground) as BackgroundVariant;
+if (!backgroundVariants.includes(background)) {
+  throw new Error(`Unknown background '${background}'. Choose one of ${backgroundVariants.join(', ')}.`);
+}
+const beats = option('--beats')?.split(',');
 
 if (!existsSync(paths.timingFile)) {
   throw new Error(`No timing for '${paths.episode}'. Run 'npm run tts -- ${paths.episode}' first.`);
@@ -31,20 +38,45 @@ const marks: Record<string, Record<string, number>> = existsSync(paths.marksFile
 // The renderer resolves the project file and the public/ media folder from the working directory.
 process.chdir(videosRoot);
 mkdirSync(outputDirectory, {recursive: true});
-const videoFile = await renderVideo({
-  projectFile: `./episodes/${paths.episode}/project.ts`,
-  variables: {timing, terminal, clips, marks},
-  settings: {
-    outFile: `${paths.episode}-${preset}.mp4` as const,
-    logProgress: true,
-    // Ubuntu blocks Chrome's user namespace sandbox; the browser only loads this local project.
-    puppeteer: {args: ['--no-sandbox']},
-    // The default browser encoder offers no quality control; the ffmpeg exporter goes through tools/encoder.mjs.
-    projectSettings: {exporter: {name: '@revideo/core/ffmpeg', options: {format: 'mp4'}}},
-    ffmpeg: {ffmpegPath: join(videosRoot, 'tools', 'encoder.mjs')},
-    viteConfig: {define: {__RENDER_PRESET__: JSON.stringify(preset)}},
-  },
-});
+
+async function render(outFile: string, range?: [number, number]): Promise<string> {
+  return renderVideo({
+    projectFile: `./episodes/${paths.episode}/project.ts`,
+    variables: {timing, terminal, clips, marks, background},
+    settings: {
+      outFile: outFile as `${string}.mp4`,
+      logProgress: true,
+      // Ubuntu blocks Chrome's user namespace sandbox; the browser only loads this local project.
+      puppeteer: {args: ['--no-sandbox']},
+      // The default browser encoder offers no quality control; the ffmpeg exporter goes through tools/encoder.mjs.
+      projectSettings: {exporter: {name: '@revideo/core/ffmpeg', options: {format: 'mp4'}}, ...(range ? {range} : {})},
+      ffmpeg: {ffmpegPath: join(videosRoot, 'tools', 'encoder.mjs')},
+      viteConfig: {define: {__RENDER_PRESET__: JSON.stringify(preset)}},
+    },
+  });
+}
+
+if (beats) {
+  // Only the listed beats, for example to compare a theme change: one render per range, joined without subtitles.
+  const name = option('--out') ?? `${paths.episode}-${preset}-${background}`;
+  const ranges = beatRanges(timing, beats);
+  const parts: string[] = [];
+  for (const [index, range] of ranges.entries()) {
+    parts.push(join(videosRoot, await render(`${name.replaceAll('/', '-')}-part${index}.mp4`, [range.start, range.end])));
+  }
+  const joinedFile = join(outputDirectory, `${name}.mp4`);
+  mkdirSync(dirname(joinedFile), {recursive: true});
+  const listFile = join(outputDirectory, `${name}-parts.txt`);
+  writeFileSync(listFile, parts.map(part => `file '${part}'`).join('\n'));
+  runFfmpeg(['-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', joinedFile]);
+  for (const file of [listFile, ...parts]) {
+    rmSync(file);
+  }
+  console.log(`Rendered ${joinedFile} (${ranges.map(range => `${range.start.toFixed(1)} to ${range.end.toFixed(1)} s`).join(', ')})`);
+  process.exit(0);
+}
+
+const videoFile = await render(`${paths.episode}-${preset}.mp4`);
 
 const subtitleFile = join(outputDirectory, `${paths.episode}.srt`);
 writeFileSync(subtitleFile, toSrt(timing));
@@ -66,3 +98,8 @@ renameSync(finishedVideoFile, absoluteVideoFile);
 writeReview(absoluteVideoFile, timing, outputDirectory);
 console.log(`Rendered ${absoluteVideoFile}`);
 console.log(`Review ${join(outputDirectory, `${paths.episode}-review.md`)} and ${join(outputDirectory, `${paths.episode}-contact.png`)}`);
+
+function option(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}

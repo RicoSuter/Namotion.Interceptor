@@ -38,6 +38,16 @@ describe('parseScript', () => {
     expect(parseScript(validScript).tempo).toBe(1.1);
   });
 
+  it('WhenBackgroundIsKnown_ThenKeepsItAndRejectsOthers', () => {
+    // Act
+    const script = parseScript(validScript.replace('title: Smoke test\n', 'title: Smoke test\nbackground: edge-aurora\n'));
+
+    // Assert
+    expect(script.background).toBe('edge-aurora');
+    expect(parseScript(validScript).background).toBeUndefined();
+    expect(() => parseScript(validScript.replace('title: Smoke test\n', 'title: Smoke test\nbackground: plaid\n'))).toThrow(/Invalid script.yaml/);
+  });
+
   it('WhenTempoIsOutOfRange_ThenThrows', () => {
     // Arrange
     const yaml = validScript.replace('title: Smoke test\n', 'title: Smoke test\ntempo: 3\n');

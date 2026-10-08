@@ -2,6 +2,7 @@ import {Circle, Gradient, Node, Rect, Txt, blur, type NodeProps} from '@revideo/
 import {all, createSignal, sequence, useThread, type ThreadGenerator} from '@revideo/core';
 import {palette, type AccentColor} from '../palette';
 import {enterEasing, fonts, fontSize, moveEasing} from '../style';
+import {Grain} from './Background';
 import {ChapterHeader} from './ChapterHeader';
 
 export interface ChapterCardProps extends NodeProps {
@@ -41,10 +42,10 @@ export class ChapterCard extends Node {
         <Circle size={blob.size} opacity={() => this.wash() * 0.3}
           x={() => blob.x + Math.sin(time() * blob.speed * Math.PI * 2 + blob.phase) * 140}
           y={() => blob.y + Math.cos(time() * blob.speed * Math.PI * 2 + blob.phase) * 90}
-          fill={new Gradient({type: 'radial', fromRadius: 0, toRadius: blob.size / 2,
-            stops: [{offset: 0, color: blob.color}, {offset: 1, color: `${blob.color}00`}]})} />,
+          fill={new Gradient({type: 'radial', fromRadius: 0, toRadius: blob.size / 2, stops: softStops(blob.color)})} />,
       );
     }
+    this.add(<Grain />);
 
     this.content = new Node({});
     this.add(this.content);
@@ -98,6 +99,16 @@ export class ChapterCard extends Node {
 }
 
 function* nothing(): ThreadGenerator {}
+
+/** Gradient stops from the color to transparent with a gaussian falloff, softer than a linear fade. */
+function softStops(color: string): Array<{offset: number; color: string}> {
+  const floor = Math.exp(-4);
+  return [...Array(9).keys()].map(index => {
+    const offset = index / 8;
+    const alpha = Math.round(((Math.exp(-4 * offset * offset) - floor) / (1 - floor)) * 255);
+    return {offset, color: `${color}${alpha.toString(16).padStart(2, '0')}`};
+  });
+}
 
 /** Left edge of every letter and the full width as the last entry, as the canvas would lay them out. */
 function measureWidths(text: string, font: string, letterSpacing: number): number[] {

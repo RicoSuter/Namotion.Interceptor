@@ -2,6 +2,7 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {parse} from 'yaml';
 import {z} from 'zod';
+import {backgroundVariants} from '../../theme/backgrounds';
 
 export const componentNames = [
   'CodeCard',
@@ -50,6 +51,8 @@ export const scriptSchema = z.object({
   voice: z.string().min(1).default('default'),
   /** Speech speed factor applied to the synthesized narration, pitch preserved. */
   tempo: z.number().min(0.5).max(2).default(defaultTempo),
+  /** Background variant; the theme default when omitted. */
+  background: z.enum(backgroundVariants).optional(),
   chapters: z.array(chapterSchema).min(1),
 });
 

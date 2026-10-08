@@ -1,18 +1,26 @@
 import {Audio, type View2D} from '@revideo/2d';
-import {useLogger, useThread, waitFor, type ThreadGenerator} from '@revideo/core';
+import {useLogger, useScene, useThread, waitFor, type ThreadGenerator} from '@revideo/core';
+import {defaultBackground, type BackgroundVariant} from './backgrounds';
+import {Background} from './components/Background';
 import {ChapterHeader} from './components/ChapterHeader';
 import {findBeat, type Timing} from './timing';
 
 /**
  * Plays each beat's narration and keeps the beat on screen for its timed duration. The narration text is not
- * drawn: render muxes it into the video as a soft subtitle track. Adds the chapter header to the view and keeps
- * its title on the current beat's chapter.
+ * drawn: render muxes it into the video as a soft subtitle track. Adds the background layer and the chapter header
+ * to the view and keeps both on the current beat's chapter.
  */
 export class Narrator {
   private readonly header = new ChapterHeader();
+  private readonly background: Background;
+  private readonly chapters: string[];
   private started = false;
 
   public constructor(private readonly view: View2D, private readonly timing: Timing) {
+    const variant = useScene().variables.get<BackgroundVariant>('background', defaultBackground)();
+    this.background = new Background({variant});
+    this.chapters = [...new Set(timing.beats.map(beat => beat.chapter))];
+    view.add(this.background);
     view.add(this.header);
   }
 
@@ -36,10 +44,12 @@ export class Narrator {
     }
     if (!this.started) {
       this.started = true;
+      this.background.timeOffset(beat.start - useThread().time());
       yield this.header.appear();
     }
-    // Runs beside the beat without a deadline: a title switch near the end of a beat may finish in the next one.
+    // These run beside the beat without a deadline: a chapter switch near the end of a beat may finish in the next.
     yield this.header.show(beat.chapterTitle);
+    yield this.background.showChapter(this.chapters.indexOf(beat.chapter));
     const deadline = useThread().time() + beat.duration;
     for (const animation of animations) {
       yield watchDeadline(id, animation, deadline);

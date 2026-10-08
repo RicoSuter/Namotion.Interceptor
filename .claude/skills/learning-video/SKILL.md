@@ -81,6 +81,7 @@ Copy `.claude/skills/learning-video/templates/outline.md` to `videos/episodes/<n
 Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder and replace its content. The schema is `videos/tools/schema/script.ts`:
 
 - `episode` (the folder name), `title`, `voice` (`default`, or a reference wav path relative to `videos/`), `chapters`.
+- `background` (optional): the background variant, one of `drift`, `chapter-tint`, `edge-aurora`, `follow-light`; the theme default (`defaultBackground` in `theme/backgrounds.ts`) when omitted. See Backgrounds.
 - `tempo` (optional, default 1.1): speech speed factor between 0.5 and 2. TTS synthesizes each line once at the voice's natural pace and caches it, then writes a pitch-preserving copy at this tempo (ffmpeg `atempo`, cached under a key that includes the tempo); beat timing uses the adjusted durations. Changing the tempo re-runs only that fast step.
 - Chapter: `id` (kebab-case), `title`, `beats`.
 - Beat:
@@ -251,10 +252,26 @@ Scene rules:
 - [ ] Add content to `camera` so it zooms; add `ChapterCard`s to `view` so they stay full screen. Fade an element out inside a beat and `remove()` it after that beat.
 - [ ] Frame: 1920 by 1080, origin in the center. Nothing but the chapter header is drawn over the picture (subtitles are a soft track), so use the whole frame: center diagrams, cards and windows vertically around y 0, and point camera targets at the subject itself, not above it.
 - [ ] The `Narrator` adds the chapter header to the view: "Namotion.Interceptor | <chapter title>" in the top right corner, the title taken from the beat's chapter in `script.yaml` (carried in `timing.json` as `chapterTitle`). It fades in when the scene starts, cross fades with a short slide when the chapter changes, and stays hidden while a `ChapterCard` fills the frame, fading in after the card's exit. Scenes add nothing for it, and never repeat chapter titles. The product name is only displayed; the narration rule above still holds.
+- [ ] The `Narrator` also adds the background layer behind everything, outside the camera, so it stays fixed while the camera moves. Scenes add no full-frame backdrop of their own.
 - [ ] Keep the header band free: no content in the top 130 px of the right half of the frame (screen x above 1240 and y below 130 at 1080p), in the full view and in every camera move. Zoomed browser windows and tall diagrams are the usual offenders; lower the zoom or point the camera a little higher on the subject.
 - [ ] Import code with `import source from '<path>?raw'` and `extractRegion(source, '<Region>')`; reference the same file and region in the beat's `code:` so validate checks it.
 - [ ] Use the domain and sample values in labels (93 °C target, 9 bar, Espresso).
 - [ ] Connect elements with `Arrow` from edge to edge, for two cards from the right side of one to the left side of the other at their vertical center (`messageCurve(fromX, toX, y)` gives a gentle bow). Arrows default to the neutral `palette.edge`; an accent color carries meaning, and pink means failure or a blocked path. Values in transit ride the arrow (`ride` in `episodes/03-connectors/scenes/shared.tsx`). A bar or line that touches neither element does not read as a connection.
+
+### Backgrounds
+
+`theme/components/Background.tsx` draws the dark base, slow colored glows and a fixed grain that dithers the gradients (8-bit gradients otherwise show rings; `ChapterCard` overlays the same grain on its wash). The variant comes from `--background` on the render command, then `background:` in `script.yaml`, then `defaultBackground`:
+
+| Variant | Look |
+|---|---|
+| `drift` | four large, soft blue, purple and teal glows at about 10 % drifting on a one minute loop |
+| `chapter-tint` | the same glows, with a hue pair per chapter that cross fades over 2 s when the chapter changes inside a scene |
+| `edge-aurora` | glows along the top and bottom edges that slowly breathe; the center stays neutral |
+| `follow-light` | one large soft light behind the camera's focus; it reaches a new focus target ahead of the camera, so it leads the eye |
+
+Keep glows subtle (content legibility first) and cool: warm accents and green turn brown or olive at this intensity. The layer draws in a custom `draw` with no cache, so it animates freely; do not wrap it in a node with opacity, a filter or a shadow (see Known pitfalls).
+
+To compare variants without rendering a whole episode, render only some beats: `npm run render -- <episode> --final --beats <id>,<id> --background <variant> --out <name>` renders each run of consecutive beats on its own and joins them into `output/<name>.mp4` (no subtitles or review).
 
 ### Component reference
 
@@ -300,6 +317,7 @@ Run in order from `videos/`:
 | `npm run tts -- <episode>` | `public/generated/<episode>/audio/*.wav` and `timing.json`; prints seconds per chapter and the total |
 | `npm run render -- <episode>` | draft at 15 fps: `output/<episode>-draft.mp4` with the narration as a soft subtitle track (`mov_text`, English, off by default), the same subtitles as `output/<episode>.srt`, `output/<episode>-contact.png`, `output/<episode>-review.md`, `output/<episode>-frames/` |
 | `npm run render -- <episode> --final` | `output/<episode>-final.mp4` at 30 fps, plus the same review files |
+| `npm run render -- <episode> [--final] --beats a,b --background <variant> --out <name>` | only the listed beats, joined into `output/<name>.mp4`, for comparisons |
 
 - Speech synthesis takes 1 to 3 s per 1 s of speech on the first run, depending on the GPU (about 10 minutes for a 10 minute episode on an RTX 3080). Audio is cached by text, voice and settings, so later runs only synthesize changed lines; the tempo copies are cached separately, so a tempo change takes seconds. TTS reads only the script, so it can run as soon as the script exists.
 - Capture, TTS and render can each take longer than a 10 minute command timeout. Run them in the background with output to a log file and poll the log.
@@ -347,6 +365,7 @@ FFMPEG=$(node -e "import('@ffmpeg-installer/ffmpeg').then(m => console.log(m.def
 - **Episode id.** `episode:` in `script.yaml` must equal the folder name.
 - **Validate before files exist.** `npm run validate` fails until the sample regions, demos and `capture.ts` exist; use the schema-only estimate at gate 2, and `npm run tts`, which does not need them, for the measured duration.
 - **World coordinates.** `Camera.focusOn` takes world coordinates, whose origin is the top left corner of the frame; `node.absolutePosition()` is one. A scene point such as `new Vector2(0, 40)` passed to `focusOn` pans to the corner. Use `focusOnPoint` for points in content coordinates.
+- **Background motion does not count.** The review's freeze detection runs on the picture minus a blurred copy of it, so the slow background glows never hide a still beat; only edges, text and particles count as motion.
 - **Small motion counts as still.** The review's freeze detection ignores small changes: a particle along an edge, a number ticking in a clip, a single node nudge. A beat whose only motion is small is reported as still. Give such beats a slow camera move across most of their length (`focusOnPoint` with a zoom of 1.05 to 1.15).
 - **Eager arguments.** `all(...nodes.map(...))` and similar helper arguments are evaluated when the beat starts. A list that fills during the beat (for example nodes a message adds) must be read inside a generator function that runs later.
 - **Tree layouts.** Flow layouts keep the definition order of nodes within a layer, and top-down layouts connect layers vertically. Fixed `position`s replace the computed centers, but the layout still includes those nodes, so a node meant to stand apart (a source next to a tree) is better a separate one-node `FlowDiagram`.
