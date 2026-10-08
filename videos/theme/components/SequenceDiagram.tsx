@@ -71,6 +71,11 @@ export class SequenceDiagram extends Node {
     }
   }
 
+  /** The participant headers, for keeping them clear of the chapter header in camera moves. */
+  public get headers(): Card[] {
+    return [...this.lanes.values()].map(lane => lane.header);
+  }
+
   /** Headers spring in one after another while the lifelines grow down. */
   public *appear(): ThreadGenerator {
     const lanes = [...this.lanes.values()];

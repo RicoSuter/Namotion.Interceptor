@@ -32,8 +32,8 @@ export default makeScene2D('hook', function* (view) {
     delay(0.2, windows.arrive()),
     windows.play(narrator.duration('hook-windows'), {from: windows.mark('open'), to: click - 0.2}),
     delay(1.4, chain(
-      camera.focusOn(() => windows.pagePoint(windows.server, 400, 360), {zoom: 1.1, duration: 1.8}),
-      camera.focusOn(() => windows.pagePoint(windows.client, 400, 360), {zoom: 1.1, duration: 2.2}),
+      camera.focusOn(() => windows.pagePoint(windows.server, 400, 360), {zoom: 1.1, duration: 1.8, clear: windows.frames}),
+      camera.focusOn(() => windows.pagePoint(windows.client, 400, 360), {zoom: 1.1, duration: 2.2, clear: windows.frames}),
     )),
   );
 
@@ -41,8 +41,8 @@ export default makeScene2D('hook', function* (view) {
   yield* narrator.beat('hook-brew',
     windows.play(brewDuration, {from: click - 0.2, to: pressure + 0.6}),
     chain(
-      camera.focusOn(() => windows.pagePoint(windows.client, 560, 470), {zoom: 1.35, duration: 1.4}),
-      camera.focusOn(() => windows.pagePoint(windows.server, 400, 360), {zoom: 1.25, duration: brewDuration - 1.6}),
+      camera.focusOn(() => windows.pagePoint(windows.client, 560, 470), {zoom: 1.35, duration: 1.4, clear: windows.frames}),
+      camera.focusOn(() => windows.pagePoint(windows.server, 400, 360), {zoom: 1.25, duration: brewDuration - 1.6, clear: windows.frames}),
     ),
   );
 

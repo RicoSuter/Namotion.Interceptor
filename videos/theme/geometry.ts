@@ -152,3 +152,20 @@ export function scrollToFocus(viewportHeight: number, contentHeight: number, foc
   const centered = (focusTop + focusBottom) / 2 - viewportHeight / 2;
   return Math.min(Math.max(centered, 0), maximum);
 }
+
+/** The chapter header's corner of the frame, in view coordinates (origin at the frame center): content keeps out of it. */
+export const headerZone = {left: 280, bottom: -436} as const;
+
+/**
+ * Camera position that keeps content clear of the chapter header: when the content's top right corner, given in
+ * the camera's content coordinates, would reach into the header zone at this zoom, the position moves down just
+ * enough; otherwise it is returned unchanged.
+ */
+export function clearOfHeader(contentTop: number, contentRight: number, zoom: number, position: Point): Point {
+  const top = contentTop * zoom + position.y;
+  const right = contentRight * zoom + position.x;
+  if (right <= headerZone.left || top >= headerZone.bottom) {
+    return position;
+  }
+  return {x: position.x, y: position.y + headerZone.bottom - top};
+}

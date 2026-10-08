@@ -133,7 +133,7 @@ export default makeScene2D('sync', function* (view) {
     delay(0.4, arrive(settings, 0.94)),
     delay(0.7, settings.show(extractRegion(configurationSource, 'RetryQueue'), 2)),
     delay(3, settings.focus(4, 4)),
-    delay(3.2, camera.focusOn(() => settings.linesCenter(4, 4).add(settings.absolutePosition()).scale(0.5), {zoom: 1.15, duration: narrator.duration('sync-retry-config') - 3.4})),
+    delay(3.2, camera.focusOn(() => settings.linesCenter(4, 4).add(settings.absolutePosition()).scale(0.5), {zoom: 1.15, duration: narrator.duration('sync-retry-config') - 3.4, clear: settings})),
   );
   retry.remove();
   offline.remove();
@@ -238,7 +238,7 @@ export default makeScene2D('sync', function* (view) {
   const confirmed = new CodeCard({fileName: 'Client/Configuration.cs', width: 1560, height: 720, codeFontSize: 28, opacity: 0, scale: 0.94});
   camera.add(confirmed);
   const confirmedFocus = (from: number, to: number, zoom: number, duration: number) =>
-    camera.focusOn(() => confirmed.linesCenter(from, to).add(confirmed.absolutePosition()).scale(0.5), {zoom, duration});
+    camera.focusOn(() => confirmed.linesCenter(from, to).add(confirmed.absolutePosition()).scale(0.5), {zoom, duration, clear: confirmed});
   yield* narrator.beat('sync-transactions',
     camera.reset(1),
     all(...[model, target, outbound, inbound, echo, bufferLabel, ...chips, ...single, incoming].map(node => node.opacity(0, 0.6))),

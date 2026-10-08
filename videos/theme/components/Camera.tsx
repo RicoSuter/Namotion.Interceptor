@@ -1,10 +1,16 @@
-import {Node, type NodeProps} from '@revideo/2d';
+import {Layout, Node, type NodeProps} from '@revideo/2d';
 import {all, transformVectorAsPoint, Vector2, type ThreadGenerator, type Vector2Signal} from '@revideo/core';
+import {clearOfHeader} from '../geometry';
 import {durations, enterEasing, moveEasing} from '../style';
 
 export interface FocusOptions {
   zoom?: number;
   duration?: number;
+  /**
+   * Content to keep clear of the chapter header in the top right corner: when the move would push its top edge
+   * under the header, the camera centers a little higher on the content instead.
+   */
+  clear?: Layout | Layout[];
 }
 
 /** Wraps scene content and moves over it with eased zoom and pan. */
@@ -27,8 +33,7 @@ export class Camera extends Node {
     const zoom = options.zoom ?? 1.4;
     const duration = options.duration ?? durations.slow;
     const world = target instanceof Node ? target.absolutePosition() : target instanceof Vector2 ? target : target();
-    const local = transformVectorAsPoint(world, this.worldToLocal());
-    yield* all(this.scale(zoom, duration, moveEasing), this.position(local.scale(-zoom), duration, moveEasing), this.lead(local, duration));
+    yield* this.glide(transformVectorAsPoint(world, this.worldToLocal()), zoom, duration, options.clear);
   }
 
   /**
@@ -37,14 +42,29 @@ export class Camera extends Node {
    * left corner of the frame.
    */
   public *focusOnPoint(point: Vector2, options: FocusOptions = {}): ThreadGenerator {
-    const zoom = options.zoom ?? 1.4;
-    const duration = options.duration ?? durations.slow;
-    yield* all(this.scale(zoom, duration, moveEasing), this.position(point.scale(-zoom), duration, moveEasing), this.lead(point, duration));
+    yield* this.glide(point, options.zoom ?? 1.4, options.duration ?? durations.slow, options.clear);
   }
 
   /** Returns to the full view. */
   public *reset(duration: number = durations.slow): ThreadGenerator {
     yield* all(this.scale(1, duration, moveEasing), this.position(0, duration, moveEasing), this.lead(Vector2.zero, duration));
+  }
+
+  private *glide(point: Vector2, zoom: number, duration: number, clear: Layout | Layout[] | undefined): ThreadGenerator {
+    let position = point.scale(-zoom);
+    if (clear) {
+      const corners = [clear].flat().flatMap(node => {
+        const half = node.size().scale(0.5);
+        const toLocal = this.worldToLocal().multiply(node.localToWorld());
+        return [new Vector2(-half.x, -half.y), new Vector2(half.x, -half.y), new Vector2(half.x, half.y)]
+          .map(corner => transformVectorAsPoint(corner, toLocal));
+      });
+      const top = Math.min(...corners.map(corner => corner.y));
+      const right = Math.max(...corners.map(corner => corner.x));
+      position = new Vector2(clearOfHeader(top, right, zoom, position));
+    }
+    const centered = position.scale(-1 / zoom);
+    yield* all(this.scale(zoom, duration, moveEasing), this.position(position, duration, moveEasing), this.lead(centered, duration));
   }
 
   private *lead(point: Vector2, duration: number): ThreadGenerator {

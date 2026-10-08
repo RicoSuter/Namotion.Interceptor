@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {connectionSides, messageCurve, routeEdges, scrollToFocus, sideCurve, type Box} from './geometry';
+import {clearOfHeader, connectionSides, headerZone, messageCurve, routeEdges, scrollToFocus, sideCurve, type Box} from './geometry';
 
 const box = (x: number, y: number): Box => ({x, y, width: 200, height: 100});
 
@@ -129,5 +129,32 @@ describe('scrollToFocus', () => {
 
     // Assert
     expect(scroll).toBe(0);
+  });
+});
+
+describe('clearOfHeader', () => {
+  it('WhenContentReachesIntoTheHeaderZone_ThenMovesDownJustEnough', () => {
+    // Act
+    const position = clearOfHeader(-400, 620, 1.2, {x: 0, y: 0});
+
+    // Assert
+    expect(position.x).toBe(0);
+    expect(-400 * 1.2 + position.y).toBeCloseTo(headerZone.bottom);
+  });
+
+  it('WhenContentStaysBelowTheZone_ThenPositionIsUnchanged', () => {
+    // Act
+    const position = clearOfHeader(-390, 620, 1, {x: 0, y: 20});
+
+    // Assert
+    expect(position).toEqual({x: 0, y: 20});
+  });
+
+  it('WhenContentEndsLeftOfTheZone_ThenPositionIsUnchanged', () => {
+    // Act
+    const position = clearOfHeader(-500, 200, 1.2, {x: 0, y: 0});
+
+    // Assert
+    expect(position).toEqual({x: 0, y: 0});
   });
 });

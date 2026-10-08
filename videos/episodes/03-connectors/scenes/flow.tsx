@@ -68,18 +68,18 @@ export default makeScene2D('flow', function* (view) {
   yield* narrator.beat('flow-in-intro',
     title.exit(),
     delay(0.4, chain(inbound.appear(), waitFor(0.6), inbound.message('external', 'source', 'Temperature = 93'))),
-    delay(1.2, camera.focusOnPoint(inboundFocus(0, 1, 0), {zoom: 1.15, duration: narrator.duration('flow-in-intro') - 1.4})),
+    delay(1.2, camera.focusOnPoint(inboundFocus(0, 1, 0), {zoom: 1.15, duration: narrator.duration('flow-in-intro') - 1.4, clear: inbound.headers})),
   );
   yield* narrator.beat('flow-in-writer',
     inbound.message('source', 'writer', 'Write(update)'),
-    camera.focusOnPoint(inboundFocus(1, 2, 1), {zoom: 1.15, duration: narrator.duration('flow-in-writer') - 0.2}),
+    camera.focusOnPoint(inboundFocus(1, 2, 1), {zoom: 1.15, duration: narrator.duration('flow-in-writer') - 0.2, clear: inbound.headers}),
   );
 
   const buffered = new Pill({text: 'held while loading', color: 'cyan', size: 24, x: inboundGrid.lane(2) + 230, y: inboundGrid.row(1) - 90, opacity: 0, scale: 0.9});
   inbound.add(buffered);
   yield* narrator.beat('flow-in-apply',
     inbound.message('writer', 'boiler', 'Temperature = 93'),
-    camera.focusOnPoint(inboundFocus(2, 3, 2).add([-60, 0]), {zoom: 1.15, duration: narrator.duration('flow-in-apply') - 0.2}),
+    camera.focusOnPoint(inboundFocus(2, 3, 2).add([-60, 0]), {zoom: 1.15, duration: narrator.duration('flow-in-apply') - 0.2, clear: inbound.headers}),
     delay(2.4, chain(arrive(buffered), buffered.scale(1.08, 0.3).to(1, 0.4))),
   );
 
@@ -88,7 +88,7 @@ export default makeScene2D('flow', function* (view) {
   const echo: Node[] = [];
   yield* narrator.beat('flow-in-stamp',
     arrive(stamp),
-    camera.focusOnPoint(inboundFocus(1, 3, 3).add([0, 60]), {zoom: 1.12, duration: 1.8}),
+    camera.focusOnPoint(inboundFocus(1, 3, 3).add([0, 60]), {zoom: 1.12, duration: 1.8, clear: inbound.headers}),
     delay(1.6, messageNodes(inbound, () => inbound.message('boiler', 'source', 'not sent back', {reply: true}), echo)),
     delay(3.4, fadeCollected(echo, 0.8)),
   );
@@ -123,17 +123,17 @@ export default makeScene2D('flow', function* (view) {
       })(),
       outbound.message('code', 'boiler', 'TargetTemperature = 95'),
     )),
-    delay(1.6, camera.focusOnPoint(outboundFocus(0, 1, 0), {zoom: 1.2, duration: narrator.duration('flow-out-intro') - 1.8})),
+    delay(1.6, camera.focusOnPoint(outboundFocus(0, 1, 0), {zoom: 1.2, duration: narrator.duration('flow-out-intro') - 1.8, clear: outbound.headers})),
   );
   inbound.remove();
   yield* narrator.beat('flow-out-queue',
     outbound.message('boiler', 'queue', 'change'),
-    camera.focusOnPoint(outboundFocus(1, 2, 1), {zoom: 1.2, duration: narrator.duration('flow-out-queue') - 0.2}),
+    camera.focusOnPoint(outboundFocus(1, 2, 1), {zoom: 1.2, duration: narrator.duration('flow-out-queue') - 0.2, clear: outbound.headers}),
   );
   yield* narrator.beat('flow-out-write',
     outbound.message('queue', 'source', 'WriteChangesAsync'),
     delay(2.2, outbound.message('source', 'external', 'send')),
-    camera.focusOnPoint(outboundFocus(2, 4, 3), {zoom: 1.15, duration: narrator.duration('flow-out-write') - 0.2}),
+    camera.focusOnPoint(outboundFocus(2, 4, 3), {zoom: 1.15, duration: narrator.duration('flow-out-write') - 0.2, clear: outbound.headers}),
   );
 
   const chipNames = ['Temperature', 'Pressure', 'State'];
@@ -142,7 +142,7 @@ export default makeScene2D('flow', function* (view) {
     new Pill({text: name, color: 'purple', size: 22, x: outboundGrid.lane(2) + (index - 1) * 170, y: chipY + 40, opacity: 0, scale: 0.9}));
   chips.forEach(chip => outbound.add(chip));
   yield* narrator.beat('flow-out-batch',
-    camera.focusOnPoint(new Vector2(190, outboundY + chipY + 20), {zoom: 1.15, duration: 1.6}),
+    camera.focusOnPoint(new Vector2(190, outboundY + chipY + 20), {zoom: 1.15, duration: 1.6, clear: outbound.headers}),
     sequence(0.25, ...chips.map(chip => arrive(chip))),
     delay(1.4, all(...chips.map((chip, index) => chip.position(new Vector2(outboundGrid.lane(2) + 110, chipY + 10 + index * 48), 0.7, moveEasing)))),
     delay(2.4, all(...chips.map(chip => chip.x(outboundGrid.lane(3) - 110, 1.2, moveEasing)))),
@@ -164,16 +164,16 @@ export default makeScene2D('flow', function* (view) {
     camera.reset(1.4),
     delay(0.8, localFirst.opacity(0.1, 0.8, moveEasing)),
     delay(1.2, arrive(localFirstLabel)),
-    delay(2.4, camera.focusOnPoint(new Vector2(190, outboundY + (outboundGrid.top + outboundGrid.row(3)) / 2), {zoom: 1.08, duration: narrator.duration('flow-local-first') - 2.6})),
+    delay(2.4, camera.focusOnPoint(new Vector2(190, outboundY + (outboundGrid.top + outboundGrid.row(3)) / 2), {zoom: 1.08, duration: narrator.duration('flow-local-first') - 2.6, clear: outbound.headers})),
   );
   yield* narrator.beat('flow-no-wait',
     outbound.activate('code'),
     delay(1.2, outbound.activate('boiler')),
-    camera.focusOnPoint(outboundFocus(0, 1, 0), {zoom: 1.18, duration: narrator.duration('flow-no-wait') - 0.2}),
+    camera.focusOnPoint(outboundFocus(0, 1, 0), {zoom: 1.18, duration: narrator.duration('flow-no-wait') - 0.2, clear: outbound.headers}),
   );
   yield* narrator.beat('flow-retry',
     all(localFirst.opacity(0, 0.6), localFirstLabel.opacity(0, 0.6)),
-    camera.focusOnPoint(new Vector2((outboundGrid.lane(3) + outboundGrid.lane(4)) / 2, outboundY + (outboundGrid.row(4) + outboundGrid.row(5)) / 2), {zoom: 1.2, duration: narrator.duration('flow-retry') - 0.2}),
+    camera.focusOnPoint(new Vector2((outboundGrid.lane(3) + outboundGrid.lane(4)) / 2, outboundY + (outboundGrid.row(4) + outboundGrid.row(5)) / 2), {zoom: 1.2, duration: narrator.duration('flow-retry') - 0.2, clear: outbound.headers}),
     delay(0.4, outbound.message('external', 'source', 'failed', {reply: true})),
     delay(2.6, outbound.message('source', 'external', 'retry')),
   );

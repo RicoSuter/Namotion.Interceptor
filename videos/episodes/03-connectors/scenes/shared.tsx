@@ -27,6 +27,11 @@ export class MachineWindows extends Node {
     this.add(this.client);
   }
 
+  /** Both windows, for keeping them clear of the chapter header in camera moves. */
+  public get frames(): BrowserFrame[] {
+    return [this.server, this.client];
+  }
+
   /** Clip time of a mark the demo recorded. */
   public mark(name: string): number {
     return this.server.mark(name);

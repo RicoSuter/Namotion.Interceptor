@@ -216,7 +216,7 @@ export default makeScene2D('roles', function* (view) {
   other.remove();
   yield* narrator.beat('roles-state',
     code.focus(4, 5),
-    delay(0.4, camera.focusOn(() => code.linesCenter(4, 5).add(code.absolutePosition()).scale(0.5), {zoom: 1.2, duration: 2})),
+    delay(0.4, camera.focusOn(() => code.linesCenter(4, 5).add(code.absolutePosition()).scale(0.5), {zoom: 1.2, duration: 2, clear: code})),
   );
   yield* narrator.beat('roles-state-use',
     code.focus(6, 6),

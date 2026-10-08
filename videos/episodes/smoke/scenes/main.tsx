@@ -38,7 +38,7 @@ export default makeScene2D('main', function* (view) {
   yield* narrator.beat('boiler-derived',
     code.focus(10, 11),
     // Halfway between the card and the focused lines, so the card stays mostly in view.
-    camera.focusOn(code.linesCenter(10, 11).add(code.absolutePosition()).scale(0.5), {zoom: 1.15, duration: 2.5}),
+    camera.focusOn(code.linesCenter(10, 11).add(code.absolutePosition()).scale(0.5), {zoom: 1.15, duration: 2.5, clear: code}),
   );
   yield* narrator.beat('tank-morph',
     camera.reset(1.4),

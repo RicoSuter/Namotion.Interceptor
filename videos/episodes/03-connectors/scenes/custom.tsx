@@ -1,4 +1,4 @@
-import {Circle, makeScene2D} from '@revideo/2d';
+import {Circle, makeScene2D, type Layout} from '@revideo/2d';
 import {all, chain, delay, linear, sequence, Vector2} from '@revideo/core';
 import extensionsSource from '../sample/Server/Grinder/GrinderSourceExtensions.cs?raw';
 import grinderSource from '../sample/Server/Grinder/GrinderSource.cs?raw';
@@ -16,7 +16,7 @@ import {grinder, twoConnectors} from '../diagrams/flows';
 import {arrive, leave, Pill} from './shared';
 
 /** The code card sits a little low so the hook names fit above it. */
-const codeY = 20;
+const codeY = 60;
 
 export default makeScene2D('custom', function* (view) {
   yield* waitForFonts();
@@ -47,8 +47,10 @@ export default makeScene2D('custom', function* (view) {
   // The source class and its three hooks.
   const code = new CodeCard({fileName: 'Grinder/GrinderSource.cs', width: 1500, height: 760, codeFontSize: 26, y: codeY, opacity: 0, scale: 0.94});
   camera.add(code);
+  // The hook pills above the card join the content kept clear of the chapter header while they are shown.
+  let pinned: Layout[] = [];
   const lineFocus = (from: number, to: number, zoom: number, duration: number) =>
-    camera.focusOn(() => code.linesCenter(from, to).add(code.absolutePosition()).scale(0.5), {zoom, duration});
+    camera.focusOn(() => code.linesCenter(from, to).add(code.absolutePosition()).scale(0.5), {zoom, duration, clear: [code, ...pinned]});
   yield* narrator.beat('custom-class',
     leave(scenario, 0, -120, 0.7),
     delay(0.4, arrive(code, 0.94)),
@@ -71,8 +73,9 @@ export default makeScene2D('custom', function* (view) {
   );
 
   const hookNames = ['StartListeningAsync', 'LoadInitialStateAsync', 'WriteChangesAsync'];
-  const hooks = hookNames.map((name, index) => new Pill({text: name, code: true, size: 24, x: (index - 1) * 480, y: codeY - 460, opacity: 0}));
+  const hooks = hookNames.map((name, index) => new Pill({text: name, code: true, size: 24, x: (index - 1) * 480, y: codeY - 440, opacity: 0}));
   hooks.forEach(hook => camera.add(hook));
+  pinned = hooks;
   const activate = (active: number) => all(...hooks.map((hook, index) => hook.opacity(index === active ? 1 : 0.45, 0.4)));
   yield* narrator.beat('custom-hooks',
     camera.reset(1),
@@ -137,6 +140,7 @@ export default makeScene2D('custom', function* (view) {
     delay(5.6, lineFocus(8, 9, 1.15, narrator.duration('custom-register') - 5.8)),
   );
   hooks.forEach(hook => hook.remove());
+  pinned = [];
 
   // The server's two connectors.
   const both = new FlowDiagram({definition: twoConnectors, scale: 0.94});
