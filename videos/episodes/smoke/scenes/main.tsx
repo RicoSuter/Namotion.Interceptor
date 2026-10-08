@@ -57,11 +57,11 @@ export default makeScene2D('main', function* (view) {
   code.remove();
   yield* narrator.beat('flow-pulse',
     chain(
-      all(flow.pulse('simulator', 'boiler', 0.8), flow.pulse('simulator', 'tank', 0.8)),
-      all(camera.focusOn(flow.node('machine'), {zoom: 1.18, duration: 1.4}), flow.pulse('boiler', 'machine', 1.1), flow.pulse('tank', 'machine', 1.1)),
+      all(flow.pulse('simulator', 'boiler', 0.7), flow.pulse('simulator', 'tank', 0.7)),
+      all(camera.focusOn(flow.node('machine'), {zoom: 1.18, duration: 1.2}), flow.pulse('boiler', 'machine', 0.9), flow.pulse('tank', 'machine', 0.9)),
       all(
-        flow.pulse('machine', 'page', 0.6),
-        camera.focusOn(() => flow.node('machine').absolutePosition().add(flow.node('page').absolutePosition()).scale(0.5), {zoom: 1.1, duration: 0.9}),
+        flow.pulse('machine', 'page', 0.5),
+        camera.focusOn(() => flow.node('machine').absolutePosition().add(flow.node('page').absolutePosition()).scale(0.5), {zoom: 1.1, duration: 0.8}),
       ),
     ),
   );
