@@ -20,6 +20,14 @@ describe('connectionSides', () => {
     expect(sides).toEqual({source: 'bottom', target: 'top'});
   });
 
+  it('WhenLayoutIsTopDownAndTargetIsInALowerLayer_ThenEdgeIsVerticalEvenWithAWiderGapSideways', () => {
+    // Act
+    const sides = connectionSides(box(0, 0), box(600, 250), 'down');
+
+    // Assert
+    expect(sides).toEqual({source: 'bottom', target: 'top'});
+  });
+
   it('WhenTargetIsLeftOfSource_ThenEdgeLeavesLeftAndEntersRight', () => {
     // Act
     const sides = connectionSides(box(400, 0), box(0, 0));

@@ -33,10 +33,17 @@ const anchorSpread = 0.6;
 
 const outward: Record<Side, Point> = {left: {x: -1, y: 0}, right: {x: 1, y: 0}, top: {x: 0, y: -1}, bottom: {x: 0, y: 1}};
 
-/** Picks the sides an edge leaves and enters by, using the axis with the larger gap between the boxes. */
-export function connectionSides(source: Box, target: Box): {source: Side; target: Side} {
+/**
+ * Picks the sides an edge leaves and enters by, using the axis with the larger gap between the boxes. In a
+ * top-down layout, boxes in different layers always connect vertically, so a tree's outer branches do not
+ * enter their children from the side.
+ */
+export function connectionSides(source: Box, target: Box, direction: 'right' | 'down' = 'right'): {source: Side; target: Side} {
   const gapX = Math.abs(target.x - source.x) - (source.width + target.width) / 2;
   const gapY = Math.abs(target.y - source.y) - (source.height + target.height) / 2;
+  if (direction === 'down' && gapY > 0) {
+    return target.y >= source.y ? {source: 'bottom', target: 'top'} : {source: 'top', target: 'bottom'};
+  }
   if (gapX >= gapY) {
     return target.x >= source.x ? {source: 'right', target: 'left'} : {source: 'left', target: 'right'};
   }
@@ -62,7 +69,7 @@ export function sideCurve(start: Point, startSide: Side, end: Point, endSide: Si
  * Routes every edge as a cubic curve between node sides. Edges that share a side get anchors spread
  * along it, ordered by the position of their other end so the curves do not cross near the node.
  */
-export function routeEdges(boxes: ReadonlyMap<string, Box>, edges: readonly EdgeEnds[]): CubicCurve[] {
+export function routeEdges(boxes: ReadonlyMap<string, Box>, edges: readonly EdgeEnds[], direction: 'right' | 'down' = 'right'): CubicCurve[] {
   const box = (id: string) => {
     const found = boxes.get(id);
     if (!found) {
@@ -70,7 +77,7 @@ export function routeEdges(boxes: ReadonlyMap<string, Box>, edges: readonly Edge
     }
     return found;
   };
-  const sides = edges.map(edge => connectionSides(box(edge.from), box(edge.to)));
+  const sides = edges.map(edge => connectionSides(box(edge.from), box(edge.to), direction));
 
   interface AnchorRequest {
     edge: number;

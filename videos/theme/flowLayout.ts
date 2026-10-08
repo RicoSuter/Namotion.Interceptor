@@ -60,6 +60,8 @@ export async function layoutFlow(definition: FlowDefinition): Promise<FlowLayout
       'elk.layered.spacing.nodeNodeBetweenLayers': String(definition.layerSpacing ?? 150),
       'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
       'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+      // Keep the definition order within a layer, so a tree's children appear in the order they are listed.
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
     },
     children: definition.nodes.map(node => ({id: node.id, ...nodeSize(node)})),
     edges: definition.edges.map((edge, index) => ({id: `edge-${index}`, sources: [edge.from], targets: [edge.to]})),
@@ -75,7 +77,7 @@ export async function layoutFlow(definition: FlowDefinition): Promise<FlowLayout
     const center = node.position ?? {x: (child.x ?? 0) + size.width / 2 - width / 2, y: (child.y ?? 0) + size.height / 2 - height / 2};
     boxes.set(child.id, {...center, ...size});
   }
-  return {boxes, curves: routeEdges(boxes, definition.edges), width, height};
+  return {boxes, curves: routeEdges(boxes, definition.edges, definition.direction ?? 'right'), width, height};
 }
 
 /** The step an edge is drawn in: its own, or the later step of its two nodes. */

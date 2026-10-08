@@ -27,6 +27,23 @@ describe('layoutFlow', () => {
     expect(simulator.x + machine.x).toBeCloseTo(0);
   });
 
+  it('WhenATreeIsLaidOutTopDown_ThenChildrenKeepTheirDefinitionOrder', async () => {
+    // Arrange
+    const children = ['boiler', 'pump', 'tank', 'hopper'];
+    const tree: FlowDefinition = {
+      direction: 'down',
+      nodes: [{id: 'machine', label: 'Machine'}, ...children.map(id => ({id, label: id}))],
+      edges: children.map(id => ({from: 'machine', to: id})),
+    };
+
+    // Act
+    const layout = await layoutFlow(tree);
+
+    // Assert
+    const xs = children.map(id => layout.boxes.get(id)!.x);
+    expect(xs).toEqual([...xs].sort((left, right) => left - right));
+  });
+
   it('WhenNodesAreLaidOut_ThenEdgesStartAndEndOnNodeSides', async () => {
     // Act
     const layout = await layoutFlow(chain);
