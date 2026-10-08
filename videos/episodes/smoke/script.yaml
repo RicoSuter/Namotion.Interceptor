@@ -18,3 +18,8 @@ chapters:
         hold: 1
         visual: The card holds before the end.
         components: [CodeCard]
+      - id: boiler-live
+        narration: In the running app, the boiler heats up until the machine reports ready.
+        visual: The status page recording plays next to the code card.
+        components: [CodeCard, BrowserFrame]
+        demo: status
