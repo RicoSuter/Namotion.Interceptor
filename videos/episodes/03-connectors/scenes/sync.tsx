@@ -133,7 +133,7 @@ export default makeScene2D('sync', function* (view) {
     delay(0.4, arrive(settings, 0.94)),
     delay(0.7, settings.show(extractRegion(configurationSource, 'RetryQueue'), 2)),
     delay(3, settings.focus(4, 4)),
-    delay(3.2, camera.focusOn(() => settings.linesCenter(4, 4).add(settings.absolutePosition()).scale(0.5), {zoom: 1.15, duration: 2.8})),
+    delay(3.2, camera.focusOn(() => settings.linesCenter(4, 4).add(settings.absolutePosition()).scale(0.5), {zoom: 1.15, duration: narrator.duration('sync-retry-config') - 3.4})),
   );
   retry.remove();
   offline.remove();
@@ -209,7 +209,7 @@ export default makeScene2D('sync', function* (view) {
   yield* narrator.beat('sync-zero-buffer',
     camera.reset(1),
     delay(0.2, bufferLabel.retext('buffer time 0 ms')),
-    delay(0.6, sequence(0.9, ...single.map((node, index) => all(
+    delay(0.6, sequence(0.75, ...single.map((node, index) => all(
       model.setValue(unbuffered[index], 0.3),
       node.opacity(1, 0.2),
       chain(ride(node, outbound, 0, 1, 1.0), all(node.opacity(0, 0.3), target.setValue(unbuffered[index], 0.3))),
@@ -245,7 +245,7 @@ export default makeScene2D('sync', function* (view) {
     delay(0.5, arrive(confirmed, 0.94)),
     delay(0.8, confirmed.show(extractRegion(configurationSource, 'ConfirmedWrite'), 3)),
     delay(4.4, confirmed.focus(4, 5)),
-    delay(4.6, confirmedFocus(4, 5, 1.12, 3)),
+    delay(4.6, confirmedFocus(4, 5, 1.12, narrator.duration('sync-transactions') - 4.8)),
   );
   [model, target, outbound, inbound, echo, bufferLabel, ...chips, ...single, incoming, local, remote, wins, unknown].forEach(node => node.remove());
   const commitDuration = narrator.duration('sync-transactions-commit');

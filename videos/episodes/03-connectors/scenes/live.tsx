@@ -61,7 +61,7 @@ export default makeScene2D('live', function* (view) {
     camera.reset(1),
     delay(0.4, code.morph(extractRegion(clientSource, 'ClientSetup'), 1.6, 'Client/Program.cs')),
     delay(3.2, code.focus(0, 6)),
-    delay(3.4, lineFocus(0, 6, 1.06, 3.6)),
+    delay(3.4, lineFocus(0, 6, 1.06, narrator.duration('live-client-code') - 3.6)),
   );
   yield* narrator.beat('live-client-classes',
     code.focus(6, 6),
@@ -200,7 +200,7 @@ export default makeScene2D('live', function* (view) {
     delay(0.3, brewCode.morph(extractRegion(machineSource, 'Brew'), 1.6, 'CoffeeMachine.cs')),
     delay(2.2, brewCode.focus(2, 5)),
     delay(4.2, brewCode.focus(8, 11)),
-    delay(4.4, brewFocus(8, 11, 1.15, 3.2)),
+    delay(4.4, brewFocus(8, 11, 1.15, narrator.duration('live-brew-method') - 4.6)),
   );
 
   // A brew on the client, run by the server.

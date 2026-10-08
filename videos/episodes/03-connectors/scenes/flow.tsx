@@ -187,7 +187,7 @@ export default makeScene2D('flow', function* (view) {
     leave(outbound, 0, -80, 0.7),
     delay(0.6, chain(
       servers.reveal(0), servers.reveal(1), servers.reveal(2),
-      servers.pulse('owner', 'server', 0.7), servers.pulse('server', 'clients', 0.7),
+      servers.pulse('owner', 'server', 0.55), servers.pulse('server', 'clients', 0.55),
     )),
   );
   outbound.remove();
@@ -199,9 +199,9 @@ export default makeScene2D('flow', function* (view) {
   yield* narrator.beat('flow-server-in',
     camera.reset(1.4),
     servers.reveal(3),
-    delay(1.2, chain(
-      servers.pulse('clients', 'server', 0.7), servers.pulse('server', 'owner', 0.7),
-      servers.pulse('owner', 'server', 0.7), servers.pulse('server', 'clients', 0.7),
+    delay(1, chain(
+      servers.pulse('clients', 'server', 0.6), servers.pulse('server', 'owner', 0.6),
+      servers.pulse('owner', 'server', 0.6), servers.pulse('server', 'clients', 0.6),
     )),
   );
 
