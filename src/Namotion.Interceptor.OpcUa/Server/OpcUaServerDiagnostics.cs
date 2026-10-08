@@ -30,5 +30,5 @@ public sealed class OpcUaServerDiagnostics : ConnectorDiagnostics
     /// <summary>
     /// Gets the number of consecutive startup failures, reset on a successful start.
     /// </summary>
-    public int ConsecutiveFailures => _server.ConsecutiveFailures;
+    public int ConsecutiveFailures => _server.ConsecutiveFailureCount;
 }
