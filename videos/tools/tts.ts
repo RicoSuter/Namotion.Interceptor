@@ -1,13 +1,14 @@
 import {spawnSync} from 'node:child_process';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
-import {validateEpisode} from './episode';
 import {loadLexicon} from './lexicon';
 import {buildNarration, buildTiming} from './narration';
 import {episodeArgument, episodePaths, lexiconFile, ttsProjectDirectory, videosRoot} from './paths';
+import {loadScript} from './schema/script';
 
 const paths = episodePaths(episodeArgument());
-const script = await validateEpisode(paths.episodeDirectory);
+// Narration needs only the script, so speech can be synthesized before the sample, demos and capture exist.
+const script = loadScript(paths.episodeDirectory);
 const items = buildNarration(script, loadLexicon(lexiconFile));
 
 mkdirSync(paths.audioDirectory, {recursive: true});
