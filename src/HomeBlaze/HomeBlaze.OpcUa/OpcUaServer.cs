@@ -197,11 +197,8 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     }
 
     /// <summary>
-    /// Mirrors the attached server's diagnostics into <see cref="Status"/>, <see cref="StatusMessage"/>
-    /// and the throughput/session state. The server retries setup failures internally, so <see cref="Status"/>
-    /// has to come from its diagnostics rather than from a successful attach. Only runs while
-    /// <see cref="_serverService"/> is set, so it never overwrites the Stopping, Stopped or Error status
-    /// the start/stop paths set for a missing path or an unresolved subject.
+    /// Mirrors the attached server's diagnostics into <see cref="Status"/>, <see cref="StatusMessage"/> and the
+    /// throughput and session state. Does nothing while no server is attached.
     /// </summary>
     private void UpdateDiagnostics()
     {
@@ -313,12 +310,14 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
 
     private async Task StopServerAsync(CancellationToken cancellationToken)
     {
-        if (_serverService != null)
+        if (_serverService is { } serverService)
         {
+            // Released before detaching, so a diagnostics poll during the stop cannot overwrite Stopping.
+            _serverService = null;
             try
             {
                 Status = ServiceStatus.Stopping;
-                await this.DetachHostedServiceAsync(_serverService, cancellationToken);
+                await this.DetachHostedServiceAsync(serverService, cancellationToken);
                 _logger.LogInformation("OPC UA server stopped");
             }
             catch (Exception ex)
@@ -327,7 +326,6 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             }
             finally
             {
-                _serverService = null;
                 Status = ServiceStatus.Stopped;
                 IncomingChangesPerSecond = null;
                 OutgoingChangesPerSecond = null;
