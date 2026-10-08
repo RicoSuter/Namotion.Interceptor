@@ -824,14 +824,14 @@ A connector that participates in chaos testing implements [`IFaultInjectable`](.
 |---|---|---|
 | `InitializeAsync` (optional) | once per run, before the first attempt | Sets up what lives across restarts. Must not accept clients. Its result is disposed after the last attempt. A failure ends the connector. |
 | `CreateChangeQueueProcessor` | at the start of every attempt | Returns the processor that publishes outbound changes, passing it the drop handler it receives. The processor subscribes on construction. |
-| `StartServerAsync` | after the processor exists | Starts the protocol server and returns once clients can connect. Disposing its result tears the attempt down. If it throws, it releases what it acquired first. |
+| `StartServerAsync` | after the processor exists | Starts the protocol server and returns once clients can connect. It also receives the stopping token, which tells a stop apart from the end of an attempt. Disposing its result tears the attempt down. If it throws, it releases what it acquired first. |
 
 Each attempt runs in this order: create the processor and register its depth on `OutboundChanges`, start the server, reset the failure count and mark the server operational, then process changes until the attempt ends. Because the subscription exists before any client connects, a change made between a client's snapshot and the start of processing still reaches that client.
 
 When an attempt ends, the base marks the server not operational, disposes the server's teardown, then releases the registration and the processor. What happens next depends on why it ended:
 
 - A stop ends the loop without recording anything, whatever exception the teardown raised.
-- An injected kill restarts immediately without recording an error.
+- An injected kill restarts immediately without recording an error, whatever exception the killed attempt raised. A stop always wins over a kill.
 - Any other exception, or processing that ends while neither stopping nor killed, is recorded in `LastError`, increments `ConsecutiveFailures`, and restarts after `GetRestartDelay`.
 
 The default delay grows exponentially with each consecutive failure and adds 0 to 2 seconds of jitter, so servers that failed together do not restart together:
