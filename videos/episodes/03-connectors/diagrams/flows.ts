@@ -94,8 +94,8 @@ export const twoPaths: FlowDefinition = {
 
 const left = -600;
 const right = 600;
-const top = -250;
-const bottom = 40;
+const top = -145;
+const bottom = 145;
 
 /** The live sample: from the simulator in the server process to the mirror and its page in the client process. */
 export const livePath: FlowDefinition = {

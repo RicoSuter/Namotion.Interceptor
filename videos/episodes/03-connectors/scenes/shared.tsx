@@ -20,7 +20,7 @@ export class MachineWindows extends Node {
 
   public constructor(demo: string, props: NodeProps = {}) {
     super(props);
-    const common = {demo, width: windowWidth, aspectRatio: (pageWidth * 2) / pageHeight, y: -70, opacity: 0, scale: 0.94};
+    const common = {demo, width: windowWidth, aspectRatio: (pageWidth * 2) / pageHeight, opacity: 0, scale: 0.94};
     this.server = new BrowserFrame({...common, address: 'localhost:5310', crop: {left: 0, width: 0.5}, x: -455});
     this.client = new BrowserFrame({...common, address: 'localhost:5311', crop: {left: 0.5, width: 0.5}, x: 455});
     this.add(this.server);

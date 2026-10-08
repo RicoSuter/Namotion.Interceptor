@@ -17,6 +17,11 @@ import {useTerminal, useTiming} from '../../../theme/variables';
 import {livePath} from '../diagrams/flows';
 import {arrive, leave, MachineWindows, Pill} from './shared';
 
+/** Protocol diagram: tall enough for eight messages, centered on its headers and rows. */
+const protocolHeight = 880;
+const protocolRow = 90;
+const protocolY = 90;
+
 export default makeScene2D('live', function* (view) {
   yield* waitForFonts();
   const narrator = new Narrator(view, useTiming());
@@ -28,7 +33,7 @@ export default makeScene2D('live', function* (view) {
   yield* narrator.beat('live-title', title.enter());
 
   // The server: context, machine, simulator and the embedded WebSocket handler.
-  const code = new CodeCard({fileName: 'Server/Program.cs', width: 1560, height: 700, codeFontSize: 28, y: -70, opacity: 0, scale: 0.94});
+  const code = new CodeCard({fileName: 'Server/Program.cs', width: 1560, height: 700, codeFontSize: 28, opacity: 0, scale: 0.94});
   camera.add(code);
   const lineFocus = (from: number, to: number, zoom: number, duration: number) =>
     camera.focusOn(() => code.linesCenter(from, to).add(code.absolutePosition()).scale(0.5), {zoom, duration});
@@ -68,14 +73,14 @@ export default makeScene2D('live', function* (view) {
     delay(2.4, lineFocus(10, 10, 1.2, 2.6)),
   );
 
-  const terminal = new Terminal({transcript: useTerminal('run-client'), title: 'client', width: 1500, y: -80, opacity: 0, scale: 0.94});
+  const terminal = new Terminal({transcript: useTerminal('run-client'), title: 'client', width: 1500, opacity: 0, scale: 0.94});
   camera.add(terminal);
   yield* narrator.beat('live-terminal',
     camera.reset(0.9),
     leave(code, 0, -200, 0.8),
     delay(0.5, arrive(terminal, 0.94)),
     delay(0.8, terminal.run(narrator.duration('live-terminal') - 1.8)),
-    delay(2, camera.focusOnPoint(new Vector2(0, -40), {zoom: 1.08, duration: narrator.duration('live-terminal') - 2.2})),
+    delay(2, camera.focusOnPoint(new Vector2(0, 0), {zoom: 1.08, duration: narrator.duration('live-terminal') - 2.2})),
   );
   code.remove();
 
@@ -85,10 +90,11 @@ export default makeScene2D('live', function* (view) {
       {id: 'client', label: 'Client', color: 'cyan'},
       {id: 'server', label: 'Server', color: 'purple'},
     ],
-    width: 900, height: 1000, rowHeight: 90, y: 60,
+    width: 900, height: protocolHeight, rowHeight: protocolRow, y: protocolY,
   });
+  /** Camera target for a message row, in camera coordinates. */
+  const rowY = (row: number) => protocolY - protocolHeight / 2 + 38 + 70 + row * protocolRow;
   yield* narrator.beat('live-protocol-hello',
-    camera.reset(1),
     leave(terminal, 0, -100, 0.6),
     delay(0.4, chain(
       (function* () {
@@ -97,37 +103,38 @@ export default makeScene2D('live', function* (view) {
       })(),
       protocol.message('client', 'server', 'Hello'),
     )),
+    delay(0.6, camera.focusOnPoint(new Vector2(0, rowY(0) - 60), {zoom: 1.12, duration: narrator.duration('live-protocol-hello') - 0.8})),
   );
   terminal.remove();
   yield* narrator.beat('live-protocol-welcome',
     protocol.message('server', 'client', 'Welcome: state, sequence 5', {reply: true}),
-    camera.focusOnPoint(new Vector2(0, -200), {zoom: 1.12, duration: narrator.duration('live-protocol-welcome') - 0.2}),
+    camera.focusOnPoint(new Vector2(0, rowY(1) - 40), {zoom: 1.12, duration: narrator.duration('live-protocol-welcome') - 0.2}),
   );
   yield* narrator.beat('live-protocol-updates',
     protocol.message('server', 'client', 'Update, sequence 6'),
     delay(1.4, protocol.message('server', 'client', 'Update, sequence 7')),
-    camera.focusOnPoint(new Vector2(0, -110), {zoom: 1.12, duration: narrator.duration('live-protocol-updates') - 0.2}),
+    camera.focusOnPoint(new Vector2(0, rowY(2)), {zoom: 1.12, duration: narrator.duration('live-protocol-updates') - 0.2}),
   );
   yield* narrator.beat('live-protocol-client-update',
     protocol.message('client', 'server', 'Update: State = Brewing'),
-    camera.focusOnPoint(new Vector2(0, -40), {zoom: 1.12, duration: narrator.duration('live-protocol-client-update') - 0.2}),
+    camera.focusOnPoint(new Vector2(0, rowY(3)), {zoom: 1.12, duration: narrator.duration('live-protocol-client-update') - 0.2}),
   );
   yield* narrator.beat('live-protocol-heartbeat',
     protocol.message('server', 'client', 'Heartbeat, sequence 7', {reply: true}),
-    camera.focusOnPoint(new Vector2(0, 20), {zoom: 1.12, duration: 2}),
-    delay(2.4, camera.focusOnPoint(new Vector2(0, -60), {zoom: 0.92, duration: narrator.duration('live-protocol-heartbeat') - 2.6})),
+    camera.focusOnPoint(new Vector2(0, rowY(4)), {zoom: 1.12, duration: 2}),
+    delay(2.4, camera.focusOnPoint(new Vector2(0, rowY(2)), {zoom: 0.92, duration: narrator.duration('live-protocol-heartbeat') - 2.6})),
   );
-  const gap = new Pill({text: 'gap or restart', color: 'pink', size: 24, x: -700, y: 208, opacity: 0, scale: 0.9});
+  const gap = new Pill({text: 'gap or restart', color: 'pink', size: 24, x: -700, y: rowY(6), opacity: 0, scale: 0.9});
   camera.add(gap);
   yield* narrator.beat('live-protocol-reconnect',
-    camera.focusOnPoint(new Vector2(0, 130), {zoom: 1.0, duration: 1.4}),
+    camera.focusOnPoint(new Vector2(0, rowY(4)), {zoom: 1.0, duration: 1.4}),
     arrive(gap),
     delay(0.8, protocol.message('client', 'server', 'Hello')),
     delay(2.4, protocol.message('server', 'client', 'Welcome: state, sequence 9', {reply: true})),
   );
 
   // The whole path through both processes.
-  const path = new FlowDiagram({definition: livePath, y: -20});
+  const path = new FlowDiagram({definition: livePath});
   camera.add(path);
   yield* path.build();
   yield* narrator.beat('live-path',
@@ -135,14 +142,14 @@ export default makeScene2D('live', function* (view) {
     all(leave(protocol, 0, -100, 0.7), leave(gap, 0, -100, 0.7)),
     delay(0.5, chain(path.reveal(0), path.reveal(1))),
     delay(2.6, chain(path.pulse('simulator', 'machine', 0.7), all(path.pulse('machine', 'handler', 0.7), path.pulse('machine', 'serverPage', 0.7)))),
-    delay(2.6, camera.focusOnPoint(new Vector2(-200, -120), {zoom: 1.08, duration: narrator.duration('live-path') - 2.8})),
+    delay(2.6, camera.focusOnPoint(new Vector2(-200, 0), {zoom: 1.08, duration: narrator.duration('live-path') - 2.8})),
   );
   protocol.remove();
   gap.remove();
   yield* narrator.beat('live-path-client',
     chain(path.reveal(2), path.reveal(3)),
     delay(1.6, chain(path.pulse('handler', 'source', 0.6), path.pulse('source', 'mirror', 0.6), path.pulse('mirror', 'clientPage', 0.6))),
-    camera.focusOnPoint(new Vector2(250, -100), {zoom: 1.08, duration: narrator.duration('live-path-client') - 0.2}),
+    camera.focusOnPoint(new Vector2(250, 0), {zoom: 1.08, duration: narrator.duration('live-path-client') - 0.2}),
   );
 
   // Both processes heating up, side by side.
@@ -166,16 +173,16 @@ export default makeScene2D('live', function* (view) {
   path.remove();
   yield* narrator.beat('live-heat-sync',
     heat.play(narrator.duration('live-heat-sync'), {from: warm, to: ready - 2.1}),
-    camera.focusOnPoint(new Vector2(0, -120), {zoom: 1.1, duration: narrator.duration('live-heat-sync') - 0.2}),
+    camera.focusOnPoint(new Vector2(0, -30), {zoom: 1.1, duration: narrator.duration('live-heat-sync') - 0.2}),
   );
   yield* narrator.beat('live-ready',
     heat.play(narrator.duration('live-ready'), {from: ready - 2.1}),
-    camera.focusOnPoint(new Vector2(0, -150), {zoom: 1.0, duration: 1.6}),
+    camera.reset(1.6),
     delay(2.2, camera.focusOn(() => heat.pagePoint(heat.client, 400, 360), {zoom: 1.15, duration: narrator.duration('live-ready') - 2.4})),
   );
 
   // The brew endpoint and the method it calls.
-  const brewCode = new CodeCard({fileName: 'Client/Program.cs', width: 1560, height: 700, codeFontSize: 28, y: -70, opacity: 0, scale: 0.94});
+  const brewCode = new CodeCard({fileName: 'Client/Program.cs', width: 1560, height: 700, codeFontSize: 28, opacity: 0, scale: 0.94});
   camera.add(brewCode);
   const brewFocus = (from: number, to: number, zoom: number, duration: number) =>
     camera.focusOn(() => brewCode.linesCenter(from, to).add(brewCode.absolutePosition()).scale(0.5), {zoom, duration});
@@ -224,11 +231,11 @@ export default makeScene2D('live', function* (view) {
   yield* narrator.beat('live-brew-done',
     brew.play(doneDuration, {from: pressure + 2.5}),
     camera.reset(1.6),
-    delay(doneDuration - 3.2, camera.focusOnPoint(new Vector2(0, 160), {zoom: 1.12, duration: 3})),
+    delay(doneDuration - 3.2, camera.focusOn(() => brew.pagePoint(brew.server, 400, 560).add(brew.pagePoint(brew.client, 400, 560)).scale(0.5), {zoom: 1.12, duration: 3})),
   );
 
   // Both directions on the path.
-  const back = new FlowDiagram({definition: livePath, y: -20, opacity: 0});
+  const back = new FlowDiagram({definition: livePath, opacity: 0});
   camera.add(back);
   yield* back.build();
   yield* narrator.beat('live-path-back',

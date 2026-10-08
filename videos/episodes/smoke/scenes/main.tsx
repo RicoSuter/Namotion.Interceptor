@@ -28,7 +28,7 @@ export default makeScene2D('main', function* (view) {
   yield* narrator.beat('intro-title', intro.enter());
 
   // Code
-  const code = new CodeCard({fileName: 'Boiler.cs', width: 1240, height: 780, y: -40, opacity: 0, scale: 0.94});
+  const code = new CodeCard({fileName: 'Boiler.cs', width: 1240, height: 780, opacity: 0, scale: 0.94});
   camera.add(code);
   yield* narrator.beat('boiler-class',
     intro.exit(),
@@ -47,7 +47,7 @@ export default makeScene2D('main', function* (view) {
   );
 
   // Flow diagram
-  const flow = new FlowDiagram({definition: statusFlow, y: -40});
+  const flow = new FlowDiagram({definition: statusFlow});
   camera.add(flow);
   yield* flow.build();
   yield* narrator.beat('flow-build',
@@ -67,7 +67,7 @@ export default makeScene2D('main', function* (view) {
   );
 
   // Sequence diagram
-  const sequenceDiagram = new SequenceDiagram({participants: [...updateParticipants], width: 1440, height: 600, y: -60});
+  const sequenceDiagram = new SequenceDiagram({participants: [...updateParticipants], width: 1440, height: 560, y: 60});
   yield* narrator.beat('sequence-write',
     all(camera.reset(0.9), flow.opacity(0, 0.6, moveEasing)),
     delay(0.7, chain(
@@ -84,21 +84,21 @@ export default makeScene2D('main', function* (view) {
   );
 
   // Live demo
-  const terminal = new Terminal({transcript: useTerminal('run-sample'), title: 'sample', width: 1400, y: -60, opacity: 0, scale: 0.94});
+  const terminal = new Terminal({transcript: useTerminal('run-sample'), title: 'sample', width: 1400, opacity: 0, scale: 0.94});
   camera.add(terminal);
   yield* narrator.beat('live-terminal',
-    all(sequenceDiagram.opacity(0, 0.5, moveEasing), sequenceDiagram.y(-80, 0.6, moveEasing)),
+    all(sequenceDiagram.opacity(0, 0.5, moveEasing), sequenceDiagram.y(40, 0.6, moveEasing)),
     delay(0.4, all(terminal.opacity(1, 0.4, enterEasing), spring(arrivalSpring, 0.94, 1, value => terminal.scale(value)))),
     delay(0.8, terminal.run(narrator.duration('live-terminal') - 0.8)),
   );
   sequenceDiagram.remove();
-  const browser = new BrowserFrame({demo: 'status', address: 'localhost:5280', width: 1180, y: 480, opacity: 0});
+  const browser = new BrowserFrame({demo: 'status', address: 'localhost:5280', width: 1180, y: 550, opacity: 0});
   camera.add(browser);
   // Wait for the clip to load before the first frame that draws it.
   yield browser;
   yield* narrator.beat('live-browser',
     all(terminal.y(-600, 0.9, moveEasing), terminal.opacity(0, 0.7, moveEasing)),
-    all(browser.y(-70, 0.9, moveEasing), browser.opacity(1, 0.6, enterEasing)),
+    all(browser.y(0, 0.9, moveEasing), browser.opacity(1, 0.6, enterEasing)),
     browser.play(narrator.duration('live-browser')),
     delay(1, camera.focusOn(browser, {zoom: 1.05, duration: narrator.duration('live-browser') - 1})),
   );

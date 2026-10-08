@@ -16,6 +16,12 @@ import {useTiming} from '../../../theme/variables';
 import {bridge, machineTree, serverRow, sourceNode, sourceRow} from '../diagrams/flows';
 import {arrive, leave, Pill, toLocal, travel} from './shared';
 
+/** Offset of the machine row from the center of the machine tree, for placing a source beside it. */
+const machineRowY = -127;
+/** Center of the mirror's tree and of the second source beside it in the claim beats. */
+const claimsY = -20;
+const otherY = 230;
+
 export default makeScene2D('roles', function* (view) {
   yield* waitForFonts();
   const narrator = new Narrator(view, useTiming());
@@ -27,17 +33,17 @@ export default makeScene2D('roles', function* (view) {
   yield* narrator.beat('roles-title', title.enter());
 
   // The coffee machine as a tree of tracked objects.
-  const tree = new FlowDiagram({definition: machineTree, y: -60});
+  const tree = new FlowDiagram({definition: machineTree});
   camera.add(tree);
   yield* tree.build();
   yield* narrator.beat('roles-tree',
     title.exit(),
     delay(0.5, chain(tree.reveal(0), waitFor(0.3), tree.reveal(1))),
-    delay(2.6, camera.focusOnPoint(new Vector2(0, -40), {zoom: 1.08, duration: narrator.duration('roles-tree') - 2.8})),
+    delay(2.6, camera.focusOnPoint(new Vector2(0, 0), {zoom: 1.08, duration: narrator.duration('roles-tree') - 2.8})),
   );
 
   // The simulator writes the boiler temperature every tenth of a second.
-  const simulator = new FlowDiagram({definition: sourceNode('Simulator', 'every 100 ms', 'orange'), x: -620, y: -187});
+  const simulator = new FlowDiagram({definition: sourceNode('Simulator', 'every 100 ms', 'orange'), x: -620, y: machineRowY});
   camera.add(simulator);
   yield* simulator.build();
   const boiler = tree.node('boiler');
@@ -60,7 +66,7 @@ export default makeScene2D('roles', function* (view) {
   );
 
   // The tree collapses into one model node, bridged to an external system.
-  const bridgeDiagram = new FlowDiagram({definition: bridge, y: -60});
+  const bridgeDiagram = new FlowDiagram({definition: bridge});
   camera.add(bridgeDiagram);
   yield* bridgeDiagram.build();
   const modelPosition = toLocal(camera, bridgeDiagram.node('model').absolutePosition());
@@ -83,17 +89,18 @@ export default makeScene2D('roles', function* (view) {
   simulator.remove();
   heatArrow.remove();
 
-  const question = new Pill({text: 'Who owns the data?', size: 44, y: -330, opacity: 0, scale: 0.9});
+  const question = new Pill({text: 'Who owns the data?', size: 44, y: -110, opacity: 0, scale: 0.9});
   camera.add(question);
   yield* narrator.beat('roles-question',
-    arrive(question),
+    bridgeDiagram.y(70, 0.8, moveEasing),
+    delay(0.2, arrive(question)),
     delay(0.6, all(bridgeDiagram.node('model').scale(1.08, 0.3).to(1, 0.4), bridgeDiagram.node('external').scale(1.08, 0.3).to(1, 0.4))),
     delay(1.6, all(bridgeDiagram.pulse('external', 'connector', 0.9), bridgeDiagram.pulse('model', 'connector', 0.9))),
   );
 
   // The two roles, one row each.
-  const sources = new FlowDiagram({definition: sourceRow, y: -230});
-  const servers = new FlowDiagram({definition: serverRow, y: 100});
+  const sources = new FlowDiagram({definition: sourceRow, y: -165});
+  const servers = new FlowDiagram({definition: serverRow, y: 165});
   camera.add(sources);
   camera.add(servers);
   yield* sources.build();
@@ -101,7 +108,7 @@ export default makeScene2D('roles', function* (view) {
   yield* narrator.beat('roles-source',
     leave(bridgeDiagram, 0, 60, 0.6),
     leave(question, 0, -60, 0.6),
-    delay(0.4, camera.focusOnPoint(new Vector2(0, -200), {zoom: 1.12, duration: narrator.duration('roles-source') - 0.6})),
+    delay(0.4, camera.focusOnPoint(new Vector2(0, -165), {zoom: 1.12, duration: narrator.duration('roles-source') - 0.6})),
     delay(0.5, chain(
       sources.reveal(0), sources.reveal(1), sources.reveal(2),
       sources.pulse('owner', 'source', 0.7), sources.pulse('source', 'replica', 0.7),
@@ -110,7 +117,7 @@ export default makeScene2D('roles', function* (view) {
   bridgeDiagram.remove();
   question.remove();
   yield* narrator.beat('roles-server',
-    camera.focusOnPoint(new Vector2(0, 90), {zoom: 1.12, duration: narrator.duration('roles-server') - 0.3}),
+    camera.focusOnPoint(new Vector2(0, 165), {zoom: 1.12, duration: narrator.duration('roles-server') - 0.3}),
     chain(
       servers.reveal(0), servers.reveal(1), servers.reveal(2),
       servers.pulse('owner', 'server', 0.7), servers.pulse('server', 'clients', 0.7),
@@ -127,11 +134,11 @@ export default makeScene2D('roles', function* (view) {
   );
 
   const packages = ['OPC UA', 'MQTT', 'WebSocket'].map((name, index) =>
-    new Pill({text: name, color: 'blue', x: (index - 1) * 300, y: 300, opacity: 0, scale: 0.9}));
+    new Pill({text: name, color: 'blue', x: (index - 1) * 300, y: 330, opacity: 0, scale: 0.9}));
   packages.forEach(pill => camera.add(pill));
   yield* narrator.beat('roles-packages',
     delay(0.4, sequence(0.35, ...packages.map(pill => arrive(pill)))),
-    camera.focusOnPoint(new Vector2(0, 80), {zoom: 1.08, duration: narrator.duration('roles-packages') - 0.3}),
+    camera.focusOnPoint(new Vector2(0, 140), {zoom: 1.08, duration: narrator.duration('roles-packages') - 0.3}),
     delay(2.2, all(nudge(sources, 'source'), nudge(servers, 'server'))),
   );
 
@@ -142,15 +149,15 @@ export default makeScene2D('roles', function* (view) {
       sources.retext('source', {label: 'WebSocket client', detail: 'mirror process'}),
     )),
     delay(1.2, chain(
-      camera.focusOnPoint(new Vector2(60, -40), {zoom: 1.12, duration: 1.6}),
-      camera.focusOnPoint(new Vector2(-60, -90), {zoom: 1.12, duration: 1.8}),
+      camera.focusOn(servers.node('server'), {zoom: 1.2, duration: 1.6}),
+      camera.focusOn(() => sources.node('source').absolutePosition(), {zoom: 1.15, duration: 1.8}),
     )),
   );
   packages.forEach(pill => pill.remove());
 
   // The mirror's tree, claimed property by property by its client source.
-  const claims = new FlowDiagram({definition: machineTree, x: -180, y: -40});
-  const client = new FlowDiagram({definition: sourceNode('WebSocket client', 'source', 'blue'), x: 700, y: -167});
+  const claims = new FlowDiagram({definition: machineTree, x: -180, y: claimsY});
+  const client = new FlowDiagram({definition: sourceNode('WebSocket client', 'source', 'blue'), x: 700, y: claimsY + machineRowY});
   camera.add(claims);
   camera.add(client);
   yield* claims.build();
@@ -173,16 +180,16 @@ export default makeScene2D('roles', function* (view) {
     delay(0.6, all(claims.reveal(0), claims.reveal(1), client.reveal(0))),
     delay(1.0, claims.retext('machine', {detail: 'the mirror'})),
     delay(2.2, sequence(0.3, ...claimed.map((id, index) => claim(id, dots[index])))),
-    delay(1.2, camera.focusOnPoint(new Vector2(150, -40), {zoom: 1.1, duration: narrator.duration('roles-claim') - 1.4})),
+    delay(1.2, camera.focusOnPoint(new Vector2(60, claimsY), {zoom: 1.05, duration: narrator.duration('roles-claim') - 1.4})),
   );
   sources.remove();
   servers.remove();
 
-  const other = new FlowDiagram({definition: sourceNode('Another source', 'source', 'orange'), x: 700, y: 210});
+  const other = new FlowDiagram({definition: sourceNode('Another source', 'source', 'orange'), x: 700, y: otherY});
   camera.add(other);
   yield* other.build();
   const hopper = claims.node('hopper');
-  const otherLeft = new Vector2(540, 210);
+  const otherLeft = new Vector2(540, otherY);
   const hopperRight = toLocal(camera, hopper.absolutePosition()).add([150, 0]);
   const rejected = new Arrow({curve: sideCurve(otherLeft, 'left', hopperRight, 'right'), color: palette.pink, dashed: true});
   camera.add(rejected);
@@ -190,12 +197,12 @@ export default makeScene2D('roles', function* (view) {
     other.reveal(0),
     delay(0.4, rejected.grow(0.7)),
     delay(1.2, all(rejected.opacity(0, 0.6), dots[4].scale(1.4, 0.2).to(1, 0.3))),
-    camera.focusOnPoint(new Vector2(380, 80), {zoom: 1.2, duration: 1.4}),
+    camera.focusOnPoint(new Vector2(380, (claimsY + otherY) / 2 + 40), {zoom: 1.2, duration: 1.4}),
   );
   rejected.remove();
 
   // Any property can tell which source owns it.
-  const code = new CodeCard({fileName: 'Client/Program.cs', width: 1240, height: 620, y: -60, opacity: 0, scale: 0.94});
+  const code = new CodeCard({fileName: 'Client/Program.cs', width: 1240, height: 620, opacity: 0, scale: 0.94});
   camera.add(code);
   const stateRegion = extractRegion(clientSource, 'SourceState');
   yield* narrator.beat('roles-try-get',

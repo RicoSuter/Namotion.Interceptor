@@ -15,6 +15,9 @@ import {useTiming} from '../../../theme/variables';
 import {grinder, twoConnectors} from '../diagrams/flows';
 import {arrive, leave, Pill} from './shared';
 
+/** The code card sits a little low so the hook names fit above it. */
+const codeY = 20;
+
 export default makeScene2D('custom', function* (view) {
   yield* waitForFonts();
   const narrator = new Narrator(view, useTiming());
@@ -26,13 +29,13 @@ export default makeScene2D('custom', function* (view) {
   yield* narrator.beat('custom-title', title.enter());
 
   // A grinder that owns its grind size.
-  const scenario = new FlowDiagram({definition: grinder, y: -100});
+  const scenario = new FlowDiagram({definition: grinder});
   camera.add(scenario);
   yield* scenario.build();
   yield* narrator.beat('custom-scenario',
     title.exit(),
     delay(0.4, chain(scenario.reveal(0), scenario.reveal(1), scenario.reveal(2))),
-    delay(1.2, camera.focusOnPoint(new Vector2(-200, -100), {zoom: 1.1, duration: narrator.duration('custom-scenario') - 1.4})),
+    delay(1.2, camera.focusOnPoint(new Vector2(-100, 0), {zoom: 1.08, duration: narrator.duration('custom-scenario') - 1.4})),
   );
   yield* narrator.beat('custom-scenario-flow',
     camera.reset(1.2),
@@ -42,7 +45,7 @@ export default makeScene2D('custom', function* (view) {
   );
 
   // The source class and its three hooks.
-  const code = new CodeCard({fileName: 'Grinder/GrinderSource.cs', width: 1500, height: 760, codeFontSize: 26, y: -30, opacity: 0, scale: 0.94});
+  const code = new CodeCard({fileName: 'Grinder/GrinderSource.cs', width: 1500, height: 760, codeFontSize: 26, y: codeY, opacity: 0, scale: 0.94});
   camera.add(code);
   const lineFocus = (from: number, to: number, zoom: number, duration: number) =>
     camera.focusOn(() => code.linesCenter(from, to).add(code.absolutePosition()).scale(0.5), {zoom, duration});
@@ -56,8 +59,8 @@ export default makeScene2D('custom', function* (view) {
   scenario.remove();
 
   // The base class restarts a failed attempt.
-  const retryIcon = new Circle({size: 84, lineWidth: 7, stroke: palette.blue, startAngle: -70, endAngle: 230, endArrow: true, arrowSize: 14, lineCap: 'round', x: 560, y: -330, opacity: 0});
-  const retryLabel = new Pill({text: 'retry after 10 s', color: 'blue', size: 24, x: 560, y: -230, opacity: 0});
+  const retryIcon = new Circle({size: 84, lineWidth: 7, stroke: palette.blue, startAngle: -70, endAngle: 230, endArrow: true, arrowSize: 14, lineCap: 'round', x: 560, y: codeY - 300, opacity: 0});
+  const retryLabel = new Pill({text: 'retry after 10 s', color: 'blue', size: 24, x: 560, y: codeY - 200, opacity: 0});
   camera.add(retryIcon);
   camera.add(retryLabel);
   const retryDuration = narrator.duration('custom-retry-loop');
@@ -68,7 +71,7 @@ export default makeScene2D('custom', function* (view) {
   );
 
   const hookNames = ['StartListeningAsync', 'LoadInitialStateAsync', 'WriteChangesAsync'];
-  const hooks = hookNames.map((name, index) => new Pill({text: name, code: true, size: 24, x: (index - 1) * 480, y: -478, opacity: 0}));
+  const hooks = hookNames.map((name, index) => new Pill({text: name, code: true, size: 24, x: (index - 1) * 480, y: codeY - 460, opacity: 0}));
   hooks.forEach(hook => camera.add(hook));
   const activate = (active: number) => all(...hooks.map((hook, index) => hook.opacity(index === active ? 1 : 0.45, 0.4)));
   yield* narrator.beat('custom-hooks',
@@ -128,7 +131,7 @@ export default makeScene2D('custom', function* (view) {
   hooks.forEach(hook => hook.remove());
 
   // The server's two connectors.
-  const both = new FlowDiagram({definition: twoConnectors, y: -100, scale: 0.94});
+  const both = new FlowDiagram({definition: twoConnectors, scale: 0.94});
   camera.add(both);
   yield* both.build();
   const pulseChain = (duration = 0.5) => chain(
@@ -140,12 +143,12 @@ export default makeScene2D('custom', function* (view) {
     leave(code, 0, -150, 0.7),
     delay(0.5, both.reveal(0)),
     delay(2, pulseChain()),
-    delay(2, camera.focusOnPoint(new Vector2(-80, -100), {zoom: 1.04, duration: narrator.duration('custom-running') - 2.2})),
+    delay(2, camera.focusOnPoint(new Vector2(-80, 0), {zoom: 1.04, duration: narrator.duration('custom-running') - 2.2})),
   );
   code.remove();
   yield* narrator.beat('custom-simulated',
     both.retext('device', {label: 'Simulated grinder', detail: 'IGrinderDevice'}),
     camera.focusOn(both.node('device'), {zoom: 1.25, duration: 1.6}),
-    delay(1.4, all(pulseChain(0.4), camera.focusOnPoint(new Vector2(0, -100), {zoom: 1.02, duration: 2.8}))),
+    delay(1.4, all(pulseChain(0.4), camera.focusOnPoint(new Vector2(0, 0), {zoom: 1.02, duration: 2.8}))),
   );
 });

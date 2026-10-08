@@ -47,20 +47,20 @@ export default makeScene2D('hook', function* (view) {
   );
 
   // A connector between the two windows, with values flowing both ways.
-  const top = new Vector2(-150, -150);
-  const topEnd = new Vector2(150, -150);
-  const bottom = new Vector2(150, 10);
-  const bottomEnd = new Vector2(-150, 10);
+  const top = new Vector2(-150, -80);
+  const topEnd = new Vector2(150, -80);
+  const bottom = new Vector2(150, 80);
+  const bottomEnd = new Vector2(-150, 80);
   const forward = new Arrow({curve: {p0: top, p1: top.add([100, 0]), p2: topEnd.add([-100, 0]), p3: topEnd}, color: palette.secondaryText});
   const backward = new Arrow({curve: {p0: bottom, p1: bottom.add([-100, 0]), p2: bottomEnd.add([100, 0]), p3: bottomEnd}, color: palette.secondaryText});
-  const connector = new Pill({text: 'Connector', color: 'blue', y: -70, opacity: 0, scale: 0.9});
+  const connector = new Pill({text: 'Connector', color: 'blue', opacity: 0, scale: 0.9});
   camera.add(forward);
   camera.add(backward);
   camera.add(connector);
   const promiseDuration = narrator.duration('hook-promise');
   yield* narrator.beat('hook-promise',
     windows.play(promiseDuration, {from: pressure + 0.6}),
-    chain(camera.reset(1.2), camera.focusOnPoint(new Vector2(0, -70), {zoom: 1.07, duration: promiseDuration - 1.4})),
+    chain(camera.reset(1.2), camera.focusOnPoint(new Vector2(0, 0), {zoom: 1.07, duration: promiseDuration - 1.4})),
     all(
       windows.server.x(-500, 1.2, moveEasing), windows.server.scale(0.86, 1.2, moveEasing),
       windows.client.x(500, 1.2, moveEasing), windows.client.scale(0.86, 1.2, moveEasing),

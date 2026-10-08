@@ -17,6 +17,8 @@ function sequenceGrid(participants: number, width: number, height: number, rowHe
   return {
     lane: (index: number) => -width / 2 + index * spacing,
     row: (index: number) => -height / 2 + 38 + 70 + index * rowHeight,
+    /** Top of the participant headers. */
+    top: -height / 2,
   };
 }
 
@@ -31,6 +33,10 @@ function* messageNodes(diagram: SequenceDiagram, send: () => ThreadGenerator, ad
 function* fadeCollected(nodes: Node[], duration: number): ThreadGenerator {
   yield* all(...nodes.map(node => node.opacity(0, duration, moveEasing)));
 }
+
+/** Diagram centers that put the headers and the used message rows in the middle of the frame. */
+const inboundY = 20;
+const outboundY = 60;
 
 export default makeScene2D('flow', function* (view) {
   yield* waitForFonts();
@@ -52,25 +58,28 @@ export default makeScene2D('flow', function* (view) {
       {id: 'boiler', label: 'Boiler', color: 'pink'},
     ],
     ...inboundSize,
-    y: -90,
+    y: inboundY,
   });
   const inboundGrid = sequenceGrid(4, inboundSize.width, inboundSize.height, inboundSize.rowHeight);
+  /** Camera target between two lanes, halfway down from the headers to a message row, in camera coordinates. */
+  const inboundFocus = (fromLane: number, toLane: number, row: number) => new Vector2(
+    (inboundGrid.lane(fromLane) + inboundGrid.lane(toLane)) / 2, inboundY + (inboundGrid.top + inboundGrid.row(row)) / 2);
   camera.add(inbound);
   yield* narrator.beat('flow-in-intro',
     title.exit(),
     delay(0.4, chain(inbound.appear(), waitFor(0.6), inbound.message('external', 'source', 'Temperature = 93'))),
-    delay(1.2, camera.focusOnPoint(new Vector2(-480, -150), {zoom: 1.15, duration: narrator.duration('flow-in-intro') - 1.4})),
+    delay(1.2, camera.focusOnPoint(inboundFocus(0, 1, 0), {zoom: 1.15, duration: narrator.duration('flow-in-intro') - 1.4})),
   );
   yield* narrator.beat('flow-in-writer',
     inbound.message('source', 'writer', 'Write(update)'),
-    camera.focusOnPoint(new Vector2(0, -140), {zoom: 1.15, duration: narrator.duration('flow-in-writer') - 0.2}),
+    camera.focusOnPoint(inboundFocus(1, 2, 1), {zoom: 1.15, duration: narrator.duration('flow-in-writer') - 0.2}),
   );
 
   const buffered = new Pill({text: 'held while loading', color: 'cyan', size: 24, x: inboundGrid.lane(2) + 230, y: inboundGrid.row(1) - 90, opacity: 0, scale: 0.9});
   inbound.add(buffered);
   yield* narrator.beat('flow-in-apply',
     inbound.message('writer', 'boiler', 'Temperature = 93'),
-    camera.focusOnPoint(new Vector2(360, -100), {zoom: 1.15, duration: 1.6}),
+    camera.focusOnPoint(inboundFocus(2, 3, 2).add([-60, 0]), {zoom: 1.15, duration: 1.6}),
     delay(2.4, chain(arrive(buffered), buffered.scale(1.08, 0.3).to(1, 0.4))),
   );
 
@@ -79,7 +88,7 @@ export default makeScene2D('flow', function* (view) {
   const echo: Node[] = [];
   yield* narrator.beat('flow-in-stamp',
     arrive(stamp),
-    camera.focusOnPoint(new Vector2(240, -20), {zoom: 1.12, duration: 1.8}),
+    camera.focusOnPoint(inboundFocus(1, 3, 3).add([0, 60]), {zoom: 1.12, duration: 1.8}),
     delay(1.6, messageNodes(inbound, () => inbound.message('boiler', 'source', 'not sent back', {reply: true}), echo)),
     delay(3.4, fadeCollected(echo, 0.8)),
   );
@@ -100,9 +109,11 @@ export default makeScene2D('flow', function* (view) {
       {id: 'external', label: 'External system', color: 'orange'},
     ],
     ...outboundSize,
-    y: -70,
+    y: outboundY,
   });
   const outboundGrid = sequenceGrid(5, outboundSize.width, outboundSize.height, outboundSize.rowHeight);
+  const outboundFocus = (fromLane: number, toLane: number, row: number) => new Vector2(
+    (outboundGrid.lane(fromLane) + outboundGrid.lane(toLane)) / 2, outboundY + (outboundGrid.top + outboundGrid.row(row)) / 2);
   yield* narrator.beat('flow-out-intro',
     leave(inbound, 0, -80, 0.7),
     delay(0.6, chain(
@@ -112,17 +123,17 @@ export default makeScene2D('flow', function* (view) {
       })(),
       outbound.message('code', 'boiler', 'TargetTemperature = 95'),
     )),
-    delay(1.6, camera.focusOnPoint(new Vector2(-570, -200), {zoom: 1.2, duration: narrator.duration('flow-out-intro') - 1.8})),
+    delay(1.6, camera.focusOnPoint(outboundFocus(0, 1, 0), {zoom: 1.2, duration: narrator.duration('flow-out-intro') - 1.8})),
   );
   inbound.remove();
   yield* narrator.beat('flow-out-queue',
     outbound.message('boiler', 'queue', 'change'),
-    camera.focusOnPoint(new Vector2(-190, -160), {zoom: 1.2, duration: narrator.duration('flow-out-queue') - 0.2}),
+    camera.focusOnPoint(outboundFocus(1, 2, 1), {zoom: 1.2, duration: narrator.duration('flow-out-queue') - 0.2}),
   );
   yield* narrator.beat('flow-out-write',
     outbound.message('queue', 'source', 'WriteChangesAsync'),
     delay(2.2, outbound.message('source', 'external', 'send')),
-    camera.focusOnPoint(new Vector2(380, -100), {zoom: 1.15, duration: narrator.duration('flow-out-write') - 0.2}),
+    camera.focusOnPoint(outboundFocus(2, 4, 3), {zoom: 1.15, duration: narrator.duration('flow-out-write') - 0.2}),
   );
 
   const chipNames = ['Temperature', 'Pressure', 'State'];
@@ -131,7 +142,7 @@ export default makeScene2D('flow', function* (view) {
     new Pill({text: name, color: 'purple', size: 22, x: outboundGrid.lane(2) + (index - 1) * 170, y: chipY + 40, opacity: 0, scale: 0.9}));
   chips.forEach(chip => outbound.add(chip));
   yield* narrator.beat('flow-out-batch',
-    camera.focusOnPoint(new Vector2(190, -80), {zoom: 1.25, duration: 1.6}),
+    camera.focusOnPoint(new Vector2(190, outboundY + chipY + 20), {zoom: 1.15, duration: 1.6}),
     sequence(0.25, ...chips.map(chip => arrive(chip))),
     delay(1.4, all(...chips.map((chip, index) => chip.position(new Vector2(outboundGrid.lane(2) + 110, chipY + 10 + index * 48), 0.7, moveEasing)))),
     delay(2.4, all(...chips.map(chip => chip.x(outboundGrid.lane(3) - 110, 1.2, moveEasing)))),
@@ -153,22 +164,22 @@ export default makeScene2D('flow', function* (view) {
     camera.reset(1.4),
     delay(0.8, localFirst.opacity(0.1, 0.8, moveEasing)),
     delay(1.2, arrive(localFirstLabel)),
-    delay(2.4, camera.focusOnPoint(new Vector2(190, -150), {zoom: 1.08, duration: narrator.duration('flow-local-first') - 2.6})),
+    delay(2.4, camera.focusOnPoint(new Vector2(190, outboundY + (outboundGrid.top + outboundGrid.row(3)) / 2), {zoom: 1.08, duration: narrator.duration('flow-local-first') - 2.6})),
   );
   yield* narrator.beat('flow-no-wait',
     outbound.activate('code'),
     delay(1.2, outbound.activate('boiler')),
-    camera.focusOnPoint(new Vector2(-570, -150), {zoom: 1.18, duration: narrator.duration('flow-no-wait') - 0.2}),
+    camera.focusOnPoint(outboundFocus(0, 1, 0), {zoom: 1.18, duration: narrator.duration('flow-no-wait') - 0.2}),
   );
   yield* narrator.beat('flow-retry',
     all(localFirst.opacity(0, 0.6), localFirstLabel.opacity(0, 0.6)),
-    camera.focusOnPoint(new Vector2(570, 40), {zoom: 1.2, duration: 1.6}),
+    camera.focusOnPoint(new Vector2((outboundGrid.lane(3) + outboundGrid.lane(4)) / 2, outboundY + (outboundGrid.row(4) + outboundGrid.row(5)) / 2), {zoom: 1.2, duration: narrator.duration('flow-retry') - 0.2}),
     delay(0.4, outbound.message('external', 'source', 'failed', {reply: true})),
     delay(2.6, outbound.message('source', 'external', 'retry')),
   );
 
   // Servers: the same pattern from the other side.
-  const servers = new FlowDiagram({definition: serverRow, y: -80});
+  const servers = new FlowDiagram({definition: serverRow});
   camera.add(servers);
   yield* servers.build();
   yield* narrator.beat('flow-server',
@@ -195,13 +206,13 @@ export default makeScene2D('flow', function* (view) {
   );
 
   // The two paths side by side.
-  const paths = new FlowDiagram({definition: twoPaths, y: -80});
+  const paths = new FlowDiagram({definition: twoPaths});
   camera.add(paths);
   yield* paths.build();
   yield* narrator.beat('flow-two-paths',
     leave(servers, 0, 80, 0.6),
     delay(0.4, chain(paths.reveal(0), paths.reveal(1), paths.reveal(2))),
     delay(1.8, all(paths.pulse('external', 'model', 0.9), delay(0.5, paths.pulse('model', 'external', 0.9)))),
-    camera.focusOnPoint(new Vector2(0, -80), {zoom: 1.15, duration: narrator.duration('flow-two-paths') - 0.2}),
+    camera.focusOnPoint(new Vector2(0, 0), {zoom: 1.15, duration: narrator.duration('flow-two-paths') - 0.2}),
   );
 });
