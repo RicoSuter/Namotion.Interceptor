@@ -18,6 +18,8 @@ export interface Clip {
   url: string;
   /** Seconds, probed at capture time. */
   duration: number;
+  /** Named moments the demo recorded with mark, in seconds of clip time. */
+  marks: Record<string, number>;
 }
 
 export function useClip(name: string): Clip {
@@ -26,5 +28,6 @@ export function useClip(name: string): Clip {
   if (duration === undefined) {
     throw new Error(`Clip '${name}' missing. Run 'npm run capture -- ${useTiming().episode}'.`);
   }
-  return {url: `/generated/${useTiming().episode}/clips/${name}.mp4`, duration};
+  const marks = useScene().variables.get('marks', {} as Record<string, Record<string, number>>)()[name] ?? {};
+  return {url: `/generated/${useTiming().episode}/clips/${name}.mp4`, duration, marks};
 }

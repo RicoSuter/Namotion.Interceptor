@@ -25,13 +25,14 @@ if (existsSync(paths.terminalDirectory)) {
 }
 
 const clips: Record<string, number> = existsSync(paths.clipsFile) ? JSON.parse(readFileSync(paths.clipsFile, 'utf8')) : {};
+const marks: Record<string, Record<string, number>> = existsSync(paths.marksFile) ? JSON.parse(readFileSync(paths.marksFile, 'utf8')) : {};
 
 // The renderer resolves the project file and the public/ media folder from the working directory.
 process.chdir(videosRoot);
 mkdirSync(outputDirectory, {recursive: true});
 const videoFile = await renderVideo({
   projectFile: `./episodes/${paths.episode}/project.ts`,
-  variables: {timing, terminal, clips},
+  variables: {timing, terminal, clips, marks},
   settings: {
     outFile: `${paths.episode}-${preset}.mp4` as const,
     logProgress: true,

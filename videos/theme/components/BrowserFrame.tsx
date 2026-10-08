@@ -20,6 +20,8 @@ export interface BrowserFrameProps extends Omit<RectProps, 'width' | 'height'> {
 export class BrowserFrame extends WindowFrame {
   private readonly video = createRef<ClipVideo>();
   private readonly clipDuration: number;
+  private readonly clipMarks: Record<string, number>;
+  private readonly demo: string;
 
   public constructor(props: BrowserFrameProps) {
     const {demo, address, width, aspectRatio, ...rest} = props;
@@ -27,7 +29,18 @@ export class BrowserFrame extends WindowFrame {
     super({...rest, width, height: videoHeight + titleBarHeight, address, bodyFill: palette.background});
     const clip = useClip(demo);
     this.clipDuration = clip.duration;
+    this.clipMarks = clip.marks;
+    this.demo = demo;
     this.body.add(<ClipVideo ref={this.video} src={clip.url} width={width} height={videoHeight} />);
+  }
+
+  /** Clip time in seconds of a moment the demo recorded with mark, for example as a play range. */
+  public mark(name: string): number {
+    const time = this.clipMarks[name];
+    if (time === undefined) {
+      throw new Error(`Clip '${this.demo}' has no mark '${name}'. Run 'npm run capture -- <episode> --only ${this.demo}'.`);
+    }
+    return time;
   }
 
   /**

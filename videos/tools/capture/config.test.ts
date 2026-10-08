@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {demoContext, resolveApps} from './config';
+import {appUrls, resolveApps} from './config';
 
 const server = {project: 'Server/Server.csproj', port: 5310, readyPath: '/status'};
 const client = {project: 'Client/Client.csproj', port: 5311, readyPath: '/status'};
@@ -50,16 +50,16 @@ describe('resolveApps', () => {
   });
 });
 
-describe('demoContext', () => {
+describe('appUrls', () => {
   it('WhenSeveralAppsRun_ThenTheFirstIsTheBaseUrlAndAllAreNamed', () => {
     // Act
-    const context = demoContext([
+    const urls = appUrls([
       {name: 'server', baseUrl: 'http://localhost:5310'},
       {name: 'client', baseUrl: 'http://localhost:5311'},
     ]);
 
     // Assert
-    expect(context).toEqual({
+    expect(urls).toEqual({
       baseUrl: 'http://localhost:5310',
       baseUrls: {server: 'http://localhost:5310', client: 'http://localhost:5311'},
     });
@@ -67,6 +67,6 @@ describe('demoContext', () => {
 
   it('WhenNoAppRuns_ThenItThrows', () => {
     // Act & Assert
-    expect(() => demoContext([])).toThrow(/Demos need an app/);
+    expect(() => appUrls([])).toThrow(/Demos need an app/);
   });
 });

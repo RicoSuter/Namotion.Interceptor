@@ -1,10 +1,15 @@
 import type {Page} from 'playwright';
 
-export interface DemoContext {
+export interface AppUrls {
   /** Base URL of the first app. */
   baseUrl: string;
   /** Base URL of every app by name. */
   baseUrls: Record<string, string>;
+}
+
+export interface DemoContext extends AppUrls {
+  /** Records a named moment of the clip, such as a click, so scenes can play from or to it with BrowserFrame.mark. */
+  mark(name: string): void;
 }
 
 /** A demo script is choreography: timed pauses set pacing, condition waits cover app state that varies. */
@@ -14,7 +19,7 @@ export type Demo = (page: Page, context: DemoContext) => Promise<void>;
  * Optional `prepare` export of a demo module. It runs before the recording starts, for example to wait until
  * an app reaches a state or to reset it, so the clip does not begin with a long wait.
  */
-export type DemoPreparation = (context: DemoContext) => Promise<void>;
+export type DemoPreparation = (context: AppUrls) => Promise<void>;
 
 export interface TerminalCapture {
   name: string;
@@ -84,8 +89,8 @@ export function resolveApps(config: CaptureConfig): NamedAppConfig[] {
   });
 }
 
-/** The demo context for the running apps: the first app's URL and every app's URL by name. */
-export function demoContext(apps: Array<{name: string; baseUrl: string}>): DemoContext {
+/** The URLs of the running apps: the first app's URL and every app's URL by name. */
+export function appUrls(apps: Array<{name: string; baseUrl: string}>): AppUrls {
   if (apps.length === 0) {
     throw new Error('Demos need an app or apps entry in capture.ts');
   }

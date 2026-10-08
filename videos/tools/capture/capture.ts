@@ -5,7 +5,7 @@ import {loadCaptureConfig, validateEpisode} from '../episode';
 import {probeVideoDuration} from '../ffmpeg';
 import {episodeArgument, episodePaths} from '../paths';
 import {startApp, type RunningApp} from './app';
-import {demoContext, resolveApps, type Demo, type DemoPreparation, type TerminalCapture} from './config';
+import {appUrls, resolveApps, type Demo, type DemoPreparation, type TerminalCapture} from './config';
 import {recordDemo} from './record';
 import {runTerminalCapture} from './terminal';
 
@@ -49,20 +49,22 @@ if (demoFiles.length > 0 || terminalsWhileAppsRun.length > 0) {
 
     // Keep durations of clips that --only did not record again.
     const durations: Record<string, number> = existsSync(paths.clipsFile) ? JSON.parse(readFileSync(paths.clipsFile, 'utf8')) : {};
-    const context = demoContext(running);
+    const marks: Record<string, Record<string, number>> = existsSync(paths.marksFile) ? JSON.parse(readFileSync(paths.marksFile, 'utf8')) : {};
+    const urls = appUrls(running);
     for (const file of demoFiles) {
       const name = basename(file, '.ts');
       console.log(`demo: ${name}`);
       const module = (await import(pathToFileURL(join(demosDirectory, file)).href)) as {default: Demo; prepare?: DemoPreparation};
-      await module.prepare?.(context);
+      await module.prepare?.(urls);
       const clipFile = join(paths.clipsDirectory, `${name}.mp4`);
-      await recordDemo(module.default, clipFile, {
-        context,
+      marks[name] = await recordDemo(module.default, clipFile, {
+        apps: urls,
         viewport: config.viewport ?? {width: 1280, height: 800},
         deviceScaleFactor: config.deviceScaleFactor ?? 2,
       });
       durations[name] = probeVideoDuration(clipFile);
       writeFileSync(paths.clipsFile, JSON.stringify(durations, null, 2));
+      writeFileSync(paths.marksFile, JSON.stringify(marks, null, 2));
     }
   } finally {
     // Clients first, so a server does not log their disconnects as errors.
