@@ -32,8 +32,8 @@ export default makeScene2D('hook', function* (view) {
     delay(0.2, windows.arrive()),
     windows.play(narrator.duration('hook-windows'), {from: windows.mark('open'), to: click - 0.2}),
     delay(1.4, chain(
-      camera.focusOn(() => windows.pagePoint(windows.server, 400, 300), {zoom: 1.1, duration: 1.8}),
-      camera.focusOn(() => windows.pagePoint(windows.client, 400, 300), {zoom: 1.1, duration: 2.2}),
+      camera.focusOn(() => windows.pagePoint(windows.server, 400, 360), {zoom: 1.1, duration: 1.8}),
+      camera.focusOn(() => windows.pagePoint(windows.client, 400, 360), {zoom: 1.1, duration: 2.2}),
     )),
   );
 

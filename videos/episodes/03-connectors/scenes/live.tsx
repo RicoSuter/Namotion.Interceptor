@@ -159,8 +159,8 @@ export default makeScene2D('live', function* (view) {
     delay(0.4, heat.arrive()),
     heat.play(heatDuration, {from: heat.mark('open'), to: warm}),
     delay(1.4, chain(
-      camera.focusOn(() => heat.pagePoint(heat.server, 400, 300), {zoom: 1.1, duration: 2.4}),
-      camera.focusOn(() => heat.pagePoint(heat.client, 400, 300), {zoom: 1.1, duration: heatDuration - 4}),
+      camera.focusOn(() => heat.pagePoint(heat.server, 400, 360), {zoom: 1.1, duration: 2.4}),
+      camera.focusOn(() => heat.pagePoint(heat.client, 400, 360), {zoom: 1.1, duration: heatDuration - 4}),
     )),
   );
   path.remove();
@@ -171,7 +171,7 @@ export default makeScene2D('live', function* (view) {
   yield* narrator.beat('live-ready',
     heat.play(narrator.duration('live-ready'), {from: ready - 2.1}),
     camera.focusOnPoint(new Vector2(0, -150), {zoom: 1.0, duration: 1.6}),
-    delay(2.2, camera.focusOn(() => heat.pagePoint(heat.client, 400, 330), {zoom: 1.25, duration: narrator.duration('live-ready') - 2.4})),
+    delay(2.2, camera.focusOn(() => heat.pagePoint(heat.client, 400, 360), {zoom: 1.15, duration: narrator.duration('live-ready') - 2.4})),
   );
 
   // The brew endpoint and the method it calls.

@@ -142,8 +142,8 @@ export default makeScene2D('roles', function* (view) {
       sources.retext('source', {label: 'WebSocket client', detail: 'mirror process'}),
     )),
     delay(1.2, chain(
-      camera.focusOn(servers.node('server'), {zoom: 1.2, duration: 1.6}),
-      camera.focusOn(sources.node('source'), {zoom: 1.1, duration: 1.8}),
+      camera.focusOnPoint(new Vector2(60, -40), {zoom: 1.12, duration: 1.6}),
+      camera.focusOnPoint(new Vector2(-60, -90), {zoom: 1.12, duration: 1.8}),
     )),
   );
   packages.forEach(pill => pill.remove());
