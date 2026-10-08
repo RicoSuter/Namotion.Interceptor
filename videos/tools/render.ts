@@ -5,6 +5,7 @@ import type {Timing} from '../theme/timing';
 import {validateEpisode} from './episode';
 import {toSrt} from './narration';
 import {episodeArgument, episodePaths, outputDirectory, videosRoot} from './paths';
+import {writeReview} from './review';
 
 const paths = episodePaths(episodeArgument());
 const preset = process.argv.includes('--final') ? 'final' : 'draft';
@@ -38,4 +39,7 @@ const videoFile = await renderVideo({
 });
 
 writeFileSync(join(outputDirectory, `${paths.episode}.srt`), toSrt(timing));
-console.log(`Rendered ${join(videosRoot, videoFile)}`);
+const absoluteVideoFile = join(videosRoot, videoFile);
+writeReview(absoluteVideoFile, timing, outputDirectory);
+console.log(`Rendered ${absoluteVideoFile}`);
+console.log(`Review ${join(outputDirectory, `${paths.episode}-review.md`)} and ${join(outputDirectory, `${paths.episode}-contact.png`)}`);
