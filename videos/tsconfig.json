@@ -1,0 +1,10 @@
+{
+  "extends": "@revideo/2d/tsconfig.project.json",
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["esnext", "dom"],
+    "types": ["node"]
+  },
+  "include": ["theme", "tools", "episodes"]
+}

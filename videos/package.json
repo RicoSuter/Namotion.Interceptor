@@ -1,0 +1,39 @@
+{
+  "name": "learning-videos",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "validate": "tsx tools/validate.ts",
+    "tts": "tsx tools/tts.ts",
+    "capture": "tsx tools/capture/capture.ts",
+    "render": "tsx tools/render.ts"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
+    "@ffprobe-installer/ffprobe": "2.1.2",
+    "@replit/codemirror-lang-csharp": "6.2.0",
+    "@revideo/2d": "0.11.0",
+    "@revideo/core": "0.11.0",
+    "@revideo/ffmpeg": "0.11.0",
+    "@revideo/renderer": "0.11.0",
+    "@revideo/ui": "0.11.0",
+    "@revideo/vite-plugin": "0.11.0",
+    "elkjs": "0.12.0",
+    "playwright": "1.64.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  },
+  "allowScripts": {
+    "puppeteer@25.12.0": true,
+    "@ffmpeg-installer/linux-x64@4.1.0": true,
+    "@ffprobe-installer/linux-x64@5.2.0": true
+  }
+}
