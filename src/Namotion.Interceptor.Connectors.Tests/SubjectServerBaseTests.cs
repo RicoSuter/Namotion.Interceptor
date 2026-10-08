@@ -280,7 +280,7 @@ public class SubjectServerBaseTests
     }
 
     [Fact]
-    public async Task WhenTheServerTeardownThrows_ThenTheFailureIsRecordedAndRestartedAfterTheDelay()
+    public async Task WhenTheServerTeardownThrows_ThenTheFailureIsRecordedAndTheRestartDelayIsRequested()
     {
         // Arrange: attempt 1 ends itself by self-cancelling, not by a stop or a kill, so its teardown's
         // exception can only reach the generic catch through the finally block in the code under test.
@@ -316,8 +316,8 @@ public class SubjectServerBaseTests
     [Fact]
     public async Task WhenForceKilledWhileStartServerAsyncWaits_ThenRestartsWithoutError()
     {
-        // Arrange: StartServerAsync blocks on the attempt's own token, so the kill lands before the
-        // change processor ever starts, exercising the kill classification that is not narrowed to
+        // Arrange: StartServerAsync blocks on the attempt's own token, then turns the kill's cancellation
+        // into a non-cancellation exception, proving the kill classification is not narrowed to
         // OperationCanceledException.
         using var server = new TestServer(CreatePerson())
         {
@@ -325,7 +325,14 @@ public class SubjectServerBaseTests
             {
                 if (attemptNumber == 1)
                 {
-                    await Task.Delay(Timeout.Infinite, attempt.Token);
+                    try
+                    {
+                        await Task.Delay(Timeout.Infinite, attempt.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw new InvalidOperationException("start aborted by kill");
+                    }
                 }
             },
             RestartDelay = _ => TimeSpan.FromHours(1)

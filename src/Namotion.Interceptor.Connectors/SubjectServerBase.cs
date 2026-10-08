@@ -59,8 +59,8 @@ public abstract class SubjectServerBase : SubjectConnectorBase
     /// <summary>
     /// Starts the protocol server for one attempt. Called once the change subscription exists, and
     /// returns once clients can connect. If it throws, it releases what it acquired before rethrowing.
-    /// A teardown it returns that throws is recorded the same way, and the attempt restarts after
-    /// <see cref="GetRestartDelay"/>, unless the connector is stopping.
+    /// A start or teardown that throws is recorded as a failure and the attempt restarts after
+    /// <see cref="GetRestartDelay"/>, unless the connector is stopping or the attempt was force-killed.
     /// </summary>
     /// <param name="attempt">The attempt this start belongs to.</param>
     /// <param name="stoppingToken">The connector's stopping token, which tells a stop apart from the
@@ -155,8 +155,9 @@ public abstract class SubjectServerBase : SubjectConnectorBase
             return TimeSpan.Zero;
         }
         // A kill tears the server down with arbitrary exceptions, as a stop does, so this filter is not
-        // narrowed to OperationCanceledException.
-        catch (Exception) when (attempt.WasForceKilled)
+        // narrowed to OperationCanceledException. A stop requested during a kill still wins, so a stop
+        // is never misreported as a kill.
+        catch (Exception) when (attempt.WasForceKilled && !stoppingToken.IsCancellationRequested)
         {
             LogForceKill();
             return TimeSpan.Zero;
