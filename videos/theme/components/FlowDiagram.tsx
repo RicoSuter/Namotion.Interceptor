@@ -15,7 +15,6 @@ export class FlowDiagram extends Node {
   private readonly definition: FlowDefinition;
   private readonly nodes = new Map<string, Rect>();
   private readonly arrows: Arrow[] = [];
-  private flowLayout: FlowLayout | null = null;
 
   public constructor(props: FlowDiagramProps) {
     const {definition, ...rest} = props;
@@ -27,7 +26,6 @@ export class FlowDiagram extends Node {
   public *build(): ThreadGenerator {
     // The scene runner resolves a yielded promise and passes its value back in.
     const flowLayout: FlowLayout = yield layoutFlow(this.definition);
-    this.flowLayout = flowLayout;
 
     const edgeLayer = new Node({});
     this.add(edgeLayer);
@@ -73,10 +71,6 @@ export class FlowDiagram extends Node {
       throw new Error(`Flow diagram has no node '${id}'`);
     }
     return node;
-  }
-
-  public get size(): {width: number; height: number} {
-    return {width: this.flowLayout?.width ?? 0, height: this.flowLayout?.height ?? 0};
   }
 
   /** Brings in the nodes of a step with a spring, then draws the edges of that step. */

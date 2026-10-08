@@ -1,5 +1,5 @@
 import {Circle, Code, Rect, Txt, lines, type DrawHooks, type RectProps} from '@revideo/2d';
-import {all, createRef, createSignal, linear, map, transformVectorAsPoint, tween, Vector2, type ThreadGenerator} from '@revideo/core';
+import {all, createRef, createSignal, linear, map, transformVectorAsPoint, tween, Vector2, waitFor, type ThreadGenerator} from '@revideo/core';
 import {csharp} from '../csharp';
 import {scrollToFocus} from '../geometry';
 import {palette} from '../palette';
@@ -40,6 +40,7 @@ const plainTokens: DrawHooks = {
 /** Code from a compiled sample on a card with a filename tab; types in, morphs, and focuses lines. */
 export class CodeCard extends Card {
   private readonly codeNode = createRef<Code>();
+  private readonly fileNameText = createRef<Txt>();
   private readonly scroll = createSignal(0);
   private readonly rowHeight: number;
   private readonly viewportHeight: number;
@@ -59,7 +60,7 @@ export class CodeCard extends Card {
       <Rect layout offset={[-1, 0]} x={-props.width / 2 + padding - 12} y={top + headerHeight / 2 + 8} height={40}
         padding={[0, 16]} gap={10} alignItems={'center'} radius={radius.small} fill={palette.elevated}>
         <Circle size={10} fill={palette.purple} />
-        <Txt fontFamily={fonts.text} fontWeight={500} fontSize={fontSize.detail} fill={palette.secondaryText} text={fileName} />
+        <Txt ref={this.fileNameText} fontFamily={fonts.text} fontWeight={500} fontSize={fontSize.detail} fill={palette.secondaryText} text={fileName} />
       </Rect>,
     );
     this.add(
@@ -80,9 +81,20 @@ export class CodeCard extends Card {
     yield* tween(duration, value => this.codeNode().code(code.slice(0, Math.round(linear(value) * code.length))));
   }
 
-  /** Animates the differences to the next version of the code. */
-  public *morph(code: string, duration = 1): ThreadGenerator {
-    yield* all(this.codeNode().code(code, duration), this.codeNode().selection(lines(0, Infinity), duration), this.scroll(0, duration, moveEasing));
+  /** Animates the differences to the next version of the code, optionally from another file. */
+  public *morph(code: string, duration = 1, fileName?: string): ThreadGenerator {
+    yield* all(
+      this.codeNode().code(code, duration),
+      this.codeNode().selection(lines(0, Infinity), duration),
+      this.scroll(0, duration, moveEasing),
+      fileName === undefined ? waitFor(0) : this.renameTab(fileName),
+    );
+  }
+
+  private *renameTab(fileName: string): ThreadGenerator {
+    yield* this.fileNameText().opacity(0, durations.fast);
+    this.fileNameText().text(fileName);
+    yield* this.fileNameText().opacity(1, durations.fast);
   }
 
   /** Highlights lines (zero-based, inclusive) and dims the rest, scrolling them into view when needed. */

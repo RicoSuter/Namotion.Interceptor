@@ -42,7 +42,7 @@ export default makeScene2D('main', function* (view) {
   );
   yield* narrator.beat('tank-morph',
     camera.reset(1.4),
-    delay(0.4, code.morph(extractRegion(waterTankSource, 'WaterTank'), 1.6)),
+    delay(0.4, code.morph(extractRegion(waterTankSource, 'WaterTank'), 1.6, 'WaterTank.cs')),
     delay(3.2, code.focus(7, 8, 0.8)),
   );
 
@@ -59,7 +59,10 @@ export default makeScene2D('main', function* (view) {
     chain(
       all(flow.pulse('simulator', 'boiler', 0.8), flow.pulse('simulator', 'tank', 0.8)),
       all(camera.focusOn(flow.node('machine'), {zoom: 1.18, duration: 1.4}), flow.pulse('boiler', 'machine', 1.1), flow.pulse('tank', 'machine', 1.1)),
-      all(flow.pulse('machine', 'page', 0.6), camera.focusOn(flow.node('page'), {zoom: 1.1, duration: 0.9})),
+      all(
+        flow.pulse('machine', 'page', 0.6),
+        camera.focusOn(() => flow.node('machine').absolutePosition().add(flow.node('page').absolutePosition()).scale(0.5), {zoom: 1.1, duration: 0.9}),
+      ),
     ),
   );
 

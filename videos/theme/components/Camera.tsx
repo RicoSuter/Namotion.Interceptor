@@ -13,11 +13,14 @@ export class Camera extends Node {
     super(props);
   }
 
-  /** Centers the target node, or a point in world coordinates, and zooms in on it. */
-  public *focusOn(target: Node | Vector2, options: FocusOptions = {}): ThreadGenerator {
+  /**
+   * Centers the target and zooms in on it. The target is a node or a point in world coordinates; pass a
+   * function to compute the point when the move starts, after earlier camera moves.
+   */
+  public *focusOn(target: Node | Vector2 | (() => Vector2), options: FocusOptions = {}): ThreadGenerator {
     const zoom = options.zoom ?? 1.4;
     const duration = options.duration ?? durations.slow;
-    const world = target instanceof Vector2 ? target : target.absolutePosition();
+    const world = target instanceof Node ? target.absolutePosition() : target instanceof Vector2 ? target : target();
     const local = transformVectorAsPoint(world, this.worldToLocal());
     yield* all(this.scale(zoom, duration, moveEasing), this.position(local.scale(-zoom), duration, moveEasing));
   }

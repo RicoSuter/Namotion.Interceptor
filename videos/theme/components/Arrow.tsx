@@ -1,7 +1,6 @@
 import {CubicBezier, Line, Node, type NodeProps} from '@revideo/2d';
 import {createRef, type ThreadGenerator} from '@revideo/core';
 import type {CubicCurve} from '../geometry';
-import {palette} from '../palette';
 import {moveEasing} from '../style';
 
 export interface ArrowProps extends NodeProps {
@@ -15,6 +14,9 @@ export interface ArrowProps extends NodeProps {
   drawn?: number;
 }
 
+/** macOS system gray 2: visible on the background without competing with the nodes. */
+const edgeGray = '#636366';
+
 /** Smooth curve with rounded caps and a small rounded chevron that rides on the drawing tip. */
 export class Arrow extends Node {
   private readonly lineReference = createRef<CubicBezier>();
@@ -22,7 +24,7 @@ export class Arrow extends Node {
   public constructor(props: ArrowProps) {
     const {curve, color, lineWidth, headSize, dashed, drawn, ...rest} = props;
     super(rest);
-    const stroke = color ?? '#636366';
+    const stroke = color ?? edgeGray;
     const width = lineWidth ?? 4;
     const size = headSize ?? 13;
     this.add(
@@ -48,4 +50,3 @@ export class Arrow extends Node {
   }
 }
 
-export const edgeColor = palette.separator;
