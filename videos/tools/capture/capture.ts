@@ -5,7 +5,7 @@ import {loadCaptureConfig, validateEpisode} from '../episode';
 import {probeVideoDuration} from '../ffmpeg';
 import {episodeArgument, episodePaths} from '../paths';
 import {startApp, type RunningApp} from './app';
-import {demoContext, resolveApps, type Demo, type TerminalCapture} from './config';
+import {demoContext, resolveApps, type Demo, type DemoPreparation, type TerminalCapture} from './config';
 import {recordDemo} from './record';
 import {runTerminalCapture} from './terminal';
 
@@ -53,7 +53,8 @@ if (demoFiles.length > 0 || terminalsWhileAppsRun.length > 0) {
     for (const file of demoFiles) {
       const name = basename(file, '.ts');
       console.log(`demo: ${name}`);
-      const module = (await import(pathToFileURL(join(demosDirectory, file)).href)) as {default: Demo};
+      const module = (await import(pathToFileURL(join(demosDirectory, file)).href)) as {default: Demo; prepare?: DemoPreparation};
+      await module.prepare?.(context);
       const clipFile = join(paths.clipsDirectory, `${name}.mp4`);
       await recordDemo(module.default, clipFile, {
         context,

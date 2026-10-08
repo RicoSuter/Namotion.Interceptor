@@ -10,6 +10,12 @@ export interface DemoContext {
 /** A demo script is choreography: timed pauses set pacing, condition waits cover app state that varies. */
 export type Demo = (page: Page, context: DemoContext) => Promise<void>;
 
+/**
+ * Optional `prepare` export of a demo module. It runs before the recording starts, for example to wait until
+ * an app reaches a state or to reset it, so the clip does not begin with a long wait.
+ */
+export type DemoPreparation = (context: DemoContext) => Promise<void>;
+
 export interface TerminalCapture {
   name: string;
   command: string;
