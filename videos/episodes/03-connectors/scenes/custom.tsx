@@ -83,19 +83,27 @@ export default makeScene2D('custom', function* (view) {
   );
   retryIcon.remove();
   retryLabel.remove();
+  // StartListening lines: 3 to 7 claim, 9 connects, 10 to 16 the loop with 14 writing and 16 disconnecting.
   yield* narrator.beat('custom-listen',
-    code.focus(3, 4),
-    chain(lineFocus(3, 4, 1.12, 2), lineFocus(4, 4, 1.18, narrator.duration('custom-listen') - 2.2)),
+    code.focus(3, 9),
+    lineFocus(3, 9, 1.1, 2),
+    delay(2.8, code.focus(4, 7)),
+    delay(2.8, lineFocus(4, 7, 1.18, narrator.duration('custom-listen') - 3)),
   );
   yield* narrator.beat('custom-listen-release',
     code.focus(4, 4),
     lineFocus(4, 4, 1.06, narrator.duration('custom-listen-release') - 0.2),
   );
+  const loopDuration = narrator.duration('custom-listen-loop');
   yield* narrator.beat('custom-listen-loop',
-    code.focus(6, 12),
-    lineFocus(6, 12, 1.08, 2),
-    delay(3, code.focus(10, 10)),
-    delay(3.2, lineFocus(10, 10, 1.15, narrator.duration('custom-listen-loop') - 3.4)),
+    code.focus(9, 9),
+    lineFocus(9, 9, 1.1, 1.4),
+    delay(1.6, code.focus(10, 16)),
+    delay(1.6, lineFocus(10, 16, 1.06, 1.6)),
+    delay(3.4, code.focus(14, 14)),
+    delay(3.4, lineFocus(14, 14, 1.15, loopDuration - 5.8)),
+    delay(loopDuration - 2.2, code.focus(16, 16)),
+    delay(loopDuration - 2.2, lineFocus(16, 16, 1.15, 2)),
   );
   yield* narrator.beat('custom-load',
     camera.reset(1),

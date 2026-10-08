@@ -398,18 +398,18 @@ chapters:
         components: [CodeCard, Camera]
         code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
       - id: custom-listen
-        narration: Start listening connects to the device. It claims the grind size, so no other source can take it.
-        visual: The connect and ClaimSource lines are focused; the camera leans in.
+        narration: Start listening claims the grind size first, even before connecting. Changes made in code while the device is offline are then queued for it, and no other source can take it.
+        visual: The ClaimSource check and the connect line below it are focused; the focus narrows to the claim while the camera leans in.
         components: [CodeCard, Camera]
         code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
       - id: custom-listen-release
         narration: The ownership manager also releases that claim when the bean hopper leaves the object graph.
-        visual: The SourceOwnershipManager field is highlighted while the camera pulls back slightly.
+        visual: The ClaimSource line stays highlighted while the camera pulls back slightly.
         components: [CodeCard, Camera]
         code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
       - id: custom-listen-loop
-        narration: Then it starts a background loop. Every value the device reports goes through the property writer, marked as coming from this source.
-        visual: The focus moves down to the BackgroundTaskLifetime loop and the propertyWriter.Write call; the camera follows.
+        narration: Then it connects and starts a background loop. Each reported value goes through the property writer, marked as from this source, and stopping the loop disconnects.
+        visual: The focus moves from the connect line down to the BackgroundTaskLifetime loop, the propertyWriter.Write call and the disconnect callback; the camera follows.
         components: [CodeCard, Camera]
         code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
       - id: custom-load

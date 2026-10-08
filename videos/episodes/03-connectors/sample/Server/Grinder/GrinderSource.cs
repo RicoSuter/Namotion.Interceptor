@@ -35,16 +35,20 @@ public sealed class GrinderSource : SubjectSourceBase
     protected override async Task<IAsyncDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
-        await _device.ConnectAsync(cancellationToken);
-        _ownership.ClaimSource(GrindSize);
+        // Claim before connecting, so changes made while offline are queued for it.
+        if (!_ownership.ClaimSource(GrindSize))
+        {
+            throw new InvalidOperationException("The grind size already has another source.");
+        }
 
+        var connection = await _device.ConnectAsync(cancellationToken);
         return BackgroundTaskLifetime.Start(cancellationToken, _logger, async token =>
         {
             await foreach (var size in _device.WatchGrindSizeAsync(token))
             {
                 propertyWriter.Write(size, ApplyGrindSize);
             }
-        });
+        }, () => connection.DisposeAsync());
     }
     #endregion
 

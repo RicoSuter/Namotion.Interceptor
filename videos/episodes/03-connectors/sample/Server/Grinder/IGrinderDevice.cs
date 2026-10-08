@@ -5,7 +5,8 @@ namespace Connectors.Server.Grinder;
 /// </summary>
 public interface IGrinderDevice
 {
-    Task ConnectAsync(CancellationToken cancellationToken);
+    /// <summary>Connects to the device; disposing the returned connection disconnects.</summary>
+    Task<IAsyncDisposable> ConnectAsync(CancellationToken cancellationToken);
 
     Task<int> ReadGrindSizeAsync(CancellationToken cancellationToken);
 

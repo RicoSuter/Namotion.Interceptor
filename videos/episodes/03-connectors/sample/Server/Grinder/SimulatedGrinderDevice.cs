@@ -11,7 +11,7 @@ public sealed class SimulatedGrinderDevice : IGrinderDevice
     private readonly Channel<int> _knob = Channel.CreateUnbounded<int>();
     private int _grindSize = 6;
 
-    public Task ConnectAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task<IAsyncDisposable> ConnectAsync(CancellationToken cancellationToken) => Task.FromResult<IAsyncDisposable>(new Connection());
 
     public Task<int> ReadGrindSizeAsync(CancellationToken cancellationToken) => Task.FromResult(Volatile.Read(ref _grindSize));
 
@@ -26,6 +26,11 @@ public sealed class SimulatedGrinderDevice : IGrinderDevice
     {
         Volatile.Write(ref _grindSize, grindSize);
         _knob.Writer.TryWrite(grindSize);
+    }
+
+    private sealed class Connection : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     public async IAsyncEnumerable<int> WatchGrindSizeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
