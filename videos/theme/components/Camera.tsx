@@ -25,6 +25,17 @@ export class Camera extends Node {
     yield* all(this.scale(zoom, duration, moveEasing), this.position(local.scale(-zoom), duration, moveEasing));
   }
 
+  /**
+   * Centers a point given in the camera's content coordinates, the coordinates its children use (origin at
+   * the frame center), and zooms in on it. focusOn takes world coordinates instead, whose origin is the top
+   * left corner of the frame.
+   */
+  public *focusOnPoint(point: Vector2, options: FocusOptions = {}): ThreadGenerator {
+    const zoom = options.zoom ?? 1.4;
+    const duration = options.duration ?? durations.slow;
+    yield* all(this.scale(zoom, duration, moveEasing), this.position(point.scale(-zoom), duration, moveEasing));
+  }
+
   /** Returns to the full view. */
   public *reset(duration: number = durations.slow): ThreadGenerator {
     yield* all(this.scale(1, duration, moveEasing), this.position(0, duration, moveEasing));
