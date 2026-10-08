@@ -45,7 +45,8 @@ videos/
 │   ├── 00-intro/
 │   ├── 01-tracking/
 │   └── 02-opcua/
-└── output/                    # gitignored: audio cache, clips, contact sheets, MP4s
+├── public/generated/          # gitignored: audio cache, clips, terminal captures, timing.json
+└── output/                    # gitignored: MP4s, subtitles, contact sheets, review reports
 .claude/skills/learning-video/SKILL.md
 ```
 
@@ -56,15 +57,15 @@ Each episode folder contains:
 - `scenes/*.tsx`: Revideo scenes, with beat durations read from `timing.json`.
 - `diagrams/*.ts`: typed diagram definitions.
 - `demos/*.ts`: Playwright demo scripts.
-- `sample/`: .NET companion app with `// region` markers for code shown on screen.
+- `sample/`: .NET companion app with C# `#region` markers for code shown on screen.
 
 The .NET projects under `videos/` (`domain/` and each `sample/`) import `src/Directory.Build.props`, reference the libraries via `ProjectReference`, and are added to `src/Namotion.Interceptor.slnx` so CI builds them. A breaking API change then fails the build instead of silently invalidating a video.
 
 ## Pipeline
 
 ```
-script.yaml ──> tools/tts ──> output/audio/*.wav + timing.json
-sample/ + demos/ ──> tools/capture ──> output/clips/*.mp4 + output/terminal/*.txt
+script.yaml ──> tools/tts ──> public/generated/<episode>/audio/*.wav + timing.json
+sample/ + demos/ ──> tools/capture ──> public/generated/<episode>/clips/*.mp4 + terminal/*.txt
 scenes + theme + timing + code regions + clips ──> tools/render ──> output/<episode>.mp4 + .srt
 ```
 
@@ -73,7 +74,7 @@ scenes + theme + timing + code regions + clips ──> tools/render ──> outp
 - Audio is cached by the hash of text, voice and settings. Only changed lines are regenerated, which also keeps unchanged audio identical across renders.
 - `tools/tts/lexicon.yaml` rewrites terms before synthesis (for example `OPC UA` to "O P C U A", `kW` to "kilowatt"). Captions show the original text.
 - Narration avoids saying "Namotion". The intro may name the library; elsewhere the voice says "the library" or the feature name ("the tracking package"), and package and namespace identifiers stay on screen only, not read aloud, unless reading one is needed to follow along. Its lexicon pronunciation is set after listening to the intro draft.
-- Render presets: draft at 540p and 15 fps, final at 1080p and 30 fps. Every render also writes a contact sheet, one frame per beat in a PNG grid, and a report of actual duration per chapter.
+- Render presets: draft at 1080p and 15 fps, final at 1080p and 30 fps (the renderer ignores resolution scaling). Every render also writes a contact sheet, one frame per beat in a PNG grid, and a report of actual duration per chapter.
 
 ## Theme components
 
@@ -99,7 +100,7 @@ Prebuilt layouts: code with diagram, code with browser, full-screen diagram.
 Rules the skill checks at the storyboard gate:
 
 1. No bullet slides. The voice explains, the screen shows. On-screen text is limited to captions, titles and short labels.
-2. Something meaningful moves at least every 3 to 4 seconds. `timing.json` marks beats exceeding this stillness budget and the render report lists them.
+2. Something meaningful moves at least every 3 to 4 seconds. The render report runs ffmpeg freeze detection on the video and lists beats that stay still for 4 seconds or more.
 3. Show transformations instead of cuts: code morphs into its next version, a property flies from code into a diagram node, a node expands into the live UI.
 4. The camera moves continuously toward the current subject. Hard cuts only at chapter boundaries.
 5. Values on screen come from the running sample.
