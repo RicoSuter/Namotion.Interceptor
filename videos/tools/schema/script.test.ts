@@ -29,6 +29,23 @@ describe('parseScript', () => {
     expect(allBeats(script).map(beat => [beat.chapter, beat.id])).toEqual([['basics', 'hello'], ['basics', 'pause']]);
   });
 
+  it('WhenTempoIsSet_ThenKeepsItOtherwiseDefaults', () => {
+    // Act
+    const script = parseScript(validScript.replace('title: Smoke test\n', 'title: Smoke test\ntempo: 1.05\n'));
+
+    // Assert
+    expect(script.tempo).toBe(1.05);
+    expect(parseScript(validScript).tempo).toBe(1.1);
+  });
+
+  it('WhenTempoIsOutOfRange_ThenThrows', () => {
+    // Arrange
+    const yaml = validScript.replace('title: Smoke test\n', 'title: Smoke test\ntempo: 3\n');
+
+    // Act & Assert
+    expect(() => parseScript(yaml)).toThrow(/Invalid script.yaml/);
+  });
+
   it('WhenBeatHasNeitherNarrationNorHold_ThenThrows', () => {
     // Arrange
     const yaml = validScript.replace('        hold: 1.5\n', '');

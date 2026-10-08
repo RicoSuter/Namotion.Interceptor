@@ -23,3 +23,13 @@ export function probeVideoDuration(file: string): number {
   }
   return duration;
 }
+
+/** Returns the duration in seconds of a media file, for example a WAV file. */
+export function probeDuration(file: string): number {
+  const result = spawnSync(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], {encoding: 'utf8'});
+  const duration = Number(result.stdout.trim());
+  if (result.status !== 0 || !Number.isFinite(duration)) {
+    throw new Error(`ffprobe could not read the duration of ${file}:\n${result.stderr}`);
+  }
+  return duration;
+}

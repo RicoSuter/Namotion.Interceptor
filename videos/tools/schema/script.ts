@@ -17,6 +17,9 @@ export const componentNames = [
   'Camera',
 ] as const;
 
+/** Narration speed when script.yaml sets no tempo. */
+export const defaultTempo = 1.1;
+
 const kebabCase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const identifier = z.string().regex(kebabCase, 'ids are kebab-case');
 
@@ -45,6 +48,8 @@ export const scriptSchema = z.object({
   episode: identifier,
   title: z.string().trim().min(1),
   voice: z.string().min(1).default('default'),
+  /** Speech speed factor applied to the synthesized narration, pitch preserved. */
+  tempo: z.number().min(0.5).max(2).default(defaultTempo),
   chapters: z.array(chapterSchema).min(1),
 });
 

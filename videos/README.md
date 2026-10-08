@@ -18,10 +18,12 @@ npx playwright install chromium
 ```bash
 npm run validate -- <episode>   # schema, code regions, demo and terminal references
 npm run capture -- <episode>    # browser clips and terminal output (starts the sample app)
-npm run tts -- <episode>        # narration audio (cached) and beat timing
+npm run tts -- <episode>        # narration audio (cached), sped up to the script's tempo, and beat timing
 npm run render -- <episode>     # draft at 15 fps, plus contact sheet and review report
 npm run render -- <episode> --final
 ```
+
+Narration plays at `tempo` 1.1 by default (set `tempo:` in `script.yaml` to change it per episode). TTS caches the synthesized speech and a pitch-preserving copy per tempo (ffmpeg `atempo`), so a tempo change does not synthesize again.
 
 Output goes to `output/`: the MP4 with the narration as a soft subtitle track (English, off by default; nothing is burned into the picture), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
 

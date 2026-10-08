@@ -81,6 +81,7 @@ Copy `.claude/skills/learning-video/templates/outline.md` to `videos/episodes/<n
 Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder and replace its content. The schema is `videos/tools/schema/script.ts`:
 
 - `episode` (the folder name), `title`, `voice` (`default`, or a reference wav path relative to `videos/`), `chapters`.
+- `tempo` (optional, default 1.1): speech speed factor between 0.5 and 2. TTS synthesizes each line once at the voice's natural pace and caches it, then writes a pitch-preserving copy at this tempo (ffmpeg `atempo`, cached under a key that includes the tempo); beat timing uses the adjusted durations. Changing the tempo re-runs only that fast step.
 - Chapter: `id` (kebab-case), `title`, `beats`.
 - Beat:
   - `id`: kebab-case, unique in the episode. Prefix with the chapter (`setup-context`).
@@ -95,7 +96,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 
 - Spoken English: short sentences, one idea per beat, active voice, "you" for the viewer.
 - 8 to 25 words per beat (about 3 to 10 seconds). Split longer thoughts into several beats so the picture can change with them.
-- Budget about 200 words per minute, the measured pace of the default voice (the smoke episode measured about 200, the connectors episode about 210): a 10 minute episode is about 1800 to 2000 words. Per chapter, words = budget seconds x 3.3.
+- Budget about 210 words per minute of finished video, the measured pace of the default voice at the default tempo 1.1 including the pauses between beats (the connectors episode: 1881 words in 8.9 minutes): a 10 minute episode is about 2000 to 2100 words. Per chapter, words = budget seconds x 3.5.
 - Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); subtitles show the narration text as written. Better: let the code card show the identifier and narrate what it does.
 - Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, subtitles keep the original.
 - Open the first chapter with a hook: the problem and a glimpse of the result. End with a short recap of what the viewer can now do, plus optional pointers.
@@ -116,7 +117,7 @@ Go through every beat and fix the script until all hold:
 Estimate the duration per chapter. `npm run validate` also checks code files, regions, demos and terminal captures, which do not exist yet at this gate, so use this schema-only estimate now:
 
 ```bash
-npx tsx -e "import {loadScript} from './tools/schema/script.ts'; const script = loadScript('episodes/<episode>'); let total = 0; for (const chapter of script.chapters) { const words = chapter.beats.reduce((sum, beat) => sum + (beat.narration?.split(/\s+/).length ?? 0), 0); const seconds = words / 3.3 + chapter.beats.reduce((sum, beat) => sum + 0.4 + (beat.hold ?? 0), 0); total += seconds; console.log(chapter.id.padEnd(24), String(words).padStart(5), 'words', seconds.toFixed(0).padStart(5), 's'); } console.log('total'.padEnd(36), (total / 60).toFixed(1), 'min');"
+npx tsx -e "import {loadScript} from './tools/schema/script.ts'; const script = loadScript('episodes/<episode>'); let total = 0; for (const chapter of script.chapters) { const words = chapter.beats.reduce((sum, beat) => sum + (beat.narration?.split(/\s+/).length ?? 0), 0); const seconds = words / (3.5 * script.tempo) + chapter.beats.reduce((sum, beat) => sum + 0.4 + (beat.hold ?? 0), 0); total += seconds; console.log(chapter.id.padEnd(24), String(words).padStart(5), 'words', seconds.toFixed(0).padStart(5), 's'); } console.log('total'.padEnd(36), (total / 60).toFixed(1), 'min');"
 ```
 
 A schema error fails this command with the exact path. A YAML value that starts with a double quote must be quoted as a whole, so start a `visual` with a word (`The message "change" arcs ...`). Add `# Status: awaiting approval` as the first line of `script.yaml`.
@@ -297,7 +298,7 @@ Run in order from `videos/`:
 | `npm run render -- <episode>` | draft at 15 fps: `output/<episode>-draft.mp4` with the narration as a soft subtitle track (`mov_text`, English, off by default), the same subtitles as `output/<episode>.srt`, `output/<episode>-contact.png`, `output/<episode>-review.md`, `output/<episode>-frames/` |
 | `npm run render -- <episode> --final` | `output/<episode>-final.mp4` at 30 fps, plus the same review files |
 
-- Speech synthesis takes 1 to 3 s per 1 s of speech on the first run, depending on the GPU (about 10 minutes for a 10 minute episode on an RTX 3080). Audio is cached by text, voice and settings, so later runs only synthesize changed lines. TTS reads only the script, so it can run as soon as the script exists.
+- Speech synthesis takes 1 to 3 s per 1 s of speech on the first run, depending on the GPU (about 10 minutes for a 10 minute episode on an RTX 3080). Audio is cached by text, voice and settings, so later runs only synthesize changed lines; the tempo copies are cached separately, so a tempo change takes seconds. TTS reads only the script, so it can run as soon as the script exists.
 - Capture, TTS and render can each take longer than a 10 minute command timeout. Run them in the background with output to a log file and poll the log.
 - After TTS compare the chapter seconds with the outline budgets. If a chapter is short, add substance or let a demo breathe with `hold`, not filler words.
 - Render logs `Beat '<id>': an animation ran N s past the end of the beat` when an animation outlives its beat. Fix every one.

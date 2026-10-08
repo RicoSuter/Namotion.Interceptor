@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {parseScript} from './schema/script';
-import {buildNarration, buildTiming, narrationPadding, toSrt} from './narration';
+import {buildNarration, buildTiming, narrationPadding, tempoKey, toSrt} from './narration';
 
 const script = parseScript(`
 episode: smoke
@@ -50,22 +50,68 @@ describe('buildNarration', () => {
   });
 });
 
+describe('tempoKey', () => {
+  it('WhenTempoIsOne_ThenKeyIsTheSynthesisKey', () => {
+    // Act & Assert
+    expect(tempoKey('0123456789abcdef', 1)).toBe('0123456789abcdef');
+  });
+
+  it('WhenTempoDiffers_ThenKeyNamesTheTempo', () => {
+    // Act
+    const key = tempoKey('0123456789abcdef', 1.1);
+
+    // Assert
+    expect(key).toBe('0123456789abcdef-x1.1');
+    expect(tempoKey('0123456789abcdef', 1.15)).not.toBe(key);
+  });
+});
+
+describe('buildNarration tempo', () => {
+  it('WhenTempoIsDefault_ThenAudioKeysUseTheDefaultTempo', () => {
+    // Act
+    const items = buildNarration(script, lexicon);
+
+    // Assert
+    expect(script.tempo).toBe(1.1);
+    expect(items[0].audioKey).toBe(`${items[0].key}-x1.1`);
+  });
+
+  it('WhenTempoChanges_ThenSynthesisKeysStayAndAudioKeysChange', () => {
+    // Act
+    const items = buildNarration(script, lexicon);
+    const faster = buildNarration({...script, tempo: 1.2}, lexicon);
+
+    // Assert
+    expect(faster.map(item => item.key)).toEqual(items.map(item => item.key));
+    expect(faster[0].audioKey).toBe(`${items[0].key}-x1.2`);
+  });
+});
+
 describe('buildTiming', () => {
   it('WhenDurationsAreKnown_ThenBeatsAreLaidOutBackToBack', () => {
     // Arrange
     const items = buildNarration(script, lexicon);
-    const durations = {[items[0].key]: 3, [items[1].key]: 1};
+    const durations = {[items[0].audioKey]: 3, [items[1].audioKey]: 1};
 
     // Act
     const timing = buildTiming(script, items, durations);
 
     // Assert
     expect(timing.beats).toEqual([
-      {id: 'first', chapter: 'one', start: 0, duration: 3 + narrationPadding, audio: `/generated/smoke/audio/${items[0].key}.wav`, caption: 'Heat to 93 °C.'},
+      {id: 'first', chapter: 'one', start: 0, duration: 3 + narrationPadding, audio: `/generated/smoke/audio/${items[0].audioKey}.wav`, caption: 'Heat to 93 °C.'},
       {id: 'second', chapter: 'one', start: 3 + narrationPadding, duration: 2, audio: null, caption: null},
-      {id: 'third', chapter: 'two', start: 5 + narrationPadding, duration: 1 + narrationPadding + 0.5, audio: `/generated/smoke/audio/${items[1].key}.wav`, caption: 'Done.'},
+      {id: 'third', chapter: 'two', start: 5 + narrationPadding, duration: 1 + narrationPadding + 0.5, audio: `/generated/smoke/audio/${items[1].audioKey}.wav`, caption: 'Done.'},
     ]);
     expect(timing.totalDuration).toBeCloseTo(6.5 + 2 * narrationPadding);
+  });
+
+  it('WhenOnlyTheSynthesizedDurationIsKnown_ThenThrows', () => {
+    // Arrange
+    const items = buildNarration(script, lexicon);
+    const durations = {[items[0].key]: 3, [items[1].key]: 1};
+
+    // Act & Assert
+    expect(() => buildTiming(script, items, durations)).toThrow(/No audio duration for beat 'first'/);
   });
 
   it('WhenDurationIsMissing_ThenThrows', () => {

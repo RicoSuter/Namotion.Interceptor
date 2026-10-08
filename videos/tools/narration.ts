@@ -11,8 +11,19 @@ export const narrationPadding = 0.4;
 
 export interface NarrationItem {
   beatId: string;
+  /** Cache key of the synthesized speech, independent of the tempo. */
   key: string;
+  /** Cache key of the tempo-adjusted audio the video plays. */
+  audioKey: string;
   text: string;
+}
+
+/**
+ * Key of the tempo-adjusted copy of synthesized audio. Tempo 1 plays the synthesized file itself; any other
+ * tempo gets its own file, so changing the tempo never synthesizes the speech again.
+ */
+export function tempoKey(key: string, tempo: number): string {
+  return tempo === 1 ? key : `${key}-x${tempo}`;
 }
 
 export function buildNarration(script: Script, lexicon: LexiconEntry[]): NarrationItem[] {
@@ -24,10 +35,11 @@ export function buildNarration(script: Script, lexicon: LexiconEntry[]): Narrati
         .update(JSON.stringify({text, voice: script.voice, engine: engineVersion}))
         .digest('hex')
         .slice(0, 16);
-      return {beatId: beat.id, key, text};
+      return {beatId: beat.id, key, audioKey: tempoKey(key, script.tempo), text};
     });
 }
 
+/** Lays the beats out back to back; durations are the seconds of each item's tempo-adjusted audio, by audio key. */
 export function buildTiming(script: Script, items: NarrationItem[], durations: Record<string, number>): Timing {
   const itemsByBeat = new Map(items.map(item => [item.beatId, item]));
   const beats: TimingBeat[] = [];
@@ -36,9 +48,9 @@ export function buildTiming(script: Script, items: NarrationItem[], durations: R
     const item = itemsByBeat.get(beat.id);
     let duration = beat.hold ?? 0;
     if (item) {
-      const audioDuration = durations[item.key];
+      const audioDuration = durations[item.audioKey];
       if (audioDuration === undefined) {
-        throw new Error(`No audio duration for beat '${beat.id}' (key ${item.key})`);
+        throw new Error(`No audio duration for beat '${beat.id}' (key ${item.audioKey})`);
       }
       duration += audioDuration + narrationPadding;
     }
@@ -47,7 +59,7 @@ export function buildTiming(script: Script, items: NarrationItem[], durations: R
       chapter: beat.chapter,
       start,
       duration,
-      audio: item ? `/generated/${script.episode}/audio/${item.key}.wav` : null,
+      audio: item ? `/generated/${script.episode}/audio/${item.audioKey}.wav` : null,
       caption: beat.narration ?? null,
     });
     start += duration;
