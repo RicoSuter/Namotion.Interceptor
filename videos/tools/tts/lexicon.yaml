@@ -1,0 +1,10 @@
+# Spoken forms for terms the voice mispronounces. Captions keep the original text.
+- {match: OPC UA, say: O P C U A}
+- {match: MQTT, say: M Q T T}
+- {match: GraphQL, say: Graph Q L}
+- {match: DI, say: D I}
+- {match: API, say: A P I}
+- {match: JSON, say: jason}
+- {match: kW, say: kilowatt}
+- {match: °C, say: degrees}
+- {match: ml, say: milliliters}
