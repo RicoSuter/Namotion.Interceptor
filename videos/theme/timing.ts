@@ -1,6 +1,8 @@
 export interface TimingBeat {
   id: string;
   chapter: string;
+  /** Title of the chapter from script.yaml, shown in the chapter header. */
+  chapterTitle: string;
   start: number;
   duration: number;
   audio: string | null;

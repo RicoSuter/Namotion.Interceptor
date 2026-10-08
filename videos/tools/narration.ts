@@ -57,6 +57,7 @@ export function buildTiming(script: Script, items: NarrationItem[], durations: R
     beats.push({
       id: beat.id,
       chapter: beat.chapter,
+      chapterTitle: beat.chapterTitle,
       start,
       duration,
       audio: item ? `/generated/${script.episode}/audio/${item.audioKey}.wav` : null,

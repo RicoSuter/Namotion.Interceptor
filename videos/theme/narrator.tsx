@@ -1,13 +1,20 @@
 import {Audio, type View2D} from '@revideo/2d';
 import {useLogger, useThread, waitFor, type ThreadGenerator} from '@revideo/core';
+import {ChapterHeader} from './components/ChapterHeader';
 import {findBeat, type Timing} from './timing';
 
 /**
  * Plays each beat's narration and keeps the beat on screen for its timed duration. The narration text is not
- * drawn: render muxes it into the video as a soft subtitle track.
+ * drawn: render muxes it into the video as a soft subtitle track. Adds the chapter header to the view and keeps
+ * its title on the current beat's chapter.
  */
 export class Narrator {
-  public constructor(private readonly view: View2D, private readonly timing: Timing) {}
+  private readonly header = new ChapterHeader();
+  private started = false;
+
+  public constructor(private readonly view: View2D, private readonly timing: Timing) {
+    view.add(this.header);
+  }
 
   /** Seconds the beat stays on screen. */
   public duration(id: string): number {
@@ -27,6 +34,12 @@ export class Narrator {
       // Resolves within the frame; reading media properties earlier logs an asynchronous property warning.
       yield audio;
     }
+    if (!this.started) {
+      this.started = true;
+      yield this.header.appear();
+    }
+    // Runs beside the beat without a deadline: a title switch near the end of a beat may finish in the next one.
+    yield this.header.show(beat.chapterTitle);
     const deadline = useThread().time() + beat.duration;
     for (const animation of animations) {
       yield watchDeadline(id, animation, deadline);

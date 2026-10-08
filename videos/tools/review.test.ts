@@ -6,9 +6,9 @@ const timing: Timing = {
   episode: 'smoke',
   totalDuration: 12,
   beats: [
-    {id: 'a', chapter: 'one', start: 0, duration: 4, audio: null, caption: 'A'},
-    {id: 'b', chapter: 'one', start: 4, duration: 6, audio: null, caption: 'B'},
-    {id: 'c', chapter: 'two', start: 10, duration: 2, audio: null, caption: null},
+    {id: 'a', chapter: 'one', chapterTitle: 'One', start: 0, duration: 4, audio: null, caption: 'A'},
+    {id: 'b', chapter: 'one', chapterTitle: 'One', start: 4, duration: 6, audio: null, caption: 'B'},
+    {id: 'c', chapter: 'two', chapterTitle: 'Two', start: 10, duration: 2, audio: null, caption: null},
   ],
 };
 

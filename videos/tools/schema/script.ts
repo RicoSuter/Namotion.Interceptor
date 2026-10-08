@@ -55,7 +55,7 @@ export const scriptSchema = z.object({
 
 export type Script = z.infer<typeof scriptSchema>;
 export type Beat = Script['chapters'][number]['beats'][number];
-export type ChapterBeat = Beat & {chapter: string};
+export type ChapterBeat = Beat & {chapter: string; chapterTitle: string};
 
 export function parseScript(yamlText: string): Script {
   const result = scriptSchema.safeParse(parse(yamlText));
@@ -77,5 +77,5 @@ export function loadScript(episodeDirectory: string): Script {
 }
 
 export function allBeats(script: Script): ChapterBeat[] {
-  return script.chapters.flatMap(chapter => chapter.beats.map(beat => ({...beat, chapter: chapter.id})));
+  return script.chapters.flatMap(chapter => chapter.beats.map(beat => ({...beat, chapter: chapter.id, chapterTitle: chapter.title})));
 }

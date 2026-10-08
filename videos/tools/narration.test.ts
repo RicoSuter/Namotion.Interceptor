@@ -98,9 +98,9 @@ describe('buildTiming', () => {
 
     // Assert
     expect(timing.beats).toEqual([
-      {id: 'first', chapter: 'one', start: 0, duration: 3 + narrationPadding, audio: `/generated/smoke/audio/${items[0].audioKey}.wav`, caption: 'Heat to 93 °C.'},
-      {id: 'second', chapter: 'one', start: 3 + narrationPadding, duration: 2, audio: null, caption: null},
-      {id: 'third', chapter: 'two', start: 5 + narrationPadding, duration: 1 + narrationPadding + 0.5, audio: `/generated/smoke/audio/${items[1].audioKey}.wav`, caption: 'Done.'},
+      {id: 'first', chapter: 'one', chapterTitle: 'One', start: 0, duration: 3 + narrationPadding, audio: `/generated/smoke/audio/${items[0].audioKey}.wav`, caption: 'Heat to 93 °C.'},
+      {id: 'second', chapter: 'one', chapterTitle: 'One', start: 3 + narrationPadding, duration: 2, audio: null, caption: null},
+      {id: 'third', chapter: 'two', chapterTitle: 'Two', start: 5 + narrationPadding, duration: 1 + narrationPadding + 0.5, audio: `/generated/smoke/audio/${items[1].audioKey}.wav`, caption: 'Done.'},
     ]);
     expect(timing.totalDuration).toBeCloseTo(6.5 + 2 * narrationPadding);
   });
@@ -130,9 +130,9 @@ describe('toSrt', () => {
       episode: 'smoke',
       totalDuration: 5,
       beats: [
-        {id: 'a', chapter: 'one', start: 0, duration: 1.25, audio: null, caption: 'Hello.'},
-        {id: 'b', chapter: 'one', start: 1.25, duration: 2, audio: null, caption: null},
-        {id: 'c', chapter: 'one', start: 3.25, duration: 61, audio: null, caption: 'Later.'},
+        {id: 'a', chapter: 'one', chapterTitle: 'One', start: 0, duration: 1.25, audio: null, caption: 'Hello.'},
+        {id: 'b', chapter: 'one', chapterTitle: 'One', start: 1.25, duration: 2, audio: null, caption: null},
+        {id: 'c', chapter: 'one', chapterTitle: 'One', start: 3.25, duration: 61, audio: null, caption: 'Later.'},
       ],
     };
 

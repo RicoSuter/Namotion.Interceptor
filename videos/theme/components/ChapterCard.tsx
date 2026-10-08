@@ -2,6 +2,7 @@ import {Circle, Gradient, Node, Rect, Txt, blur, type NodeProps} from '@revideo/
 import {all, createSignal, sequence, useThread, type ThreadGenerator} from '@revideo/core';
 import {palette, type AccentColor} from '../palette';
 import {enterEasing, fonts, fontSize, moveEasing} from '../style';
+import {ChapterHeader} from './ChapterHeader';
 
 export interface ChapterCardProps extends NodeProps {
   title: string;
@@ -13,7 +14,10 @@ export interface ChapterCardProps extends NodeProps {
 
 const titleLetterSpacing = -3;
 
-/** Full-screen chapter title over a slowly drifting gradient wash; letters rise in with a stagger. */
+/**
+ * Full-screen chapter title over a slowly drifting gradient wash; letters rise in with a stagger. Covers the
+ * chapter header from enter until it has left.
+ */
 export class ChapterCard extends Node {
   private readonly letters: Txt[] = [];
   private readonly kickerText: Txt | null = null;
@@ -66,6 +70,7 @@ export class ChapterCard extends Node {
   }
 
   public *enter(): ThreadGenerator {
+    ChapterHeader.of(this)?.coverage(1);
     const titleY = this.kickerText ? 30 : 0;
     yield* all(
       this.wash(1, 1.4, moveEasing),
@@ -84,7 +89,11 @@ export class ChapterCard extends Node {
       this.content.y(-40, 0.6, moveEasing),
       this.opacity(0, 0.7, moveEasing),
     );
+    const header = ChapterHeader.of(this);
     this.remove();
+    if (header) {
+      yield* header.coverage(0, 0.6, enterEasing);
+    }
   }
 }
 
