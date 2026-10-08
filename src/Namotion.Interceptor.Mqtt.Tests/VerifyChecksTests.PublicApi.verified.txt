@@ -167,13 +167,15 @@ namespace Namotion.Interceptor.Mqtt.Server
     {
         public int ConnectedClientCount { get; }
     }
-    public class MqttSubjectServer : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.IFaultInjectable, System.IAsyncDisposable
+    public class MqttSubjectServer : Namotion.Interceptor.Connectors.SubjectServerBase, Namotion.Interceptor.Connectors.IFaultInjectable, System.IAsyncDisposable
     {
         public MqttSubjectServer(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Mqtt.Server.MqttServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger<Namotion.Interceptor.Mqtt.Server.MqttSubjectServer> logger) { }
         [get: System.Runtime.CompilerServices.PreserveBaseOverrides]
         public virtual Namotion.Interceptor.Mqtt.Server.MqttServerDiagnostics Diagnostics { get; }
         public override Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+        protected override Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateChangeQueueProcessor(System.Action<long> dropHandler) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        protected override System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected override System.Threading.Tasks.Task<System.IAsyncDisposable?> InitializeAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected override System.Threading.Tasks.Task<System.IAsyncDisposable?> StartServerAsync(Namotion.Interceptor.Connectors.ConnectorRunAttempt attempt, System.Threading.CancellationToken stoppingToken) { }
     }
 }
