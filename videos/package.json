@@ -8,7 +8,7 @@
     "validate": "tsx tools/validate.ts",
     "tts": "tsx tools/tts.ts",
     "capture": "tsx tools/capture/capture.ts",
-    "render": "tsx tools/render.ts"
+    "render": "DISABLE_TELEMETRY=true tsx tools/render.ts"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "1.1.0",

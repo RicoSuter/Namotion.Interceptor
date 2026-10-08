@@ -1,0 +1,20 @@
+episode: smoke
+title: Pipeline smoke test
+chapters:
+  - id: boiler
+    title: The boiler
+    beats:
+      - id: boiler-class
+        narration: A boiler is a plain class with partial properties.
+        visual: The Boiler class types into a dark code card.
+        components: [CodeCard]
+        code: {file: ../../domain/Coffee/Boiler.cs, region: Boiler}
+      - id: boiler-derived
+        narration: Is hot is derived, so it updates on its own whenever the temperature changes.
+        visual: The IsHot lines are selected, everything else dims.
+        components: [CodeCard]
+        code: {file: ../../domain/Coffee/Boiler.cs, region: Boiler}
+      - id: boiler-pause
+        hold: 1
+        visual: The card holds before the end.
+        components: [CodeCard]
