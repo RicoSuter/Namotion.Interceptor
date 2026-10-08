@@ -55,4 +55,12 @@ describe('assignFreezes', () => {
     // Assert
     expect(stillBeats).toEqual([{id: 'b', start: 4.5, end: 9.5}]);
   });
+
+  it('WhenFreezeOnlyTouchesBeatEdge_ThenBeatIsNotReported', () => {
+    // Act
+    const stillBeats = assignFreezes([{start: 9.95, end: 12}], timing);
+
+    // Assert
+    expect(stillBeats).toEqual([{id: 'c', start: 9.95, end: 12}]);
+  });
 });

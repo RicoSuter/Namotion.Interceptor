@@ -1,8 +1,9 @@
-import {existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {basename, join} from 'node:path';
 import {renderVideo} from '@revideo/renderer';
 import type {Timing} from '../theme/timing';
 import {validateEpisode} from './episode';
+import {probeVideoDuration, runFfmpeg} from './ffmpeg';
 import {toSrt} from './narration';
 import {episodeArgument, episodePaths, outputDirectory, videosRoot} from './paths';
 import {writeReview} from './review';
@@ -40,6 +41,11 @@ const videoFile = await renderVideo({
 
 writeFileSync(join(outputDirectory, `${paths.episode}.srt`), toSrt(timing));
 const absoluteVideoFile = join(videosRoot, videoFile);
+// The renderer ends the audio track with the last clip; pad it so audio and video streams have the same length.
+// The bundled ffmpeg ignores -shortest with apad and copied video, so the length is set explicitly.
+const paddedVideoFile = join(outputDirectory, `${paths.episode}-${preset}.padded.mp4`);
+runFfmpeg(['-i', absoluteVideoFile, '-c:v', 'copy', '-af', 'apad', '-t', probeVideoDuration(absoluteVideoFile).toString(), paddedVideoFile]);
+renameSync(paddedVideoFile, absoluteVideoFile);
 writeReview(absoluteVideoFile, timing, outputDirectory);
 console.log(`Rendered ${absoluteVideoFile}`);
 console.log(`Review ${join(outputDirectory, `${paths.episode}-review.md`)} and ${join(outputDirectory, `${paths.episode}-contact.png`)}`);

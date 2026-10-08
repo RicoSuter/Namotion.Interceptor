@@ -13,3 +13,13 @@ export function runFfmpeg(args: string[]): string {
   }
   return result.stderr;
 }
+
+/** Returns the duration in seconds of the first video stream. */
+export function probeVideoDuration(file: string): number {
+  const result = spawnSync(ffprobePath, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration', '-of', 'csv=p=0', file], {encoding: 'utf8'});
+  const duration = Number(result.stdout.trim());
+  if (result.status !== 0 || !Number.isFinite(duration)) {
+    throw new Error(`ffprobe could not read the video duration of ${file}:\n${result.stderr}`);
+  }
+  return duration;
+}

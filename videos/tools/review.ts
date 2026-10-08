@@ -6,6 +6,9 @@ import {runFfmpeg} from './ffmpeg';
 /** Seconds without visible motion before a beat is flagged. */
 export const stillnessBudget = 4;
 
+/** Seconds a freeze must reach into a beat before the beat is reported, so frame-edge contact does not count. */
+const boundaryTolerance = 0.1;
+
 const columns = 4;
 const thumbnailWidth = 480;
 const thumbnailHeight = 270;
@@ -40,7 +43,7 @@ export function parseFreezes(log: string, videoDuration: number): Interval[] {
 export function assignFreezes(freezes: Interval[], timing: Timing): Array<{id: string} & Interval> {
   return freezes.flatMap(freeze =>
     timing.beats
-      .filter(beat => beat.start < freeze.end && beat.start + beat.duration > freeze.start)
+      .filter(beat => beat.start < freeze.end - boundaryTolerance && beat.start + beat.duration > freeze.start + boundaryTolerance)
       .map(beat => ({id: beat.id, start: freeze.start, end: freeze.end})),
   );
 }
