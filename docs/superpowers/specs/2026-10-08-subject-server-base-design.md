@@ -26,7 +26,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
 
     protected abstract ChangeQueueProcessor CreateChangeQueueProcessor(Action<long> dropHandler);
 
-    protected abstract Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt);
+    protected abstract Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken);
 
     protected virtual TimeSpan GetRestartDelay(int consecutiveFailures);
 
@@ -36,7 +36,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
 
 - `InitializeAsync`: once per run, around the restart loop. For state that outlives a restart. Must not accept clients. Its result is disposed after the loop ends. A throw ends the connector (no retry); the base records it through the existing `ExecuteAsync` error path. Default returns `null`.
 - `CreateChangeQueueProcessor`: called by the base only, at the start of each attempt and before `StartServerAsync`. The `dropHandler` is the outbound drop reporter and must be passed to the processor. A factory rather than abstract filter/write/rule members, because the WebSocket server builds its processor through `WebSocketSubjectHandler` (the handler is the echo source, shared with embedded mode), and each server's existing factory is pinned by delivery-rule tests.
-- `StartServerAsync`: per attempt, called once the processor is subscribed; returns once clients can connect. Receives the attempt so a server can tie request handling to `attempt.Token`, read `WasForceKilled` in its teardown, and call `attempt.CancelAsync()` to end the attempt. Disposing the result tears the attempt down. If it throws, the server releases whatever it acquired before rethrowing; the base has nothing to dispose.
+- `StartServerAsync`: per attempt, called once the processor is subscribed; returns once clients can connect. Receives the attempt and the stopping token so a server can tell a stop from the end of an attempt, tie request handling to `attempt.Token`, read `WasForceKilled` in its teardown, and call `attempt.CancelAsync()` to end the attempt. Disposing the result tears the attempt down. If it throws, the server releases whatever it acquired before rethrowing; the base has nothing to dispose.
 - `GetRestartDelay`: delay after a failed attempt, `consecutiveFailures` starting at 1. Default is exponential `min(2^(n-1), 30)` seconds plus 0 to 2 s random jitter. Virtual for external servers; no built-in server overrides it.
 - `ConsecutiveFailures`: failures since the last successful start. Exposed so a server's diagnostics can report it (`OpcUaServerDiagnostics.ConsecutiveFailures`).
 
@@ -56,7 +56,7 @@ public abstract class SubjectServerBase : SubjectConnectorBase
 4. Outcome of the attempt, decided inside the attempt body (filters must read `WasForceKilled` before the attempt is disposed):
    - Stopping token cancelled: return without reporting, regardless of the exception type, because a stop can tear a server down with arbitrary exceptions.
    - Force-killed: log a warning, restart without delay, no error reported.
-   - Any other exception, or `ProcessAsync` completing while neither stopping nor killed: increment `ConsecutiveFailures`, `Metrics.ReportError`, log an error, restart after `GetRestartDelay(ConsecutiveFailures)`. A completion without exception is reported as an `InvalidOperationException` wrapping any captured cancellation.
+   - Any other exception, or `ProcessAsync` completing while neither stopping nor killed: increment `ConsecutiveFailures`, `Metrics.ReportError`, log an error, restart after `GetRestartDelay(ConsecutiveFailures)`. A completion without exception is reported as an `InvalidOperationException`; any other exception after a force-kill counts as the kill.
 5. The restart delay runs after `RunAttemptAsync` returns, so the teardown has freed the port. A stop during the delay leaves the loop normally.
 
 ## Server migration

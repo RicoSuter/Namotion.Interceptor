@@ -1,5 +1,7 @@
 # SubjectServerBase Implementation Plan
 
+> **Note:** Task 1 is implemented; its code block is superseded by the committed `SubjectServerBase.cs` (yield between attempts, single liveness `finally`, `StartServerAsync(ConnectorRunAttempt, CancellationToken)`). Later tasks use that signature.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a `SubjectServerBase` template that subscribes to property changes before each server attempt accepts clients, and migrate the OPC UA, MQTT and WebSocket servers onto it.
@@ -386,7 +388,7 @@ public class SubjectServerBaseTests
             return processor;
         }
 
-        protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt)
+        protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
         {
             var attemptNumber = Interlocked.Increment(ref _startCount);
             if (OnStart is not null)
@@ -723,7 +725,7 @@ Replace the whole `protected override async Task RunAsync(CancellationToken stop
         _handler.CreateChangeQueueProcessor(_logger, dropHandler);
 
     /// <inheritdoc />
-    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt)
+    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
         var attemptToken = attempt.Token;
         Task? heartbeatTask = null;
@@ -997,7 +999,7 @@ Replace the methods `RunAsync`, `SubscribeToSubjectDetaching` and `ExecuteServer
     }
 
     /// <inheritdoc />
-    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt)
+    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
         var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
@@ -1128,13 +1130,6 @@ Change the constructor's base call to:
         : base(new ConnectorMetrics(), logger)
 ```
 
-Add a field below `_currentClientCounter`:
-
-```csharp
-    // Set once per run, so an attempt's teardown can leave the broker running for the run's own cleanup.
-    private CancellationToken _stoppingToken;
-```
-
 - [ ] **Step 3: Replace `RunAsync` with the hooks**
 
 Replace the whole `protected override async Task RunAsync(CancellationToken stoppingToken)` method with:
@@ -1143,8 +1138,6 @@ Replace the whole `protected override async Task RunAsync(CancellationToken stop
     /// <inheritdoc />
     protected override Task<IAsyncDisposable?> InitializeAsync(CancellationToken stoppingToken)
     {
-        _stoppingToken = stoppingToken;
-
         var optionsBuilder = new MqttServerOptionsBuilder()
             .WithDefaultEndpoint()
             .WithDefaultEndpointPort(_configuration.BrokerPort)
@@ -1207,7 +1200,7 @@ Replace the whole `protected override async Task RunAsync(CancellationToken stop
         CreateOutboundProcessor(dropHandler);
 
     /// <inheritdoc />
-    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt)
+    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
         var server = _mqttServer ?? throw new InvalidOperationException("The broker is created by InitializeAsync.");
 
@@ -1240,7 +1233,7 @@ Replace the whole `protected override async Task RunAsync(CancellationToken stop
         return new AsyncTeardown(async () =>
         {
             // On a stop the run's cleanup stops the broker, after the initial-state publishes have drained.
-            if (!_stoppingToken.IsCancellationRequested)
+            if (!stoppingToken.IsCancellationRequested)
             {
                 await server.StopAsync().ConfigureAwait(false);
             }
@@ -1432,7 +1425,7 @@ public sealed class MySubjectServer : SubjectServerBase
             ChangeDeliveryRule.SourceValuesAreSettled,
             bufferTime: null, maxQueueDepth: null, logger: _logger, dropHandler: dropHandler);
 
-    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt)
+    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
         var listener = await MyListener.StartAsync(_port, attempt.Token);
         return listener; // Disposing it stops accepting clients.
