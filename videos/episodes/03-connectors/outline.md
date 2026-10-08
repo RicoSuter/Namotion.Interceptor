@@ -13,41 +13,41 @@ After watching, the viewer can tell a source from a server, wire a WebSocket ser
 
 ## Chapters
 
-Ranked by importance. Budgets total the target length.
+Ranked by importance. Budgets total the target length; they were set after measuring the voice at about 210 words per minute.
 
 | # | Chapter | Budget | The viewer learns |
 |---|---|---|---|
-| 1 | Hook | 0:40 | a model in one process, mirrored and written from another |
-| 2 | Sources and servers | 1:40 | data ownership decides the role; the single-owner rule |
-| 3 | Data flow | 1:40 | inbound through the property writer, outbound local first through the change queue |
-| 4 | Live sample | 2:40 | embedded WebSocket handler and client source; a brew on the client runs on the server |
+| 1 | Hook | 0:30 | a model in one process, mirrored and written from another |
+| 2 | Sources and servers | 1:30 | data ownership decides the role; the single-owner rule |
+| 3 | Data flow | 1:35 | inbound through the property writer, outbound local first through the change queue |
+| 4 | Live sample | 2:35 | embedded WebSocket handler and client source; a brew on the client runs on the server |
 | 5 | Staying in sync | 1:50 | buffer, load, replay; write retry queue; local write wins; batching; source transactions |
-| 6 | Your own source | 1:40 | `SubjectSourceBase` and its three hooks, ownership, registration |
-| 7 | Recap | 0:30 | what they can do now, pointers to the protocol pages |
-| | **Total** | **10:40** | |
+| 6 | Your own source | 1:30 | `SubjectSourceBase` and its three hooks, ownership, registration |
+| 7 | Recap | 0:25 | what they can do now, pointers to the protocol pages |
+| | **Total** | **9:55** | |
 
-### 1. Hook (0:40)
+### 1. Hook (0:30)
 
 - Learns: a connector bridges a model to another system; here two processes share one coffee machine.
 - On screen: two browser windows (server left, client right) spring in and play the `brew` clip; the camera moves to the client's Brew button, then to the server reacting.
 - Sample code: none
 - API: none
 
-### 2. Sources and servers (1:40)
+### 2. Sources and servers (1:30)
 
 - Learns: the coffee machine recap; a connector bridges the subject tree to an external system; the role depends on who owns the data; source = replica of an external owner, server = exposes the local owner; each property has at most one source; `TryGetSource`.
 - On screen: the machine tree as a top-down flow diagram with pulses (recap), then two flow rows (external owner, source, replica; local owner, server, clients) built step by step; dots mark claimed properties; a code card with `TryGetSource` from the client.
 - Sample code: `sample/Client/Program.cs` region `SourceState`
 - API: `PropertyReference.TryGetSource` (src/Namotion.Interceptor.Connectors/SourcePropertyExtensions.cs), `ISubjectSource.State`, `SourceState` (src/Namotion.Interceptor.Connectors/Monitoring)
 
-### 3. Data flow (1:40)
+### 3. Data flow (1:35)
 
 - Learns: inbound values go external system, source, property writer, property; outbound writes change the local model immediately, are queued, and a background service calls `WriteChangesAsync`; the model is briefly ahead (local first); servers behave the same towards their clients.
 - On screen: an inbound sequence diagram (3 messages), then an outbound one (4 messages), with the active participant highlighted and the camera following; a final pull back.
 - Sample code: none (the sample code comes in the live chapter)
 - API: `SubjectPropertyWriter.Write` (src/Namotion.Interceptor.Connectors/SubjectPropertyWriter.cs), `ISubjectSource.WriteChangesAsync`
 
-### 4. Live sample (2:40)
+### 4. Live sample (2:35)
 
 - Learns: embedded mode with `AddWebSocketSubjectHandler` and `MapWebSocketSubjectHandler`; the client with `AddWebSocketSubjectClientSource` and `ServerUri`; derived properties are computed on each side; a brew on the client is a local write that reaches the server, whose simulator runs the physics.
 - On screen: server code types in, focus on the handler lines, morph to the mapping lines, morph to the client code; a terminal shows the client claiming properties; a flow diagram of the whole path with pulses; two browser windows play `heat` and then `brew`, camera moving between them; the client brew endpoint in a code card.
@@ -61,14 +61,14 @@ Ranked by importance. Budgets total the target length.
 - Sample code: `sample/Client/Configuration.cs` regions `RetryQueue`, `ConfirmedWrite`
 - API: `WebSocketClientConfiguration.WriteRetryQueueSize`, `RetryTime`, `BufferTime`; `WithTransactions` (src/Namotion.Interceptor.Tracking), `WithSourceTransactions` (src/Namotion.Interceptor.Connectors), `BeginTransactionAsync`, `TransactionFailureHandling.Rollback`, `SubjectTransaction.CommitAsync`
 
-### 6. Your own source (1:40)
+### 6. Your own source (1:30)
 
 - Learns: a grinder device that owns the grind size becomes a source; derive from `SubjectSourceBase`; override `StartListeningAsync`, `LoadInitialStateAsync`, `WriteChangesAsync`; claim ownership with `SourceOwnershipManager`; return `WriteResult.Failure` to use the retry queue; register as singleton and hosted service.
 - On screen: a small flow diagram (grinder device, grinder source, bean hopper); the source class types in and each hook is focused in turn with camera moves; morph to the registration extension method.
 - Sample code: `sample/Server/Grinder/GrinderSource.cs` regions `GrinderSourceClass`, `StartListening`, `LoadInitialState`, `WriteChanges`; `sample/Server/Grinder/GrinderSourceExtensions.cs` region `AddGrinderSource`
 - API: `SubjectSourceBase`, `SubjectPropertyWriter.Write`, `BackgroundTaskLifetime.Start`, `SourceOwnershipManager.ClaimSource`, `WriteResult.Success`, `WriteResult.Failure`, `RegisteredSubjectProperty.SetValueFromSource` (all src/Namotion.Interceptor.Connectors)
 
-### 7. Recap (0:30)
+### 7. Recap (0:25)
 
 - Learns: the three ideas in one breath, then pointers to the WebSocket, MQTT and OPC UA pages.
 - On screen: the roles diagram returns with pulses in both directions, then a closing chapter card.

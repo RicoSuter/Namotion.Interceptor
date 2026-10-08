@@ -1,0 +1,466 @@
+# Status: auto-approved (the user auto-approved both gates for this run)
+# The episode id must equal the episode folder name.
+episode: 03-connectors
+title: Connectors
+voice: default
+chapters:
+  - id: hook
+    title: Connectors
+    beats:
+      - id: hook-title
+        narration: Your coffee machine model lives in one process. What if a second process could see it, and even brew with it?
+        visual: Chapter card "Connectors" with the kicker "Two processes, one machine"; the title letters rise in over the gradient wash.
+        components: [ChapterCard]
+      - id: hook-windows
+        narration: On the left runs the machine itself, with its simulator. On the right, a separate app holds nothing but a mirror of it.
+        visual: The card exits; two browser windows spring in side by side, server left and client right, both showing a ready machine; small labels Server and Client fade in under them; the camera eases from the left window to the right one.
+        components: [BrowserFrame, Camera]
+        demo: brew
+      - id: hook-brew
+        narration: Press brew on the mirror, and a moment later the real machine starts pumping.
+        hold: 1.5
+        visual: The brew clip plays in both windows; the camera leans toward the client's Brew button as it is pressed, then pans to the server window where the pressure bar fills.
+        components: [BrowserFrame, Camera]
+        demo: brew
+      - id: hook-promise
+        narration: The bridge between them is a connector. In the next ten minutes you will see how connectors move values both ways, keep them consistent, and how to write your own.
+        visual: The camera pulls back to both windows finishing the espresso; a connector pill with a moving particle springs in between the two windows.
+        components: [BrowserFrame, Card, Camera]
+        demo: brew
+  - id: roles
+    title: Sources and servers
+    beats:
+      - id: roles-title
+        narration: Let us start with the two roles a connector can play.
+        visual: Chapter card "Sources and servers" with the kicker Chapter 1.
+        components: [ChapterCard]
+      - id: roles-tree
+        narration: First, a quick recap. The coffee machine is a tree of tracked objects, with a boiler, a pump, a water tank and a bean hopper.
+        visual: The card exits; the machine node springs in at the top and its four parts arrive beneath it one after another, with curved edges drawing down.
+        components: [FlowDiagram]
+      - id: roles-writes
+        narration: Every property is intercepted, so the library sees each write, like the simulator heating the boiler a little every tenth of a second.
+        visual: A simulator node slides in beside the boiler; particles travel from the simulator into the boiler and up to the machine while the camera leans toward the boiler.
+        components: [FlowDiagram, Camera]
+      - id: roles-bridge
+        narration: A connector bridges this tree to an external system, like a machine controller over OPC UA, a broker over MQTT, or another process over WebSocket.
+        visual: The camera pulls back as the tree shrinks to the left; a connector node and an external system node spring in to the right and edges draw between them; particles run both ways.
+        components: [FlowDiagram, Camera]
+      - id: roles-question
+        narration: Every connector plays one of two roles, and a single question decides which. Who owns the data?
+        visual: The tree fades; the connector and external system nodes glide to the center and the label "who owns the data?" rises in between them.
+        components: [FlowDiagram, Card]
+      - id: roles-source
+        narration: A source connects to a system that owns the data, like a controller on the factory floor. Your local model is a replica of it.
+        visual: The upper row builds left to right, external system tagged "owns the data", then Source, then Local model tagged "replica"; particles flow from the owner to the replica.
+        components: [FlowDiagram]
+      - id: roles-server
+        narration: A server is the opposite. Your local model owns the data, and the server exposes it to clients.
+        visual: The lower row builds, Local model tagged "owns the data", then Server, then Clients; particles flow from the model to the clients while the camera eases down.
+        components: [FlowDiagram, Camera]
+      - id: roles-convention
+        narration: In practice, sources are network clients and servers are network servers, but ownership is what really defines them.
+        visual: The camera pulls back to both rows; the owner nodes of both rows pulse in turn.
+        components: [FlowDiagram, Camera]
+      - id: roles-packages
+        narration: The OPC UA, MQTT and WebSocket packages each ship both, a client source and a server.
+        visual: Three small protocol pills spring in under the diagram, one after another.
+        components: [Card]
+      - id: roles-sample
+        narration: The live sample uses both. The machine process runs a WebSocket server, and the mirror runs a WebSocket client, which is a source.
+        visual: The pills fade; the Server node gets the label "machine process" and the Source node "mirror process" while each pulses and the camera moves from one to the other.
+        components: [FlowDiagram, Camera]
+      - id: roles-claim
+        narration: One rule keeps sources apart. Each property has at most one source, and a source claims its properties when it starts.
+        visual: The rows fade; the machine tree returns, now labeled "mirror"; a client source node arrives beside it and colored claim dots pop onto each part one by one.
+        components: [FlowDiagram, Card]
+      - id: roles-claim-why
+        narration: That way, two sources can never fight over the same value.
+        visual: A second source node slides in, its edge to the boiler draws dashed and fades out, rejected; the camera nudges toward the boiler.
+        components: [FlowDiagram, Camera]
+      - id: roles-try-get
+        narration: You can ask any property for its source. The client uses that to show whether it is synchronized.
+        visual: The tree slides away; a code card springs in and the SourceState region of the client types in.
+        components: [CodeCard]
+        code: {file: sample/Client/Program.cs, region: SourceState}
+      - id: roles-state
+        narration: The source reports its state, synchronizing while it connects and loads, and synchronized once the model can be trusted.
+        visual: The TryGetSource and State lines stay bright while the rest dims, and the camera leans in on them.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Program.cs, region: SourceState}
+      - id: roles-state-use
+        narration: Check that state before you trust a value, for example to grey out a display while the source reconnects.
+        visual: The focus moves to the Unclaimed fallback and back to State; the camera eases out to the whole card.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Program.cs, region: SourceState}
+  - id: flow
+    title: Data flow
+    beats:
+      - id: flow-title
+        narration: Next, how values actually travel.
+        hold: 0.6
+        visual: Chapter card "Data flow" with the kicker Chapter 2.
+        components: [ChapterCard]
+      - id: flow-in-intro
+        narration: Inbound first. The external system reports a new value, say the boiler is now at 93 °C.
+        visual: Sequence diagram lifelines grow for External system, Source, Property writer and Boiler; the first message "Temperature = 93" arcs from the external system to the source.
+        components: [SequenceDiagram]
+      - id: flow-in-writer
+        narration: The source does not set the property directly. It hands the update to the property writer.
+        visual: The message "Write(update)" arcs from the source to the property writer, which lights up; the camera follows to the right.
+        components: [SequenceDiagram, Camera]
+      - id: flow-in-apply
+        narration: The writer applies it to the subject. While the source is still loading its initial state, it holds updates back to replay them in order.
+        visual: The message "Temperature = 93" arrives at the boiler; then a small "buffered" pill drops onto the writer's lifeline and pulses.
+        components: [SequenceDiagram, Camera]
+      - id: flow-in-stamp
+        narration: Each value is stamped as coming from that source. That is how the library knows not to send it straight back.
+        visual: A small source badge appears on the boiler lane next to the arrived value; a return arrow starts toward the source and dissolves.
+        components: [SequenceDiagram, Card]
+      - id: flow-in-why
+        narration: That matters on every reconnect, when fresh values can arrive before the full snapshot.
+        visual: The camera pulls back to the whole inbound diagram while the writer's buffered pill pulses again.
+        components: [SequenceDiagram, Camera]
+      - id: flow-out-intro
+        narration: Outbound works differently. Your code sets a property, and the local model changes immediately. It is a plain C# setter.
+        visual: The inbound diagram slides up and fades; a new one grows with Your code, Boiler, Change queue, Source and External system; "TargetTemperature = 95" arcs from your code to the boiler.
+        components: [SequenceDiagram]
+      - id: flow-out-queue
+        narration: The change notification lands in a queue. A background service picks it up a few milliseconds later.
+        visual: The message "change" arcs from the boiler to the change queue, which lights up; the camera drifts right.
+        components: [SequenceDiagram, Camera]
+      - id: flow-out-write
+        narration: It calls the source's write changes method with a batch of changes, and the source sends them to the external system.
+        visual: The message "WriteChangesAsync" arcs from the queue to the source, then "send" from the source to the external system.
+        components: [SequenceDiagram, Camera]
+      - id: flow-out-batch
+        narration: A batch can carry many properties at once, so a burst of changes becomes a single network message.
+        visual: Three small change chips gather on the queue lane and travel together along the WriteChangesAsync arrow.
+        components: [SequenceDiagram, Card]
+      - id: flow-local-first
+        narration: So for a short moment, your model is ahead of the external system. This is called local first, and it keeps your code fast.
+        visual: The camera pulls back; a soft "local first" band highlights the gap between the boiler's update and the external system's.
+        components: [SequenceDiagram, Card, Camera]
+      - id: flow-no-wait
+        narration: Your code never waits for the network, not even when the connection is slow.
+        visual: The boiler and your code lanes pulse while the far lanes stay dim.
+        components: [SequenceDiagram]
+      - id: flow-retry
+        narration: If sending fails, your model keeps the new value, and the source retries until both ends agree again.
+        visual: A dashed red reply "failed" arcs back from the external system to the source, then a "retry" message arcs forward again.
+        components: [SequenceDiagram]
+      - id: flow-server
+        narration: Servers follow the same pattern from the other side. Local writes apply at once and reach connected clients shortly after.
+        visual: The sequence diagram fades; the server row of the roles diagram returns with particles flowing from the model through the server to the clients.
+        components: [FlowDiagram]
+      - id: flow-server-sample
+        narration: In the sample, the WebSocket handler plays this server role for the coffee machine.
+        visual: The Server node relabels to WebSocket handler and pulses; the camera leans toward it.
+        components: [FlowDiagram, Camera]
+      - id: flow-server-in
+        narration: When a client writes to a server, the server applies it to the local model, which then publishes it like any other change.
+        visual: Particles run backward from the clients to the model, then forward again to the clients.
+        components: [FlowDiagram, Camera]
+      - id: flow-two-paths
+        narration: Two paths, then. Inbound through the property writer, outbound through the change queue.
+        visual: The server row shrinks away; two curved arrows, one labeled property writer and one labeled change queue, draw in opposite directions between the external system and the model.
+        components: [FlowDiagram]
+  - id: live
+    title: The live sample
+    beats:
+      - id: live-title
+        narration: Now let us build the sample you saw at the start.
+        visual: Chapter card "The live sample" with the kicker Chapter 3.
+        components: [ChapterCard]
+      - id: live-server-code
+        narration: The machine process is an ASP.NET app. It creates a context with tracking, the registry and lifecycle support, then the machine and its simulator.
+        visual: A code card springs in titled Server/Program.cs and the ServerSetup region types in.
+        components: [CodeCard]
+        code: {file: sample/Server/Program.cs, region: ServerSetup}
+      - id: live-server-handler
+        narration: One line adds the WebSocket handler for the coffee machine. This is the embedded mode, which shares the app's port instead of opening its own.
+        visual: The AddWebSocketSubjectHandler line stays bright while the rest dims; the camera leans in on it.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Program.cs, region: ServerSetup}
+      - id: live-server-map
+        narration: After building the app, two lines enable WebSockets and map the handler to its path, right next to the status page.
+        visual: The card morphs into the MapHandler region; the two WebSocket lines are focused.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Program.cs, region: MapHandler}
+      - id: live-client-code
+        narration: The mirror is a second ASP.NET app. It creates the same kind of context and its own coffee machine, but no simulator.
+        visual: The card morphs into the client's ClientSetup region and the tab renames to Client/Program.cs.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Program.cs, region: ClientSetup}
+      - id: live-client-classes
+        narration: Both processes share the same model classes, which is all the client needs to understand the server's data.
+        visual: The CoffeeMachine line is focused; the camera eases in on it.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Program.cs, region: ClientSetup}
+      - id: live-client-source
+        narration: Then it adds a WebSocket client source for the machine and points it at the server's address. That is the whole connection.
+        visual: The AddWebSocketSubjectClientSource lines are focused and the camera leans toward the server address.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Program.cs, region: ClientSetup}
+      - id: live-terminal
+        narration: Start a client, and it connects, receives the full state, and claims the properties it keeps in sync.
+        hold: 0.8
+        visual: The code card slides up and away; a terminal springs in, types the run command and streams the client log, ending with the claimed property count.
+        components: [Terminal]
+        terminal: run-client
+      - id: live-protocol-hello
+        narration: Under the hood, the client opens a WebSocket and says hello.
+        visual: The terminal fades; a sequence diagram with Client and Server lanes grows, and "Hello" arcs from the client to the server.
+        components: [SequenceDiagram]
+      - id: live-protocol-welcome
+        narration: The server answers with a welcome, the complete state of the machine plus a sequence number.
+        visual: A reply "Welcome, state, sequence 5" arcs back to the client, which lights up.
+        components: [SequenceDiagram]
+      - id: live-protocol-updates
+        narration: After that, the server pushes each batch of changes as an update, numbered one after another.
+        visual: Two updates "Update 6" and "Update 7" arc from the server to the client in quick succession.
+        components: [SequenceDiagram, Camera]
+      - id: live-protocol-client-update
+        narration: Client writes travel the other way as updates too, and the server applies them to its machine.
+        visual: The message "Update, State = Brewing" arcs from the client to the server, which lights up.
+        components: [SequenceDiagram, Camera]
+      - id: live-protocol-heartbeat
+        narration: A heartbeat every thirty seconds carries the latest number. If the client spots a gap, it reconnects and starts over with a fresh welcome.
+        visual: A dashed "Heartbeat 8" arcs to the client; the camera pulls back to show the whole exchange.
+        components: [SequenceDiagram, Camera]
+      - id: live-protocol-reconnect
+        narration: If the server restarts, the client reconnects with a growing delay, and a fresh welcome brings it up to date.
+        visual: The arrows fade; Hello and Welcome draw once more at the bottom while the camera follows.
+        components: [SequenceDiagram, Camera]
+      - id: live-path
+        narration: Here is the whole path. The simulator writes the server's machine, and the handler broadcasts each change.
+        visual: The sequence fades; a flow diagram builds from the simulator to the server machine to the WebSocket handler, and particles run along the edges.
+        components: [FlowDiagram]
+      - id: live-path-client
+        narration: The client source applies each change to the mirror through its property writer, and each status page reads its own process.
+        visual: The client half of the diagram builds, client source, mirror machine and the two status pages; particles carry on to the mirror and the camera follows.
+        components: [FlowDiagram, Camera]
+      - id: live-heat
+        narration: Both apps start cold. Watch the boiler heat up on the left, and the mirror follow on the right.
+        hold: 1.5
+        visual: The diagram shrinks into the two browser windows, which play the heat clip side by side; the camera eases from the server window toward the client window.
+        components: [BrowserFrame, Camera]
+        demo: heat
+      - id: live-heat-sync
+        narration: The values arrive within milliseconds, because the handler sends changes as they settle, batched every eight milliseconds.
+        visual: The heat clip continues; the camera pulls back to frame both temperature cards climbing together.
+        components: [BrowserFrame, Camera]
+        demo: heat
+      - id: live-ready
+        narration: At 93 °C both sides report ready. The mirror computes ready on its own, from the synced values, because it is a derived property.
+        hold: 1
+        visual: The clip reaches Ready on both sides; the camera leans toward the client's Ready headline.
+        components: [BrowserFrame, Camera]
+        demo: heat
+      - id: live-brew-code
+        narration: Now the other direction. The client's brew endpoint just calls brew on its local machine. There is nothing connector specific here.
+        visual: The windows slide aside; a code card with the BrewEndpoint region types in.
+        components: [CodeCard]
+        code: {file: sample/Client/Program.cs, region: BrewEndpoint}
+      - id: live-brew-method
+        narration: Brew checks that the machine is ready, then sets the state, the recipe and the target temperature, and starts the pump. Ordinary property writes.
+        visual: The card morphs into the domain's Brew method from CoffeeMachine.cs; the four assignments are focused.
+        components: [CodeCard, Camera]
+        code: {file: ../../domain/Coffee/CoffeeMachine.cs, region: Brew}
+      - id: live-brew-click
+        narration: Press the button. The mirror switches to brewing immediately, because the write is local first.
+        visual: The code card fades; the two windows return and play the brew clip; the camera leans toward the client as the button is pressed.
+        components: [BrowserFrame, Camera]
+        demo: brew
+      - id: live-brew-server
+        narration: The changes travel to the server in one message. Its simulator sees a running pump and builds pressure to 9 bar.
+        hold: 1
+        visual: The camera pans to the server window while its pressure bar fills to 9 bar.
+        components: [BrowserFrame, Camera]
+        demo: brew
+      - id: live-brew-done
+        narration: After forty milliliters, the server finishes the espresso, and the new cup count flows back to the mirror.
+        hold: 1.2
+        visual: The camera pulls back to both windows as the cup count changes from 0 to 1 on both sides.
+        components: [BrowserFrame, Camera]
+        demo: brew
+      - id: live-path-back
+        narration: So the path runs both ways. Server values flow out to the mirror, and the mirror's writes flow back in.
+        visual: The windows shrink into the flow diagram again; particles run from the simulator to the mirror and then back from the mirror to the server machine.
+        components: [FlowDiagram, Camera]
+  - id: sync
+    title: Staying in sync
+    beats:
+      - id: sync-title
+        narration: Connections drop and values race. Here is how sources stay consistent.
+        visual: Chapter card "Staying in sync" with the kicker Chapter 4.
+        components: [ChapterCard]
+      - id: sync-buffer
+        narration: When a source connects, updates can arrive before the full state is loaded. So first, the source buffers them.
+        visual: A four step flow starts with the Buffer node; small update chips drop into it and stack.
+        components: [FlowDiagram, Card]
+      - id: sync-load
+        narration: Then it loads the complete initial state. For the WebSocket client, that is the server's welcome message.
+        visual: The Load node springs in to the right of Buffer and the edge draws; a large state card slides into it.
+        components: [FlowDiagram, Card]
+      - id: sync-replay
+        narration: Next, it replays the buffered updates in order, so nothing that changed during the load gets lost.
+        visual: The Replay node arrives; the stacked chips travel along the edge one by one into the model.
+        components: [FlowDiagram, Camera]
+      - id: sync-reconcile
+        narration: Finally, it sends local writes made while it was connecting, unless a newer local write has already replaced them.
+        visual: The Reconcile node arrives; one chip is struck through and fades, the other travels on; the camera eases right.
+        components: [FlowDiagram, Camera]
+      - id: sync-retry
+        narration: Once connected, a write can still fail, for example when the network drops. The source then parks it in a write retry queue.
+        visual: The flow fades; a new diagram shows Change queue, Source and External system; the edge to the external system turns dashed and write chips drop into a retry queue stack under the source.
+        components: [FlowDiagram, Card]
+      - id: sync-retry-drain
+        narration: When the connection works again, the queued writes are sent in order, and the queue drains.
+        visual: The edge turns solid; chips leave the stack one after another and travel to the external system.
+        components: [FlowDiagram, Card, Camera]
+      - id: sync-retry-config
+        narration: The queue holds a thousand writes by default, and drops the oldest when it is full. Set its size to zero to turn it off.
+        visual: The diagram slides left; a code card with the client's RetryQueue region types in, the WriteRetryQueueSize line focused.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Configuration.cs, region: RetryQueue}
+      - id: sync-retry-memory
+        narration: The queue lives in memory, so writes that are still waiting are lost if the process restarts.
+        visual: The RetryQueue lines dim except the queue size; the camera pulls back.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Configuration.cs, region: RetryQueue}
+      - id: sync-local-wins
+        narration: What if the external system changed while your write was waiting? A local write that already committed wins, and the system converges to it.
+        visual: Two value cards, Local 95 °C and External 93 °C, spring in; an arrow draws from local to external and the external card flips to 95 °C.
+        components: [Card]
+      - id: sync-local-wins-why
+        narration: The source cannot tell whether its value is older or newer than yours. Silently dropping a write you already made would be worse.
+        visual: A question mark pill drifts between the two cards, then both cards glow green together.
+        components: [Card, Camera]
+      - id: sync-batching
+        narration: Outbound changes are also batched. Within the buffer time, eight milliseconds by default, each property collapses to its newest value.
+        visual: Three temperature chips, 92.1, 92.6 and 93.0, slide in a row and merge into a single 93.0 chip.
+        components: [Card]
+      - id: sync-settled
+        narration: So only the settled value is sent. For state like a temperature, skipping the steps in between is exactly what you want.
+        visual: The merged chip travels along an arrow to an external system card, which updates to 93.0.
+        components: [Card, Camera]
+      - id: sync-zero-buffer
+        narration: Set the buffer time to zero, and each change is written on its own as it arrives.
+        visual: The chips separate again and travel one by one, each on its own.
+        components: [Card]
+      - id: sync-echo
+        narration: And a value that came from a source is never written back to that same source.
+        visual: A chip arrives from the external system into the model; a return arrow starts to draw and dissolves.
+        components: [Card]
+      - id: sync-transactions
+        narration: Sometimes local first is not enough, and the external system must confirm a write before your model changes. That is what source transactions are for.
+        visual: The chips fade; a code card with the ConfirmedWrite region types in.
+        components: [CodeCard]
+        code: {file: sample/Client/Configuration.cs, region: ConfirmedWrite}
+      - id: sync-transactions-commit
+        narration: Inside a transaction, the write is captured, not applied. Commit sends it to the source first, and applies it locally only when the source accepts.
+        visual: The assignment line is focused, then the commit line; the camera follows down the card.
+        components: [CodeCard, Camera]
+        code: {file: sample/Client/Configuration.cs, region: ConfirmedWrite}
+      - id: sync-tradeoff
+        narration: Choose local first for responsiveness, and transactions when you need confirmed delivery.
+        visual: The code card shrinks to the left; two cards spring in, "Local first, applied at once" and "Transaction, applied after confirmation".
+        components: [Card, Camera]
+  - id: custom
+    title: Your own source
+    beats:
+      - id: custom-title
+        narration: Finally, let us write a source of our own.
+        visual: Chapter card "Your own source" with the kicker Chapter 5.
+        components: [ChapterCard]
+      - id: custom-scenario
+        narration: Imagine the grinder is a separate device with its own API, and it owns the grind size. That makes it a source.
+        visual: A flow diagram builds, Grinder device, Grinder source, Bean hopper with the detail GrindSize.
+        components: [FlowDiagram]
+      - id: custom-scenario-flow
+        narration: Values from the grinder flow into the bean hopper, and a grind size set in code flows back to the grinder.
+        visual: Particles travel from the device to the bean hopper, then back from the bean hopper to the device.
+        components: [FlowDiagram, Camera]
+      - id: custom-class
+        narration: Derive from subject source base. The base class runs the whole lifecycle, with connecting, retries, buffering, the change queue and the retry queue.
+        visual: The diagram slides up and fades; a code card springs in and the GrinderSourceClass region types in.
+        components: [CodeCard]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: GrinderSourceClass}
+      - id: custom-retry-loop
+        narration: If connecting or listening throws, the base class waits ten seconds and simply starts over.
+        visual: The SubjectSourceBase name is focused; a small circular retry arrow spins beside the card.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: GrinderSourceClass}
+      - id: custom-hooks
+        narration: You fill in three hooks. Start listening, load initial state, and write changes.
+        visual: The class declaration line is focused, then the card morphs into the StartListening region.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
+      - id: custom-listen
+        narration: Start listening connects to the device. It claims the grind size, so no other source can take it.
+        visual: The connect and ClaimSource lines are focused; the camera leans in.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
+      - id: custom-listen-release
+        narration: The ownership manager also releases that claim when the bean hopper leaves the object graph.
+        visual: The SourceOwnershipManager field is highlighted while the camera pulls back slightly.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
+      - id: custom-listen-loop
+        narration: Then it starts a background loop. Every value the device reports goes through the property writer, marked as coming from this source.
+        visual: The focus moves down to the BackgroundTaskLifetime loop and the propertyWriter.Write call; the camera follows.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: StartListening}
+      - id: custom-load
+        narration: Load initial state reads the current value and returns an action that applies it. The base class runs it, then replays anything buffered meanwhile.
+        visual: The card morphs into the LoadInitialState region and the returned action is focused.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: LoadInitialState}
+      - id: custom-write
+        narration: Write changes sends local changes to the device. Build the payload from the changes you get, not by reading other properties.
+        visual: The card morphs into the WriteChanges region; the loop over the changes is focused.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: WriteChanges}
+      - id: custom-write-failure
+        narration: If the device rejects them, return a failure with those changes, and the base class puts them into the retry queue.
+        visual: The focus moves to the WriteResult.Failure line.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSource.cs, region: WriteChanges}
+      - id: custom-register
+        narration: Last, register the source as a singleton and as a hosted service, so the host starts it. An extension method keeps that in one line.
+        visual: The card morphs into the AddGrinderSource extension method in GrinderSourceExtensions.cs; the two registration lines are focused.
+        components: [CodeCard, Camera]
+        code: {file: sample/Server/Grinder/GrinderSourceExtensions.cs, region: AddGrinderSource}
+      - id: custom-running
+        narration: In the sample, the server now runs two connectors, the grinder source feeding the model and the WebSocket handler exposing it.
+        visual: The code card shrinks away; a flow diagram shows Grinder device, Grinder source, Server machine, WebSocket handler and Mirror; particles run through the chain.
+        components: [FlowDiagram, Camera]
+      - id: custom-simulated
+        narration: Because the device sits behind an interface, a simulated grinder runs the sample without any hardware.
+        visual: The Grinder device node relabels to Simulated grinder and pulses; particles keep flowing.
+        components: [FlowDiagram, Camera]
+  - id: recap
+    title: Recap
+    beats:
+      - id: recap-title
+        narration: Let us recap what you can do now.
+        visual: Chapter card "Recap" in green tones.
+        components: [ChapterCard]
+      - id: recap-roles
+        narration: A source mirrors a system that owns the data, and a server exposes the model you own.
+        visual: The card exits; the two role rows from chapter 1 build again with particles.
+        components: [FlowDiagram]
+      - id: recap-paths
+        narration: Values come in through the property writer and go out through the change queue, local first, batched and retried.
+        visual: Particles run inbound along the source row and outbound along the server row; the camera eases between them.
+        components: [FlowDiagram, Camera]
+      - id: recap-custom
+        narration: And your own source is three hooks on a base class.
+        visual: The rows fade; three small hook pills, StartListening, LoadInitialState and WriteChanges, spring in.
+        components: [Card]
+      - id: recap-pointers
+        narration: The WebSocket, MQTT and OPC UA pages in the docs take each protocol further. Happy brewing.
+        hold: 1.5
+        visual: A closing chapter card "Ready to connect" in green tones.
+        components: [ChapterCard]

@@ -8,3 +8,5 @@
 - {match: kW, say: kilowatt}
 - {match: °C, say: degrees}
 - {match: ml, say: milliliters}
+- {match: C#, say: C sharp}
+- {match: ASP.NET, say: A S P dot net}
