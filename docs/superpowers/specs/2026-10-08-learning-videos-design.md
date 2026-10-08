@@ -158,7 +158,7 @@ Demo scripts are choreography: timed pauses set pacing, and condition waits are 
 
 ## Local tooling
 
-Node 24 (installed in `~/.local`), uv, a static ffmpeg in `~/.local/bin`, Chatterbox with CUDA (RTX 3080, 10 GB), Playwright using the preinstalled Chromium. `videos/README.md` documents setup and commands.
+Node 24 and uv (installed in `~/.local`), ffmpeg from the `@ffmpeg-installer` npm package, Chatterbox with CUDA (RTX 3080, 10 GB), Playwright with its own Chromium. `videos/README.md` documents setup and commands.
 
 ## Risks
 
