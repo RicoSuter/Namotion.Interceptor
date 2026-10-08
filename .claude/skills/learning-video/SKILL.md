@@ -47,6 +47,7 @@ When the user asks for a revision of an earlier stage (changed docs, new chapter
   3. Transformations, not cuts: code morphs into its next version, a node expands into the live UI, a diagram grows by steps.
   4. The camera moves toward the current subject. Hard cuts only at chapter boundaries.
   5. Real values from the running sample.
+  6. Key terms and numbers get a callout, not a sentence: when a beat introduces a term or a number, show it as a short label inside the visual, next to what it names (a pill reading `buffer time 8 ms` under the link it configures). A few words at most.
 - **Style.** Clean macOS look: theme components and tokens only (`theme/palette.ts`, `theme/style.ts`), soft shadows instead of outlines, Inter and JetBrains Mono, no neon or glow.
 - **No application references.** Episodes describe scenarios generically with the coffee machine domain (AGENTS.md).
 - **Writing.** No em dashes and no hard wrapping in markdown and narration.
@@ -104,6 +105,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 Go through every beat and fix the script until all hold:
 
 - [ ] No beat shows a list of text. Labels are at most a few words.
+- [ ] A beat that introduces a key term or number names it with a short callout in the visual, never with sentence-length text.
 - [ ] Every `visual` names a motion. Beats longer than about 8 seconds (20 words) name at least two motions (for example a camera move after the code types in).
 - [ ] Consecutive beats transform the same element where possible (morph, focus, reveal the next step, camera move) instead of replacing it.
 - [ ] Each chapter starts with a `ChapterCard` beat; hard cuts happen only there.
@@ -230,7 +232,7 @@ export default makeScene2D('setup', function* (view) {
   view.add(title);
   yield* narrator.beat('setup-title', title.enter());
 
-  const code = new CodeCard({fileName: 'Program.cs', width: 1240, height: 780, y: -40, opacity: 0, scale: 0.94});
+  const code = new CodeCard({fileName: 'Program.cs', width: 1240, height: 780, opacity: 0, scale: 0.94});
   camera.add(code);
   yield* narrator.beat('setup-context',
     title.exit(),
@@ -249,6 +251,7 @@ Scene rules:
 - [ ] Frame: 1920 by 1080, origin in the center. Nothing is drawn over the picture (subtitles are a soft track), so use the whole frame: center diagrams, cards and windows vertically around y 0, and point camera targets at the subject itself, not above it.
 - [ ] Import code with `import source from '<path>?raw'` and `extractRegion(source, '<Region>')`; reference the same file and region in the beat's `code:` so validate checks it.
 - [ ] Use the domain and sample values in labels (93 °C target, 9 bar, Espresso).
+- [ ] Connect elements with `Arrow` from edge to edge, for two cards from the right side of one to the left side of the other at their vertical center (`messageCurve(fromX, toX, y)` gives a gentle bow). Arrows default to the neutral `palette.edge`; an accent color carries meaning, and pink means failure or a blocked path. Values in transit ride the arrow (`ride` in `episodes/03-connectors/scenes/shared.tsx`). A bar or line that touches neither element does not read as a connection.
 
 ### Component reference
 
@@ -265,9 +268,9 @@ All in `theme/components/`; read the file before using a component in a new way.
 | `BrowserFrame` | `{demo: '<name>', address, width, aspectRatio = 1.6, crop?: {left, width}}`; then `yield browser` | `play(duration, {from?, to?})` fits the clip to the duration; `mark(name)` is the clip time of a demo mark |
 | `Card` | Rect props plus `fill`; rounded, soft shadow | standard node signals (`opacity`, `scale`, `position`) |
 | `WindowFrame` | `{width, height, title?, address?, bodyFill?}`; add content to `.body` | standard node signals |
-| `Arrow` | `{curve, color?, lineWidth?, headSize?, dashed?, drawn?}`; curves from `theme/geometry.ts` (`sideCurve`, `messageCurve`) | `grow(duration)` |
+| `Arrow` | `{curve, color?, lineWidth?, headSize?, dashed?, drawn?}`; curves from `theme/geometry.ts` (`sideCurve`, `messageCurve`); color defaults to `palette.edge` | `grow(duration)`; `line.getPointAtPercentage(p)` for a point on the curve |
 
-Tokens: `palette` (`background`, `card`, `elevated`, `separator`, `text`, `secondaryText`, accents `blue`, `cyan`, `green`, `orange`, `pink`, `purple`); `style.ts` has `radius`, `shadow`, `smallShadow`, `fonts`, `fontSize` (label 30, detail 22, code 30, terminal 30, title 112), `spacing`, `durations` (0.3, 0.6, 1.2), `moveEasing` for moves and the camera, `enterEasing` for arrivals, `arrivalSpring` for `spring(arrivalSpring, from, to, setter)`.
+Tokens: `palette` (`background`, `card`, `elevated`, `separator`, `text`, `secondaryText`, `edge` for neutral connectors, accents `blue`, `cyan`, `green`, `orange`, `pink`, `purple`); `style.ts` has `radius`, `shadow`, `smallShadow`, `fonts`, `fontSize` (label 30, detail 22, code 30, terminal 30, title 112), `spacing`, `durations` (0.3, 0.6, 1.2), `moveEasing` for moves and the camera, `enterEasing` for arrivals, `arrivalSpring` for `spring(arrivalSpring, from, to, setter)`.
 
 `ObjectGraph`, `LiveChart` and `LayerStack` are not implemented. Compose the beat from existing components (an object tree as a `'down'` `FlowDiagram`, values in a `Card`), or implement the component in `theme/components/` following `FlowDiagram` and `Card`, show it in the smoke episode, and commit it separately.
 
@@ -318,7 +321,8 @@ FFMPEG=$(node -e "import('@ffmpeg-installer/ffmpeg').then(m => console.log(m.def
    - [ ] clipped text: code cut at the card edge, labels outside their nodes, content outside the frame;
    - [ ] unreadable sizes (under 22 px at 1080p), low contrast, crowded frames;
    - [ ] empty or black frames, a picture that contradicts the narration, values that do not match the sample;
-   - [ ] camera framing: the subject centered, nothing important cut off.
+   - [ ] camera framing: the subject centered vertically and horizontally in the full frame, nothing important cut off, no large empty band left over at the bottom;
+   - [ ] connections: arrows touch the elements they connect and point the way the value travels.
 5. Fix and re-render until the report lists no still beats (or each remaining one has a stated reason) and the frames are clean. Narration changes re-synthesize only the changed beats; rerun `tts` before `render`.
 6. Present to the user: video path, duration per chapter against the budget, the contact sheet, remaining warnings with reasons, and any doc mismatches.
 7. Apply feedback by editing only the affected beats: narration in `script.yaml` then `tts`; visuals in the scene; a demo with `capture --only <name>`; then render again.
