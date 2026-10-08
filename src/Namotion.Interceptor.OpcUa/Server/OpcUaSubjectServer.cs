@@ -390,21 +390,21 @@ internal class OpcUaSubjectServer : SubjectServerBase, IOpcUaSubjectServer, IFau
 
     private sealed class AttemptTeardown : IAsyncDisposable
     {
-        private readonly OpcUaSubjectServer _server;
+        private readonly OpcUaSubjectServer _owner;
         private readonly ConnectorRunAttempt _attempt;
         private readonly ApplicationInstance _application;
         private readonly OpcUaStandardServer _opcUaServer;
 
         public AttemptTeardown(
-            OpcUaSubjectServer server, ConnectorRunAttempt attempt, ApplicationInstance application, OpcUaStandardServer opcUaServer)
+            OpcUaSubjectServer owner, ConnectorRunAttempt attempt, ApplicationInstance application, OpcUaStandardServer opcUaServer)
         {
-            _server = server;
+            _owner = owner;
             _attempt = attempt;
             _application = application;
             _opcUaServer = opcUaServer;
         }
 
         public async ValueTask DisposeAsync() =>
-            await _server.TearDownAttemptAsync(_attempt, _application, _opcUaServer).ConfigureAwait(false);
+            await _owner.TearDownAttemptAsync(_attempt, _application, _opcUaServer).ConfigureAwait(false);
     }
 }
