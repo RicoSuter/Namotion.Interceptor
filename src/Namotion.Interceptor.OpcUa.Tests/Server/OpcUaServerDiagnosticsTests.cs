@@ -89,11 +89,12 @@ public class OpcUaServerDiagnosticsTests
             // Act
             await server.StartAsync(CancellationToken.None);
             await AsyncTestHelpers.WaitUntilAsync(
-                () => server.Diagnostics.ConsecutiveFailures >= 1,
+                () => server.Diagnostics.LastError is not null,
                 message: "A server that cannot build its application should record the failure.");
 
             // Assert
             Assert.IsType<InvalidOperationException>(server.Diagnostics.LastError);
+            Assert.True(server.Diagnostics.ConsecutiveFailures >= 1);
             Assert.NotNull(server.Diagnostics.StartTime);
             Assert.False(server.Diagnostics.IsOperational);
         }
@@ -113,8 +114,8 @@ public class OpcUaServerDiagnosticsTests
     [Fact]
     public async Task WhenAStartAttemptFails_ThenTheNextAttemptCanRegisterItsOwnChangeQueue()
     {
-        // Arrange: the certificate check is the first failure point inside the loop's own try, so the
-        // attempt gets far enough to have registered its processor before it fails.
+        // Arrange: the base registers the outbound processor before every StartServerAsync call, so a
+        // failing certificate check exercises the release just as any other start failure would.
         using var server = CreateServer(
             new UncheckableCertificateOpcUaServerConfiguration { CleanCertificateStore = false });
 

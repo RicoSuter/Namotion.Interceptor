@@ -28,7 +28,7 @@ public sealed class OpcUaServerDiagnostics : ConnectorDiagnostics
     public int ActiveSessionCount => _server.ActiveSessionCount;
 
     /// <summary>
-    /// Gets the number of consecutive startup failures, reset on a successful start.
+    /// Gets the number of failed attempts since an attempt last started successfully.
     /// </summary>
     public int ConsecutiveFailures => _server.ConsecutiveFailureCount;
 }

@@ -223,7 +223,7 @@ internal class OpcUaSubjectServer : SubjectServerBase, IOpcUaSubjectServer, IFau
         var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
         _server = server;
 
-        var teardown = new AttemptTeardown(() => TearDownAttemptAsync(attempt, application, server));
+        var teardown = new AttemptTeardown(this, attempt, application, server);
         try
         {
             await application.CheckApplicationInstanceCertificatesAsync(true, ct: attempt.Token).ConfigureAwait(false);
@@ -240,34 +240,42 @@ internal class OpcUaSubjectServer : SubjectServerBase, IOpcUaSubjectServer, IFau
     private async Task TearDownAttemptAsync(
         ConnectorRunAttempt attempt, ApplicationInstance application, OpcUaStandardServer server)
     {
-        var serverToClean = _server;
         _server = null;
-        serverToClean?.ClearPropertyData();
 
+        // In a finally, because a throwing ClearPropertyData must not skip the listener close, the
+        // shutdown and the disposal below: skipping any of those leaks the port and the SDK's internal
+        // tasks, and every later bind on the same port fails.
         try
         {
-            if (attempt.WasForceKilled && application.Server is OpcUaStandardServer startedServer)
-            {
-                // Force-kill: close transport listeners immediately so clients see an abrupt connection
-                // loss (realistic crash simulation).
-                startedServer.CloseTransportListeners();
-            }
-
-            // Always run ShutdownServerAsync to ensure the SDK's internal tasks (SubscriptionManager
-            // publish/refresh threads) are properly signaled to exit via OnServerStoppingAsync. Without
-            // StopAsync, these fire-and-forget tasks keep the entire server object graph alive as GC roots,
-            // causing ~8-16 MB leak per server restart. On force-kill the transport is already dead, so
-            // this only cleans up internal state and does not change what clients observe.
-            await ShutdownServerAsync(application).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to shutdown OPC UA server.");
+            server.ClearPropertyData();
         }
         finally
         {
-            try { server.Dispose(); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+            try
+            {
+                if (attempt.WasForceKilled && application.Server is OpcUaStandardServer startedServer)
+                {
+                    // Force-kill: close transport listeners immediately so clients see an abrupt connection
+                    // loss (realistic crash simulation).
+                    startedServer.CloseTransportListeners();
+                }
+
+                // Always run ShutdownServerAsync to ensure the SDK's internal tasks (SubscriptionManager
+                // publish/refresh threads) are properly signaled to exit via OnServerStoppingAsync. Without
+                // StopAsync, these fire-and-forget tasks keep the entire server object graph alive as GC roots,
+                // causing ~8-16 MB leak per server restart. On force-kill the transport is already dead, so
+                // this only cleans up internal state and does not change what clients observe.
+                await ShutdownServerAsync(application).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to shutdown OPC UA server.");
+            }
+            finally
+            {
+                try { server.Dispose(); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+            }
         }
     }
 
@@ -380,8 +388,23 @@ internal class OpcUaSubjectServer : SubjectServerBase, IOpcUaSubjectServer, IFau
         }
     }
 
-    private sealed class AttemptTeardown(Func<Task> teardown) : IAsyncDisposable
+    private sealed class AttemptTeardown : IAsyncDisposable
     {
-        public async ValueTask DisposeAsync() => await teardown().ConfigureAwait(false);
+        private readonly OpcUaSubjectServer _server;
+        private readonly ConnectorRunAttempt _attempt;
+        private readonly ApplicationInstance _application;
+        private readonly OpcUaStandardServer _opcUaServer;
+
+        public AttemptTeardown(
+            OpcUaSubjectServer server, ConnectorRunAttempt attempt, ApplicationInstance application, OpcUaStandardServer opcUaServer)
+        {
+            _server = server;
+            _attempt = attempt;
+            _application = application;
+            _opcUaServer = opcUaServer;
+        }
+
+        public async ValueTask DisposeAsync() =>
+            await _server.TearDownAttemptAsync(_attempt, _application, _opcUaServer).ConfigureAwait(false);
     }
 }
