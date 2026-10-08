@@ -79,7 +79,7 @@ export default makeScene2D('flow', function* (view) {
   inbound.add(buffered);
   yield* narrator.beat('flow-in-apply',
     inbound.message('writer', 'boiler', 'Temperature = 93'),
-    camera.focusOnPoint(inboundFocus(2, 3, 2).add([-60, 0]), {zoom: 1.15, duration: 1.6}),
+    camera.focusOnPoint(inboundFocus(2, 3, 2).add([-60, 0]), {zoom: 1.15, duration: narrator.duration('flow-in-apply') - 0.2}),
     delay(2.4, chain(arrive(buffered), buffered.scale(1.08, 0.3).to(1, 0.4))),
   );
 
