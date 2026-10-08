@@ -114,26 +114,18 @@ public sealed class WebSocketSubjectServer : SubjectServerBase, IFaultInjectable
         {
             return;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _logger.LogError(exception, "WebSocket heartbeat loop failed.");
-
+            // Rethrown so the teardown surfaces it and the base records it as the failure.
+            throw;
+        }
+        finally
+        {
             // The attempt is still live here: its teardown awaits this task before the attempt is disposed.
             if (!attemptToken.IsCancellationRequested)
             {
                 await attempt.CancelAsync().ConfigureAwait(false);
             }
-
-            // Rethrown so the teardown's await surfaces this exception and the base records it as
-            // LastError, instead of the generic "completed unexpectedly" it would record otherwise.
-            throw;
-        }
-
-        // A heartbeat that ends while the attempt is live ends processing too, which restarts the attempt.
-        // The attempt is still live here: its teardown awaits this task before the attempt is disposed.
-        if (!attemptToken.IsCancellationRequested)
-        {
-            await attempt.CancelAsync().ConfigureAwait(false);
         }
     }
 
