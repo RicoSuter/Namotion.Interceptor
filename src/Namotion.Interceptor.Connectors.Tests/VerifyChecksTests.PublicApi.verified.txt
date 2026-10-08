@@ -136,6 +136,16 @@ namespace Namotion.Interceptor.Connectors
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
     }
+    public abstract class SubjectServerBase : Namotion.Interceptor.Connectors.SubjectConnectorBase
+    {
+        protected SubjectServerBase(Namotion.Interceptor.Connectors.Diagnostics.ConnectorMetrics metrics, Microsoft.Extensions.Logging.ILogger logger) { }
+        protected int ConsecutiveFailures { get; }
+        protected abstract Namotion.Interceptor.Connectors.ChangeQueueProcessor CreateChangeQueueProcessor(System.Action<long> dropHandler);
+        protected virtual System.TimeSpan GetRestartDelay(int consecutiveFailures) { }
+        protected virtual System.Threading.Tasks.Task<System.IAsyncDisposable?> InitializeAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected override sealed System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartServerAsync(Namotion.Interceptor.Connectors.ConnectorRunAttempt attempt, System.Threading.CancellationToken stoppingToken);
+    }
     public abstract class SubjectSourceBase : Namotion.Interceptor.Connectors.SubjectConnectorBase, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
         protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000, Namotion.Interceptor.Connectors.ThroughputCounter? incomingThroughput = null, Namotion.Interceptor.Connectors.ThroughputCounter? outgoingThroughput = null) { }
