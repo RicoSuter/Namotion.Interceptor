@@ -1,18 +1,32 @@
-/** Dark IDE base with gradient accents. Extended by the theme plan. */
+/** macOS dark system colors. */
 export const palette = {
-  base: '#1e1e2e',
-  mantle: '#181825',
-  crust: '#11111b',
-  surface: '#313244',
-  overlay: '#6c7086',
-  text: '#cdd6f4',
-  subtext: '#bac2de',
-  blue: '#89b4fa',
-  mauve: '#cba6f7',
-  teal: '#94e2d5',
-  green: '#a6e3a1',
-  yellow: '#f9e2af',
-  red: '#f38ba8',
-  accentPink: '#f0abfc',
-  accentCyan: '#67e8f9',
+  background: '#1c1c1e',
+  card: '#2c2c2e',
+  elevated: '#3a3a3c',
+  separator: '#48484a',
+  text: '#f5f5f7',
+  secondaryText: '#a1a1a6',
+  blue: '#0a84ff',
+  cyan: '#64d2ff',
+  green: '#30d158',
+  orange: '#ff9f0a',
+  pink: '#ff375f',
+  purple: '#bf5af2',
+} as const;
+
+export type AccentColor = 'blue' | 'cyan' | 'green' | 'orange' | 'pink' | 'purple';
+
+/** Window control colors of a macOS title bar. */
+export const trafficLights = ['#ff5f57', '#febc2e', '#28c840'] as const;
+
+/** Syntax colors tuned for contrast on the card color. */
+export const syntax = {
+  keyword: '#ff7ab2',
+  type: '#64d2ff',
+  property: '#d0a8ff',
+  method: '#67e0b8',
+  string: '#ff8a7a',
+  number: '#e5cf7e',
+  comment: '#7f8c98',
+  punctuation: '#a1a1a6',
 } as const;

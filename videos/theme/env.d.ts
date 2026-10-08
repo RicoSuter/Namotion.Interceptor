@@ -4,3 +4,5 @@ declare module '*?raw' {
 }
 
 declare const __RENDER_PRESET__: 'draft' | 'final' | undefined;
+
+declare module '*.css';
