@@ -373,16 +373,9 @@ public partial class SonosSystem : BackgroundService,
                 }
             }
 
-            foreach (var (uuid, player) in players)
+            foreach (var device in GetDevices(players.Values.Where(player => !present.Contains(player.Uuid))))
             {
-                if (!present.Contains(uuid))
-                {
-                    player.MarkMissing();
-                    foreach (var satellite in player.Satellites.Values)
-                    {
-                        satellite.MarkMissing();
-                    }
-                }
+                device.MarkMissing();
             }
 
             if (updatedPlayers is not null)
@@ -462,8 +455,22 @@ public partial class SonosSystem : BackgroundService,
     internal ArgumentException CreateUnknownRoomException(string value, string parameterName) =>
         new($"Unknown Sonos room '{value}'. Known rooms: {string.Join(", ", Players.Values.Select(player => player.RoomName))}.", parameterName);
 
-    private static bool HaveSameEntries<T>(Dictionary<string, T> existing, Dictionary<string, T> updated)
-        where T : class
+    /// <summary>
+    /// Returns each player followed by its satellites.
+    /// </summary>
+    internal static IEnumerable<SonosDevice> GetDevices(IEnumerable<SonosPlayer> players)
+    {
+        foreach (var player in players)
+        {
+            yield return player;
+            foreach (var satellite in player.Satellites.Values)
+            {
+                yield return satellite;
+            }
+        }
+    }
+
+    private static bool HaveSameEntries(Dictionary<string, SonosGroup> existing, Dictionary<string, SonosGroup> updated)
     {
         if (existing.Count != updated.Count)
         {

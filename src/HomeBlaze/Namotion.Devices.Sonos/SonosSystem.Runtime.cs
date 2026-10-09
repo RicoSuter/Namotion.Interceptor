@@ -44,13 +44,13 @@ public partial class SonosSystem
     // command refresh running on a caller's token stops instead of writing state after the teardown.
     private CancellationTokenSource? _scopeCancellation;
 
-    // The monotonic timestamp of the earliest subscription renewal, TimeProviderExtensions.Never for none. Written
-    // under _reconcileLock, which also guards the subscriptions' RenewAt, and read by the connection loop while it
-    // holds no lock.
-    private long _nextRenewalAt = TimeProviderExtensions.Never;
+    // The monotonic timestamp of the loop's next subscription wake, for the earliest renewal or first-event deadline,
+    // TimeProviderExtensions.Never for none. Written under _reconcileLock, which also guards the subscriptions'
+    // RenewAt, and read by the connection loop while it holds no lock.
+    private long _nextWakeAt = TimeProviderExtensions.Never;
 
     // The connection loop's current sleep. Cancelling it wakes the loop to reschedule when a reconciliation outside
-    // the loop, from a command, schedules an earlier renewal. Guarded by _loopWakeLock.
+    // the loop, from a command, schedules an earlier subscription wake. Guarded by _loopWakeLock.
     private readonly Lock _loopWakeLock = new();
     private CancellationTokenSource? _loopWake;
 
@@ -68,16 +68,13 @@ public partial class SonosSystem
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        if (_configurationChanged.CurrentCount == 0)
+        try
         {
-            try
-            {
-                _configurationChanged.Release();
-            }
-            catch (SemaphoreFullException)
-            {
-                // A concurrent call signalled first; one pending restart covers both.
-            }
+            _configurationChanged.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // Signalled already; one pending restart covers both.
         }
 
         return Task.CompletedTask;
@@ -335,10 +332,10 @@ public partial class SonosSystem
         // The stopping token is already cancelled on shutdown, so teardown gets its own short budgets, one for the
         // lock and one for the unsubscribes, so a slow reconciliation cannot use up the time for unsubscribing. Holding
         // the reconcile lock keeps a command's reconciliation from subscribing again between unsubscribing and disposing.
-        bool hasReconcileLock;
-        using (var lockCancellation = new CancellationTokenSource(TeardownTimeout))
+        var hasReconcileLock = await _reconcileLock.WaitAsync(TeardownTimeout);
+        if (!hasReconcileLock)
         {
-            hasReconcileLock = await TryEnterReconcileLockAsync(lockCancellation.Token);
+            _logger.LogWarning("A Sonos reconciliation did not finish within the teardown budget; tearing down anyway.");
         }
 
         try
@@ -355,28 +352,13 @@ public partial class SonosSystem
         }
     }
 
-    private async Task<bool> TryEnterReconcileLockAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _reconcileLock.WaitAsync(cancellationToken);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogWarning("A Sonos reconciliation did not finish within the teardown budget; tearing down anyway.");
-            return false;
-        }
-    }
-
     private async Task ReleaseConnectionScopeAsync(CancellationToken cancellationToken)
     {
         // Again, after waiting for an in-flight reconciliation or for the budget to expire: one that was in flight
-        // may have set them after the early reset.
+        // may have set it after the early reset.
         AreEventsActive = false;
-        ActiveEventCallbackHost = null;
         _failures.ReportSuccess(EventDeliveryFailureKey);
-        Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
+        Interlocked.Exchange(ref _nextWakeAt, TimeProviderExtensions.Never);
 
         SonosEventListener? eventListener;
         HttpClient? httpClient;
@@ -427,13 +409,9 @@ public partial class SonosSystem
 
         httpClient?.Dispose();
 
-        foreach (var player in Players.Values)
+        foreach (var device in GetDevices(Players.Values))
         {
-            player.ReportPollFailed(DisconnectedMessage);
-            foreach (var satellite in player.Satellites.Values)
-            {
-                satellite.ReportPollFailed(DisconnectedMessage);
-            }
+            device.ReportPollFailed(DisconnectedMessage);
         }
     }
 
@@ -574,7 +552,7 @@ public partial class SonosSystem
         var nextPollAt = Clock.GetTimestampAfter(EffectivePollingInterval);
         while (true)
         {
-            bool isRenewalOnly;
+            bool isSubscriptionWake;
             using (var wake = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
             {
                 lock (_loopWakeLock)
@@ -585,11 +563,11 @@ public partial class SonosSystem
                 try
                 {
                     // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also
-                    // wakes to renew them, without a full poll. Read after publishing the wake source: a renewal
+                    // wakes to renew them, without a full poll. Read after publishing the wake source: a wake
                     // scheduled before is seen here, one scheduled after cancels the wait.
-                    var nextRenewalAt = Interlocked.Read(ref _nextRenewalAt);
-                    isRenewalOnly = nextRenewalAt < nextPollAt;
-                    var wait = Clock.GetTimeUntil(isRenewalOnly ? nextRenewalAt : nextPollAt);
+                    var nextWakeAt = Interlocked.Read(ref _nextWakeAt);
+                    isSubscriptionWake = nextWakeAt < nextPollAt;
+                    var wait = Clock.GetTimeUntil(isSubscriptionWake ? nextWakeAt : nextPollAt);
                     if (await _configurationChanged.WaitAsync(wait > MinimumLoopWait ? wait : MinimumLoopWait, wake.Token))
                     {
                         return true;
@@ -597,7 +575,7 @@ public partial class SonosSystem
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
                 {
-                    // Woken for an earlier renewal; the next iteration waits for it.
+                    // Woken for an earlier subscription wake; the next iteration waits for it.
                     continue;
                 }
                 finally
@@ -609,7 +587,7 @@ public partial class SonosSystem
                 }
             }
 
-            if (isRenewalOnly)
+            if (isSubscriptionWake)
             {
                 await RenewSubscriptionsAsync(stoppingToken);
                 continue;
@@ -644,7 +622,7 @@ public partial class SonosSystem
         }
     }
 
-    private void WakeLoopForRenewal()
+    private void WakeLoop()
     {
         lock (_loopWakeLock)
         {
@@ -723,13 +701,9 @@ public partial class SonosSystem
                 return;
             }
 
-            foreach (var player in Players.Values)
+            foreach (var device in GetDevices(Players.Values))
             {
-                SyncConnection(player);
-                foreach (var satellite in player.Satellites.Values)
-                {
-                    SyncConnection(satellite);
-                }
+                SyncConnection(device);
             }
         }
     }
@@ -945,7 +919,7 @@ public partial class SonosSystem
             // Never started, or its accept loop died (which it logs); polling keeps the state current.
             UpdateAreEventsActive();
             ActiveEventCallbackHost = null;
-            Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
+            Interlocked.Exchange(ref _nextWakeAt, TimeProviderExtensions.Never);
             return;
         }
 
@@ -986,7 +960,7 @@ public partial class SonosSystem
         finally
         {
             // Also when cancelled: a subscription made before the cancellation must still be renewed.
-            ScheduleRenewal(eventListener);
+            ScheduleWake(eventListener);
         }
     }
 
@@ -1027,27 +1001,27 @@ public partial class SonosSystem
     private long GetInitialEventDeadline(SonosEventSubscription subscription) =>
         Clock.AddToTimestamp(subscription.SubscribedAt, InitialEventTimeout);
 
-    // Caller holds _reconcileLock, which guards the subscriptions' RenewAt. The loop also wakes when a first event
-    // is due, so a missing one is reported without waiting for the next poll.
-    private void ScheduleRenewal(SonosEventListener eventListener)
+    // Caller holds _reconcileLock, which guards the subscriptions' RenewAt. The loop wakes for the earliest renewal
+    // and also when a first event is due, so a missing one is reported without waiting for the next poll.
+    private void ScheduleWake(SonosEventListener eventListener)
     {
         var now = Clock.GetTimestamp();
-        var nextRenewalAt = TimeProviderExtensions.Never;
+        var nextWakeAt = TimeProviderExtensions.Never;
         foreach (var subscription in eventListener.Subscriptions)
         {
             if (subscription.Sid is not null)
             {
-                nextRenewalAt = Math.Min(nextRenewalAt, subscription.RenewAt);
+                nextWakeAt = Math.Min(nextWakeAt, subscription.RenewAt);
                 if (!subscription.HasReceivedEvent && GetInitialEventDeadline(subscription) is var deadline && deadline > now)
                 {
-                    nextRenewalAt = Math.Min(nextRenewalAt, deadline);
+                    nextWakeAt = Math.Min(nextWakeAt, deadline);
                 }
             }
         }
 
-        if (nextRenewalAt < Interlocked.Exchange(ref _nextRenewalAt, nextRenewalAt))
+        if (nextWakeAt < Interlocked.Exchange(ref _nextWakeAt, nextWakeAt))
         {
-            WakeLoopForRenewal();
+            WakeLoop();
         }
     }
 
@@ -1089,16 +1063,15 @@ public partial class SonosSystem
             }
 
             var canSubscribe = player.IsConnected;
-            desired[$"{player.Uuid}/{AvTransportService}"] = new SubscriptionTarget(
-                new Uri(baseUri, "/MediaRenderer/AVTransport/Event"), body => OnAvTransportEvent(player, body), canSubscribe);
-            desired[$"{player.Uuid}/{RenderingControlService}"] = new SubscriptionTarget(
-                new Uri(baseUri, "/MediaRenderer/RenderingControl/Event"), body => OnRenderingControlEvent(player, body), canSubscribe);
+            void Add(string service, Action<string> handler) =>
+                desired[$"{player.Uuid}/{service}"] = new SubscriptionTarget(new Uri(baseUri, $"/MediaRenderer/{service}/Event"), handler, canSubscribe);
 
+            Add(AvTransportService, body => OnAvTransportEvent(player, body));
+            Add(RenderingControlService, body => OnRenderingControlEvent(player, body));
             if (groups.ContainsKey(player.Uuid))
             {
                 var coordinatorUuid = player.Uuid;
-                desired[$"{player.Uuid}/{GroupRenderingControlService}"] = new SubscriptionTarget(
-                    new Uri(baseUri, "/MediaRenderer/GroupRenderingControl/Event"), body => OnGroupRenderingControlEvent(coordinatorUuid, body), canSubscribe);
+                Add(GroupRenderingControlService, body => OnGroupRenderingControlEvent(coordinatorUuid, body));
             }
         }
 

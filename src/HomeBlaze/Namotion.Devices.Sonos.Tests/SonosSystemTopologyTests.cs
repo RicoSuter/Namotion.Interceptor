@@ -18,13 +18,9 @@ public class SonosSystemTopologyTests
     /// </summary>
     internal static void ReportAllReachable(SonosSystem system)
     {
-        foreach (var player in system.Players.Values)
+        foreach (var device in SonosSystem.GetDevices(system.Players.Values))
         {
-            player.ReportPollSucceeded();
-            foreach (var satellite in player.Satellites.Values)
-            {
-                satellite.ReportPollSucceeded();
-            }
+            device.ReportPollSucceeded();
         }
     }
 
