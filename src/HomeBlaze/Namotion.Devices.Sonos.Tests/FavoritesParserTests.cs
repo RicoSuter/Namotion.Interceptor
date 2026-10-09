@@ -112,4 +112,17 @@ public class FavoritesParserTests
         // Assert
         Assert.True(favorite.IsContainer);
     }
+
+    [Fact]
+    public void WhenFavoriteIsConvertedToString_ThenTitleIsReturned()
+    {
+        // Arrange
+        var favorite = new SonosFavorite("Radio FM1", "x-sonosapi-stream:tunein%3a9557", false, null);
+
+        // Act
+        var result = favorite.ToString();
+
+        // Assert
+        Assert.Equal("Radio FM1", result);
+    }
 }

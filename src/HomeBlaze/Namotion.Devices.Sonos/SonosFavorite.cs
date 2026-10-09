@@ -12,4 +12,9 @@ public sealed record SonosFavorite(string Title, string Uri, bool IsContainer, s
     // The DIDL needed to play the favorite. It often embeds account tokens, so it stays off the public surface
     // and out of JSON. It is part of record equality, so a changed token replaces the stored array.
     internal string Metadata { get; init; } = "";
+
+    /// <summary>
+    /// Returns <see cref="Title"/>, so a list of favorites reads as the names shown in the Sonos app.
+    /// </summary>
+    public override string ToString() => Title;
 }
