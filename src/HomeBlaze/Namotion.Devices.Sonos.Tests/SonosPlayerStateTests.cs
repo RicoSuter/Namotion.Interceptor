@@ -1,14 +1,15 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosPlayerStateTests
 {
     private const string SpotifyUri = TestFixtures.SpotifyConnectUri;
-    private static readonly DateTimeOffset T0 = new(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
 
     private static SonosPlayer CreateKitchen()
     {
@@ -46,7 +47,7 @@ public class SonosPlayerStateTests
     {
         // Arrange
         var player = CreateKitchen();
-        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), T0.AddSeconds(2));
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), T0 + 2);
 
         // Act
         player.ApplyPoll(
@@ -55,7 +56,7 @@ public class SonosPlayerStateTests
                 TimeSpan.FromSeconds(7),
                 null,
                 new RenderingControlChange(10, null, null, null, null, null, null)),
-            T0.AddSeconds(1));
+            T0 + 1);
 
         // Assert
         Assert.Equal(0.5m, player.Volume);
@@ -64,15 +65,19 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenPollStartsLongBeforeTheLastPoll_ThenItIsTakenAsAClockJumpAndApplied()
+    public void WhenTheWallClockStepsBack_ThenLaterPollsAreStillApplied()
     {
         // Arrange
-        var player = CreateKitchen();
-        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), T0.AddMinutes(10));
+        var clock = new SteppableClock();
+        var system = new SonosSystem(new TestHttpClientFactory(), NullLogger<SonosSystem>.Instance) { Clock = clock };
+        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var player = system.Players[KitchenUuid];
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), system.NextOrder());
 
         // Act
-        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(10, null, null, null, null, null, null)), T0);
-        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(20, null, null, null, null, null, null)), T0.AddSeconds(30));
+        clock.WallClockOffset = TimeSpan.FromMinutes(-10);
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(10, null, null, null, null, null, null)), system.NextOrder());
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(20, null, null, null, null, null, null)), system.NextOrder());
 
         // Assert
         Assert.Equal(0.2m, player.Volume);
@@ -108,7 +113,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
 
         // Act
-        player.ApplyPoll(Reading(new AvTransportChange("PLAYING", "SHUFFLE_NOREPEAT", SpotifyUri, SpotifyUri, "NOT_IMPLEMENTED", "NOT_IMPLEMENTED")), T0.AddSeconds(1));
+        player.ApplyPoll(Reading(new AvTransportChange("PLAYING", "SHUFFLE_NOREPEAT", SpotifyUri, SpotifyUri, "NOT_IMPLEMENTED", "NOT_IMPLEMENTED")), T0 + 1);
 
         // Assert
         Assert.Equal("Song", player.CurrentTrackTitle);
@@ -128,7 +133,7 @@ public class SonosPlayerStateTests
         // Act
         player.ApplyPoll(
             new SonosPlayerReading(new AvTransportChange("PLAYING", "NORMAL", trackUri, trackUri, "NOT_IMPLEMENTED", "NOT_IMPLEMENTED"), null, null, NoRenderingControl()),
-            T0.AddSeconds(1));
+            T0 + 1);
 
         // Assert
         Assert.Equal(trackUri, player.CurrentTrackUri);
@@ -161,7 +166,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
 
         // Act
-        player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s1", ""), null, null, NoRenderingControl()), T0.AddSeconds(1));
+        player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s1", ""), null, null, NoRenderingControl()), T0 + 1);
 
         // Assert
         Assert.Equal("SRF 3", player.MediaTitle);
@@ -178,7 +183,7 @@ public class SonosPlayerStateTests
         // Act
         player.ApplyPoll(
             new SonosPlayerReading(new AvTransportChange("PLAYING", "NORMAL", queueUri, "x-file-cifs://nas/b.mp3", null, null, ""), null, null, NoRenderingControl()),
-            T0.AddSeconds(1));
+            T0 + 1);
 
         // Assert
         Assert.Equal("x-file-cifs://nas/b.mp3", player.CurrentTrackUri);
@@ -193,7 +198,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
 
         // Act
-        player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s2", "NOT_IMPLEMENTED"), null, null, NoRenderingControl()), T0.AddSeconds(1));
+        player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s2", "NOT_IMPLEMENTED"), null, null, NoRenderingControl()), T0 + 1);
 
         // Assert
         Assert.Null(player.MediaTitle);
@@ -207,7 +212,7 @@ public class SonosPlayerStateTests
         player.ApplyPoll(Reading(QueueTrackPlaying()), T0);
 
         // Act
-        player.ApplyAvTransportEvent(SpotifyPlaying(), T0.AddSeconds(1));
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0 + 1);
 
         // Assert
         Assert.Equal("Song", player.CurrentTrackTitle);
@@ -222,7 +227,7 @@ public class SonosPlayerStateTests
         player.ApplyPoll(Reading(SpotifyPlaying()), T0);
 
         // Act
-        player.ApplyAvTransportEvent(new AvTransportChange("PAUSED_PLAYBACK", null, null, null, null, null), T0.AddSeconds(1));
+        player.ApplyAvTransportEvent(new AvTransportChange("PAUSED_PLAYBACK", null, null, null, null, null), T0 + 1);
 
         // Assert
         Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
@@ -235,8 +240,8 @@ public class SonosPlayerStateTests
         var player = CreateKitchen();
         player.ApplyPoll(
             new SonosPlayerReading(SpotifyPlaying(), TimeSpan.FromSeconds(10), null, NoRenderingControl()),
-            T0.AddSeconds(-10));
-        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", null, null, null, null, null), T0.AddSeconds(1));
+            T0 - 10);
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", null, null, null, null, null), T0 + 1);
 
         // Act
         player.ApplyPoll(Reading(SpotifyPlaying()), T0);
@@ -253,7 +258,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
 
         // Act
-        player.ApplyAvTransportEvent(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null), T0.AddSeconds(1));
+        player.ApplyAvTransportEvent(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null), T0 + 1);
 
         // Assert
         Assert.Equal(SonosTransportState.Playing, player.TransportState);
@@ -267,7 +272,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
 
         // Act
-        player.ApplyPoll(Reading(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null)), T0.AddSeconds(1));
+        player.ApplyPoll(Reading(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null)), T0 + 1);
 
         // Assert
         Assert.Equal(SonosTransportState.Playing, player.TransportState);
@@ -292,7 +297,7 @@ public class SonosPlayerStateTests
             .ToArray()));
 
         // Act
-        player.ApplyAvTransportEvent(SpotifyPlaying(), T0.AddSeconds(1));
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0 + 1);
 
         // Assert
         Assert.Equal("Song", player.CurrentTrackTitle);
@@ -304,7 +309,7 @@ public class SonosPlayerStateTests
     {
         // Arrange
         var player = CreateKitchen();
-        player.ApplyAvTransportEvent(SpotifyPlaying(), T0.AddSeconds(1));
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0 + 1);
 
         // Act
         player.ApplyPoll(
@@ -326,7 +331,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
 
         // Act
-        player.ApplyPoll(Reading(new AvTransportChange("STOPPED", "NORMAL", "", "", "0:00:00", "")), T0.AddSeconds(1));
+        player.ApplyPoll(Reading(new AvTransportChange("STOPPED", "NORMAL", "", "", "0:00:00", "")), T0 + 1);
 
         // Assert
         Assert.Equal(SonosTransportState.Stopped, player.TransportState);
@@ -373,7 +378,7 @@ public class SonosPlayerStateTests
     {
         // Arrange
         var player = CreateKitchen();
-        player.ApplyRenderingControlEvent(new RenderingControlChange(44, null, null, null, null, null, null), T0.AddSeconds(1));
+        player.ApplyRenderingControlEvent(new RenderingControlChange(44, null, null, null, null, null, null), T0 + 1);
 
         // Act
         player.ApplyPoll(Reading(new AvTransportChange(null, null, null, null, null, null), new RenderingControlChange(10, false, 0, 0, true, null, null)), T0);

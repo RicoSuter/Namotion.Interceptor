@@ -176,7 +176,7 @@ public partial class SonosSystem
         using (scopeCancellation)
         {
             var groupKey = player.GroupKey;
-            var pollStartedAt = Clock.GetUtcNow();
+            var pollStartedAt = NextOrder();
             var groupPlayers = Players.Values
                 .Where(candidate => candidate.IsConnected && candidate.GroupKey == groupKey)
                 .ToArray();
@@ -252,12 +252,12 @@ public partial class SonosSystem
         try
         {
             var seedConnection = GetSeedConnection();
-            var appliedTopologyEvents = GetAppliedTopologyEvents();
+            var topologyPollStartedAt = NextOrder();
             var zoneGroupState = await seedConnection.ReadZoneGroupStateAsync(cancellationToken);
-            ApplyPolledTopology(zoneGroupState, appliedTopologyEvents);
+            ApplyPolledTopology(zoneGroupState, topologyPollStartedAt);
             SyncConnections();
 
-            var pollStartedAt = Clock.GetUtcNow();
+            var pollStartedAt = NextOrder();
             var players = Players.Values.Where(player => player.IsInTopology).ToArray();
             await Task.WhenAll(players.Select(player => PollPlayerAsync(player, pollStartedAt, cancellationToken)));
             await Task.WhenAll(players
@@ -778,7 +778,7 @@ public partial class SonosSystem
         }
     }
 
-    private Task PollPlayerAsync(SonosPlayer player, DateTimeOffset pollStartedAt, CancellationToken cancellationToken) =>
+    private Task PollPlayerAsync(SonosPlayer player, long pollStartedAt, CancellationToken cancellationToken) =>
         PollDeviceAsync(
             player,
             async (connection, newFaults, token) =>
@@ -1092,16 +1092,16 @@ public partial class SonosSystem
     // and logs a parser's XmlException, and its disposal waits for running handlers, so they must not block on it.
 
     private void OnAvTransportEvent(SonosPlayer player, string body) =>
-        player.ApplyAvTransportEvent(UpnpEventParser.ParseAvTransport(body), Clock.GetUtcNow());
+        player.ApplyAvTransportEvent(UpnpEventParser.ParseAvTransport(body), NextOrder());
 
     private void OnRenderingControlEvent(SonosPlayer player, string body) =>
-        player.ApplyRenderingControlEvent(UpnpEventParser.ParseRenderingControl(body), Clock.GetUtcNow());
+        player.ApplyRenderingControlEvent(UpnpEventParser.ParseRenderingControl(body), NextOrder());
 
     private void OnGroupRenderingControlEvent(string coordinatorUuid, string body)
     {
         if (Groups.TryGetValue(coordinatorUuid, out var group))
         {
-            group.ApplyGroupRenderingControlEvent(UpnpEventParser.ParseGroupRenderingControl(body), Clock.GetUtcNow());
+            group.ApplyGroupRenderingControlEvent(UpnpEventParser.ParseGroupRenderingControl(body), NextOrder());
         }
     }
 

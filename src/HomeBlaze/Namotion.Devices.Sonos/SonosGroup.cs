@@ -21,8 +21,7 @@ public partial class SonosGroup :
 {
     private readonly SonosSystem _system;
     private readonly Lock _stateLock = new();
-    private DateTimeOffset _lastEventAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastPollStartedAt = DateTimeOffset.MinValue;
+    private PollEventOrder _order;
 
     internal SonosGroup(SonosSystem system, SonosPlayer coordinator)
     {
@@ -247,27 +246,25 @@ public partial class SonosGroup :
         }
     }
 
-    internal void ApplyGroupRenderingControlEvent(GroupRenderingControlChange change, DateTimeOffset receivedAt)
+    /// <param name="change">The change the event carries.</param>
+    /// <param name="order">When the event arrived, from <see cref="SonosSystem.NextOrder"/>.</param>
+    internal void ApplyGroupRenderingControlEvent(GroupRenderingControlChange change, long order)
     {
         lock (_stateLock)
         {
-            _lastEventAt = receivedAt;
+            _order.RecordEvent(order);
             Apply(change);
         }
     }
 
-    internal void ApplyGroupRenderingControlPoll(GroupRenderingControlChange change, DateTimeOffset pollStartedAt)
+    /// <param name="change">The values the poll read.</param>
+    /// <param name="pollStartedAt">When the poll started, from <see cref="SonosSystem.NextOrder"/>.</param>
+    internal void ApplyGroupRenderingControlPoll(GroupRenderingControlChange change, long pollStartedAt)
     {
         lock (_stateLock)
         {
             // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one.
-            if (SonosValues.IsSupersededPoll(pollStartedAt, _lastPollStartedAt))
-            {
-                return;
-            }
-
-            _lastPollStartedAt = pollStartedAt;
-            if (_lastEventAt <= pollStartedAt)
+            if (_order.TryApplyPoll(pollStartedAt))
             {
                 Apply(change);
             }

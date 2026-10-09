@@ -20,11 +20,12 @@ public partial class SonosPlayer : SonosDevice,
 {
     private readonly SonosSystem _system;
 
-    // Guards the event versus poll ordering: a timestamp and the fields it protects change together.
+    // Guards the event versus poll ordering: an order and the fields it protects change together. Every poll goes
+    // through all three, so a poll superseded by a later one applies nothing; the sleep timer has no events.
     private readonly Lock _stateLock = new();
-    private DateTimeOffset _lastAvTransportEventAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastRenderingControlEventAt = DateTimeOffset.MinValue;
-    private DateTimeOffset _lastPollStartedAt = DateTimeOffset.MinValue;
+    private PollEventOrder _avTransportOrder;
+    private PollEventOrder _renderingControlOrder;
+    private PollEventOrder _sleepTimerOrder;
 
     // Every event and poll repeats the metadata, so the last parse is reused while the raw string is unchanged, and
     // the album art URI while the track and the speaker address are. Guarded by _stateLock.
@@ -623,39 +624,42 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
-    internal void ApplyAvTransportEvent(AvTransportChange change, DateTimeOffset receivedAt)
+    /// <param name="change">The change the event carries.</param>
+    /// <param name="order">When the event arrived, from <see cref="SonosSystem.NextOrder"/>.</param>
+    internal void ApplyAvTransportEvent(AvTransportChange change, long order)
     {
         lock (_stateLock)
         {
-            _lastAvTransportEventAt = receivedAt;
+            _avTransportOrder.RecordEvent(order);
             ApplyAvTransport(change);
         }
     }
 
-    internal void ApplyRenderingControlEvent(RenderingControlChange change, DateTimeOffset receivedAt)
+    /// <param name="change">The change the event carries.</param>
+    /// <param name="order">When the event arrived, from <see cref="SonosSystem.NextOrder"/>.</param>
+    internal void ApplyRenderingControlEvent(RenderingControlChange change, long order)
     {
         lock (_stateLock)
         {
-            _lastRenderingControlEventAt = receivedAt;
+            _renderingControlOrder.RecordEvent(order);
             ApplyRenderingControl(change);
         }
     }
 
-    internal void ApplyPoll(SonosPlayerReading reading, DateTimeOffset pollStartedAt)
+    /// <param name="reading">The values the poll read.</param>
+    /// <param name="pollStartedAt">When the poll started, from <see cref="SonosSystem.NextOrder"/>.</param>
+    internal void ApplyPoll(SonosPlayerReading reading, long pollStartedAt)
     {
         lock (_stateLock)
         {
-            // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one.
-            if (SonosValues.IsSupersededPoll(pollStartedAt, _lastPollStartedAt))
-            {
-                return;
-            }
+            // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one. A
+            // poll that started before the latest event read state the event has since replaced. That includes the
+            // position, which belongs to the track the poll read.
+            var appliesAvTransport = _avTransportOrder.TryApplyPoll(pollStartedAt);
+            var appliesRenderingControl = _renderingControlOrder.TryApplyPoll(pollStartedAt);
+            var appliesSleepTimer = _sleepTimerOrder.TryApplyPoll(pollStartedAt);
 
-            _lastPollStartedAt = pollStartedAt;
-
-            // A poll that started before the latest event read state the event has since replaced. That includes
-            // the position, which belongs to the track the poll read.
-            if (_lastAvTransportEventAt <= pollStartedAt)
+            if (appliesAvTransport)
             {
                 ApplyAvTransport(reading.AvTransport);
                 if (reading.HasPosition)
@@ -664,12 +668,12 @@ public partial class SonosPlayer : SonosDevice,
                 }
             }
 
-            if (_lastRenderingControlEventAt <= pollStartedAt)
+            if (appliesRenderingControl)
             {
                 ApplyRenderingControl(reading.RenderingControl);
             }
 
-            if (reading.HasSleepTimer)
+            if (appliesSleepTimer && reading.HasSleepTimer)
             {
                 ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
             }

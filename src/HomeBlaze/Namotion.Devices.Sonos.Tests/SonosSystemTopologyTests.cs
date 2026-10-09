@@ -198,13 +198,13 @@ public class SonosSystemTopologyTests
         var household = FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office);
         var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
         var system = CreateSystem();
-        system.ApplyPolledTopology(household, system.GetAppliedTopologyEvents());
+        system.ApplyPolledTopology(household, system.NextOrder());
         ReportAllReachable(system);
 
         // Act
-        system.ApplyPolledTopology(withoutKitchen, system.GetAppliedTopologyEvents());
-        system.ApplyPolledTopology(household, system.GetAppliedTopologyEvents());
-        system.ApplyPolledTopology(withoutKitchen, system.GetAppliedTopologyEvents());
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder());
+        system.ApplyPolledTopology(household, system.NextOrder());
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder());
 
         // Assert
         Assert.True(system.Players[TestFixtures.KitchenUuid].IsConnected);
@@ -219,11 +219,11 @@ public class SonosSystemTopologyTests
         var household = FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office);
         var system = CreateSystem();
         system.ApplyTopologyEvent(household);
-        var appliedTopologyEventsBeforeRead = system.GetAppliedTopologyEvents();
+        var pollStartedAt = system.NextOrder();
 
         // Act
         system.ApplyTopologyEvent(household);
-        system.ApplyPolledTopology(FakeSonosSpeaker.CreateGroupTopology(office, kitchen), appliedTopologyEventsBeforeRead);
+        system.ApplyPolledTopology(FakeSonosSpeaker.CreateGroupTopology(office, kitchen), pollStartedAt);
 
         // Assert
         Assert.Equal(2, system.Groups.Count);

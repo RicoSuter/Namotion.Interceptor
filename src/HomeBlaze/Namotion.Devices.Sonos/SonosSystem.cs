@@ -43,10 +43,13 @@ public partial class SonosSystem : BackgroundService,
     // Topology arrives from the poll and from ZoneGroupTopology events, so applying it is serialized.
     private readonly Lock _topologyLock = new();
 
-    // Guarded by _topologyLock. The count of applied topology events orders a polled topology against them, and the
-    // players missing from the last topology that was not applied wait for a second read to confirm them. The first
-    // topology of a connection needs no confirmation: the previous one may be arbitrarily old.
-    private long _appliedTopologyEvents;
+    // The last order NextOrder handed out.
+    private long _order;
+
+    // Guarded by _topologyLock. The order of the applied topology events orders a polled topology against them, and
+    // the players missing from the last topology that was not applied wait for a second read to confirm them. The
+    // first topology of a connection needs no confirmation: the previous one may be arbitrarily old.
+    private PollEventOrder _topologyOrder;
     private HashSet<string> _unconfirmedMissingPlayers = new(StringComparer.Ordinal);
     private bool _hasConnectionTopology;
 
@@ -282,26 +285,23 @@ public partial class SonosSystem : BackgroundService,
         new("The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
 
     /// <summary>
-    /// Returns the count of applied topology events, taken before reading a topology for <see cref="ApplyPolledTopology"/>.
+    /// Returns the next value of a sequence that orders polls against events: a poll takes one before it reads, an
+    /// event when it arrives. Unlike a wall-clock time, a later call always returns a larger value.
     /// </summary>
-    internal long GetAppliedTopologyEvents()
-    {
-        lock (_topologyLock)
-        {
-            return _appliedTopologyEvents;
-        }
-    }
+    internal long NextOrder() => Interlocked.Increment(ref _order);
 
     /// <summary>
     /// Applies a ZoneGroupState read by a poll, unless a topology event was applied after the read started: the event
     /// is newer. Throws <see cref="System.Xml.XmlException"/> or <see cref="FormatException"/> when it cannot be parsed.
     /// </summary>
-    internal void ApplyPolledTopology(string zoneGroupState, long appliedTopologyEventsBeforeRead)
+    /// <param name="zoneGroupState">The ZoneGroupState XML the poll read.</param>
+    /// <param name="pollStartedAt">When the poll started, from <see cref="NextOrder"/>.</param>
+    internal void ApplyPolledTopology(string zoneGroupState, long pollStartedAt)
     {
         var topology = ParseUnlessApplied(zoneGroupState);
         lock (_topologyLock)
         {
-            if (_appliedTopologyEvents != appliedTopologyEventsBeforeRead)
+            if (!_topologyOrder.TryApplyPoll(pollStartedAt))
             {
                 _logger.LogDebug("Skipped a polled Sonos topology that a topology event replaced while it was read.");
                 return;
@@ -322,7 +322,7 @@ public partial class SonosSystem : BackgroundService,
         {
             if (ApplyZoneGroupState(zoneGroupState, topology))
             {
-                _appliedTopologyEvents++;
+                _topologyOrder.RecordEvent(NextOrder());
             }
         }
     }

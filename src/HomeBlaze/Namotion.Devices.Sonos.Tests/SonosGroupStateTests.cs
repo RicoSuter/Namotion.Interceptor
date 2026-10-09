@@ -1,12 +1,13 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosGroupStateTests
 {
-    private static readonly DateTimeOffset T0 = new(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
 
     private static SonosSystem CreateSystem()
     {
@@ -62,7 +63,7 @@ public class SonosGroupStateTests
     {
         // Arrange
         var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
-        group.ApplyGroupRenderingControlEvent(new GroupRenderingControlChange(35, false), T0.AddSeconds(1));
+        group.ApplyGroupRenderingControlEvent(new GroupRenderingControlChange(35, false), T0 + 1);
 
         // Act
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, false), T0);
@@ -76,10 +77,10 @@ public class SonosGroupStateTests
     {
         // Arrange
         var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
-        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), T0.AddSeconds(2));
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), T0 + 2);
 
         // Act
-        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), T0.AddSeconds(1));
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), T0 + 1);
 
         // Assert
         Assert.Equal(0.35m, group.Volume);
@@ -87,15 +88,19 @@ public class SonosGroupStateTests
     }
 
     [Fact]
-    public void WhenGroupPollStartsLongBeforeTheLastPoll_ThenItIsTakenAsAClockJumpAndApplied()
+    public void WhenTheWallClockStepsBack_ThenLaterGroupPollsAreStillApplied()
     {
         // Arrange
-        var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
-        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), T0.AddMinutes(10));
+        var clock = new SteppableClock();
+        var system = new SonosSystem(new TestHttpClientFactory(), NullLogger<SonosSystem>.Instance) { Clock = clock };
+        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var group = system.Groups[LivingRoomUuid];
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), system.NextOrder());
 
         // Act
-        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), T0);
-        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(20, true), T0.AddSeconds(30));
+        clock.WallClockOffset = TimeSpan.FromMinutes(-10);
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), system.NextOrder());
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(20, true), system.NextOrder());
 
         // Assert
         Assert.Equal(0.2m, group.Volume);

@@ -5,6 +5,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
@@ -13,7 +14,6 @@ namespace Namotion.Devices.Sonos.Tests;
 /// </summary>
 public class SonosDerivedTrackingTests
 {
-    private static readonly DateTimeOffset T0 = new(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
     public void WhenTransportStateChanges_ThenIsPlayingRaisesPropertyChanged()

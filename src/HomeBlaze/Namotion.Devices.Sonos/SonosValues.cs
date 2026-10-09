@@ -20,22 +20,12 @@ internal static class SonosValues
     /// </summary>
     internal static readonly TimeSpan MaximumSleepTimer = new(23, 59, 59);
 
-    // How much earlier than the last applied poll a poll may start and still be a late completion, not a clock jump.
-    private static readonly TimeSpan PollReorderWindow = TimeSpan.FromMinutes(5);
-
     /// <summary>
     /// A value Sonos actually reported. Null means the field was absent and <c>NOT_IMPLEMENTED</c> means the
     /// source cannot tell (Spotify Connect, TV), so both keep the current value rather than clearing it.
     /// </summary>
     internal static bool IsKnown([NotNullWhen(true)] string? value) =>
         value is not null && value != NotImplemented;
-
-    /// <summary>
-    /// Returns whether a poll started shortly before the last applied one, so applying it would roll newer state back.
-    /// A start further back than the reorder window is a backward wall-clock jump and is accepted, so the gate recovers.
-    /// </summary>
-    internal static bool IsSupersededPoll(DateTimeOffset pollStartedAt, DateTimeOffset lastPollStartedAt) =>
-        pollStartedAt < lastPollStartedAt && lastPollStartedAt - pollStartedAt < PollReorderWindow;
 
     /// <summary>
     /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.

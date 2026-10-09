@@ -10,6 +10,11 @@ internal static class TestFixtures
     /// <summary>
     /// The transport URI of a Spotify Connect session on the kitchen player, with a placeholder session id.
     /// </summary>
+    /// <summary>
+    /// A poll or event order, as <see cref="SonosSystem.NextOrder"/> hands out, for tests that order them by hand.
+    /// </summary>
+    internal const long T0 = 1000;
+
     internal const string SpotifyConnectUri = "x-sonos-vli:RINCON_A0000000000601400:2,spotify:0000000000000000";
 
     internal static string Read(string name) =>
