@@ -50,34 +50,12 @@ public static class JsonSchemaTypeMapper
     /// </summary>
     public static string? GetFormat(Type? type)
     {
-        if (type is null)
-        {
-            return null;
-        }
-
-        type = Nullable.GetUnderlyingType(type) ?? type;
-
-        if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
-        {
-            return "date-time";
-        }
-
-        if (type == typeof(DateOnly))
-        {
-            return "date";
-        }
-
-        if (type == typeof(Guid))
-        {
-            return "uuid";
-        }
-
-        if (type == typeof(Uri))
-        {
-            return "uri";
-        }
-
-        return null;
+        type = UnwrapNullable(type);
+        return type == typeof(DateTime) || type == typeof(DateTimeOffset) ? "date-time"
+            : type == typeof(DateOnly) ? "date"
+            : type == typeof(Guid) ? "uuid"
+            : type == typeof(Uri) ? "uri"
+            : null;
     }
 
     /// <summary>
@@ -87,25 +65,14 @@ public static class JsonSchemaTypeMapper
     /// </summary>
     public static string? GetPattern(Type? type)
     {
-        if (type is null)
-        {
-            return null;
-        }
-
-        type = Nullable.GetUnderlyingType(type) ?? type;
-
-        if (type == typeof(TimeSpan))
-        {
-            return @"^-?(\d+\.)?\d{2}:\d{2}:\d{2}(\.\d{1,7})?$";
-        }
-
-        if (type == typeof(TimeOnly))
-        {
-            return @"^\d{2}:\d{2}:\d{2}(\.\d{1,7})?$";
-        }
-
-        return null;
+        type = UnwrapNullable(type);
+        return type == typeof(TimeSpan) ? @"^-?(\d+\.)?\d{2}:\d{2}:\d{2}(\.\d{1,7})?$"
+            : type == typeof(TimeOnly) ? @"^\d{2}:\d{2}:\d{2}(\.\d{1,7})?$"
+            : null;
     }
+
+    private static Type? UnwrapNullable(Type? type) =>
+        type is null ? null : Nullable.GetUnderlyingType(type) ?? type;
 
     // The types System.Text.Json writes as JSON strings by default; enums are listed and read by name.
     internal static bool IsWrittenAsString(Type type) =>

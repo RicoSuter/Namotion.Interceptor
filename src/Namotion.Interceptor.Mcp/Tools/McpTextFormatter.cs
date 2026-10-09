@@ -250,11 +250,13 @@ internal static class McpTextFormatter
             builder.Append(dictionary is not null ? '{' : '[');
 
             var writtenCount = 0;
+            var visitedCount = 0;
             var remainingCount = 0;
             var enumerator = dictionary?.GetEnumerator() ?? collection.GetEnumerator();
             using var disposableEnumerator = enumerator as IDisposable;
             while (enumerator.MoveNext())
             {
+                visitedCount++;
                 var itemText = dictionary is not null
                     ? FormatDictionaryEntry((DictionaryEntry)enumerator.Current!)
                     : JsonSerializer.Serialize(enumerator.Current, CollectionSerializerOptions);
@@ -278,12 +280,9 @@ internal static class McpTextFormatter
                     builder.Append("...");
                     writtenCount++;
                 }
-                else
-                {
-                    remainingCount++;
-                }
 
-                remainingCount += CountRemaining(collection, enumerator, writtenCount + remainingCount);
+                var totalCount = collection is ICollection { Count: var count } ? count : visitedCount + CountRest(enumerator);
+                remainingCount = totalCount - writtenCount;
                 break;
             }
 
@@ -307,20 +306,15 @@ internal static class McpTextFormatter
         JsonSerializer.Serialize(entry.Key.ToString(), CollectionSerializerOptions) + ":" +
         JsonSerializer.Serialize(entry.Value, CollectionSerializerOptions);
 
-    private static int CountRemaining(IEnumerable collection, IEnumerator enumerator, int visitedCount)
+    private static int CountRest(IEnumerator enumerator)
     {
-        if (collection is ICollection { Count: var count })
-        {
-            return count - visitedCount;
-        }
-
-        var remainingCount = 0;
+        var count = 0;
         while (enumerator.MoveNext())
         {
-            remainingCount++;
+            count++;
         }
 
-        return remainingCount;
+        return count;
     }
 
     private static string FormatJsonElement(JsonElement element) => element.ValueKind switch
