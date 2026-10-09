@@ -292,7 +292,7 @@ export default makeScene2D('setup', function* (view) {
 Scene rules:
 
 - [ ] `yield* waitForFonts()` first, then one `Narrator` and one `Camera` per scene.
-- [ ] Call `narrator.beat(id, ...animations)` for every beat id of `script.yaml` exactly once, in script order. The animations all start with the beat and run in parallel; order them with `delay`, `chain`, `sequence`. Size long animations with `narrator.duration(id)`.
+- [ ] Call `narrator.beat(id, ...animations)` for every beat id of `script.yaml` exactly once, in script order; a beat added to the script later goes to the same place in the scene, and the narrator stops the render when the order differs. The animations all start with the beat and run in parallel; order them with `delay`, `chain`, `sequence`. Size long animations with `narrator.duration(id)`.
 - [ ] Between beats do only zero-time work: add or `remove()` nodes, `yield* flow.build()`, `yield browser`. A `waitFor` or animation outside a beat shifts the picture against the narration, subtitles and contact sheet.
 - [ ] Add content to `camera` so it zooms; add `ChapterCard`s to `view` so they stay full screen. Fade an element out inside a beat and `remove()` it after that beat.
 - [ ] Frame: 1920 by 1080, origin in the center. Nothing but the chapter header is drawn over the picture (subtitles are a soft track), so use the whole frame: center diagrams, cards and windows vertically around y 0, and point camera targets at the subject itself, not above it.
@@ -366,7 +366,7 @@ Run in order from `videos/`:
 | `npm run tts` and `npm run render` with `--voice <voice> --tempo <factor>` | a trial narration with its own timing and render files; the regular ones stay untouched (see Voices in `videos/README.md`) |
 
 - Chatterbox takes 1 to 3 s per 1 s of speech on the first run, depending on the GPU (about 10 minutes for a 10 minute episode on an RTX 3080); Kokoro takes about a minute for the same episode. Audio is cached by text, voice and settings, so later runs only synthesize changed lines; the `atempo` copies are cached separately, so a tempo change that only changes the atempo factor takes seconds. TTS reads only the script, so it can run as soon as the script exists.
-- Capture, TTS and render can each take longer than a 10 minute command timeout. Run them in the background with output to a log file and poll the log.
+- Capture, TTS and render can each take longer than a 10 minute command timeout (a 10 minute draft renders in about 50 minutes). Run them in the background with output to a log file and wait for the task's completion notice; `pgrep -f '<command>'` also matches the waiting shell itself. Check fixes with `--beats <id>,...` before the next full render.
 - After TTS compare the chapter seconds with the outline budgets. If a chapter is short, add substance or let a demo breathe with `hold`, not filler words.
 - Render logs `Beat '<id>': an animation ran N s past the end of the beat` when an animation outlives its beat. Fix every one.
 - Render the final preset only when the user asks or the draft review is clean and gates are auto-approved.
