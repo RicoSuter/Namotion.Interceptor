@@ -29,7 +29,7 @@ All property change notifications flow through a single `PropertyChangeIntercept
 | API | Delivery | Serialization | Main cost |
 |---|---|---|---|
 | `GetPropertyChangeObservable()` | scheduler by default | yes | context-wide fan-out and Rx subscription state |
-| `CreatePropertyChangeQueueSubscription()` | caller-owned consumer | one consumer | an unbounded queue and a blocked consumer thread |
+| `CreatePropertyChangeQueueSubscription()` | caller-owned consumer | one consumer | an unbounded queue, plus a blocked thread when drained synchronously |
 | `SubscribeInline(...)` | writing thread | no | lowest fixed cost, but observer latency and failures affect the setter |
 | `Subscribe(..., scheduler, onError)` | scheduler | per subscription | an unbounded queue and scheduled drain work |
 
@@ -77,19 +77,33 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 }
 ```
 
+`TryDequeue` blocks its thread while the queue is empty, so give it a dedicated thread rather than a thread-pool thread. To drain without holding a thread while idle, pair `TryDequeueImmediate` with `WaitToDequeueAsync`:
+
+```csharp
+while (!cancellationToken.IsCancellationRequested)
+{
+    if (subscription.TryDequeueImmediate(out var change))
+    {
+        Console.WriteLine($"Property '{change.Property.Name}' changed.");
+    }
+    else if (!await subscription.WaitToDequeueAsync(cancellationToken).ConfigureAwait(false))
+    {
+        break; // cancelled, or disposed and drained
+    }
+}
+```
+
 **Queue semantics and threading:**
 
-- Enqueue is fully thread-safe and needs no synchronization; `TryDequeue` is single-consumer, so each subscription must be drained by one thread.
+- Enqueue is fully thread-safe and needs no synchronization; consuming is single-consumer, so each subscription must be drained by one loop at a time, and each `WaitToDequeueAsync` must be awaited before the next one starts.
 - Each subscription owns an isolated queue, so different subscriptions can be consumed concurrently.
 - Independent subscriptions may observe different relative orderings under concurrent writes: dispatch enqueues to each subscription in turn on the writing thread, so two writers can interleave differently per subscription. There is no order that all subscriptions agree on.
 - The implementation is deadlock-free and never loses an enqueued item.
 - The queue is unbounded with no backpressure or overflow policy, so a slow consumer causes unbounded memory growth.
-- Disposal returns immediately: it wakes a waiting consumer and stops future enqueues but does not wait for buffered items, which the consumer may still drain (`TryDequeue` returns the remaining items, then `false`). An enqueue already in flight may finish after `Dispose` returns.
-- Cancellation takes priority over buffered items: `TryDequeue` checks the token before dequeuing, so a cancelled call returns `false` even when items are available.
-
-**Queue limitations:**
-- `TryDequeue` is synchronous and blocks a consumer thread until an item arrives, cancellation is requested, or the subscription is disposed. Continuously draining several subscriptions therefore costs one blocked consumer thread per subscription while they are idle, whereas the observable multiplexes all its subscribers onto the dispatch thread and its scheduler.
-- There is no asynchronous consumer API: `TryDequeue` returns the change through an `out` parameter, so it cannot be awaited.
+- Disposal returns immediately: it wakes a waiting consumer and stops future enqueues but does not wait for buffered items, which the consumer may still drain (`TryDequeue` returns the remaining items, then `false`; `WaitToDequeueAsync` returns `false` once they are drained). An enqueue already in flight may finish after `Dispose` returns.
+- Cancellation takes priority over buffered items: `TryDequeue` and `WaitToDequeueAsync` check the token first, so a cancelled call returns `false` even when items are available.
+- `WaitToDequeueAsync` returning `true` means an item may be available, not that one is reserved for the caller, so the loop re-checks with `TryDequeueImmediate`. A waiting consumer never resumes inline on the writing thread, but its continuation is scheduled from there: await with `ConfigureAwait(false)` unless it must resume on a captured context, since posting to that context then happens inside the property setter.
+- `TryDequeueImmediate` takes no token, so the asynchronous loop checks cancellation before each dequeue. Otherwise a steadily fed queue never lets it reach the wait, and a cancelled loop keeps draining.
 
 ### Per-Property Subscriptions
 
@@ -156,8 +170,8 @@ The revision exists because arrival order can differ from commit order. Dispatch
 | Inline per-property callback | conditional (a) | arrival | writer thread |
 | Scheduled per-property callback | conditional (a, c) | accepted arrival per subscription | configured scheduler |
 | Observable | conditional (a) | arrival | scheduler by default |
-| Pull queue | conditional (a) | arrival | consumer thread |
-| `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | processor thread |
+| Pull queue | conditional (a) | arrival | the consumer |
+| `ChangeQueueProcessor`, buffer > 0 | no, latest-state-wins | arrival of survivors; per-property newest within a flush (b) | thread pool, one flush at a time |
 
 (a) A throwing lifecycle handler or an earlier synchronous observer, including an inline per-property observer or synchronous Rx observer, suppresses delivery for the rest of that write's consumers. Delivery is exactly-once only while those no-throw contracts hold.
 
