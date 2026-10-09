@@ -51,8 +51,8 @@ export function voiceLabel(voice: Voice): string {
 
 /**
  * Highest speed Kokoro synthesizes at natively. Kokoro rounds every phoneme to whole frames, so above about 1.3 short
- * phonemes collapse: a line's first article or a final consonant goes missing (measured with Whisper on the
- * connectors episode). Faster tempos add `atempo` on top.
+ * phonemes collapse: a line's first article or a final consonant goes missing (measured with Whisper on a 10 minute
+ * episode). Faster tempos add `atempo` on top.
  */
 export const kokoroMaximumSpeed = 1.25;
 
