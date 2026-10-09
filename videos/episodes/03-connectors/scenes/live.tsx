@@ -65,7 +65,7 @@ export default makeScene2D('live', function* (view) {
   );
   yield* narrator.beat('live-client-classes',
     code.focus(6, 6),
-    lineFocus(6, 6, 1.12, 2.4),
+    chain(lineFocus(6, 6, 1.12, 2.2), lineFocus(6, 6, 1.22, narrator.duration('live-client-classes') - 2.4)),
   );
   yield* narrator.beat('live-client-source',
     code.focus(8, 11),

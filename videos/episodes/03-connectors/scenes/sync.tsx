@@ -254,7 +254,7 @@ export default makeScene2D('sync', function* (view) {
     confirmed.focus(11, 11),
     confirmedFocus(11, 11, 1.2, 1.8),
     delay(3.2, confirmed.focus(12, 12)),
-    delay(3.2, confirmedFocus(12, 12, 1.2, commitDuration - 3.4)),
+    delay(3.2, chain(confirmedFocus(12, 12, 1.2, 1.2), confirmedFocus(11, 12, 1.06, commitDuration - 4.6))),
   );
 
   const localFirst = new ValueCard({label: 'Local first', value: 'applied at once', color: 'green', width: 620, height: 210, valueSize: 46, x: 520, y: -130, opacity: 0, scale: 0.9});
