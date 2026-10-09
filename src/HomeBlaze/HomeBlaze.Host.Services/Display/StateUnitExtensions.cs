@@ -118,6 +118,8 @@ public static class StateUnitExtensions
             Enum e => e.ToString(),
             IEnumerable<string> strings => string.Join("\n", strings),
             string text => text,
+            // Binary payloads would otherwise render one line per byte.
+            byte[] bytes => $"{bytes.Length} bytes",
             IEnumerable elements => JoinElements(elements),
             _ => value.ToString() ?? ""
         };
@@ -128,12 +130,15 @@ public static class StateUnitExtensions
     private static string JoinElements(IEnumerable elements)
     {
         var builder = new StringBuilder();
+        var isFirst = true;
         foreach (var element in elements)
         {
-            if (builder.Length > 0)
+            if (!isFirst)
             {
                 builder.Append('\n');
             }
+
+            isFirst = false;
 
             builder.Append(element == null ? "null" : element.ToString() ?? "");
         }

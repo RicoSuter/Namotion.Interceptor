@@ -175,6 +175,38 @@ public class StateUnitExtensionsTests
     }
 
     [Fact]
+    public void WhenFirstElementRendersEmpty_ThenLinesStaySeparated()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(new object[] { new System.Text.StringBuilder(), 2 });
+
+        // Assert
+        Assert.Equal("\n2", result);
+    }
+
+    [Fact]
+    public void WhenDisplayValueIsByteArray_ThenRendersItsLength()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(new byte[] { 1, 2, 3 });
+
+        // Assert
+        Assert.Equal("3 bytes", result);
+    }
+
+    [Fact]
     public void WhenDisplayValueIsEmptyArray_ThenRendersEmptyString()
     {
         // Arrange
