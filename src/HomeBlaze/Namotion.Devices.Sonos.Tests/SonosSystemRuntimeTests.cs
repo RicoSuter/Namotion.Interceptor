@@ -230,6 +230,41 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenRenewalsFail_ThenTheNextAttemptWaitsForTheRetryDelay()
+    {
+        // Arrange
+        var retryDelay = TimeSpan.FromSeconds(3);
+        await using var speaker = new FakeSonosSpeaker { SubscriptionTimeoutSeconds = 2 };
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
+        {
+            system.PollingInterval = TimeSpan.FromHours(1);
+            system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
+            system.FailedRenewalRetryDelay = retryDelay;
+        });
+
+        // Act
+        speaker.AbortRenewals = true;
+        var failingSince = DateTimeOffset.UtcNow;
+
+        // Assert
+        DateTimeOffset[] attempts = [];
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                attempts = speaker.RenewalAttempts
+                    .Where(attempt => attempt.Path == AvTransportEventPath && attempt.At >= failingSince)
+                    .Select(attempt => attempt.At)
+                    .ToArray();
+                return attempts.Length >= 2;
+            },
+            ConnectedSystem.WaitTimeout,
+            message: "The failed renewal should be tried again.");
+
+        // Without the delay the overdue renewal would be retried at the one second floor of the loop.
+        Assert.True(attempts[1] - attempts[0] >= retryDelay - TimeSpan.FromMilliseconds(500), $"The retry came after {attempts[1] - attempts[0]}.");
+    }
+
+    [Fact]
     public async Task WhenReadingFavoritesKeepsFailing_ThenOnlyEachNewFailureIsAWarning()
     {
         // Arrange

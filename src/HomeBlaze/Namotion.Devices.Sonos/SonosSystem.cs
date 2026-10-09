@@ -121,6 +121,11 @@ public partial class SonosSystem : BackgroundService,
     /// </summary>
     internal TimeSpan MinimumSubscriptionLifetime { get; set; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>
+    /// How long a renewal that failed without an answer waits before it is tried again. Tests shorten it.
+    /// </summary>
+    internal TimeSpan FailedRenewalRetryDelay { get; set; } = TimeSpan.FromSeconds(30);
+
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {
         HttpClientFactory = httpClientFactory;

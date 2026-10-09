@@ -19,7 +19,6 @@ public partial class SonosSystem
     private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MinimumLoopWait = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan FailedRenewalRetryDelay = TimeSpan.FromSeconds(30);
 
     // Never disposed: neither exposes a wait handle, so there is nothing to release, and disposing them while the
     // loop is still unwinding from a Dispose without StopAsync made its last waits throw or hang.

@@ -17,7 +17,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentQueue<SoapCall> _calls = new();
     private readonly ConcurrentDictionary<string, string> _callbacks = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _unsubscribed = new();
-    private readonly ConcurrentQueue<string> _renewed = new();
+    private readonly ConcurrentQueue<(string Path, DateTimeOffset At)> _renewed = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _holds = new(StringComparer.Ordinal);
 
     internal FakeSonosSpeaker()
@@ -39,7 +39,17 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// <summary>
     /// The event paths of every renewal, a SUBSCRIBE that carries a SID.
     /// </summary>
-    internal IReadOnlyCollection<string> Renewed => _renewed.ToArray();
+    internal IReadOnlyCollection<string> Renewed => _renewed.Select(renewal => renewal.Path).ToArray();
+
+    /// <summary>
+    /// Every renewal with the time it arrived, including the ones <see cref="AbortRenewals"/> dropped.
+    /// </summary>
+    internal IReadOnlyCollection<(string Path, DateTimeOffset At)> RenewalAttempts => _renewed.ToArray();
+
+    /// <summary>
+    /// Fails every renewal with a dropped connection, as an unreachable speaker would.
+    /// </summary>
+    internal bool AbortRenewals { get; set; }
 
     /// <summary>
     /// The lifetime granted to subscriptions and renewals, in seconds.
@@ -154,7 +164,16 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
                 if (request.Headers["SID"] is not null)
                 {
-                    _renewed.Enqueue(path);
+                    _renewed.Enqueue((path, DateTimeOffset.UtcNow));
+                    if (AbortRenewals)
+                    {
+                        // A bare Abort still answers 200 here, so the body is cut short to make the request fail.
+                        response.ContentLength64 = 10;
+                        await response.OutputStream.WriteAsync("<"u8.ToArray());
+                        await response.OutputStream.FlushAsync();
+                        response.Abort();
+                        return;
+                    }
                 }
 
                 response.Headers["SID"] = SidFor(path);
