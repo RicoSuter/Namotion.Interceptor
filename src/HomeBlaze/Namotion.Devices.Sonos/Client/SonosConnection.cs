@@ -239,14 +239,14 @@ internal sealed class SonosConnection : IDisposable
     /// keeps one websocket per device and cannot start it again once it failed or the speaker closed it, so a shared
     /// one would fail every later notification. The speaker's answer is not read, so a rejected clip is not reported.
     /// </summary>
-    internal async Task<bool> PlayNotificationAsync(Uri soundUri, int volume, CancellationToken cancellationToken)
+    internal async Task PlayNotificationAsync(Uri soundUri, int volume, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(NotificationTimeout);
         var device = new SonosBaseDevice(_deviceOptions);
         try
         {
-            return await device.QueueNotification(new NotificationOptions(soundUri, volume), timeout.Token);
+            await device.QueueNotification(new NotificationOptions(soundUri, volume), timeout.Token);
         }
         finally
         {
