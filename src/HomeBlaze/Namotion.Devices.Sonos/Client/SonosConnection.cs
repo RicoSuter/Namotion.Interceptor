@@ -14,6 +14,7 @@ internal sealed record SonosZoneInfo(string? SerialNumber, string? MacAddress, s
 /// <summary>
 /// The SOAP connection to one Sonos unit. Reads return our records; commands throw on a SOAP fault.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Wraps Sonos.Base, where every UPnP request and response is its own type.")]
 internal sealed class SonosConnection : IDisposable
 {
     private const int InstanceId = 0;
@@ -282,6 +283,7 @@ internal sealed class SonosConnection : IDisposable
         }
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S6966", Justification = "Sonos.Base's DisposeAsync does not release a socket that never opened or that timed out, so the synchronous Dispose must follow it.")]
     private async Task CloseNotificationDeviceAsync(SonosBaseDevice device)
     {
         // Closing gracefully lets the speaker take the clip before the connection goes; Sonos.Base waits for the

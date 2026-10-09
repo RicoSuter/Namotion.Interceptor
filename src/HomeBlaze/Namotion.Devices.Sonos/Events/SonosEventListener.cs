@@ -84,6 +84,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
     /// Starts listening. Throws <see cref="HttpListenerException"/> when the port is taken or cannot be bound,
     /// <see cref="InvalidOperationException"/> when already started and <see cref="ObjectDisposedException"/> after disposal.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S5332", Justification = "Sonos speakers deliver UPnP events only over plain HTTP.")]
     internal void Start(string callbackHost, int port, string listenHost = "+")
     {
         ObjectDisposedException.ThrowIf(_disposing, this);
