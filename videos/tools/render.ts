@@ -7,6 +7,7 @@ import {beatRanges} from './beatRanges';
 import {validateEpisode} from './episode';
 import {probeVideoDuration, runFfmpeg} from './ffmpeg';
 import {disableSubtitleTracks} from './mp4';
+import {narrationTrackArgs} from './narrationTrack';
 import {applyNarrationOptions, toSrt} from './narration';
 import {episodeArgument, episodePaths, outputDirectory, videosRoot} from './paths';
 import {writeReview} from './review';
@@ -67,7 +68,16 @@ if (beats) {
   const ranges = beatRanges(timing, beats);
   const parts: string[] = [];
   for (const [index, range] of ranges.entries()) {
-    parts.push(join(videosRoot, await render(`${name.replaceAll('/', '-')}-part${index}.mp4`, [range.start, range.end])));
+    const rendered = join(videosRoot, await render(`${name.replaceAll('/', '-')}-part${index}.mp4`, [range.start, range.end]));
+    // Each part gets the narration of its own beats, so a part's frame rounding never shifts the next part's audio.
+    const rangeBeats = timing.beats.filter(beat => beats.includes(beat.id) && beat.start >= range.start && beat.start < range.end);
+    const narrationFile = rendered.replace(/\.mp4$/, '-narration.wav');
+    runFfmpeg(narrationTrackArgs(timing, new Set(rangeBeats.map(beat => beat.id)), join(videosRoot, 'public'), narrationFile));
+    const part = rendered.replace(/\.mp4$/, '-narrated.mp4');
+    runFfmpeg(['-i', rendered, '-i', narrationFile, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', part]);
+    rmSync(rendered);
+    rmSync(narrationFile);
+    parts.push(part);
   }
   const joinedFile = join(outputDirectory, `${name}.mp4`);
   mkdirSync(dirname(joinedFile), {recursive: true});
@@ -86,20 +96,22 @@ const videoFile = await render(`${paths.episode}-${preset}${variant}.mp4`);
 const subtitleFile = join(outputDirectory, `${paths.episode}${variant}.srt`);
 writeFileSync(subtitleFile, toSrt(timing));
 const absoluteVideoFile = join(videosRoot, videoFile);
-// One pass copies the video, pads the audio and adds the narration as a soft subtitle track. The renderer ends
-// the audio track with the last clip; the bundled ffmpeg ignores -shortest with apad and copied video, so the
-// length is set explicitly.
+const narrationFile = join(outputDirectory, `${paths.episode}${variant}-narration.wav`);
+runFfmpeg(narrationTrackArgs(timing, null, join(videosRoot, 'public'), narrationFile));
+// One pass copies the video, replaces the renderer's audio with the narration track and adds the narration text as
+// a soft subtitle track. The bundled ffmpeg ignores -shortest with copied video, so the length is set explicitly.
 const finishedVideoFile = join(outputDirectory, `${paths.episode}-${preset}${variant}.finished.mp4`);
 runFfmpeg([
-  '-i', absoluteVideoFile, '-i', subtitleFile,
-  '-map', '0:v', '-map', '0:a?', '-map', '1:s',
-  '-c:v', 'copy', '-af', 'apad', '-c:s', 'mov_text',
+  '-i', absoluteVideoFile, '-i', narrationFile, '-i', subtitleFile,
+  '-map', '0:v', '-map', '1:a', '-map', '2:s',
+  '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-af', 'apad', '-c:s', 'mov_text',
   '-metadata:s:s:0', 'language=eng', '-disposition:s:0', '0',
   '-t', probeVideoDuration(absoluteVideoFile).toString(), finishedVideoFile,
 ]);
 // The bundled mov muxer enables the first subtitle track despite its disposition.
 disableSubtitleTracks(finishedVideoFile);
 renameSync(finishedVideoFile, absoluteVideoFile);
+rmSync(narrationFile);
 writeReview(absoluteVideoFile, timing, outputDirectory);
 console.log(`Rendered ${absoluteVideoFile}`);
 console.log(`Review ${join(outputDirectory, `${paths.episode}-review.md`)} and ${join(outputDirectory, `${paths.episode}-contact.png`)}`);
