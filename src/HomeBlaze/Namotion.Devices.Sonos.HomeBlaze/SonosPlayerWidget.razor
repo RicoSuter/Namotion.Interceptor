@@ -1,0 +1,79 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosPlayer))]
+@implements ISubjectComponent
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Speaker" Class="mr-2" />
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h6">@Player?.RoomName</MudText>
+                <MudText Typo="Typo.caption">@Player?.Model</MudText>
+            </MudStack>
+            <MudSpacer />
+            @if (Player?.Source is { } source && source != SonosSource.None)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@source</MudChip>
+            }
+            @if (Player?.BatteryLevel is { } battery)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Icon="@(Player.IsCharging == true ? Icons.Material.Filled.BatteryChargingFull : Icons.Material.Filled.BatteryStd)">
+                    @battery.ToString("P0")
+                </MudChip>
+            }
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+            @if (Player?.CurrentTrackImageUri is { } image)
+            {
+                <MudImage Src="@image" Width="64" Height="64" ObjectFit="ObjectFit.Cover" Class="rounded" />
+            }
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.body1">@(Player?.CurrentTrackTitle ?? "Nothing playing")</MudText>
+                <MudText Typo="Typo.caption">@Player?.CurrentTrackArtist</MudText>
+            </MudStack>
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" Disabled="@(Player?.Previous_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.PreviousAsync(CancellationToken.None)))" />
+            <MudIconButton Icon="@(Player?.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                           Disabled="@(Player?.TogglePlayback_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.TogglePlaybackAsync(CancellationToken.None)))" />
+            <MudIconButton Icon="@Icons.Material.Filled.SkipNext" Disabled="@(Player?.Next_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.NextAsync(CancellationToken.None)))" />
+            <MudIconButton Icon="@(Player?.IsMuted == true ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                           Disabled="@(Player?.Play_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.IsMuted == true ? player.UnmuteAsync(CancellationToken.None) : player.MuteAsync(CancellationToken.None)))" />
+            <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
+                       Disabled="@(Player?.Play_IsEnabled != true)"
+                       Value="@((int)((Player?.Volume ?? 0m) * 100m))"
+                       ValueChanged="@(value => RunAsync(player => player.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SonosPlayer? Player => Subject as SonosPlayer;
+
+    private async Task RunAsync(Func<SonosPlayer, Task> command)
+    {
+        if (Player is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await command(Player);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Sonos: {exception.Message}", Severity.Error);
+        }
+    }
+}

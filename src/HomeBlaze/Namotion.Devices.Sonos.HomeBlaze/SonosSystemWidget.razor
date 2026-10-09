@@ -1,0 +1,57 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosSystem))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.LibraryMusic" Class="mr-2" />
+            <MudText Typo="Typo.h6">Sonos</MudText>
+            <MudSpacer />
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                     Color="@(SystemSubject?.IsConnected == true ? Color.Success : Color.Error)">
+                @(SystemSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                     Color="@(SystemSubject?.AreEventsActive == true ? Color.Success : Color.Warning)">
+                @(SystemSubject?.AreEventsActive == true ? "Events: live" : "Events: polling only")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Rooms</MudText>
+                <MudText Typo="Typo.h5">@(SystemSubject?.Players.Count ?? 0)</MudText>
+            </MudStack>
+            <MudStack>
+                <MudText Typo="Typo.caption">Groups</MudText>
+                <MudText Typo="Typo.h5">@(SystemSubject?.Groups.Count ?? 0)</MudText>
+            </MudStack>
+        </MudStack>
+
+        @if (SystemSubject is not null)
+        {
+            @foreach (var player in SystemSubject.Players.Values)
+            {
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudIcon Size="Size.Small"
+                             Icon="@(player.IsPlaying == true ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.Speaker)"
+                             Color="@(player.IsConnected ? Color.Default : Color.Error)" />
+                    <MudText Typo="Typo.body2">@player.RoomName</MudText>
+                    @if (player.IsPlaying == true && player.CurrentTrackTitle is not null)
+                    {
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@player.CurrentTrackTitle</MudText>
+                    }
+                </MudStack>
+            }
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SonosSystem? SystemSubject => Subject as SonosSystem;
+}

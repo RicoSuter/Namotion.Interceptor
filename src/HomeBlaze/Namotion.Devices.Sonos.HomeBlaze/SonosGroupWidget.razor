@@ -1,0 +1,58 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosGroup))]
+@implements ISubjectComponent
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.SpeakerGroup" Class="mr-2" />
+            <MudText Typo="Typo.h6">@Group?.Title</MudText>
+        </MudStack>
+
+        <MudStack Row="true" Spacing="1">
+            @foreach (var member in Group?.Members ?? [])
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@member.RoomName</MudChip>
+            }
+        </MudStack>
+
+        <MudStack Spacing="0">
+            <MudText Typo="Typo.body1">@(Group?.CurrentTrackTitle ?? "Nothing playing")</MudText>
+            <MudText Typo="Typo.caption">@Group?.CurrentTrackArtist</MudText>
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIconButton Icon="@(Group?.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                           Disabled="@(Group?.TogglePlayback_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(group => group.TogglePlaybackAsync(CancellationToken.None)))" />
+            <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
+                       Disabled="@(Group?.SetVolume_IsEnabled != true)"
+                       Value="@((int)((Group?.Volume ?? 0m) * 100m))"
+                       ValueChanged="@(value => RunAsync(group => group.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SonosGroup? Group => Subject as SonosGroup;
+
+    private async Task RunAsync(Func<SonosGroup, Task> command)
+    {
+        if (Group is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await command(Group);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Sonos: {exception.Message}", Severity.Error);
+        }
+    }
+}
