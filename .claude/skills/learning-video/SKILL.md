@@ -82,7 +82,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 
 - `episode` (the folder name), `title`, `voice` (`default`, or a reference wav path relative to `videos/`), `chapters`.
 - `background` (optional): the background variant, one of `drift`, `chapter-tint`, `edge-aurora`, `follow-light`; the theme default (`defaultBackground` in `theme/backgrounds.ts`) when omitted. See Backgrounds.
-- `tempo` (optional, default 1.1): speech speed factor between 0.5 and 2. TTS synthesizes each line once at the voice's natural pace and caches it, then writes a pitch-preserving copy at this tempo (ffmpeg `atempo`, cached under a key that includes the tempo); beat timing uses the adjusted durations. Changing the tempo re-runs only that fast step.
+- `tempo` (optional, default 1, the voice's natural pace): speech speed factor between 0.5 and 2. TTS synthesizes each line once at the voice's natural pace and caches it, then writes a pitch-preserving copy at this tempo (ffmpeg `atempo`, cached under a key that includes the tempo); beat timing uses the adjusted durations. Changing the tempo re-runs only that fast step.
 - Chapter: `id` (kebab-case), `title`, `beats`.
 - Beat:
   - `id`: kebab-case, unique in the episode. Prefix with the chapter (`setup-context`).
@@ -97,7 +97,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 
 - Spoken English: short sentences, one idea per beat, active voice, "you" for the viewer.
 - 8 to 25 words per beat (about 3 to 10 seconds). Split longer thoughts into several beats so the picture can change with them.
-- Budget about 210 words per minute of finished video, the measured pace of the default voice at the default tempo 1.1 including the pauses between beats (the connectors episode: 1881 words in 8.9 minutes): a 10 minute episode is about 2000 to 2100 words. Per chapter, words = budget seconds x 3.5.
+- Budget about 195 words per minute of finished video, the measured pace of the default voice at the default tempo 1 including the pauses between beats (the connectors episode: 1881 words in 9.7 minutes; the speech alone runs at about 3.5 words per second): a 10 minute episode is about 1900 to 1950 words. Per chapter, words = budget seconds x 3.2. A tempo above 1 scales both up proportionally.
 - Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); subtitles show the narration text as written. Better: let the code card show the identifier and narrate what it does.
 - Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, subtitles keep the original.
 - Open the first chapter with a hook: the problem and a glimpse of the result. End with a short recap of what the viewer can now do, plus optional pointers.

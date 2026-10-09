@@ -35,7 +35,7 @@ describe('parseScript', () => {
 
     // Assert
     expect(script.tempo).toBe(1.05);
-    expect(parseScript(validScript).tempo).toBe(1.1);
+    expect(parseScript(validScript).tempo).toBe(1);
   });
 
   it('WhenBackgroundIsKnown_ThenKeepsItAndRejectsOthers', () => {

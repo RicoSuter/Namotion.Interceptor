@@ -67,13 +67,13 @@ describe('tempoKey', () => {
 });
 
 describe('buildNarration tempo', () => {
-  it('WhenTempoIsDefault_ThenAudioKeysUseTheDefaultTempo', () => {
+  it('WhenTempoIsDefault_ThenAudioKeysAreTheSynthesisKeys', () => {
     // Act
     const items = buildNarration(script, lexicon);
 
     // Assert
-    expect(script.tempo).toBe(1.1);
-    expect(items[0].audioKey).toBe(`${items[0].key}-x1.1`);
+    expect(script.tempo).toBe(1);
+    expect(items[0].audioKey).toBe(items[0].key);
   });
 
   it('WhenTempoChanges_ThenSynthesisKeysStayAndAudioKeysChange', () => {
@@ -108,11 +108,12 @@ describe('buildTiming', () => {
 
   it('WhenOnlyTheSynthesizedDurationIsKnown_ThenThrows', () => {
     // Arrange
-    const items = buildNarration(script, lexicon);
+    const faster = {...script, tempo: 1.1};
+    const items = buildNarration(faster, lexicon);
     const durations = {[items[0].key]: 3, [items[1].key]: 1};
 
     // Act & Assert
-    expect(() => buildTiming(script, items, durations)).toThrow(/No audio duration for beat 'first'/);
+    expect(() => buildTiming(faster, items, durations)).toThrow(/No audio duration for beat 'first'/);
   });
 
   it('WhenDurationIsMissing_ThenThrows', () => {
