@@ -33,6 +33,7 @@ public class SonosConnectionTests
         Assert.Equal("NORMAL", reading.AvTransport.PlayMode);
         Assert.StartsWith("x-sonos-vli:", reading.AvTransport.MediaUri);
         Assert.Equal("NOT_IMPLEMENTED", reading.AvTransport.TrackMetaData);
+        Assert.Equal(string.Empty, reading.AvTransport.MediaMetaData);
         Assert.Null(reading.Position);
         Assert.Null(reading.SleepTimerRemaining);
         Assert.Equal(44, reading.RenderingControl.Volume);

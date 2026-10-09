@@ -105,7 +105,8 @@ internal sealed class SonosConnection : IDisposable
                 media.CurrentURI,
                 position.TrackURI,
                 position.TrackDuration,
-                position.TrackMetaData),
+                position.TrackMetaData,
+                media.CurrentURIMetaData),
             SonosValues.ParseDuration(position.RelTime),
             SonosValues.ParseDuration(sleepTimer.RemainingSleepTimerDuration),
             new RenderingControlChange(

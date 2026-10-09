@@ -28,13 +28,15 @@ public class SonosGroupStateTests
 
         // Act
         coordinator.ApplyPoll(
-            new SonosPlayerReading(new AvTransportChange("PLAYING", "SHUFFLE", spotifyUri, spotifyUri, null, null), null, TimeSpan.FromMinutes(30), noRenderingControl),
+            new SonosPlayerReading(new AvTransportChange("PLAYING", "SHUFFLE", spotifyUri, spotifyUri, null, null, SonosEventBodies.Didl("Spotify")), null, TimeSpan.FromMinutes(30), noRenderingControl),
             T0);
         member.ApplyPoll(
             new SonosPlayerReading(new AvTransportChange("PLAYING", "NORMAL", memberTransport, memberTransport, null, null), null, null, noRenderingControl),
             T0);
 
         // Assert
+        Assert.Equal("Spotify", member.MediaTitle);
+        Assert.Equal("Spotify", system.Groups[TestFixtures.OfficeUuid].MediaTitle);
         Assert.Equal(SonosSource.SpotifyConnect, member.Source);
         Assert.True(member.Shuffle);
         Assert.Equal(SonosRepeatMode.All, member.Repeat);

@@ -34,6 +34,36 @@ public class UpnpEventParserTests
     }
 
     [Fact]
+    public void WhenAvTransportEventHasMediaMetadata_ThenTheEnqueuedMetadataIsPreferred()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("AVTransportURIMetaData", SonosEventBodies.Didl("Transport")),
+            ("EnqueuedTransportURIMetaData", SonosEventBodies.Didl("Playlist")));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("Playlist", DidlParser.ParseTitle(change.MediaMetaData));
+    }
+
+    [Fact]
+    public void WhenAvTransportEventHasOnlyTransportMetadata_ThenItIsTheMediaMetadata()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("AVTransportURIMetaData", SonosEventBodies.Didl("SRF 3")),
+            ("EnqueuedTransportURIMetaData", ""));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("SRF 3", DidlParser.ParseTitle(change.MediaMetaData));
+    }
+
+    [Fact]
     public void WhenAvTransportEventOmitsFields_ThenTheyAreNull()
     {
         // Arrange

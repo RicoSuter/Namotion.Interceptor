@@ -21,8 +21,16 @@ internal static class UpnpEventParser
             values.GetValueOrDefault("AVTransportURI"),
             values.GetValueOrDefault("CurrentTrackURI"),
             values.GetValueOrDefault("CurrentTrackDuration"),
-            values.GetValueOrDefault("CurrentTrackMetaData"));
+            values.GetValueOrDefault("CurrentTrackMetaData"),
+            GetMediaMetaData(values));
     }
+
+    // A queue names its playlist or album only in the enqueued metadata; other media carry it in both or only in the
+    // transport metadata.
+    private static string? GetMediaMetaData(Dictionary<string, string> values) =>
+        values.GetValueOrDefault("EnqueuedTransportURIMetaData") is { Length: > 0 } enqueued && SonosValues.IsKnown(enqueued)
+            ? enqueued
+            : values.GetValueOrDefault("AVTransportURIMetaData");
 
     /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
     internal static RenderingControlChange ParseRenderingControl(string body)

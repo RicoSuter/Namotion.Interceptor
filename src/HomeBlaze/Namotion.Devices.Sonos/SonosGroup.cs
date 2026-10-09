@@ -72,6 +72,11 @@ public partial class SonosGroup :
     [Derived]
     public TimeSpan? CurrentTrackDuration => Coordinator.CurrentTrackDuration;
 
+    /// <inheritdoc cref="SonosPlayer.MediaTitle"/>
+    [Derived]
+    [State(Position = 4)]
+    public string? MediaTitle => Coordinator.MediaTitle;
+
     [Derived]
     public string? Title => string.Join(" + ", Members.Select(member => member.RoomName));
 

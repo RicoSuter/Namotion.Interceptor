@@ -2,7 +2,8 @@ namespace Namotion.Devices.Sonos.Parsing;
 
 /// <summary>
 /// AVTransport values from an event or a poll. A null field was not reported. String fields are raw wire values, which may be
-/// <c>NOT_IMPLEMENTED</c> or empty, and consumers filter them with <see cref="SonosValues.IsKnown"/>.
+/// <c>NOT_IMPLEMENTED</c> or empty, and consumers filter them with <see cref="SonosValues.IsKnown"/>. The media metadata
+/// is the DIDL of the media the player was told to play, which names the station or playlist.
 /// </summary>
 internal sealed record AvTransportChange(
     string? TransportState,
@@ -10,7 +11,8 @@ internal sealed record AvTransportChange(
     string? MediaUri,
     string? TrackUri,
     string? TrackDuration,
-    string? TrackMetaData);
+    string? TrackMetaData,
+    string? MediaMetaData = null);
 
 /// <summary>
 /// RenderingControl values on the Master channel. A null field was not reported or not parsable.

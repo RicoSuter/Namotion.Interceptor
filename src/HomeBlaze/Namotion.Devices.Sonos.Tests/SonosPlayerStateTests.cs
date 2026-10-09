@@ -33,6 +33,9 @@ public class SonosPlayerStateTests
         "0:03:30",
         SonosEventBodies.Didl("Song A", "Artist A", "Album A", "/getaa?s=1&u=a"));
 
+    private static AvTransportChange RadioPlaying(string mediaUri, string mediaMetaData) =>
+        new("PLAYING", "NORMAL", mediaUri, mediaUri, null, null, mediaMetaData);
+
     private static RenderingControlChange NoRenderingControl() => new(null, null, null, null, null, null, null);
 
     private static SonosPlayerReading Reading(AvTransportChange avTransport, RenderingControlChange? renderingControl = null) =>
@@ -135,6 +138,47 @@ public class SonosPlayerStateTests
         Assert.Null(player.CurrentTrackImageUri);
         Assert.Null(player.CurrentTrackDuration);
         Assert.Null(player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenStationMetadataArrives_ThenTheMediaTitleIsTheStation()
+    {
+        // Arrange
+        var player = CreateKitchen();
+
+        // Act
+        player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
+
+        // Assert
+        Assert.Equal("SRF 3", player.MediaTitle);
+    }
+
+    [Fact]
+    public void WhenPollReportsTheSameMediaWithoutMetadata_ThenTheMediaTitleIsKept()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
+
+        // Act
+        player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s1", ""), null, null, NoRenderingControl()), T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal("SRF 3", player.MediaTitle);
+    }
+
+    [Fact]
+    public void WhenOtherMediaArrivesWithoutMetadata_ThenTheMediaTitleIsCleared()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
+
+        // Act
+        player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s2", "NOT_IMPLEMENTED"), null, null, NoRenderingControl()), T0.AddSeconds(1));
+
+        // Assert
+        Assert.Null(player.MediaTitle);
     }
 
     [Fact]

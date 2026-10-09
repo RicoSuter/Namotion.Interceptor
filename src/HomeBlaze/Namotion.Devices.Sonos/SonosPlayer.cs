@@ -82,6 +82,8 @@ public partial class SonosPlayer : SonosDevice,
 
     internal partial TimeSpan? ReportedSleepTimerRemaining { get; set; }
 
+    internal partial string? ReportedMediaTitle { get; set; }
+
     [Derived]
     [State(Position = 11)]
     public SonosSource Source
@@ -104,6 +106,13 @@ public partial class SonosPlayer : SonosDevice,
     [Derived]
     [State(Position = 14)]
     public TimeSpan? SleepTimerRemaining => GetCoordinator().ReportedSleepTimerRemaining;
+
+    /// <summary>
+    /// The name of what the group plays, such as the radio station or playlist, when Sonos reports it.
+    /// </summary>
+    [Derived]
+    [State(Position = 15)]
+    public string? MediaTitle => GetCoordinator().ReportedMediaTitle;
 
     [State(Position = 20)]
     public partial int? Bass { get; internal set; }
@@ -675,6 +684,16 @@ public partial class SonosPlayer : SonosDevice,
         {
             // Position comes only from polls; the next one reads it for the new track.
             CurrentTrackPosition = null;
+        }
+
+        // Polls often report the media metadata empty that events delivered, so only a parsable title replaces it.
+        if (DidlParser.ParseTitle(change.MediaMetaData) is { } mediaTitle)
+        {
+            ReportedMediaTitle = mediaTitle;
+        }
+        else if (isTrackChange)
+        {
+            ReportedMediaTitle = null;
         }
 
         if (SonosValues.IsKnown(change.TrackDuration))
