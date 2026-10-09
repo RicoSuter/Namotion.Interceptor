@@ -252,4 +252,131 @@ public class McpTextFormatterTests
         // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatSearchResult(result));
     }
+    [Fact]
+    public void WhenPropertyIsRecordArray_ThenRendersCompactJson()
+    {
+        // Arrange
+        var value = new[] { new Favorite("Radio", "x-radio:1", false), new Favorite("Album", "x-album:2", true) };
+
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(value, "array"));
+
+        // Assert
+        Assert.Equal(
+            """  Value: [{"Title":"Radio","Uri":"x-radio:1","IsContainer":false},{"Title":"Album","Uri":"x-album:2","IsContainer":true}] | array""",
+            line);
+    }
+
+    [Fact]
+    public void WhenPropertyIsPrimitiveList_ThenRendersCompactJson()
+    {
+        // Arrange
+        var value = new List<object?> { 1, "two", null, DayOfWeek.Monday, "Zürich" };
+
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(value, "array"));
+
+        // Assert
+        Assert.Equal("""  Value: [1,"two",null,"Monday","Zürich"] | array""", line);
+    }
+
+    [Fact]
+    public void WhenPropertyIsEmptyArray_ThenRendersEmptyJsonArray()
+    {
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(Array.Empty<Favorite>(), "array"));
+
+        // Assert
+        Assert.Equal("  Value: [] | array", line);
+    }
+
+    [Fact]
+    public void WhenPropertyIsDictionary_ThenRendersCompactJsonObject()
+    {
+        // Arrange
+        var value = new Dictionary<string, int> { ["a"] = 1, ["b"] = 2 };
+
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(value, "object"));
+
+        // Assert
+        Assert.Equal("""  Value: {"a":1,"b":2} | object""", line);
+    }
+
+    [Fact]
+    public void WhenCollectionExceedsLengthCap_ThenRendersWholeItemsAndRemainingCount()
+    {
+        // Arrange
+        var value = Enumerable.Range(0, 1000).Select(index => $"item-{index:D4}").ToArray();
+
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(value, "array"));
+
+        // Assert
+        Assert.StartsWith("""  Value: ["item-0000","item-0001",""", line);
+        Assert.Matches("""\["item-0000",.*"item-\d{4}", \.\.\. \+\d+ more\] \| array$""", line);
+        Assert.True(line.Length < 600, $"Line has {line.Length} characters.");
+    }
+
+    [Fact]
+    public void WhenFirstItemExceedsLengthCap_ThenTruncatesItAndCountsTheRest()
+    {
+        // Arrange
+        var value = new[] { new string('x', 2000), "second" };
+
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(value, "array"));
+
+        // Assert
+        Assert.Matches("""^  Value: \["x+\.\.\., \.\.\. \+1 more\] \| array$""", line);
+        Assert.True(line.Length < 600, $"Line has {line.Length} characters.");
+    }
+
+    [Fact]
+    public void WhenPropertyIsByteArray_ThenRendersLengthOnly()
+    {
+        // Act
+        var line = FormatPropertyLine(new ScalarProperty(new byte[] { 1, 2, 3 }, "array"));
+
+        // Assert
+        Assert.Equal("  Value: <3 bytes> | array", line);
+    }
+
+    [Fact]
+    public void WhenPropertyIsStringOrPrimitive_ThenRendersAsBefore()
+    {
+        // Act
+        var stringLine = FormatPropertyLine(new ScalarProperty("Living Room", "string"));
+        var integerLine = FormatPropertyLine(new ScalarProperty(42, "integer"));
+        var booleanLine = FormatPropertyLine(new ScalarProperty(false, "boolean"));
+
+        // Assert
+        Assert.Equal("  Value: Living Room | string", stringLine);
+        Assert.Equal("  Value: 42 | integer", integerLine);
+        Assert.Equal("  Value: false | boolean", booleanLine);
+    }
+
+    private static string FormatPropertyLine(ScalarProperty property)
+    {
+        var result = new BrowseResult
+        {
+            Result = new SubjectNode
+            {
+                Path = "/Device",
+                Type = "MyApp.Device",
+                Properties = new Dictionary<string, SubjectNodeProperty> { ["Value"] = property }
+            },
+            SubjectCount = 1
+        };
+
+        return McpTextFormatter.FormatBrowseResult(result)
+            .Split('\n')
+            .Single(line => line.StartsWith("  Value: ", StringComparison.Ordinal))
+            .TrimEnd('\r');
+    }
+
+    public sealed record Favorite(string Title, string Uri, bool IsContainer)
+    {
+        public override string ToString() => Title;
+    }
 }

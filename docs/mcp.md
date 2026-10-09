@@ -61,6 +61,7 @@ Key conventions:
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
 - **Footer:** `[N subjects]` or `[N subjects, truncated]`
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
+- Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
 
 ## Tools
 
