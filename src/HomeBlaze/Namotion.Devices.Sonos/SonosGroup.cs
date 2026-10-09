@@ -187,15 +187,15 @@ public partial class SonosGroup :
     [Operation(Title = "Set Volume", Position = 10, Description = "Sets the group volume.")]
     public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
-        SonosValues.ThrowIfVolumeOutOfRange(volume);
-        return RunAsync((connection, token) => connection.SetGroupVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+        SonosValues.ThrowIfFractionOutOfRange(volume, 0m);
+        return RunAsync((connection, token) => connection.SetGroupVolumeAsync(SonosValues.ToSonosPercent(volume, 0m), token), cancellationToken);
     }
 
     [Operation(Title = "Change Volume", Position = 11, Description = "Changes the group volume by a relative amount.")]
     public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
     {
-        SonosValues.ThrowIfVolumeAdjustmentOutOfRange(delta);
-        return RunAsync((connection, token) => connection.ChangeGroupVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
+        SonosValues.ThrowIfFractionOutOfRange(delta, -1m);
+        return RunAsync((connection, token) => connection.ChangeGroupVolumeAsync(SonosValues.ToSonosPercent(delta, -1m), token), cancellationToken);
     }
 
     [Operation(Title = "Mute", Icon = "VolumeOff", Position = 12, Description = "Mutes every player in the group.")]
@@ -290,7 +290,7 @@ public partial class SonosGroup :
     {
         if (change.Volume is { } volume)
         {
-            Volume = SonosValues.ToVolume(volume);
+            Volume = SonosValues.ToFraction(volume);
         }
 
         if (change.Mute is { } mute)

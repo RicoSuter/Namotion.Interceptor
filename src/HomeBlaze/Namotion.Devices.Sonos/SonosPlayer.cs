@@ -308,22 +308,22 @@ public partial class SonosPlayer : SonosDevice,
     [Operation(Title = "Set Volume", Position = 10, Description = "Sets the volume of this player.")]
     public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
-        SonosValues.ThrowIfVolumeOutOfRange(volume);
-        return RunOnPlayerAsync((connection, token) => connection.SetVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+        SonosValues.ThrowIfFractionOutOfRange(volume, 0m);
+        return RunOnPlayerAsync((connection, token) => connection.SetVolumeAsync(SonosValues.ToSonosPercent(volume, 0m), token), cancellationToken);
     }
 
     [Operation(Title = "Change Volume", Position = 11, Description = "Changes the volume of this player by a relative amount.")]
     public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
     {
-        SonosValues.ThrowIfVolumeAdjustmentOutOfRange(delta);
-        return RunOnPlayerAsync((connection, token) => connection.ChangeVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
+        SonosValues.ThrowIfFractionOutOfRange(delta, -1m);
+        return RunOnPlayerAsync((connection, token) => connection.ChangeVolumeAsync(SonosValues.ToSonosPercent(delta, -1m), token), cancellationToken);
     }
 
     [Operation(Title = "Ramp Volume", Position = 12, Description = "Ramps the volume of this player gradually to the given value.")]
     public Task RampVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
-        SonosValues.ThrowIfVolumeOutOfRange(volume);
-        return RunOnPlayerAsync((connection, token) => connection.RampVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+        SonosValues.ThrowIfFractionOutOfRange(volume, 0m);
+        return RunOnPlayerAsync((connection, token) => connection.RampVolumeAsync(SonosValues.ToSonosPercent(volume, 0m), token), cancellationToken);
     }
 
     [Operation(Title = "Mute", Icon = "VolumeOff", Position = 13, Description = "Mutes this player.")]
@@ -417,10 +417,10 @@ public partial class SonosPlayer : SonosDevice,
             throw new ArgumentException("The sound URI must be an absolute http or https URI.", nameof(soundUri));
         }
 
-        SonosValues.ThrowIfVolumeOutOfRange(volume);
+        SonosValues.ThrowIfFractionOutOfRange(volume, 0m);
 
         // The notification volume must be 1 to 100, so 0 % plays at the lowest volume instead of failing.
-        var sonosVolume = Math.Clamp(SonosValues.ToSonosVolume(volume), 1, 100);
+        var sonosVolume = Math.Clamp(SonosValues.ToSonosPercent(volume, 0m), 1, 100);
         return RunOnPlayerAsync((connection, token) => connection.PlayNotificationAsync(sound, sonosVolume, token), cancellationToken);
     }
 
@@ -751,7 +751,7 @@ public partial class SonosPlayer : SonosDevice,
     {
         if (change.Volume is { } volume)
         {
-            Volume = SonosValues.ToVolume(volume);
+            Volume = SonosValues.ToFraction(volume);
         }
 
         if (change.Mute is { } mute)

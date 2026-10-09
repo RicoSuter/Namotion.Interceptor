@@ -13,7 +13,7 @@ public class SonosValuesTests
     public void WhenConvertingSonosVolume_ThenReturnsFraction(int sonosVolume, double expected)
     {
         // Act
-        var volume = SonosValues.ToVolume(sonosVolume);
+        var volume = SonosValues.ToFraction(sonosVolume);
 
         // Assert
         Assert.Equal((decimal)expected, volume);
@@ -55,7 +55,7 @@ public class SonosValuesTests
     public void WhenConvertingVolumeFraction_ThenReturnsClampedSonosVolume(double volume, int expected)
     {
         // Act
-        var sonosVolume = SonosValues.ToSonosVolume((decimal)volume);
+        var sonosVolume = SonosValues.ToSonosPercent((decimal)volume, 0m);
 
         // Assert
         Assert.Equal(expected, sonosVolume);
@@ -68,7 +68,7 @@ public class SonosValuesTests
     public void WhenConvertingVolumeDelta_ThenReturnsClampedAdjustment(double delta, int expected)
     {
         // Act
-        var adjustment = SonosValues.ToSonosVolumeAdjustment((decimal)delta);
+        var adjustment = SonosValues.ToSonosPercent((decimal)delta, -1m);
 
         // Assert
         Assert.Equal(expected, adjustment);
