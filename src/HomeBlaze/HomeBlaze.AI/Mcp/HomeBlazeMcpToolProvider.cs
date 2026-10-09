@@ -1,10 +1,13 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -30,10 +33,16 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             path = new { type = "string", description = "Subject path" },
             method = new { type = "string", description = "Method name" },
-            parameters = new { type = "object", description = "Method parameters (optional)" }
+            parameters = new { type = "object", description = "Arguments by parameter name, in the type, format and unit list_methods gives (optional)" }
         },
         required = new[] { "path", "method" }
     });
+
+    // Enums are listed and returned by name, so arguments accept names as well as numbers.
+    private static readonly JsonSerializerOptions ArgumentSerializerOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
@@ -60,7 +69,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         yield return new McpToolInfo
         {
             Name = "list_methods",
-            Description = "List operations and queries available on a subject at the given path.",
+            Description = "List operations and queries available on a subject at the given path, with each parameter's type, format and unit.",
             InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync
         };
@@ -91,11 +100,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             returnType = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
             parameters = method.Parameters
                 .Where(parameter => parameter.RequiresInput)
-                .Select(parameter => new
-                {
-                    name = parameter.Name,
-                    type = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(parameter.Type)
-                })
+                .Select(parameter => McpMethodParameter.Create(
+                    parameter.Name, parameter.Type, parameter.IsNullable, GetUnitDescription(parameter.Unit)))
                 .ToArray()
         });
 
@@ -136,7 +142,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                     var parameter = inputParams[i];
                     if (argumentsElement.TryGetProperty(parameter.Name, out var argumentValue))
                     {
-                        userParameters[i] = JsonSerializer.Deserialize(argumentValue.GetRawText(), parameter.Type);
+                        userParameters[i] = argumentValue.Deserialize(parameter.Type, ArgumentSerializerOptions);
                     }
                 }
             }
@@ -150,6 +156,13 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Method invocation failed. Check server logs for details." };
         }
     }
+
+    private static string? GetUnitDescription(StateUnit? unit) => unit switch
+    {
+        null or StateUnit.Default => null,
+        StateUnit.Percent => "fraction where 1 = 100% (0.2 = 20%)",
+        _ => $"unit: {unit}"
+    };
 
     private RegisteredSubject? ResolveSubject(string path)
     {

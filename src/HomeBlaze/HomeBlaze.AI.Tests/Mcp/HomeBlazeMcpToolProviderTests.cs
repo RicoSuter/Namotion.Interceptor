@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services.Lifecycle;
@@ -43,6 +44,161 @@ public class HomeBlazeMcpToolProviderTests
         Assert.True(json.TryGetProperty("methods", out var methods));
         var methodArray = methods.EnumerateArray().ToArray();
         Assert.Contains(methodArray, m => m.GetProperty("name").GetString() == "TurnOn");
+    }
+
+    [Fact]
+    public async Task WhenListMethodsWithDescription_ThenReturnsDescription()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            Title = "Turn On",
+            Description = "Turns the device on.",
+            PropertyName = "TurnOn"
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "TurnOn");
+
+        // Assert
+        Assert.Equal("Turns the device on.", method.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task WhenListMethodsWithPercentParameter_ThenDescribesFraction()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetVolume", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetVolume",
+            Parameters =
+            [
+                new MethodParameter { Name = "volume", Type = typeof(decimal), Unit = StateUnit.Percent },
+                new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }
+            ]
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "SetVolume");
+
+        // Assert
+        var parameter = Assert.Single(method.GetProperty("parameters").EnumerateArray());
+        Assert.Equal("volume", parameter.GetProperty("name").GetString());
+        Assert.Equal("number", parameter.GetProperty("type").GetString());
+        Assert.Equal("fraction where 1 = 100% (0.2 = 20%)", parameter.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public async Task WhenListMethodsWithOtherUnitParameter_ThenNamesTheUnit()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetTarget", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetTarget",
+            Parameters =
+            [
+                new MethodParameter { Name = "temperature", Type = typeof(decimal), Unit = StateUnit.DegreeCelsius },
+                new MethodParameter { Name = "offset", Type = typeof(decimal), Unit = StateUnit.Default }
+            ]
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "SetTarget");
+
+        // Assert
+        var parameters = method.GetProperty("parameters").EnumerateArray().ToArray();
+        Assert.Equal("unit: DegreeCelsius", parameters[0].GetProperty("description").GetString());
+        Assert.False(parameters[1].TryGetProperty("description", out _));
+    }
+
+    [Fact]
+    public async Task WhenListMethodsWithTimeSpanEnumAndNullableParameters_ThenDescribesFormatValuesAndNullability()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Configure", _ => new MethodMetadata(_ => null)
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "Configure",
+            Parameters =
+            [
+                new MethodParameter { Name = "position", Type = typeof(TimeSpan) },
+                new MethodParameter { Name = "mode", Type = typeof(TestMode) },
+                new MethodParameter { Name = "title", Type = typeof(string), IsNullable = true }
+            ]
+        });
+
+        // Act
+        var method = await ListMethodAsync(factory, "Configure");
+
+        // Assert
+        var parameters = method.GetProperty("parameters").EnumerateArray().ToArray();
+        Assert.Equal("string", parameters[0].GetProperty("type").GetString());
+        Assert.Equal("[d.]hh:mm:ss[.fffffff]", parameters[0].GetProperty("format").GetString());
+        Assert.Equal(["Off", "All", "One"], parameters[1].GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
+        Assert.True(parameters[2].GetProperty("nullable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodWithTimeSpanArgument_ThenConvertsDocumentedFormat()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedPosition = null;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Seek", _ => new MethodMetadata(arguments =>
+        {
+            capturedPosition = arguments?[0];
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "Seek",
+            Parameters = [new MethodParameter { Name = "position", Type = typeof(TimeSpan) }]
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "Seek", parameters = new { position = "00:01:30" } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(TimeSpan.FromSeconds(90), capturedPosition);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodWithEnumName_ThenConvertsToEnumValue()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        object? capturedMode = null;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetMode", _ => new MethodMetadata(arguments =>
+        {
+            capturedMode = arguments?[0];
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetMode",
+            Parameters = [new MethodParameter { Name = "mode", Type = typeof(TestMode) }]
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "SetMode", parameters = new { mode = "All" } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(TestMode.All, capturedMode);
     }
 
     [Fact]
@@ -227,6 +383,21 @@ public class HomeBlazeMcpToolProviderTests
         };
         var factory = new McpToolFactory(room, config);
         return (room, config, factory);
+    }
+
+    private static async Task<JsonElement> ListMethodAsync(McpToolFactory factory, string methodName)
+    {
+        var tool = factory.CreateTools().First(t => t.Name == "list_methods");
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { path = "" }), CancellationToken.None);
+        return JsonSerializer.SerializeToElement(result).GetProperty("methods").EnumerateArray()
+            .First(method => method.GetProperty("name").GetString() == methodName);
+    }
+
+    public enum TestMode
+    {
+        Off,
+        All,
+        One
     }
 
     private class EmptyServiceProvider : IServiceProvider
