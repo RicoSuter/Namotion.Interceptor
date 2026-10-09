@@ -149,15 +149,14 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
     {
-        var hasArguments = input.TryGetProperty("parameters", out var argumentsElement) &&
-                           argumentsElement.ValueKind != JsonValueKind.Null;
-        if (hasArguments && argumentsElement.ValueKind != JsonValueKind.Object)
+        JsonElement? argumentsObject = null;
+        if (input.TryGetProperty("parameters", out var argumentsElement) && argumentsElement.ValueKind != JsonValueKind.Null)
         {
-            return (null, $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}");
-        }
+            if (argumentsElement.ValueKind != JsonValueKind.Object)
+            {
+                return (null, $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}");
+            }
 
-        if (hasArguments)
-        {
             foreach (var argument in argumentsElement.EnumerateObject())
             {
                 if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
@@ -165,13 +164,15 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                     return (null, $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}");
                 }
             }
+
+            argumentsObject = argumentsElement;
         }
 
         var arguments = new object?[inputParameters.Length];
         for (var i = 0; i < inputParameters.Length; i++)
         {
             var parameter = inputParameters[i];
-            if (!hasArguments || !argumentsElement.TryGetProperty(parameter.Name, out var argumentValue))
+            if (argumentsObject is not { } providedArguments || !providedArguments.TryGetProperty(parameter.Name, out var argumentValue))
             {
                 // A missing non-nullable argument would otherwise reach the method as default, for example a volume of 0.
                 if (!parameter.IsNullable)
