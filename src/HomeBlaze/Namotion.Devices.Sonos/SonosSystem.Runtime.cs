@@ -326,7 +326,7 @@ public partial class SonosSystem
         // The stopping token is already cancelled on shutdown, so teardown gets its own short budgets, one for the
         // lock and one for the unsubscribes, so a slow reconciliation cannot use up the time for unsubscribing. Holding
         // the reconcile lock keeps a command's reconciliation from subscribing again between unsubscribing and disposing.
-        var hasReconcileLock = await _reconcileLock.WaitAsync(TeardownTimeout);
+        var hasReconcileLock = await _reconcileLock.WaitAsync(TeardownTimeout, CancellationToken.None);
         if (!hasReconcileLock)
         {
             _logger.LogWarning("A Sonos reconciliation did not finish within the teardown budget; tearing down anyway.");

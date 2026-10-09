@@ -440,7 +440,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
                     return null;
                 }
 
-                buffered.Write(buffer, 0, read);
+                await buffered.WriteAsync(buffer.AsMemory(0, read));
             }
         }
         finally

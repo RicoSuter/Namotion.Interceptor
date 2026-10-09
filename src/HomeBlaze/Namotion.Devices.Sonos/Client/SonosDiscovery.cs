@@ -91,7 +91,7 @@ internal static class SonosDiscovery
             using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
 
             // Connecting a UDP socket sends nothing; it only makes the OS choose the route and its local address.
-            socket.Connect(remoteAddress, SonosValues.DevicePort);
+            await socket.ConnectAsync(remoteAddress, SonosValues.DevicePort, cancellationToken);
             return (socket.LocalEndPoint as IPEndPoint)?.Address.ToString();
         }
         catch (Exception exception) when (exception is SocketException or ArgumentException or NotSupportedException)
