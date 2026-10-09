@@ -98,6 +98,11 @@ internal sealed class ConnectedSystem : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Returns a scope that stops and disposes a system the test creates and starts itself.
+    /// </summary>
+    internal static IAsyncDisposable Own(SonosSystem system) => new SystemScope(system);
+
     private static async Task StopAsync(SonosSystem system)
     {
         await system.StopAsync(CancellationToken.None);
@@ -108,5 +113,10 @@ internal sealed class ConnectedSystem : IAsyncDisposable
     {
         await System.StopAsync(CancellationToken.None);
         System.Dispose();
+    }
+
+    private sealed class SystemScope(SonosSystem system) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => new(StopAsync(system));
     }
 }

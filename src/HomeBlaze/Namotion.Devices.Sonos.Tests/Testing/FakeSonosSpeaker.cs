@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Security;
 using System.Text;
+using System.Xml.Linq;
 
 namespace Namotion.Devices.Sonos.Tests.Testing;
 
@@ -77,7 +78,10 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// </summary>
     internal bool SendInitialEvents { get; set; } = true;
 
-    internal static string SidFor(string eventPath) => "uuid:" + eventPath.Trim('/').Replace('/', '-');
+    /// <summary>
+    /// The SID this speaker grants for the event path, unique per speaker as on real ones.
+    /// </summary>
+    internal string SidFor(string eventPath) => $"uuid:{_server.Port}-{eventPath.Trim('/').Replace('/', '-')}";
 
     internal string? GetCallback(string eventPath) =>
         _callbacks.TryGetValue(eventPath, out var callback) ? callback : null;
@@ -155,6 +159,20 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         "</ZoneGroups></ZoneGroupState>";
 
     /// <summary>
+    /// Answers GetZoneGroupState with the kitchen as a home theater player at its base URI, bonded with a subwoofer.
+    /// </summary>
+    internal void RespondWithHomeTheater(Uri playerUri, string subwooferUuid, Uri subwooferUri)
+    {
+        var channelMap = $"{TestFixtures.KitchenUuid}:LF,RF;{subwooferUuid}:SW";
+        Respond("GetZoneGroupState", ("ZoneGroupState",
+            "<ZoneGroupState><ZoneGroups>" +
+            $"""<ZoneGroup Coordinator="{TestFixtures.KitchenUuid}" ID="{TestFixtures.KitchenUuid}:1">""" +
+            $"""<ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="{playerUri}xml/device_description.xml" ZoneName="Küche" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="">""" +
+            $"""<Satellite UUID="{subwooferUuid}" Location="{subwooferUri}xml/device_description.xml" ZoneName="Küche" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="" />""" +
+            "</ZoneGroupMember></ZoneGroup></ZoneGroups></ZoneGroupState>"));
+    }
+
+    /// <summary>
     /// Sends a NOTIFY with the body to the callback of the event path, as the speaker that holds the subscription.
     /// </summary>
     internal async Task<HttpStatusCode> NotifyAsync(string eventPath, string body)
@@ -177,7 +195,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// </summary>
     internal void RespondAsIdlePlayer(string uuid, string roomName)
     {
-        const string spotifyUri = "x-sonos-vli:RINCON_A0000000000601400:2,spotify:94963e711df088cf";
+        const string spotifyUri = TestFixtures.SpotifyConnectUri;
         RespondWithTopology((uuid, roomName, BaseUri));
         Respond("GetZoneInfo",
             ("SerialNumber", "00-00-00-00-00-06:D"), ("SoftwareVersion", "97.1-80312"), ("DisplaySoftwareVersion", "18.8"),
@@ -269,7 +287,8 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                     body = await reader.ReadToEndAsync();
                 }
 
-                _calls.Enqueue(new SoapCall(path, service, action, body));
+                var call = new SoapCall(path, service, action, body);
+                _calls.Enqueue(call);
                 if (_holds.TryGetValue(action, out var hold))
                 {
                     await hold.Task;
@@ -293,7 +312,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                     return;
                 }
 
-                var values = GetResponseValues(action, body);
+                var values = GetResponseValues(call);
                 await WriteAsync(response,
                     "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
                     $"<s:Body><u:{action}Response xmlns:u=\"urn:schemas-upnp-org:service:{service}:1\">{values}</u:{action}Response></s:Body></s:Envelope>");
@@ -326,34 +345,22 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
     private static string BrowsePageKey(string startingIndex) => "Browse:" + startingIndex;
 
-    private string GetResponseValues(string action, string body)
+    private string GetResponseValues(SoapCall call)
     {
-        if (action == "GetEQ" && TryGetArgument(body, "EQType") is { } eqType &&
+        var action = call.Action;
+        if (action == "GetEQ" && call.GetArgument("EQType") is { } eqType &&
             _responses.TryGetValue(EqualizerKey(eqType), out var equalizerValues))
         {
             return equalizerValues;
         }
 
-        if (action == "Browse" && TryGetArgument(body, "StartingIndex") is { } startingIndex &&
+        if (action == "Browse" && call.GetArgument("StartingIndex") is { } startingIndex &&
             _responses.TryGetValue(BrowsePageKey(startingIndex), out var pageValues))
         {
             return pageValues;
         }
 
         return _responses.GetValueOrDefault(action, string.Empty);
-    }
-
-    private static string? TryGetArgument(string body, string name)
-    {
-        var start = body.IndexOf($"<{name}>", StringComparison.Ordinal);
-        if (start < 0)
-        {
-            return null;
-        }
-
-        start += name.Length + 2;
-        var end = body.IndexOf($"</{name}>", start, StringComparison.Ordinal);
-        return end < 0 ? null : body[start..end];
     }
 
     private static async Task WriteAsync(HttpListenerResponse response, string content)
@@ -370,4 +377,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 /// <summary>
 /// One SOAP request: the control URL path it was posted to, the service and action from SOAPACTION, and the raw body.
 /// </summary>
-internal sealed record SoapCall(string Path, string Service, string Action, string Body);
+internal sealed record SoapCall(string Path, string Service, string Action, string Body)
+{
+    /// <summary>
+    /// Returns the value of the named argument, unescaped once as the speaker reads it, or null when it is absent.
+    /// </summary>
+    internal string? GetArgument(string name) =>
+        XDocument.Parse(Body).Descendants().FirstOrDefault(element => element.Name.LocalName == name)?.Value;
+}

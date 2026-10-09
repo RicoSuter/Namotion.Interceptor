@@ -22,7 +22,7 @@ public class SonosGroupOperationTests
         var snapshot = actions.IndexOf("SnapshotGroupVolume");
         var setVolume = actions.IndexOf("SetGroupVolume");
         Assert.True(snapshot >= 0 && setVolume > snapshot);
-        Assert.Contains(speaker.Calls, call => call.Action == "SetGroupVolume" && call.Body.Contains("<DesiredVolume>30</DesiredVolume>"));
+        Assert.Contains(speaker.Calls, call => call.Action == "SetGroupVolume" && call.GetArgument("DesiredVolume") == "30");
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class SonosGroupOperationTests
         await group.MuteAsync(CancellationToken.None);
 
         // Assert
-        Assert.Contains(household.Office.Calls, call => call.Action == "SetGroupMute" && call.Body.Contains("<DesiredMute>true</DesiredMute>"));
+        Assert.Contains(household.Office.Calls, call => call.Action == "SetGroupMute" && call.GetArgument("DesiredMute") == "true");
         Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetGroupMute");
     }
 

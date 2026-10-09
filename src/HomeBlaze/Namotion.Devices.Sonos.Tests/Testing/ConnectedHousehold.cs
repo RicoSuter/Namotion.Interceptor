@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Namotion.Devices.Sonos.Tests.Testing;
 
 /// <summary>
@@ -23,7 +25,10 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
 
     internal SonosPlayer OfficePlayer => System.Players[TestFixtures.OfficeUuid];
 
-    internal static async Task<ConnectedHousehold> StartAsync(bool isGrouped = false)
+    internal static async Task<ConnectedHousehold> StartAsync(
+        bool isGrouped = false,
+        Action<SonosSystem>? configure = null,
+        ILogger<SonosSystem>? logger = null)
     {
         var kitchen = new FakeSonosSpeaker();
         FakeSonosSpeaker? office = null;
@@ -45,7 +50,12 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
             }
 
             var system = await ConnectedSystem.StartWithEventsAsync(
-                () => ConnectedSystem.CreateSystem(kitchen.Host),
+                () =>
+                {
+                    var system = ConnectedSystem.CreateSystem(kitchen.Host, logger: logger);
+                    configure?.Invoke(system);
+                    return system;
+                },
                 system => system.IsConnected &&
                           system.AreEventsActive &&
                           system.Players.Count == 2 &&

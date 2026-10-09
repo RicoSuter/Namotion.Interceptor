@@ -1,5 +1,4 @@
 using System.Net.WebSockets;
-using System.Xml.Linq;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
@@ -14,9 +13,6 @@ public class SonosConnectionTests
 
     private static SonosConnection CreateConnection(FakeSonosSpeaker speaker, HttpClient httpClient) =>
         new(speaker.BaseUri, Uuid, httpClient, new SonosClientProvider(httpClient));
-
-    private static string? GetArgument(SoapCall call, string name) =>
-        XDocument.Parse(call.Body).Descendants().FirstOrDefault(element => element.Name.LocalName == name)?.Value;
 
     [Fact]
     public async Task WhenReadingPlayer_ThenSoapResponsesAreMapped()
@@ -43,7 +39,7 @@ public class SonosConnectionTests
         Assert.True(reading.RenderingControl.Loudness);
         Assert.True(reading.RenderingControl.NightMode);
         Assert.False(reading.RenderingControl.SpeechEnhancement);
-        Assert.Contains(speaker.Calls, call => call.Action == "GetEQ" && call.Body.Contains("<EQType>DialogLevel</EQType>"));
+        Assert.Contains(speaker.Calls, call => call.Action == "GetEQ" && call.GetArgument("EQType") == "DialogLevel");
     }
 
     [Fact]
@@ -81,7 +77,7 @@ public class SonosConnectionTests
 
         // Assert
         Assert.Equal(["Radio FM1", "SRF 3", "Radio Extra"], favorites.Select(favorite => favorite.Title));
-        Assert.Equal(["0", "4"], speaker.Calls.Where(call => call.Action == "Browse").Select(call => GetArgument(call, "StartingIndex")));
+        Assert.Equal(["0", "4"], speaker.Calls.Where(call => call.Action == "Browse").Select(call => call.GetArgument("StartingIndex")));
     }
 
     [Fact]
@@ -168,8 +164,8 @@ public class SonosConnectionTests
         Assert.Equal("/MediaRenderer/RenderingControl/Control", call.Path);
         Assert.Equal("RenderingControl", call.Service);
         Assert.Equal("SetVolume", call.Action);
-        Assert.Contains("<DesiredVolume>50</DesiredVolume>", call.Body);
-        Assert.Contains("<Channel>Master</Channel>", call.Body);
+        Assert.Equal("50", call.GetArgument("DesiredVolume"));
+        Assert.Equal("Master", call.GetArgument("Channel"));
     }
 
     [Fact]
@@ -201,8 +197,8 @@ public class SonosConnectionTests
         var call = Assert.Single(speaker.Calls);
         Assert.Equal("/MediaRenderer/AVTransport/Control", call.Path);
         Assert.Equal("Seek", call.Action);
-        Assert.Equal("REL_TIME", GetArgument(call, "Unit"));
-        Assert.Equal("01:02:03", GetArgument(call, "Target"));
+        Assert.Equal("REL_TIME", call.GetArgument("Unit"));
+        Assert.Equal("01:02:03", call.GetArgument("Target"));
     }
 
     [Fact]
@@ -219,7 +215,7 @@ public class SonosConnectionTests
         // Assert
         var call = Assert.Single(speaker.Calls);
         Assert.Equal("ConfigureSleepTimer", call.Action);
-        Assert.Equal("01:30:00", GetArgument(call, "NewSleepTimerDuration"));
+        Assert.Equal("01:30:00", call.GetArgument("NewSleepTimerDuration"));
     }
 
     [Fact]
@@ -236,7 +232,7 @@ public class SonosConnectionTests
         // Assert
         var call = Assert.Single(speaker.Calls);
         Assert.Equal("ConfigureSleepTimer", call.Action);
-        Assert.Equal(string.Empty, GetArgument(call, "NewSleepTimerDuration"));
+        Assert.Equal(string.Empty, call.GetArgument("NewSleepTimerDuration"));
     }
 
     [Fact]
@@ -281,7 +277,7 @@ public class SonosConnectionTests
         var call = Assert.Single(speaker.Calls);
         Assert.Equal("AVTransport", call.Service);
         Assert.Equal("SetAVTransportURI", call.Action);
-        Assert.Equal($"x-rincon:{TestFixtures.LivingRoomUuid}", GetArgument(call, "CurrentURI"));
+        Assert.Equal($"x-rincon:{TestFixtures.LivingRoomUuid}", call.GetArgument("CurrentURI"));
     }
 
     [Theory]
@@ -301,8 +297,8 @@ public class SonosConnectionTests
         var call = Assert.Single(speaker.Calls);
         Assert.Equal("RenderingControl", call.Service);
         Assert.Equal("SetEQ", call.Action);
-        Assert.Equal(type, GetArgument(call, "EQType"));
-        Assert.Equal(expectedValue, GetArgument(call, "DesiredValue"));
+        Assert.Equal(type, call.GetArgument("EQType"));
+        Assert.Equal(expectedValue, call.GetArgument("DesiredValue"));
     }
 
     [Fact]
@@ -320,9 +316,9 @@ public class SonosConnectionTests
         var calls = speaker.Calls.ToArray();
         Assert.Equal(["RemoveAllTracksFromQueue", "AddURIToQueue", "SetAVTransportURI", "Play"], calls.Select(call => call.Action));
         Assert.All(calls, call => Assert.Equal("AVTransport", call.Service));
-        Assert.Equal("x-rincon-cpcontainer:playlist", GetArgument(calls[1], "EnqueuedURI"));
-        Assert.Equal("<DIDL-Lite />", GetArgument(calls[1], "EnqueuedURIMetaData"));
-        Assert.Equal($"x-rincon-queue:{Uuid}#0", GetArgument(calls[2], "CurrentURI"));
+        Assert.Equal("x-rincon-cpcontainer:playlist", calls[1].GetArgument("EnqueuedURI"));
+        Assert.Equal("<DIDL-Lite />", calls[1].GetArgument("EnqueuedURIMetaData"));
+        Assert.Equal($"x-rincon-queue:{Uuid}#0", calls[2].GetArgument("CurrentURI"));
     }
 
     [Fact]
@@ -340,8 +336,8 @@ public class SonosConnectionTests
 
         // Assert
         var calls = speaker.Calls.ToArray();
-        Assert.Equal(metadata, GetArgument(calls[0], "CurrentURIMetaData"));
-        Assert.Equal(metadata, GetArgument(Assert.Single(calls, call => call.Action == "AddURIToQueue"), "EnqueuedURIMetaData"));
+        Assert.Equal(metadata, calls[0].GetArgument("CurrentURIMetaData"));
+        Assert.Equal(metadata, Assert.Single(calls, call => call.Action == "AddURIToQueue").GetArgument("EnqueuedURIMetaData"));
     }
 
     [Fact]
@@ -359,7 +355,7 @@ public class SonosConnectionTests
         var calls = speaker.Calls.ToArray();
         Assert.Equal(["SnapshotGroupVolume", "SetGroupVolume"], calls.Select(call => call.Action));
         Assert.All(calls, call => Assert.Equal("/MediaRenderer/GroupRenderingControl/Control", call.Path));
-        Assert.Equal("30", GetArgument(calls[1], "DesiredVolume"));
+        Assert.Equal("30", calls[1].GetArgument("DesiredVolume"));
     }
 
     [Fact]
@@ -376,7 +372,7 @@ public class SonosConnectionTests
         // Assert
         var calls = speaker.Calls.ToArray();
         Assert.Equal(["SnapshotGroupVolume", "SetRelativeGroupVolume"], calls.Select(call => call.Action));
-        Assert.Equal("-5", GetArgument(calls[1], "Adjustment"));
+        Assert.Equal("-5", calls[1].GetArgument("Adjustment"));
     }
 
     [Fact]

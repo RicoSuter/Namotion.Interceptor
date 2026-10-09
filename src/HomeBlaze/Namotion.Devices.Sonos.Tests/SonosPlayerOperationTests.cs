@@ -311,7 +311,7 @@ public class SonosPlayerOperationTests
         await connected.Player.SetVolumeAsync(0.5m, CancellationToken.None);
 
         // Assert
-        Assert.Contains(speaker.Calls, call => call.Action == "SetVolume" && call.Body.Contains("<DesiredVolume>50</DesiredVolume>"));
+        Assert.Contains(speaker.Calls, call => call.Action == "SetVolume" && call.GetArgument("DesiredVolume") == "50");
         Assert.True(connected.Player.Play_IsEnabled);
     }
 
@@ -327,11 +327,11 @@ public class SonosPlayerOperationTests
 
         // Assert
         var calls = speaker.Calls.ToArray();
-        var setUri = Array.FindIndex(calls, call => call.Action == "SetAVTransportURI" && call.Body.Contains("tunein%3a9557"));
+        var setUri = Array.FindIndex(calls, call => call.Action == "SetAVTransportURI" && call.GetArgument("CurrentURI")?.Contains("tunein%3a9557") == true);
         var play = Array.FindLastIndex(calls, call => call.Action == "Play");
         Assert.True(setUri >= 0, "SetAVTransportURI with the favorite URI was not sent.");
         Assert.True(play > setUri, "Play was not sent after setting the URI.");
-        Assert.Contains("Radio FM1", calls[setUri].Body);
+        Assert.Contains("Radio FM1", calls[setUri].GetArgument("CurrentURIMetaData"));
     }
 
     [Fact]
@@ -419,7 +419,7 @@ public class SonosPlayerOperationTests
         await connected.Player.SetShuffleAsync(true, CancellationToken.None);
 
         // Assert
-        Assert.Contains(speaker.Calls, call => call.Action == "SetPlayMode" && call.Body.Contains("<NewPlayMode>SHUFFLE</NewPlayMode>"));
+        Assert.Contains(speaker.Calls, call => call.Action == "SetPlayMode" && call.GetArgument("NewPlayMode") == "SHUFFLE");
     }
 
     [Fact]
@@ -436,7 +436,7 @@ public class SonosPlayerOperationTests
         await household.KitchenPlayer.SetShuffleAsync(true, CancellationToken.None);
 
         // Assert
-        Assert.Contains(household.Office.Calls, call => call.Action == "SetPlayMode" && call.Body.Contains("<NewPlayMode>SHUFFLE</NewPlayMode>"));
+        Assert.Contains(household.Office.Calls, call => call.Action == "SetPlayMode" && call.GetArgument("NewPlayMode") == "SHUFFLE");
         Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetPlayMode");
     }
 
@@ -553,13 +553,9 @@ public class SonosPlayerOperationTests
         Assert.Contains("object.item.audioItem.audioBroadcast", metadata);
     }
 
-    // The metadata is DIDL-Lite carried as the text of the SOAP element, so parsing the envelope unescapes it once.
-    private static (string Uri, string Metadata) ReadTransportUri(SoapCall call)
-    {
-        var body = System.Xml.Linq.XDocument.Parse(call.Body);
-        string Read(string name) => body.Descendants().Single(element => element.Name.LocalName == name).Value;
-        return (Read("CurrentURI"), Read("CurrentURIMetaData"));
-    }
+    // The metadata is DIDL-Lite carried as the text of the SOAP element, so reading the argument unescapes it once.
+    private static (string? Uri, string? Metadata) ReadTransportUri(SoapCall call) =>
+        (call.GetArgument("CurrentURI"), call.GetArgument("CurrentURIMetaData"));
 
     [Theory]
     [InlineData("not a uri")]

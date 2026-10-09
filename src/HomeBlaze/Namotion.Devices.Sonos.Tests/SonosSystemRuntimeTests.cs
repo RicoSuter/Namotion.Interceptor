@@ -45,19 +45,12 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         await using var connected = await ConnectedSystem.StartAsync(speaker);
-        var callback = speaker.GetCallback(AvTransportEventPath)!;
-        using var httpClient = new HttpClient();
-        using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), callback)
-        {
-            Content = new StringContent(SonosEventBodies.AvTransport(("TransportState", "PLAYING")))
-        };
-        request.Headers.TryAddWithoutValidation("SID", FakeSonosSpeaker.SidFor(AvTransportEventPath));
 
         // Act
-        using var response = await httpClient.SendAsync(request);
+        var status = await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PLAYING")));
 
         // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, status);
         await AsyncTestHelpers.WaitUntilAsync(
             () => connected.Player.TransportState == SonosTransportState.Playing,
             ConnectedSystem.WaitTimeout,
@@ -70,32 +63,39 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker { SendInitialEvents = false };
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var logger = new RecordingLogger<SonosSystem>();
-        var system = ConnectedSystem.CreateSystem(speaker.Host, logger: logger);
-        system.PollingInterval = TimeSpan.FromHours(1);
-        system.InitialEventTimeout = TimeSpan.FromMilliseconds(500);
+        RecordingLogger<SonosSystem> logger = null!;
 
-        try
+        // Act
+        var system = await StartWithListenerAsync(() =>
         {
-            // Act
-            await system.StartAsync(CancellationToken.None);
+            logger = new RecordingLogger<SonosSystem>();
+            var system = ConnectedSystem.CreateSystem(speaker.Host, logger: logger);
+            system.PollingInterval = TimeSpan.FromHours(1);
+            system.InitialEventTimeout = TimeSpan.FromMilliseconds(500);
+            return system;
+        });
+        await using var owner = ConnectedSystem.Own(system);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => logger.Warnings.Any(message => message.Contains("EventCallbackHost")),
-                ConnectedSystem.WaitTimeout,
-                message: "A missing initial event should be reported although the next poll is an hour away.");
-            Assert.True(system.IsConnected);
-            Assert.NotNull(speaker.GetCallback(AvTransportEventPath));
-            Assert.False(system.AreEventsActive);
-            Assert.Single(logger.Warnings, message => message.Contains("EventCallbackHost"));
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => logger.Warnings.Any(message => message.Contains("EventCallbackHost")),
+            ConnectedSystem.WaitTimeout,
+            message: "A missing initial event should be reported although the next poll is an hour away.");
+        Assert.True(system.IsConnected);
+        Assert.NotNull(speaker.GetCallback(AvTransportEventPath));
+        Assert.False(system.AreEventsActive);
+        Assert.Single(logger.Warnings, message => message.Contains("EventCallbackHost"));
     }
+
+    /// <summary>
+    /// Starts a system from <paramref name="create"/> once its event listener runs, retrying on another port when the
+    /// chosen one was taken in between, since these tests depend on the listener.
+    /// </summary>
+    private static Task<SonosSystem> StartWithListenerAsync(Func<SonosSystem> create) =>
+        ConnectedSystem.StartWithEventsAsync(
+            create,
+            system => system.IsConnected && system.ActiveEventCallbackHost is not null,
+            "The system should connect with its event listener running.");
 
     [Fact]
     public async Task WhenTheFirstEventArrives_ThenEventsBecomeActive()
@@ -103,36 +103,25 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker { SendInitialEvents = false };
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var system = ConnectedSystem.CreateSystem(speaker.Host);
-        system.PollingInterval = TimeSpan.FromHours(1);
-
-        try
+        var system = await StartWithListenerAsync(() =>
         {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected && speaker.GetCallback(AvTransportEventPath) is not null && system.LastUpdated is not null,
-                ConnectedSystem.WaitTimeout,
-                message: "The system should connect and subscribe.");
-            Assert.False(system.AreEventsActive);
+            var system = ConnectedSystem.CreateSystem(speaker.Host);
+            system.PollingInterval = TimeSpan.FromHours(1);
+            return system;
+        });
+        await using var owner = ConnectedSystem.Own(system);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => speaker.GetCallback(AvTransportEventPath) is not null && system.LastUpdated is not null,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should subscribe.");
+        Assert.False(system.AreEventsActive);
 
-            // Act
-            using var httpClient = new HttpClient();
-            using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), speaker.GetCallback(AvTransportEventPath))
-            {
-                Content = new StringContent(SonosEventBodies.AvTransport(("TransportState", "PLAYING")))
-            };
-            request.Headers.TryAddWithoutValidation("SID", FakeSonosSpeaker.SidFor(AvTransportEventPath));
-            using var response = await httpClient.SendAsync(request);
+        // Act
+        var status = await speaker.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(("TransportState", "PLAYING")));
 
-            // Assert
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.True(system.AreEventsActive);
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.True(system.AreEventsActive);
     }
 
     [Fact]
@@ -140,24 +129,17 @@ public class SonosSystemRuntimeTests
     {
         // Arrange
         var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}");
+        await using var owner = ConnectedSystem.Own(system);
 
         // Act
         await system.StartAsync(CancellationToken.None);
 
         // Assert
-        try
-        {
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.Status == ServiceStatus.Error && system.StatusMessage is not null,
-                ConnectedSystem.WaitTimeout,
-                message: "An unreachable seed should report an error.");
-            Assert.False(system.IsConnected);
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.Status == ServiceStatus.Error && system.StatusMessage is not null,
+            ConnectedSystem.WaitTimeout,
+            message: "An unreachable seed should report an error.");
+        Assert.False(system.IsConnected);
     }
 
     [Fact]
@@ -189,23 +171,16 @@ public class SonosSystemRuntimeTests
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
         var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}");
         system.DiscoverSpeakerAsync = _ => Task.FromResult<Uri?>(speaker.BaseUri);
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            // Act
-            await system.StartAsync(CancellationToken.None);
+        // Act
+        await system.StartAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected && system.Players.ContainsKey(TestFixtures.KitchenUuid),
-                ConnectedSystem.WaitTimeout,
-                message: "An unreachable SeedHost should fall back to discovery.");
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && system.Players.ContainsKey(TestFixtures.KitchenUuid),
+            ConnectedSystem.WaitTimeout,
+            message: "An unreachable SeedHost should fall back to discovery.");
     }
 
     [Fact]
@@ -214,25 +189,18 @@ public class SonosSystemRuntimeTests
         // Arrange
         var logger = new RecordingLogger<SonosSystem>();
         var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}", logger: logger);
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            // Act
-            await system.StartAsync(CancellationToken.None);
+        // Act
+        await system.StartAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("connection failed")) >= 2,
-                ConnectedSystem.WaitTimeout,
-                message: "The repeated failures should be logged at Debug.");
-            Assert.Single(logger.Warnings, message => message.Contains("connection failed"));
-            Assert.Single(logger.Warnings, message => message.Contains("did not answer"));
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("connection failed")) >= 2,
+            ConnectedSystem.WaitTimeout,
+            message: "The repeated failures should be logged at Debug.");
+        Assert.Single(logger.Warnings, message => message.Contains("connection failed"));
+        Assert.Single(logger.Warnings, message => message.Contains("did not answer"));
     }
 
     [Fact]
@@ -242,30 +210,23 @@ public class SonosSystemRuntimeTests
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
         var system = ConnectedSystem.CreateSystem("http://127.0.0.1:1400");
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.Status == ServiceStatus.Error && system.StatusMessage?.Contains("SeedHost") == true,
-                ConnectedSystem.WaitTimeout,
-                message: "An invalid seed host should report an error.");
+        await system.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.Status == ServiceStatus.Error && system.StatusMessage?.Contains("SeedHost") == true,
+            ConnectedSystem.WaitTimeout,
+            message: "An invalid seed host should report an error.");
 
-            // Act
-            system.SeedHost = speaker.Host;
-            await system.ApplyConfigurationAsync(CancellationToken.None);
+        // Act
+        system.SeedHost = speaker.Host;
+        await system.ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected && system.Status == ServiceStatus.Running,
-                ConnectedSystem.WaitTimeout,
-                message: "Fixing the seed host should connect the system.");
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && system.Status == ServiceStatus.Running,
+            ConnectedSystem.WaitTimeout,
+            message: "Fixing the seed host should connect the system.");
     }
 
     [Fact]
@@ -276,27 +237,20 @@ public class SonosSystemRuntimeTests
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
         await using var portBlocker = new LoopbackHttpServer(_ => Task.CompletedTask);
         var system = ConnectedSystem.CreateSystem(speaker.Host, eventPort: portBlocker.Port);
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            // Act
-            await system.StartAsync(CancellationToken.None);
+        // Act
+        await system.StartAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected && system.Players.TryGetValue(TestFixtures.KitchenUuid, out var player) && player.Model is not null,
-                ConnectedSystem.WaitTimeout,
-                message: "The system should connect without events.");
-            Assert.False(system.AreEventsActive);
-            Assert.Null(system.ActiveEventCallbackHost);
-            Assert.Equal(0.44m, system.Players[TestFixtures.KitchenUuid].Volume);
-            Assert.Null(speaker.GetCallback(AvTransportEventPath));
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && system.Players.TryGetValue(TestFixtures.KitchenUuid, out var player) && player.Model is not null,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should connect without events.");
+        Assert.False(system.AreEventsActive);
+        Assert.Null(system.ActiveEventCallbackHost);
+        Assert.Equal(0.44m, system.Players[TestFixtures.KitchenUuid].Volume);
+        Assert.Null(speaker.GetCallback(AvTransportEventPath));
     }
 
     [Fact]
@@ -370,37 +324,31 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker { FailSubscriptions = true, SubscriptionTimeoutSeconds = 2 };
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var system = ConnectedSystem.CreateSystem(speaker.Host);
-        system.PollingInterval = TimeSpan.FromHours(1);
-        system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
-
-        try
+        var system = await StartWithListenerAsync(() =>
         {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => system.IsConnected, ConnectedSystem.WaitTimeout, message: "The system should connect without events.");
-            Assert.False(system.AreEventsActive);
-            speaker.FailSubscriptions = false;
+            var system = ConnectedSystem.CreateSystem(speaker.Host);
+            system.PollingInterval = TimeSpan.FromHours(1);
+            system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
+            return system;
+        });
+        await using var owner = ConnectedSystem.Own(system);
+        Assert.False(system.AreEventsActive);
+        speaker.FailSubscriptions = false;
 
-            // Act
-            await system.RefreshAsync(CancellationToken.None);
-            var topologyReads = speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
+        // Act
+        await system.RefreshAsync(CancellationToken.None);
+        var topologyReads = speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.AreEventsActive,
-                ConnectedSystem.WaitTimeout,
-                message: "The initial events of the subscriptions made by the refresh should activate events.");
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => speaker.Renewed.Contains(AvTransportEventPath),
-                ConnectedSystem.WaitTimeout,
-                message: "The subscriptions made by the refresh should be renewed although the next poll is an hour away.");
-            Assert.Equal(topologyReads, speaker.Calls.Count(call => call.Action == "GetZoneGroupState"));
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.AreEventsActive,
+            ConnectedSystem.WaitTimeout,
+            message: "The initial events of the subscriptions made by the refresh should activate events.");
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => speaker.Renewed.Contains(AvTransportEventPath),
+            ConnectedSystem.WaitTimeout,
+            message: "The subscriptions made by the refresh should be renewed although the next poll is an hour away.");
+        Assert.Equal(topologyReads, speaker.Calls.Count(call => call.Action == "GetZoneGroupState"));
     }
 
     [Fact]
@@ -410,15 +358,18 @@ public class SonosSystemRuntimeTests
         const string renderingControlEventPath = "/MediaRenderer/RenderingControl/Event";
         await using var speaker = new FakeSonosSpeaker { FailSubscriptions = true, SubscriptionTimeoutSeconds = 2 };
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var system = ConnectedSystem.CreateSystem(speaker.Host);
-        system.PollingInterval = TimeSpan.FromHours(1);
-        system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
         var hold = speaker.HoldSubscribe(renderingControlEventPath);
+        var system = await StartWithListenerAsync(() =>
+        {
+            var system = ConnectedSystem.CreateSystem(speaker.Host);
+            system.PollingInterval = TimeSpan.FromHours(1);
+            system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
+            return system;
+        });
+        await using var owner = ConnectedSystem.Own(system);
 
         try
         {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => system.IsConnected, ConnectedSystem.WaitTimeout, message: "The system should connect without events.");
             speaker.FailSubscriptions = false;
             using var cancellation = new CancellationTokenSource();
 
@@ -442,8 +393,6 @@ public class SonosSystemRuntimeTests
         finally
         {
             hold.TrySetResult();
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
         }
     }
 
@@ -518,32 +467,25 @@ public class SonosSystemRuntimeTests
         kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
         foreach (var speaker in new[] { subwoofer, kitchen })
         {
-            RespondWithHomeTheater(speaker, kitchen.BaseUri, subwooferUuid, subwoofer.BaseUri);
+            speaker.RespondWithHomeTheater(kitchen.BaseUri, subwooferUuid, subwoofer.BaseUri);
         }
 
         // Satellites answer a favorites Browse with a bare HTTP 500.
         subwoofer.RespondWithServerError("Browse");
         var system = ConnectedSystem.CreateSystem(subwoofer.Host);
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            // Act
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected,
-                ConnectedSystem.WaitTimeout,
-                message: "The system should connect through the subwoofer.");
+        // Act
+        await system.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should connect through the subwoofer.");
 
-            // Assert
-            Assert.True(system.Players[TestFixtures.KitchenUuid].Satellites.ContainsKey(subwooferUuid));
-            Assert.Equal(new[] { "Radio FM1", "SRF 3" }, system.Favorites.Select(favorite => favorite.Title));
-            Assert.DoesNotContain(subwoofer.Calls, call => call.Action == "Browse");
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        Assert.True(system.Players[TestFixtures.KitchenUuid].Satellites.ContainsKey(subwooferUuid));
+        Assert.Equal(new[] { "Radio FM1", "SRF 3" }, system.Favorites.Select(favorite => favorite.Title));
+        Assert.DoesNotContain(subwoofer.Calls, call => call.Action == "Browse");
     }
 
     [Fact]
@@ -689,30 +631,23 @@ public class SonosSystemRuntimeTests
         speaker.RespondWithFault("GetZoneInfo", 701);
         var system = ConnectedSystem.CreateSystem(speaker.Host);
         system.PollingInterval = TimeSpan.FromHours(1);
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected && system.Players.TryGetValue(TestFixtures.KitchenUuid, out var player) && player.IsConnected,
-                ConnectedSystem.WaitTimeout,
-                message: "A fault in the zone info should not keep the player offline.");
-            var player = system.Players[TestFixtures.KitchenUuid];
-            Assert.Equal("Sonos Ray", player.Model);
-            Assert.Null(player.SerialNumber);
+        await system.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && system.Players.TryGetValue(TestFixtures.KitchenUuid, out var player) && player.IsConnected,
+            ConnectedSystem.WaitTimeout,
+            message: "A fault in the zone info should not keep the player offline.");
+        var player = system.Players[TestFixtures.KitchenUuid];
+        Assert.Equal("Sonos Ray", player.Model);
+        Assert.Null(player.SerialNumber);
 
-            // Act
-            speaker.ClearFault("GetZoneInfo");
-            await system.RefreshAsync(CancellationToken.None);
+        // Act
+        speaker.ClearFault("GetZoneInfo");
+        await system.RefreshAsync(CancellationToken.None);
 
-            // Assert
-            Assert.Equal("00-00-00-00-00-06:D", player.SerialNumber);
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        Assert.Equal("00-00-00-00-00-06:D", player.SerialNumber);
     }
 
     [Fact]
@@ -771,29 +706,24 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker { FailSubscriptions = true };
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var logger = new RecordingLogger<SonosSystem>();
-        var system = ConnectedSystem.CreateSystem(speaker.Host, logger: logger);
-        system.PollingInterval = TimeSpan.FromHours(1);
-
-        try
+        RecordingLogger<SonosSystem> logger = null!;
+        var system = await StartWithListenerAsync(() =>
         {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(() => system.IsConnected, ConnectedSystem.WaitTimeout, message: "The system should connect.");
+            logger = new RecordingLogger<SonosSystem>();
+            var system = ConnectedSystem.CreateSystem(speaker.Host, logger: logger);
+            system.PollingInterval = TimeSpan.FromHours(1);
+            return system;
+        });
+        await using var owner = ConnectedSystem.Own(system);
 
-            // Act
-            await system.RefreshAsync(CancellationToken.None);
-            await system.RefreshAsync(CancellationToken.None);
+        // Act
+        await system.RefreshAsync(CancellationToken.None);
+        await system.RefreshAsync(CancellationToken.None);
 
-            // Assert
-            Assert.Equal(4, logger.Warnings.Count(message => message.Contains("subscription")));
-            Assert.Equal(8, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
-            Assert.False(system.AreEventsActive);
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        Assert.Equal(4, logger.Warnings.Count(message => message.Contains("subscription")));
+        Assert.Equal(8, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
+        Assert.False(system.AreEventsActive);
     }
 
     [Fact]
@@ -868,40 +798,33 @@ public class SonosSystemRuntimeTests
             Interlocked.Increment(ref discoveryCalls);
             return Task.FromResult<Uri?>(null);
         };
+        await using var owner = ConnectedSystem.Own(system);
 
-        try
-        {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected && system.Players.Count == 2 && system.Players.Values.All(player => player.IsConnected),
-                ConnectedSystem.WaitTimeout,
-                message: "The system should connect to both speakers.");
-            var kitchenTopologyReads = kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
-            var officeTopologyReads = office.Calls.Count(call => call.Action == "GetZoneGroupState");
+        await system.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => system.IsConnected && system.Players.Count == 2 && system.Players.Values.All(player => player.IsConnected),
+            ConnectedSystem.WaitTimeout,
+            message: "The system should connect to both speakers.");
+        var kitchenTopologyReads = kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
+        var officeTopologyReads = office.Calls.Count(call => call.Action == "GetZoneGroupState");
 
-            // Act
-            kitchen.RespondWithFault("GetZoneGroupState", 501);
-            system.SeedHost = null;
-            await system.ApplyConfigurationAsync(CancellationToken.None);
+        // Act
+        kitchen.RespondWithFault("GetZoneGroupState", 501);
+        system.SeedHost = null;
+        await system.ApplyConfigurationAsync(CancellationToken.None);
 
-            // Assert
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => office.Calls.Count(call => call.Action == "GetZoneGroupState") > officeTopologyReads &&
-                      system.IsConnected &&
-                      system.Players[TestFixtures.OfficeUuid].IsConnected,
-                ConnectedSystem.WaitTimeout,
-                message: "The system should reconnect through the office speaker.");
-            Assert.Equal(ServiceStatus.Running, system.Status);
-            Assert.Equal(0, Volatile.Read(ref discoveryCalls));
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => office.Calls.Count(call => call.Action == "GetZoneGroupState") > officeTopologyReads &&
+                  system.IsConnected &&
+                  system.Players[TestFixtures.OfficeUuid].IsConnected,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should reconnect through the office speaker.");
+        Assert.Equal(ServiceStatus.Running, system.Status);
+        Assert.Equal(0, Volatile.Read(ref discoveryCalls));
 
-            // The probe stops at the first speaker that answers, so a probe of the kitchen means it was tried first.
-            Assert.True(kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > kitchenTopologyReads);
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // The probe stops at the first speaker that answers, so a probe of the kitchen means it was tried first.
+        Assert.True(kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > kitchenTopologyReads);
     }
 
     [Fact]
@@ -1014,34 +937,16 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
-    public async Task WhenConfigurationIsAppliedConcurrently_ThenNoCallThrows()
+    public async Task WhenConfigurationIsAppliedAgainBeforeTheLoopReacts_ThenNoCallThrows()
     {
         // Arrange
-        var system = ConnectedSystem.CreateSystem("127.0.0.1:1");
+        using var system = ConnectedSystem.CreateSystem("127.0.0.1:1");
+        await system.ApplyConfigurationAsync(CancellationToken.None);
 
-        try
-        {
-            // Act
-            var exception = await Record.ExceptionAsync(() => Task.WhenAll(Enumerable.Range(0, 64)
-                .Select(_ => Task.Run(() => system.ApplyConfigurationAsync(CancellationToken.None)))));
+        // Act
+        var exception = await Record.ExceptionAsync(() => system.ApplyConfigurationAsync(CancellationToken.None));
 
-            // Assert
-            Assert.Null(exception);
-        }
-        finally
-        {
-            system.Dispose();
-        }
-    }
-
-    private static void RespondWithHomeTheater(FakeSonosSpeaker speaker, Uri playerUri, string subwooferUuid, Uri subwooferUri)
-    {
-        var channelMap = $"{TestFixtures.KitchenUuid}:LF,RF;{subwooferUuid}:SW";
-        speaker.Respond("GetZoneGroupState", ("ZoneGroupState",
-            "<ZoneGroupState><ZoneGroups>" +
-            $"""<ZoneGroup Coordinator="{TestFixtures.KitchenUuid}" ID="{TestFixtures.KitchenUuid}:1">""" +
-            $"""<ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="{playerUri}xml/device_description.xml" ZoneName="Küche" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="">""" +
-            $"""<Satellite UUID="{subwooferUuid}" Location="{subwooferUri}xml/device_description.xml" ZoneName="Küche" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="" />""" +
-            "</ZoneGroupMember></ZoneGroup></ZoneGroups></ZoneGroupState>"));
+        // Assert
+        Assert.Null(exception);
     }
 }
