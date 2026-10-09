@@ -21,7 +21,7 @@ public partial class SonosGroup :
 {
     private readonly SonosSystem _system;
     private readonly Lock _stateLock = new();
-    private PollEventOrder _order;
+    private PollEventOrder _order = new();
 
     internal SonosGroup(SonosSystem system, SonosPlayer coordinator)
     {

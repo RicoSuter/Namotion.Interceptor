@@ -67,7 +67,7 @@ public partial class SonosSystem : BackgroundService,
     // Guarded by _topologyLock. The order of the applied topology events orders a polled topology against them, and
     // the players missing from the last topology that was not applied wait for a second read to confirm them. The
     // first topology of a connection needs no confirmation: the previous one may be arbitrarily old.
-    private PollEventOrder _topologyOrder;
+    private PollEventOrder _topologyOrder = new();
     private HashSet<string> _unconfirmedMissingPlayers = new(StringComparer.Ordinal);
     private bool _hasConnectionTopology;
 

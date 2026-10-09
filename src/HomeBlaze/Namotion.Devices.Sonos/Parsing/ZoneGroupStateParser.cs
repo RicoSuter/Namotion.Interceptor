@@ -94,7 +94,7 @@ internal static class ZoneGroupStateParser
     private static Uri GetBaseUri(XElement element)
     {
         var location = new Uri(GetRequiredAttribute(element, "Location"));
-        return new Uri(location.GetLeftPart(UriPartial.Authority) + "/");
+        return new UriBuilder(location.Scheme, location.Host, location.Port).Uri;
     }
 
     private static bool? GetIsWireless(XElement element) => (string?)element.Attribute("EthLink") switch

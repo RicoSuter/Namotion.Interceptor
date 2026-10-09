@@ -850,19 +850,21 @@ public partial class SonosSystem
     private async Task RefreshFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
     {
         Exception? failure = null;
-        var candidates = players
-            .Where(player => player.IsConnected)
-            .OrderBy(player => player.IsGroupCoordinator ? 0 : 1)
-            .Select(player => (Player: player, Connection: FindConnection(player.Uuid)))
-            .Where(candidate => candidate.Connection is not null)
-            .ToArray();
+        var candidates = new List<(SonosPlayer Player, SonosConnection Connection)>(players.Length);
+        foreach (var player in players.Where(player => player.IsConnected).OrderBy(player => player.IsGroupCoordinator ? 0 : 1))
+        {
+            if (FindConnection(player.Uuid) is { } connection)
+            {
+                candidates.Add((player, connection));
+            }
+        }
 
-        for (var index = 0; index < candidates.Length; index++)
+        for (var index = 0; index < candidates.Count; index++)
         {
             var (player, connection) = candidates[index];
             try
             {
-                SetFavorites(await connection!.ReadFavoritesAsync(cancellationToken));
+                SetFavorites(await connection.ReadFavoritesAsync(cancellationToken));
                 _failures.ReportSuccess(FavoritesFailureKey);
                 return;
             }
@@ -873,7 +875,7 @@ public partial class SonosSystem
             catch (Exception exception)
             {
                 failure = exception;
-                if (index < candidates.Length - 1)
+                if (index < candidates.Count - 1)
                 {
                     _logger.LogDebug(exception, "Reading the Sonos favorites from {Room} failed; trying the next player.", player.RoomName);
                 }

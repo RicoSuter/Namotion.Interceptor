@@ -23,9 +23,9 @@ public partial class SonosPlayer : SonosDevice,
     // Guards the event versus poll ordering: an order and the fields it protects change together. Every poll goes
     // through all three, so a poll superseded by a later one applies nothing; the sleep timer has no events.
     private readonly Lock _stateLock = new();
-    private PollEventOrder _avTransportOrder;
-    private PollEventOrder _renderingControlOrder;
-    private PollEventOrder _sleepTimerOrder;
+    private PollEventOrder _avTransportOrder = new();
+    private PollEventOrder _renderingControlOrder = new();
+    private PollEventOrder _sleepTimerOrder = new();
 
     // Every event and poll repeats the metadata, so the last parse is reused while the raw string is unchanged, and
     // the album art URI while the track and the speaker address are. Guarded by _stateLock.
