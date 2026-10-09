@@ -24,43 +24,50 @@ internal static class SonosDiscovery
             throw new ArgumentException("Expected a host or host:port without a scheme.", nameof(host));
         }
 
-        string hostName;
-        string? port = null;
-        if (value.StartsWith('['))
-        {
-            var end = value.IndexOf(']');
-            if (end < 0 || (end + 1 < value.Length && value[end + 1] != ':'))
-            {
-                throw new ArgumentException($"Invalid IPv6 host '{value}'.", nameof(host));
-            }
-
-            hostName = value[1..end];
-            port = end + 1 < value.Length ? value[(end + 2)..] : null;
-        }
-        else if (value.Count(character => character == ':') == 1)
-        {
-            var separator = value.IndexOf(':');
-            hostName = value[..separator];
-            port = value[(separator + 1)..];
-        }
-        else
-        {
-            hostName = value;
-        }
-
+        var (hostName, port) = SplitHostAndPort(value, nameof(host));
         if (Uri.CheckHostName(hostName) == UriHostNameType.Unknown)
         {
             throw new ArgumentException($"Invalid host '{value}'.", nameof(host));
         }
 
-        var portNumber = SonosValues.DevicePort;
-        if (port is not null &&
-            (!int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out portNumber) || portNumber is < 1 or > 65535))
+        return new UriBuilder("http", hostName, ParsePort(port, value, nameof(host))).Uri;
+    }
+
+    private static (string HostName, string? Port) SplitHostAndPort(string value, string parameterName)
+    {
+        if (value.StartsWith('['))
         {
-            throw new ArgumentException($"Invalid port in '{value}'.", nameof(host));
+            var end = value.IndexOf(']');
+            if (end < 0 || (end + 1 < value.Length && value[end + 1] != ':'))
+            {
+                throw new ArgumentException($"Invalid IPv6 host '{value}'.", parameterName);
+            }
+
+            return (value[1..end], end + 1 < value.Length ? value[(end + 2)..] : null);
         }
 
-        return new UriBuilder("http", hostName, portNumber).Uri;
+        if (value.Count(character => character == ':') == 1)
+        {
+            var separator = value.IndexOf(':');
+            return (value[..separator], value[(separator + 1)..]);
+        }
+
+        return (value, null);
+    }
+
+    private static int ParsePort(string? port, string value, string parameterName)
+    {
+        if (port is null)
+        {
+            return SonosValues.DevicePort;
+        }
+
+        if (!int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out var portNumber) || portNumber is < 1 or > 65535)
+        {
+            throw new ArgumentException($"Invalid port in '{value}'.", parameterName);
+        }
+
+        return portNumber;
     }
 
     /// <summary>

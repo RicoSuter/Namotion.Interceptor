@@ -26,33 +26,7 @@ internal static class ZoneGroupStateParser
                     continue;
                 }
 
-                var uuid = GetRequiredAttribute(member, "UUID");
-                var satellites = new List<SonosTopologySatellite>();
-
-                var homeTheaterMap = (string?)member.Attribute("HTSatChanMapSet");
-                foreach (var satellite in member.Elements("Satellite"))
-                {
-                    satellites.Add(CreateSatellite(satellite, homeTheaterMap, isStereoPair: false));
-                }
-
-                // A stereo pair lists its second speaker as an invisible member of the same group.
-                var stereoMap = (string?)member.Attribute("ChannelMapSet");
-                foreach (var partner in members)
-                {
-                    if (IsInvisible(partner) && ContainsUuid(stereoMap, GetRequiredAttribute(partner, "UUID")))
-                    {
-                        satellites.Add(CreateSatellite(partner, stereoMap, isStereoPair: true));
-                    }
-                }
-
-                players.Add(new SonosTopologyPlayer(
-                    uuid,
-                    (string?)member.Attribute("ZoneName") ?? string.Empty,
-                    GetBaseUri(member),
-                    (string?)member.Attribute("SoftwareVersion"),
-                    GetIsWireless(member),
-                    (string?)member.Attribute("MoreInfo"),
-                    satellites));
+                players.Add(CreatePlayer(member, members));
             }
 
             if (players.Count > 0)
@@ -65,6 +39,37 @@ internal static class ZoneGroupStateParser
         }
 
         return new SonosTopology(groups);
+    }
+
+    private static SonosTopologyPlayer CreatePlayer(XElement member, List<XElement> members)
+    {
+        var uuid = GetRequiredAttribute(member, "UUID");
+        var satellites = new List<SonosTopologySatellite>();
+
+        var homeTheaterMap = (string?)member.Attribute("HTSatChanMapSet");
+        foreach (var satellite in member.Elements("Satellite"))
+        {
+            satellites.Add(CreateSatellite(satellite, homeTheaterMap, isStereoPair: false));
+        }
+
+        // A stereo pair lists its second speaker as an invisible member of the same group.
+        var stereoMap = (string?)member.Attribute("ChannelMapSet");
+        foreach (var partner in members)
+        {
+            if (IsInvisible(partner) && ContainsUuid(stereoMap, GetRequiredAttribute(partner, "UUID")))
+            {
+                satellites.Add(CreateSatellite(partner, stereoMap, isStereoPair: true));
+            }
+        }
+
+        return new SonosTopologyPlayer(
+            uuid,
+            (string?)member.Attribute("ZoneName") ?? string.Empty,
+            GetBaseUri(member),
+            (string?)member.Attribute("SoftwareVersion"),
+            GetIsWireless(member),
+            (string?)member.Attribute("MoreInfo"),
+            satellites);
     }
 
     private static SonosTopologySatellite CreateSatellite(XElement element, string? channelMap, bool isStereoPair)

@@ -719,22 +719,7 @@ public partial class SonosPlayer : SonosDevice,
             CurrentTrackPosition = null;
         }
 
-        // Polls often report the media metadata empty that events delivered, so only a parsable title replaces it.
-        // The next track of the same queue or station keeps it.
-        if (change.MediaMetaData != _lastMediaMetaData)
-        {
-            _lastMediaTitle = DidlParser.ParseTitle(change.MediaMetaData);
-            _lastMediaMetaData = change.MediaMetaData;
-        }
-
-        if (_lastMediaTitle is { } mediaTitle)
-        {
-            ReportedMediaTitle = mediaTitle;
-        }
-        else if (isMediaChange)
-        {
-            ReportedMediaTitle = null;
-        }
+        ApplyMediaTitle(change.MediaMetaData, isMediaChange);
 
         if (SonosValues.IsKnown(change.TrackDuration))
         {
@@ -745,12 +730,38 @@ public partial class SonosPlayer : SonosDevice,
             CurrentTrackDuration = null;
         }
 
-        if (SonosValues.IsKnown(change.TrackMetaData))
+        ApplyTrackMetaData(change.TrackMetaData, isTrackChange);
+    }
+
+    // Caller holds _stateLock. Polls often report the media metadata empty that events delivered, so only a parsable
+    // title replaces it. The next track of the same queue or station keeps it.
+    private void ApplyMediaTitle(string? mediaMetaData, bool isMediaChange)
+    {
+        if (mediaMetaData != _lastMediaMetaData)
         {
-            if (change.TrackMetaData != _lastTrackMetaData)
+            _lastMediaTitle = DidlParser.ParseTitle(mediaMetaData);
+            _lastMediaMetaData = mediaMetaData;
+        }
+
+        if (_lastMediaTitle is { } mediaTitle)
+        {
+            ReportedMediaTitle = mediaTitle;
+        }
+        else if (isMediaChange)
+        {
+            ReportedMediaTitle = null;
+        }
+    }
+
+    // Caller holds _stateLock.
+    private void ApplyTrackMetaData(string? trackMetaData, bool isTrackChange)
+    {
+        if (SonosValues.IsKnown(trackMetaData))
+        {
+            if (trackMetaData != _lastTrackMetaData)
             {
-                _lastTrack = DidlParser.ParseTrack(change.TrackMetaData);
-                _lastTrackMetaData = change.TrackMetaData;
+                _lastTrack = DidlParser.ParseTrack(trackMetaData);
+                _lastTrackMetaData = trackMetaData;
             }
 
             ApplyTrack(_lastTrack);

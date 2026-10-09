@@ -527,13 +527,10 @@ public partial class SonosSystem
 
                 try
                 {
-                    // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also
-                    // wakes to renew them, without a full poll. Read after publishing the wake source: a wake
-                    // scheduled before is seen here, one scheduled after cancels the wait.
-                    var nextWakeAt = Interlocked.Read(ref _nextWakeAt);
-                    isSubscriptionWake = nextWakeAt < nextPollAt;
-                    var wait = Clock.GetTimeUntil(isSubscriptionWake ? nextWakeAt : nextPollAt);
-                    if (await _configurationChanged.WaitAsync(wait > MinimumLoopWait ? wait : MinimumLoopWait, wake.Token))
+                    // Read after publishing the wake source: a wake scheduled before is seen here, one scheduled
+                    // after cancels the wait.
+                    var wait = GetLoopWait(nextPollAt, out isSubscriptionWake);
+                    if (await _configurationChanged.WaitAsync(wait, wake.Token))
                     {
                         return true;
                     }
@@ -585,6 +582,16 @@ public partial class SonosSystem
 
             nextPollAt = Clock.GetTimestampAfter(EffectivePollingInterval);
         }
+    }
+
+    // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also wakes to renew
+    // them, without a full poll.
+    private TimeSpan GetLoopWait(long nextPollAt, out bool isSubscriptionWake)
+    {
+        var nextWakeAt = Interlocked.Read(ref _nextWakeAt);
+        isSubscriptionWake = nextWakeAt < nextPollAt;
+        var wait = Clock.GetTimeUntil(isSubscriptionWake ? nextWakeAt : nextPollAt);
+        return wait > MinimumLoopWait ? wait : MinimumLoopWait;
     }
 
     private void WakeLoop()

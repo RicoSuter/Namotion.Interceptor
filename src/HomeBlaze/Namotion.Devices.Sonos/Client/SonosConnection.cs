@@ -145,14 +145,7 @@ internal sealed class SonosConnection : IDisposable
         }
 
         return new SonosPlayerReading(
-            new AvTransportChange(
-                transport?.CurrentTransportState,
-                settings?.PlayMode,
-                media?.CurrentURI,
-                position?.TrackURI,
-                position?.TrackDuration,
-                position?.TrackMetaData,
-                media?.CurrentURIMetaData),
+            CreateAvTransportChange(transport, settings, media, position),
             SonosValues.ParseDuration(position?.RelTime),
             SonosValues.ParseDuration(sleepTimer?.RemainingSleepTimerDuration),
             new RenderingControlChange(
@@ -166,6 +159,20 @@ internal sealed class SonosConnection : IDisposable
             HasPosition: position is not null,
             HasSleepTimer: sleepTimer is not null);
     }
+
+    private static AvTransportChange CreateAvTransportChange(
+        AVTransportService.GetTransportInfoResponse? transport,
+        AVTransportService.GetTransportSettingsResponse? settings,
+        AVTransportService.GetMediaInfoResponse? media,
+        AVTransportService.GetPositionInfoResponse? position) =>
+        new(
+            transport?.CurrentTransportState,
+            settings?.PlayMode,
+            media?.CurrentURI,
+            position?.TrackURI,
+            position?.TrackDuration,
+            position?.TrackMetaData,
+            media?.CurrentURIMetaData);
 
     /// <summary>
     /// Reads the group volume and mute from a coordinator, with the same fault handling as <see cref="ReadPlayerAsync"/>.

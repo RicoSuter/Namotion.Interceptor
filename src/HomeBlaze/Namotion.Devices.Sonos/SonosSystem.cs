@@ -159,7 +159,18 @@ public partial class SonosSystem : BackgroundService,
     public string? IconName => "LibraryMusic";
 
     [Derived]
-    public string? IconColor => IsConnected ? "Success" : Status == ServiceStatus.Error ? "Error" : null;
+    public string? IconColor
+    {
+        get
+        {
+            if (IsConnected)
+            {
+                return "Success";
+            }
+
+            return Status == ServiceStatus.Error ? "Error" : null;
+        }
+    }
 
     // Read by the connection loop in SonosSystem.Runtime.cs.
     internal IHttpClientFactory HttpClientFactory { get; }
@@ -411,23 +422,7 @@ public partial class SonosSystem : BackgroundService,
             _unconfirmedMissingPlayers.Clear();
             _hasConnectionTopology = true;
             Volatile.Write(ref _appliedZoneGroupState, null);
-            Dictionary<string, SonosPlayer>? updatedPlayers = null;
-            foreach (var group in topology.Groups)
-            {
-                foreach (var topologyPlayer in group.Players)
-                {
-                    if (!players.TryGetValue(topologyPlayer.Uuid, out var player))
-                    {
-                        player = new SonosPlayer(this, topologyPlayer.Uuid);
-                        updatedPlayers ??= new Dictionary<string, SonosPlayer>(players, StringComparer.Ordinal);
-                        updatedPlayers[topologyPlayer.Uuid] = player;
-                        _logger.LogInformation("Found the Sonos player {Room} ({Uuid}).", topologyPlayer.RoomName, topologyPlayer.Uuid);
-                    }
-
-                    player.ApplyPlayerTopology(topologyPlayer, group.CoordinatorUuid);
-                }
-            }
-
+            var updatedPlayers = ApplyPlayerTopologies(topology, players);
             foreach (var device in GetDevices(players.Values.Where(player => !present.Contains(player.Uuid))))
             {
                 device.MarkMissing();
@@ -441,6 +436,29 @@ public partial class SonosSystem : BackgroundService,
             ApplyGroups(topology, Players);
             return true;
         }
+    }
+
+    // Caller holds _topologyLock. Returns the players with the new ones added, or null when none are new.
+    private Dictionary<string, SonosPlayer>? ApplyPlayerTopologies(SonosTopology topology, Dictionary<string, SonosPlayer> players)
+    {
+        Dictionary<string, SonosPlayer>? updatedPlayers = null;
+        foreach (var group in topology.Groups)
+        {
+            foreach (var topologyPlayer in group.Players)
+            {
+                if (!players.TryGetValue(topologyPlayer.Uuid, out var player))
+                {
+                    player = new SonosPlayer(this, topologyPlayer.Uuid);
+                    updatedPlayers ??= new Dictionary<string, SonosPlayer>(players, StringComparer.Ordinal);
+                    updatedPlayers[topologyPlayer.Uuid] = player;
+                    _logger.LogInformation("Found the Sonos player {Room} ({Uuid}).", topologyPlayer.RoomName, topologyPlayer.Uuid);
+                }
+
+                player.ApplyPlayerTopology(topologyPlayer, group.CoordinatorUuid);
+            }
+        }
+
+        return updatedPlayers;
     }
 
     // Caller holds _topologyLock.

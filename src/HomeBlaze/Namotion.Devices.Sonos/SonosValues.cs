@@ -43,7 +43,12 @@ internal static class SonosValues
             return fallback;
         }
 
-        return configured < minimum ? minimum : configured > MaximumInterval ? MaximumInterval : configured;
+        if (configured < minimum)
+        {
+            return minimum;
+        }
+
+        return configured > MaximumInterval ? MaximumInterval : configured;
     }
 
     internal static string? NullIfEmpty(string? value) =>
@@ -85,16 +90,21 @@ internal static class SonosValues
         var text = value.AsSpan();
         Span<Range> parts = stackalloc Range[4];
         if (text.Split(parts, ':') != 3 ||
-            !int.TryParse(text[parts[0]], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
-            !int.TryParse(text[parts[1]], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
-            !double.TryParse(text[parts[2]], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) ||
-            hours > 9999 || minutes >= 60 || !double.IsFinite(seconds) || seconds is < 0 or >= 60)
+            !TryParseDurationPart(text[parts[0]], 9999, out var hours) ||
+            !TryParseDurationPart(text[parts[1]], 59, out var minutes) ||
+            !TryParseSeconds(text[parts[2]], out var seconds))
         {
             return null;
         }
 
         return TimeSpan.FromHours(hours) + TimeSpan.FromMinutes(minutes) + TimeSpan.FromSeconds(seconds);
     }
+
+    private static bool TryParseDurationPart(ReadOnlySpan<char> text, int maximum, out int value) =>
+        int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value) && value <= maximum;
+
+    private static bool TryParseSeconds(ReadOnlySpan<char> text, out double seconds) =>
+        double.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out seconds) && seconds is >= 0 and < 60;
 
     internal static string FormatDuration(TimeSpan value) =>
         string.Create(CultureInfo.InvariantCulture, $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}");
@@ -130,6 +140,9 @@ internal static class SonosValues
         _ => throw new ArgumentOutOfRangeException(nameof(repeat), repeat, "Unknown repeat mode.")
     };
 
+    private static readonly string[] RadioUriPrefixes =
+        ["x-rincon-mp3radio:", "x-sonosapi-stream:", "x-sonosapi-radio:", "x-sonosapi-hls:", "aac:", "hls-radio:"];
+
     internal static SonosSource DetectSource(string? uri)
     {
         if (string.IsNullOrEmpty(uri))
@@ -162,19 +175,21 @@ internal static class SonosValues
             return uri.Contains(",airplay:", StringComparison.Ordinal) ? SonosSource.AirPlay : SonosSource.Other;
         }
 
-        if (uri.StartsWith("x-rincon-mp3radio:", StringComparison.Ordinal) ||
-            uri.StartsWith("x-sonosapi-stream:", StringComparison.Ordinal) ||
-            uri.StartsWith("x-sonosapi-radio:", StringComparison.Ordinal) ||
-            uri.StartsWith("x-sonosapi-hls:", StringComparison.Ordinal) ||
-            uri.StartsWith("aac:", StringComparison.Ordinal) ||
-            uri.StartsWith("hls-radio:", StringComparison.Ordinal) ||
-            uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        return IsRadioUri(uri) ? SonosSource.Radio : SonosSource.Other;
+    }
+
+    private static bool IsRadioUri(string uri)
+    {
+        foreach (var prefix in RadioUriPrefixes)
         {
-            return SonosSource.Radio;
+            if (uri.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
         }
 
-        return SonosSource.Other;
+        return uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
