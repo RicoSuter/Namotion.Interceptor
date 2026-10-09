@@ -195,9 +195,10 @@ internal static class SonosValues
     }
 
     /// <summary>
-    /// Sonos renders a plain http(s) stream as radio, with its title and without a seek bar, only behind this scheme.
+    /// Returns the URI with its scheme replaced by <c>x-rincon-mp3radio</c>.
     /// </summary>
     internal static string ToStreamUri(string uri) =>
+        // Sonos renders a plain http(s) stream as radio, with its title and without a seek bar, only behind this scheme.
         "x-rincon-mp3radio" + uri[uri.IndexOf(':')..];
 
     internal static string CreateStreamMetadata(string title) =>

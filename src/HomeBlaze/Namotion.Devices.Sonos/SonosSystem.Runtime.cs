@@ -113,14 +113,17 @@ public partial class SonosSystem
     }
 
     /// <summary>
-    /// Returns the connection for a command, refusing when the system or the player is not connected: a command
-    /// would physically succeed, but nothing would be polling or subscribed to show its result.
+    /// Returns the connection for a command to the player. Throws <see cref="InvalidOperationException"/> when the
+    /// system or the player is not connected and <see cref="ObjectDisposedException"/> after disposal.
     /// </summary>
     internal SonosConnection GetConnectionForCommand(string uuid)
     {
         lock (_connectionsLock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+
+            // A command would physically succeed while disconnected, but nothing would be polling or subscribed to
+            // show its result.
             if (!IsConnected)
             {
                 throw CreateNotConnectedException();
@@ -609,12 +612,12 @@ public partial class SonosSystem
     }
 
     /// <summary>
-    /// Reports the device reachable unless teardown released the connection while the poll was in flight. Teardown
-    /// clears the connections under the same lock before it marks devices offline, so a late success cannot undo
-    /// that. This is the only subject write made under _connectionsLock; it takes no subject state lock.
+    /// Reports the device reachable unless teardown released the connection while the poll was in flight.
     /// </summary>
     private void ReportPollSucceededIfCurrent(SonosDevice device, SonosConnection connection)
     {
+        // Teardown clears the connections under the same lock before it marks devices offline, so a late success
+        // cannot undo that. This is the only subject write made under _connectionsLock; it takes no subject state lock.
         lock (_connectionsLock)
         {
             if (ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection))

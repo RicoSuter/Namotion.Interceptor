@@ -50,12 +50,21 @@ public partial class SonosSystem : BackgroundService,
     [Configuration]
     public partial string? EventCallbackHost { get; set; }
 
+    /// <summary>
+    /// The port the event listener binds to and speakers send events to.
+    /// </summary>
     [Configuration]
     public partial int EventPort { get; set; }
 
+    /// <summary>
+    /// The time between reconciliations of topology, state and favorites. Zero or less uses 30 seconds.
+    /// </summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
 
+    /// <summary>
+    /// The delay before reconnecting after a failed connection. Zero or less uses 30 seconds.
+    /// </summary>
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
 
