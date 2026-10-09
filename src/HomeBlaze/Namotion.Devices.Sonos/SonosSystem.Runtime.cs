@@ -40,6 +40,11 @@ public partial class SonosSystem
     // also guards the subscriptions' RenewAt, and read by the connection loop while it holds no lock.
     private long _nextRenewalTicks = long.MaxValue;
 
+    // The connection loop's current sleep. Cancelling it wakes the loop to reschedule when a reconciliation outside
+    // the loop, from a command, schedules an earlier renewal. Guarded by _loopWakeLock.
+    private readonly Lock _loopWakeLock = new();
+    private CancellationTokenSource? _loopWake;
+
     // Guarded by _reconcileLock. A persistent failure is logged at Warning once and at Debug while it lasts.
     private bool _isFavoritesReadFailing;
     private readonly HashSet<string> _failingSubscriptionKeys = new(StringComparer.Ordinal);
@@ -457,14 +462,39 @@ public partial class SonosSystem
         var nextPollAt = DateTimeOffset.UtcNow + EffectivePollingInterval;
         while (true)
         {
-            // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also wakes
-            // to renew them, without a full poll.
-            var nextRenewalTicks = Interlocked.Read(ref _nextRenewalTicks);
-            var isRenewalOnly = nextRenewalTicks < nextPollAt.UtcTicks;
-            var wait = (isRenewalOnly ? new DateTimeOffset(nextRenewalTicks, TimeSpan.Zero) : nextPollAt) - DateTimeOffset.UtcNow;
-            if (await _configurationChanged.WaitAsync(wait > MinimumLoopWait ? wait : MinimumLoopWait, stoppingToken))
+            bool isRenewalOnly;
+            using (var wake = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
             {
-                return true;
+                lock (_loopWakeLock)
+                {
+                    _loopWake = wake;
+                }
+
+                try
+                {
+                    // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also
+                    // wakes to renew them, without a full poll. Read after publishing the wake source: a renewal
+                    // scheduled before is seen here, one scheduled after cancels the wait.
+                    var nextRenewalTicks = Interlocked.Read(ref _nextRenewalTicks);
+                    isRenewalOnly = nextRenewalTicks < nextPollAt.UtcTicks;
+                    var wait = (isRenewalOnly ? new DateTimeOffset(nextRenewalTicks, TimeSpan.Zero) : nextPollAt) - DateTimeOffset.UtcNow;
+                    if (await _configurationChanged.WaitAsync(wait > MinimumLoopWait ? wait : MinimumLoopWait, wake.Token))
+                    {
+                        return true;
+                    }
+                }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // Woken for an earlier renewal; the next iteration waits for it.
+                    continue;
+                }
+                finally
+                {
+                    lock (_loopWakeLock)
+                    {
+                        _loopWake = null;
+                    }
+                }
             }
 
             if (isRenewalOnly)
@@ -499,6 +529,16 @@ public partial class SonosSystem
             }
 
             nextPollAt = DateTimeOffset.UtcNow + EffectivePollingInterval;
+        }
+    }
+
+    private void WakeLoopForRenewal()
+    {
+        lock (_loopWakeLock)
+        {
+            // Asynchronous, so the loop never continues on this thread; the loop disposes the source only after it
+            // cleared the field under this lock.
+            _ = _loopWake?.CancelAsync();
         }
     }
 
@@ -804,7 +844,11 @@ public partial class SonosSystem
             }
         }
 
-        Interlocked.Exchange(ref _nextRenewalTicks, nextRenewalTicks);
+        if (nextRenewalTicks < Interlocked.Exchange(ref _nextRenewalTicks, nextRenewalTicks))
+        {
+            WakeLoopForRenewal();
+        }
+
         AreEventsActive = areEventsActive;
     }
 

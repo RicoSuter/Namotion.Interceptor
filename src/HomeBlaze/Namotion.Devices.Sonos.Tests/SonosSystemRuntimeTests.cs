@@ -196,6 +196,40 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenARefreshSubscribesWhileTheLoopSleeps_ThenTheNewSubscriptionsAreRenewedBeforeTheNextPoll()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker { FailSubscriptions = true, SubscriptionTimeoutSeconds = 2 };
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var system = ConnectedSystem.CreateSystem(speaker.Host);
+        system.PollingInterval = TimeSpan.FromHours(1);
+        system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
+
+        try
+        {
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => system.IsConnected, ConnectedSystem.WaitTimeout, message: "The system should connect without events.");
+            Assert.False(system.AreEventsActive);
+            speaker.FailSubscriptions = false;
+
+            // Act
+            await system.RefreshAsync(CancellationToken.None);
+
+            // Assert
+            Assert.True(system.AreEventsActive);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => speaker.Renewed.Contains(AvTransportEventPath),
+                ConnectedSystem.WaitTimeout,
+                message: "The subscriptions made by the refresh should be renewed although the next poll is an hour away.");
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenReadingFavoritesKeepsFailing_ThenOnlyEachNewFailureIsAWarning()
     {
         // Arrange
