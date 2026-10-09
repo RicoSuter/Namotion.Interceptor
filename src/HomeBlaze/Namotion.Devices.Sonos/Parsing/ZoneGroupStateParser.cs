@@ -7,6 +7,9 @@ namespace Namotion.Devices.Sonos.Parsing;
 /// </summary>
 internal static class ZoneGroupStateParser
 {
+    /// <remarks>
+    /// Throws <see cref="System.Xml.XmlException"/> for malformed XML and <see cref="FormatException"/> when a member lacks a required UUID or Location attribute.
+    /// </remarks>
     internal static SonosTopology Parse(string xml)
     {
         var document = XDocument.Parse(xml);
@@ -22,7 +25,7 @@ internal static class ZoneGroupStateParser
                     continue;
                 }
 
-                var uuid = (string)member.Attribute("UUID")!;
+                var uuid = GetRequiredAttribute(member, "UUID");
                 var satellites = new List<SonosTopologySatellite>();
 
                 var homeTheaterMap = (string?)member.Attribute("HTSatChanMapSet");
@@ -35,7 +38,7 @@ internal static class ZoneGroupStateParser
                 var stereoMap = (string?)member.Attribute("ChannelMapSet");
                 foreach (var partner in members)
                 {
-                    if (IsInvisible(partner) && ContainsUuid(stereoMap, (string)partner.Attribute("UUID")!))
+                    if (IsInvisible(partner) && ContainsUuid(stereoMap, GetRequiredAttribute(partner, "UUID")))
                     {
                         satellites.Add(CreateSatellite(partner, stereoMap, isStereoPair: true));
                     }
@@ -65,7 +68,7 @@ internal static class ZoneGroupStateParser
 
     private static SonosTopologySatellite CreateSatellite(XElement element, string? channelMap, bool isStereoPair)
     {
-        var uuid = (string)element.Attribute("UUID")!;
+        var uuid = GetRequiredAttribute(element, "UUID");
         return new SonosTopologySatellite(
             uuid,
             (string?)element.Attribute("ZoneName") ?? string.Empty,
@@ -75,12 +78,16 @@ internal static class ZoneGroupStateParser
             GetRole(channelMap, uuid, isStereoPair));
     }
 
+    private static string GetRequiredAttribute(XElement element, string name) =>
+        (string?)element.Attribute(name)
+        ?? throw new FormatException($"The {element.Name.LocalName} element is missing the required '{name}' attribute.");
+
     private static bool IsInvisible(XElement element) =>
         (string?)element.Attribute("Invisible") == "1";
 
     private static Uri GetBaseUri(XElement element)
     {
-        var location = new Uri((string)element.Attribute("Location")!);
+        var location = new Uri(GetRequiredAttribute(element, "Location"));
         return new Uri(location.GetLeftPart(UriPartial.Authority) + "/");
     }
 
