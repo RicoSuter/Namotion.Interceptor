@@ -678,13 +678,15 @@ public partial class SonosPlayer : SonosDevice,
         // An unknown value keeps the current one only while the track stays the same: Spotify Connect polls report
         // NOT_IMPLEMENTED for what its events delivered. After a change, the kept values would describe the
         // previous track.
-        var isTrackChange = false;
+        var isMediaChange = false;
         if (SonosValues.IsKnown(change.MediaUri))
         {
             var mediaUri = SonosValues.NullIfEmpty(change.MediaUri);
-            isTrackChange = mediaUri != MediaUri;
+            isMediaChange = mediaUri != MediaUri;
             MediaUri = mediaUri;
         }
+
+        var isTrackChange = isMediaChange;
 
         if (SonosValues.IsKnown(change.TrackUri))
         {
@@ -700,11 +702,12 @@ public partial class SonosPlayer : SonosDevice,
         }
 
         // Polls often report the media metadata empty that events delivered, so only a parsable title replaces it.
+        // The next track of the same queue or station keeps it.
         if (DidlParser.ParseTitle(change.MediaMetaData) is { } mediaTitle)
         {
             ReportedMediaTitle = mediaTitle;
         }
-        else if (isTrackChange)
+        else if (isMediaChange)
         {
             ReportedMediaTitle = null;
         }

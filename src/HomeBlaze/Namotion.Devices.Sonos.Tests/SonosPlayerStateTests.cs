@@ -168,6 +168,24 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
+    public void WhenTheTrackChangesWithinTheSameMedia_ThenTheMediaTitleIsKept()
+    {
+        // Arrange
+        const string queueUri = "x-rincon-queue:RINCON_A0000000000601400#0";
+        var player = CreateKitchen();
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", "NORMAL", queueUri, "x-file-cifs://nas/a.mp3", null, null, SonosEventBodies.Didl("Playlist")), T0);
+
+        // Act
+        player.ApplyPoll(
+            new SonosPlayerReading(new AvTransportChange("PLAYING", "NORMAL", queueUri, "x-file-cifs://nas/b.mp3", null, null, ""), null, null, NoRenderingControl()),
+            T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal("x-file-cifs://nas/b.mp3", player.CurrentTrackUri);
+        Assert.Equal("Playlist", player.MediaTitle);
+    }
+
+    [Fact]
     public void WhenOtherMediaArrivesWithoutMetadata_ThenTheMediaTitleIsCleared()
     {
         // Arrange
