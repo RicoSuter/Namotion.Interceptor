@@ -15,6 +15,7 @@ export class Narrator {
   private readonly background: Background;
   private readonly chapters: string[];
   private started = false;
+  private previousIndex = -1;
 
   public constructor(private readonly view: View2D, private readonly timing: Timing) {
     const variant = useScene().variables.get<BackgroundVariant>('background', defaultBackground)();
@@ -36,6 +37,12 @@ export class Narrator {
    */
   public *beat(id: string, ...animations: ThreadGenerator[]): ThreadGenerator {
     const beat = findBeat(this.timing, id);
+    // A beat called out of script order plays its narration at the wrong time while timing and subtitles keep the script's.
+    const index = this.timing.beats.indexOf(beat);
+    if (this.previousIndex >= 0 && index !== this.previousIndex + 1) {
+      throw new Error(`Beat '${id}' runs out of script order: it follows '${this.timing.beats[this.previousIndex].id}', but script.yaml has '${this.timing.beats[this.previousIndex + 1]?.id}' there.`);
+    }
+    this.previousIndex = index;
     let audio: Audio | null = null;
     if (beat.audio) {
       audio = (<Audio src={beat.audio} play={true} />) as Audio;
