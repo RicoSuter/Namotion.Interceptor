@@ -70,6 +70,24 @@ public class SonosDerivedTrackingTests
         Assert.DoesNotContain(nameof(SonosPlayer.SetVolume_IsEnabled), firedEvents);
     }
 
+    [Fact]
+    public void WhenCoordinatorPlayModeChanges_ThenMemberShuffleRaisesPropertyChanged()
+    {
+        // Arrange
+        var system = Track(SonosPlayerOperationTests.CreateGroupedSystem());
+        var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
+        var member = Track(system.Players[TestFixtures.KitchenUuid]);
+        Assert.Null(member.Shuffle);
+        var firedEvents = TrackPropertyChanged(member);
+
+        // Act
+        coordinator.ApplyAvTransportEvent(new AvTransportChange(null, "SHUFFLE_NOREPEAT", null, null, null, null), T0);
+
+        // Assert
+        Assert.True(member.Shuffle);
+        Assert.Contains(nameof(SonosPlayer.Shuffle), firedEvents);
+    }
+
     private static T Track<T>(T subject) where T : IInterceptorSubject
     {
         subject.Context.AddFallbackContext(InterceptorSubjectContext

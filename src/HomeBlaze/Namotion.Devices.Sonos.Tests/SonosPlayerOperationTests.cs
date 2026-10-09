@@ -354,7 +354,7 @@ public class SonosPlayerOperationTests
         household.Office.Respond("GetTransportSettings", ("PlayMode", "REPEAT_ALL"), ("RecQualityMode", "NOT_IMPLEMENTED"));
         await household.System.RefreshAsync(CancellationToken.None);
         Assert.Equal(SonosRepeatMode.All, household.OfficePlayer.Repeat);
-        Assert.Equal(SonosRepeatMode.Off, household.KitchenPlayer.Repeat);
+        Assert.Equal(SonosRepeatMode.All, household.KitchenPlayer.Repeat);
 
         // Act
         await household.KitchenPlayer.SetShuffleAsync(true, CancellationToken.None);

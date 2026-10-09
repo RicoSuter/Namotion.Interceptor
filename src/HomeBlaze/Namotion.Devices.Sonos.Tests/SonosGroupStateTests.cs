@@ -16,6 +16,32 @@ public class SonosGroupStateTests
     }
 
     [Fact]
+    public void WhenPlayerIsAGroupMember_ThenSourcePlayModeAndSleepTimerFollowTheCoordinator()
+    {
+        // Arrange
+        const string spotifyUri = "x-sonos-vli:RINCON_A0000000000701400:2,spotify:0123456789abcdef";
+        var system = SonosPlayerOperationTests.CreateGroupedSystem();
+        var coordinator = system.Players[TestFixtures.OfficeUuid];
+        var member = system.Players[TestFixtures.KitchenUuid];
+        var noRenderingControl = new RenderingControlChange(null, null, null, null, null, null, null);
+        var memberTransport = $"x-rincon:{TestFixtures.OfficeUuid}";
+
+        // Act
+        coordinator.ApplyPoll(
+            new SonosPlayerReading(new AvTransportChange("PLAYING", "SHUFFLE", spotifyUri, spotifyUri, null, null), null, TimeSpan.FromMinutes(30), noRenderingControl),
+            T0);
+        member.ApplyPoll(
+            new SonosPlayerReading(new AvTransportChange("PLAYING", "NORMAL", memberTransport, memberTransport, null, null), null, null, noRenderingControl),
+            T0);
+
+        // Assert
+        Assert.Equal(SonosSource.SpotifyConnect, member.Source);
+        Assert.True(member.Shuffle);
+        Assert.Equal(SonosRepeatMode.All, member.Repeat);
+        Assert.Equal(TimeSpan.FromMinutes(30), member.SleepTimerRemaining);
+    }
+
+    [Fact]
     public void WhenGroupRenderingControlEventApplied_ThenVolumeIsAFraction()
     {
         // Arrange

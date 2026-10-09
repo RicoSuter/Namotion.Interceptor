@@ -72,18 +72,38 @@ public partial class SonosPlayer : SonosDevice,
 
     public partial TimeSpan? CurrentTrackDuration { get; internal set; }
 
+    // Source, play mode and sleep timer are group state. A member reports its own play mode and sleep timer and an
+    // x-rincon: transport that points at the coordinator, so these read the coordinator's reported values. They read
+    // its raw values rather than its derived ones, so an inconsistent topology cannot make two players recurse.
+
+    internal partial bool? ReportedShuffle { get; set; }
+
+    internal partial SonosRepeatMode? ReportedRepeat { get; set; }
+
+    internal partial TimeSpan? ReportedSleepTimerRemaining { get; set; }
+
     [Derived]
     [State(Position = 11)]
-    public SonosSource Source => SonosValues.DetectSource(MediaUri ?? CurrentTrackUri);
+    public SonosSource Source
+    {
+        get
+        {
+            var coordinator = GetCoordinator();
+            return SonosValues.DetectSource(coordinator.MediaUri ?? coordinator.CurrentTrackUri);
+        }
+    }
 
+    [Derived]
     [State(Position = 12)]
-    public partial bool? Shuffle { get; internal set; }
+    public bool? Shuffle => GetCoordinator().ReportedShuffle;
 
+    [Derived]
     [State(Position = 13)]
-    public partial SonosRepeatMode? Repeat { get; internal set; }
+    public SonosRepeatMode? Repeat => GetCoordinator().ReportedRepeat;
 
+    [Derived]
     [State(Position = 14)]
-    public partial TimeSpan? SleepTimerRemaining { get; internal set; }
+    public TimeSpan? SleepTimerRemaining => GetCoordinator().ReportedSleepTimerRemaining;
 
     [State(Position = 20)]
     public partial int? Bass { get; internal set; }
@@ -502,7 +522,7 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
-    // Play mode is group state, so it is read from the coordinator subject.
+    // The coordinator of the player's group, or the player itself when it coordinates or the coordinator is unknown.
     private SonosPlayer GetCoordinator() =>
         _system.Players.GetValueOrDefault(GroupCoordinatorUuid ?? Uuid) ?? this;
 
@@ -616,7 +636,7 @@ public partial class SonosPlayer : SonosDevice,
                 ApplyRenderingControl(reading.RenderingControl);
             }
 
-            SleepTimerRemaining = reading.SleepTimerRemaining;
+            ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
         }
     }
 
@@ -629,8 +649,8 @@ public partial class SonosPlayer : SonosDevice,
 
         if (SonosValues.ParsePlayMode(change.PlayMode) is { } playMode)
         {
-            Shuffle = playMode.Shuffle;
-            Repeat = playMode.Repeat;
+            ReportedShuffle = playMode.Shuffle;
+            ReportedRepeat = playMode.Repeat;
         }
 
         // An unknown value keeps the current one only while the track stays the same: Spotify Connect polls report
