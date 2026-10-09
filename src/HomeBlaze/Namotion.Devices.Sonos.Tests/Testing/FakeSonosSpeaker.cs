@@ -37,12 +37,13 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal IReadOnlyCollection<string> Unsubscribed => _unsubscribed.ToArray();
 
     /// <summary>
-    /// The event paths of every renewal, a SUBSCRIBE that carries a SID.
+    /// The event path of every renewal request received (a SUBSCRIBE carrying a SID), in arrival order, one entry per
+    /// request. Counts the renewals <see cref="AbortRenewals"/> failed as well as the answered ones.
     /// </summary>
     internal IReadOnlyCollection<string> Renewed => _renewed.Select(renewal => renewal.Path).ToArray();
 
     /// <summary>
-    /// Every renewal with the time it arrived, including the ones <see cref="AbortRenewals"/> dropped.
+    /// The same requests as <see cref="Renewed"/>, each with the time it arrived.
     /// </summary>
     internal IReadOnlyCollection<(string Path, DateTimeOffset At)> RenewalAttempts => _renewed.ToArray();
 

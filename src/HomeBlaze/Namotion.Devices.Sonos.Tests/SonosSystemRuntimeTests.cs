@@ -214,6 +214,7 @@ public class SonosSystemRuntimeTests
 
             // Act
             await system.RefreshAsync(CancellationToken.None);
+            var topologyReads = speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
 
             // Assert
             Assert.True(system.AreEventsActive);
@@ -221,6 +222,7 @@ public class SonosSystemRuntimeTests
                 () => speaker.Renewed.Contains(AvTransportEventPath),
                 ConnectedSystem.WaitTimeout,
                 message: "The subscriptions made by the refresh should be renewed although the next poll is an hour away.");
+            Assert.Equal(topologyReads, speaker.Calls.Count(call => call.Action == "GetZoneGroupState"));
         }
         finally
         {
