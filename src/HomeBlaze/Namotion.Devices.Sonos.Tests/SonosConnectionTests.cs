@@ -1,5 +1,7 @@
+using System.Xml.Linq;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Tests.Testing;
+using Sonos.Base.Services;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -10,6 +12,9 @@ public class SonosConnectionTests
 
     private static SonosConnection CreateConnection(FakeSonosSpeaker speaker, HttpClient httpClient) =>
         new(speaker.BaseUri, Uuid, httpClient, new SonosClientProvider(httpClient));
+
+    private static string? GetArgument(SoapCall call, string name) =>
+        XDocument.Parse(call.Body).Descendants().FirstOrDefault(element => element.Name.LocalName == name)?.Value;
 
     [Fact]
     public async Task WhenReadingPlayer_ThenSoapResponsesAreMapped()
@@ -34,6 +39,7 @@ public class SonosConnectionTests
         Assert.False(reading.RenderingControl.Mute);
         Assert.True(reading.RenderingControl.Loudness);
         Assert.True(reading.RenderingControl.NightMode);
+        Assert.False(reading.RenderingControl.SpeechEnhancement);
         Assert.Contains(speaker.Calls, call => call.Action == "GetEQ" && call.Body.Contains("<EQType>DialogLevel</EQType>"));
     }
 
@@ -90,6 +96,7 @@ public class SonosConnectionTests
 
         // Assert
         var call = Assert.Single(speaker.Calls);
+        Assert.Equal("/MediaRenderer/RenderingControl/Control", call.Path);
         Assert.Equal("RenderingControl", call.Service);
         Assert.Equal("SetVolume", call.Action);
         Assert.Contains("<DesiredVolume>50</DesiredVolume>", call.Body);
@@ -97,10 +104,167 @@ public class SonosConnectionTests
     }
 
     [Fact]
-    public async Task WhenSetVolumeIsRejected_ThenThrows()
+    public async Task WhenSpeakerAnswersWithFault_ThenCommandThrowsServiceException()
     {
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondWithFault("SetVolume", 402);
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<SonosServiceException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
+        Assert.Equal(402, exception.UpnpErrorCode);
+    }
+
+    [Fact]
+    public async Task WhenSeeking_ThenSendsRelativeTimeTarget()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.SeekAsync(new TimeSpan(1, 2, 3), CancellationToken.None);
+
+        // Assert
+        var call = Assert.Single(speaker.Calls);
+        Assert.Equal("/MediaRenderer/AVTransport/Control", call.Path);
+        Assert.Equal("Seek", call.Action);
+        Assert.Equal("REL_TIME", GetArgument(call, "Unit"));
+        Assert.Equal("01:02:03", GetArgument(call, "Target"));
+    }
+
+    [Fact]
+    public async Task WhenSettingSleepTimer_ThenSendsFormattedDuration()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.SetSleepTimerAsync(TimeSpan.FromMinutes(90), CancellationToken.None);
+
+        // Assert
+        var call = Assert.Single(speaker.Calls);
+        Assert.Equal("ConfigureSleepTimer", call.Action);
+        Assert.Equal("01:30:00", GetArgument(call, "NewSleepTimerDuration"));
+    }
+
+    [Fact]
+    public async Task WhenSettingSleepTimerToZero_ThenSendsEmptyDurationToCancel()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.SetSleepTimerAsync(TimeSpan.Zero, CancellationToken.None);
+
+        // Assert
+        var call = Assert.Single(speaker.Calls);
+        Assert.Equal("ConfigureSleepTimer", call.Action);
+        Assert.Equal(string.Empty, GetArgument(call, "NewSleepTimerDuration"));
+    }
+
+    [Fact]
+    public async Task WhenSeekingOrSettingSleepTimerToNegativeDuration_ThenThrowsWithoutCalling()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SeekAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SetSleepTimerAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
+        Assert.Empty(speaker.Calls);
+    }
+
+    [Fact]
+    public async Task WhenJoining_ThenSetsCoordinatorRinconUri()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.JoinAsync(TestFixtures.LivingRoomUuid, CancellationToken.None);
+
+        // Assert
+        var call = Assert.Single(speaker.Calls);
+        Assert.Equal("AVTransport", call.Service);
+        Assert.Equal("SetAVTransportURI", call.Action);
+        Assert.Equal($"x-rincon:{TestFixtures.LivingRoomUuid}", GetArgument(call, "CurrentURI"));
+    }
+
+    [Theory]
+    [InlineData("NightMode", true, "1")]
+    [InlineData("DialogLevel", false, "0")]
+    public async Task WhenSettingEqualizer_ThenSendsTypeAndValue(string type, bool enabled, string expectedValue)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.SetEqualizerAsync(type, enabled, CancellationToken.None);
+
+        // Assert
+        var call = Assert.Single(speaker.Calls);
+        Assert.Equal("RenderingControl", call.Service);
+        Assert.Equal("SetEQ", call.Action);
+        Assert.Equal(type, GetArgument(call, "EQType"));
+        Assert.Equal(expectedValue, GetArgument(call, "DesiredValue"));
+    }
+
+    [Fact]
+    public async Task WhenPlayingFromQueue_ThenReplacesQueueSwitchesToItAndPlays()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.PlayFromQueueAsync("x-rincon-cpcontainer:playlist", "<DIDL-Lite />", CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToArray();
+        Assert.Equal(["RemoveAllTracksFromQueue", "AddURIToQueue", "SetAVTransportURI", "Play"], calls.Select(call => call.Action));
+        Assert.All(calls, call => Assert.Equal("AVTransport", call.Service));
+        Assert.Equal("x-rincon-cpcontainer:playlist", GetArgument(calls[1], "EnqueuedURI"));
+        Assert.Equal("<DIDL-Lite />", GetArgument(calls[1], "EnqueuedURIMetaData"));
+        Assert.Equal($"x-rincon-queue:{Uuid}#0", GetArgument(calls[2], "CurrentURI"));
+    }
+
+    [Fact]
+    public async Task WhenSettingGroupVolume_ThenSnapshotsBeforeSetting()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.SetGroupVolumeAsync(30, CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToArray();
+        Assert.Equal(["SnapshotGroupVolume", "SetGroupVolume"], calls.Select(call => call.Action));
+        Assert.All(calls, call => Assert.Equal("/MediaRenderer/GroupRenderingControl/Control", call.Path));
+        Assert.Equal("30", GetArgument(calls[1], "DesiredVolume"));
+    }
+
+    [Fact]
+    public async Task WhenSpeakerIsUnreachable_ThenSetVolumeThrows()
+    {
+        // Arrange
         using var httpClient = new HttpClient();
         using var connection = new SonosConnection(
             new Uri($"http://127.0.0.1:{LoopbackHttpServer.GetFreePort()}/"), Uuid, httpClient, new SonosClientProvider(httpClient));

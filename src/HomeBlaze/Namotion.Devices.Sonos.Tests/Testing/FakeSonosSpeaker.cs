@@ -13,6 +13,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 {
     private readonly LoopbackHttpServer _server;
     private readonly ConcurrentDictionary<string, string> _responses = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _faults = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<SoapCall> _calls = new();
     private readonly ConcurrentDictionary<string, string> _callbacks = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _unsubscribed = new();
@@ -42,6 +43,17 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         _responses[action] = string.Concat(values.Select(value => $"<{value.Name}>{SecurityElement.Escape(value.Value)}</{value.Name}>"));
 
     /// <summary>
+    /// Answers GetEQ for one EQType, so each equalizer setting can carry its own value.
+    /// </summary>
+    internal void RespondToEqualizer(string eqType, string value) =>
+        _responses[EqualizerKey(eqType)] = $"<CurrentValue>{SecurityElement.Escape(value)}</CurrentValue>";
+
+    /// <summary>
+    /// Answers the action with HTTP 500 and a UPnPError SOAP fault carrying the error code.
+    /// </summary>
+    internal void RespondWithFault(string action, int errorCode) => _faults[action] = errorCode;
+
+    /// <summary>
     /// Answers as a single-room household whose only player is this speaker, paused on Spotify Connect.
     /// </summary>
     internal void RespondAsIdlePlayer(string uuid, string roomName)
@@ -65,7 +77,8 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         Respond("GetBass", ("CurrentBass", "0"));
         Respond("GetTreble", ("CurrentTreble", "0"));
         Respond("GetLoudness", ("CurrentLoudness", "1"));
-        Respond("GetEQ", ("CurrentValue", "1"));
+        RespondToEqualizer("NightMode", "1");
+        RespondToEqualizer("DialogLevel", "0");
         Respond("GetGroupVolume", ("CurrentVolume", "44"));
         Respond("GetGroupMute", ("CurrentMute", "0"));
         Respond("Browse", ("Result", TestFixtures.Read("favorites.xml")), ("NumberReturned", "4"), ("TotalMatches", "4"), ("UpdateID", "1"));
@@ -109,8 +122,19 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                     body = await reader.ReadToEndAsync();
                 }
 
-                _calls.Enqueue(new SoapCall(service, action, body));
-                var values = _responses.GetValueOrDefault(action, string.Empty);
+                _calls.Enqueue(new SoapCall(path, service, action, body));
+                if (_faults.TryGetValue(action, out var errorCode))
+                {
+                    response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                    await WriteAsync(response,
+                        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                        "<s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+                        $"<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>{errorCode}</errorCode></UPnPError></detail>" +
+                        "</s:Fault></s:Body></s:Envelope>");
+                    return;
+                }
+
+                var values = GetResponseValues(action, body);
                 await WriteAsync(response,
                     "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
                     $"<s:Body><u:{action}Response xmlns:u=\"urn:schemas-upnp-org:service:{service}:1\">{values}</u:{action}Response></s:Body></s:Envelope>");
@@ -120,6 +144,32 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
                 return;
         }
+    }
+
+    private static string EqualizerKey(string eqType) => "GetEQ:" + eqType;
+
+    private string GetResponseValues(string action, string body)
+    {
+        if (action == "GetEQ" && TryGetArgument(body, "EQType") is { } eqType &&
+            _responses.TryGetValue(EqualizerKey(eqType), out var equalizerValues))
+        {
+            return equalizerValues;
+        }
+
+        return _responses.GetValueOrDefault(action, string.Empty);
+    }
+
+    private static string? TryGetArgument(string body, string name)
+    {
+        var start = body.IndexOf($"<{name}>", StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        start += name.Length + 2;
+        var end = body.IndexOf($"</{name}>", start, StringComparison.Ordinal);
+        return end < 0 ? null : body[start..end];
     }
 
     private static async Task WriteAsync(HttpListenerResponse response, string content)
@@ -133,4 +183,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     public ValueTask DisposeAsync() => _server.DisposeAsync();
 }
 
-internal sealed record SoapCall(string Service, string Action, string Body);
+/// <summary>
+/// One SOAP request: the control URL path it was posted to, the service and action from SOAPACTION, and the raw body.
+/// </summary>
+internal sealed record SoapCall(string Path, string Service, string Action, string Body);

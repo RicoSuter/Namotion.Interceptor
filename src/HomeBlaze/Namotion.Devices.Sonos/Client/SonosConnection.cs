@@ -124,8 +124,11 @@ internal sealed class SonosConnection : IDisposable
 
     internal Task TogglePlaybackAsync(CancellationToken cancellationToken) => _device.TogglePlayback(cancellationToken);
 
-    internal Task SeekAsync(TimeSpan position, CancellationToken cancellationToken) =>
-        AvTransport.Seek(new AVTransportService.SeekRequest { InstanceID = InstanceId, Unit = "REL_TIME", Target = SonosValues.FormatDuration(position) }, cancellationToken);
+    internal Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
+        return AvTransport.Seek(new AVTransportService.SeekRequest { InstanceID = InstanceId, Unit = "REL_TIME", Target = SonosValues.FormatDuration(position) }, cancellationToken);
+    }
 
     internal Task SetVolumeAsync(int volume, CancellationToken cancellationToken) =>
         RenderingControl.SetVolume(new RenderingControlService.SetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel, DesiredVolume = volume }, cancellationToken);
@@ -175,12 +178,18 @@ internal sealed class SonosConnection : IDisposable
     internal Task SetPlayModeAsync(string playMode, CancellationToken cancellationToken) =>
         AvTransport.SetPlayMode(new AVTransportService.SetPlayModeRequest { InstanceID = InstanceId, NewPlayMode = playMode }, cancellationToken);
 
-    internal Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken) =>
-        AvTransport.ConfigureSleepTimer(new AVTransportService.ConfigureSleepTimerRequest
+    /// <summary>
+    /// Sets the sleep timer; zero cancels it.
+    /// </summary>
+    internal Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(duration, TimeSpan.Zero);
+        return AvTransport.ConfigureSleepTimer(new AVTransportService.ConfigureSleepTimerRequest
         {
             InstanceID = InstanceId,
-            NewSleepTimerDuration = duration <= TimeSpan.Zero ? string.Empty : SonosValues.FormatDuration(duration)
+            NewSleepTimerDuration = duration == TimeSpan.Zero ? string.Empty : SonosValues.FormatDuration(duration)
         }, cancellationToken);
+    }
 
     internal Task SetBassAsync(int bass, CancellationToken cancellationToken) =>
         RenderingControl.SetBass(new RenderingControlService.SetBassRequest { InstanceID = InstanceId, DesiredBass = bass }, cancellationToken);
