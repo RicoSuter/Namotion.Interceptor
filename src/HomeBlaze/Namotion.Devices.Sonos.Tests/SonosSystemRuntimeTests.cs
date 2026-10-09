@@ -247,6 +247,40 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenAPollFailsAfterTeardownReleasedItsConnection_ThenThePlayerKeepsTheDisconnectedMessage()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        var transportReads = speaker.Calls.Count(call => call.Action == "GetTransportInfo");
+        var hold = speaker.HoldAction("GetTransportInfo");
+
+        try
+        {
+            // The refresh after the command polls the player and waits for the held answer.
+            var play = connected.Player.PlayAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => speaker.Calls.Count(call => call.Action == "GetTransportInfo") > transportReads,
+                ConnectedSystem.WaitTimeout,
+                message: "The refresh after the command should poll the player.");
+
+            // Act
+            await connected.System.StopAsync(CancellationToken.None);
+            await play.WaitAsync(ConnectedSystem.WaitTimeout);
+
+            // Assert
+            Assert.False(connected.Player.IsConnected);
+            Assert.Equal("The Sonos system is disconnected.", connected.Player.StatusMessage);
+        }
+        finally
+        {
+            hold.TrySetResult();
+            connected.System.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenConfigurationChanges_ThenSystemReconnects()
     {
         // Arrange

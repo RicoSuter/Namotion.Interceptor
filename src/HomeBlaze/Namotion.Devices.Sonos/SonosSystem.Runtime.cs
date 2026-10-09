@@ -617,13 +617,28 @@ public partial class SonosSystem
     private void ReportPollSucceededIfCurrent(SonosDevice device, SonosConnection connection)
     {
         // Teardown clears the connections under the same lock before it marks devices offline, so a late success
-        // cannot undo that. This is the only subject write made under _connectionsLock; it takes no subject state lock.
+        // cannot undo that. This and ReportPollFailedIfCurrent are the only subject writes made under
+        // _connectionsLock; they take no subject state lock.
         lock (_connectionsLock)
         {
             if (ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection))
             {
                 device.ReportPollSucceeded();
             }
+        }
+    }
+
+    /// <summary>
+    /// Records a failed poll unless teardown released the connection while the poll was in flight.
+    /// </summary>
+    /// <returns>Whether the failure is new, so the caller logs it at Warning once; false for a repeated or stale one.</returns>
+    private bool ReportPollFailedIfCurrent(SonosDevice device, SonosConnection? connection, string message)
+    {
+        // A poll without a connection failed before sending anything, so it cannot be stale.
+        lock (_connectionsLock)
+        {
+            return (connection is null || ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection)) &&
+                   device.ReportPollFailed(message);
         }
     }
 
@@ -637,9 +652,10 @@ public partial class SonosSystem
 
     private async Task PollPlayerAsync(SonosPlayer player, DateTimeOffset pollStartedAt, CancellationToken cancellationToken)
     {
+        SonosConnection? connection = null;
         try
         {
-            var connection = FindConnection(player.Uuid)
+            connection = FindConnection(player.Uuid)
                 ?? throw new InvalidOperationException("No connection to the player.");
 
             if (player.NeedsStaticData)
@@ -669,7 +685,7 @@ public partial class SonosSystem
         catch (Exception exception)
         {
             // Logged at Warning once per failure transition, so an offline player does not flood the log every poll.
-            if (player.ReportPollFailed(exception.Message))
+            if (ReportPollFailedIfCurrent(player, connection, exception.Message))
             {
                 _logger.LogWarning(exception, "Polling the Sonos player in {Room} failed.", player.RoomName);
             }
@@ -682,9 +698,10 @@ public partial class SonosSystem
 
     private async Task PollSatelliteAsync(SonosSatellite satellite, CancellationToken cancellationToken)
     {
+        SonosConnection? connection = null;
         try
         {
-            var connection = FindConnection(satellite.Uuid)
+            connection = FindConnection(satellite.Uuid)
                 ?? throw new InvalidOperationException("No connection to the satellite.");
 
             await ReadStaticDataAsync(satellite, connection, cancellationToken);
@@ -696,7 +713,7 @@ public partial class SonosSystem
         }
         catch (Exception exception)
         {
-            if (satellite.ReportPollFailed(exception.Message))
+            if (ReportPollFailedIfCurrent(satellite, connection, exception.Message))
             {
                 _logger.LogWarning(exception, "Reading the Sonos satellite {Uuid} failed.", satellite.Uuid);
             }

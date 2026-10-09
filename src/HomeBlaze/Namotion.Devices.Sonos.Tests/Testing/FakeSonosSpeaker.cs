@@ -18,6 +18,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentDictionary<string, string> _callbacks = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _unsubscribed = new();
     private readonly ConcurrentQueue<string> _renewed = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _holds = new(StringComparer.Ordinal);
 
     internal FakeSonosSpeaker()
     {
@@ -70,6 +71,12 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal void RespondWithFault(string action, int errorCode) => _faults[action] = errorCode;
 
     internal void ClearFault(string action) => _faults.TryRemove(action, out _);
+
+    /// <summary>
+    /// Records but does not answer the action until the returned source completes.
+    /// </summary>
+    internal TaskCompletionSource HoldAction(string action) =>
+        _holds[action] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// Answers GetZoneGroupState with a household of standalone players, each at its own base URI.
@@ -171,6 +178,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 }
 
                 _calls.Enqueue(new SoapCall(path, service, action, body));
+                if (_holds.TryGetValue(action, out var hold))
+                {
+                    await hold.Task;
+                }
+
                 if (_faults.TryGetValue(action, out var errorCode))
                 {
                     response.StatusCode = (int)HttpStatusCode.InternalServerError;
