@@ -42,6 +42,9 @@ internal static class SonosValues
     internal static int ToSonosVolumeAdjustment(decimal delta) =>
         (int)Math.Round(Math.Clamp(delta, -1m, 1m) * 100m, MidpointRounding.AwayFromZero);
 
+    /// <summary>
+    /// Parses an <c>H:MM:SS</c> duration of at most 9999 hours, null for an absent, unknown or unparsable value.
+    /// </summary>
     internal static TimeSpan? ParseDuration(string? value)
     {
         if (!IsKnown(value) || value.Length == 0)
@@ -53,7 +56,8 @@ internal static class SonosValues
         if (parts.Length != 3 ||
             !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
             !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
-            !double.TryParse(parts[2], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds))
+            !double.TryParse(parts[2], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) ||
+            hours > 9999 || minutes >= 60 || seconds >= 60)
         {
             return null;
         }

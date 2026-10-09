@@ -65,6 +65,10 @@ public class SonosValuesTests
     [InlineData("")]
     [InlineData("NOT_IMPLEMENTED")]
     [InlineData("garbage")]
+    [InlineData("2147483647:00:00")]
+    [InlineData("0:00:99999999999999999999")]
+    [InlineData("0:60:00")]
+    [InlineData("0:00:60")]
     public void WhenParsingUnknownDuration_ThenReturnsNull(string? value)
     {
         // Act
