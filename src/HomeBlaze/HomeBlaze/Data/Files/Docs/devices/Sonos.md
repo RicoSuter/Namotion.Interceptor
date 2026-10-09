@@ -14,7 +14,7 @@ One `SonosSystem` represents a Sonos household. It finds the speakers itself, sh
 | `SeedHost` | string | null | Any speaker of the household as `host` or `host:port`. Empty tries the speakers found since HomeBlaze started, then SSDP discovery. |
 | `EventCallbackHost` | string | null | The address speakers send events to. Empty detects the local address that routes to the seed speaker. |
 | `EventPort` | int | 6329 | The port of the event listener. |
-| `PollingInterval` | TimeSpan | 30 seconds | How often topology, state and favorites are reconciled. |
+| `PollingInterval` | TimeSpan | 30 seconds | How often topology, state and favorites are reconciled, at most one hour. Event subscriptions are renewed on their own schedule, so events stay alive with any polling interval. |
 | `RetryInterval` | TimeSpan | 30 seconds | Delay before reconnecting after a failure. |
 
 ### Discovery

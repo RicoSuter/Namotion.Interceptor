@@ -170,6 +170,26 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenSubscriptionsExpireBeforeTheNextPoll_ThenTheyAreRenewedWithoutPolling()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker { SubscriptionTimeoutSeconds = 2 };
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        var topologyReads = speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
+
+        // Act
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => speaker.Renewed.Contains(AvTransportEventPath),
+            ConnectedSystem.WaitTimeout,
+            message: "The subscription should be renewed before it expires although the next poll is an hour away.");
+
+        // Assert
+        Assert.Equal(topologyReads, speaker.Calls.Count(call => call.Action == "GetZoneGroupState"));
+        Assert.True(connected.System.AreEventsActive);
+    }
+
+    [Fact]
     public async Task WhenConfigurationChanges_ThenSystemReconnects()
     {
         // Arrange

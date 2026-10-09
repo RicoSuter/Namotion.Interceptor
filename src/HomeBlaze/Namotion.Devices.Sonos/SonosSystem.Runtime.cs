@@ -18,6 +18,8 @@ public partial class SonosSystem
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MinimumLoopWait = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan FailedRenewalRetryDelay = TimeSpan.FromSeconds(30);
 
     // Never disposed: neither exposes a wait handle, so there is nothing to release, and disposing them while the
     // loop is still unwinding from a Dispose without StopAsync made its last waits throw or hang.
@@ -33,6 +35,10 @@ public partial class SonosSystem
     private SonosEventListener? _eventListener;
     private SonosConnection? _seedConnection;
     private bool _disposed;
+
+    // UTC ticks of the earliest subscription renewal, long.MaxValue for none. Written under _reconcileLock, which
+    // also guards the subscriptions' RenewAt, and read by the connection loop while it holds no lock.
+    private long _nextRenewalTicks = long.MaxValue;
 
     private TimeSpan EffectivePollingInterval => PollingInterval > TimeSpan.Zero ? PollingInterval : DefaultPollingInterval;
 
@@ -261,6 +267,7 @@ public partial class SonosSystem
         // may have set them after the early reset.
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
+        Interlocked.Exchange(ref _nextRenewalTicks, long.MaxValue);
 
         SonosEventListener? eventListener;
         HttpClient? httpClient;
@@ -434,11 +441,23 @@ public partial class SonosSystem
         MarkConnected();
 
         var consecutiveFailures = 0;
+        var nextPollAt = DateTimeOffset.UtcNow + EffectivePollingInterval;
         while (true)
         {
-            if (await _configurationChanged.WaitAsync(EffectivePollingInterval, stoppingToken))
+            // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also wakes
+            // to renew them, without a full poll.
+            var nextRenewalTicks = Interlocked.Read(ref _nextRenewalTicks);
+            var isRenewalOnly = nextRenewalTicks < nextPollAt.UtcTicks;
+            var wait = (isRenewalOnly ? new DateTimeOffset(nextRenewalTicks, TimeSpan.Zero) : nextPollAt) - DateTimeOffset.UtcNow;
+            if (await _configurationChanged.WaitAsync(wait > MinimumLoopWait ? wait : MinimumLoopWait, stoppingToken))
             {
                 return true;
+            }
+
+            if (isRenewalOnly)
+            {
+                await RenewSubscriptionsAsync(stoppingToken);
+                continue;
             }
 
             try
@@ -465,6 +484,21 @@ public partial class SonosSystem
                 StatusMessage = $"Reconciliation failed ({consecutiveFailures} of {MaxConsecutiveReconcileFailures}): {exception.Message}";
                 SetSeed(SelectNextSeed());
             }
+
+            nextPollAt = DateTimeOffset.UtcNow + EffectivePollingInterval;
+        }
+    }
+
+    private async Task RenewSubscriptionsAsync(CancellationToken cancellationToken)
+    {
+        await _reconcileLock.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureSubscriptionsAsync(cancellationToken);
+        }
+        finally
+        {
+            _reconcileLock.Release();
         }
     }
 
@@ -691,6 +725,7 @@ public partial class SonosSystem
             // Never started, or its accept loop died (which it logs); polling keeps the state current.
             AreEventsActive = false;
             ActiveEventCallbackHost = null;
+            Interlocked.Exchange(ref _nextRenewalTicks, long.MaxValue);
             return;
         }
 
@@ -702,9 +737,11 @@ public partial class SonosSystem
             {
                 await RunSubscriptionRequestAsync(() => eventListener.UnsubscribeAsync(subscription, cancellationToken), subscription.Key, cancellationToken);
             }
-            else if (subscription.Sid is not null && subscription.RenewAt <= now)
+            else if (subscription.Sid is not null && subscription.RenewAt <= now &&
+                     !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
             {
-                await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken);
+                // Keeps an unreachable speaker from being retried at every loop wake until the next poll drops it.
+                subscription.RenewAt = now + FailedRenewalRetryDelay;
             }
         }
 
@@ -717,14 +754,28 @@ public partial class SonosSystem
             }
         }
 
-        AreEventsActive = eventListener.Subscriptions.Any(subscription => subscription.Sid is not null);
+        var nextRenewalTicks = long.MaxValue;
+        var areEventsActive = false;
+        foreach (var subscription in eventListener.Subscriptions)
+        {
+            if (subscription.Sid is not null)
+            {
+                areEventsActive = true;
+                nextRenewalTicks = Math.Min(nextRenewalTicks, subscription.RenewAt.UtcTicks);
+            }
+        }
+
+        Interlocked.Exchange(ref _nextRenewalTicks, nextRenewalTicks);
+        AreEventsActive = areEventsActive;
     }
 
-    private async Task RunSubscriptionRequestAsync(Func<Task> request, string key, CancellationToken cancellationToken)
+    /// <returns>Whether the request completed without an exception.</returns>
+    private async Task<bool> RunSubscriptionRequestAsync(Func<Task> request, string key, CancellationToken cancellationToken)
     {
         try
         {
             await request();
+            return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -734,6 +785,7 @@ public partial class SonosSystem
         {
             // Includes the listener's OperationCanceledException for a subscription unsubscribed concurrently.
             _logger.LogWarning(exception, "The Sonos event subscription {Key} failed; polling keeps its state current.", key);
+            return false;
         }
     }
 

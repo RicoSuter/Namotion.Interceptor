@@ -17,6 +17,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentQueue<SoapCall> _calls = new();
     private readonly ConcurrentDictionary<string, string> _callbacks = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _unsubscribed = new();
+    private readonly ConcurrentQueue<string> _renewed = new();
 
     internal FakeSonosSpeaker()
     {
@@ -33,6 +34,16 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal IReadOnlyCollection<SoapCall> Calls => _calls.ToArray();
 
     internal IReadOnlyCollection<string> Unsubscribed => _unsubscribed.ToArray();
+
+    /// <summary>
+    /// The event paths of every renewal, a SUBSCRIBE that carries a SID.
+    /// </summary>
+    internal IReadOnlyCollection<string> Renewed => _renewed.ToArray();
+
+    /// <summary>
+    /// The lifetime granted to subscriptions and renewals, in seconds.
+    /// </summary>
+    internal int SubscriptionTimeoutSeconds { get; set; } = 1800;
 
     internal static string SidFor(string eventPath) => "uuid:" + eventPath.Trim('/').Replace('/', '-');
 
@@ -125,8 +136,13 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                     _callbacks[path] = callback.Trim('<', '>');
                 }
 
+                if (request.Headers["SID"] is not null)
+                {
+                    _renewed.Enqueue(path);
+                }
+
                 response.Headers["SID"] = SidFor(path);
-                response.Headers["TIMEOUT"] = "Second-1800";
+                response.Headers["TIMEOUT"] = $"Second-{SubscriptionTimeoutSeconds}";
                 return;
 
             case "UNSUBSCRIBE":
