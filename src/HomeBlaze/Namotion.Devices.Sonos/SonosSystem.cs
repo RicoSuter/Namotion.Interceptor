@@ -241,7 +241,7 @@ public partial class SonosSystem : BackgroundService,
 
     // A not-connected error faults the returned task, like any other failure of a command, while argument and
     // capability validation (null or unknown names, a missing home theater or line-in) throws synchronously.
-    private InvalidOperationException CreateNotConnectedException() =>
+    internal InvalidOperationException CreateNotConnectedException() =>
         new("The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
 
     internal void ApplyTopology(SonosTopology topology)

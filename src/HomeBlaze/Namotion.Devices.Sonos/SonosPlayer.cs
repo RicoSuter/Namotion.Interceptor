@@ -338,6 +338,13 @@ public partial class SonosPlayer : SonosDevice,
     public Task PlayFavoriteAsync(string title, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(title);
+
+        // Before the first connection no favorites are known, which would misreport every title as unknown.
+        if (!_system.IsConnected)
+        {
+            return Task.FromException(_system.CreateNotConnectedException());
+        }
+
         var favorite = _system.FindFavorite(title)
             ?? throw new ArgumentException(
                 $"Unknown Sonos favorite '{title}'. Known favorites: {string.Join(", ", _system.Favorites.Select(known => known.Title))}.", nameof(title));

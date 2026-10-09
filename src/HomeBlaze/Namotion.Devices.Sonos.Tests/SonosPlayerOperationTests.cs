@@ -1,5 +1,6 @@
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Sonos.Base.Services;
 using Xunit;
 
@@ -99,10 +100,83 @@ public class SonosPlayerOperationTests
     public async Task WhenPlayingUnknownFavorite_ThenThrows()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateGroupedSystem().Players[TestFixtures.KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => player.PlayFavoriteAsync("Nothing", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenPlayingFavoriteBeforeTheSystemConnected_ThenThrowsNotConnected()
+    {
+        // Arrange
+        var player = CreateDisconnectedKitchen();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => player.PlayFavoriteAsync("Radio FM1", CancellationToken.None));
+        Assert.Contains("not connected", exception.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsWhileTheStateIsReadBack_ThenTheCommandStillSucceeds()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var readsBefore = speaker.Calls.Count(call => call.Action == "GetTransportInfo");
+        var hold = speaker.HoldAction("GetTransportInfo");
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            var play = connected.Player.PlayAsync(cancellation.Token);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => speaker.Calls.Count(call => call.Action == "GetTransportInfo") > readsBefore,
+                ConnectedSystem.WaitTimeout,
+                message: "The command should read the state back.");
+
+            // Act
+            await cancellation.CancelAsync();
+
+            // Assert
+            await play.WaitAsync(ConnectedSystem.WaitTimeout);
+            Assert.Contains(speaker.Calls, call => call.Action == "Play");
+        }
+        finally
+        {
+            hold.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsWhileTheTopologyIsReadBack_ThenTheGroupingCommandStillSucceeds()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync();
+        household.System.PollingInterval = TimeSpan.FromHours(1);
+        var readsBefore = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
+        var hold = household.Kitchen.HoldAction("GetZoneGroupState");
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            var join = household.KitchenPlayer.JoinGroupAsync("Büro", cancellation.Token);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > readsBefore,
+                ConnectedSystem.WaitTimeout,
+                message: "The grouping command should read the topology back.");
+
+            // Act
+            await cancellation.CancelAsync();
+
+            // Assert
+            await join.WaitAsync(ConnectedSystem.WaitTimeout);
+            Assert.Contains(household.Kitchen.Calls, call => call.Action == "SetAVTransportURI");
+        }
+        finally
+        {
+            hold.TrySetResult();
+        }
     }
 
     [Fact]

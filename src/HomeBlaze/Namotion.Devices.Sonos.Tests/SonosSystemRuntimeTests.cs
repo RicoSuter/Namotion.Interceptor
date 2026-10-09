@@ -495,6 +495,39 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenTheConnectionIsTornDownDuringARefresh_ThenTheRefreshStopsAndTeardownDoesNotWaitForIt()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        var readsBefore = speaker.Calls.Count(call => call.Action == "GetTransportInfo");
+        var hold = speaker.HoldAction("GetTransportInfo");
+
+        try
+        {
+            var refresh = connected.System.RefreshAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => speaker.Calls.Count(call => call.Action == "GetTransportInfo") > readsBefore,
+                ConnectedSystem.WaitTimeout,
+                message: "The refresh should poll the player.");
+
+            // Act
+            await connected.System.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => refresh.WaitAsync(ConnectedSystem.WaitTimeout));
+            Assert.Contains("disconnected", exception.Message);
+            Assert.DoesNotContain(logger.Warnings, message => message.Contains("teardown budget"));
+        }
+        finally
+        {
+            hold.TrySetResult();
+        }
+    }
+
+    [Fact]
     public async Task WhenAPlayerMissesAPoll_ThenItsSubscriptionsAreKept()
     {
         // Arrange

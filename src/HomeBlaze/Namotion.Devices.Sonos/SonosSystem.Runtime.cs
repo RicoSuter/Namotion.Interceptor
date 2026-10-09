@@ -36,6 +36,10 @@ public partial class SonosSystem
     private SonosConnection? _seedConnection;
     private bool _disposed;
 
+    // Guarded by _connectionsLock and replaced with the scope. Teardown cancels it first, so a reconciliation or
+    // command refresh running on a caller's token stops instead of writing state after the teardown.
+    private CancellationTokenSource? _scopeCancellation;
+
     // The monotonic timestamp of the earliest subscription renewal, TimeProviderExtensions.Never for none. Written
     // under _reconcileLock, which also guards the subscriptions' RenewAt, and read by the connection loop while it
     // holds no lock.
@@ -152,17 +156,40 @@ public partial class SonosSystem
     }
 
     /// <summary>
-    /// Re-reads the players of the commanded player's group so a command's effect shows without events.
+    /// Re-reads the players of the commanded player's group so a command's effect shows without events. Never
+    /// throws, so the command's own result or exception is what its caller gets.
     /// </summary>
     internal async Task RefreshAfterCommandAsync(SonosPlayer player, CancellationToken cancellationToken)
     {
-        var coordinatorUuid = player.GroupCoordinatorUuid ?? player.Uuid;
-        var pollStartedAt = Clock.GetUtcNow();
-        var groupPlayers = Players.Values
-            .Where(candidate => candidate.IsConnected && (candidate.GroupCoordinatorUuid ?? candidate.Uuid) == coordinatorUuid)
-            .ToArray();
+        CancellationTokenSource scopeCancellation;
+        try
+        {
+            scopeCancellation = CreateScopeCancellation(cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // Torn down or disposed since the command started; there is nothing left to read the state through.
+            _logger.LogDebug(exception, "Skipped reading the Sonos state back after a command.");
+            return;
+        }
 
-        await Task.WhenAll(groupPlayers.Select(candidate => PollPlayerAsync(candidate, pollStartedAt, cancellationToken)));
+        using (scopeCancellation)
+        {
+            var coordinatorUuid = player.GroupCoordinatorUuid ?? player.Uuid;
+            var pollStartedAt = Clock.GetUtcNow();
+            var groupPlayers = Players.Values
+                .Where(candidate => candidate.IsConnected && (candidate.GroupCoordinatorUuid ?? candidate.Uuid) == coordinatorUuid)
+                .ToArray();
+
+            try
+            {
+                await Task.WhenAll(groupPlayers.Select(candidate => PollPlayerAsync(candidate, pollStartedAt, scopeCancellation.Token)));
+            }
+            catch (OperationCanceledException exception)
+            {
+                _logger.LogDebug(exception, "Reading the Sonos state back after a command was cancelled.");
+            }
+        }
     }
 
     /// <summary>
@@ -190,14 +217,36 @@ public partial class SonosSystem
         {
             await ReconcileAsync(cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException exception)
+        {
+            // The commands' own result or exception is what the caller gets; the next poll reads the topology.
+            _logger.LogDebug(exception, "Reading the Sonos topology after a grouping command was cancelled.");
+        }
+        catch (Exception exception)
         {
             // The next poll retries the read.
             _logger.LogWarning(exception, "Reading the Sonos topology after a grouping command failed.");
         }
     }
 
+    /// <summary>
+    /// Reads topology, state and favorites and updates the subscriptions. Throws
+    /// <see cref="InvalidOperationException"/> when the connection is torn down before or while it runs.
+    /// </summary>
     internal async Task ReconcileAsync(CancellationToken cancellationToken)
+    {
+        using var scopeCancellation = CreateScopeCancellation(cancellationToken);
+        try
+        {
+            await ReconcileCoreAsync(scopeCancellation.Token);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && scopeCancellation.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(DisconnectedMessage, exception);
+        }
+    }
+
+    private async Task ReconcileCoreAsync(CancellationToken cancellationToken)
     {
         await _reconcileLock.WaitAsync(cancellationToken);
         try
@@ -239,8 +288,25 @@ public partial class SonosSystem
             }
 
             _httpClient = httpClient;
+            _scopeCancellation = new CancellationTokenSource();
             _clientProvider = new SonosClientProvider(httpClient);
             _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock, UpdateAreEventsActive);
+        }
+    }
+
+    /// <summary>
+    /// Returns a source linked to the caller's token that the teardown of the current connection cancels. Throws
+    /// <see cref="InvalidOperationException"/> when no connection is open and <see cref="ObjectDisposedException"/>
+    /// after disposal.
+    /// </summary>
+    private CancellationTokenSource CreateScopeCancellation(CancellationToken cancellationToken)
+    {
+        lock (_connectionsLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _scopeCancellation is { } scopeCancellation
+                ? CancellationTokenSource.CreateLinkedTokenSource(scopeCancellation.Token, cancellationToken)
+                : throw CreateNotConnectedException();
         }
     }
 
@@ -249,6 +315,18 @@ public partial class SonosSystem
         IsConnected = false;
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
+
+        // First, so a reconciliation or refresh running on a caller's token releases the lock promptly.
+        CancellationTokenSource? scopeCancellation;
+        lock (_connectionsLock)
+        {
+            scopeCancellation = _scopeCancellation;
+        }
+
+        if (scopeCancellation is not null)
+        {
+            await scopeCancellation.CancelAsync();
+        }
 
         // The stopping token is already cancelled on shutdown, so teardown gets its own short budgets, one for the
         // lock and one for the unsubscribes, so a slow reconciliation cannot use up the time for unsubscribing. Holding
@@ -298,11 +376,13 @@ public partial class SonosSystem
 
         SonosEventListener? eventListener;
         HttpClient? httpClient;
+        CancellationTokenSource? scopeCancellation;
         List<SonosConnection> connections;
         lock (_connectionsLock)
         {
             eventListener = _eventListener;
             httpClient = _httpClient;
+            scopeCancellation = _scopeCancellation;
             connections = [.. _connections.Values];
             if (_seedConnection is not null)
             {
@@ -314,7 +394,11 @@ public partial class SonosSystem
             _eventListener = null;
             _clientProvider = null;
             _httpClient = null;
+            _scopeCancellation = null;
         }
+
+        // Cancelled already; sources linked to it before only unregister from it when they are disposed.
+        scopeCancellation?.Dispose();
 
         if (eventListener is not null)
         {
