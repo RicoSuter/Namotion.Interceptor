@@ -124,56 +124,56 @@ public partial class SonosGroup :
     [PropertyAttribute("Unmute", KnownAttributes.IsEnabled)]
     public bool Unmute_IsEnabled => CanControl;
 
-    [Operation(Position = 1)]
+    [Operation(Position = 1, Description = "Starts or resumes playback of the group.")]
     public Task PlayAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.PlayAsync(token), cancellationToken);
 
-    [Operation(Position = 2)]
+    [Operation(Position = 2, Description = "Pauses playback of the group.")]
     public Task PauseAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.PauseAsync(token), cancellationToken);
 
-    [Operation(Position = 3)]
+    [Operation(Position = 3, Description = "Stops playback of the group.")]
     public Task StopAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.StopAsync(token), cancellationToken);
 
-    [Operation(Position = 4)]
+    [Operation(Position = 4, Description = "Skips to the next track of the group.")]
     public Task NextAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.NextAsync(token), cancellationToken);
 
-    [Operation(Position = 5)]
+    [Operation(Position = 5, Description = "Goes back to the previous track of the group.")]
     public Task PreviousAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.PreviousAsync(token), cancellationToken);
 
-    [Operation(Position = 6)]
+    [Operation(Position = 6, Description = "Pauses the group when it plays, otherwise starts playback.")]
     public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.TogglePlaybackAsync(token), cancellationToken);
 
-    [Operation(Position = 7)]
+    [Operation(Position = 7, Description = "Seeks the current track of the group to the given position.")]
     public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
         return RunAsync((connection, token) => connection.SeekAsync(position, token), cancellationToken);
     }
 
-    [Operation(Position = 10)]
+    [Operation(Position = 10, Description = "Sets the group volume, from 0 to 1.")]
     public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
         SonosValues.ThrowIfVolumeOutOfRange(volume);
         return RunAsync((connection, token) => connection.SetGroupVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
     }
 
-    [Operation(Position = 11)]
+    [Operation(Position = 11, Description = "Changes the group volume by a relative amount, from -1 to 1.")]
     public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
     {
         SonosValues.ThrowIfVolumeAdjustmentOutOfRange(delta);
         return RunAsync((connection, token) => connection.ChangeGroupVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
     }
 
-    [Operation(Position = 12)]
+    [Operation(Position = 12, Description = "Mutes every player in the group.")]
     public Task MuteAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.SetGroupMuteAsync(true, token), cancellationToken);
 
-    [Operation(Position = 13)]
+    [Operation(Position = 13, Description = "Unmutes every player in the group.")]
     public Task UnmuteAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.SetGroupMuteAsync(false, token), cancellationToken);
 

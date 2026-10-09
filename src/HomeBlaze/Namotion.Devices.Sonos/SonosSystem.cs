@@ -155,7 +155,7 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// Reads topology, state and favorites now instead of at the next poll.
     /// </summary>
-    [Operation(Position = 1)]
+    [Operation(Position = 1, Description = "Reads topology, state and favorites now instead of at the next poll.")]
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         EnsureConnected();
@@ -165,7 +165,7 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// Groups every connected room with the given room (party mode).
     /// </summary>
-    [Operation(Position = 2)]
+    [Operation(Position = 2, Description = "Groups every connected room with the given room (party mode).")]
     public Task GroupAllAsync(string coordinatorRoom, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(coordinatorRoom);
@@ -197,7 +197,7 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// Makes every room standalone.
     /// </summary>
-    [Operation(Position = 3)]
+    [Operation(Position = 3, Description = "Makes every room standalone.")]
     public async Task UngroupAllAsync(CancellationToken cancellationToken)
     {
         EnsureConnected();
