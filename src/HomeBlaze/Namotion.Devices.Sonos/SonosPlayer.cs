@@ -603,10 +603,12 @@ public partial class SonosPlayer : SonosDevice,
 
             _lastPollStartedAt = pollStartedAt;
 
-            // A poll that started before the latest event read state the event has since replaced.
+            // A poll that started before the latest event read state the event has since replaced. That includes
+            // the position, which belongs to the track the poll read.
             if (_lastAvTransportEventAt <= pollStartedAt)
             {
                 ApplyAvTransport(reading.AvTransport);
+                CurrentTrackPosition = reading.Position;
             }
 
             if (_lastRenderingControlEventAt <= pollStartedAt)
@@ -614,7 +616,6 @@ public partial class SonosPlayer : SonosDevice,
                 ApplyRenderingControl(reading.RenderingControl);
             }
 
-            CurrentTrackPosition = reading.Position;
             SleepTimerRemaining = reading.SleepTimerRemaining;
         }
     }
@@ -632,19 +633,37 @@ public partial class SonosPlayer : SonosDevice,
             Repeat = playMode.Repeat;
         }
 
+        // An unknown value keeps the current one only while the track stays the same: Spotify Connect polls report
+        // NOT_IMPLEMENTED for what its events delivered. After a change, the kept values would describe the
+        // previous track.
+        var isTrackChange = false;
         if (SonosValues.IsKnown(change.MediaUri))
         {
-            MediaUri = SonosValues.NullIfEmpty(change.MediaUri);
+            var mediaUri = SonosValues.NullIfEmpty(change.MediaUri);
+            isTrackChange = mediaUri != MediaUri;
+            MediaUri = mediaUri;
         }
 
         if (SonosValues.IsKnown(change.TrackUri))
         {
-            CurrentTrackUri = SonosValues.NullIfEmpty(change.TrackUri);
+            var trackUri = SonosValues.NullIfEmpty(change.TrackUri);
+            isTrackChange |= trackUri != CurrentTrackUri;
+            CurrentTrackUri = trackUri;
+        }
+
+        if (isTrackChange)
+        {
+            // Position comes only from polls; the next one reads it for the new track.
+            CurrentTrackPosition = null;
         }
 
         if (SonosValues.IsKnown(change.TrackDuration))
         {
             CurrentTrackDuration = SonosValues.ParseDuration(change.TrackDuration);
+        }
+        else if (isTrackChange)
+        {
+            CurrentTrackDuration = null;
         }
 
         if (SonosValues.IsKnown(change.TrackMetaData))
@@ -655,12 +674,22 @@ public partial class SonosPlayer : SonosDevice,
                 _lastTrackMetaData = change.TrackMetaData;
             }
 
-            var track = _lastTrack;
-            CurrentTrackTitle = track?.Title;
-            CurrentTrackArtist = track?.Artist;
-            CurrentTrackAlbum = track?.Album;
-            CurrentTrackImageUri = SonosValues.ToAbsoluteUri(track?.AlbumArtUri, BaseUri);
+            ApplyTrack(_lastTrack);
         }
+        else if (isTrackChange)
+        {
+            _lastTrack = null;
+            _lastTrackMetaData = null;
+            ApplyTrack(null);
+        }
+    }
+
+    private void ApplyTrack(DidlTrack? track)
+    {
+        CurrentTrackTitle = track?.Title;
+        CurrentTrackArtist = track?.Artist;
+        CurrentTrackAlbum = track?.Album;
+        CurrentTrackImageUri = SonosValues.ToAbsoluteUri(track?.AlbumArtUri, BaseUri);
     }
 
     private void ApplyRenderingControl(RenderingControlChange change)

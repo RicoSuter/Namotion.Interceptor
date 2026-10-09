@@ -25,6 +25,16 @@ public class SonosPlayerStateTests
         "0:03:25",
         SonosEventBodies.Didl("Song", "Artist", "Album", "/getaa?s=1&u=x"));
 
+    private static AvTransportChange QueueTrackPlaying() => new(
+        "PLAYING",
+        "NORMAL",
+        "x-rincon-queue:RINCON_A0000000000601400#0",
+        "x-file-cifs://nas/music/song-a.mp3",
+        "0:03:30",
+        SonosEventBodies.Didl("Song A", "Artist A", "Album A", "/getaa?s=1&u=a"));
+
+    private static RenderingControlChange NoRenderingControl() => new(null, null, null, null, null, null, null);
+
     private static SonosPlayerReading Reading(AvTransportChange avTransport, RenderingControlChange? renderingControl = null) =>
         new(avTransport, TimeSpan.FromSeconds(42), null, renderingControl ?? new RenderingControlChange(null, null, null, null, null, null, null));
 
@@ -103,6 +113,76 @@ public class SonosPlayerStateTests
         Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
     }
 
+    [Theory]
+    [InlineData(SpotifyUri)]
+    [InlineData("x-sonos-htastream:RINCON_A0000000000601400:spdif")]
+    public void WhenPollReportsAnotherTrackWithoutMetadata_ThenThePreviousTrackDetailsAreCleared(string trackUri)
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyAvTransportEvent(QueueTrackPlaying(), T0);
+
+        // Act
+        player.ApplyPoll(
+            new SonosPlayerReading(new AvTransportChange("PLAYING", "NORMAL", trackUri, trackUri, "NOT_IMPLEMENTED", "NOT_IMPLEMENTED"), null, null, NoRenderingControl()),
+            T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal(trackUri, player.CurrentTrackUri);
+        Assert.Null(player.CurrentTrackTitle);
+        Assert.Null(player.CurrentTrackArtist);
+        Assert.Null(player.CurrentTrackAlbum);
+        Assert.Null(player.CurrentTrackImageUri);
+        Assert.Null(player.CurrentTrackDuration);
+        Assert.Null(player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenEventChangesTheTrack_ThenThePositionOfThePreviousTrackIsCleared()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyPoll(Reading(QueueTrackPlaying()), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal("Song", player.CurrentTrackTitle);
+        Assert.Null(player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenEventKeepsTheTrack_ThenThePositionIsKept()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyPoll(Reading(SpotifyPlaying()), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("PAUSED_PLAYBACK", null, null, null, null, null), T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenPollStartedBeforeAnAvTransportEvent_ThenItsPositionIsNotApplied()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyPoll(
+            new SonosPlayerReading(SpotifyPlaying(), TimeSpan.FromSeconds(10), null, NoRenderingControl()),
+            T0.AddSeconds(-10));
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", null, null, null, null, null), T0.AddSeconds(1));
+
+        // Act
+        player.ApplyPoll(Reading(SpotifyPlaying()), T0);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromSeconds(10), player.CurrentTrackPosition);
+    }
+
     [Fact]
     public void WhenEventReportsNotImplementedTransportState_ThenTransportStateIsKept()
     {
@@ -173,7 +253,7 @@ public class SonosPlayerStateTests
         Assert.Equal(SonosTransportState.Playing, player.TransportState);
         Assert.Equal("Song", player.CurrentTrackTitle);
         Assert.Equal(0.1m, player.Volume);
-        Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
+        Assert.Null(player.CurrentTrackPosition);
     }
 
     [Fact]
