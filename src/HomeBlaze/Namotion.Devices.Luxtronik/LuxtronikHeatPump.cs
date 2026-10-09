@@ -193,15 +193,19 @@ public partial class LuxtronikHeatPump :
     public partial LuxtronikMixingCircuit? MixingCircuit3 { get; internal set; }
 
     [Derived]
+    [State(IsEstimated = true)]
     public decimal? Power => Energy.ElectricalPower;
 
     [Derived]
+    [State(IsEstimated = true)]
     public decimal? TotalConsumedEnergy => Energy.TotalElectricalEnergy;
 
     [Derived]
+    [State(IsEstimated = true)]
     public decimal? ThermalPower => Energy.ThermalPower;
 
     [Derived]
+    [State(IsEstimated = true)]
     public decimal? TotalProducedThermalEnergy => Energy.TotalThermalEnergy;
 
     [Derived]

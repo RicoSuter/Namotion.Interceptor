@@ -97,6 +97,10 @@ On every connect the device also reads the firmware version and skips values the
 
 The `SmartHomeControl` blocks show the setpoint configuration a smart home system sends over the SHI (the controller lists it under "Empfangene Daten"): `Mode` (no influence, setpoint, offset, level), `Setpoint`, `Offset` and `Level`. The cooling blocks have no `Level`, and `OverallSmartHomeControl` has `Mode` (individual, offset, level), `Offset` and `Level`. With no writing client they read "no influence" ("individual" for the overall block), and locks and requests read off.
 
+Power and energy values are marked as estimated. The controller calculates them from its own data rather than measuring them (its energy monitor "ist keine geeichte Messeinrichtung"), and the SHI reports them in steps of 100 W and 100 Wh. Use an external meter for exact consumption.
+
+`SmartGrid.IsEvu1Active` and `IsEvu2Active` are the raw states of the EVU inputs, as the controller lists them under its inputs ("EVU: Ein" reads `true`). With Smart Grid switched off, EVU1 is the utility lock contact: it is on while the heat pump is released and off during a lock time ("Aus = Sperrzeit"). `SmartGrid.State` follows the SHI manual's Smart Grid table and is only meaningful while Smart Grid is switched on in the controller; the SHI does not report that setting.
+
 ## Interfaces
 
 - `IPowerSensor`: electrical power and consumed energy
