@@ -112,7 +112,7 @@ runFfmpeg([
 disableSubtitleTracks(finishedVideoFile);
 renameSync(finishedVideoFile, absoluteVideoFile);
 rmSync(narrationFile);
-writeReview(absoluteVideoFile, timing, outputDirectory);
+writeReview(absoluteVideoFile, timing, outputDirectory, join(videosRoot, 'public'));
 console.log(`Rendered ${absoluteVideoFile}`);
 console.log(`Review ${join(outputDirectory, `${paths.episode}-review.md`)} and ${join(outputDirectory, `${paths.episode}-contact.png`)}`);
 

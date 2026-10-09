@@ -23,6 +23,7 @@ npm run capture -- <episode>    # browser clips and terminal output (starts the 
 npm run tts -- <episode>        # narration audio (cached), sped up to the script's tempo, and beat timing
 npm run render -- <episode>     # draft at 15 fps, plus contact sheet and review report
 npm run render -- <episode> --final
+npm run transcribe -- <episode> # Whisper transcript of every narrated beat, lists the beats that differ from the script
 ```
 
 Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <video title> | <chapter title>", top left) from the scene runtime. Choose the background with `background:` in `script.yaml` (`drift`, `chapter-tint`, `edge-aurora` or `follow-light`) or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
@@ -52,7 +53,7 @@ Kokoro's own speed keeps the prosody natural, but Kokoro rounds every sound to w
 
 Episodes run 10 to 12 minutes, 10 unless the user asks for more. With the default voice a minute of finished video holds about 165 words, the pauses between beats included (1608 words in 9.9 minutes and 1881 words in 10.9 minutes on two trial episodes), so budget about 1650 words for 10 minutes. `npm run validate` prints the words and seconds per chapter: estimated from the script's voice and tempo (`speechRates` in `tools/estimate.ts`), or measured from `timing.json` once `npm run tts` has run.
 
-Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
+Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md`: chapter durations, beats without motion, loudness of the whole video and of every 30 s window, and whether each beat's speech starts in the video where it starts in its narration clip. `npm run transcribe` writes `<episode>-transcript.md`; it runs Whisper (`openai/whisper-small.en`, downloaded on first use) on the narration clips of the last `npm run tts`, and word boundaries, punctuation, number words and the lexicon's spoken forms do not count as differences.
 
 ## Layout
 
@@ -67,3 +68,12 @@ Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for t
 Demo pages are recorded at `deviceScaleFactor` 2 by default (set it in `capture.ts`), so a 1280 by 800 page becomes a 2560 by 1600 clip that stays crisp when the camera zooms in. Design pages for video: large type and the theme palette. Capture registers Inter and JetBrains Mono in every demo page, so pages can name those fonts without shipping them. Capture writes clip durations to `clips/clips.json`; `BrowserFrame.play` uses them to fit a clip to its beat (up to 4x faster, otherwise the start is trimmed).
 
 Generated media lives in `public/generated/` and rendered videos in `output/`; both are gitignored.
+
+## Tests
+
+```bash
+npm run typecheck
+npx vitest run                  # TypeScript unit tests in theme/ and tools/
+(cd tools/tts && uv run pytest) # Python unit tests of the speech and transcription package
+dotnet test domain/Coffee.Tests
+```

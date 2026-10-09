@@ -2,6 +2,8 @@ import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import type {Timing} from '../theme/timing';
 import {runFfmpeg} from './ffmpeg';
+import {loudnessReport, measureVideoLoudness} from './loudness';
+import {measureNarrationSync, narrationSyncReport} from './narrationSync';
 
 /** Seconds without visible motion before a beat is flagged. */
 export const stillnessBudget = 4;
@@ -55,8 +57,11 @@ export function assignFreezes(freezes: Interval[], timing: Timing): Array<{id: s
   );
 }
 
-/** Writes <episode>-contact.png and <episode>-review.md next to the video. */
-export function writeReview(videoFile: string, timing: Timing, outputDirectory: string): void {
+/**
+ * Writes <episode>-contact.png and <episode>-review.md next to the video. `publicDirectory` holds the narration
+ * clips the timing references.
+ */
+export function writeReview(videoFile: string, timing: Timing, outputDirectory: string, publicDirectory: string): void {
   const framesDirectory = join(outputDirectory, `${timing.episode}-frames`);
   rmSync(framesDirectory, {recursive: true, force: true});
   mkdirSync(framesDirectory, {recursive: true});
@@ -98,6 +103,8 @@ export function writeReview(videoFile: string, timing: Timing, outputDirectory: 
       ? ['None.']
       : stillBeats.map(beat => `- ${beat.id}: still from ${beat.start.toFixed(1)} s to ${beat.end.toFixed(1)} s`)),
     '',
+    ...loudnessReport(measureVideoLoudness(videoFile, timing.totalDuration)),
+    ...narrationSyncReport(measureNarrationSync(videoFile, timing, publicDirectory)),
     '## Contact sheet order',
     '',
     ...midpoints.map((midpoint, index) => `${index + 1}. ${midpoint.id} (${midpoint.time.toFixed(1)} s)`),

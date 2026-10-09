@@ -9,7 +9,8 @@
     "tts": "tsx tools/tts.ts",
     "capture": "tsx tools/capture/capture.ts",
     "render": "DISABLE_TELEMETRY=true tsx tools/render.ts",
-    "audition": "tsx tools/audition/audition.ts"
+    "audition": "tsx tools/audition/audition.ts",
+    "transcribe": "tsx tools/transcribe.ts"
   },
   "dependencies": {
     "@codemirror/language": "6.13.1",
