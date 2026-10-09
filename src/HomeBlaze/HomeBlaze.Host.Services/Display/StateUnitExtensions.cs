@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Globalization;
+using System.Text;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -115,8 +117,28 @@ public static class StateUnitExtensions
                 : $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
             IEnumerable<string> strings => string.Join("\n", strings),
+            string text => text,
+            IEnumerable elements => JoinElements(elements),
             _ => value.ToString() ?? ""
         };
+    }
+
+    // The property panel splits on '\n' to render one line per element. Subject collections and dictionaries never
+    // arrive here because the panel lists them as child subjects instead.
+    private static string JoinElements(IEnumerable elements)
+    {
+        var builder = new StringBuilder();
+        foreach (var element in elements)
+        {
+            if (builder.Length > 0)
+            {
+                builder.Append('\n');
+            }
+
+            builder.Append(element == null ? "null" : element.ToString() ?? "");
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>
