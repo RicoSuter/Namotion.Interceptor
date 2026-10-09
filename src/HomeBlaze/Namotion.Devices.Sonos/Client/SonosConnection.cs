@@ -151,7 +151,7 @@ internal sealed class SonosConnection : IDisposable
         RenderingControl.SetMute(new RenderingControlService.SetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel, DesiredMute = mute }, cancellationToken);
 
     internal Task SetTransportUriAsync(string uri, string metadata, CancellationToken cancellationToken) =>
-        AvTransport.SetAVTransportURI(new AVTransportService.SetAVTransportURIRequest { InstanceID = InstanceId, CurrentURI = uri, CurrentURIMetaData = metadata }, cancellationToken);
+        AvTransport.SetAVTransportURI(new AVTransportService.SetAVTransportURIRequest { InstanceID = InstanceId, CurrentURI = uri, CurrentURIMetaData = EscapeMetadataAmpersands(metadata) }, cancellationToken);
 
     internal async Task PlayFromQueueAsync(string uri, string metadata, CancellationToken cancellationToken)
     {
@@ -160,7 +160,7 @@ internal sealed class SonosConnection : IDisposable
         {
             InstanceID = InstanceId,
             EnqueuedURI = uri,
-            EnqueuedURIMetaData = metadata,
+            EnqueuedURIMetaData = EscapeMetadataAmpersands(metadata),
             DesiredFirstTrackNumberEnqueued = 0,
             EnqueueAsNext = false
         }, cancellationToken);
@@ -221,6 +221,11 @@ internal sealed class SonosConnection : IDisposable
 
     internal Task SetGroupMuteAsync(bool mute, CancellationToken cancellationToken) =>
         GroupRenderingControl.SetGroupMute(new GroupRenderingControlService.SetGroupMuteRequest { InstanceID = InstanceId, DesiredMute = mute }, cancellationToken);
+
+    // Sonos.Base writes an argument containing '<' raw, escaping only quotes and angle brackets, so an ampersand
+    // in DIDL metadata would reach the speaker unescaped and break its DIDL parse.
+    private static string EscapeMetadataAmpersands(string metadata) =>
+        metadata.Contains('<') ? metadata.Replace("&", "&amp;", StringComparison.Ordinal) : metadata;
 
     private async Task<bool> GetEqualizerAsync(string type, CancellationToken cancellationToken)
     {

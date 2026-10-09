@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Media;
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -12,7 +13,7 @@ namespace Namotion.Devices.Sonos;
 /// </summary>
 [InterceptorSubject]
 public partial class SonosGroup :
-    IAudioPlayerState,
+    IAudioPlayer,
     IMediaTrackState,
     IVirtualSubject,
     ITitleProvider,
@@ -90,6 +91,68 @@ public partial class SonosGroup :
     [Derived]
     [PropertyAttribute("Seek", KnownAttributes.IsEnabled)]
     public bool Seek_IsEnabled => CanControl && CurrentTrackDuration > TimeSpan.Zero;
+
+    [Operation(Position = 1)]
+    public Task PlayAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.PlayAsync(token), cancellationToken);
+
+    [Operation(Position = 2)]
+    public Task PauseAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.PauseAsync(token), cancellationToken);
+
+    [Operation(Position = 3)]
+    public Task StopAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.StopAsync(token), cancellationToken);
+
+    [Operation(Position = 4)]
+    public Task NextAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.NextAsync(token), cancellationToken);
+
+    [Operation(Position = 5)]
+    public Task PreviousAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.PreviousAsync(token), cancellationToken);
+
+    [Operation(Position = 6)]
+    public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.TogglePlaybackAsync(token), cancellationToken);
+
+    [Operation(Position = 7)]
+    public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
+        return RunAsync((connection, token) => connection.SeekAsync(position, token), cancellationToken);
+    }
+
+    [Operation(Position = 10)]
+    public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.SetGroupVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+
+    [Operation(Position = 11)]
+    public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.ChangeGroupVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
+
+    [Operation(Position = 12)]
+    public Task MuteAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.SetGroupMuteAsync(true, token), cancellationToken);
+
+    [Operation(Position = 13)]
+    public Task UnmuteAsync(CancellationToken cancellationToken) =>
+        RunAsync((connection, token) => connection.SetGroupMuteAsync(false, token), cancellationToken);
+
+    private async Task RunAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
+    {
+        var coordinator = Coordinator;
+        var connection = _system.GetConnectionForCommand(coordinator.Uuid);
+        try
+        {
+            await command(connection, cancellationToken);
+        }
+        finally
+        {
+            // Also after a failure: a multi-step command may have partly applied. The refresh logs its own failures.
+            await _system.RefreshAfterCommandAsync(coordinator, cancellationToken);
+        }
+    }
 
     internal void Update(string groupId, SonosPlayer[] members)
     {

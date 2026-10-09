@@ -140,6 +140,34 @@ public partial class SonosSystem
         await Task.WhenAll(groupPlayers.Select(candidate => PollPlayerAsync(candidate, pollStartedAt, cancellationToken)));
     }
 
+    /// <summary>
+    /// Runs grouping commands, then reads the topology back. A failure reads it back too, since earlier commands
+    /// may already have regrouped rooms, and the command's exception propagates.
+    /// </summary>
+    internal async Task RunGroupingCommandsAsync(Func<CancellationToken, Task> commands, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await commands(cancellationToken);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ReconcileAsync(cancellationToken);
+            }
+            catch (Exception reconcileException) when (reconcileException is not OperationCanceledException)
+            {
+                // The grouping failure is what the caller needs; the next poll retries the read.
+                _logger.LogWarning(reconcileException, "Reading the Sonos topology after a failed grouping command failed.");
+            }
+
+            throw;
+        }
+
+        await ReconcileAsync(cancellationToken);
+    }
+
     internal async Task ReconcileAsync(CancellationToken cancellationToken)
     {
         await _reconcileLock.WaitAsync(cancellationToken);

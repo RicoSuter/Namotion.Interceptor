@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.Sonos;
 
@@ -65,7 +66,7 @@ public partial class SonosSystem : BackgroundService,
     public partial Dictionary<string, SonosGroup> Groups { get; internal set; }
 
     /// <summary>
-    /// The names of the favorites <c>SonosPlayer.PlayFavoriteAsync</c> accepts.
+    /// The names of the favorites <see cref="SonosPlayer.PlayFavoriteAsync"/> accepts.
     /// </summary>
     [State(Position = 3)]
     public partial string[] Favorites { get; internal set; }
@@ -119,6 +120,83 @@ public partial class SonosSystem : BackgroundService,
         Groups = new Dictionary<string, SonosGroup>(StringComparer.Ordinal);
         Favorites = [];
         Status = ServiceStatus.Stopped;
+    }
+
+    [Derived]
+    [PropertyAttribute("Refresh", KnownAttributes.IsEnabled)]
+    public bool Refresh_IsEnabled => IsConnected;
+
+    [Derived]
+    [PropertyAttribute("GroupAll", KnownAttributes.IsEnabled)]
+    public bool GroupAll_IsEnabled => IsConnected;
+
+    [Derived]
+    [PropertyAttribute("UngroupAll", KnownAttributes.IsEnabled)]
+    public bool UngroupAll_IsEnabled => IsConnected;
+
+    /// <summary>
+    /// Reads topology, state and favorites now instead of at the next poll.
+    /// </summary>
+    [Operation(Position = 1)]
+    public Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        EnsureConnected();
+        return ReconcileAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Groups every connected room with the given room (party mode).
+    /// </summary>
+    [Operation(Position = 2)]
+    public Task GroupAllAsync(string coordinatorRoom, CancellationToken cancellationToken)
+    {
+        var coordinator = FindPlayer(coordinatorRoom) ?? throw CreateUnknownRoomException(coordinatorRoom, nameof(coordinatorRoom));
+        var coordinatorConnection = GetConnectionForCommand(coordinator.Uuid);
+
+        return RunGroupingCommandsAsync(async token =>
+        {
+            // Only a coordinator can be joined, so a grouped target first becomes standalone.
+            if (!coordinator.IsGroupCoordinator)
+            {
+                await coordinatorConnection.LeaveGroupAsync(token);
+            }
+
+            foreach (var player in Players.Values)
+            {
+                if (player.IsConnected && !ReferenceEquals(player, coordinator) && player.GroupCoordinatorUuid != coordinator.Uuid)
+                {
+                    await GetConnectionForCommand(player.Uuid).JoinAsync(coordinator.Uuid, token);
+                }
+            }
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Makes every room standalone.
+    /// </summary>
+    [Operation(Position = 3)]
+    public Task UngroupAllAsync(CancellationToken cancellationToken)
+    {
+        EnsureConnected();
+        return RunGroupingCommandsAsync(async token =>
+        {
+            foreach (var player in Players.Values)
+            {
+                if (player.IsConnected && !player.IsGroupCoordinator)
+                {
+                    await GetConnectionForCommand(player.Uuid).LeaveGroupAsync(token);
+                }
+            }
+        }, cancellationToken);
+    }
+
+    private void EnsureConnected()
+    {
+        if (!IsConnected)
+        {
+            throw new InvalidOperationException(
+                "The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
+        }
     }
 
     internal void ApplyTopology(SonosTopology topology)

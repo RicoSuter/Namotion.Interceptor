@@ -244,6 +244,25 @@ public class SonosConnectionTests
     }
 
     [Fact]
+    public async Task WhenMetadataContainsAmpersand_ThenSpeakerReceivesTheMetadataUnchanged()
+    {
+        // Arrange
+        const string metadata = "<DIDL-Lite><dc:title>Rock &amp; Roll</dc:title></DIDL-Lite>";
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.SetTransportUriAsync("x-rincon-mp3radio://stream.example.com/live.mp3", metadata, CancellationToken.None);
+        await connection.PlayFromQueueAsync("x-rincon-cpcontainer:playlist", metadata, CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToArray();
+        Assert.Equal(metadata, GetArgument(calls[0], "CurrentURIMetaData"));
+        Assert.Equal(metadata, GetArgument(Assert.Single(calls, call => call.Action == "AddURIToQueue"), "EnqueuedURIMetaData"));
+    }
+
+    [Fact]
     public async Task WhenSettingGroupVolume_ThenSnapshotsBeforeSetting()
     {
         // Arrange

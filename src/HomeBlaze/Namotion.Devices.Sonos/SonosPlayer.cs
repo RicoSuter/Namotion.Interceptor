@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Media;
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -13,7 +14,7 @@ namespace Namotion.Devices.Sonos;
 /// </summary>
 [InterceptorSubject]
 public partial class SonosPlayer : SonosDevice,
-    IAudioPlayerState,
+    IAudioPlayer,
     IMediaTrackState,
     IBatteryState
 {
@@ -176,6 +177,238 @@ public partial class SonosPlayer : SonosDevice,
     [Derived]
     [PropertyAttribute("LeaveGroup", KnownAttributes.IsEnabled)]
     public bool LeaveGroup_IsEnabled => CanControl && !IsGroupCoordinator;
+
+    [Operation(Position = 1)]
+    public Task PlayAsync(CancellationToken cancellationToken) =>
+        RunOnCoordinatorAsync((connection, token) => connection.PlayAsync(token), cancellationToken);
+
+    [Operation(Position = 2)]
+    public Task PauseAsync(CancellationToken cancellationToken) =>
+        RunOnCoordinatorAsync((connection, token) => connection.PauseAsync(token), cancellationToken);
+
+    [Operation(Position = 3)]
+    public Task StopAsync(CancellationToken cancellationToken) =>
+        RunOnCoordinatorAsync((connection, token) => connection.StopAsync(token), cancellationToken);
+
+    [Operation(Position = 4)]
+    public Task NextAsync(CancellationToken cancellationToken) =>
+        RunOnCoordinatorAsync((connection, token) => connection.NextAsync(token), cancellationToken);
+
+    [Operation(Position = 5)]
+    public Task PreviousAsync(CancellationToken cancellationToken) =>
+        RunOnCoordinatorAsync((connection, token) => connection.PreviousAsync(token), cancellationToken);
+
+    [Operation(Position = 6)]
+    public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
+        RunOnCoordinatorAsync((connection, token) => connection.TogglePlaybackAsync(token), cancellationToken);
+
+    [Operation(Position = 7)]
+    public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
+        return RunOnCoordinatorAsync((connection, token) => connection.SeekAsync(position, token), cancellationToken);
+    }
+
+    [Operation(Position = 10)]
+    public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken) =>
+        RunOnPlayerAsync((connection, token) => connection.SetVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+
+    [Operation(Position = 11)]
+    public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken) =>
+        RunOnPlayerAsync((connection, token) => connection.ChangeVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
+
+    [Operation(Position = 12)]
+    public Task RampVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken) =>
+        RunOnPlayerAsync((connection, token) => connection.RampVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+
+    [Operation(Position = 13)]
+    public Task MuteAsync(CancellationToken cancellationToken) =>
+        RunOnPlayerAsync((connection, token) => connection.SetMuteAsync(true, token), cancellationToken);
+
+    [Operation(Position = 14)]
+    public Task UnmuteAsync(CancellationToken cancellationToken) =>
+        RunOnPlayerAsync((connection, token) => connection.SetMuteAsync(false, token), cancellationToken);
+
+    [Operation(Position = 20)]
+    public Task PlayFavoriteAsync(string name, CancellationToken cancellationToken)
+    {
+        var favorite = _system.FindFavorite(name)
+            ?? throw new ArgumentException(
+                $"Unknown Sonos favorite '{name}'. Known favorites: {string.Join(", ", _system.Favorites)}.", nameof(name));
+
+        return RunOnCoordinatorAsync(async (connection, token) =>
+        {
+            if (favorite.IsContainer)
+            {
+                await connection.PlayFromQueueAsync(favorite.Uri, favorite.Metadata, token);
+            }
+            else
+            {
+                await connection.SetTransportUriAsync(favorite.Uri, favorite.Metadata, token);
+                await connection.PlayAsync(token);
+            }
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Plays a URI: http(s) streams play as radio with the optional title; native Sonos URIs pass through.
+    /// </summary>
+    [Operation(Position = 21)]
+    public Task PlayUriAsync(string uri, string? title, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        var isStream = uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                       uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        var transportUri = isStream ? SonosValues.ToStreamUri(uri) : uri;
+        var metadata = isStream || title is not null ? SonosValues.CreateStreamMetadata(title ?? uri) : string.Empty;
+
+        return RunOnCoordinatorAsync(async (connection, token) =>
+        {
+            await connection.SetTransportUriAsync(transportUri, metadata, token);
+            await connection.PlayAsync(token);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Plays a sound over the current playback, which resumes afterwards. Needs S2 speakers.
+    /// </summary>
+    [Operation(Position = 22)]
+    public Task PlayNotificationAsync(string soundUri, [OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
+    {
+        if (!Uri.TryCreate(soundUri, UriKind.Absolute, out var sound) || (sound.Scheme != Uri.UriSchemeHttp && sound.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("The sound URI must be an absolute http or https URI.", nameof(soundUri));
+        }
+
+        // The notification volume must be 1 to 100, so 0 % plays at the lowest volume instead of failing.
+        var sonosVolume = Math.Clamp(SonosValues.ToSonosVolume(volume), 1, 100);
+        return RunOnPlayerAsync((connection, token) => connection.PlayNotificationAsync(sound, sonosVolume, token), cancellationToken);
+    }
+
+    [Operation(Position = 23)]
+    public Task SwitchToTvAsync(CancellationToken cancellationToken)
+    {
+        EnsureHomeTheater();
+        return RunOnPlayerAsync((connection, token) => connection.SwitchToTvAsync(token), cancellationToken);
+    }
+
+    [Operation(Position = 24)]
+    public Task SwitchToLineInAsync(CancellationToken cancellationToken)
+    {
+        if (!HasLineIn)
+        {
+            throw new InvalidOperationException($"{Title} has no line-in.");
+        }
+
+        return RunOnPlayerAsync((connection, token) => connection.SwitchToLineInAsync(token), cancellationToken);
+    }
+
+    [Operation(Position = 30)]
+    public Task SetShuffleAsync(bool shuffle, CancellationToken cancellationToken)
+    {
+        var playMode = SonosValues.FormatPlayMode(shuffle, Repeat ?? SonosRepeatMode.Off);
+        return RunOnCoordinatorAsync((connection, token) => connection.SetPlayModeAsync(playMode, token), cancellationToken);
+    }
+
+    [Operation(Position = 31)]
+    public Task SetRepeatAsync(SonosRepeatMode repeat, CancellationToken cancellationToken)
+    {
+        var playMode = SonosValues.FormatPlayMode(Shuffle ?? false, repeat);
+        return RunOnCoordinatorAsync((connection, token) => connection.SetPlayModeAsync(playMode, token), cancellationToken);
+    }
+
+    /// <summary>
+    /// Sets the sleep timer; zero cancels it.
+    /// </summary>
+    [Operation(Position = 32)]
+    public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(duration, TimeSpan.Zero);
+        return RunOnCoordinatorAsync((connection, token) => connection.SetSleepTimerAsync(duration, token), cancellationToken);
+    }
+
+    [Operation(Position = 40)]
+    public Task SetBassAsync(int bass, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(bass, -10);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(bass, 10);
+        return RunOnPlayerAsync((connection, token) => connection.SetBassAsync(bass, token), cancellationToken);
+    }
+
+    [Operation(Position = 41)]
+    public Task SetTrebleAsync(int treble, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(treble, -10);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(treble, 10);
+        return RunOnPlayerAsync((connection, token) => connection.SetTrebleAsync(treble, token), cancellationToken);
+    }
+
+    [Operation(Position = 42)]
+    public Task SetLoudnessAsync(bool loudness, CancellationToken cancellationToken) =>
+        RunOnPlayerAsync((connection, token) => connection.SetLoudnessAsync(loudness, token), cancellationToken);
+
+    [Operation(Position = 43)]
+    public Task SetNightModeAsync(bool nightMode, CancellationToken cancellationToken)
+    {
+        EnsureHomeTheater();
+        return RunOnPlayerAsync((connection, token) => connection.SetEqualizerAsync("NightMode", nightMode, token), cancellationToken);
+    }
+
+    [Operation(Position = 44)]
+    public Task SetSpeechEnhancementAsync(bool speechEnhancement, CancellationToken cancellationToken)
+    {
+        EnsureHomeTheater();
+        return RunOnPlayerAsync((connection, token) => connection.SetEqualizerAsync("DialogLevel", speechEnhancement, token), cancellationToken);
+    }
+
+    [Operation(Position = 50)]
+    public Task JoinGroupAsync(string roomNameOrUuid, CancellationToken cancellationToken)
+    {
+        var target = _system.FindPlayer(roomNameOrUuid)
+            ?? throw _system.CreateUnknownRoomException(roomNameOrUuid, nameof(roomNameOrUuid));
+        var coordinatorUuid = target.GroupCoordinatorUuid ?? target.Uuid;
+        if (ReferenceEquals(target, this) || coordinatorUuid == Uuid)
+        {
+            throw new ArgumentException("A player cannot join its own group.", nameof(roomNameOrUuid));
+        }
+
+        var connection = _system.GetConnectionForCommand(Uuid);
+        return _system.RunGroupingCommandsAsync(token => connection.JoinAsync(coordinatorUuid, token), cancellationToken);
+    }
+
+    [Operation(Position = 51)]
+    public Task LeaveGroupAsync(CancellationToken cancellationToken)
+    {
+        var connection = _system.GetConnectionForCommand(Uuid);
+        return _system.RunGroupingCommandsAsync(connection.LeaveGroupAsync, cancellationToken);
+    }
+
+    private void EnsureHomeTheater()
+    {
+        if (!IsHomeTheater)
+        {
+            throw new InvalidOperationException($"{Title} is not a home theater player.");
+        }
+    }
+
+    private Task RunOnCoordinatorAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
+        RunAsync(_system.GetConnectionForCommand(GroupCoordinatorUuid ?? Uuid), command, cancellationToken);
+
+    private Task RunOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
+        RunAsync(_system.GetConnectionForCommand(Uuid), command, cancellationToken);
+
+    private async Task RunAsync(SonosConnection connection, Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await command(connection, cancellationToken);
+        }
+        finally
+        {
+            // Also after a failure: a multi-step command may have partly applied. The refresh logs its own failures.
+            await _system.RefreshAfterCommandAsync(this, cancellationToken);
+        }
+    }
 
     internal void ApplyPlayerTopology(SonosTopologyPlayer topology, string coordinatorUuid)
     {
