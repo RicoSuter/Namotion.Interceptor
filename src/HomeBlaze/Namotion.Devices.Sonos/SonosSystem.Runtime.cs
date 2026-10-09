@@ -31,18 +31,11 @@ public partial class SonosSystem
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
     private readonly SemaphoreSlim _reconcileLock = new(1, 1);
     private readonly Lock _connectionsLock = new();
-    private readonly Dictionary<string, SonosConnection> _connections = new(StringComparer.Ordinal);
 
-    // Guarded by _connectionsLock and replaced for every connection attempt. The scope owns the HttpClient:
-    // SonosConnection and SonosEventListener only borrow it.
-    private HttpClient? _httpClient;
-    private SonosEventListener? _eventListener;
-    private SonosConnection? _seedConnection;
+    // Guarded by _connectionsLock, as are the scope's connections and seed. Replaced for every connection attempt and
+    // null between them; work that started on a scope checks that it is still the current one before it reports.
+    private SonosConnectionScope? _scope;
     private bool _disposed;
-
-    // Guarded by _connectionsLock and replaced with the scope. Teardown cancels it first, so a reconciliation or
-    // command refresh running on a caller's token stops instead of writing state after the teardown.
-    private CancellationTokenSource? _scopeCancellation;
 
     // The monotonic timestamp of the loop's next subscription wake, for the earliest renewal or first-event deadline,
     // TimeProviderExtensions.Never for none. Written under _reconcileLock, which also guards the subscriptions'
@@ -91,14 +84,14 @@ public partial class SonosSystem
 
             try
             {
-                OpenConnectionScope();
-                var seedUri = await FindSeedAsync(stoppingToken)
+                var scope = OpenConnectionScope();
+                var seedUri = await FindSeedAsync(scope.HttpClient, stoppingToken)
                     ?? throw new InvalidOperationException(string.IsNullOrWhiteSpace(SeedHost)
                         ? "No Sonos speaker found. Set SeedHost when multicast discovery is blocked, for example under Docker bridge networking."
                         : $"The SeedHost '{SeedHost}' did not answer, and no other Sonos speaker was found.");
 
-                await StartEventListenerAsync(seedUri.Host, stoppingToken);
-                reconnectImmediately = await RunConnectedAsync(seedUri, stoppingToken);
+                await StartEventListenerAsync(scope.EventListener, seedUri.Host, stoppingToken);
+                reconnectImmediately = await RunConnectedAsync(scope, seedUri, stoppingToken);
             }
             catch (Exception exception) when (stoppingToken.IsCancellationRequested)
             {
@@ -146,7 +139,7 @@ public partial class SonosSystem
                 throw CreateNotConnectedException();
             }
 
-            if (!Players.TryGetValue(uuid, out var player) || !player.IsConnected || !_connections.TryGetValue(uuid, out var connection))
+            if (!Players.TryGetValue(uuid, out var player) || !player.IsConnected || _scope is not { } scope || !scope.Connections.TryGetValue(uuid, out var connection))
             {
                 throw new InvalidOperationException($"The Sonos player {uuid} is not connected.");
             }
@@ -275,7 +268,7 @@ public partial class SonosSystem
         }
     }
 
-    private void OpenConnectionScope()
+    private SonosConnectionScope OpenConnectionScope()
     {
         ResetConnectionTopology();
         var httpClient = HttpClientFactory.CreateClient(nameof(SonosSystem));
@@ -289,9 +282,10 @@ public partial class SonosSystem
                 throw new ObjectDisposedException(nameof(SonosSystem));
             }
 
-            _httpClient = httpClient;
-            _scopeCancellation = new CancellationTokenSource();
-            _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock, UpdateAreEventsActive);
+            _scope = new SonosConnectionScope(
+                httpClient,
+                new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock, UpdateAreEventsActive));
+            return _scope;
         }
     }
 
@@ -305,8 +299,8 @@ public partial class SonosSystem
         lock (_connectionsLock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _scopeCancellation is { } scopeCancellation
-                ? CancellationTokenSource.CreateLinkedTokenSource(scopeCancellation.Token, cancellationToken)
+            return _scope is { } scope
+                ? CancellationTokenSource.CreateLinkedTokenSource(scope.Cancellation.Token, cancellationToken)
                 : throw CreateNotConnectedException();
         }
     }
@@ -318,15 +312,15 @@ public partial class SonosSystem
         ActiveEventCallbackHost = null;
 
         // First, so a reconciliation or refresh running on a caller's token releases the lock promptly.
-        CancellationTokenSource? scopeCancellation;
+        SonosConnectionScope? scope;
         lock (_connectionsLock)
         {
-            scopeCancellation = _scopeCancellation;
+            scope = _scope;
         }
 
-        if (scopeCancellation is not null)
+        if (scope is not null)
         {
-            await scopeCancellation.CancelAsync();
+            await scope.Cancellation.CancelAsync();
         }
 
         // The stopping token is already cancelled on shutdown, so teardown gets its own short budgets, one for the
@@ -360,54 +354,31 @@ public partial class SonosSystem
         _failures.ReportSuccess(EventDeliveryFailureKey);
         Interlocked.Exchange(ref _nextWakeAt, TimeProviderExtensions.Never);
 
-        SonosEventListener? eventListener;
-        HttpClient? httpClient;
-        CancellationTokenSource? scopeCancellation;
-        List<SonosConnection> connections;
+        // Detached first: nothing changes a scope that is no longer current, so it is disposed without the lock, and a
+        // late poll result finds its connection gone.
+        SonosConnectionScope? scope;
         lock (_connectionsLock)
         {
-            eventListener = _eventListener;
-            httpClient = _httpClient;
-            scopeCancellation = _scopeCancellation;
-            connections = [.. _connections.Values];
-            if (_seedConnection is not null)
-            {
-                connections.Add(_seedConnection);
-            }
-
-            _connections.Clear();
-            _seedConnection = null;
-            _eventListener = null;
-            _httpClient = null;
-            _scopeCancellation = null;
+            scope = _scope;
+            _scope = null;
         }
 
-        // Cancelled already; sources linked to it before only unregister from it when they are disposed.
-        scopeCancellation?.Dispose();
-
-        if (eventListener is not null)
+        if (scope is not null)
         {
             try
             {
-                await eventListener.UnsubscribeAllAsync(cancellationToken);
+                await scope.EventListener.UnsubscribeAllAsync(cancellationToken);
             }
             catch (Exception exception)
             {
                 _logger.LogWarning(exception, "Unsubscribing the Sonos events failed; the speakers drop them once they expire.");
             }
 
-            await eventListener.DisposeAsync();
+            await scope.DisposeAsync();
 
             // After the handlers drained: a first event that arrived during teardown may have set it.
             UpdateAreEventsActive();
         }
-
-        foreach (var connection in connections)
-        {
-            connection.Dispose();
-        }
-
-        httpClient?.Dispose();
 
         foreach (var device in GetDevices(Players.Values))
         {
@@ -432,7 +403,7 @@ public partial class SonosSystem
     /// Returns the configured SeedHost when it answers, otherwise a known speaker that answers, otherwise one found
     /// over SSDP. Throws <see cref="InvalidOperationException"/> for an invalid SeedHost.
     /// </summary>
-    private async Task<Uri?> FindSeedAsync(CancellationToken cancellationToken)
+    private async Task<Uri?> FindSeedAsync(HttpClient httpClient, CancellationToken cancellationToken)
     {
         Uri? seedHostUri = null;
         var seedHost = SeedHost;
@@ -448,7 +419,7 @@ public partial class SonosSystem
             }
 
             // The full request timeout, not the probe budget for known speakers: the configured seed is preferred.
-            if (await ProbeSeedAsync(seedHostUri, RequestTimeout, cancellationToken))
+            if (await ProbeSeedAsync(httpClient, seedHostUri, RequestTimeout, cancellationToken))
             {
                 _failures.ReportSuccess(SeedHostFailureKey);
                 return seedHostUri;
@@ -467,7 +438,7 @@ public partial class SonosSystem
 
         foreach (var knownSeed in knownSeeds)
         {
-            if (await ProbeSeedAsync(knownSeed, SeedProbeTimeout, cancellationToken))
+            if (await ProbeSeedAsync(httpClient, knownSeed, SeedProbeTimeout, cancellationToken))
             {
                 return knownSeed;
             }
@@ -488,14 +459,8 @@ public partial class SonosSystem
         }
     }
 
-    private async Task<bool> ProbeSeedAsync(Uri seedUri, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<bool> ProbeSeedAsync(HttpClient httpClient, Uri seedUri, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        HttpClient httpClient;
-        lock (_connectionsLock)
-        {
-            httpClient = _httpClient ?? throw new InvalidOperationException("No Sonos connection scope is open.");
-        }
-
         using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         probeCancellation.CancelAfter(timeout);
         using var connection = new SonosConnection(seedUri, null, httpClient);
@@ -516,7 +481,7 @@ public partial class SonosSystem
         }
     }
 
-    private async Task StartEventListenerAsync(string seedHost, CancellationToken cancellationToken)
+    private async Task StartEventListenerAsync(SonosEventListener eventListener, string seedHost, CancellationToken cancellationToken)
     {
         var callbackHost = string.IsNullOrWhiteSpace(EventCallbackHost)
             ? await SonosDiscovery.DetectLocalAddressAsync(seedHost, cancellationToken)
@@ -530,7 +495,7 @@ public partial class SonosSystem
 
         try
         {
-            _eventListener!.Start(callbackHost, EventPort, EventListenHost);
+            eventListener.Start(callbackHost, EventPort, EventListenHost);
             ActiveEventCallbackHost = callbackHost;
         }
         catch (HttpListenerException exception)
@@ -540,9 +505,9 @@ public partial class SonosSystem
         }
     }
 
-    private async Task<bool> RunConnectedAsync(Uri seedUri, CancellationToken stoppingToken)
+    private async Task<bool> RunConnectedAsync(SonosConnectionScope scope, Uri seedUri, CancellationToken stoppingToken)
     {
-        SetSeed(seedUri);
+        SetSeed(scope, seedUri);
 
         // The first reconciliation is what establishes the connection, so its failure ends this attempt.
         await ReconcileAsync(stoppingToken);
@@ -615,7 +580,7 @@ public partial class SonosSystem
                     "Sonos reconciliation failed ({FailureCount} of {MaxFailureCount}); trying another speaker as seed.",
                     consecutiveFailures, MaxConsecutiveReconcileFailures);
                 StatusMessage = $"Reconciliation failed ({consecutiveFailures} of {MaxConsecutiveReconcileFailures}): {exception.Message}";
-                SetSeed(SelectNextSeed());
+                SetSeed(scope, SelectNextSeed());
             }
 
             nextPollAt = Clock.GetTimestampAfter(EffectivePollingInterval);
@@ -653,17 +618,18 @@ public partial class SonosSystem
         StatusMessage = null;
     }
 
-    private void SetSeed(Uri seedUri)
+    // Called by the connection loop, which owns the scope while it is open.
+    private void SetSeed(SonosConnectionScope scope, Uri seedUri)
     {
         lock (_connectionsLock)
         {
-            if (_seedConnection?.BaseUri == seedUri)
+            if (scope.Seed?.BaseUri == seedUri)
             {
                 return;
             }
 
-            _seedConnection?.Dispose();
-            _seedConnection = new SonosConnection(seedUri, null, _httpClient!);
+            scope.Seed?.Dispose();
+            scope.Seed = new SonosConnection(seedUri, null, scope.HttpClient);
         }
     }
 
@@ -671,7 +637,7 @@ public partial class SonosSystem
     {
         lock (_connectionsLock)
         {
-            return _seedConnection ?? throw new InvalidOperationException("No Sonos seed speaker is selected.");
+            return _scope?.Seed ?? throw new InvalidOperationException("No Sonos seed speaker is selected.");
         }
     }
 
@@ -679,7 +645,7 @@ public partial class SonosSystem
     {
         lock (_connectionsLock)
         {
-            return _seedConnection?.BaseUri;
+            return _scope?.Seed?.BaseUri;
         }
     }
 
@@ -696,27 +662,27 @@ public partial class SonosSystem
     {
         lock (_connectionsLock)
         {
-            if (_httpClient is null)
+            if (_scope is not { } scope)
             {
                 return;
             }
 
             foreach (var device in GetDevices(Players.Values))
             {
-                SyncConnection(device);
+                SyncConnection(scope, device);
             }
         }
     }
 
     // Caller holds _connectionsLock.
-    private void SyncConnection(SonosDevice device)
+    private void SyncConnection(SonosConnectionScope scope, SonosDevice device)
     {
         if (!device.IsInTopology || device.BaseUri is not { } baseUri)
         {
             return;
         }
 
-        if (_connections.TryGetValue(device.Uuid, out var existing))
+        if (scope.Connections.TryGetValue(device.Uuid, out var existing))
         {
             if (existing.BaseUri == baseUri)
             {
@@ -726,7 +692,7 @@ public partial class SonosSystem
             existing.Dispose();
         }
 
-        _connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, _httpClient!, _logger);
+        scope.Connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, scope.HttpClient, _logger);
         device.InvalidateStaticData();
     }
 
@@ -734,7 +700,7 @@ public partial class SonosSystem
     {
         lock (_connectionsLock)
         {
-            return _connections.GetValueOrDefault(uuid);
+            return _scope?.Connections.GetValueOrDefault(uuid);
         }
     }
 
@@ -743,13 +709,13 @@ public partial class SonosSystem
     /// </summary>
     private void ReportPollSucceededIfCurrent(SonosDevice device, SonosConnection connection)
     {
-        // Teardown clears the connections under the same lock before it marks devices offline, so a late success
-        // cannot undo that. This and ReportPollFailedIfCurrent are the only subject writes made under
+        // Teardown detaches the scope under the same lock before it marks devices offline, so a late success cannot
+        // undo that. This and ReportPollFailedIfCurrent are the only subject writes made under
         // _connectionsLock; they take no subject state lock. The SonosSystem remarks state what that asks of change
         // subscribers.
         lock (_connectionsLock)
         {
-            if (ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection))
+            if (ReferenceEquals(_scope?.Connections.GetValueOrDefault(device.Uuid), connection))
             {
                 device.ReportPollSucceeded();
             }
@@ -765,7 +731,7 @@ public partial class SonosSystem
         // A poll without a connection failed before sending anything, so it cannot be stale.
         lock (_connectionsLock)
         {
-            return (connection is null || ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection)) &&
+            return (connection is null || ReferenceEquals(_scope?.Connections.GetValueOrDefault(device.Uuid), connection)) &&
                    device.ReportPollFailed(message);
         }
     }
@@ -774,7 +740,7 @@ public partial class SonosSystem
     {
         lock (_connectionsLock)
         {
-            return _eventListener;
+            return _scope?.EventListener;
         }
     }
 
