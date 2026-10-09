@@ -103,25 +103,24 @@ internal sealed class SonosConnection : IDisposable
     /// </summary>
     internal async Task<SonosPlayerReading> ReadPlayerAsync(bool isHomeTheater, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var faults = newFaults;
-        var transport = await ReadOrDefaultAsync("GetTransportInfo", () => AvTransport.GetTransportInfo(cancellationToken), faults);
-        var settings = await ReadOrDefaultAsync("GetTransportSettings", () => AvTransport.GetTransportSettings(cancellationToken), faults);
-        var media = await ReadOrDefaultAsync("GetMediaInfo", () => AvTransport.GetMediaInfo(cancellationToken), faults);
-        var position = await ReadOrDefaultAsync("GetPositionInfo", () => AvTransport.GetPositionInfo(cancellationToken), faults);
-        var sleepTimer = await ReadOrDefaultAsync("GetRemainingSleepTimerDuration", () => AvTransport.GetRemainingSleepTimerDuration(cancellationToken), faults);
+        var transport = await ReadOrDefaultAsync("GetTransportInfo", () => AvTransport.GetTransportInfo(cancellationToken), newFaults);
+        var settings = await ReadOrDefaultAsync("GetTransportSettings", () => AvTransport.GetTransportSettings(cancellationToken), newFaults);
+        var media = await ReadOrDefaultAsync("GetMediaInfo", () => AvTransport.GetMediaInfo(cancellationToken), newFaults);
+        var position = await ReadOrDefaultAsync("GetPositionInfo", () => AvTransport.GetPositionInfo(cancellationToken), newFaults);
+        var sleepTimer = await ReadOrDefaultAsync("GetRemainingSleepTimerDuration", () => AvTransport.GetRemainingSleepTimerDuration(cancellationToken), newFaults);
 
-        var volume = await ReadOrDefaultAsync("GetVolume", () => RenderingControl.GetVolume(new RenderingControlService.GetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), faults);
-        var mute = await ReadOrDefaultAsync("GetMute", () => RenderingControl.GetMute(new RenderingControlService.GetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), faults);
-        var bass = await ReadOrDefaultAsync("GetBass", () => RenderingControl.GetBass(cancellationToken), faults);
-        var treble = await ReadOrDefaultAsync("GetTreble", () => RenderingControl.GetTreble(cancellationToken), faults);
-        var loudness = await ReadOrDefaultAsync("GetLoudness", () => RenderingControl.GetLoudness(new RenderingControlService.GetLoudnessRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), faults);
+        var volume = await ReadOrDefaultAsync("GetVolume", () => RenderingControl.GetVolume(new RenderingControlService.GetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), newFaults);
+        var mute = await ReadOrDefaultAsync("GetMute", () => RenderingControl.GetMute(new RenderingControlService.GetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), newFaults);
+        var bass = await ReadOrDefaultAsync("GetBass", () => RenderingControl.GetBass(cancellationToken), newFaults);
+        var treble = await ReadOrDefaultAsync("GetTreble", () => RenderingControl.GetTreble(cancellationToken), newFaults);
+        var loudness = await ReadOrDefaultAsync("GetLoudness", () => RenderingControl.GetLoudness(new RenderingControlService.GetLoudnessRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), newFaults);
 
         bool? nightMode = null;
         bool? speechEnhancement = null;
         if (isHomeTheater)
         {
-            nightMode = await GetEqualizerAsync("NightMode", faults, cancellationToken);
-            speechEnhancement = await GetEqualizerAsync("DialogLevel", faults, cancellationToken);
+            nightMode = await GetEqualizerAsync("NightMode", newFaults, cancellationToken);
+            speechEnhancement = await GetEqualizerAsync("DialogLevel", newFaults, cancellationToken);
         }
 
         return new SonosPlayerReading(
