@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
@@ -58,8 +59,7 @@ public class SonosGroupOperationTests
     public async Task WhenGroupSystemIsNotConnected_ThenPauseThrows()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
         var group = system.Groups[TestFixtures.LivingRoomUuid];
 
         // Act & Assert
@@ -76,7 +76,7 @@ public class SonosGroupOperationTests
     public async Task WhenGroupVolumeIsOutOfRange_ThenThrowsBeforeConnecting(bool isChange, double value)
     {
         // Arrange
-        var group = CreateDisconnectedLivingRoom();
+        var group = CreateHousehold().Groups[LivingRoomUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => isChange
@@ -92,20 +92,13 @@ public class SonosGroupOperationTests
     public async Task WhenGroupVolumeIsAtTheLimit_ThenItIsAccepted(bool isChange, double value)
     {
         // Arrange
-        var group = CreateDisconnectedLivingRoom();
+        var group = CreateHousehold().Groups[LivingRoomUuid];
 
         // Act & Assert
         // Not connected, so an accepted value fails at the connection instead of the argument check.
         await Assert.ThrowsAsync<InvalidOperationException>(() => isChange
             ? group.ChangeVolumeAsync((decimal)value, CancellationToken.None)
             : group.SetVolumeAsync((decimal)value, CancellationToken.None));
-    }
-
-    private static SonosGroup CreateDisconnectedLivingRoom()
-    {
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
-        return system.Groups[TestFixtures.LivingRoomUuid];
     }
 
     [Fact]
@@ -128,8 +121,7 @@ public class SonosGroupOperationTests
     public void WhenGroupSystemIsNotConnected_ThenOperationsAreDisabled()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
         var group = system.Groups[TestFixtures.LivingRoomUuid];
 
         // Assert

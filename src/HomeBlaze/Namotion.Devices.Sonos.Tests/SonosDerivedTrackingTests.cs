@@ -19,8 +19,7 @@ public class SonosDerivedTrackingTests
     public void WhenTransportStateChanges_ThenIsPlayingRaisesPropertyChanged()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
         var player = Track(system.Players[TestFixtures.KitchenUuid]);
         var firedEvents = TrackPropertyChanged(player);
 
@@ -36,8 +35,7 @@ public class SonosDerivedTrackingTests
     public void WhenCoordinatorTrackChanges_ThenGroupTitleOfTrackRaisesPropertyChanged()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
         var coordinator = Track(system.Players[TestFixtures.LivingRoomUuid]);
         var group = Track(system.Groups[TestFixtures.LivingRoomUuid]);
         Assert.Null(group.CurrentTrackTitle);
@@ -55,7 +53,7 @@ public class SonosDerivedTrackingTests
     public void WhenCoordinatorGoesOffline_ThenMemberPlayIsEnabledRaisesPropertyChanged()
     {
         // Arrange
-        var system = Track(SonosPlayerOperationTests.CreateGroupedSystem());
+        var system = Track(CreateGroupedSystem());
         var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
         var member = Track(system.Players[TestFixtures.KitchenUuid]);
         Assert.True(member.Play_IsEnabled);
@@ -74,7 +72,7 @@ public class SonosDerivedTrackingTests
     public void WhenCoordinatorPlayModeChanges_ThenMemberShuffleRaisesPropertyChanged()
     {
         // Arrange
-        var system = Track(SonosPlayerOperationTests.CreateGroupedSystem());
+        var system = Track(CreateGroupedSystem());
         var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
         var member = Track(system.Players[TestFixtures.KitchenUuid]);
         Assert.Null(member.Shuffle);

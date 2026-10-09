@@ -1,29 +1,12 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosSystemTopologyTests
 {
-    internal static SonosSystem CreateSystem() =>
-        new(new TestHttpClientFactory(), NullLogger<SonosSystem>.Instance);
-
-    internal static SonosTopology ReadHousehold() =>
-        ZoneGroupStateParser.Parse(TestFixtures.Read("zone-group-state.xml"));
-
-    /// <summary>
-    /// Reports every player and satellite reachable, as their first successful poll does.
-    /// </summary>
-    internal static void ReportAllReachable(SonosSystem system)
-    {
-        foreach (var device in SonosSystem.GetDevices(system.Players.Values))
-        {
-            device.ReportPollSucceeded();
-        }
-    }
-
     private static SonosTopology WithoutKitchen(SonosTopology household) =>
         new(household.Groups.Where(group => group.CoordinatorUuid != TestFixtures.KitchenUuid).ToArray());
 
@@ -133,8 +116,7 @@ public class SonosSystemTopologyTests
     public void WhenTopologyAppliedTwice_ThenInstancesAreKept()
     {
         // Arrange
-        var system = CreateSystem();
-        system.ApplyTopology(ReadHousehold());
+        var system = CreateHousehold();
         var players = system.Players;
         var groups = system.Groups;
         var livingRoom = system.Players[TestFixtures.LivingRoomUuid];
@@ -432,8 +414,7 @@ public class SonosSystemTopologyTests
     public void WhenFindingPlayerByRoomOrUuid_ThenReturnsIt(string value)
     {
         // Arrange
-        var system = CreateSystem();
-        system.ApplyTopology(ReadHousehold());
+        var system = CreateHousehold();
 
         // Act
         var player = system.FindPlayer(value);

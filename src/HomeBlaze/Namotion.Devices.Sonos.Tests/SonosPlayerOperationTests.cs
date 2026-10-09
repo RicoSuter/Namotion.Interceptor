@@ -1,25 +1,18 @@
-using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Sonos.Base.Services;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosPlayerOperationTests
 {
-    private static SonosPlayer CreateDisconnectedKitchen()
-    {
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
-        return system.Players[TestFixtures.KitchenUuid];
-    }
-
     [Fact]
     public async Task WhenSystemIsNotConnected_ThenPlayThrows()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => player.PlayAsync(CancellationToken.None));
@@ -32,7 +25,7 @@ public class SonosPlayerOperationTests
     public async Task WhenBassIsOutOfRange_ThenThrows(int bass)
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SetBassAsync(bass, CancellationToken.None));
@@ -52,7 +45,7 @@ public class SonosPlayerOperationTests
     public async Task WhenVolumeIsOutOfRange_ThenThrowsBeforeConnecting(string operation, double value)
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => InvokeVolumeOperation(player, operation, (decimal)value));
@@ -69,7 +62,7 @@ public class SonosPlayerOperationTests
     public async Task WhenVolumeIsAtTheLimit_ThenItIsAccepted(string operation, double value)
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         // Not connected, so an accepted value fails at the connection instead of the argument check.
@@ -89,7 +82,7 @@ public class SonosPlayerOperationTests
     public async Task WhenJoiningUnknownRoom_ThenThrowsListingTheRooms()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => player.JoinGroupAsync("Nowhere", CancellationToken.None));
@@ -110,7 +103,7 @@ public class SonosPlayerOperationTests
     public async Task WhenPlayingFavoriteBeforeTheSystemConnected_ThenThrowsNotConnected()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => player.PlayFavoriteAsync("Radio FM1", CancellationToken.None));
@@ -183,7 +176,7 @@ public class SonosPlayerOperationTests
     public async Task WhenNightModeOnPlayerWithoutHomeTheater_ThenThrows()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() => player.SetNightModeAsync(true, CancellationToken.None));
@@ -193,7 +186,7 @@ public class SonosPlayerOperationTests
     public void WhenPlayerIsAloneAndHasNoDuration_ThenGroupAndSeekOperationsAreDisabled()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Assert
         Assert.False(player.LeaveGroup_IsEnabled);
@@ -206,7 +199,7 @@ public class SonosPlayerOperationTests
     public void WhenSystemIsNotConnected_ThenPlayerOperationsAreDisabled()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Assert
         Assert.All(GetPlayerOperationStates(player), state => Assert.False(state.IsEnabled, state.Name));
@@ -217,9 +210,8 @@ public class SonosPlayerOperationTests
     public void WhenSystemIsConnected_ThenPlayerAndCoordinatorOperationsAreEnabled()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
-        SonosSystemTopologyTests.ReportAllReachable(system);
+        var system = CreateHousehold();
+        ReportAllReachable(system);
         var player = system.Players[TestFixtures.KitchenUuid];
 
         // Act
@@ -246,25 +238,6 @@ public class SonosPlayerOperationTests
         Assert.All(GetCoordinatorOperationStates(member), state => Assert.False(state.IsEnabled, state.Name));
         Assert.All(GetPlayerOperationStates(member), state => Assert.True(state.IsEnabled, state.Name));
         Assert.True(member.LeaveGroup_IsEnabled);
-    }
-
-    /// <summary>
-    /// A connected household of the office coordinating a group with the kitchen.
-    /// </summary>
-    internal static SonosSystem CreateGroupedSystem()
-    {
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(ZoneGroupStateParser.Parse($"""
-            <ZoneGroupState><ZoneGroups>
-              <ZoneGroup Coordinator="{TestFixtures.OfficeUuid}" ID="{TestFixtures.OfficeUuid}:1">
-                <ZoneGroupMember UUID="{TestFixtures.OfficeUuid}" Location="http://10.0.0.116:1400/xml/device_description.xml" ZoneName="Büro" />
-                <ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="http://10.0.0.121:1400/xml/device_description.xml" ZoneName="Küche" />
-              </ZoneGroup>
-            </ZoneGroups></ZoneGroupState>
-            """));
-        SonosSystemTopologyTests.ReportAllReachable(system);
-        system.IsConnected = true;
-        return system;
     }
 
     // Commands sent to the player itself. SwitchToTv, SwitchToLineIn, SetNightMode and SetSpeechEnhancement also
@@ -495,7 +468,7 @@ public class SonosPlayerOperationTests
     public void WhenSystemIsNotConnected_ThenPlayReturnsFaultedTask()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act
         var task = player.PlayAsync(CancellationToken.None);
@@ -508,7 +481,7 @@ public class SonosPlayerOperationTests
     public async Task WhenNameArgumentsAreNull_ThenThrowArgumentNull()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         Assert.Equal("room", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.JoinGroupAsync(null!, CancellationToken.None))).ParamName);
@@ -576,7 +549,7 @@ public class SonosPlayerOperationTests
     public async Task WhenSeekingToNegativePosition_ThenThrows()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SeekAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
@@ -586,7 +559,7 @@ public class SonosPlayerOperationTests
     public async Task WhenSettingNegativeSleepTimer_ThenThrows()
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SetSleepTimerAsync(TimeSpan.FromMinutes(-1), CancellationToken.None));
@@ -598,7 +571,7 @@ public class SonosPlayerOperationTests
     public async Task WhenSettingSleepTimerAboveTheMaximum_ThenThrows(int seconds)
     {
         // Arrange
-        var player = CreateDisconnectedKitchen();
+        var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SetSleepTimerAsync(TimeSpan.FromSeconds(seconds), CancellationToken.None));

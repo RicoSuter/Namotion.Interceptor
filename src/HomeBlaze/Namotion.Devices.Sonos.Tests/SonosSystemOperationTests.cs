@@ -1,6 +1,7 @@
 using Namotion.Devices.Sonos.Tests.Testing;
 using Sonos.Base.Services;
 using Xunit;
+using static Namotion.Devices.Sonos.Tests.Testing.TestFixtures;
 
 namespace Namotion.Devices.Sonos.Tests;
 
@@ -10,8 +11,7 @@ public class SonosSystemOperationTests
     public async Task WhenGroupingAllIntoUnknownRoom_ThenThrows()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() => system.GroupAllAsync("Nowhere", CancellationToken.None));
@@ -21,7 +21,7 @@ public class SonosSystemOperationTests
     public void WhenRefreshingWhileDisconnected_ThenReturnsFaultedTask()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
+        var system = CreateSystem();
 
         // Act
         var task = system.RefreshAsync(CancellationToken.None);
@@ -34,8 +34,7 @@ public class SonosSystemOperationTests
     public void WhenGroupingAllWhileDisconnected_ThenReturnsFaultedTask()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
 
         // Act
         var task = system.GroupAllAsync("Küche", CancellationToken.None);
@@ -63,8 +62,7 @@ public class SonosSystemOperationTests
     public void WhenUngroupingAllWhileDisconnected_ThenReturnsFaultedTask()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
 
         // Act
         var task = system.UngroupAllAsync(CancellationToken.None);
@@ -77,8 +75,7 @@ public class SonosSystemOperationTests
     public async Task WhenGroupingAllIntoNullRoom_ThenThrowsArgumentNull()
     {
         // Arrange
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold();
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentNullException>(() => system.GroupAllAsync(null!, CancellationToken.None));

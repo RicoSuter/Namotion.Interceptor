@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
@@ -9,22 +8,15 @@ namespace Namotion.Devices.Sonos.Tests;
 public class SonosGroupStateTests
 {
 
-    private static SonosSystem CreateSystem()
-    {
-        var system = SonosSystemTopologyTests.CreateSystem();
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
-        return system;
-    }
-
     [Fact]
     public void WhenPlayerIsAGroupMember_ThenSourcePlayModeAndSleepTimerFollowTheCoordinator()
     {
         // Arrange
         const string spotifyUri = "x-sonos-vli:RINCON_A0000000000701400:2,spotify:0123456789abcdef";
-        var system = SonosPlayerOperationTests.CreateGroupedSystem();
+        var system = CreateGroupedSystem();
         var coordinator = system.Players[TestFixtures.OfficeUuid];
         var member = system.Players[TestFixtures.KitchenUuid];
-        var noRenderingControl = new RenderingControlChange(null, null, null, null, null, null, null);
+        var noRenderingControl = EmptyRenderingControl;
         var memberTransport = $"x-rincon:{TestFixtures.OfficeUuid}";
 
         // Act
@@ -48,7 +40,7 @@ public class SonosGroupStateTests
     public void WhenGroupRenderingControlEventApplied_ThenVolumeIsAFraction()
     {
         // Arrange
-        var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
+        var group = CreateHousehold().Groups[TestFixtures.LivingRoomUuid];
 
         // Act
         group.ApplyGroupRenderingControlEvent(new GroupRenderingControlChange(35, true), T0);
@@ -62,7 +54,7 @@ public class SonosGroupStateTests
     public void WhenGroupPollStartedBeforeEvent_ThenEventIsKept()
     {
         // Arrange
-        var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
+        var group = CreateHousehold().Groups[TestFixtures.LivingRoomUuid];
         group.ApplyGroupRenderingControlEvent(new GroupRenderingControlChange(35, false), T0 + 1);
 
         // Act
@@ -76,7 +68,7 @@ public class SonosGroupStateTests
     public void WhenOlderGroupPollCompletesAfterNewerPoll_ThenOlderPollIsDropped()
     {
         // Arrange
-        var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
+        var group = CreateHousehold().Groups[TestFixtures.LivingRoomUuid];
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), T0 + 2);
 
         // Act
@@ -92,8 +84,7 @@ public class SonosGroupStateTests
     {
         // Arrange
         var clock = new SteppableClock();
-        var system = new SonosSystem(new TestHttpClientFactory(), NullLogger<SonosSystem>.Instance) { Clock = clock };
-        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var system = CreateHousehold(clock);
         var group = system.Groups[LivingRoomUuid];
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), system.NextOrder());
 
@@ -111,7 +102,7 @@ public class SonosGroupStateTests
     public void WhenCoordinatorPlays_ThenGroupReportsCoordinatorTrack()
     {
         // Arrange
-        var system = CreateSystem();
+        var system = CreateHousehold();
         var group = system.Groups[TestFixtures.LivingRoomUuid];
 
         // Act
