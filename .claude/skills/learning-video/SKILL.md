@@ -155,6 +155,29 @@ Then measure the real duration: `npm run tts -- <episode>` needs only the script
 - [ ] Extend the shared domain only when the episode needs it. Add, never rename, regions and members; keep `videos/domain/Coffee.Tests` passing.
 - [ ] Build: `dotnet build videos/episodes/<episode>/sample/<Name>.Sample.csproj`, later `dotnet build src/Namotion.Interceptor.slnx`.
 
+#### Sample code is teaching code
+
+Viewers copy what the video shows, so compiling and using existing APIs is not enough. Review every sample against the contracts the docs state, including the failure and shutdown paths, not just the happy path:
+
+- [ ] Ownership is claimed as soon as the binding is known: before connecting when the binding is local configuration (see `SourceOwnershipManager` in `docs/connectors.md`).
+- [ ] Every connect or subscribe has its cleanup: a disposable connection, or a cleanup callback passed to `BackgroundTaskLifetime`.
+- [ ] Results of claim and try methods are checked, not ignored.
+- [ ] `WriteChangesAsync` writes the changes it is given and does not read other subject properties.
+- [ ] Shared state is thread-safe: anything touched by a background loop and a write or a request handler is synchronized or immutable.
+
+The 03-connectors `GrinderSource` got this wrong first: it claimed after connecting, ignored the claim result and never disconnected.
+
+#### Library defects found while building a sample
+
+A sample that exposes a defect in the library does not work around it:
+
+- [ ] Reproduce the defect with a failing test in the library's test project.
+- [ ] Fix it in its own commit with a `fix:` prefix, separate from the episode commits.
+- [ ] Keep the sample unchanged around the bug, without a workaround, so it shows the intended usage.
+- [ ] List the fix in the stage 6 report so the user can split it into its own pull request.
+
+Example: 03-connectors found that `SubjectUpdateApplier` did not apply enum values that arrive as names in a subject update.
+
 ### Video-friendly demo pages
 
 Browser demos record pages of the sample. Design them for video, following `episodes/smoke/sample/StatusPage.cs`:
@@ -347,7 +370,7 @@ FFMPEG=$(node -e "import('@ffmpeg-installer/ffmpeg').then(m => console.log(m.def
    - [ ] the chapter header in the top right corner is free: no content under or touching it, and it shows the right chapter;
    - [ ] connections: arrows touch the elements they connect and point the way the value travels.
 5. Fix and re-render until the report lists no still beats (or each remaining one has a stated reason) and the frames are clean. Narration changes re-synthesize only the changed beats; rerun `tts` before `render`.
-6. Present to the user: video path, duration per chapter against the budget, the contact sheet, remaining warnings with reasons, and any doc mismatches.
+6. Present to the user: video path, duration per chapter against the budget, the contact sheet, remaining warnings with reasons, any doc mismatches, and library defects fixed (one commit each, listed for a separate pull request).
 7. Apply feedback by editing only the affected beats: narration in `script.yaml` then `tts`; visuals in the scene; a demo with `capture --only <name>`; then render again.
 
 ## Known pitfalls
