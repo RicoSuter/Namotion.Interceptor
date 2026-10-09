@@ -355,6 +355,29 @@ public class EcowittGatewayTests
     }
 
     [Fact]
+    public void WhenOutdoorAndIndoorHiddenAfterCreation_ThenNulledOut()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var data = new EcowittLiveData
+        {
+            Outdoor = new EcowittOutdoorData { Temperature = 18.0m },
+            Indoor = new EcowittIndoorData { Temperature = 22.5m }
+        };
+        gateway.UpdateFromLiveData(data);
+        Assert.NotNull(gateway.OutdoorSensor);
+        Assert.NotNull(gateway.IndoorSensor);
+
+        // Act
+        gateway.HiddenSensors = ["outdoor", "indoor"];
+        gateway.UpdateFromLiveData(data);
+
+        // Assert
+        Assert.Null(gateway.OutdoorSensor);
+        Assert.Null(gateway.IndoorSensor);
+    }
+
+    [Fact]
     public void WhenSensorInfoProvided_ThenMapsToCorrectSensors()
     {
         // Arrange

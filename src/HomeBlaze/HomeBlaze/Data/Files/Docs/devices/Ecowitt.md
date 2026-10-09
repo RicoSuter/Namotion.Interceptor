@@ -26,7 +26,7 @@ The gateway automatically discovers these sensor types:
 | Sensor | Measurements |
 |--------|-------------|
 | Outdoor | Temperature, humidity, dew point, feels-like, wind speed/gust/direction, UV index, solar radiation, illuminance, vapor pressure deficit |
-| Indoor (WH25) | Temperature, humidity, absolute/relative pressure |
+| Indoor (the gateway's built-in sensor, or a paired WH25/WH32B) | Temperature, humidity, absolute/relative pressure |
 | Rain Gauge | Event, rate, hourly/daily/weekly/monthly/yearly totals |
 | Piezo Rain (WS90) | Same as rain gauge |
 | Channel Sensors | Per-channel temperature and humidity |
@@ -38,9 +38,11 @@ The gateway automatically discovers these sensor types:
 | Leak Detectors | Per-channel water leak status |
 | Lightning | Distance, strike count, last strike time |
 
+The gateway's built-in sensor measures wherever the gateway is placed and reports no sensor ID or signal strength.
+
 ## Hidden Sensors
 
-The gateway may pick up sensors from neighboring stations. Use the Hidden Sensors configuration to exclude unwanted sensors. Sensor keys follow the format: `ch:1`, `soil:2`, `leaf:1`, `rain`, `piezo`, `lightning`.
+The gateway may pick up sensors from neighboring stations. Use the Hidden Sensors configuration to exclude unwanted sensors. Sensor keys follow the format: `outdoor`, `indoor`, `rain`, `piezo`, `lightning`, and per channel `ch:1`, `soil:2`, `leaf:1`, `temp:1`, `pm25:1`, `co2:1`, `leak:1`. To stop the gateway from learning a neighbor's sensor at all, disable its channel in the gateway's web interface by setting the sensor ID to `FFFFFFFE`.
 
 ## JSON Configuration Example
 

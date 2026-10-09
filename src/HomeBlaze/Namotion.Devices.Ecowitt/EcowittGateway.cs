@@ -336,7 +336,7 @@ public partial class EcowittGateway : BackgroundService,
         var now = DateTimeOffset.UtcNow;
 
         // Single-instance sensors: create on first discovery, mutate in-place
-        if (data.Outdoor != null)
+        if (data.Outdoor != null && !IsSensorHidden("outdoor"))
         {
             OutdoorSensor ??= new EcowittOutdoorSensor();
             OutdoorSensor.Temperature = data.Outdoor.Temperature;
@@ -353,8 +353,12 @@ public partial class EcowittGateway : BackgroundService,
             OutdoorSensor.VaporPressureDeficit = data.Outdoor.VaporPressureDeficit;
             OutdoorSensor.LastUpdated = now;
         }
+        else if (IsSensorHidden("outdoor"))
+        {
+            OutdoorSensor = null;
+        }
 
-        if (data.Indoor != null)
+        if (data.Indoor != null && !IsSensorHidden("indoor"))
         {
             IndoorSensor ??= new EcowittIndoorSensor();
             IndoorSensor.Temperature = data.Indoor.Temperature;
@@ -362,6 +366,10 @@ public partial class EcowittGateway : BackgroundService,
             IndoorSensor.AbsolutePressure = data.Indoor.AbsolutePressure;
             IndoorSensor.RelativePressure = data.Indoor.RelativePressure;
             IndoorSensor.LastUpdated = now;
+        }
+        else if (IsSensorHidden("indoor"))
+        {
+            IndoorSensor = null;
         }
 
         var configChanged = false;
