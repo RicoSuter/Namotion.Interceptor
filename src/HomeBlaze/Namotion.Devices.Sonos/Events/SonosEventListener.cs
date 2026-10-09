@@ -14,9 +14,11 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private const string EventPathPrefix = "/event/";
     private const long MaxNotifyBodyBytes = 1024 * 1024;
     private static readonly TimeSpan DefaultSubscriptionLifetime = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan DefaultMinimumLifetime = TimeSpan.FromMinutes(1);
 
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
+    private readonly TimeSpan _minimumLifetime;
     private readonly ConcurrentDictionary<string, SonosEventSubscription> _subscriptionsByKey = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SonosEventSubscription> _subscriptionsBySid = new(StringComparer.Ordinal);
 
@@ -28,10 +30,14 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private int _inFlightHandlers;
     private readonly TaskCompletionSource _handlersDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal SonosEventListener(HttpClient httpClient, ILogger logger)
+    /// <param name="httpClient">The client for SUBSCRIBE and UNSUBSCRIBE requests, borrowed and not disposed.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="minimumLifetime">The shortest lifetime a renewal is scheduled for, whatever the speaker grants; one minute by default.</param>
+    internal SonosEventListener(HttpClient httpClient, ILogger logger, TimeSpan? minimumLifetime = null)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _minimumLifetime = minimumLifetime ?? DefaultMinimumLifetime;
     }
 
     internal bool IsListening => !_disposing && !_acceptFailed && _listener?.IsListening == true;
@@ -404,15 +410,18 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private static string? GetHeader(HttpResponseMessage response, string name) =>
         response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
 
-    private static TimeSpan GetLifetime(HttpResponseMessage response)
+    private TimeSpan GetLifetime(HttpResponseMessage response)
     {
         const string prefix = "Second-";
         var timeout = GetHeader(response, "TIMEOUT");
-        return timeout is not null &&
+        var lifetime = timeout is not null &&
             timeout.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
             int.TryParse(timeout.AsSpan(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
                 ? TimeSpan.FromSeconds(seconds)
                 : DefaultSubscriptionLifetime;
+
+        // A tiny grant such as Second-0 would otherwise schedule a renewal at every wake of the connection loop.
+        return lifetime > _minimumLifetime ? lifetime : _minimumLifetime;
     }
 
     public async ValueTask DisposeAsync()

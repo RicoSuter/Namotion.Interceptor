@@ -116,6 +116,11 @@ public partial class SonosSystem : BackgroundService,
     /// </summary>
     internal Func<CancellationToken, Task<Uri?>> DiscoverSpeakerAsync { get; set; } = SonosDiscovery.FindSpeakerAsync;
 
+    /// <summary>
+    /// The shortest subscription lifetime renewals are scheduled for, whatever a speaker grants. Tests shorten it.
+    /// </summary>
+    internal TimeSpan MinimumSubscriptionLifetime { get; set; } = TimeSpan.FromMinutes(1);
+
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {
         HttpClientFactory = httpClientFactory;

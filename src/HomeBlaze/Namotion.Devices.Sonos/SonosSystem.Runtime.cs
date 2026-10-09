@@ -227,7 +227,7 @@ public partial class SonosSystem
 
             _httpClient = httpClient;
             _clientProvider = new SonosClientProvider(httpClient);
-            _eventListener = new SonosEventListener(httpClient, _logger);
+            _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime);
         }
     }
 

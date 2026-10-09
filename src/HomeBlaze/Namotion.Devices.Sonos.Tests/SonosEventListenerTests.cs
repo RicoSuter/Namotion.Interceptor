@@ -268,6 +268,27 @@ public class SonosEventListenerTests
     }
 
     [Fact]
+    public async Task WhenSpeakerGrantsATinyLifetime_ThenRenewalWaitsForHalfTheMinimumLifetime()
+    {
+        // Arrange
+        await using var speaker = new LoopbackHttpServer(context =>
+        {
+            context.Response.Headers["SID"] = "uuid:sub-1";
+            context.Response.Headers["TIMEOUT"] = "Second-0";
+            return Task.CompletedTask;
+        });
+        using var httpClient = new HttpClient();
+        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+
+        // Act
+        var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
+
+        // Assert
+        Assert.InRange(subscription.RenewAt, DateTimeOffset.UtcNow.AddSeconds(25), DateTimeOffset.UtcNow.AddSeconds(31));
+    }
+
+    [Fact]
     public async Task WhenSubscribingTheSameKeyTwice_ThenThrowsAndKeepsTheFirstSubscription()
     {
         // Arrange

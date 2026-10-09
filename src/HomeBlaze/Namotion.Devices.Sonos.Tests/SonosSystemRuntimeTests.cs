@@ -178,7 +178,10 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker { SubscriptionTimeoutSeconds = 2 };
         await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
-            system.PollingInterval = TimeSpan.FromHours(1));
+        {
+            system.PollingInterval = TimeSpan.FromHours(1);
+            system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
+        });
         var topologyReads = speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
 
         // Act
