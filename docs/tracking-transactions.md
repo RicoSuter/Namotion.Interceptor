@@ -13,7 +13,7 @@ Use transactions when you need guarantees about what was actually persisted to e
 Transactions provide:
 - **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
-- **Notification suppression**: Captured non-derived writes stay silent until commit replay applies them
+- **Notification suppression**: Captured non-derived writes stay silent until commit replay applies them; the replay then publishes each write as it is applied, in write order
 - **External source integration**: Changes can be written to external sources before being applied to the local model
 - **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
 
@@ -46,7 +46,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 
     await transaction.CommitAsync(cancellationToken);
 
-    // All changes are now applied and notifications are fired
+    // All changes are now applied; each notified as it was applied
 }
 ```
 
@@ -222,9 +222,8 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the local model (calls property setters, triggers `OnChanging/OnChanged` methods)
-2. If any apply fails and `Rollback` mode: revert successful applies
-3. Fire change notifications
+1. **Apply all changes** to the local model in write order (calls property setters, triggers `OnChanging/OnChanged` methods). Each applied write publishes its change notification and updates derived properties immediately, so observers can see intermediate combinations of values during the commit.
+2. If any apply fails and `Rollback` mode: revert successful applies. The reverts publish notifications too.
 
 ### With Source Transactions
 
