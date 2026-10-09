@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -52,7 +53,9 @@ public partial class SonosSystem
     // Guarded by _reconcileLock. A persistent failure is logged at Warning once and at Debug while it lasts.
     private bool _isFavoritesReadFailing;
     private bool _isEventDeliveryFailing;
-    private readonly HashSet<string> _failingSubscriptionKeys = new(StringComparer.Ordinal);
+
+    // Concurrent because unsubscribes run in parallel.
+    private readonly ConcurrentDictionary<string, byte> _failingSubscriptionKeys = new(StringComparer.Ordinal);
 
     private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultPollingInterval, MinimumInterval);
 
@@ -843,16 +846,20 @@ public partial class SonosSystem
         var now = Clock.GetTimestamp();
         try
         {
+            // Concurrently: a speaker that left does not answer, and each request may take the whole timeout while
+            // the reconcile lock blocks commands.
+            var obsolete = eventListener.Subscriptions
+                .Where(subscription => !desired.TryGetValue(subscription.Key, out var target) || target.EventUri != subscription.EventUri)
+                .ToArray();
+            await Task.WhenAll(obsolete.Select(subscription =>
+                RunSubscriptionRequestAsync(() => eventListener.UnsubscribeAsync(subscription, cancellationToken), subscription.Key, cancellationToken)));
+
             foreach (var subscription in eventListener.Subscriptions)
             {
-                if (!desired.TryGetValue(subscription.Key, out var target) || target.EventUri != subscription.EventUri)
+                if (subscription.Sid is not null && subscription.RenewAt <= now &&
+                    !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
                 {
-                    await RunSubscriptionRequestAsync(() => eventListener.UnsubscribeAsync(subscription, cancellationToken), subscription.Key, cancellationToken);
-                }
-                else if (subscription.Sid is not null && subscription.RenewAt <= now &&
-                         !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
-                {
-                    // Keeps an unreachable speaker from being retried at every loop wake until the next poll drops it.
+                    // Keeps an unreachable speaker from being retried at every loop wake.
                     subscription.RenewAt = Clock.GetTimestampAfter(FailedRenewalRetryDelay);
                 }
             }
@@ -860,7 +867,7 @@ public partial class SonosSystem
             var active = eventListener.Subscriptions.Select(subscription => subscription.Key).ToHashSet(StringComparer.Ordinal);
             foreach (var (key, target) in desired)
             {
-                if (!active.Contains(key))
+                if (target.CanSubscribe && !active.Contains(key))
                 {
                     await RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(key, target.EventUri, target.Handler, cancellationToken), key, cancellationToken);
                 }
@@ -941,7 +948,7 @@ public partial class SonosSystem
         try
         {
             await request();
-            _failingSubscriptionKeys.Remove(key);
+            _failingSubscriptionKeys.TryRemove(key, out _);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -951,7 +958,7 @@ public partial class SonosSystem
         catch (Exception exception)
         {
             // Includes the listener's OperationCanceledException for a subscription unsubscribed concurrently.
-            if (_failingSubscriptionKeys.Add(key))
+            if (_failingSubscriptionKeys.TryAdd(key, 0))
             {
                 _logger.LogWarning(exception, "The Sonos event subscription {Key} failed; polling keeps its state current.", key);
             }
@@ -964,37 +971,45 @@ public partial class SonosSystem
         }
     }
 
-    private Dictionary<string, (Uri EventUri, Action<string> Handler)> GetDesiredSubscriptions()
+    /// <summary>
+    /// Returns the subscriptions to hold. One missed poll does not drop a player's subscriptions: they are kept while
+    /// it stays in the topology, and a renewal finds out whether the speaker still holds them. New ones are only made
+    /// to connected players.
+    /// </summary>
+    private Dictionary<string, SubscriptionTarget> GetDesiredSubscriptions()
     {
-        var desired = new Dictionary<string, (Uri EventUri, Action<string> Handler)>(StringComparer.Ordinal);
+        var desired = new Dictionary<string, SubscriptionTarget>(StringComparer.Ordinal);
         var groups = Groups;
         foreach (var player in Players.Values)
         {
-            if (!player.IsConnected || player.BaseUri is not { } baseUri)
+            if (!player.IsInTopology || player.BaseUri is not { } baseUri)
             {
                 continue;
             }
 
-            desired[$"{player.Uuid}/{AvTransportService}"] =
-                (new Uri(baseUri, "/MediaRenderer/AVTransport/Event"), body => OnAvTransportEvent(player, body));
-            desired[$"{player.Uuid}/{RenderingControlService}"] =
-                (new Uri(baseUri, "/MediaRenderer/RenderingControl/Event"), body => OnRenderingControlEvent(player, body));
+            var canSubscribe = player.IsConnected;
+            desired[$"{player.Uuid}/{AvTransportService}"] = new SubscriptionTarget(
+                new Uri(baseUri, "/MediaRenderer/AVTransport/Event"), body => OnAvTransportEvent(player, body), canSubscribe);
+            desired[$"{player.Uuid}/{RenderingControlService}"] = new SubscriptionTarget(
+                new Uri(baseUri, "/MediaRenderer/RenderingControl/Event"), body => OnRenderingControlEvent(player, body), canSubscribe);
 
             if (groups.ContainsKey(player.Uuid))
             {
                 var coordinatorUuid = player.Uuid;
-                desired[$"{player.Uuid}/{GroupRenderingControlService}"] =
-                    (new Uri(baseUri, "/MediaRenderer/GroupRenderingControl/Event"), body => OnGroupRenderingControlEvent(coordinatorUuid, body));
+                desired[$"{player.Uuid}/{GroupRenderingControlService}"] = new SubscriptionTarget(
+                    new Uri(baseUri, "/MediaRenderer/GroupRenderingControl/Event"), body => OnGroupRenderingControlEvent(coordinatorUuid, body), canSubscribe);
             }
         }
 
         if (GetSeedUri() is { } seedUri)
         {
-            desired[TopologySubscriptionKey] = (new Uri(seedUri, "/ZoneGroupTopology/Event"), OnTopologyEvent);
+            desired[TopologySubscriptionKey] = new SubscriptionTarget(new Uri(seedUri, "/ZoneGroupTopology/Event"), OnTopologyEvent, CanSubscribe: true);
         }
 
         return desired;
     }
+
+    private sealed record SubscriptionTarget(Uri EventUri, Action<string> Handler, bool CanSubscribe);
 
     // The event handlers run on the listener's thread pool callbacks, concurrently with polling. The listener catches
     // and logs a parser's XmlException, and its disposal waits for running handlers, so they must not block on it.

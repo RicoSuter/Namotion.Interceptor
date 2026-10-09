@@ -20,6 +20,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly ConcurrentQueue<SoapCall> _calls = new();
     private readonly ConcurrentDictionary<string, string> _callbacks = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _unsubscribed = new();
+    private readonly ConcurrentQueue<string> _subscribed = new();
     private readonly ConcurrentQueue<(string Path, DateTimeOffset At)> _renewed = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _holds = new(StringComparer.Ordinal);
 
@@ -38,6 +39,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal IReadOnlyCollection<SoapCall> Calls => _calls.ToArray();
 
     internal IReadOnlyCollection<string> Unsubscribed => _unsubscribed.ToArray();
+
+    /// <summary>
+    /// The event path of every new subscription requested (a SUBSCRIBE carrying a callback), in arrival order.
+    /// </summary>
+    internal IReadOnlyCollection<string> Subscribed => _subscribed.ToArray();
 
     /// <summary>
     /// The event path of every renewal request received (a SUBSCRIBE carrying a SID), in arrival order, one entry per
@@ -190,6 +196,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
             case "SUBSCRIBE":
                 if (request.Headers["CALLBACK"] is { } callback)
                 {
+                    _subscribed.Enqueue(path);
                     _callbacks[path] = callback.Trim('<', '>');
                     if (_holds.TryGetValue("SUBSCRIBE " + path, out var subscribeHold))
                     {
