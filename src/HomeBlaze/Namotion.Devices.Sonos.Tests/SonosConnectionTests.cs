@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using Namotion.Devices.Sonos.Client;
+using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Sonos.Base.Services;
 using Xunit;
@@ -26,7 +27,7 @@ public class SonosConnectionTests
         using var connection = CreateConnection(speaker, httpClient);
 
         // Act
-        var reading = await connection.ReadPlayerAsync(isHomeTheater: true, CancellationToken.None);
+        var reading = await connection.ReadPlayerAsync(isHomeTheater: true, [], CancellationToken.None);
 
         // Assert
         Assert.Equal("PAUSED_PLAYBACK", reading.AvTransport.TransportState);
@@ -55,7 +56,7 @@ public class SonosConnectionTests
         using var connection = CreateConnection(speaker, httpClient);
 
         // Act
-        var reading = await connection.ReadPlayerAsync(isHomeTheater: true, CancellationToken.None);
+        var reading = await connection.ReadPlayerAsync(isHomeTheater: true, [], CancellationToken.None);
 
         // Assert
         Assert.True(reading.RenderingControl.SpeechEnhancement);
@@ -83,6 +84,33 @@ public class SonosConnectionTests
     }
 
     [Fact]
+    public async Task WhenOneReadAnswersWithAFault_ThenOnlyItsValuesAreUnknownAndTheFaultIsReportedOnce()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondAsIdlePlayer(Uuid, "Küche");
+        speaker.RespondWithFault("GetRemainingSleepTimerDuration", 701);
+        speaker.RespondWithFault("GetVolume", 701);
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+        List<SonosReadFault> firstFaults = [];
+        List<SonosReadFault> secondFaults = [];
+
+        // Act
+        var reading = await connection.ReadPlayerAsync(isHomeTheater: false, firstFaults, CancellationToken.None);
+        await connection.ReadPlayerAsync(isHomeTheater: false, secondFaults, CancellationToken.None);
+
+        // Assert
+        Assert.False(reading.HasSleepTimer);
+        Assert.True(reading.HasPosition);
+        Assert.Null(reading.RenderingControl.Volume);
+        Assert.False(reading.RenderingControl.Mute);
+        Assert.Equal("PAUSED_PLAYBACK", reading.AvTransport.TransportState);
+        Assert.Equal(["GetRemainingSleepTimerDuration", "GetVolume"], firstFaults.Select(fault => fault.Action));
+        Assert.Empty(secondFaults);
+    }
+
+    [Fact]
     public async Task WhenReadingPlayerWithoutHomeTheater_ThenEqualizerIsNotQueried()
     {
         // Arrange
@@ -92,7 +120,7 @@ public class SonosConnectionTests
         using var connection = CreateConnection(speaker, httpClient);
 
         // Act
-        var reading = await connection.ReadPlayerAsync(isHomeTheater: false, CancellationToken.None);
+        var reading = await connection.ReadPlayerAsync(isHomeTheater: false, [], CancellationToken.None);
 
         // Assert
         Assert.Null(reading.RenderingControl.NightMode);
@@ -112,12 +140,13 @@ public class SonosConnectionTests
         var topology = await connection.ReadTopologyAsync(CancellationToken.None);
         var favorites = await connection.ReadFavoritesAsync(CancellationToken.None);
         var description = await connection.ReadDescriptionAsync(CancellationToken.None);
-        var zoneInfo = await connection.ReadZoneInfoAsync(CancellationToken.None);
+        var zoneInfo = await connection.ReadZoneInfoAsync([], CancellationToken.None);
 
         // Assert
         Assert.Equal("Küche", Assert.Single(Assert.Single(topology.Groups).Players).RoomName);
         Assert.Equal(2, favorites.Count);
         Assert.Equal("Sonos Ray", description.ModelName);
+        Assert.NotNull(zoneInfo);
         Assert.Equal("18.8", zoneInfo.DisplayVersion);
         Assert.Equal("00:00:00:00:00:06", zoneInfo.MacAddress);
     }

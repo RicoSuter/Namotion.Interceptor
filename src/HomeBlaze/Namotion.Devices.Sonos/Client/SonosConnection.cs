@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Namotion.Devices.Sonos.Parsing;
 using Sonos.Base;
 using Sonos.Base.Services;
@@ -20,6 +21,10 @@ internal sealed class SonosConnection : IDisposable
     private readonly HttpClient _httpClient;
     private readonly SonosBaseDevice _device;
 
+    // The reads that answer with a UPnP fault, so each is reported once when it starts faulting. Concurrent because
+    // a command refresh can poll the same player as the reconciliation.
+    private readonly ConcurrentDictionary<string, byte> _faultingReads = new(StringComparer.Ordinal);
+
     internal SonosConnection(Uri baseUri, string? uuid, HttpClient httpClient, ISonosServiceProvider provider)
     {
         BaseUri = baseUri;
@@ -41,10 +46,16 @@ internal sealed class SonosConnection : IDisposable
         return DeviceDescriptionParser.Parse(xml);
     }
 
-    internal async Task<SonosZoneInfo> ReadZoneInfoAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads the zone info; null when the speaker answers with a UPnP fault, which is added to
+    /// <paramref name="newFaults"/> when it is new.
+    /// </summary>
+    internal async Task<SonosZoneInfo?> ReadZoneInfoAsync(List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var zoneInfo = await _device.DevicePropertiesService.GetZoneInfo(cancellationToken);
-        return new SonosZoneInfo(zoneInfo.SerialNumber, zoneInfo.MACAddress, zoneInfo.HardwareVersion, zoneInfo.DisplaySoftwareVersion);
+        var zoneInfo = await ReadOrDefaultAsync("GetZoneInfo", () => _device.DevicePropertiesService.GetZoneInfo(cancellationToken), newFaults);
+        return zoneInfo is null
+            ? null
+            : new SonosZoneInfo(zoneInfo.SerialNumber, zoneInfo.MACAddress, zoneInfo.HardwareVersion, zoneInfo.DisplaySoftwareVersion);
     }
 
     internal async Task<SonosTopology> ReadTopologyAsync(CancellationToken cancellationToken)
@@ -74,56 +85,85 @@ internal sealed class SonosConnection : IDisposable
 
     /// <summary>
     /// Reads one player. Requests go one after another: a poll is a dozen small calls, and players are polled in
-    /// parallel already.
+    /// parallel already. A read the speaker answers with a UPnP fault leaves its values unknown and is added to
+    /// <paramref name="newFaults"/> when it was not faulting before; a transport failure throws.
     /// </summary>
-    internal async Task<SonosPlayerReading> ReadPlayerAsync(bool isHomeTheater, CancellationToken cancellationToken)
+    internal async Task<SonosPlayerReading> ReadPlayerAsync(bool isHomeTheater, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var transport = await AvTransport.GetTransportInfo(cancellationToken);
-        var settings = await AvTransport.GetTransportSettings(cancellationToken);
-        var media = await AvTransport.GetMediaInfo(cancellationToken);
-        var position = await AvTransport.GetPositionInfo(cancellationToken);
-        var sleepTimer = await AvTransport.GetRemainingSleepTimerDuration(cancellationToken);
+        var faults = newFaults;
+        var transport = await ReadOrDefaultAsync("GetTransportInfo", () => AvTransport.GetTransportInfo(cancellationToken), faults);
+        var settings = await ReadOrDefaultAsync("GetTransportSettings", () => AvTransport.GetTransportSettings(cancellationToken), faults);
+        var media = await ReadOrDefaultAsync("GetMediaInfo", () => AvTransport.GetMediaInfo(cancellationToken), faults);
+        var position = await ReadOrDefaultAsync("GetPositionInfo", () => AvTransport.GetPositionInfo(cancellationToken), faults);
+        var sleepTimer = await ReadOrDefaultAsync("GetRemainingSleepTimerDuration", () => AvTransport.GetRemainingSleepTimerDuration(cancellationToken), faults);
 
-        var volume = await RenderingControl.GetVolume(new RenderingControlService.GetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken);
-        var mute = await RenderingControl.GetMute(new RenderingControlService.GetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken);
-        var bass = await RenderingControl.GetBass(cancellationToken);
-        var treble = await RenderingControl.GetTreble(cancellationToken);
-        var loudness = await RenderingControl.GetLoudness(new RenderingControlService.GetLoudnessRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken);
+        var volume = await ReadOrDefaultAsync("GetVolume", () => RenderingControl.GetVolume(new RenderingControlService.GetVolumeRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), faults);
+        var mute = await ReadOrDefaultAsync("GetMute", () => RenderingControl.GetMute(new RenderingControlService.GetMuteRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), faults);
+        var bass = await ReadOrDefaultAsync("GetBass", () => RenderingControl.GetBass(cancellationToken), faults);
+        var treble = await ReadOrDefaultAsync("GetTreble", () => RenderingControl.GetTreble(cancellationToken), faults);
+        var loudness = await ReadOrDefaultAsync("GetLoudness", () => RenderingControl.GetLoudness(new RenderingControlService.GetLoudnessRequest { InstanceID = InstanceId, Channel = MasterChannel }, cancellationToken), faults);
 
         bool? nightMode = null;
         bool? speechEnhancement = null;
         if (isHomeTheater)
         {
-            nightMode = await GetEqualizerAsync("NightMode", cancellationToken);
-            speechEnhancement = await GetEqualizerAsync("DialogLevel", cancellationToken);
+            nightMode = await GetEqualizerAsync("NightMode", faults, cancellationToken);
+            speechEnhancement = await GetEqualizerAsync("DialogLevel", faults, cancellationToken);
         }
 
         return new SonosPlayerReading(
             new AvTransportChange(
-                transport.CurrentTransportState,
-                settings.PlayMode,
-                media.CurrentURI,
-                position.TrackURI,
-                position.TrackDuration,
-                position.TrackMetaData,
-                media.CurrentURIMetaData),
-            SonosValues.ParseDuration(position.RelTime),
-            SonosValues.ParseDuration(sleepTimer.RemainingSleepTimerDuration),
+                transport?.CurrentTransportState,
+                settings?.PlayMode,
+                media?.CurrentURI,
+                position?.TrackURI,
+                position?.TrackDuration,
+                position?.TrackMetaData,
+                media?.CurrentURIMetaData),
+            SonosValues.ParseDuration(position?.RelTime),
+            SonosValues.ParseDuration(sleepTimer?.RemainingSleepTimerDuration),
             new RenderingControlChange(
-                volume.CurrentVolume,
-                mute.CurrentMute,
-                bass.CurrentBass,
-                treble.CurrentTreble,
-                loudness.CurrentLoudness,
+                volume?.CurrentVolume,
+                mute?.CurrentMute,
+                bass?.CurrentBass,
+                treble?.CurrentTreble,
+                loudness?.CurrentLoudness,
                 nightMode,
-                speechEnhancement));
+                speechEnhancement),
+            HasPosition: position is not null,
+            HasSleepTimer: sleepTimer is not null);
     }
 
-    internal async Task<GroupRenderingControlChange> ReadGroupAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads the group volume and mute from a coordinator, with the same fault handling as <see cref="ReadPlayerAsync"/>.
+    /// </summary>
+    internal async Task<GroupRenderingControlChange> ReadGroupAsync(List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
-        var volume = await GroupRenderingControl.GetGroupVolume(cancellationToken);
-        var mute = await GroupRenderingControl.GetGroupMute(cancellationToken);
-        return new GroupRenderingControlChange(volume.CurrentVolume, mute.CurrentMute);
+        var volume = await ReadOrDefaultAsync("GetGroupVolume", () => GroupRenderingControl.GetGroupVolume(cancellationToken), newFaults);
+        var mute = await ReadOrDefaultAsync("GetGroupMute", () => GroupRenderingControl.GetGroupMute(cancellationToken), newFaults);
+        return new GroupRenderingControlChange(volume?.CurrentVolume, mute?.CurrentMute);
+    }
+
+    // A UPnP fault means the speaker answered but cannot report this value now, for example an action a model or a
+    // grouped member does not support; the other reads still count.
+    private async Task<T?> ReadOrDefaultAsync<T>(string action, Func<Task<T>> read, List<SonosReadFault> newFaults)
+        where T : class
+    {
+        try
+        {
+            var result = await read();
+            _faultingReads.TryRemove(action, out _);
+            return result;
+        }
+        catch (SonosServiceException exception)
+        {
+            if (_faultingReads.TryAdd(action, 0))
+            {
+                newFaults.Add(new SonosReadFault(action, exception));
+            }
+
+            return null;
+        }
     }
 
     internal Task PlayAsync(CancellationToken cancellationToken) => _device.Play(cancellationToken);
@@ -248,10 +288,11 @@ internal sealed class SonosConnection : IDisposable
         metadata.Contains('<') ? metadata.Replace("&", "&amp;", StringComparison.Ordinal) : metadata;
 
     // Any level above zero is on: the Arc Ultra reports its speech enhancement level 1 to 4 as DialogLevel.
-    private async Task<bool> GetEqualizerAsync(string type, CancellationToken cancellationToken)
+    private async Task<bool?> GetEqualizerAsync(string type, List<SonosReadFault> faults, CancellationToken cancellationToken)
     {
-        var response = await RenderingControl.GetEQ(new RenderingControlService.GetEQRequest { InstanceID = InstanceId, EQType = type }, cancellationToken);
-        return response.CurrentValue != 0;
+        var response = await ReadOrDefaultAsync("GetEQ " + type,
+            () => RenderingControl.GetEQ(new RenderingControlService.GetEQRequest { InstanceID = InstanceId, EQType = type }, cancellationToken), faults);
+        return response is null ? null : response.CurrentValue != 0;
     }
 
     public void Dispose() => _device.Dispose();

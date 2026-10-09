@@ -113,6 +113,16 @@ public abstract partial class SonosDevice :
         IsInTopology = true;
     }
 
+    /// <summary>
+    /// Applies the device description alone, when the zone info could not be read; it is read again next time.
+    /// </summary>
+    internal void ApplyDescription(SonosDeviceDescription description)
+    {
+        Model = description.ModelName;
+        ProductCode = description.ModelNumber;
+        ServiceIds = description.ServiceIds;
+    }
+
     internal void ApplyStaticData(
         SonosDeviceDescription description,
         string? serialNumber,
@@ -120,9 +130,7 @@ public abstract partial class SonosDevice :
         string? hardwareRevision,
         string? softwareVersion)
     {
-        Model = description.ModelName;
-        ProductCode = description.ModelNumber;
-        ServiceIds = description.ServiceIds;
+        ApplyDescription(description);
         SerialNumber = SonosValues.NullIfEmpty(serialNumber);
         MacAddress = SonosValues.NullIfEmpty(macAddress);
         HardwareRevision = SonosValues.NullIfEmpty(hardwareRevision);

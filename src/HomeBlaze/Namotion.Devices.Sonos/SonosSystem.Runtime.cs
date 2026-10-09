@@ -796,14 +796,18 @@ public partial class SonosSystem
             connection = FindConnection(player.Uuid)
                 ?? throw new InvalidOperationException("No connection to the player.");
 
+            // A read the speaker answers with a UPnP fault keeps its previous values; only a transport failure, which
+            // throws, makes the player unreachable.
+            var newFaults = new List<SonosReadFault>();
             if (player.NeedsStaticData)
             {
-                await ReadStaticDataAsync(player, connection, cancellationToken);
+                await ReadStaticDataAsync(player, connection, newFaults, cancellationToken);
             }
 
-            var reading = await connection.ReadPlayerAsync(player.IsHomeTheater, cancellationToken);
+            var reading = await connection.ReadPlayerAsync(player.IsHomeTheater, newFaults, cancellationToken);
             var group = Groups.GetValueOrDefault(player.Uuid);
-            var groupReading = group is null ? null : await connection.ReadGroupAsync(cancellationToken);
+            var groupReading = group is null ? null : await connection.ReadGroupAsync(newFaults, cancellationToken);
+            LogNewReadFaults(player, newFaults);
 
             // Applied outside _connectionsLock: the apply takes the subjects' state locks and fires change
             // notifications, whose subscribers may issue commands that take _connectionsLock. Stale values on a
@@ -842,7 +846,9 @@ public partial class SonosSystem
             connection = FindConnection(satellite.Uuid)
                 ?? throw new InvalidOperationException("No connection to the satellite.");
 
-            await ReadStaticDataAsync(satellite, connection, cancellationToken);
+            var newFaults = new List<SonosReadFault>();
+            await ReadStaticDataAsync(satellite, connection, newFaults, cancellationToken);
+            LogNewReadFaults(satellite, newFaults);
             ReportPollSucceededIfCurrent(satellite, connection);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -862,11 +868,26 @@ public partial class SonosSystem
         }
     }
 
-    private static async Task ReadStaticDataAsync(SonosDevice device, SonosConnection connection, CancellationToken cancellationToken)
+    private static async Task ReadStaticDataAsync(SonosDevice device, SonosConnection connection, List<SonosReadFault> newFaults, CancellationToken cancellationToken)
     {
         var description = await connection.ReadDescriptionAsync(cancellationToken);
-        var zoneInfo = await connection.ReadZoneInfoAsync(cancellationToken);
-        device.ApplyStaticData(description, zoneInfo.SerialNumber, zoneInfo.MacAddress, zoneInfo.HardwareVersion, zoneInfo.DisplayVersion);
+        if (await connection.ReadZoneInfoAsync(newFaults, cancellationToken) is { } zoneInfo)
+        {
+            device.ApplyStaticData(description, zoneInfo.SerialNumber, zoneInfo.MacAddress, zoneInfo.HardwareVersion, zoneInfo.DisplayVersion);
+        }
+        else
+        {
+            // The static data stays incomplete, so the next poll reads the zone info again.
+            device.ApplyDescription(description);
+        }
+    }
+
+    private void LogNewReadFaults(SonosDevice device, List<SonosReadFault> newFaults)
+    {
+        foreach (var fault in newFaults)
+        {
+            _logger.LogDebug(fault.Exception, "{Device} answered {Action} with a fault; the values it reports keep their last state.", device.Title, fault.Action);
+        }
     }
 
     // Read through a player, not the seed: the seed may be a satellite, and satellites answer the favorites Browse

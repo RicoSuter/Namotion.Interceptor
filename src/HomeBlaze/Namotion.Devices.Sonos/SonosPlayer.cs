@@ -644,7 +644,10 @@ public partial class SonosPlayer : SonosDevice,
             if (_lastAvTransportEventAt <= pollStartedAt)
             {
                 ApplyAvTransport(reading.AvTransport);
-                CurrentTrackPosition = reading.Position;
+                if (reading.HasPosition)
+                {
+                    CurrentTrackPosition = reading.Position;
+                }
             }
 
             if (_lastRenderingControlEventAt <= pollStartedAt)
@@ -652,7 +655,10 @@ public partial class SonosPlayer : SonosDevice,
                 ApplyRenderingControl(reading.RenderingControl);
             }
 
-            ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
+            if (reading.HasSleepTimer)
+            {
+                ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
+            }
         }
     }
 

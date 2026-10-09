@@ -32,10 +32,19 @@ internal sealed record RenderingControlChange(
 internal sealed record GroupRenderingControlChange(int? Volume, bool? Mute);
 
 /// <summary>
-/// One poll of a player. Position and sleep timer are never evented, so they come only from here.
+/// One poll of a player. Position and sleep timer are never evented, so they come only from here. A read the
+/// speaker answered with a fault leaves its values unknown: null, or for the position and sleep timer,
+/// <see cref="HasPosition"/> and <see cref="HasSleepTimer"/> false.
 /// </summary>
 internal sealed record SonosPlayerReading(
     AvTransportChange AvTransport,
     TimeSpan? Position,
     TimeSpan? SleepTimerRemaining,
-    RenderingControlChange RenderingControl);
+    RenderingControlChange RenderingControl,
+    bool HasPosition = true,
+    bool HasSleepTimer = true);
+
+/// <summary>
+/// A read that started to answer with a UPnP fault: the speaker is reachable, but cannot report that value now.
+/// </summary>
+internal sealed record SonosReadFault(string Action, Exception Exception);

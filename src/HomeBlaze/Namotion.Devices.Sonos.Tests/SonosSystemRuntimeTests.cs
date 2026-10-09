@@ -584,6 +584,63 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenAPollReadAnswersWithAFault_ThenThePlayerStaysConnectedAndKeepsTheValue()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        speaker.RespondWithFault("GetVolume", 701);
+
+        // Act
+        await connected.System.RefreshAsync(CancellationToken.None);
+        await connected.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(connected.Player.IsConnected);
+        Assert.Null(connected.Player.StatusMessage);
+        Assert.Equal(0.44m, connected.Player.Volume);
+        Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message.Contains("GetVolume"));
+        Assert.DoesNotContain(logger.Warnings, message => message.Contains("Polling"));
+    }
+
+    [Fact]
+    public async Task WhenTheZoneInfoAnswersWithAFault_ThenThePlayerConnectsAndTheZoneInfoIsReadLater()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        speaker.RespondWithFault("GetZoneInfo", 701);
+        var system = ConnectedSystem.CreateSystem(speaker.Host);
+        system.PollingInterval = TimeSpan.FromHours(1);
+
+        try
+        {
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => system.IsConnected && system.Players.TryGetValue(TestFixtures.KitchenUuid, out var player) && player.IsConnected,
+                ConnectedSystem.WaitTimeout,
+                message: "A fault in the zone info should not keep the player offline.");
+            var player = system.Players[TestFixtures.KitchenUuid];
+            Assert.Equal("Sonos Ray", player.Model);
+            Assert.Null(player.SerialNumber);
+
+            // Act
+            speaker.ClearFault("GetZoneInfo");
+            await system.RefreshAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal("00-00-00-00-00-06:D", player.SerialNumber);
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenAPlayerMissesAPoll_ThenItsSubscriptionsAreKept()
     {
         // Arrange
