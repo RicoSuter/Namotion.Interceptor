@@ -16,6 +16,12 @@ namespace Namotion.Devices.Sonos;
 /// <summary>
 /// A Sonos household: its room players, their bonded satellites and the groups they form.
 /// </summary>
+/// <remarks>
+/// The state of the system, its players, satellites and groups changes, and raises its change notifications, while
+/// internal locks are held that every Sonos operation and poll also takes. A change subscriber must therefore not
+/// wait synchronously for a Sonos operation, for example with <c>GetAwaiter().GetResult()</c>, or that wait deadlocks;
+/// it may start one without waiting for it.
+/// </remarks>
 [Category("Devices")]
 [Description("Sonos household with its room players, satellites and groups")]
 [InterceptorSubject]

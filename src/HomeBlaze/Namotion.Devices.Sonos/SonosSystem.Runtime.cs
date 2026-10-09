@@ -790,7 +790,8 @@ public partial class SonosSystem
     {
         // Teardown clears the connections under the same lock before it marks devices offline, so a late success
         // cannot undo that. This and ReportPollFailedIfCurrent are the only subject writes made under
-        // _connectionsLock; they take no subject state lock.
+        // _connectionsLock; they take no subject state lock. The SonosSystem remarks state what that asks of change
+        // subscribers.
         lock (_connectionsLock)
         {
             if (ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection))
