@@ -62,7 +62,7 @@ using System.Text.Json.Serialization;
                         (o) => ((StatusMachine)o).Name,
                         (o, v) => ((StatusMachine)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false),
+                        isDynamic: false).WithStoredValueReader<string>(static (o) => ((StatusMachine)o)._Name),
                     ["Status"] = new SubjectPropertyMetadata(
                         typeof(global::IHasStatus).GetProperty(nameof(global::IHasStatus.Status), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((global::IHasStatus)o).Status,
