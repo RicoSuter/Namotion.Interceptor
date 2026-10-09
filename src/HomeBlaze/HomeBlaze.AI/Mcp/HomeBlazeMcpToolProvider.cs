@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -8,6 +7,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Models;
+using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -37,12 +37,6 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         },
         required = new[] { "path", "method" }
     });
-
-    // Enums are listed and returned by name, so arguments accept names as well as numbers.
-    private static readonly JsonSerializerOptions ArgumentSerializerOptions = new()
-    {
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
@@ -97,7 +91,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             kind = method.Kind.ToString().ToLowerInvariant(),
             title = method.Title,
             description = method.Description,
-            returnType = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
+            returnType = JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
             parameters = method.Parameters
                 .Where(parameter => parameter.RequiresInput)
                 .Select(parameter => McpMethodParameter.Create(
@@ -128,27 +122,23 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Operations are not allowed in read-only mode." };
         }
 
+        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
+        var (arguments, argumentError) = ReadArguments(input, inputParameters);
+        if (argumentError is not null)
+        {
+            return new { error = argumentError };
+        }
+
         try
         {
-            // Parse user-input arguments from JSON
-            object?[]? userParameters = null;
-            if (input.TryGetProperty("parameters", out var argumentsElement))
-            {
-                var inputParams = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
-                userParameters = new object?[inputParams.Length];
-
-                for (var i = 0; i < inputParams.Length; i++)
-                {
-                    var parameter = inputParams[i];
-                    if (argumentsElement.TryGetProperty(parameter.Name, out var argumentValue))
-                    {
-                        userParameters[i] = argumentValue.Deserialize(parameter.Type, ArgumentSerializerOptions);
-                    }
-                }
-            }
-
-            var result = await method.InvokeAsync(userParameters, _serviceProvider, cancellationToken);
+            var result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
             return result is not null ? new { success = true, result } : new { success = true };
+        }
+        catch (ArgumentException exception)
+        {
+            // Argument validation messages are written for the caller, for example listing the known values.
+            _logger.LogWarning(exception, "Method '{MethodName}' rejected an argument.", methodName);
+            return new { error = exception.Message };
         }
         catch (Exception exception)
         {
@@ -156,6 +146,59 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Method invocation failed. Check server logs for details." };
         }
     }
+
+    private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
+    {
+        var hasArguments = input.TryGetProperty("parameters", out var argumentsElement) &&
+                           argumentsElement.ValueKind != JsonValueKind.Null;
+        if (hasArguments && argumentsElement.ValueKind != JsonValueKind.Object)
+        {
+            return (null, $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}");
+        }
+
+        if (hasArguments)
+        {
+            foreach (var argument in argumentsElement.EnumerateObject())
+            {
+                if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
+                {
+                    return (null, $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}");
+                }
+            }
+        }
+
+        var arguments = new object?[inputParameters.Length];
+        for (var i = 0; i < inputParameters.Length; i++)
+        {
+            var parameter = inputParameters[i];
+            if (!hasArguments || !argumentsElement.TryGetProperty(parameter.Name, out var argumentValue))
+            {
+                // A missing non-nullable argument would otherwise reach the method as default, for example a volume of 0.
+                if (!parameter.IsNullable)
+                {
+                    return (null, $"Missing parameter '{parameter.Name}'. {DescribeExpectedParameters(inputParameters)}");
+                }
+
+                continue;
+            }
+
+            try
+            {
+                arguments[i] = McpValueConverter.Deserialize(argumentValue, parameter.Type);
+            }
+            catch (JsonException exception)
+            {
+                return (null, $"Invalid value for parameter '{parameter.Name}': {exception.Message}");
+            }
+        }
+
+        return (arguments, null);
+    }
+
+    private static string DescribeExpectedParameters(MethodParameter[] inputParameters) =>
+        inputParameters.Length == 0
+            ? "The method takes no parameters."
+            : $"Expected parameters: {string.Join(", ", inputParameters.Select(parameter => parameter.Name))}.";
 
     private static string? GetUnitDescription(StateUnit? unit) => unit switch
     {

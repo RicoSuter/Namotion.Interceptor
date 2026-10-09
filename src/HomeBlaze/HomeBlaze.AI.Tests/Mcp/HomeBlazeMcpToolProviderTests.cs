@@ -201,6 +201,120 @@ public class HomeBlazeMcpToolProviderTests
         Assert.Equal(TestMode.All, capturedMode);
     }
 
+    [Theory]
+    [InlineData("""{"level": 0.3}""", "Unknown parameter 'level'.")]
+    [InlineData("""{}""", "Missing parameter 'volume'.")]
+    [InlineData(null, "Missing parameter 'volume'.")]
+    public async Task WhenInvokeMethodArgumentIsMissingOrMisspelled_ThenReturnsErrorNamingTheParametersWithoutInvoking(string? parameters, string expectedError)
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetVolume", _ => new MethodMetadata(_ =>
+        {
+            isInvoked = true;
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetVolume",
+            Parameters =
+            [
+                new MethodParameter { Name = "volume", Type = typeof(decimal) },
+                new MethodParameter { Name = "title", Type = typeof(string), IsNullable = true },
+                new MethodParameter { Name = "cancellationToken", Type = typeof(CancellationToken), IsRuntimeProvided = true }
+            ]
+        });
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "SetVolume", parameters);
+
+        // Assert
+        Assert.Equal($"{expectedError} Expected parameters: volume, title.", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenInvokeMethodWithoutNullableArgument_ThenItIsPassedAsNull()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        object?[]? capturedArguments = null;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("PlayStream", _ => new MethodMetadata(arguments =>
+        {
+            capturedArguments = arguments;
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "PlayStream",
+            Parameters =
+            [
+                new MethodParameter { Name = "uri", Type = typeof(string) },
+                new MethodParameter { Name = "title", Type = typeof(string), IsNullable = true }
+            ]
+        });
+
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "", method = "PlayStream", parameters = new { uri = "http://example.com/live" } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(["http://example.com/live", null], capturedArguments!);
+    }
+
+    [Theory]
+    [InlineData("""{"mode": 42}""")]
+    [InlineData("""{"mode": "Off, One"}""")]
+    [InlineData("""{"mode": "Sometimes"}""")]
+    public async Task WhenInvokeMethodEnumArgumentIsUndefined_ThenReturnsErrorListingTheValuesWithoutInvoking(string parameters)
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("SetMode", _ => new MethodMetadata(_ =>
+        {
+            isInvoked = true;
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "SetMode",
+            Parameters = [new MethodParameter { Name = "mode", Type = typeof(TestMode) }]
+        });
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "SetMode", parameters);
+
+        // Assert
+        Assert.Contains("'mode'", error);
+        Assert.Contains("Off, All, One", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenMethodRejectsAnArgument_ThenTheArgumentErrorReachesTheCaller()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("PlayFavorite", _ => new MethodMetadata(_ =>
+            throw new ArgumentException("Unknown favorite 'Jazz'. Known favorites: Rock, Pop.", "title"))
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "PlayFavorite",
+            Parameters = [new MethodParameter { Name = "title", Type = typeof(string) }]
+        });
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "PlayFavorite", """{"title": "Jazz"}""");
+
+        // Assert
+        Assert.StartsWith("Unknown favorite 'Jazz'. Known favorites: Rock, Pop.", error);
+    }
+
     [Fact]
     public async Task WhenInvokeQueryMethodInReadOnlyMode_ThenAllowed()
     {
@@ -383,6 +497,16 @@ public class HomeBlazeMcpToolProviderTests
         };
         var factory = new McpToolFactory(room, config);
         return (room, config, factory);
+    }
+
+    private static async Task<string> InvokeForErrorAsync(McpToolFactory factory, string methodName, string? parameters)
+    {
+        var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
+        var input = parameters is null
+            ? JsonSerializer.SerializeToElement(new { path = "", method = methodName })
+            : JsonSerializer.SerializeToElement(new { path = "", method = methodName, parameters = JsonDocument.Parse(parameters).RootElement });
+        var result = await tool.Handler(input, CancellationToken.None);
+        return JsonSerializer.SerializeToElement(result).GetProperty("error").GetString()!;
     }
 
     private static async Task<JsonElement> ListMethodAsync(McpToolFactory factory, string methodName)
