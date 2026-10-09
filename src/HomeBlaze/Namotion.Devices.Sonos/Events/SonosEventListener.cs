@@ -58,7 +58,22 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
     internal bool IsListening => !_disposing && !_acceptFailed && _listener?.IsListening == true;
 
-    internal IReadOnlyCollection<SonosEventSubscription> Subscriptions => _subscriptionsByKey.Values.ToArray();
+    /// <summary>
+    /// The current subscriptions, enumerated without a lock or a copy, so one added or removed meanwhile may or may not
+    /// be seen.
+    /// </summary>
+    internal IEnumerable<SonosEventSubscription> Subscriptions
+    {
+        get
+        {
+            foreach (var pair in _subscriptionsByKey)
+            {
+                yield return pair.Value;
+            }
+        }
+    }
+
+    internal bool HasSubscription(string key) => _subscriptionsByKey.ContainsKey(key);
 
     /// <summary>
     /// The URI speakers send events to, without the subscription key; null until started.
@@ -234,8 +249,12 @@ internal sealed class SonosEventListener : IAsyncDisposable
     /// Unsubscribes every subscription concurrently. Best effort: an unreachable speaker drops the subscription itself
     /// once it expires.
     /// </summary>
-    internal Task UnsubscribeAllAsync(CancellationToken cancellationToken) =>
-        Task.WhenAll(_subscriptionsByKey.Values.Select(subscription => TryUnsubscribeAsync(subscription, cancellationToken)));
+    internal Task UnsubscribeAllAsync(CancellationToken cancellationToken)
+    {
+        // A snapshot first: each unsubscribe removes its subscription.
+        var subscriptions = Subscriptions.ToArray();
+        return Task.WhenAll(subscriptions.Select(subscription => TryUnsubscribeAsync(subscription, cancellationToken)));
+    }
 
     private async Task TryUnsubscribeAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
     {
