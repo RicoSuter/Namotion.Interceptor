@@ -4,6 +4,7 @@
     1: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Timestamp: {Scrubbed},
         Items: [
           {
@@ -64,6 +65,7 @@
     2: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -103,6 +105,7 @@
     3: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -141,6 +144,7 @@
     4: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -180,6 +184,7 @@
     5: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {
@@ -218,6 +223,7 @@
     6: {
       children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       father: {

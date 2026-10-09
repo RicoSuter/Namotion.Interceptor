@@ -4,6 +4,7 @@
     1: {
       Children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       Father: {
@@ -45,6 +46,7 @@
     2: {
       Children: {
         Kind: Collection,
+        Mode: Complete,
         Count: 0
       },
       Father: {

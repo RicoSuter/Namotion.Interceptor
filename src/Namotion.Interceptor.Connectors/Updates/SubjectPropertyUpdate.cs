@@ -15,6 +15,16 @@ public class SubjectPropertyUpdate
     public SubjectPropertyUpdateKind Kind { get; set; }
 
     /// <summary>
+    /// How this update relates to what the receiver already holds, see <see cref="SubjectPropertyUpdateMode"/>.
+    /// A mode that does not apply to <see cref="Kind"/> is treated as <see cref="SubjectPropertyUpdateMode.Incremental"/>,
+    /// which is the default and is omitted from JSON.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    [JsonPropertyName("mode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public SubjectPropertyUpdateMode Mode { get; set; }
+
+    /// <summary>
     /// The value for Value kind properties.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
