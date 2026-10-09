@@ -33,7 +33,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             path = new { type = "string", description = "Subject path" },
             method = new { type = "string", description = "Method name" },
-            parameters = new { type = "object", description = "Arguments by parameter name, in the type, format and unit list_methods gives (optional)" }
+            parameters = new { type = "object", description = "Arguments by parameter name, in the type, format, pattern and unit list_methods gives (optional)" }
         },
         required = new[] { "path", "method" }
     });
@@ -63,7 +63,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         yield return new McpToolInfo
         {
             Name = "list_methods",
-            Description = "List operations and queries available on a subject at the given path, with each parameter's type, format and unit.",
+            Description = "List operations and queries available on a subject at the given path, with each parameter's type, format, pattern and unit.",
             InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync
         };
