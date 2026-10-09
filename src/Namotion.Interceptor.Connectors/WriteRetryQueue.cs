@@ -7,7 +7,8 @@ namespace Namotion.Interceptor.Connectors;
 
 /// <summary>
 /// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
-/// When the queue is full, oldest writes are dropped to make room for new ones.
+/// When the queue is full, its writes are collapsed to one per property and then the oldest are dropped
+/// to make room for new ones.
 /// </summary>
 internal sealed class WriteRetryQueue : IDisposable
 {
@@ -18,6 +19,9 @@ internal sealed class WriteRetryQueue : IDisposable
     // Reusable buffer to avoid allocation on each flush (capped at 1024 items, loops for larger queues)
     private const int MaxBatchSize = 1024;
     private SubjectPropertyChange[] _scratchBuffer = new SubjectPropertyChange[64];
+
+    // Reused across overflows; created on the first one, since most queues never overflow.
+    private Dictionary<PropertyReference, (SubjectPropertyChange Change, int LastIndex)>? _collapseScratch;
 
     private readonly ILogger _logger;
     private readonly QueueMetrics _metrics;
@@ -56,8 +60,10 @@ internal sealed class WriteRetryQueue : IDisposable
     }
 
     /// <summary>
-    /// Enqueues writes for retry. When the queue exceeds its capacity, the oldest writes are dropped.
-    /// This operation is thread-safe.
+    /// Enqueues writes for retry. When the queue exceeds its capacity, writes are first collapsed to one per
+    /// property (see <see cref="Collapse"/>) and then the oldest are dropped, so a property written
+    /// repeatedly cannot evict other properties' writes and every surviving property keeps its latest
+    /// commit. This operation is thread-safe.
     /// </summary>
     public void Enqueue(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
@@ -99,6 +105,22 @@ internal sealed class WriteRetryQueue : IDisposable
                 _maxQueueSize);
         }
     }
+
+    /// <summary>
+    /// Collapses two changes to one property into one that keeps the old value of the older change and the
+    /// new value and origin of the newer one, newer by <see cref="SubjectPropertyChange.Revision"/>. The
+    /// survivor carries the newer revision only when both changes carry one.
+    /// </summary>
+    internal static SubjectPropertyChange Collapse(SubjectPropertyChange kept, SubjectPropertyChange change) =>
+        change.Revision == 0 || kept.Revision == 0
+            // One of them orders against nothing, so capture order decides and the survivor carries
+            // no revision either. Same rule as the flush-path collapse: keeping a revision here would
+            // let the survivor be ranked against the property marker and dropped, on a comparison
+            // against a value it was not ordered by.
+            ? kept.MergeWithNewer(change).WithoutRevision()
+            : change.Revision < kept.Revision
+                ? change.MergeWithNewer(kept)
+                : kept.MergeWithNewer(change);
 
     /// <summary>
     /// Flushes pending writes from the queue to the source.
@@ -348,8 +370,20 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
+    // Under _lock. Collapses only once the queue has overflowed, so a queue within its capacity costs
+    // nothing beyond the append, and the capacity bounds the collapse.
     private int TrimToCapacity()
     {
+        if (_pendingWrites.Count <= _maxQueueSize)
+        {
+            return 0;
+        }
+
+        if (_maxQueueSize > 0)
+        {
+            CollapsePendingPerProperty();
+        }
+
         var droppedCount = Math.Max(0, _pendingWrites.Count - _maxQueueSize);
         if (droppedCount > 0)
         {
@@ -357,6 +391,44 @@ internal sealed class WriteRetryQueue : IDisposable
         }
 
         return droppedCount;
+    }
+
+    // Each property's survivor takes the slot of its latest change, so the eviction that follows drops
+    // the properties written longest ago rather than the one written most, and every survivor carries
+    // its property's latest commit.
+    private void CollapsePendingPerProperty()
+    {
+        var pending = _pendingWrites;
+        var survivors = _collapseScratch ??= new Dictionary<PropertyReference, (SubjectPropertyChange Change, int LastIndex)>(PropertyReference.Comparer);
+        for (var index = 0; index < pending.Count; index++)
+        {
+            var change = pending[index];
+            survivors[change.Property] = survivors.TryGetValue(change.Property, out var survivor)
+                ? (Collapse(survivor.Change, change), index)
+                : (change, index);
+        }
+
+        var collapsedCount = pending.Count - survivors.Count;
+        if (collapsedCount > 0)
+        {
+            var write = 0;
+            for (var index = 0; index < pending.Count; index++)
+            {
+                var survivor = survivors[pending[index].Property];
+                if (survivor.LastIndex == index)
+                {
+                    pending[write++] = survivor.Change;
+                }
+            }
+
+            pending.RemoveRange(write, pending.Count - write);
+
+            // An absorbed write leaves the owned count too: its value travels on in the survivor, so it
+            // is neither pending nor dropped.
+            _ownedWriteCount -= collapsedCount;
+        }
+
+        survivors.Clear();
     }
 
     /// <summary>
