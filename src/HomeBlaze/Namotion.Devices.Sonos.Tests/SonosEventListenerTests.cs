@@ -358,18 +358,19 @@ public class SonosEventListenerTests
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => handlerCalls++, CancellationToken.None);
 
         // Act
+        // The oversized chunk is the last write and has no terminator, so the server never closes over unread data.
         using var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, port);
         await using var stream = client.GetStream();
         var headerBytes = Encoding.ASCII.GetBytes(
             $"NOTIFY /event/RINCON_X/AVTransport HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nSID: uuid:sub-1\r\nNT: upnp:event\r\nNTS: upnp:propchange\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
-        var chunkSize = 1024 * 1024 + 1;
-        var chunkBytes = new byte[chunkSize];
-        Array.Fill(chunkBytes, (byte)'a');
+        // The declared chunk is larger than what is sent, so the cap is hit while the chunk is still incomplete.
+        var declaredChunkSize = 2 * 1024 * 1024;
+        var sentBytes = new byte[1024 * 1024 + 16 * 1024];
+        Array.Fill(sentBytes, (byte)'a');
         await stream.WriteAsync(headerBytes);
-        await stream.WriteAsync(Encoding.ASCII.GetBytes($"{chunkSize:X}\r\n"));
-        await stream.WriteAsync(chunkBytes);
-        await stream.WriteAsync(Encoding.ASCII.GetBytes("\r\n0\r\n\r\n"));
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"{declaredChunkSize:X}\r\n"));
+        await stream.WriteAsync(sentBytes);
         using var reader = new StreamReader(stream, Encoding.ASCII);
         var statusLine = await reader.ReadLineAsync().WaitAsync(WaitTimeout);
 

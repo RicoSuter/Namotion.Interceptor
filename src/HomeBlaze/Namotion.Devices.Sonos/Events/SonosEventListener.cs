@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
@@ -68,9 +69,13 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
     /// <summary>
     /// Subscribes to the events of a service. Throws <see cref="InvalidOperationException"/> when the key is already
-    /// subscribed or the listener is not started, and <see cref="OperationCanceledException"/> when the subscription
-    /// is unsubscribed concurrently.
+    /// subscribed or the listener is not started, <see cref="ObjectDisposedException"/> after disposal,
+    /// <see cref="HttpRequestException"/> when the SUBSCRIBE request fails, and <see cref="OperationCanceledException"/>
+    /// when the subscription is unsubscribed concurrently.
     /// </summary>
+    /// <remarks>
+    /// The handler runs on the thread pool and must not block on disposing the listener, which waits for running handlers.
+    /// </remarks>
     internal async Task<SonosEventSubscription> SubscribeAsync(
         string key, Uri eventUri, Action<string> handler, CancellationToken cancellationToken)
     {
@@ -342,22 +347,29 @@ internal sealed class SonosEventListener : IAsyncDisposable
     /// <returns>The body, or null when it exceeds <see cref="MaxNotifyBodyBytes"/>. Also bounds chunked bodies, which declare no length.</returns>
     private static async Task<string?> ReadBodyAsync(HttpListenerRequest request)
     {
-        using var buffered = new MemoryStream();
-        var buffer = new byte[8192];
-        while (true)
+        using var buffered = new MemoryStream(request.ContentLength64 > 0 ? (int)request.ContentLength64 : 0);
+        var buffer = ArrayPool<byte>.Shared.Rent(8192);
+        try
         {
-            var read = await request.InputStream.ReadAsync(buffer);
-            if (read == 0)
+            while (true)
             {
-                break;
-            }
+                var read = await request.InputStream.ReadAsync(buffer);
+                if (read == 0)
+                {
+                    break;
+                }
 
-            if (buffered.Length + read > MaxNotifyBodyBytes)
-            {
-                return null;
-            }
+                if (buffered.Length + read > MaxNotifyBodyBytes)
+                {
+                    return null;
+                }
 
-            buffered.Write(buffer, 0, read);
+                buffered.Write(buffer, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
 
         buffered.Position = 0;
