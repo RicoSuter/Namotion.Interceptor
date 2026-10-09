@@ -1,5 +1,6 @@
 /// <summary>
-/// Status page designed for video: large type, the video palette, and a poll of <c>/status</c> every 500 ms.
+/// Status page designed for video: large type, the video palette, and a poll of <c>/status</c> every 500 ms. Sizes
+/// follow the viewport width, so the page also fits one half of a split recording.
 /// </summary>
 public static class StatusPage
 {
@@ -16,16 +17,16 @@ public static class StatusPage
               margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center;
               background: #1c1c1e; color: #f5f5f7; font-family: Inter, system-ui, sans-serif;
             }
-            main { width: 920px; }
+            main { width: min(920px, 88vw); }
             .kicker { font-size: 22px; font-weight: 600; letter-spacing: 0.24em; color: #a1a1a6; text-transform: uppercase; }
-            h1 { margin: 16px 0 48px; font-size: 104px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+            h1 { margin: 16px 0 48px; font-size: min(104px, 8.2vw); font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
             .card {
               background: #2c2c2e; border-radius: 28px; padding: 40px 48px;
               box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
             }
             .row { display: flex; justify-content: space-between; align-items: baseline; }
             .label { font-size: 28px; font-weight: 500; color: #a1a1a6; }
-            .value { font-size: 64px; font-weight: 600; font-variant-numeric: tabular-nums; }
+            .value { font-size: min(64px, 5.6vw); font-weight: 600; font-variant-numeric: tabular-nums; }
             .bar { margin-top: 28px; height: 18px; border-radius: 9px; background: #3a3a3c; overflow: hidden; }
             .fill { height: 100%; width: 0; border-radius: 9px; background: #ff9f0a; transition: width 0.45s ease, background 0.6s ease; }
             .pill {
@@ -61,6 +62,7 @@ public static class StatusPage
                 document.getElementById('fill').style.width = (share * 100).toFixed(1) + '%';
                 document.getElementById('readiness').textContent = machine.isReady ? 'Ready to brew' : 'Heating up';
                 document.getElementById('page').classList.toggle('ready', machine.isReady);
+                document.body.dataset.live = 'true';
               } catch {
                 // The next poll retries.
               }

@@ -20,13 +20,26 @@ builder.Services.AddHostedService<CoffeeMachineSimulatorService>();
 var app = builder.Build();
 
 app.MapGet("/", () => Results.Content(StatusPage.Html, "text/html"));
+app.MapGet("/controls", () => Results.Content(ControlsPage.Html, "text/html"));
 
 app.MapGet("/status", (CoffeeMachine machine) => new
 {
     machine.Status,
     machine.IsReady,
     machine.Boiler.Temperature,
-    machine.Boiler.TargetTemperature
+    machine.Boiler.TargetTemperature,
+    machine.CupsBrewed
+});
+
+app.MapPost("/brew/{recipe}", (CoffeeMachine machine, string recipe) =>
+{
+    if (!machine.IsReady || !machine.Recipes.ContainsKey(recipe))
+    {
+        return Results.Conflict();
+    }
+
+    machine.Brew(recipe);
+    return Results.Accepted();
 });
 
 var machine = app.Services.GetRequiredService<CoffeeMachine>();

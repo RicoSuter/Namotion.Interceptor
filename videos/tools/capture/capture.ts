@@ -19,7 +19,8 @@ const apps = resolveApps(config);
 const terminals = (config.terminal ?? []).filter(capture => !only || capture.name === only);
 const demosDirectory = join(paths.episodeDirectory, 'demos');
 const demoFiles = existsSync(demosDirectory)
-  ? readdirSync(demosDirectory).filter(file => file.endsWith('.ts') && (!only || basename(file, '.ts') === only))
+  // Demos record in name order against the same running apps, so a demo can rely on the state an earlier one left.
+  ? readdirSync(demosDirectory).filter(file => file.endsWith('.ts') && (!only || basename(file, '.ts') === only)).sort()
   : [];
 
 mkdirSync(paths.terminalDirectory, {recursive: true});

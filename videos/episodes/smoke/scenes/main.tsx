@@ -1,15 +1,20 @@
 import {makeScene2D} from '@revideo/2d';
-import {all, chain, delay, spring, waitFor} from '@revideo/core';
+import {all, chain, delay, spring, Vector2, waitFor} from '@revideo/core';
 import boilerSource from '../../../domain/Coffee/Boiler.cs?raw';
 import waterTankSource from '../../../domain/Coffee/WaterTank.cs?raw';
+import {Arrow} from '../../../theme/components/Arrow';
 import {BrowserFrame} from '../../../theme/components/BrowserFrame';
 import {Camera} from '../../../theme/components/Camera';
 import {ChapterCard} from '../../../theme/components/ChapterCard';
 import {CodeCard} from '../../../theme/components/CodeCard';
 import {FlowDiagram} from '../../../theme/components/FlowDiagram';
+import {Pill} from '../../../theme/components/Pill';
 import {SequenceDiagram} from '../../../theme/components/SequenceDiagram';
+import {SplitWindows} from '../../../theme/components/SplitWindows';
 import {Terminal} from '../../../theme/components/Terminal';
 import {waitForFonts} from '../../../theme/fonts';
+import {messageCurve} from '../../../theme/geometry';
+import {arrive, leave, nudge, ride, toLocal} from '../../../theme/motion';
 import {Narrator} from '../../../theme/narrator';
 import {extractRegion} from '../../../theme/regions';
 import {arrivalSpring, enterEasing, moveEasing} from '../../../theme/style';
@@ -43,55 +48,93 @@ export default makeScene2D('main', function* (view) {
   yield* narrator.beat('tank-morph',
     camera.reset(1.4),
     delay(0.4, code.morph(extractRegion(waterTankSource, 'WaterTank'), 1.6, 'WaterTank.cs')),
-    delay(3.2, code.focus(7, 8, 0.8)),
+    delay(2.6, code.focus(7, 8, 0.8)),
+    delay(narrator.duration('tank-morph') - 1.2, code.unfocus(0.8)),
   );
 
   // Flow diagram
   const flow = new FlowDiagram({definition: statusFlow});
   camera.add(flow);
   yield* flow.build();
+  const target = new Pill({text: 'target 93 °C', color: 'pink', size: 24, opacity: 0});
+  camera.add(target);
+  target.position(toLocal(camera, flow.node('boiler').absolutePosition()).add([0, -110]));
   yield* narrator.beat('flow-build',
     all(code.opacity(0, 0.5, moveEasing), code.x(-300, 0.6, moveEasing)),
-    delay(0.3, chain(flow.reveal(0), flow.reveal(1), flow.reveal(2), flow.reveal(3))),
+    delay(0.3, chain(flow.reveal(0), flow.reveal(1), arrive(target), flow.reveal(2), flow.reveal(3))),
   );
   code.remove();
   yield* narrator.beat('flow-pulse',
     chain(
       all(flow.pulse('simulator', 'boiler', 0.7), flow.pulse('simulator', 'tank', 0.7)),
+      nudge(target),
       all(camera.focusOn(flow.node('machine'), {zoom: 1.18, duration: 1.2}), flow.pulse('boiler', 'machine', 0.9), flow.pulse('tank', 'machine', 0.9)),
       all(
         flow.pulse('machine', 'page', 0.5),
         camera.focusOn(() => flow.node('machine').absolutePosition().add(flow.node('page').absolutePosition()).scale(0.5), {zoom: 1.1, duration: 0.8}),
       ),
+      flow.retext('page', {detail: 'every 500 ms'}),
     ),
   );
 
   // Sequence diagram
   const sequenceDiagram = new SequenceDiagram({participants: [...updateParticipants], width: 1440, height: 560, y: 60});
   yield* narrator.beat('sequence-write',
-    all(camera.reset(0.9), flow.opacity(0, 0.6, moveEasing)),
+    all(camera.reset(0.9), flow.opacity(0, 0.6, moveEasing), leave(target)),
     delay(0.7, chain(
       (function* () { camera.add(sequenceDiagram); yield* sequenceDiagram.appear(); })(),
+      sequenceDiagram.activate('simulator'),
       sequenceDiagram.message('simulator', 'boiler', 'Temperature = 93'),
       waitFor(0.4),
       sequenceDiagram.message('boiler', 'machine', 'IsHot changed'),
     )),
   );
   flow.remove();
+  target.remove();
   yield* narrator.beat('sequence-read',
     sequenceDiagram.message('page', 'machine', 'GET /status'),
     delay(1.8, sequenceDiagram.message('machine', 'page', 'Ready', {reply: true})),
   );
 
+  // Two pages of one app, from one split recording
+  const windows = new SplitWindows({demo: 'two-pages', addresses: ['localhost:5280/controls', 'localhost:5280'], pageWidth: 640, pageHeight: 800, windowWidth: 600, gap: 260, y: 40});
+  camera.add(windows);
+  yield windows.left;
+  yield windows.right;
+  const request = new Arrow({curve: messageCurve(-130, 130, 40)});
+  const recipe = new Pill({text: 'Espresso', color: 'orange', size: 22, opacity: 0});
+  camera.add(request);
+  camera.add(recipe);
+  yield* narrator.beat('pages-arrive',
+    all(sequenceDiagram.opacity(0, 0.5, moveEasing), sequenceDiagram.y(40, 0.6, moveEasing)),
+    delay(0.4, windows.arrive()),
+    windows.play(narrator.duration('pages-arrive'), {to: windows.mark('click')}),
+  );
+  sequenceDiagram.remove();
+  const clickDuration = narrator.duration('pages-click');
+  yield* narrator.beat('pages-click',
+    windows.play(clickDuration, {from: windows.mark('click') - 0.2, to: windows.mark('brewing') + 2.5}),
+    delay(0.3, request.grow(0.6)),
+    delay(0.5, chain(arrive(recipe), ride(recipe, request, 0.3, 0.7, 1.2))),
+    delay(1.8, camera.focusOnPoint(new Vector2(430, 40), {zoom: 1.12, duration: clickDuration - 2, clear: windows.frames})),
+  );
+  yield* narrator.beat('pages-done',
+    windows.play(narrator.duration('pages-done'), {from: windows.mark('brewing') + 2.5}),
+    all(request.opacity(0, 0.6, moveEasing), leave(recipe, 0, -30)),
+    delay(0.6, camera.reset(narrator.duration('pages-done') - 0.8)),
+  );
+  request.remove();
+  recipe.remove();
+
   // Live demo
   const terminal = new Terminal({transcript: useTerminal('run-sample'), title: 'sample', width: 1400, opacity: 0, scale: 0.94});
   camera.add(terminal);
   yield* narrator.beat('live-terminal',
-    all(sequenceDiagram.opacity(0, 0.5, moveEasing), sequenceDiagram.y(40, 0.6, moveEasing)),
+    all(windows.opacity(0, 0.5, moveEasing), windows.y(0, 0.6, moveEasing)),
     delay(0.4, all(terminal.opacity(1, 0.4, enterEasing), spring(arrivalSpring, 0.94, 1, value => terminal.scale(value)))),
     delay(0.8, terminal.run(narrator.duration('live-terminal') - 0.8)),
   );
-  sequenceDiagram.remove();
+  windows.remove();
   const browser = new BrowserFrame({demo: 'status', address: 'localhost:5280', width: 1180, y: 550, opacity: 0});
   camera.add(browser);
   // Wait for the clip to load before the first frame that draws it.
