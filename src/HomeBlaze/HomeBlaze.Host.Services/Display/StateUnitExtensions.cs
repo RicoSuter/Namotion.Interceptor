@@ -125,8 +125,9 @@ public static class StateUnitExtensions
         };
     }
 
-    // The property panel splits on '\n' to render one line per element. Subject collections and dictionaries never
-    // arrive here because the panel lists them as child subjects instead.
+    // The property panel splits on '\n' to render one line per element. Subject collections and subject dictionaries
+    // never arrive here because the panel lists them as child subjects instead; a dictionary of plain values does, and
+    // renders one "[key, value]" line per entry.
     private static string JoinElements(IEnumerable elements)
     {
         var builder = new StringBuilder();
