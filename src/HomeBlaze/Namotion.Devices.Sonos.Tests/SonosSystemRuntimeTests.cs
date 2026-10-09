@@ -924,14 +924,16 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         var connected = await ConnectedSystem.StartAsync(speaker);
+        var executeTask = connected.System.ExecuteTask;
+        Assert.NotNull(executeTask);
 
         // Act
         connected.System.Dispose();
-        await connected.System.ExecuteTask!.WaitAsync(ConnectedSystem.WaitTimeout);
+        await executeTask.WaitAsync(ConnectedSystem.WaitTimeout);
         var exception = await Record.ExceptionAsync(() => connected.System.ApplyConfigurationAsync(CancellationToken.None));
 
         // Assert
-        Assert.True(connected.System.ExecuteTask.IsCompletedSuccessfully);
+        Assert.True(executeTask.IsCompletedSuccessfully);
         Assert.Equal(ServiceStatus.Stopped, connected.System.Status);
         Assert.Null(exception);
     }

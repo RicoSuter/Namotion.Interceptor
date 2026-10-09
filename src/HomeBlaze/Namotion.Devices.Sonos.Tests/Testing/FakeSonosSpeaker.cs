@@ -248,38 +248,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 return;
 
             case "SUBSCRIBE":
-                if (request.Headers["CALLBACK"] is { } callback)
-                {
-                    _subscribed.Enqueue(path);
-                    _callbacks[path] = callback.Trim('<', '>');
-                    if (_holds.TryGetValue("SUBSCRIBE " + path, out var subscribeHold))
-                    {
-                        await subscribeHold.Task;
-                    }
-                }
-
-                if (request.Headers["SID"] is not null)
-                {
-                    _renewed.Enqueue((path, DateTimeOffset.UtcNow));
-                    if (AbortRenewals)
-                    {
-                        // A bare Abort still answers 200 here, so the body is cut short to make the request fail.
-                        response.ContentLength64 = 10;
-                        await response.OutputStream.WriteAsync("<"u8.ToArray());
-                        await response.OutputStream.FlushAsync();
-                        response.Abort();
-                        return;
-                    }
-                }
-
-                response.Headers["SID"] = SidFor(path);
-                response.Headers["TIMEOUT"] = $"Second-{SubscriptionTimeoutSeconds}";
-                if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback)
-                {
-                    // Not awaited: Sonos sends the initial NOTIFY around its SUBSCRIBE response, often before it.
-                    _ = SendInitialEventAsync(newCallback.Trim('<', '>'), SidFor(path));
-                }
-
+                await HandleSubscribeAsync(request, response, path);
                 return;
 
             case "UNSUBSCRIBE":
@@ -287,52 +256,92 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 return;
 
             case "POST":
-                // "urn:schemas-upnp-org:service:AVTransport:1#Play"
-                var soapAction = (request.Headers["SOAPACTION"] ?? string.Empty).Trim('"');
-                var action = soapAction[(soapAction.LastIndexOf('#') + 1)..];
-                var service = soapAction.Split(':') is { Length: >= 4 } parts ? parts[3] : string.Empty;
-
-                string body;
-                using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
-                {
-                    body = await reader.ReadToEndAsync();
-                }
-
-                var call = new SoapCall(path, service, action, body);
-                _calls.Enqueue(call);
-                if (_holds.TryGetValue(action, out var hold))
-                {
-                    await hold.Task;
-                }
-
-                if (_serverErrors.ContainsKey(action))
-                {
-                    response.StatusCode = (int)HttpStatusCode.InternalServerError;
-                    response.ContentLength64 = 0;
-                    return;
-                }
-
-                if (_faults.TryGetValue(action, out var errorCode))
-                {
-                    response.StatusCode = (int)HttpStatusCode.InternalServerError;
-                    await WriteAsync(response,
-                        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
-                        "<s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
-                        $"<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>{errorCode}</errorCode></UPnPError></detail>" +
-                        "</s:Fault></s:Body></s:Envelope>");
-                    return;
-                }
-
-                var values = GetResponseValues(call);
-                await WriteAsync(response,
-                    "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
-                    $"<s:Body><u:{action}Response xmlns:u=\"urn:schemas-upnp-org:service:{service}:1\">{values}</u:{action}Response></s:Body></s:Envelope>");
+                await HandlePostAsync(request, response, path);
                 return;
 
             default:
                 response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
                 return;
         }
+    }
+
+    private async Task HandleSubscribeAsync(HttpListenerRequest request, HttpListenerResponse response, string path)
+    {
+        if (request.Headers["CALLBACK"] is { } callback)
+        {
+            _subscribed.Enqueue(path);
+            _callbacks[path] = callback.Trim('<', '>');
+            if (_holds.TryGetValue("SUBSCRIBE " + path, out var subscribeHold))
+            {
+                await subscribeHold.Task;
+            }
+        }
+
+        if (request.Headers["SID"] is not null)
+        {
+            _renewed.Enqueue((path, DateTimeOffset.UtcNow));
+            if (AbortRenewals)
+            {
+                // A bare Abort still answers 200 here, so the body is cut short to make the request fail.
+                response.ContentLength64 = 10;
+                await response.OutputStream.WriteAsync("<"u8.ToArray());
+                await response.OutputStream.FlushAsync();
+                response.Abort();
+                return;
+            }
+        }
+
+        response.Headers["SID"] = SidFor(path);
+        response.Headers["TIMEOUT"] = $"Second-{SubscriptionTimeoutSeconds}";
+        if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback)
+        {
+            // Not awaited: Sonos sends the initial NOTIFY around its SUBSCRIBE response, often before it.
+            _ = SendInitialEventAsync(newCallback.Trim('<', '>'), SidFor(path));
+        }
+    }
+
+    private async Task HandlePostAsync(HttpListenerRequest request, HttpListenerResponse response, string path)
+    {
+        // "urn:schemas-upnp-org:service:AVTransport:1#Play"
+        var soapAction = (request.Headers["SOAPACTION"] ?? string.Empty).Trim('"');
+        var action = soapAction[(soapAction.LastIndexOf('#') + 1)..];
+        var service = soapAction.Split(':') is { Length: >= 4 } parts ? parts[3] : string.Empty;
+
+        string body;
+        using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
+        {
+            body = await reader.ReadToEndAsync();
+        }
+
+        var call = new SoapCall(path, service, action, body);
+        _calls.Enqueue(call);
+        if (_holds.TryGetValue(action, out var hold))
+        {
+            await hold.Task;
+        }
+
+        if (_serverErrors.ContainsKey(action))
+        {
+            response.StatusCode = (int)HttpStatusCode.InternalServerError;
+            response.ContentLength64 = 0;
+            return;
+        }
+
+        if (_faults.TryGetValue(action, out var errorCode))
+        {
+            response.StatusCode = (int)HttpStatusCode.InternalServerError;
+            await WriteAsync(response,
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                "<s:Body><s:Fault><faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>" +
+                $"<detail><UPnPError xmlns=\"urn:schemas-upnp-org:control-1-0\"><errorCode>{errorCode}</errorCode></UPnPError></detail>" +
+                "</s:Fault></s:Body></s:Envelope>");
+            return;
+        }
+
+        var values = GetResponseValues(call);
+        await WriteAsync(response,
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+            $"<s:Body><u:{action}Response xmlns:u=\"urn:schemas-upnp-org:service:{service}:1\">{values}</u:{action}Response></s:Body></s:Envelope>");
     }
 
     private static async Task SendInitialEventAsync(string callback, string sid)

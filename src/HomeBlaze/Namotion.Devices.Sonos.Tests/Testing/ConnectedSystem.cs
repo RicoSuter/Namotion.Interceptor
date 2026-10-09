@@ -71,7 +71,7 @@ internal sealed class ConnectedSystem : IAsyncDisposable
     /// </summary>
     internal static async Task<SonosSystem> StartWithEventsAsync(Func<SonosSystem> create, Func<SonosSystem, bool> isReady, string message)
     {
-        for (var attempt = 1; ; attempt++)
+        for (var attempt = 1; attempt <= MaxStartAttempts; attempt++)
         {
             var system = create();
             try
@@ -86,11 +86,6 @@ internal sealed class ConnectedSystem : IAsyncDisposable
                 {
                     return system;
                 }
-
-                if (attempt == MaxStartAttempts)
-                {
-                    throw new InvalidOperationException($"{message} The event listener found no free port.");
-                }
             }
             catch
             {
@@ -100,6 +95,8 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 
             await StopAsync(system);
         }
+
+        throw new InvalidOperationException($"{message} The event listener found no free port.");
     }
 
     /// <summary>

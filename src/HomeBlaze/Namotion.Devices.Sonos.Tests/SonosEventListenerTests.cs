@@ -119,7 +119,7 @@ public class SonosEventListenerTests
             await RespondWithSid(context, "uuid:sub-1");
         });
         await using var listener = CreateListener(httpClient);
-        var port = LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        LoopbackPorts.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Act
