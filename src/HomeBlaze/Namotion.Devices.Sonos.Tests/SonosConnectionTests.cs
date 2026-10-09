@@ -44,6 +44,44 @@ public class SonosConnectionTests
     }
 
     [Fact]
+    public async Task WhenDialogLevelIsAboveOne_ThenSpeechEnhancementIsOn()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondAsIdlePlayer(Uuid, "Küche");
+        speaker.RespondToEqualizer("DialogLevel", "3");
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        var reading = await connection.ReadPlayerAsync(isHomeTheater: true, CancellationToken.None);
+
+        // Assert
+        Assert.True(reading.RenderingControl.SpeechEnhancement);
+    }
+
+    [Fact]
+    public async Task WhenFavoritesSpanSeveralPages_ThenEveryPageIsRead()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondToBrowsePage(0, TestFixtures.Read("favorites.xml"), numberReturned: 4, totalMatches: 5);
+        speaker.RespondToBrowsePage(4,
+            "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">" +
+            "<item id=\"FV:2/5\" parentID=\"FV:2\" restricted=\"false\"><dc:title>Radio Extra</dc:title><res>x-rincon-mp3radio://radio.example/stream</res></item></DIDL-Lite>",
+            numberReturned: 1, totalMatches: 5);
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        var favorites = await connection.ReadFavoritesAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Radio FM1", "SRF 3", "Radio Extra"], favorites.Select(favorite => favorite.Title));
+        Assert.Equal(["0", "4"], speaker.Calls.Where(call => call.Action == "Browse").Select(call => GetArgument(call, "StartingIndex")));
+    }
+
+    [Fact]
     public async Task WhenReadingPlayerWithoutHomeTheater_ThenEqualizerIsNotQueried()
     {
         // Arrange
@@ -181,6 +219,19 @@ public class SonosConnectionTests
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SeekAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SetSleepTimerAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
+        Assert.Empty(speaker.Calls);
+    }
+
+    [Fact]
+    public async Task WhenSettingSleepTimerToADayOrLonger_ThenThrowsWithoutCalling()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => connection.SetSleepTimerAsync(TimeSpan.FromHours(24), CancellationToken.None));
         Assert.Empty(speaker.Calls);
     }
 

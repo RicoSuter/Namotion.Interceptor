@@ -421,12 +421,13 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     /// <summary>
-    /// Sets the sleep timer; zero cancels it.
+    /// Sets the sleep timer, at most 23:59:59; zero cancels it.
     /// </summary>
-    [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the player's group; zero cancels it.")]
+    [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the player's group, at most 23:59:59; zero cancels it.")]
     public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(duration, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(duration, SonosValues.MaximumSleepTimer);
         return RunOnCoordinatorAsync((connection, token) => connection.SetSleepTimerAsync(duration, token), cancellationToken);
     }
 

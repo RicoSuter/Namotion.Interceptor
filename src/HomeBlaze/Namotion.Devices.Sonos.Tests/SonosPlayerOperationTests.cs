@@ -520,6 +520,18 @@ public class SonosPlayerOperationTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SetSleepTimerAsync(TimeSpan.FromMinutes(-1), CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(24 * 3600)]
+    [InlineData(25 * 3600)]
+    public async Task WhenSettingSleepTimerAboveTheMaximum_ThenThrows(int seconds)
+    {
+        // Arrange
+        var player = CreateDisconnectedKitchen();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SetSleepTimerAsync(TimeSpan.FromSeconds(seconds), CancellationToken.None));
+    }
+
     [Fact]
     public async Task WhenCommandFails_ThenFaultPropagatesAndStateIsReadBack()
     {

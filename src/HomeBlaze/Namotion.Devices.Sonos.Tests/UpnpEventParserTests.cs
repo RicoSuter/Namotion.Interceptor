@@ -70,6 +70,22 @@ public class UpnpEventParserTests
         Assert.Equal(new RenderingControlChange(22, true, -2, 3, true, true, false), change);
     }
 
+    [Theory]
+    [InlineData("0", false)]
+    [InlineData("1", true)]
+    [InlineData("3", true)]
+    public void WhenRenderingControlEventReportsDialogLevel_ThenAnyLevelAboveZeroEnablesSpeechEnhancement(string level, bool expected)
+    {
+        // Arrange
+        var body = SonosEventBodies.RenderingControl(("DialogLevel", null, level));
+
+        // Act
+        var change = UpnpEventParser.ParseRenderingControl(body);
+
+        // Assert
+        Assert.Equal(expected, change.SpeechEnhancement);
+    }
+
     [Fact]
     public void WhenGroupRenderingControlEvent_ThenGroupVolumeAndMuteAreRead()
     {

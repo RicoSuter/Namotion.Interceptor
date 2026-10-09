@@ -55,8 +55,21 @@ internal sealed class SonosConnection : IDisposable
 
     internal async Task<IReadOnlyList<SonosFavorite>> ReadFavoritesAsync(CancellationToken cancellationToken)
     {
-        var response = await _device.ContentDirectoryService.Browse("FV:2", Count: 100, cancellationToken: cancellationToken);
-        return FavoritesParser.Parse(response.Result, BaseUri);
+        const int pageSize = 100;
+        var favorites = new List<SonosFavorite>();
+        var startingIndex = 0;
+        while (true)
+        {
+            var response = await _device.ContentDirectoryService.Browse("FV:2", StartingIndex: startingIndex, Count: pageSize, cancellationToken: cancellationToken);
+            favorites.AddRange(FavoritesParser.Parse(response.Result, BaseUri));
+
+            // Counted by the items returned, not the favorites parsed, which skip shortcuts.
+            startingIndex += response.NumberReturned;
+            if (response.NumberReturned <= 0 || startingIndex >= response.TotalMatches)
+            {
+                return favorites;
+            }
+        }
     }
 
     /// <summary>
@@ -179,11 +192,12 @@ internal sealed class SonosConnection : IDisposable
         AvTransport.SetPlayMode(new AVTransportService.SetPlayModeRequest { InstanceID = InstanceId, NewPlayMode = playMode }, cancellationToken);
 
     /// <summary>
-    /// Sets the sleep timer; zero cancels it.
+    /// Sets the sleep timer, at most <see cref="SonosValues.MaximumSleepTimer"/>; zero cancels it.
     /// </summary>
     internal Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(duration, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(duration, SonosValues.MaximumSleepTimer);
         return AvTransport.ConfigureSleepTimer(new AVTransportService.ConfigureSleepTimerRequest
         {
             InstanceID = InstanceId,
@@ -232,10 +246,11 @@ internal sealed class SonosConnection : IDisposable
     private static string EscapeMetadataAmpersands(string metadata) =>
         metadata.Contains('<') ? metadata.Replace("&", "&amp;", StringComparison.Ordinal) : metadata;
 
+    // Any level above zero is on: the Arc Ultra reports its speech enhancement level 1 to 4 as DialogLevel.
     private async Task<bool> GetEqualizerAsync(string type, CancellationToken cancellationToken)
     {
         var response = await RenderingControl.GetEQ(new RenderingControlService.GetEQRequest { InstanceID = InstanceId, EQType = type }, cancellationToken);
-        return response.CurrentValue == 1;
+        return response.CurrentValue != 0;
     }
 
     public void Dispose() => _device.Dispose();

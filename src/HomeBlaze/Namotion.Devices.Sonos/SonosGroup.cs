@@ -226,7 +226,7 @@ public partial class SonosGroup :
         Coordinator.SetRepeatAsync(repeat, cancellationToken);
 
     /// <inheritdoc cref="SonosPlayer.SetSleepTimerAsync"/>
-    [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the group; zero cancels it.")]
+    [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the group, at most 23:59:59; zero cancels it.")]
     public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken) =>
         Coordinator.SetSleepTimerAsync(duration, cancellationToken);
 

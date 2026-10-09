@@ -35,7 +35,7 @@ internal static class UpnpEventParser
             GetInt(values, "Treble"),
             GetBool(values, "Loudness"),
             GetBool(values, "NightMode"),
-            GetBool(values, "DialogLevel"));
+            GetLevelIsOn(values, "DialogLevel"));
     }
 
     /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
@@ -105,6 +105,10 @@ internal static class UpnpEventParser
         values.TryGetValue(name, out var value) && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result)
             ? result
             : null;
+
+    // The Arc Ultra reports its speech enhancement level 1 to 4 as DialogLevel, so any level above zero is on.
+    private static bool? GetLevelIsOn(Dictionary<string, string> values, string name) =>
+        GetInt(values, name) is { } level ? level != 0 : null;
 
     private static bool? GetBool(Dictionary<string, string> values, string name) =>
         values.TryGetValue(name, out var value)

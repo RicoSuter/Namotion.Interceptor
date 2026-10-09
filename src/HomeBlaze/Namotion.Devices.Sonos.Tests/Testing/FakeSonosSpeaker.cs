@@ -78,6 +78,14 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         _responses[EqualizerKey(eqType)] = $"<CurrentValue>{SecurityElement.Escape(value)}</CurrentValue>";
 
     /// <summary>
+    /// Answers a Browse starting at the index with one page of a longer result.
+    /// </summary>
+    internal void RespondToBrowsePage(int startingIndex, string result, int numberReturned, int totalMatches) =>
+        _responses[BrowsePageKey(startingIndex.ToString(System.Globalization.CultureInfo.InvariantCulture))] =
+            $"<Result>{SecurityElement.Escape(result)}</Result><NumberReturned>{numberReturned}</NumberReturned>" +
+            $"<TotalMatches>{totalMatches}</TotalMatches><UpdateID>1</UpdateID>";
+
+    /// <summary>
     /// Answers the action with HTTP 500 and a UPnPError SOAP fault carrying the error code.
     /// </summary>
     internal void RespondWithFault(string action, int errorCode) => _faults[action] = errorCode;
@@ -253,12 +261,20 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
     private static string EqualizerKey(string eqType) => "GetEQ:" + eqType;
 
+    private static string BrowsePageKey(string startingIndex) => "Browse:" + startingIndex;
+
     private string GetResponseValues(string action, string body)
     {
         if (action == "GetEQ" && TryGetArgument(body, "EQType") is { } eqType &&
             _responses.TryGetValue(EqualizerKey(eqType), out var equalizerValues))
         {
             return equalizerValues;
+        }
+
+        if (action == "Browse" && TryGetArgument(body, "StartingIndex") is { } startingIndex &&
+            _responses.TryGetValue(BrowsePageKey(startingIndex), out var pageValues))
+        {
+            return pageValues;
         }
 
         return _responses.GetValueOrDefault(action, string.Empty);

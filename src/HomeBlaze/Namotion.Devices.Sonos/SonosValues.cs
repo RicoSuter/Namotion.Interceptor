@@ -14,6 +14,11 @@ internal static class SonosValues
 
     internal const int DevicePort = 1400;
 
+    /// <summary>
+    /// The longest sleep timer Sonos accepts.
+    /// </summary>
+    internal static readonly TimeSpan MaximumSleepTimer = new(23, 59, 59);
+
     // How much earlier than the last applied poll a poll may start and still be a late completion, not a clock jump.
     private static readonly TimeSpan PollReorderWindow = TimeSpan.FromMinutes(5);
 
