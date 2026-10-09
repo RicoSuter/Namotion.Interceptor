@@ -7,7 +7,7 @@ namespace HomeBlaze.Abstractions.Media;
 /// Controller interface for audio players.
 /// </summary>
 [SubjectAbstraction]
-[Description("Controls audio playback with play, pause, stop, skip, seek, and mute.")]
+[Description("Controls audio playback with play, pause, stop, skip and seek.")]
 public interface IAudioPlayerController : IVolumeController
 {
     /// <summary>
@@ -45,16 +45,4 @@ public interface IAudioPlayerController : IVolumeController
     /// </summary>
     [Operation]
     Task SeekAsync(TimeSpan position, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Mutes the audio.
-    /// </summary>
-    [Operation]
-    Task MuteAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Unmutes the audio.
-    /// </summary>
-    [Operation]
-    Task UnmuteAsync(CancellationToken cancellationToken);
 }

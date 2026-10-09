@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
@@ -209,6 +210,20 @@ public class SonosPlayerStateTests
         Assert.Equal(3, player.Treble);
         Assert.False(player.Loudness);
         Assert.Null(player.NightMode);
+    }
+
+    [Fact]
+    public void WhenRenderingControlReportsMute_ThenVolumeStateReportsMuted()
+    {
+        // Arrange
+        var player = CreateKitchen();
+
+        // Act
+        player.ApplyRenderingControlEvent(new RenderingControlChange(44, true, null, null, null, null, null), T0);
+
+        // Assert
+        IVolumeState volumeState = player;
+        Assert.True(volumeState.IsMuted);
     }
 
     [Fact]

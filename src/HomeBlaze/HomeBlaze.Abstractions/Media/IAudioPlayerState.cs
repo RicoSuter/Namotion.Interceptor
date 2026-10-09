@@ -15,10 +15,4 @@ public interface IAudioPlayerState : IVolumeState
     /// </summary>
     [State(Position = 140)]
     bool? IsPlaying { get; }
-
-    /// <summary>
-    /// Whether audio is muted.
-    /// </summary>
-    [State(Position = 141)]
-    bool? IsMuted { get; }
 }

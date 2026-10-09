@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
 
@@ -22,6 +23,21 @@ public class SonosGroupOperationTests
         var setVolume = actions.IndexOf("SetGroupVolume");
         Assert.True(snapshot >= 0 && setVolume > snapshot);
         Assert.Contains(speaker.Calls, call => call.Action == "SetGroupVolume" && call.Body.Contains("<DesiredVolume>30</DesiredVolume>"));
+    }
+
+    [Fact]
+    public async Task WhenGroupIsMutedThroughTheVolumeController_ThenGroupMuteIsSentToTheCoordinator()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true);
+        IVolumeController group = household.System.Groups[TestFixtures.OfficeUuid];
+
+        // Act
+        await group.MuteAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(household.Office.Calls, call => call.Action == "SetGroupMute" && call.Body.Contains("<DesiredMute>true</DesiredMute>"));
+        Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetGroupMute");
     }
 
     [Fact]
