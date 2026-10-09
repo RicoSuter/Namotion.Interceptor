@@ -28,7 +28,7 @@ public partial class HostingLeaf
 
 /// <summary>
 /// A leaf that does host something. One of these in the graph is what an application with any hosted
-/// subject at all looks like, so any saving for graphs that host nothing must survive it.
+/// subject at all looks like, and it is the case the fast path must not break.
 /// </summary>
 [InterceptorSubject]
 public partial class HostingWorkerLeaf : HostingLeaf, IHostedService
@@ -81,8 +81,9 @@ public enum HostingArm
 /// <remarks>
 /// The graph is attached and detached by one array assignment each way, so a single measured
 /// operation is <see cref="SubjectCount"/> attach or detach lifecycle callbacks. The host is never
-/// started, because starting it would add a background loop whose allocations the process wide
-/// memory diagnoser would absorb.
+/// started: the attach path reads the gate state and takes the same branches whether the gate is
+/// closed or open, and starting a host would add a background loop whose allocations the
+/// process wide memory diagnoser would absorb.
 /// </remarks>
 [MemoryDiagnoser]
 [InvocationCount(1)]

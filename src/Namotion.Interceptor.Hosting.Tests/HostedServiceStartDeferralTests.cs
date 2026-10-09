@@ -2,10 +2,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.Hosting.Tests;
 
+/// <summary>
+/// The start deferral: a start captured in one waits for it, and for every deferral enclosing it, before
+/// the handler creates or starts anything.
+/// </summary>
+/// <remarks>
+/// What a released start then does is the handler's contract rather than the deferral's, so it is pinned
+/// in <see cref="HostedServiceHandlerTests"/> and <see cref="HostedServiceHandlerRaceTests"/>. The
+/// deferral's own drain interaction is here, because nothing else parks a transition on a caller.
+/// </remarks>
 public class HostedServiceStartDeferralTests
 {
     [Theory]
@@ -17,34 +25,35 @@ public class HostedServiceStartDeferralTests
         await using var fixture = new Fixture();
         await fixture.Handler.StartAsync(CancellationToken.None);
         var subject = new Person(fixture.Context);
-        var deferred = new ProbeService(() => "deferred");
+        var scoped = new ProbeService(() => "scoped");
         var independent = new ProbeService(() => "independent");
-        if (alreadyStarted)
-        {
-            await subject.AttachHostedServiceAsync(independent, CancellationToken.None);
-        }
+        var independentAttachment = alreadyStarted
+            ? await subject.AttachHostedServiceAsync(() => independent, CancellationToken.None)
+            : null;
+
+        // Started before the deferral opens, so its flow never carries the deferral and its attach is not
+        // captured by it. That is the property under test.
         var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var independentFlow = Task.Run(async () =>
         {
             await proceed.Task;
-            if (!alreadyStarted)
-            {
-                await subject.AttachHostedServiceAsync(independent, CancellationToken.None);
-            }
-            await subject.DetachHostedServiceAsync(independent, CancellationToken.None);
+            independentAttachment ??= await subject.AttachHostedServiceAsync(() => independent, CancellationToken.None);
+            await subject.DetachHostedServiceAsync(independentAttachment, CancellationToken.None);
         });
 
         // Act
-        using (var deferral = fixture.Context.DeferHostedServiceStarts())
+        using (fixture.Context.DeferHostedServiceStarts())
         {
-            subject.AttachHostedService(deferred);
+            subject.AttachHostedService(() => scoped);
             proceed.SetResult();
             await independentFlow.WaitAsync(TimeSpan.FromSeconds(10));
 
             // Assert
-            Assert.False(deferred.Started.Task.IsCompleted);
+            Assert.Equal("independent", await independent.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.False(scoped.Started.Task.IsCompleted);
         }
-        await deferred.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal("scoped", await scoped.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
@@ -55,248 +64,25 @@ public class HostedServiceStartDeferralTests
         var configuration = "uninitialized";
         var service = new ProbeService(() => configuration);
         var subject = new Person(fixture.Context);
+        await fixture.Handler.StartAsync(CancellationToken.None);
 
         // Act
-        using (var outer = fixture.Context.DeferHostedServiceStarts())
+        using (fixture.Context.DeferHostedServiceStarts())
         {
-            using (var inner = fixture.Context.DeferHostedServiceStarts())
+            using (fixture.Context.DeferHostedServiceStarts())
             {
-                subject.AttachHostedService(service);
+                subject.AttachHostedService(() => service);
             }
-            await fixture.Handler.StartAsync(CancellationToken.None);
-            Assert.False(service.Started.Task.IsCompleted);
+
+            // The inner deferral is gone, so only the enclosing one is holding this start. The wait
+            // covers the dispatch as well as the park, which is what makes the observation mean
+            // anything: a body that has not run yet would run inside it.
             configuration = "configured";
+            await AssertDoesNotStartAsync(service, "the enclosing deferral is still open");
         }
 
         // Assert
         Assert.Equal("configured", await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(3)]
-    public async Task WhenHandlerStopsDuringAnOpenDeferral_ThenAllStartsAreCanceledAndCompletionDeferralsAreReleased(int count)
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        var services = Enumerable.Range(0, count).Select(_ => new ProbeService(() => "started")).ToArray();
-        var subject = new Person(fixture.Context);
-        using var deferral = fixture.Context.DeferHostedServiceStarts();
-        var attachments = services.Select(service => subject.AttachHostedServiceAsync(service, CancellationToken.None)).ToArray();
-        Assert.Equal(count, fixture.CompletionDeferred);
-        Assert.Equal(0, fixture.CompletionDeferralReleased);
-
-        // Act
-        await fixture.Handler.StartAsync(CancellationToken.None);
-        await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-
-        // Assert
-        foreach (var attachment in attachments)
-        {
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TimeSpan.FromSeconds(10)));
-        }
-        Assert.Equal(count, fixture.CompletionDeferralReleased);
-        Assert.All(services, service => Assert.False(service.Started.Task.IsCompleted));
-    }
-
-    [Fact]
-    public async Task WhenShutdownCancellationDetachesADeferredService_ThenShutdownStillStopsIt()
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        await fixture.Handler.StartAsync(CancellationToken.None);
-        var subject = new Person(fixture.Context);
-        var releaseStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var deferred = new ProbeService(() => "deferred", () => stopped.TrySetResult());
-        var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task,
-            starting: token => token.Register(() => subject.DetachHostedService(deferred)));
-        subject.AttachHostedService(blocking);
-        await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        using var deferral = fixture.Context.DeferHostedServiceStarts();
-        subject.AttachHostedService(deferred);
-        Task? stopping = null;
-
-        try
-        {
-            // Act
-            stopping = fixture.Handler.StopAsync(CancellationToken.None);
-
-            // Assert
-            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.False(deferred.Started.Task.IsCompleted);
-        }
-        finally
-        {
-            releaseStart.TrySetResult();
-            await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
-        }
-        Assert.Equal(2, fixture.CompletionDeferralReleased);
-    }
-
-    [Theory]
-    [InlineData("Stop")]
-    [InlineData("Dispose")]
-    [InlineData("Cancellation")]
-    public async Task WhenShutdownBeginsWhileAStartIsBlocked_ThenReattachmentDefersNoStartupCompletion(string shutdown)
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        using var cancellation = new CancellationTokenSource();
-        await fixture.Handler.StartAsync(cancellation.Token);
-        var subject = new Person(fixture.Context);
-        var releaseStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task);
-        subject.AttachHostedService(blocking);
-        await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        using var deferral = fixture.Context.DeferHostedServiceStarts();
-        var deferred = new ProbeService(() => "deferred", () => stopped.TrySetResult());
-        var attachment = subject.AttachHostedServiceAsync(deferred, CancellationToken.None);
-        Task? stopping = null;
-
-        try
-        {
-            // Act
-            if (shutdown == "Stop")
-            {
-                stopping = fixture.Handler.StopAsync(CancellationToken.None);
-                await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            else if (shutdown == "Dispose")
-            {
-                ((IDisposable)fixture.Handler).Dispose();
-            }
-            else
-            {
-                await cancellation.CancelAsync();
-            }
-            subject.DetachHostedService(deferred);
-            var exception = Record.Exception(() => subject.AttachHostedService(deferred));
-
-            // Assert
-            Assert.Null(exception);
-            Assert.Equal(2, fixture.CompletionDeferred);
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => subject.AttachHostedServiceAsync(
-                new ProbeService(() => "late"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
-            Assert.Equal(2, fixture.CompletionDeferred);
-        }
-        finally
-        {
-            releaseStart.TrySetResult();
-            await (stopping ?? fixture.Handler.StopAsync(CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
-        }
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attachment.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(2, fixture.CompletionDeferralReleased);
-        Assert.False(deferred.Started.Task.IsCompleted);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenDeferredServiceIsDetached_ThenItsStartIsCanceledBeforeDeferralRelease(bool reattach)
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        await fixture.Handler.StartAsync(CancellationToken.None);
-        var events = new List<string>();
-        var service = new ProbeService(() => { events.Add("start"); return "started"; }, () => events.Add("stop"));
-        var subject = new Person(fixture.Context);
-        Task? secondAttachment = null;
-
-        // Act
-        using (var deferral = fixture.Context.DeferHostedServiceStarts())
-        {
-            var firstAttachment = subject.AttachHostedServiceAsync(service, CancellationToken.None);
-            var detachment = subject.DetachHostedServiceAsync(service, CancellationToken.None);
-            if (reattach)
-            {
-                secondAttachment = subject.AttachHostedServiceAsync(service, CancellationToken.None);
-            }
-            await detachment.WaitAsync(TimeSpan.FromSeconds(10));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstAttachment.WaitAsync(TimeSpan.FromSeconds(10)));
-            await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.CompletionDeferralReleased) == 1);
-            Assert.False(service.Started.Task.IsCompleted);
-        }
-        if (secondAttachment is not null)
-        {
-            await secondAttachment.WaitAsync(TimeSpan.FromSeconds(10));
-        }
-        // A queued independent start is a barrier for all previously eligible actions.
-        await subject.AttachHostedServiceAsync(new ProbeService(() => "barrier"), CancellationToken.None)
-            .WaitAsync(TimeSpan.FromSeconds(10));
-
-        // Assert
-        Assert.Equal(reattach ? new[] { "stop", "start" } : new[] { "stop" }, events);
-        await AsyncTestHelpers.WaitUntilAsync(() => Volatile.Read(ref fixture.CompletionDeferralReleased) == fixture.CompletionDeferred);
-        Assert.Equal(fixture.CompletionDeferred, fixture.CompletionDeferralReleased);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WhenADeferralReleasesSeveralStarts_ThenTheyRunInAttachmentOrder(bool nested)
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        await fixture.Handler.StartAsync(CancellationToken.None);
-        var events = new List<string>();
-        var subject = new Person(fixture.Context);
-        var attachments = new List<Task>();
-
-        // Act
-        using (var outer = fixture.Context.DeferHostedServiceStarts())
-        {
-            using (var inner = nested ? fixture.Context.DeferHostedServiceStarts() : null)
-            {
-                attachments.Add(subject.AttachHostedServiceAsync(new ProbeService(() => { events.Add("first"); return "first"; }), CancellationToken.None));
-            }
-            attachments.Add(subject.AttachHostedServiceAsync(new ProbeService(() => { events.Add("second"); return "second"; }), CancellationToken.None));
-            Assert.Equal(2, fixture.CompletionDeferred);
-            Assert.Equal(0, fixture.CompletionDeferralReleased);
-        }
-        await Task.WhenAll(attachments).WaitAsync(TimeSpan.FromSeconds(10));
-        await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-        // Assert
-        Assert.Equal(new[] { "first", "second" }, events);
-        Assert.Equal(2, fixture.CompletionDeferralReleased);
-    }
-
-    [Fact]
-    public async Task WhenHandlerStartsInsideAnOpenDeferral_ThenTheActionLoopDoesNotInheritIt()
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        var subject = new Person(fixture.Context);
-        var child = new ProbeService(() => "child");
-        var parent = new ProbeService(() =>
-        {
-            subject.AttachHostedService(child);
-            return "parent";
-        });
-
-        // Attached from a flow created before the deferral below, so the deferral never captures this
-        // attach and the loop's own flow is the only thing that can defer the child.
-        var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var independentFlow = Task.Run(async () =>
-        {
-            await proceed.Task;
-            await subject.AttachHostedServiceAsync(parent, CancellationToken.None);
-        });
-
-        // Act - the deferral stays open across the start, so a loop that inherited the flow it was
-        // started in would capture the child that parent attaches inside its own StartAsync and
-        // hold it until this deferral is disposed.
-        using (fixture.Context.DeferHostedServiceStarts())
-        {
-            await fixture.Handler.StartAsync(CancellationToken.None);
-            proceed.SetResult();
-            await independentFlow.WaitAsync(TimeSpan.FromSeconds(10));
-
-            // Assert
-            Assert.Equal("child", await child.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
-        }
     }
 
     [Theory]
@@ -312,7 +98,7 @@ public class HostedServiceStartDeferralTests
         var captured = new ProbeService(() => "captured");
         var outer = fixture.Context.DeferHostedServiceStarts();
         var inner = fixture.Context.DeferHostedServiceStarts();
-        subject.AttachHostedService(captured);
+        subject.AttachHostedService(() => captured);
 
         // Act
         var irregular = Record.Exception(() =>
@@ -330,56 +116,105 @@ public class HostedServiceStartDeferralTests
         Assert.Equal("captured", await captured.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
 
         var later = new ProbeService(() => "later");
-        await subject.AttachHostedServiceAsync(later, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        await subject.AttachHostedServiceAsync(() => later, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("later", await later.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
     [Fact]
-    public async Task WhenAStopIsStillQueuedAtShutdown_ThenTheDetachedServiceIsStillStopped()
+    public async Task WhenTheDrainBeginsWhileADeferralIsOpen_ThenItReleasesTheParkedStartInsteadOfWaitingForIt()
     {
         // Arrange
         await using var fixture = new Fixture();
         await fixture.Handler.StartAsync(CancellationToken.None);
         var subject = new Person(fixture.Context);
-        var releaseStart = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var detached = new ProbeService(() => "detached", () => stopped.TrySetResult());
-        await subject.AttachHostedServiceAsync(detached, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        var deferred = new ProbeService(() => "deferred");
 
-        // Occupies the loop, so the stop queued below is still waiting when shutdown begins.
-        var blocking = new ProbeService(() => "blocking", startup: releaseStart.Task);
-        subject.AttachHostedService(blocking);
-        await blocking.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        subject.DetachHostedService(detached);
-
-        // Act
-        var stopping = fixture.Handler.StopAsync(CancellationToken.None);
-        releaseStart.SetResult();
-
-        // Assert
-        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await stopping.WaitAsync(TimeSpan.FromSeconds(10));
-    }
-
-    [Fact]
-    public async Task WhenAnAwaitedAttachResumes_ThenItDoesNotOccupyTheActionLoop()
-    {
-        // Arrange
-        await using var fixture = new Fixture();
-        await fixture.Handler.StartAsync(CancellationToken.None);
-        var subject = new Person(fixture.Context);
-        var next = new ProbeService(() => "next");
-
-        // Act - the continuation attaches another service and waits for it, so it can only finish
-        // if the loop is free to run that start rather than being inside this continuation.
-        var attaching = Task.Run(async () =>
+        // Act - the deferral stays open across the whole shutdown, so a drain that waited the deferral
+        // out rather than releasing the start parked on it would hold its barrier until this deferral
+        // is disposed, which is after the assertions below.
+        using (fixture.Context.DeferHostedServiceStarts())
         {
-            await subject.AttachHostedServiceAsync(new ProbeService(() => "first"), CancellationToken.None);
-            subject.AttachHostedService(next);
-            return next.Started.Task.Wait(TimeSpan.FromSeconds(5));
-        });
+            subject.AttachHostedService(() => deferred);
+            Assert.Equal(1, fixture.CompletionDeferred);
 
-        // Assert
-        Assert.True(await attaching.WaitAsync(TimeSpan.FromSeconds(10)));
+            // Establishes what this test is about. Without it the drain can begin before the body is
+            // dispatched, which declines at the gate and never reaches the park at all.
+            await AssertDoesNotStartAsync(deferred, "this deferral is still open");
+
+            await fixture.Handler.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Assert - a released start declines rather than starting, because the drain re-reads the
+            // gate, and its completion deferral is released either way.
+            Assert.False(deferred.Started.Task.IsCompleted);
+            await fixture.AllCompletionDeferralsReleased.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStopPathAttachesAService_ThenAnUnrelatedOpenDeferralDoesNotCaptureIt()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        await fixture.Handler.StartAsync(CancellationToken.None);
+        var subject = new Person(fixture.Context);
+        var second = new ProbeService(() => "second");
+        var first = new ProbeService(() => "first", stopped: () => subject.AttachHostedService(() => second));
+        var attachment = await subject
+            .AttachHostedServiceAsync(() => first, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Act - the detach is not awaited, which is what this deferral's own rules ask of a caller, so
+        // its stop body runs while the deferral is still open and with the execution context of this
+        // flow.
+        using (fixture.Context.DeferHostedServiceStarts())
+        {
+            subject.DetachHostedService(attachment);
+
+            // Assert - what a stop path attaches belongs to no deferral this caller opened.
+            Assert.Equal("second", await second.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+    }
+
+    [Fact]
+    public async Task WhenAStopPathAwaitsItsOwnAttach_ThenAnUnrelatedOpenDeferralDoesNotWedgeTheQueue()
+    {
+        // Arrange
+        await using var fixture = new Fixture();
+        await fixture.Handler.StartAsync(CancellationToken.None);
+        var subject = new Person(fixture.Context);
+        var second = new ProbeService(() => "second");
+        Func<Task>? attachFromStop = null;
+        var first = new ProbeService(() => "first", stopping: () => attachFromStop!());
+        attachFromStop = () => subject.AttachHostedServiceAsync(() => second, CancellationToken.None);
+        var attachment = await subject
+            .AttachHostedServiceAsync(() => first, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Act - this stop is not captured by the deferral, having been attached and started before it
+        // opened, so awaiting the detach inside the deferral is not the hazard awaiting a captured start
+        // is. What the stop path attaches is what an inherited deferral would park.
+        using (fixture.Context.DeferHostedServiceStarts())
+        {
+            var detachment = subject.DetachHostedServiceAsync(attachment, CancellationToken.None);
+
+            // Assert - the stop body returns rather than holding its queue for as long as this deferral
+            // stays open.
+            Assert.True(await detachment.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("second", await second.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+    }
+
+    /// <summary>
+    /// How long a parked start is watched for a start it must not make. "Did not happen" has no event
+    /// to wait on, so this is a timed observation, and it cannot false fail: on an intact build the
+    /// start is held on a deferral only the test disposes, so no length of watching lets it through.
+    /// </summary>
+    private static readonly TimeSpan MustNotStartWithin = TimeSpan.FromSeconds(1);
+
+    private static async Task AssertDoesNotStartAsync(ProbeService service, string because)
+    {
+        var started = await Task.WhenAny(service.Started.Task, Task.Delay(MustNotStartWithin)) == service.Started.Task;
+        Assert.False(started, $"The start ran while {because}, so nothing was waiting for that deferral.");
     }
 
     private sealed class Fixture : IAsyncDisposable, IStartupCompletion
@@ -424,7 +259,12 @@ public class HostedServiceStartDeferralTests
         public void Dispose() => released();
     }
 
-    private sealed class ProbeService(Func<string> readConfiguration, Action? stopped = null, Task? startup = null, Action<CancellationToken>? starting = null) : IHostedService
+    private sealed class ProbeService(
+        Func<string> readConfiguration,
+        Action? stopped = null,
+        Task? startup = null,
+        Action<CancellationToken>? starting = null,
+        Func<Task>? stopping = null) : IHostedService
     {
         public TaskCompletionSource<string> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task StartAsync(CancellationToken cancellationToken)
@@ -433,10 +273,13 @@ public class HostedServiceStartDeferralTests
             Started.TrySetResult(readConfiguration());
             return startup ?? Task.CompletedTask;
         }
-        public Task StopAsync(CancellationToken cancellationToken)
+        public async Task StopAsync(CancellationToken cancellationToken)
         {
             stopped?.Invoke();
-            return Task.CompletedTask;
+            if (stopping is not null)
+            {
+                await stopping();
+            }
         }
     }
 }
