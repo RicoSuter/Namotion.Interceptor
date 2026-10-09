@@ -1,22 +1,32 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import Any
 
 import numpy as np
 
+from video_tts.voices import ChatterboxVoice
+
 
 class ChatterboxEngine:
-    def __init__(self, voice_prompt: Path | None) -> None:
+    def __init__(self, voice: ChatterboxVoice, model: Any | None = None) -> None:
         import torch
-        from chatterbox.tts import ChatterboxTTS
 
         self._torch = torch
-        self._model = ChatterboxTTS.from_pretrained(device="cuda" if torch.cuda.is_available() else "cpu")
-        self._voice_prompt = str(voice_prompt) if voice_prompt else None
-        self.sample_rate: int = self._model.sr
+        if model is None:
+            from chatterbox.tts import ChatterboxTTS
+
+            model = ChatterboxTTS.from_pretrained(device="cuda" if torch.cuda.is_available() else "cpu")
+        self._model = model
+        self._voice = voice
+        self.sample_rate: int = model.sr
 
     def generate(self, text: str, seed: int) -> np.ndarray:
         # Seeding per line keeps re-synthesis of the same line reproducible.
         self._torch.manual_seed(seed)
-        wav = self._model.generate(text, audio_prompt_path=self._voice_prompt)
+        wav = self._model.generate(
+            text,
+            audio_prompt_path=str(self._voice.reference) if self._voice.reference else None,
+            exaggeration=self._voice.exaggeration,
+            cfg_weight=self._voice.cfg_weight,
+        )
         return wav.squeeze(0).cpu().numpy()

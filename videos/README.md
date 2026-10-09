@@ -13,6 +13,8 @@ npx playwright install chromium
 (cd tools/tts && uv sync)
 ```
 
+Kokoro voices need the optional `kokoro` extra, which `npm run tts` installs on first use (`uv sync --extra kokoro` installs it up front).
+
 ## Producing an episode
 
 ```bash
@@ -24,6 +26,14 @@ npm run render -- <episode> --final
 ```
 
 Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <video title> | <chapter title>", top left) from the scene runtime. Choose the background with `background:` in `script.yaml` (`drift`, `chapter-tint`, `edge-aurora` or `follow-light`) or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
+
+Choose the narration voice with `voice:` in `script.yaml`:
+
+- `chatterbox` (default): Chatterbox's built-in voice.
+- `chatterbox-calm`: the same voice with a slower, more neutral delivery (lower exaggeration and CFG weight).
+- `kokoro:<name>`: a [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) English voice, for example `kokoro:af_heart`, `kokoro:am_michael` or `kokoro:bm_george`.
+
+Audio is cached by text, engine, voice and settings, so switching back to a voice reuses its earlier audio.
 
 Narration plays at the voice's natural pace (`tempo` 1) by default; set `tempo:` in `script.yaml` to speed it up or slow it down per episode. TTS caches the synthesized speech and a pitch-preserving copy per tempo (ffmpeg `atempo`), so a tempo change does not synthesize again.
 

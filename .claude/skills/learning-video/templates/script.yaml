@@ -2,7 +2,7 @@
 # The episode id must equal the episode folder name.
 episode: 03-example
 title: Example feature
-voice: default
+voice: chatterbox
 chapters:
   - id: hook
     title: Example feature

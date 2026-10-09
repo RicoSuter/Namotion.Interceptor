@@ -25,7 +25,7 @@ describe('parseScript', () => {
     const script = parseScript(validScript);
 
     // Assert
-    expect(script.voice).toBe('default');
+    expect(script.voice).toBe('chatterbox');
     expect(allBeats(script).map(beat => [beat.chapter, beat.id])).toEqual([['basics', 'hello'], ['basics', 'pause']]);
   });
 
@@ -46,6 +46,14 @@ describe('parseScript', () => {
     expect(script.background).toBe('edge-aurora');
     expect(parseScript(validScript).background).toBeUndefined();
     expect(() => parseScript(validScript.replace('title: Smoke test\n', 'title: Smoke test\nbackground: plaid\n'))).toThrow(/Invalid script.yaml/);
+  });
+
+  it('WhenVoiceIsUnknown_ThenThrowsWithTheVoiceError', () => {
+    // Arrange
+    const yaml = validScript.replace('title: Smoke test\n', 'title: Smoke test\nvoice: kokoro:xx\n');
+
+    // Act & Assert
+    expect(() => parseScript(yaml)).toThrow(/Unknown Kokoro voice 'xx'/);
   });
 
   it('WhenTempoIsOutOfRange_ThenThrows', () => {

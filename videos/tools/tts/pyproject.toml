@@ -10,11 +10,21 @@ dependencies = [
     "soundfile>=0.13",
 ]
 
+[project.optional-dependencies]
+kokoro = [
+    # The spaCy model of Kokoro's English phonemizer, locked here instead of downloaded on first use.
+    "en-core-web-sm",
+    "kokoro==0.9.4",
+]
+
 [dependency-groups]
 dev = ["pytest>=8"]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

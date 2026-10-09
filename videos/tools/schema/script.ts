@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {parse} from 'yaml';
 import {z} from 'zod';
 import {backgroundVariants} from '../../theme/backgrounds';
+import {defaultVoice, parseVoice} from '../voice';
 
 export const componentNames = [
   'CodeCard',
@@ -48,7 +49,17 @@ const chapterSchema = z.object({
 export const scriptSchema = z.object({
   episode: identifier,
   title: z.string().trim().min(1),
-  voice: z.string().min(1).default('default'),
+  /** Narration voice, see `parseVoice`. */
+  voice: z
+    .string()
+    .default(defaultVoice)
+    .superRefine((spec, context) => {
+      try {
+        parseVoice(spec);
+      } catch (error) {
+        context.addIssue({code: 'custom', message: (error as Error).message});
+      }
+    }),
   /** Speech speed factor applied to the synthesized narration, pitch preserved. */
   tempo: z.number().min(0.5).max(2).default(defaultTempo),
   /** Background variant; the theme default when omitted. */

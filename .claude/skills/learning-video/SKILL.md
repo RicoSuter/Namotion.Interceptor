@@ -80,7 +80,8 @@ Copy `.claude/skills/learning-video/templates/outline.md` to `videos/episodes/<n
 
 Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder and replace its content. The schema is `videos/tools/schema/script.ts`:
 
-- `episode` (the folder name), `title`, `voice` (`default`, or a reference wav path relative to `videos/`), `chapters`.
+- `episode` (the folder name), `title`, `chapters`.
+- `voice` (optional, default `chatterbox`): the narration voice, see Voices in `videos/README.md`. Changing it synthesizes every line again.
 - `background` (optional): the background variant, one of `drift`, `chapter-tint`, `edge-aurora`, `follow-light`; the theme default (`defaultBackground` in `theme/backgrounds.ts`) when omitted. See Backgrounds.
 - `tempo` (optional, default 1, the voice's natural pace): speech speed factor between 0.5 and 2. TTS synthesizes each line once at the voice's natural pace and caches it, then writes a pitch-preserving copy at this tempo (ffmpeg `atempo`, cached under a key that includes the tempo); beat timing uses the adjusted durations. Changing the tempo re-runs only that fast step.
 - Chapter: `id` (kebab-case), `title`, `beats`.

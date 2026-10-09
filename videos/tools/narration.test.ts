@@ -43,7 +43,7 @@ describe('buildNarration', () => {
 
   it('WhenVoiceChanges_ThenKeysChange', () => {
     // Act
-    const items = buildNarration({...script, voice: 'voices/rico.wav'}, lexicon);
+    const items = buildNarration({...script, voice: 'kokoro:af_heart'}, lexicon);
 
     // Assert
     expect(items[0].key).not.toBe(buildNarration(script, lexicon)[0].key);

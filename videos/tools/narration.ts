@@ -2,9 +2,7 @@ import {createHash} from 'node:crypto';
 import type {Timing, TimingBeat} from '../theme/timing';
 import {applyLexicon, type LexiconEntry} from './lexicon';
 import {allBeats, type Script} from './schema/script';
-
-/** Bump when synthesis settings change so cached audio is regenerated. */
-export const engineVersion = 'chatterbox-1';
+import {parseVoice, voiceIdentity} from './voice';
 
 /** Silence after each narrated line, in seconds. */
 export const narrationPadding = 0.4;
@@ -18,6 +16,14 @@ export interface NarrationItem {
   text: string;
 }
 
+/** Cache key of a line synthesized by a voice, given the voice's cache identity. */
+export function synthesisKey(text: string, identity: {voice: unknown; engine: string}): string {
+  return createHash('sha256')
+    .update(JSON.stringify({text, voice: identity.voice, engine: identity.engine}))
+    .digest('hex')
+    .slice(0, 16);
+}
+
 /**
  * Key of the tempo-adjusted copy of synthesized audio. Tempo 1 plays the synthesized file itself; any other
  * tempo gets its own file, so changing the tempo never synthesizes the speech again.
@@ -26,15 +32,13 @@ export function tempoKey(key: string, tempo: number): string {
   return tempo === 1 ? key : `${key}-x${tempo}`;
 }
 
-export function buildNarration(script: Script, lexicon: LexiconEntry[]): NarrationItem[] {
+/** Builds the narrated lines; `identity` is the voice's cache identity, by default that of the script's voice. */
+export function buildNarration(script: Script, lexicon: LexiconEntry[], identity = voiceIdentity(parseVoice(script.voice))): NarrationItem[] {
   return allBeats(script)
     .filter(beat => beat.narration !== undefined)
     .map(beat => {
       const text = applyLexicon(beat.narration!, lexicon);
-      const key = createHash('sha256')
-        .update(JSON.stringify({text, voice: script.voice, engine: engineVersion}))
-        .digest('hex')
-        .slice(0, 16);
+      const key = synthesisKey(text, identity);
       return {beatId: beat.id, key, audioKey: tempoKey(key, script.tempo), text};
     });
 }
