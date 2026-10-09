@@ -26,9 +26,15 @@ public partial class SonosPlayer : SonosDevice,
     private DateTimeOffset _lastRenderingControlEventAt = DateTimeOffset.MinValue;
     private DateTimeOffset _lastPollStartedAt = DateTimeOffset.MinValue;
 
-    // Every event and poll repeats the metadata, so the last parse is reused while the raw string is unchanged.
+    // Every event and poll repeats the metadata, so the last parse is reused while the raw string is unchanged, and
+    // the album art URI while the track and the speaker address are. Guarded by _stateLock.
     private string? _lastTrackMetaData;
     private DidlTrack? _lastTrack;
+    private string? _lastMediaMetaData;
+    private string? _lastMediaTitle;
+    private DidlTrack? _imageUriTrack;
+    private Uri? _imageUriBaseUri;
+    private string? _imageUri;
 
     internal SonosPlayer(SonosSystem system, string uuid)
         : base(uuid)
@@ -711,7 +717,13 @@ public partial class SonosPlayer : SonosDevice,
 
         // Polls often report the media metadata empty that events delivered, so only a parsable title replaces it.
         // The next track of the same queue or station keeps it.
-        if (DidlParser.ParseTitle(change.MediaMetaData) is { } mediaTitle)
+        if (change.MediaMetaData != _lastMediaMetaData)
+        {
+            _lastMediaTitle = DidlParser.ParseTitle(change.MediaMetaData);
+            _lastMediaMetaData = change.MediaMetaData;
+        }
+
+        if (_lastMediaTitle is { } mediaTitle)
         {
             ReportedMediaTitle = mediaTitle;
         }
@@ -752,7 +764,15 @@ public partial class SonosPlayer : SonosDevice,
         CurrentTrackTitle = track?.Title;
         CurrentTrackArtist = track?.Artist;
         CurrentTrackAlbum = track?.Album;
-        CurrentTrackImageUri = SonosValues.ToAbsoluteUri(track?.AlbumArtUri, BaseUri);
+        var baseUri = BaseUri;
+        if (!ReferenceEquals(track, _imageUriTrack) || baseUri != _imageUriBaseUri)
+        {
+            _imageUri = SonosValues.ToAbsoluteUri(track?.AlbumArtUri, baseUri);
+            _imageUriTrack = track;
+            _imageUriBaseUri = baseUri;
+        }
+
+        CurrentTrackImageUri = _imageUri;
     }
 
     private void ApplyRenderingControl(RenderingControlChange change)

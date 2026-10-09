@@ -140,8 +140,8 @@ internal sealed class SonosConnection : IDisposable
         bool? speechEnhancement = null;
         if (isHomeTheater)
         {
-            nightMode = await GetEqualizerAsync("NightMode", newFaults, cancellationToken);
-            speechEnhancement = await GetEqualizerAsync("DialogLevel", newFaults, cancellationToken);
+            nightMode = await GetEqualizerAsync("NightMode", "GetEQ NightMode", newFaults, cancellationToken);
+            speechEnhancement = await GetEqualizerAsync("DialogLevel", "GetEQ DialogLevel", newFaults, cancellationToken);
         }
 
         return new SonosPlayerReading(
@@ -359,9 +359,9 @@ internal sealed class SonosConnection : IDisposable
     private static string EscapeMetadataAmpersands(string metadata) =>
         metadata.Contains('<') ? metadata.Replace("&", "&amp;", StringComparison.Ordinal) : metadata;
 
-    private async Task<bool?> GetEqualizerAsync(string type, List<SonosReadFault> faults, CancellationToken cancellationToken)
+    private async Task<bool?> GetEqualizerAsync(string type, string action, List<SonosReadFault> faults, CancellationToken cancellationToken)
     {
-        var response = await ReadOrDefaultAsync("GetEQ " + type,
+        var response = await ReadOrDefaultAsync(action,
             () => RenderingControl.GetEQ(new RenderingControlService.GetEQRequest { InstanceID = InstanceId, EQType = type }, cancellationToken), faults);
         return response is null ? null : SonosValues.IsLevelOn(response.CurrentValue);
     }

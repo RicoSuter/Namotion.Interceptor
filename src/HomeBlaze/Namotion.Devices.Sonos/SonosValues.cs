@@ -91,11 +91,13 @@ internal static class SonosValues
             return null;
         }
 
-        var parts = value.Split(':');
-        if (parts.Length != 3 ||
-            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
-            !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
-            !double.TryParse(parts[2], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) ||
+        // One range more than needed, so a fourth part is counted rather than folded into the third.
+        var text = value.AsSpan();
+        Span<Range> parts = stackalloc Range[4];
+        if (text.Split(parts, ':') != 3 ||
+            !int.TryParse(text[parts[0]], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
+            !int.TryParse(text[parts[1]], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
+            !double.TryParse(text[parts[2]], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) ||
             hours > 9999 || minutes >= 60 || !double.IsFinite(seconds) || seconds is < 0 or >= 60)
         {
             return null;
