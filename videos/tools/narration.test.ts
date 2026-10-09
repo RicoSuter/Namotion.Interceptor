@@ -87,6 +87,23 @@ describe('buildNarration tempo', () => {
   });
 });
 
+describe('buildNarration tempo with Kokoro', () => {
+  it('WhenKokoroTempoChanges_ThenSynthesisKeysChangeAndAudioIsTheSynthesizedFile', () => {
+    // Arrange
+    const kokoro = {...script, voice: 'kokoro:am_michael'};
+
+    // Act
+    const natural = buildNarration(kokoro, lexicon);
+    const faster = buildNarration({...kokoro, tempo: 1.34}, lexicon);
+
+    // Assert
+    expect(faster[0].key).not.toBe(natural[0].key);
+    expect(faster.map(item => item.audioKey)).toEqual(faster.map(item => item.key));
+    expect(faster[0].key).toBe(buildNarration({...kokoro, tempo: 1.34}, lexicon)[0].key);
+    expect(buildNarration({...kokoro, tempo: 1.3}, lexicon)[0].key).not.toBe(faster[0].key);
+  });
+});
+
 describe('buildTiming', () => {
   it('WhenDurationsAreKnown_ThenBeatsAreLaidOutBackToBack', () => {
     // Arrange

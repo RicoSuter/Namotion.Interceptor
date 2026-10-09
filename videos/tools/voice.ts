@@ -18,7 +18,7 @@ export type Voice =
 /** The settings the Python TTS package receives for a voice. */
 export type VoiceRequest =
   | {engine: 'chatterbox'; reference: string | null; exaggeration: number; cfgWeight: number}
-  | {engine: 'kokoro'; name: string};
+  | {engine: 'kokoro'; name: string; speed: number};
 
 export const defaultVoice = 'chatterbox';
 
@@ -62,10 +62,25 @@ export function voiceLabel(voice: Voice): string {
   return voice.preset === 'default' ? `clone-${name}` : `clone-${name}-${voice.preset}`;
 }
 
-/** The request for the TTS package; a cloned voice needs the absolute path of its prepared reference recording. */
-export function voiceRequest(voice: Voice, preparedReference: string | null = null): VoiceRequest {
+/**
+ * How a voice reaches a narration tempo. Kokoro synthesizes at that speed itself, which keeps its prosody natural.
+ * Chatterbox has no speed control, so its speech is synthesized at the natural pace and then sped up with ffmpeg's
+ * pitch-preserving `atempo`.
+ */
+export function tempoPlan(voice: Voice, tempo: number): {speed: number; atempo: number} {
+  return voice.engine === 'kokoro' ? {speed: tempo, atempo: 1} : {speed: 1, atempo: tempo};
+}
+
+/**
+ * The request for the TTS package; a cloned voice needs the absolute path of its prepared reference recording.
+ * `speed` is the engine's native speed from `tempoPlan`.
+ */
+export function voiceRequest(voice: Voice, preparedReference: string | null = null, speed = 1): VoiceRequest {
   if (voice.engine === 'kokoro') {
-    return {engine: 'kokoro', name: voice.name};
+    return {engine: 'kokoro', name: voice.name, speed};
+  }
+  if (speed !== 1) {
+    throw new Error(`Voice '${voiceLabel(voice)}' has no native speed; its tempo is applied with atempo`);
   }
   if (voice.reference !== null && preparedReference === null) {
     throw new Error(`Voice '${voiceLabel(voice)}' needs its prepared reference recording`);
@@ -74,13 +89,17 @@ export function voiceRequest(voice: Voice, preparedReference: string | null = nu
 }
 
 /**
- * What identifies synthesized audio in the cache besides its text: the engine version, the voice and its settings.
- * A cloned voice is identified by the digest of its reference recording, so a new recording at the same path is
- * synthesized again.
+ * What identifies synthesized audio in the cache besides its text: the engine version, the voice, its settings and
+ * the engine's native `speed` from `tempoPlan`. A cloned voice is identified by the digest of its reference recording,
+ * so a new recording at the same path is synthesized again.
  */
-export function voiceIdentity(voice: Voice, referenceDigest: string | null = null): {voice: unknown; engine: string} {
+export function voiceIdentity(voice: Voice, referenceDigest: string | null = null, speed = 1): {voice: unknown; engine: string} {
   if (voice.engine === 'kokoro') {
-    return {voice: {name: voice.name}, engine: engineVersions.kokoro};
+    // Speed 1 keeps the identity it had before Kokoro took a speed, so its cached audio stays valid.
+    return {voice: speed === 1 ? {name: voice.name} : {name: voice.name, speed}, engine: engineVersions.kokoro};
+  }
+  if (speed !== 1) {
+    throw new Error(`Voice '${voiceLabel(voice)}' has no native speed; its tempo is applied with atempo`);
   }
   const settings = chatterboxPresets[voice.preset];
   if (voice.reference !== null) {

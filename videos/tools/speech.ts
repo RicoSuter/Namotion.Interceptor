@@ -4,7 +4,7 @@ import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'no
 import {join, resolve} from 'node:path';
 import {probeDuration, runFfmpeg} from './ffmpeg';
 import {ttsProjectDirectory, videosRoot, voicesDirectory} from './paths';
-import {voiceIdentity, voiceRequest, type Voice, type VoiceRequest} from './voice';
+import {tempoPlan, voiceIdentity, voiceRequest, type Voice, type VoiceRequest} from './voice';
 
 /** Bump when the preparation of reference recordings changes, so cloned voices are synthesized again. */
 const referencePreparation = 'reference-1';
@@ -17,17 +17,38 @@ const referenceSilenceThreshold = '-45dB';
 
 export interface ResolvedVoice {
   request: VoiceRequest;
-  /** The voice's cache identity, see `voiceIdentity`. */
+  /** The voice's cache identity at the tempo's native speed, see `voiceIdentity`. */
   identity: {voice: unknown; engine: string};
+  /** The factor ffmpeg's `atempo` applies to the synthesized speech; 1 when the engine reaches the tempo itself. */
+  atempo: number;
 }
 
-/** Resolves a voice for synthesis; a cloned voice's reference recording is prepared first (cached by content). */
-export function resolveVoice(voice: Voice): ResolvedVoice {
+/**
+ * Resolves a voice for synthesis at a narration tempo (see `tempoPlan`); a cloned voice's reference recording is
+ * prepared first (cached by content).
+ */
+export function resolveVoice(voice: Voice, tempo = 1): ResolvedVoice {
+  const {speed, atempo} = tempoPlan(voice, tempo);
   if (voice.engine === 'kokoro' || voice.reference === null) {
-    return {request: voiceRequest(voice), identity: voiceIdentity(voice)};
+    return {request: voiceRequest(voice, null, speed), identity: voiceIdentity(voice, null, speed), atempo};
   }
   const reference = prepareReference(resolve(videosRoot, voice.reference));
-  return {request: voiceRequest(voice, reference.file), identity: voiceIdentity(voice, reference.digest)};
+  return {request: voiceRequest(voice, reference.file), identity: voiceIdentity(voice, reference.digest), atempo};
+}
+
+/**
+ * Writes the copy of `<key>.wav` that plays at `atempo` as `<audioKey>.wav`, unless it exists or the factor is 1
+ * (then both keys name the same file).
+ */
+export function applyTempo(directory: string, key: string, audioKey: string, atempo: number): void {
+  const audioFile = join(directory, `${audioKey}.wav`);
+  if (atempo === 1 || existsSync(audioFile)) {
+    return;
+  }
+  // Write then rename so an interrupted run never leaves a truncated file in the cache.
+  const temporaryFile = join(directory, `${audioKey}.tmp.wav`);
+  runFfmpeg(['-i', join(directory, `${key}.wav`), '-af', `atempo=${atempo}`, temporaryFile]);
+  renameSync(temporaryFile, audioFile);
 }
 
 /**

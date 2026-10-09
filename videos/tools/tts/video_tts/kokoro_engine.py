@@ -12,13 +12,14 @@ KOKORO_REPOSITORY = "hexgrad/Kokoro-82M"
 class KokoroEngine:
     sample_rate = 24000
 
-    def __init__(self, name: str, pipeline: Callable[..., Iterable[Any]] | None = None) -> None:
+    def __init__(self, name: str, speed: float = 1.0, pipeline: Callable[..., Iterable[Any]] | None = None) -> None:
         self._name = name
+        self._speed = speed
         self._pipeline = pipeline if pipeline is not None else _create_pipeline(lang_code=name[0])
 
     def generate(self, text: str, seed: int) -> np.ndarray:
         # Kokoro is deterministic, so the seed is not needed for reproducible lines.
-        chunks = [_to_numpy(result.audio) for result in self._pipeline(text, voice=self._name, speed=1.0) if result.audio is not None]
+        chunks = [_to_numpy(result.audio) for result in self._pipeline(text, voice=self._name, speed=self._speed) if result.audio is not None]
         if not chunks:
             raise RuntimeError(f"Kokoro produced no audio for {text!r}")
         return np.concatenate(chunks)

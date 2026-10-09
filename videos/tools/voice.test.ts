@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {synthesisKey} from './narration';
-import {parseVoice, voiceIdentity, voiceLabel, voiceRequest} from './voice';
+import {parseVoice, tempoPlan, voiceIdentity, voiceLabel, voiceRequest} from './voice';
 
 describe('parseVoice', () => {
   it('WhenSpecNamesChatterbox_ThenUsesItsPreset', () => {
@@ -51,7 +51,13 @@ describe('voiceRequest', () => {
     // Act & Assert
     expect(voiceRequest(parseVoice('chatterbox'))).toEqual({engine: 'chatterbox', reference: null, exaggeration: 0.5, cfgWeight: 0.5});
     expect(voiceRequest(parseVoice('chatterbox-calm'))).toEqual({engine: 'chatterbox', reference: null, exaggeration: 0.35, cfgWeight: 0.3});
-    expect(voiceRequest(parseVoice('kokoro:af_heart'))).toEqual({engine: 'kokoro', name: 'af_heart'});
+    expect(voiceRequest(parseVoice('kokoro:af_heart'))).toEqual({engine: 'kokoro', name: 'af_heart', speed: 1});
+  });
+
+  it('WhenKokoroHasSpeed_ThenRequestCarriesIt', () => {
+    // Act & Assert
+    expect(voiceRequest(parseVoice('kokoro:am_michael'), null, 1.34)).toEqual({engine: 'kokoro', name: 'am_michael', speed: 1.34});
+    expect(() => voiceRequest(parseVoice('chatterbox'), null, 1.2)).toThrow(/has no native speed/);
   });
 
   it('WhenVoiceIsClone_ThenRequestNeedsThePreparedReference', () => {
@@ -64,7 +70,41 @@ describe('voiceRequest', () => {
   });
 });
 
+describe('tempoPlan', () => {
+  it('WhenVoiceIsKokoro_ThenEngineReachesTheTempoNatively', () => {
+    // Act & Assert
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), 1.34)).toEqual({speed: 1.34, atempo: 1});
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), 1)).toEqual({speed: 1, atempo: 1});
+  });
+
+  it('WhenVoiceIsChatterboxOrClone_ThenAtempoReachesTheTempo', () => {
+    // Act & Assert
+    expect(tempoPlan(parseVoice('chatterbox'), 1.2)).toEqual({speed: 1, atempo: 1.2});
+    expect(tempoPlan(parseVoice('clone-calm:voices/rico.wav'), 0.9)).toEqual({speed: 1, atempo: 0.9});
+  });
+});
+
 describe('voiceIdentity', () => {
+  it('WhenKokoroSpeedChanges_ThenKeyChangesAndSpeedOneKeepsTheEarlierKey', () => {
+    // Arrange
+    const voice = parseVoice('kokoro:am_michael');
+
+    // Act
+    const natural = synthesisKey('Hello.', voiceIdentity(voice));
+    const faster = synthesisKey('Hello.', voiceIdentity(voice, null, 1.3));
+
+    // Assert
+    expect(natural).toBe(synthesisKey('Hello.', {voice: {name: 'am_michael'}, engine: 'kokoro-1'}));
+    expect(synthesisKey('Hello.', voiceIdentity(voice, null, 1))).toBe(natural);
+    expect(faster).not.toBe(natural);
+    expect(synthesisKey('Hello.', voiceIdentity(voice, null, 1.34))).not.toBe(faster);
+  });
+
+  it('WhenChatterboxGetsASpeed_ThenThrows', () => {
+    // Act & Assert
+    expect(() => voiceIdentity(parseVoice('chatterbox'), null, 1.2)).toThrow(/has no native speed/);
+  });
+
   it('WhenVoiceIsDefaultChatterbox_ThenKeyMatchesAudioCachedBeforeVoicesWereConfigurable', () => {
     // Act
     const key = synthesisKey('Hello.', voiceIdentity(parseVoice('chatterbox')));

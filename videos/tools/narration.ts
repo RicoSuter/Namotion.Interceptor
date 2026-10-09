@@ -2,16 +2,16 @@ import {createHash} from 'node:crypto';
 import type {Timing, TimingBeat} from '../theme/timing';
 import {applyLexicon, type LexiconEntry} from './lexicon';
 import {allBeats, type Script} from './schema/script';
-import {parseVoice, voiceIdentity, voiceLabel} from './voice';
+import {parseVoice, tempoPlan, voiceIdentity, voiceLabel} from './voice';
 
 /** Silence after each narrated line, in seconds. */
 export const narrationPadding = 0.4;
 
 export interface NarrationItem {
   beatId: string;
-  /** Cache key of the synthesized speech, independent of the tempo. */
+  /** Cache key of the synthesized speech; it includes the tempo only for a voice that reaches it natively. */
   key: string;
-  /** Cache key of the tempo-adjusted audio the video plays. */
+  /** Cache key of the audio the video plays: the synthesized speech, or its `atempo` copy. */
   audioKey: string;
   text: string;
 }
@@ -25,25 +25,31 @@ export function synthesisKey(text: string, identity: {voice: unknown; engine: st
 }
 
 /**
- * Key of the tempo-adjusted copy of synthesized audio. Tempo 1 plays the synthesized file itself; any other
- * tempo gets its own file, so changing the tempo never synthesizes the speech again.
+ * Key of the `atempo` copy of synthesized audio. Factor 1 plays the synthesized file itself; any other factor gets
+ * its own file, so changing the tempo of a voice without native speed never synthesizes the speech again.
  */
-export function tempoKey(key: string, tempo: number): string {
-  return tempo === 1 ? key : `${key}-x${tempo}`;
+export function tempoKey(key: string, atempo: number): string {
+  return atempo === 1 ? key : `${key}-x${atempo}`;
 }
 
-/** Builds the narrated lines; `identity` is the voice's cache identity, by default that of the script's voice. */
-export function buildNarration(script: Script, lexicon: LexiconEntry[], identity = voiceIdentity(parseVoice(script.voice))): NarrationItem[] {
+/**
+ * Builds the narrated lines at the script's tempo (see `tempoPlan`). `identity` is the voice's cache identity at
+ * that tempo, as `resolveVoice` returns it; by default that of the script's voice, which a cloned voice cannot use.
+ */
+export function buildNarration(script: Script, lexicon: LexiconEntry[], identity?: {voice: unknown; engine: string}): NarrationItem[] {
+  const voice = parseVoice(script.voice);
+  const {speed, atempo} = tempoPlan(voice, script.tempo);
+  const cacheIdentity = identity ?? voiceIdentity(voice, null, speed);
   return allBeats(script)
     .filter(beat => beat.narration !== undefined)
     .map(beat => {
       const text = applyLexicon(beat.narration!, lexicon);
-      const key = synthesisKey(text, identity);
-      return {beatId: beat.id, key, audioKey: tempoKey(key, script.tempo), text};
+      const key = synthesisKey(text, cacheIdentity);
+      return {beatId: beat.id, key, audioKey: tempoKey(key, atempo), text};
     });
 }
 
-/** Lays the beats out back to back; durations are the seconds of each item's tempo-adjusted audio, by audio key. */
+/** Lays the beats out back to back; durations are the seconds of each item's played audio, by audio key. */
 export function buildTiming(script: Script, items: NarrationItem[], durations: Record<string, number>): Timing {
   const itemsByBeat = new Map(items.map(item => [item.beatId, item]));
   const beats: TimingBeat[] = [];
