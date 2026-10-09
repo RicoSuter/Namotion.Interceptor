@@ -189,7 +189,7 @@ export default makeScene2D('streams', function* (view) {
   yield* narrator.beat('streams-brew-step',
     brew.play(stepDuration, {from: rows + 1.2, to: rows + 1.2 + stepDuration * 0.5}),
     all(...numbers.map(number => number.opacity(0, 0.4))),
-    camera.focusOn(() => brew.pagePoint(brew.right, 400, streamRowY(3)), {zoom: 1.7, duration: 1.4, clear: brew.frames}),
+    camera.focusOn(() => brew.pagePoint(brew.right, 400, streamRowY(3)), {zoom: 1.35, duration: 1.4, clear: brew.frames}),
     delay(1.6, (function* () {
       noRecipe.position(toLocal(camera, brew.pagePoint(brew.right, 640, streamRowY(3) + 18)));
       yield* arrive(noRecipe);
@@ -277,6 +277,6 @@ export default makeScene2D('streams', function* (view) {
     delay(1.4, all(older.opacity(1, 0.3), older.x(0, 1, moveEasing))),
     delay(orderDuration * 0.55, all(newer.y(380, 0.8, moveEasing), older.y(300, 0.8, moveEasing))),
     delay(orderDuration * 0.55 + 1, chain(all(older.opacity(0.4, 0.5)), nudge(newer, 1.08))),
-    delay(0.8, camera.focusOnPoint(new Vector2(0, 200), {zoom: 1.1, duration: orderDuration - 1})),
+    delay(0.8, camera.focusOnPoint(new Vector2(0, 120), {zoom: 1.06, duration: orderDuration - 1, clear: queue})),
   );
 });

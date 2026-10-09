@@ -184,14 +184,14 @@ chapters:
         narration: Every committed write produces a subject property change. It carries the property, the old and the new value, a timestamp and a revision.
         visual: The card exits; a change card springs in titled SubjectPropertyChange, and its five fields slide in one after another with real values from a status change.
         components: [Card]
-      - id: streams-values
-        narration: Read the values with get old value and get new value, typed to what you expect.
-        visual: The old and new value fields of the change card are highlighted in turn, each with a small generic method pill beside it.
-        components: [Card, Camera]
       - id: streams-source
         narration: It also records where the value came from, so a value that a connector received is never echoed back to it.
         visual: An origin field slides into the change card with a small source badge; a return arrow starts to draw and dissolves.
         components: [Card]
+      - id: streams-values
+        narration: Read the values with get old value and get new value, typed to what you expect.
+        visual: The old and new value fields of the change card are highlighted in turn, each with a small generic method pill beside it.
+        components: [Card, Camera]
       - id: streams-channels
         narration: One interceptor publishes each change through three channels. An observable, a queue, and subscriptions to a single property.
         visual: The change card shrinks to the left as a write node; three channel nodes fan out to the right and particles travel to each in turn.

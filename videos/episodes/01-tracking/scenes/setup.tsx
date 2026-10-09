@@ -75,10 +75,10 @@ export default makeScene2D('setup', function* (view) {
   yield* narrator.beat('setup-generated',
     (function* () {
       const anchor = toLocal(camera, code.linesCenter(4, 4));
-      generated.position(anchor.add([330, -110]));
-      yield* all(arrive(generated), generated.y(anchor.y + 6 - 60, 0.8, moveEasing));
+      generated.position(anchor.add([300, -250]));
+      yield* all(arrive(generated), generated.y(anchor.y - 200, 0.8, moveEasing));
     })(),
-    delay(0.4, lineFocus(3, 5, 1.22, narrator.duration('setup-generated') - 0.6)),
+    delay(0.4, lineFocus(2, 5, 1.06, narrator.duration('setup-generated') - 0.6)),
   );
 
   // The context: full property tracking plus validation.
@@ -119,8 +119,8 @@ export default makeScene2D('setup', function* (view) {
         const start = toLocal(camera, code.linesCenter(2, 2)).add([300, 0]);
         bracket.line.p0(start);
         bracket.line.p1(start.add([60, 0]));
-        bracket.line.p2(new Vector2(featureX - 280, featureY(1) + 60));
-        bracket.line.p3(new Vector2(featureX - 230, featureY(1) + 60));
+        bracket.line.p2(new Vector2(featureX - 400, featureY(1)));
+        bracket.line.p3(new Vector2(featureX - 340, featureY(1)));
         yield* bracket.grow(0.6);
       })());
     })(),
@@ -128,21 +128,22 @@ export default makeScene2D('setup', function* (view) {
   );
   yield* narrator.beat('setup-individual',
     sequence(0.5, ...methods.map(method => all(method.opacity(1, 0.5, enterEasing), method.y(method.y() - 4, 0.5, enterEasing)))),
-    camera.focusOnPoint(new Vector2(featureX - 80, 0), {zoom: 1.12, duration: narrator.duration('setup-individual') - 0.2}),
+    camera.focusOnPoint(new Vector2(60, -20), {zoom: 1.04, duration: narrator.duration('setup-individual') - 0.2}),
   );
 
   // Context inheritance hands the context down the tree.
-  const inherited = new FlowDiagram({definition: machineTree, x: 470, y: 20, scale: 0.46});
+  const inherited = new FlowDiagram({definition: machineTree, y: 200, scale: 0.8});
   camera.add(inherited);
   yield* inherited.build();
   const inheritDuration = narrator.duration('setup-inherit');
   yield* narrator.beat('setup-inherit',
     camera.reset(1),
     all(...pills.map(pill => leave(pill, 60, 0, 0.6)), ...methods.map(method => leave(method, 60, 0, 0.6)), bracket.opacity(0, 0.5)),
+    all(code.x(0, 1, moveEasing), code.y(-270, 1, moveEasing), code.scale(0.6, 1, moveEasing)),
     delay(0.3, code.focus(5, 5)),
-    delay(0.6, all(inherited.reveal(0), delay(0.3, inherited.reveal(1)))),
+    delay(0.9, all(inherited.reveal(0), delay(0.3, inherited.reveal(1)))),
     delay(2.2, sequence(0.25, ...['boiler', 'pump', 'tank', 'hopper', 'recipes'].map(id => inherited.pulse('machine', id, 0.8)))),
-    delay(2.2, camera.focusOnPoint(new Vector2(180, 0), {zoom: 1.08, duration: inheritDuration - 2.4})),
+    delay(2.2, camera.focusOnPoint(new Vector2(0, 40), {zoom: 1.04, duration: inheritDuration - 2.4, clear: code})),
   );
   pills.forEach(pill => pill.remove());
   methods.forEach(method => method.remove());
@@ -154,8 +155,8 @@ export default makeScene2D('setup', function* (view) {
   camera.add(range);
   yield* narrator.beat('setup-validation',
     camera.reset(1),
-    leave(inherited, 60, 0, 0.6),
-    delay(0.3, all(code.x(-200, 1, moveEasing), code.scale(0.85, 1, moveEasing))),
+    leave(inherited, 0, 60, 0.6),
+    delay(0.3, all(code.x(-200, 1, moveEasing), code.y(0, 1, moveEasing), code.scale(0.85, 1, moveEasing))),
     delay(1.1, code.focus(3, 3)),
     delay(1.4, (function* () {
       const anchor = toLocal(camera, code.linesCenter(3, 3));
@@ -168,9 +169,9 @@ export default makeScene2D('setup', function* (view) {
 
   // Transactions come later: a placeholder on the empty line.
   const placeholder = (
-    <Rect layout padding={[10, 22]} gap={16} alignItems={'center'} radius={14} stroke={palette.separator} lineWidth={3}
-      lineDash={[10, 10]} opacity={0}>
-      <Txt fontFamily={fonts.code} fontSize={24} fill={palette.secondaryText} text={'.WithTransactions()'} />
+    <Rect layout padding={[2, 16]} gap={16} alignItems={'center'} radius={10} stroke={palette.separator} lineWidth={2}
+      lineDash={[8, 8]} opacity={0}>
+      <Txt fontFamily={fonts.code} fontSize={22} fill={palette.secondaryText} text={'.WithTransactions()'} />
       <Txt fontFamily={fonts.text} fontWeight={600} fontSize={22} fill={palette.blue} text={'later'} />
     </Rect>
   ) as Rect;

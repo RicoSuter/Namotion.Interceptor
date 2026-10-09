@@ -81,10 +81,10 @@ export default makeScene2D('transactions', function* (view) {
     code.morph(extractRegion(boilerSource, 'Boiler'), 1.2, 'Boiler.cs'),
     delay(1.4, code.focus(5, 6)),
     delay(1.6, (function* () {
-      ristretto.position(toLocal(camera, code.linesCenter(5, 6)).add([60, 120]));
+      ristretto.position(new Vector2(170, toLocal(camera, code.linesCenter(5, 6)).y));
       yield* arrive(ristretto);
     })()),
-    delay(1.6, camera.focusOnPoint(new Vector2(-250, 0), {zoom: 1.12, duration: ristrettoDuration - 1.8})),
+    delay(1.6, camera.focusOnPoint(new Vector2(-120, 0), {zoom: 1.06, duration: ristrettoDuration - 1.8})),
   );
 
   // The third write throws: two writes landed, the pump never starts.
@@ -139,7 +139,7 @@ export default makeScene2D('transactions', function* (view) {
     machines.play(stuckDuration, {from: left + 1.5, to: right - 1.6}),
     camera.focusOn(() => machines.pagePoint(machines.left, 400, 300), {zoom: 1.35, duration: 1.4, clear: machines.frames}),
     delay(1.8, (function* () {
-      stuck.position(toLocal(camera, machines.pagePoint(machines.left, 640, 142)));
+      stuck.position(toLocal(camera, machines.pagePoint(machines.left, 690, 142)));
       yield* arrive(stuck);
     })()),
   );
@@ -171,6 +171,7 @@ export default makeScene2D('transactions', function* (view) {
     all(machines.opacity(0, 0.7, moveEasing), machines.scale(0.9, 0.8, moveEasing), alarm.opacity(0, 0.3)),
     delay(0.4, arrive(fix, 0.94)),
     delay(0.6, fix.show(extractRegion(stepsSource, 'Context'), 1.2)),
+    delay(0.8, fixFocus(0, 5, 1.15, contextDuration * 0.5 - 1)),
     delay(contextDuration * 0.5, fix.morph(extractRegion(hostSource, 'ContextWithTransactions'), 1.2, 'MachineHost.cs')),
     delay(contextDuration * 0.5 + 1.4, fix.focus(4, 4)),
     delay(contextDuration * 0.5 + 1.4, fixFocus(4, 4, 1.2, contextDuration * 0.5 - 1.6)),
@@ -279,6 +280,7 @@ export default makeScene2D('transactions', function* (view) {
   camera.add(exception);
   const exceptionDuration = narrator.duration('tx-exception');
   yield* narrator.beat('tx-exception',
+    leave(untouched, 0, 40, 0.5),
     arrive(endpoint),
     delay(0.5, all(exception.opacity(1, 0.3), exception.y(-220, 1.2, moveEasing))),
     delay(1.8, nudge(endpoint, 1.06)),
@@ -290,7 +292,7 @@ export default makeScene2D('transactions', function* (view) {
   const rightDuration = narrator.duration('tx-live-right');
   yield* narrator.beat('tx-live-right',
     camera.reset(1),
-    all(leave(endpoint, 0, -40, 0.6), leave(exception, 0, -40, 0.6), leave(untouched, 0, 40, 0.6)),
+    all(leave(endpoint, 0, -40, 0.6), leave(exception, 0, -40, 0.6)),
     delay(0.3, all(machines.opacity(1, 0.6, enterEasing), machines.scale(1, 0.7, moveEasing))),
     machines.play(rightDuration, {from: right - 1.5, to: espresso - 0.8}),
     delay(1, camera.focusOn(() => machines.pagePoint(machines.right, 400, 380), {zoom: 1.28, duration: rightDuration - 1.2, clear: machines.frames})),

@@ -92,7 +92,7 @@ export default makeScene2D('derived', function* (view) {
     delay(0.4, code.focus(1, 1)),
     delay(1.6, graph.reveal(1)),
     delay(3.2, all(graph.pulse('temperature', 'hot', 0.8), graph.pulse('target', 'hot', 0.8), graph.pulse('level', 'low', 0.8))),
-    delay(1.6, camera.focusOnPoint(new Vector2(260, 30), {zoom: 1.08, duration: narrator.duration('derived-chain') - 1.8})),
+    delay(2.6, nudge(graph.node('hot'), 1.06)),
   );
 
   // Evaluated once on attach, so the dependencies are known from the start.
@@ -117,8 +117,8 @@ export default makeScene2D('derived', function* (view) {
     graph.reveal(2),
     (function* () {
       const temperature = node('temperature');
-      write.position(temperature.add([-120, -150]));
-      yield* delay(1.2, all(arrive(write), write.position(temperature.add([0, -100]), 0.8, moveEasing)));
+      write.position(temperature.add([-420, 60]));
+      yield* delay(1.2, all(arrive(write), write.position(temperature.add([-340, 0]), 0.8, moveEasing)));
     })(),
     delay(2.4, chain(
       graph.pulse('temperature', 'hot', 0.6),
@@ -141,7 +141,7 @@ export default makeScene2D('derived', function* (view) {
     })(),
     delay(1.6, chain(statusValue.retext('"Heating 79 °C"'), nudge(statusValue, 1.08))),
     delay(2.6, all(readyValue.opacity(0.55, 0.6), nudge(graph.node('ready'), 1.03))),
-    camera.focusOnPoint(new Vector2(380, 30), {zoom: 1.14, duration: compareDuration - 0.2}),
+    camera.focusOnPoint(new Vector2(250, 30), {zoom: 1.08, duration: compareDuration - 0.2}),
   );
   const acrossDuration = narrator.duration('derived-across');
   yield* narrator.beat('derived-across',
@@ -216,9 +216,9 @@ export default makeScene2D('derived', function* (view) {
   const countsDuration = narrator.duration('derived-counts');
   yield* narrator.beat('derived-counts',
     heat.play(countsDuration, {from: warm - 4, to: ready - 7}),
-    camera.focusOn(() => counter(400).add([0, 90]), {zoom: 1.45, duration: 1.4, clear: heat.frames}),
+    camera.focusOn(() => counter(400), {zoom: 1.35, duration: 1.4, clear: heat.frames}),
     delay(1.6, sequence(Math.max((countsDuration - 2.8) / 3, 0.6), ...callouts.map((callout, index) => (function* () {
-      callout.position(toLocal(camera, counter([160, 399, 638][index])).add([0, 96]));
+      callout.position(toLocal(camera, heat.pagePoint(heat.right, [160, 399, 638][index], 0)).add([0, -96]));
       yield* arrive(callout);
     })()))),
   );

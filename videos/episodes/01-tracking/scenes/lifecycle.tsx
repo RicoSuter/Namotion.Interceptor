@@ -111,14 +111,14 @@ export default makeScene2D('lifecycle', function* (view) {
     attached.opacity(0, 0.4),
     (function* () {
       const lungo = at('lungo');
-      other.position(lungo.add([-430, 0]));
-      const start = other.position().add([150, 0]);
-      const end = lungo.add([-140, 0]);
+      other.position(lungo.add([-280, 210]));
+      const start = other.position().add([0, -30]);
+      const end = lungo.add([-60, 70]);
       second.line.p0(start);
-      second.line.p1(start.add([60, 0]));
-      second.line.p2(end.add([-60, 0]));
+      second.line.p1(start.add([0, -50]));
+      second.line.p2(end.add([-80, 20]));
       second.line.p3(end);
-      references.position(lungo.add([0, 110]));
+      references.position(lungo.add([230, 210]));
       yield* chain(arrive(other), second.grow(0.6), arrive(references));
     })(),
     delay(sharedDuration * 0.6, all(second.opacity(0, 0.6), other.opacity(0.35, 0.6), delay(0.3, references.retext('1 reference')))),
@@ -145,7 +145,7 @@ export default makeScene2D('lifecycle', function* (view) {
   attached.remove();
 
   // A lifecycle handler sees every change: attach, reference added, reference removed, detach.
-  const handler = new Card({width: 1060, height: 210, y: 190, opacity: 0, scale: 0.94});
+  const handler = new Card({width: 1060, height: 210, y: 210, opacity: 0, scale: 0.94});
   handler.add(<Txt y={-50} fontFamily={fonts.code} fontWeight={600} fontSize={30} fill={palette.text} text={'ILifecycleHandler'} />);
   const flags = ['IsContextAttach', 'IsPropertyReferenceAdded', 'IsPropertyReferenceRemoved', 'IsContextDetach'];
   const flagPills = flags.map((flag, index) => new Pill({text: flag, code: true, size: 22, x: (index % 2 === 0 ? -250 : 250), y: index < 2 ? 4 : 68, opacity: 0.35}));
@@ -154,10 +154,10 @@ export default makeScene2D('lifecycle', function* (view) {
   const handlerDuration = narrator.duration('lifecycle-handler');
   yield* narrator.beat('lifecycle-handler',
     events.unfocus(),
-    all(events.y(-230, 0.8, moveEasing), events.opacity(0.6, 0.8)),
+    events.opacity(0.6, 0.8),
     delay(0.4, arrive(handler, 0.94)),
     delay(1.6, sequence(Math.max((handlerDuration - 2.6) / 4, 0.4), ...flagPills.map(pill => all(pill.opacity(1, 0.3), nudge(pill, 1.08))))),
-    camera.focusOnPoint(new Vector2(0, 80), {zoom: 1.08, duration: handlerDuration - 0.2}),
+    camera.focusOnPoint(new Vector2(0, 50), {zoom: 1.04, duration: handlerDuration - 0.2, clear: events}),
   );
 
   // Live: the attached row arrives in the change stream and the page shows the new recipe.
