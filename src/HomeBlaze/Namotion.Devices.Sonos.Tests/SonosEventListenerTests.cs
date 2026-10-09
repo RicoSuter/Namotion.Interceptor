@@ -330,6 +330,37 @@ public class SonosEventListenerTests
     }
 
     [Fact]
+    public async Task WhenSubscribingConcurrently_ThenEachKeyIsSubscribedOnce()
+    {
+        // Arrange
+        var releaseResponses = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextSid = 0;
+        await using var speaker = new LoopbackHttpServer(async context =>
+        {
+            await releaseResponses.Task.WaitAsync(WaitTimeout);
+            await RespondWithSid(context, $"uuid:sub-{Interlocked.Increment(ref nextSid)}");
+        });
+        using var httpClient = new HttpClient();
+        await using var listener = CreateListener(httpClient);
+        LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var eventUri = new Uri(speaker.BaseUri, "/Event");
+
+        // Act
+        var first = listener.SubscribeAsync("RINCON_X/AVTransport", eventUri, _ => { }, CancellationToken.None);
+        var duplicate = listener.SubscribeAsync("RINCON_X/AVTransport", eventUri, _ => { }, CancellationToken.None);
+        var other = listener.SubscribeAsync("RINCON_X/RenderingControl", eventUri, _ => { }, CancellationToken.None);
+        releaseResponses.SetResult();
+
+        // Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => duplicate);
+        var subscriptions = new[] { await first, await other };
+        Assert.Equal(2, subscriptions.Select(subscription => subscription.Sid).Distinct().Count());
+        Assert.Equal(
+            ["RINCON_X/AVTransport", "RINCON_X/RenderingControl"],
+            listener.Subscriptions.Select(subscription => subscription.Key).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public async Task WhenSubscribingBeforeStart_ThenThrows()
     {
         // Arrange
