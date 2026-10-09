@@ -80,9 +80,17 @@ public partial class SonosSystem : BackgroundService,
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
 
+    /// <summary>
+    /// The room players by RINCON id. A player that leaves the topology stays and reports
+    /// <see cref="SonosDevice.IsConnected"/> false. The dictionary is replaced, never mutated.
+    /// </summary>
     [State(Position = 1)]
     public partial Dictionary<string, SonosPlayer> Players { get; internal set; }
 
+    /// <summary>
+    /// The current groups by the RINCON id of their coordinator; a standalone room is a group of one. The dictionary
+    /// is replaced, never mutated.
+    /// </summary>
     [State(Position = 2)]
     public partial Dictionary<string, SonosGroup> Groups { get; internal set; }
 
@@ -92,9 +100,18 @@ public partial class SonosSystem : BackgroundService,
     [State(Position = 3)]
     public partial SonosFavorite[] Favorites { get; internal set; }
 
+    /// <summary>
+    /// Whether the event listener runs and at least one subscription has delivered an event. While false, the state
+    /// is only as current as the last poll.
+    /// </summary>
     [State(Position = 4)]
     public partial bool AreEventsActive { get; internal set; }
 
+    /// <summary>
+    /// The host the speakers send events to while the event listener runs; null while it does not, because it could
+    /// not listen, no local address routes to the seed speaker or the system is not connected. It stays set when no
+    /// event arrives, which <see cref="AreEventsActive"/> reports.
+    /// </summary>
     [State(Position = 5)]
     public partial string? ActiveEventCallbackHost { get; internal set; }
 
@@ -104,6 +121,9 @@ public partial class SonosSystem : BackgroundService,
 
     public partial string? StatusMessage { get; internal set; }
 
+    /// <summary>
+    /// When the last reconciliation of topology, state and favorites completed; null before the first.
+    /// </summary>
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
