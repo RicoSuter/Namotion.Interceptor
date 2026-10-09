@@ -48,11 +48,11 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 |-----------|-------------|
 | `Play`, `Pause`, `Stop`, `Next`, `Previous`, `TogglePlayback` | Playback, sent to the group coordinator |
 | `Seek` | Jumps within the current track (only when it has a duration) |
-| `SetVolume`, `ChangeVolume`, `RampVolume` | Volume 0 to 1, relative change, or a smooth ramp |
+| `SetVolume`, `ChangeVolume`, `RampVolume` | Volume as a fraction from 0 to 1, a relative change from -1 to 1, or a smooth ramp to a volume. Values out of range are rejected, not clamped. |
 | `Mute`, `Unmute` | Mute of this room |
 | `PlayFavorite` | Plays a Sonos favorite by name, see `SonosSystem.Favorites` |
 | `PlayUri` | Plays an http(s) stream as radio, with an optional title, or a native Sonos URI |
-| `PlayNotification` | Plays a sound over the current playback, which then resumes (S2 speakers). The volume is limited to 1 to 100 percent. |
+| `PlayNotification` | Plays a sound over the current playback, which then resumes (S2 speakers). The volume is a fraction from 0 to 1, played at 1 percent at least. |
 | `SwitchToTv`, `SwitchToLineIn` | Selects the TV or line-in input where available |
 | `SetShuffle`, `SetRepeat`, `SetSleepTimer` | Play mode and sleep timer of the whole group, sent to the group coordinator (zero cancels the timer) |
 | `SetBass`, `SetTreble`, `SetLoudness` | Sound settings, bass and treble from -10 to 10 |
@@ -65,7 +65,7 @@ Every operation is disabled while the system or the player is not connected. Ope
 
 ### SonosGroup
 
-`Play`, `Pause`, `Stop`, `Next`, `Previous`, `TogglePlayback`, `Seek`, and group-wide `SetVolume`, `ChangeVolume`, `Mute`, `Unmute`. Group volume keeps the volume ratio between the rooms.
+`Play`, `Pause`, `Stop`, `Next`, `Previous`, `TogglePlayback`, `Seek`, and group-wide `SetVolume`, `ChangeVolume`, `Mute`, `Unmute`, with the same volume ranges as a player. Group volume keeps the volume ratio between the rooms.
 
 ### SonosSystem
 

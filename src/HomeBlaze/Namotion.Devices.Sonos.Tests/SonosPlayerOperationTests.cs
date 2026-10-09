@@ -37,6 +37,53 @@ public class SonosPlayerOperationTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => player.SetBassAsync(bass, CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData("SetVolume", -0.01)]
+    [InlineData("SetVolume", 1.01)]
+    [InlineData("SetVolume", 20)]
+    [InlineData("RampVolume", -0.01)]
+    [InlineData("RampVolume", 20)]
+    [InlineData("ChangeVolume", -1.01)]
+    [InlineData("ChangeVolume", 1.01)]
+    [InlineData("ChangeVolume", 20)]
+    [InlineData("PlayNotification", -0.01)]
+    [InlineData("PlayNotification", 20)]
+    public async Task WhenVolumeIsOutOfRange_ThenThrowsBeforeConnecting(string operation, double value)
+    {
+        // Arrange
+        var player = CreateDisconnectedKitchen();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => InvokeVolumeOperation(player, operation, (decimal)value));
+    }
+
+    [Theory]
+    [InlineData("SetVolume", 0)]
+    [InlineData("SetVolume", 1)]
+    [InlineData("RampVolume", 1)]
+    [InlineData("ChangeVolume", -1)]
+    [InlineData("ChangeVolume", 1)]
+    [InlineData("PlayNotification", 0)]
+    [InlineData("PlayNotification", 1)]
+    public async Task WhenVolumeIsAtTheLimit_ThenItIsAccepted(string operation, double value)
+    {
+        // Arrange
+        var player = CreateDisconnectedKitchen();
+
+        // Act & Assert
+        // Not connected, so an accepted value fails at the connection instead of the argument check.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => InvokeVolumeOperation(player, operation, (decimal)value));
+    }
+
+    private static Task InvokeVolumeOperation(SonosPlayer player, string operation, decimal value) => operation switch
+    {
+        "SetVolume" => player.SetVolumeAsync(value, CancellationToken.None),
+        "RampVolume" => player.RampVolumeAsync(value, CancellationToken.None),
+        "ChangeVolume" => player.ChangeVolumeAsync(value, CancellationToken.None),
+        "PlayNotification" => player.PlayNotificationAsync("http://127.0.0.1/chime.mp3", value, CancellationToken.None),
+        _ => throw new ArgumentOutOfRangeException(nameof(operation))
+    };
+
     [Fact]
     public async Task WhenJoiningUnknownRoom_ThenThrowsListingTheRooms()
     {

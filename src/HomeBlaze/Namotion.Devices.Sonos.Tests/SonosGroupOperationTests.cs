@@ -36,6 +36,48 @@ public class SonosGroupOperationTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => group.PauseAsync(CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(false, -0.01)]
+    [InlineData(false, 1.01)]
+    [InlineData(false, 20)]
+    [InlineData(true, -1.01)]
+    [InlineData(true, 1.01)]
+    [InlineData(true, 20)]
+    public async Task WhenGroupVolumeIsOutOfRange_ThenThrowsBeforeConnecting(bool isChange, double value)
+    {
+        // Arrange
+        var group = CreateDisconnectedLivingRoom();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => isChange
+            ? group.ChangeVolumeAsync((decimal)value, CancellationToken.None)
+            : group.SetVolumeAsync((decimal)value, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(true, -1)]
+    [InlineData(true, 1)]
+    public async Task WhenGroupVolumeIsAtTheLimit_ThenItIsAccepted(bool isChange, double value)
+    {
+        // Arrange
+        var group = CreateDisconnectedLivingRoom();
+
+        // Act & Assert
+        // Not connected, so an accepted value fails at the connection instead of the argument check.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => isChange
+            ? group.ChangeVolumeAsync((decimal)value, CancellationToken.None)
+            : group.SetVolumeAsync((decimal)value, CancellationToken.None));
+    }
+
+    private static SonosGroup CreateDisconnectedLivingRoom()
+    {
+        var system = SonosSystemTopologyTests.CreateSystem();
+        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        return system.Groups[TestFixtures.LivingRoomUuid];
+    }
+
     [Fact]
     public async Task WhenGroupHasMembers_ThenVolumeIsSentToTheCoordinatorOnly()
     {

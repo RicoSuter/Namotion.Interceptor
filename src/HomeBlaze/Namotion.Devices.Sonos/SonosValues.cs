@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Security;
 
 namespace Namotion.Devices.Sonos;
@@ -35,6 +36,24 @@ internal static class SonosValues
 
     internal static decimal ToVolume(int sonosVolume) =>
         Math.Clamp(sonosVolume, 0, 100) / 100m;
+
+    /// <summary>
+    /// Throws <see cref="ArgumentOutOfRangeException"/> unless the volume is a fraction from 0 to 1.
+    /// </summary>
+    internal static void ThrowIfVolumeOutOfRange(decimal volume, [CallerArgumentExpression(nameof(volume))] string? parameterName = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(volume, 0m, parameterName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(volume, 1m, parameterName);
+    }
+
+    /// <summary>
+    /// Throws <see cref="ArgumentOutOfRangeException"/> unless the volume change is a fraction from -1 to 1.
+    /// </summary>
+    internal static void ThrowIfVolumeAdjustmentOutOfRange(decimal delta, [CallerArgumentExpression(nameof(delta))] string? parameterName = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(delta, -1m, parameterName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(delta, 1m, parameterName);
+    }
 
     internal static int ToSonosVolume(decimal volume) =>
         (int)Math.Round(Math.Clamp(volume, 0m, 1m) * 100m, MidpointRounding.AwayFromZero);

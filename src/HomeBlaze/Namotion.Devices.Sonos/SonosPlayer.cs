@@ -273,16 +273,25 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     [Operation(Position = 10)]
-    public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken) =>
-        RunOnPlayerAsync((connection, token) => connection.SetVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+    public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
+    {
+        SonosValues.ThrowIfVolumeOutOfRange(volume);
+        return RunOnPlayerAsync((connection, token) => connection.SetVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+    }
 
     [Operation(Position = 11)]
-    public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken) =>
-        RunOnPlayerAsync((connection, token) => connection.ChangeVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
+    public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
+    {
+        SonosValues.ThrowIfVolumeAdjustmentOutOfRange(delta);
+        return RunOnPlayerAsync((connection, token) => connection.ChangeVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
+    }
 
     [Operation(Position = 12)]
-    public Task RampVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken) =>
-        RunOnPlayerAsync((connection, token) => connection.RampVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+    public Task RampVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
+    {
+        SonosValues.ThrowIfVolumeOutOfRange(volume);
+        return RunOnPlayerAsync((connection, token) => connection.RampVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
+    }
 
     [Operation(Position = 13)]
     public Task MuteAsync(CancellationToken cancellationToken) =>
@@ -346,6 +355,8 @@ public partial class SonosPlayer : SonosDevice,
         {
             throw new ArgumentException("The sound URI must be an absolute http or https URI.", nameof(soundUri));
         }
+
+        SonosValues.ThrowIfVolumeOutOfRange(volume);
 
         // The notification volume must be 1 to 100, so 0 % plays at the lowest volume instead of failing.
         var sonosVolume = Math.Clamp(SonosValues.ToSonosVolume(volume), 1, 100);

@@ -113,7 +113,7 @@ public partial class Motor
 public enum StateUnit
 {
     Default,                // No formatting
-    Percent,                // 75%
+    Percent,                // 0.75 shown as 75%
     DegreeCelsius,          // 23.5 °C
     Watt,                   // 100 W
     Kilowatt,               // 1.5 kW
@@ -152,7 +152,7 @@ public enum StateUnit
 }
 ```
 
-Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA").
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA"). A `Percent` value, state or operation parameter, is a fraction from 0 to 1: it displays as 0 to 100 %, the operation dialog takes 0 to 100 and divides by 100, and MCP `invoke_method` passes the fraction unchanged.
 
 ### Naming Cumulative Properties
 
