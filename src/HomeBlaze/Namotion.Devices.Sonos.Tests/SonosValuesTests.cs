@@ -69,6 +69,9 @@ public class SonosValuesTests
     [InlineData("0:00:99999999999999999999")]
     [InlineData("0:60:00")]
     [InlineData("0:00:60")]
+    [InlineData("0:00:NaN")]
+    [InlineData("0:00:Infinity")]
+    [InlineData("0:00:-Infinity")]
     public void WhenParsingUnknownDuration_ThenReturnsNull(string? value)
     {
         // Act

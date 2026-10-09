@@ -57,7 +57,7 @@ internal static class SonosValues
             !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var hours) ||
             !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
             !double.TryParse(parts[2], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) ||
-            hours > 9999 || minutes >= 60 || seconds >= 60)
+            hours > 9999 || minutes >= 60 || !double.IsFinite(seconds) || seconds is < 0 or >= 60)
         {
             return null;
         }
