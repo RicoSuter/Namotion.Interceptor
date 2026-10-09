@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Parsing;
@@ -31,7 +30,7 @@ internal sealed class SonosConnection : IDisposable
 
     // The reads that answer with a UPnP fault, so each is reported once when it starts faulting. Concurrent because
     // a command refresh can poll the same player as the reconciliation.
-    private readonly ConcurrentDictionary<string, byte> _faultingReads = new(StringComparer.Ordinal);
+    private readonly FailureTracker _faultingReads = new();
 
     /// <param name="baseUri">The base URI of the unit.</param>
     /// <param name="uuid">The RINCON id of the unit, null while unknown.</param>
@@ -166,12 +165,12 @@ internal sealed class SonosConnection : IDisposable
         try
         {
             var result = await read();
-            _faultingReads.TryRemove(action, out _);
+            _faultingReads.ReportSuccess(action);
             return result;
         }
         catch (SonosServiceException exception)
         {
-            if (_faultingReads.TryAdd(action, 0))
+            if (_faultingReads.ReportFailure(action))
             {
                 newFaults.Add(new SonosReadFault(action, exception));
             }

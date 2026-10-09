@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net;
 using HomeBlaze.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -16,6 +15,12 @@ public partial class SonosSystem
     private const string GroupRenderingControlService = "GroupRenderingControl";
     private const string TopologySubscriptionKey = "seed/ZoneGroupTopology";
     private const string DisconnectedMessage = "The Sonos system is disconnected.";
+
+    // Keys of _failures; subscription keys, which contain a slash, share it.
+    private const string ConnectionFailureKey = "Connection";
+    private const string SeedHostFailureKey = "SeedHost";
+    private const string FavoritesFailureKey = "Favorites";
+    private const string EventDeliveryFailureKey = "EventDelivery";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
@@ -53,16 +58,8 @@ public partial class SonosSystem
     // while a reconciliation recomputes, and a stale result written last would stick until the next pass.
     private readonly Lock _eventsActiveLock = new();
 
-    // Written by the connection loop only. A persistent failure is logged at Warning once and at Debug while it lasts.
-    private string? _connectionFailure;
-    private bool _isSeedHostUnreachable;
-
-    // Guarded by _reconcileLock. A persistent failure is logged at Warning once and at Debug while it lasts.
-    private bool _isFavoritesReadFailing;
-    private bool _isEventDeliveryFailing;
-
-    // Concurrent because unsubscribes run in parallel.
-    private readonly ConcurrentDictionary<string, byte> _failingSubscriptionKeys = new(StringComparer.Ordinal);
+    // A persistent failure is logged at Warning once and at Debug while it lasts, see LogFailure.
+    private readonly FailureTracker _failures = new();
 
     private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultPollingInterval, MinimumInterval);
 
@@ -115,15 +112,7 @@ public partial class SonosSystem
             catch (Exception exception)
             {
                 // A long outage retries every interval, so only a new failure is a Warning.
-                if (exception.Message != _connectionFailure)
-                {
-                    _connectionFailure = exception.Message;
-                    _logger.LogWarning(exception, "Sonos system connection failed.");
-                }
-                else
-                {
-                    _logger.LogDebug(exception, "Sonos system connection failed again.");
-                }
+                LogFailure(_failures.ReportFailure(ConnectionFailureKey, exception.Message), exception, "Sonos system connection failed.");
 
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
@@ -386,7 +375,7 @@ public partial class SonosSystem
         // may have set them after the early reset.
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
-        _isEventDeliveryFailing = false;
+        _failures.ReportSuccess(EventDeliveryFailureKey);
         Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
 
         SonosEventListener? eventListener;
@@ -483,15 +472,12 @@ public partial class SonosSystem
             // The full request timeout, not the probe budget for known speakers: the configured seed is preferred.
             if (await ProbeSeedAsync(seedHostUri, RequestTimeout, cancellationToken))
             {
-                _isSeedHostUnreachable = false;
+                _failures.ReportSuccess(SeedHostFailureKey);
                 return seedHostUri;
             }
 
-            if (!_isSeedHostUnreachable)
-            {
-                _isSeedHostUnreachable = true;
-                _logger.LogWarning("The Sonos SeedHost {SeedHost} did not answer; trying the known speakers, then discovery.", seedHost);
-            }
+            LogFailure(_failures.ReportFailure(SeedHostFailureKey), null,
+                "The Sonos SeedHost {SeedHost} did not answer; trying the known speakers, then discovery.", seedHost);
         }
 
         // Players still in the last topology first: a missing one was more likely unplugged or replaced.
@@ -683,7 +669,7 @@ public partial class SonosSystem
 
     private void MarkConnected()
     {
-        _connectionFailure = null;
+        _failures.ReportSuccess(ConnectionFailureKey);
         IsConnected = true;
         Status = ServiceStatus.Running;
         StatusMessage = null;
@@ -857,14 +843,8 @@ public partial class SonosSystem
         catch (Exception exception)
         {
             // Logged at Warning once per failure transition, so an offline player does not flood the log every poll.
-            if (ReportPollFailedIfCurrent(player, connection, exception.Message))
-            {
-                _logger.LogWarning(exception, "Polling the Sonos player in {Room} failed.", player.RoomName);
-            }
-            else
-            {
-                _logger.LogDebug(exception, "Polling the Sonos player in {Room} failed again.", player.RoomName);
-            }
+            LogFailure(ReportPollFailedIfCurrent(player, connection, exception.Message), exception,
+                "Polling the Sonos player in {Room} failed.", player.RoomName);
         }
     }
 
@@ -887,14 +867,8 @@ public partial class SonosSystem
         }
         catch (Exception exception)
         {
-            if (ReportPollFailedIfCurrent(satellite, connection, exception.Message))
-            {
-                _logger.LogWarning(exception, "Reading the Sonos satellite {Uuid} failed.", satellite.Uuid);
-            }
-            else
-            {
-                _logger.LogDebug(exception, "Reading the Sonos satellite {Uuid} failed again.", satellite.Uuid);
-            }
+            LogFailure(ReportPollFailedIfCurrent(satellite, connection, exception.Message), exception,
+                "Reading the Sonos satellite {Uuid} failed.", satellite.Uuid);
         }
     }
 
@@ -938,7 +912,7 @@ public partial class SonosSystem
             try
             {
                 SetFavorites(await connection!.ReadFavoritesAsync(cancellationToken));
-                _isFavoritesReadFailing = false;
+                _failures.ReportSuccess(FavoritesFailureKey);
                 return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -956,15 +930,7 @@ public partial class SonosSystem
         }
 
         failure ??= new InvalidOperationException("No connected Sonos player to read the favorites from.");
-        if (_isFavoritesReadFailing)
-        {
-            _logger.LogDebug(failure, "Reading the Sonos favorites failed again.");
-        }
-        else
-        {
-            _isFavoritesReadFailing = true;
-            _logger.LogWarning(failure, "Reading the Sonos favorites failed.");
-        }
+        LogFailure(_failures.ReportFailure(FavoritesFailureKey), failure, "Reading the Sonos favorites failed.");
     }
 
     private async Task EnsureSubscriptionsAsync(CancellationToken cancellationToken)
@@ -1040,17 +1006,19 @@ public partial class SonosSystem
 
         if (overdue is null)
         {
-            _isEventDeliveryFailing = false;
+            _failures.ReportSuccess(EventDeliveryFailureKey);
         }
-        else if (!_isEventDeliveryFailing)
+        else
         {
-            _isEventDeliveryFailing = true;
-            _logger.LogWarning(
+            LogFailure(_failures.ReportFailure(EventDeliveryFailureKey), null,
                 "The Sonos speakers accepted the event subscriptions, but no event reached {CallbackUri} within {Timeout} ({Key}); polling keeps the state current. " +
                 "Check that no firewall blocks the port, that Docker publishes it, and that EventCallbackHost is an address the speakers can reach.",
                 eventListener.CallbackBaseUri, InitialEventTimeout, overdue.Key);
         }
     }
+
+    private void LogFailure(bool isNew, Exception? exception, string message, params object?[] args) =>
+        _logger.Log(isNew ? LogLevel.Warning : LogLevel.Debug, exception, message, args);
 
     private long GetInitialEventDeadline(SonosEventSubscription subscription) =>
         Clock.AddToTimestamp(subscription.SubscribedAt, InitialEventTimeout);
@@ -1085,7 +1053,7 @@ public partial class SonosSystem
         try
         {
             await request();
-            _failingSubscriptionKeys.TryRemove(key, out _);
+            _failures.ReportSuccess(key);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1095,15 +1063,7 @@ public partial class SonosSystem
         catch (Exception exception)
         {
             // Includes the listener's OperationCanceledException for a subscription unsubscribed concurrently.
-            if (_failingSubscriptionKeys.TryAdd(key, 0))
-            {
-                _logger.LogWarning(exception, "The Sonos event subscription {Key} failed; polling keeps its state current.", key);
-            }
-            else
-            {
-                _logger.LogDebug(exception, "The Sonos event subscription {Key} failed again.", key);
-            }
-
+            LogFailure(_failures.ReportFailure(key), exception, "The Sonos event subscription {Key} failed; polling keeps its state current.", key);
             return false;
         }
     }
