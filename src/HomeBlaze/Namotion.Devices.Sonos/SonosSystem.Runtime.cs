@@ -252,8 +252,9 @@ public partial class SonosSystem
         try
         {
             var seedConnection = GetSeedConnection();
+            var appliedTopologyEvents = GetAppliedTopologyEvents();
             var topology = await seedConnection.ReadTopologyAsync(cancellationToken);
-            ApplyTopology(topology);
+            ApplyPolledTopology(topology, appliedTopologyEvents);
             SyncConnections();
 
             var pollStartedAt = Clock.GetUtcNow();
@@ -276,6 +277,7 @@ public partial class SonosSystem
 
     private void OpenConnectionScope()
     {
+        ResetConnectionTopology();
         var httpClient = HttpClientFactory.CreateClient(nameof(SonosSystem));
         httpClient.Timeout = RequestTimeout;
 
@@ -1112,13 +1114,15 @@ public partial class SonosSystem
         }
     }
 
-    // New players found here get their connection and subscriptions at the next reconciliation.
+    // Connections follow at once, so a command after an IP change reaches the new address. New players are polled,
+    // and then subscribed, at the next reconciliation.
     private void OnTopologyEvent(string body)
     {
         var zoneGroupState = UpnpEventParser.ParseZoneGroupState(body);
         if (!string.IsNullOrEmpty(zoneGroupState))
         {
-            ApplyTopology(ZoneGroupStateParser.Parse(zoneGroupState));
+            ApplyTopologyEvent(ZoneGroupStateParser.Parse(zoneGroupState));
+            SyncConnections();
         }
     }
 

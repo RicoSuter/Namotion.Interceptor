@@ -37,6 +37,13 @@ public partial class SonosSystem : BackgroundService,
     // Topology arrives from the poll and from ZoneGroupTopology events, so applying it is serialized.
     private readonly Lock _topologyLock = new();
 
+    // Guarded by _topologyLock. The count of applied topology events orders a polled topology against them, and the
+    // players missing from the last topology that was not applied wait for a second read to confirm them. The first
+    // topology of a connection needs no confirmation: the previous one may be arbitrarily old.
+    private long _appliedTopologyEvents;
+    private HashSet<string> _unconfirmedMissingPlayers = new(StringComparer.Ordinal);
+    private bool _hasConnectionTopology;
+
     /// <summary>
     /// Any speaker of the household as host or host:port. Empty tries the speakers found since the system started, then SSDP discovery.
     /// </summary>
@@ -244,18 +251,90 @@ public partial class SonosSystem : BackgroundService,
     internal InvalidOperationException CreateNotConnectedException() =>
         new("The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
 
-    internal void ApplyTopology(SonosTopology topology)
+    /// <summary>
+    /// Returns the count of applied topology events, taken before reading a topology for <see cref="ApplyPolledTopology"/>.
+    /// </summary>
+    internal long GetAppliedTopologyEvents()
+    {
+        lock (_topologyLock)
+        {
+            return _appliedTopologyEvents;
+        }
+    }
+
+    /// <summary>
+    /// Applies a topology read by a poll, unless a topology event was applied after the read started: the event is newer.
+    /// </summary>
+    internal void ApplyPolledTopology(SonosTopology topology, long appliedTopologyEventsBeforeRead)
+    {
+        lock (_topologyLock)
+        {
+            if (_appliedTopologyEvents != appliedTopologyEventsBeforeRead)
+            {
+                _logger.LogDebug("Skipped a polled Sonos topology that a topology event replaced while it was read.");
+                return;
+            }
+
+            ApplyTopology(topology);
+        }
+    }
+
+    internal void ApplyTopologyEvent(SonosTopology topology)
+    {
+        lock (_topologyLock)
+        {
+            if (ApplyTopology(topology))
+            {
+                _appliedTopologyEvents++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Makes the next topology the first of a new connection, which is applied without confirming missing players.
+    /// </summary>
+    internal void ResetConnectionTopology()
+    {
+        lock (_topologyLock)
+        {
+            _hasConnectionTopology = false;
+            _unconfirmedMissingPlayers.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Applies a topology. One that misses players of the current topology is applied only when the read before it
+    /// missed them too, since a seed that just rebooted or woke up may briefly report only part of the household.
+    /// </summary>
+    /// <returns>Whether the topology was applied.</returns>
+    internal bool ApplyTopology(SonosTopology topology)
     {
         lock (_topologyLock)
         {
             var players = Players;
+            var present = topology.Groups
+                .SelectMany(group => group.Players)
+                .Select(player => player.Uuid)
+                .ToHashSet(StringComparer.Ordinal);
+
+            var missing = players.Values
+                .Where(player => player.IsInTopology && !present.Contains(player.Uuid))
+                .Select(player => player.Uuid)
+                .ToHashSet(StringComparer.Ordinal);
+            if (_hasConnectionTopology && missing.Count > 0 && !missing.IsSubsetOf(_unconfirmedMissingPlayers))
+            {
+                _unconfirmedMissingPlayers = missing;
+                _logger.LogDebug("The Sonos topology misses {Players}; it is applied once the next read confirms it.", string.Join(", ", missing));
+                return false;
+            }
+
+            _unconfirmedMissingPlayers.Clear();
+            _hasConnectionTopology = true;
             Dictionary<string, SonosPlayer>? updatedPlayers = null;
-            var present = new HashSet<string>(StringComparer.Ordinal);
             foreach (var group in topology.Groups)
             {
                 foreach (var topologyPlayer in group.Players)
                 {
-                    present.Add(topologyPlayer.Uuid);
                     if (!players.TryGetValue(topologyPlayer.Uuid, out var player))
                     {
                         player = new SonosPlayer(this, topologyPlayer.Uuid);
@@ -286,6 +365,7 @@ public partial class SonosSystem : BackgroundService,
             }
 
             ApplyGroups(topology, Players);
+            return true;
         }
     }
 

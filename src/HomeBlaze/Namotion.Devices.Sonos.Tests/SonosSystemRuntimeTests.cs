@@ -10,6 +10,7 @@ namespace Namotion.Devices.Sonos.Tests;
 public class SonosSystemRuntimeTests
 {
     private const string AvTransportEventPath = "/MediaRenderer/AVTransport/Event";
+    private const string TopologyEventPath = "/ZoneGroupTopology/Event";
 
     [Fact]
     public async Task WhenSeedHostAnswers_ThenSystemConnectsAndReadsThePlayer()
@@ -520,6 +521,61 @@ public class SonosSystemRuntimeTests
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => refresh.WaitAsync(ConnectedSystem.WaitTimeout));
             Assert.Contains("disconnected", exception.Message);
             Assert.DoesNotContain(logger.Warnings, message => message.Contains("teardown budget"));
+        }
+        finally
+        {
+            hold.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task WhenATopologyEventMovesAPlayerToANewAddress_ThenCommandsGoToTheNewAddress()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        await using var moved = new FakeSonosSpeaker();
+        moved.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var topology = FakeSonosSpeaker.CreateStandaloneTopology((TestFixtures.KitchenUuid, "Küche", moved.BaseUri));
+
+        // Act
+        Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(TopologyEventPath, SonosEventBodies.Properties(("ZoneGroupState", topology))));
+        await connected.Player.PlayAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(moved.Calls, call => call.Action == "Play");
+        Assert.DoesNotContain(speaker.Calls, call => call.Action == "Play");
+    }
+
+    [Fact]
+    public async Task WhenATopologyEventArrivesWhileTheTopologyIsRead_ThenTheOlderReadDoesNotRollItBack()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync();
+        household.System.PollingInterval = TimeSpan.FromHours(1);
+        var readsBefore = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
+        var hold = household.Kitchen.HoldAction("GetZoneGroupState");
+        var grouped = FakeSonosSpeaker.CreateGroupTopology(
+            (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri),
+            (TestFixtures.KitchenUuid, "Küche", household.Kitchen.BaseUri));
+
+        try
+        {
+            var refresh = household.System.RefreshAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > readsBefore,
+                ConnectedSystem.WaitTimeout,
+                message: "The refresh should read the topology.");
+
+            // Act
+            await household.Kitchen.NotifyAsync(TopologyEventPath, SonosEventBodies.Properties(("ZoneGroupState", grouped)));
+            Assert.Equal(TestFixtures.OfficeUuid, household.KitchenPlayer.GroupCoordinatorUuid);
+            hold.TrySetResult();
+            await refresh;
+
+            // Assert
+            Assert.Equal(TestFixtures.OfficeUuid, household.KitchenPlayer.GroupCoordinatorUuid);
+            Assert.Equal(2, household.System.Groups[TestFixtures.OfficeUuid].Members.Length);
         }
         finally
         {

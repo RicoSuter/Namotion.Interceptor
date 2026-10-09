@@ -13,6 +13,24 @@ public class SonosSystemTopologyTests
     internal static SonosTopology ReadHousehold() =>
         ZoneGroupStateParser.Parse(TestFixtures.Read("zone-group-state.xml"));
 
+    /// <summary>
+    /// Reports every player and satellite reachable, as their first successful poll does.
+    /// </summary>
+    internal static void ReportAllReachable(SonosSystem system)
+    {
+        foreach (var player in system.Players.Values)
+        {
+            player.ReportPollSucceeded();
+            foreach (var satellite in player.Satellites.Values)
+            {
+                satellite.ReportPollSucceeded();
+            }
+        }
+    }
+
+    private static SonosTopology WithoutKitchen(SonosTopology household) =>
+        new(household.Groups.Where(group => group.CoordinatorUuid != TestFixtures.KitchenUuid).ToArray());
+
     [Fact]
     public void WhenCreated_ThenHasDefaults()
     {
@@ -77,7 +95,7 @@ public class SonosSystemTopologyTests
             system.Players.Keys);
         Assert.Equal("Küche", system.Players[TestFixtures.KitchenUuid].RoomName);
         Assert.Equal("10.0.0.121", system.Players[TestFixtures.KitchenUuid].IpAddress);
-        Assert.True(system.Players[TestFixtures.KitchenUuid].IsConnected);
+        Assert.True(system.Players[TestFixtures.KitchenUuid].IsInTopology);
     }
 
     [Fact]
@@ -137,15 +155,17 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
-    public void WhenPlayerMissingFromTopology_ThenItStaysButIsOffline()
+    public void WhenPlayerIsMissingFromTwoTopologiesInARow_ThenItStaysButIsOffline()
     {
         // Arrange
         var system = CreateSystem();
         var household = ReadHousehold();
         system.ApplyTopology(household);
-        var withoutKitchen = new SonosTopology(household.Groups.Where(group => group.CoordinatorUuid != TestFixtures.KitchenUuid).ToArray());
+        ReportAllReachable(system);
+        var withoutKitchen = WithoutKitchen(household);
 
         // Act
+        system.ApplyTopology(withoutKitchen);
         system.ApplyTopology(withoutKitchen);
 
         // Assert
@@ -155,14 +175,35 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenPlayerIsMissingFromOneTopologyOnly_ThenNothingIsTornDown()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+        ReportAllReachable(system);
+        var groups = system.Groups;
+
+        // Act
+        system.ApplyTopology(WithoutKitchen(household));
+        system.ApplyTopology(household);
+
+        // Assert
+        Assert.True(system.Players[TestFixtures.KitchenUuid].IsConnected);
+        Assert.Same(groups, system.Groups);
+    }
+
+    [Fact]
     public void WhenMissingPlayerReappears_ThenInstanceIsKeptAndConnected()
     {
         // Arrange
         var system = CreateSystem();
         var household = ReadHousehold();
         system.ApplyTopology(household);
+        ReportAllReachable(system);
         var kitchen = system.Players[TestFixtures.KitchenUuid];
-        system.ApplyTopology(new SonosTopology(household.Groups.Where(group => group.CoordinatorUuid != TestFixtures.KitchenUuid).ToArray()));
+        system.ApplyTopology(WithoutKitchen(household));
+        system.ApplyTopology(WithoutKitchen(household));
 
         // Act
         system.ApplyTopology(household);
@@ -174,6 +215,22 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenPlayerIsFoundInTheTopology_ThenItIsNotConnectedUntilItsFirstPoll()
+    {
+        // Arrange
+        var system = CreateSystem();
+
+        // Act
+        system.ApplyTopology(ReadHousehold());
+
+        // Assert
+        var kitchen = system.Players[TestFixtures.KitchenUuid];
+        Assert.False(kitchen.IsConnected);
+        kitchen.ReportPollSucceeded();
+        Assert.True(kitchen.IsConnected);
+    }
+
+    [Fact]
     public void WhenSatelliteMissingFromTopology_ThenItStaysButIsOffline()
     {
         // Arrange
@@ -181,6 +238,7 @@ public class SonosSystemTopologyTests
         var household = ReadHousehold();
         system.ApplyTopology(household);
         const string subwooferUuid = "RINCON_A0000000000201400";
+        ReportAllReachable(system);
         var subwoofer = system.Players[TestFixtures.LivingRoomUuid].Satellites[subwooferUuid];
         var withoutSubwoofer = new SonosTopology(household.Groups
             .Select(group => group with
@@ -305,6 +363,7 @@ public class SonosSystemTopologyTests
                 }
                 : group)
             .ToArray());
+        system.ApplyTopology(replacement);
         system.ApplyTopology(replacement);
 
         // Act

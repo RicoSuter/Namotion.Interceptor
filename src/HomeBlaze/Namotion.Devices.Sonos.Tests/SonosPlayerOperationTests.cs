@@ -219,6 +219,7 @@ public class SonosPlayerOperationTests
         // Arrange
         var system = SonosSystemTopologyTests.CreateSystem();
         system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        SonosSystemTopologyTests.ReportAllReachable(system);
         var player = system.Players[TestFixtures.KitchenUuid];
 
         // Act
@@ -261,6 +262,7 @@ public class SonosPlayerOperationTests
               </ZoneGroup>
             </ZoneGroups></ZoneGroupState>
             """));
+        SonosSystemTopologyTests.ReportAllReachable(system);
         system.IsConnected = true;
         return system;
     }

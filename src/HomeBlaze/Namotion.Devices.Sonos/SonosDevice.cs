@@ -28,7 +28,9 @@ public abstract partial class SonosDevice :
         Uuid = uuid;
         RoomName = string.Empty;
         ServiceIds = new HashSet<string>(StringComparer.Ordinal);
-        IsReachable = true;
+
+        // Until its first successful poll, which also finds out whether there is a connection to command it through.
+        IsReachable = false;
     }
 
     /// <summary>

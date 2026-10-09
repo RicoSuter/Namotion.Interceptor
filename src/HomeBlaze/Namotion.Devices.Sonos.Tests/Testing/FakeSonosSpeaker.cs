@@ -129,20 +129,45 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// Answers GetZoneGroupState with a household of standalone players, each at its own base URI.
     /// </summary>
     internal void RespondWithTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
-        Respond("GetZoneGroupState", ("ZoneGroupState",
-            "<ZoneGroupState><ZoneGroups>" +
-            string.Concat(players.Select(player =>
-                $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1">{CreateMember(player)}</ZoneGroup>""")) +
-            "</ZoneGroups></ZoneGroupState>"));
+        Respond("GetZoneGroupState", ("ZoneGroupState", CreateStandaloneTopology(players)));
 
     /// <summary>
     /// Answers GetZoneGroupState with one group of all players, coordinated by the first.
     /// </summary>
     internal void RespondWithGroup(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
-        Respond("GetZoneGroupState", ("ZoneGroupState",
-            "<ZoneGroupState><ZoneGroups>" +
-            $"""<ZoneGroup Coordinator="{players[0].Uuid}" ID="{players[0].Uuid}:1">{string.Concat(players.Select(CreateMember))}</ZoneGroup>""" +
-            "</ZoneGroups></ZoneGroupState>"));
+        Respond("GetZoneGroupState", ("ZoneGroupState", CreateGroupTopology(players)));
+
+    /// <summary>
+    /// Returns ZoneGroupState XML of standalone players, each at its own base URI.
+    /// </summary>
+    internal static string CreateStandaloneTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
+        "<ZoneGroupState><ZoneGroups>" +
+        string.Concat(players.Select(player =>
+            $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1">{CreateMember(player)}</ZoneGroup>""")) +
+        "</ZoneGroups></ZoneGroupState>";
+
+    /// <summary>
+    /// Returns ZoneGroupState XML of one group of all players, coordinated by the first.
+    /// </summary>
+    internal static string CreateGroupTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
+        "<ZoneGroupState><ZoneGroups>" +
+        $"""<ZoneGroup Coordinator="{players[0].Uuid}" ID="{players[0].Uuid}:1">{string.Concat(players.Select(CreateMember))}</ZoneGroup>""" +
+        "</ZoneGroups></ZoneGroupState>";
+
+    /// <summary>
+    /// Sends a NOTIFY with the body to the callback of the event path, as the speaker that holds the subscription.
+    /// </summary>
+    internal async Task<HttpStatusCode> NotifyAsync(string eventPath, string body)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), GetCallback(eventPath)
+            ?? throw new InvalidOperationException($"Nothing subscribed to {eventPath}."))
+        {
+            Content = new StringContent(body)
+        };
+        request.Headers.TryAddWithoutValidation("SID", SidFor(eventPath));
+        using var response = await NotifyClient.SendAsync(request);
+        return response.StatusCode;
+    }
 
     private static string CreateMember((string Uuid, string RoomName, Uri BaseUri) player) =>
         $"""<ZoneGroupMember UUID="{player.Uuid}" Location="{player.BaseUri}xml/device_description.xml" ZoneName="{player.RoomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" />""";
