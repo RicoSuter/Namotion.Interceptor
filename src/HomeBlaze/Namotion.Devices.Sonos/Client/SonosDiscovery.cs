@@ -100,8 +100,6 @@ internal static class SonosDiscovery
     internal static async Task<Uri?> FindSpeakerAsync(CancellationToken cancellationToken)
     {
         using var locator = new AggregateSsdpDeviceLocator(includeIpv4: true, includeIpv6: false, adapterFilter: null, logger: null);
-        locator.NotificationFilter = ZonePlayerSearchTarget;
-
         var devices = await locator.SearchAsync(ZonePlayerSearchTarget, SearchTime, cancellationToken);
         var location = devices.Where(IsZonePlayer).Select(device => device.DescriptionLocation).FirstOrDefault();
         return location is null ? null : new UriBuilder("http", location.Host, location.Port).Uri;
