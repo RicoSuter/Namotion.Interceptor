@@ -89,6 +89,12 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         _holds[action] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
+    /// Records the callback of a new subscription to the event path but does not answer until the returned source completes.
+    /// </summary>
+    internal TaskCompletionSource HoldSubscribe(string eventPath) =>
+        _holds["SUBSCRIBE " + eventPath] = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
     /// Answers GetZoneGroupState with a household of standalone players, each at its own base URI.
     /// </summary>
     internal void RespondWithTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
@@ -160,6 +166,10 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 if (request.Headers["CALLBACK"] is { } callback)
                 {
                     _callbacks[path] = callback.Trim('<', '>');
+                    if (_holds.TryGetValue("SUBSCRIBE " + path, out var subscribeHold))
+                    {
+                        await subscribeHold.Task;
+                    }
                 }
 
                 if (request.Headers["SID"] is not null)

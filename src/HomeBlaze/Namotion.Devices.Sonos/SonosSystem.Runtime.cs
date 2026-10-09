@@ -809,36 +809,48 @@ public partial class SonosSystem
 
         var desired = GetDesiredSubscriptions();
         var now = DateTimeOffset.UtcNow;
-        foreach (var subscription in eventListener.Subscriptions)
+        try
         {
-            if (!desired.TryGetValue(subscription.Key, out var target) || target.EventUri != subscription.EventUri)
+            foreach (var subscription in eventListener.Subscriptions)
             {
-                await RunSubscriptionRequestAsync(() => eventListener.UnsubscribeAsync(subscription, cancellationToken), subscription.Key, cancellationToken);
+                if (!desired.TryGetValue(subscription.Key, out var target) || target.EventUri != subscription.EventUri)
+                {
+                    await RunSubscriptionRequestAsync(() => eventListener.UnsubscribeAsync(subscription, cancellationToken), subscription.Key, cancellationToken);
+                }
+                else if (subscription.Sid is not null && subscription.RenewAt <= now &&
+                         !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
+                {
+                    // Keeps an unreachable speaker from being retried at every loop wake until the next poll drops it.
+                    subscription.RenewAt = now + FailedRenewalRetryDelay;
+                }
             }
-            else if (subscription.Sid is not null && subscription.RenewAt <= now &&
-                     !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
-            {
-                // Keeps an unreachable speaker from being retried at every loop wake until the next poll drops it.
-                subscription.RenewAt = now + FailedRenewalRetryDelay;
-            }
-        }
 
-        var active = eventListener.Subscriptions.Select(subscription => subscription.Key).ToHashSet(StringComparer.Ordinal);
-        foreach (var (key, target) in desired)
+            var active = eventListener.Subscriptions.Select(subscription => subscription.Key).ToHashSet(StringComparer.Ordinal);
+            foreach (var (key, target) in desired)
+            {
+                if (!active.Contains(key))
+                {
+                    await RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(key, target.EventUri, target.Handler, cancellationToken), key, cancellationToken);
+                }
+            }
+
+            AreEventsActive = eventListener.Subscriptions.Any(subscription => subscription.Sid is not null);
+        }
+        finally
         {
-            if (!active.Contains(key))
-            {
-                await RunSubscriptionRequestAsync(() => eventListener.SubscribeAsync(key, target.EventUri, target.Handler, cancellationToken), key, cancellationToken);
-            }
+            // Also when cancelled: a subscription made before the cancellation must still be renewed.
+            ScheduleRenewal(eventListener);
         }
+    }
 
+    // Caller holds _reconcileLock, which guards the subscriptions' RenewAt.
+    private void ScheduleRenewal(SonosEventListener eventListener)
+    {
         var nextRenewalTicks = long.MaxValue;
-        var areEventsActive = false;
         foreach (var subscription in eventListener.Subscriptions)
         {
             if (subscription.Sid is not null)
             {
-                areEventsActive = true;
                 nextRenewalTicks = Math.Min(nextRenewalTicks, subscription.RenewAt.UtcTicks);
             }
         }
@@ -847,8 +859,6 @@ public partial class SonosSystem
         {
             WakeLoopForRenewal();
         }
-
-        AreEventsActive = areEventsActive;
     }
 
     /// <returns>Whether the request completed without an exception.</returns>

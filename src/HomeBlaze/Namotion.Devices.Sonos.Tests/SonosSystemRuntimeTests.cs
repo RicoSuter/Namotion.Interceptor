@@ -230,6 +230,50 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenARefreshIsCancelledAfterSubscribing_ThenTheSubscriptionMadeIsStillRenewed()
+    {
+        // Arrange
+        const string renderingControlEventPath = "/MediaRenderer/RenderingControl/Event";
+        await using var speaker = new FakeSonosSpeaker { FailSubscriptions = true, SubscriptionTimeoutSeconds = 2 };
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var system = ConnectedSystem.CreateSystem(speaker.Host);
+        system.PollingInterval = TimeSpan.FromHours(1);
+        system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(2);
+        var hold = speaker.HoldSubscribe(renderingControlEventPath);
+
+        try
+        {
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => system.IsConnected, ConnectedSystem.WaitTimeout, message: "The system should connect without events.");
+            speaker.FailSubscriptions = false;
+            using var cancellation = new CancellationTokenSource();
+
+            // AVTransport is subscribed first and succeeds; the refresh then waits for the held RenderingControl subscription.
+            var refresh = system.RefreshAsync(cancellation.Token);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => speaker.GetCallback(renderingControlEventPath) is not null,
+                ConnectedSystem.WaitTimeout,
+                message: "The refresh should subscribe to RenderingControl after AVTransport.");
+
+            // Act
+            await cancellation.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refresh);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => speaker.Renewed.Contains(AvTransportEventPath),
+                ConnectedSystem.WaitTimeout,
+                message: "The subscription made before the cancellation should be renewed although the next poll is an hour away.");
+        }
+        finally
+        {
+            hold.TrySetResult();
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenRenewalsFail_ThenTheNextAttemptWaitsForTheRetryDelay()
     {
         // Arrange
