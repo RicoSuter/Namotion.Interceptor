@@ -2286,16 +2286,16 @@ name = "video-tts"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "chatterbox-tts" },
+    { name = "en-core-web-sm" },
+    { name = "kokoro" },
     { name = "numpy" },
-    { name = "setuptools" },
     { name = "soundfile" },
 ]
 
 [package.optional-dependencies]
-kokoro = [
-    { name = "en-core-web-sm" },
-    { name = "kokoro" },
+chatterbox = [
+    { name = "chatterbox-tts" },
+    { name = "setuptools" },
 ]
 
 [package.dev-dependencies]
@@ -2305,14 +2305,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "chatterbox-tts", specifier = "==0.1.7" },
-    { name = "en-core-web-sm", marker = "extra == 'kokoro'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
-    { name = "kokoro", marker = "extra == 'kokoro'", specifier = "==0.9.4" },
+    { name = "chatterbox-tts", marker = "extra == 'chatterbox'", specifier = "==0.1.7" },
+    { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
+    { name = "kokoro", specifier = "==0.9.4" },
     { name = "numpy" },
-    { name = "setuptools", specifier = "<81" },
+    { name = "setuptools", marker = "extra == 'chatterbox'", specifier = "<81" },
     { name = "soundfile", specifier = ">=0.13" },
 ]
-provides-extras = ["kokoro"]
+provides-extras = ["chatterbox"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]

@@ -104,7 +104,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 - An entry can override `say` for one engine with a `kokoro` or `chatterbox` key; the script's voice picks the engine. Kokoro reads phoneme markup, `{match: OPC UA, say: O P C U A, kokoro: '[OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/)'}`, which Chatterbox would read aloud, so keep a plain spelling in `say`. To find phonemes, print what Kokoro makes of the plain spelling and of a markup candidate, then adjust and listen (from `videos/tools/tts`):
 
 ```bash
-uv run --extra kokoro python -c "
+uv run python -c "
 from video_tts.kokoro_engine import _create_pipeline
 pipeline = _create_pipeline('a')
 for text in ['Over O P C U A.', 'Over [OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/).']:

@@ -40,8 +40,8 @@ export function synthesize(outputDirectory: string, voice: VoiceRequest, items: 
   const requestFile = join(outputDirectory, 'narration-request.json');
   writeFileSync(requestFile, JSON.stringify({outputDirectory, voice, items}, null, 2));
 
-  // Kokoro is an optional extra of the TTS project, installed on first use.
-  const extras = voice.engine === 'kokoro' ? ['--extra', 'kokoro'] : [];
+  // Chatterbox is an optional extra of the TTS project, installed on first use.
+  const extras = voice.engine === 'chatterbox' ? ['--extra', 'chatterbox'] : [];
   const result = spawnSync('uv', ['run', ...extras, 'python', '-m', 'video_tts', requestFile], {cwd: ttsProjectDirectory, stdio: 'inherit'});
   if (result.status !== 0) {
     throw new Error(`Speech synthesis failed with exit code ${result.status}`);

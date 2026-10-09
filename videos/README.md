@@ -13,7 +13,7 @@ npx playwright install chromium
 (cd tools/tts && uv sync)
 ```
 
-Kokoro voices need the optional `kokoro` extra, which `npm run tts` installs on first use (`uv sync --extra kokoro` installs it up front).
+Chatterbox voices need the optional `chatterbox` extra, which `npm run tts` installs on first use (`uv sync --extra chatterbox` installs it up front).
 
 ## Producing an episode
 
