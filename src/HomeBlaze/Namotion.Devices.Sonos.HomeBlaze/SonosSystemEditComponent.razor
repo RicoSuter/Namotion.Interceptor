@@ -68,11 +68,14 @@
     private int _originalPollingIntervalSeconds;
     private int _originalRetryIntervalSeconds;
 
-    public bool IsValid => _eventPort is > 0 and <= 65535 && _pollingIntervalSeconds > 0 && _retryIntervalSeconds > 0;
+    public bool IsValid =>
+        _eventPort is >= 1 and <= 65535 &&
+        _pollingIntervalSeconds is >= 5 and <= 3600 &&
+        _retryIntervalSeconds is >= 5 and <= 3600;
 
     public bool IsDirty =>
-        _seedHost != _originalSeedHost ||
-        _eventCallbackHost != _originalEventCallbackHost ||
+        NormalizeHost(_seedHost) != NormalizeHost(_originalSeedHost) ||
+        NormalizeHost(_eventCallbackHost) != NormalizeHost(_originalEventCallbackHost) ||
         _eventPort != _originalEventPort ||
         _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
         _retryIntervalSeconds != _originalRetryIntervalSeconds;
@@ -101,8 +104,8 @@
     {
         if (SystemSubject is not null && IsValid)
         {
-            SystemSubject.SeedHost = string.IsNullOrWhiteSpace(_seedHost) ? null : _seedHost.Trim();
-            SystemSubject.EventCallbackHost = string.IsNullOrWhiteSpace(_eventCallbackHost) ? null : _eventCallbackHost.Trim();
+            SystemSubject.SeedHost = NormalizeHost(_seedHost);
+            SystemSubject.EventCallbackHost = NormalizeHost(_eventCallbackHost);
             SystemSubject.EventPort = _eventPort;
             SystemSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
             SystemSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
@@ -112,6 +115,9 @@
 
         return Task.CompletedTask;
     }
+
+    private static string? NormalizeHost(string? host) =>
+        string.IsNullOrWhiteSpace(host) ? null : host.Trim();
 
     private void StoreOriginals()
     {
