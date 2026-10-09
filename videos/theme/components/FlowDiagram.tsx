@@ -68,6 +68,11 @@ export class FlowDiagram extends Node {
     }
   }
 
+  /** Every node, revealed or not, for keeping them clear of the chapter header in camera moves. */
+  public get boxes(): Rect[] {
+    return [...this.nodes.values()];
+  }
+
   /** The node with the given id, for example as a camera target. */
   public node(id: string): Rect {
     const node = this.nodes.get(id);

@@ -40,17 +40,18 @@ export default makeScene2D('sync', function* (view) {
   yield* steps.build();
   const at = (id: string) => toLocal(camera, steps.node(id).absolutePosition());
   const buffer = at('buffer');
-  const updates = ['Temperature 54', 'Pressure 0', 'Level 99'].map((text, index) =>
-    new Pill({text, color: 'cyan', size: 22, x: buffer.x, y: buffer.y - 290 - index * 60, opacity: 0}));
-  updates.forEach(update => camera.add(update));
   const stackY = (index: number) => buffer.y + 120 + index * 58;
+  // The updates slide in from the left, below the chapter header.
+  const updates = ['Temperature 54', 'Pressure 0', 'Level 99'].map((text, index) =>
+    new Pill({text, color: 'cyan', size: 22, x: buffer.x - 320, y: stackY(index), opacity: 0}));
+  updates.forEach(update => camera.add(update));
   yield* narrator.beat('sync-buffer',
     title.exit(),
     delay(0.4, steps.reveal(0)),
     delay(0.8, camera.focusOnPoint(new Vector2(-380, 30), {zoom: 1.15, duration: narrator.duration('sync-buffer') - 1})),
     delay(1.4, sequence(0.5, ...updates.map((update, index) => all(
       update.opacity(1, 0.3),
-      update.y(stackY(index), 0.9, moveEasing),
+      update.x(buffer.x, 0.9, moveEasing),
     )))),
   );
 

@@ -43,7 +43,7 @@ export default makeScene2D('recap', function* (view) {
     delay(2.4, all(
       arrive(outbound),
       chain(servers.pulse('owner', 'server', 0.6), servers.pulse('server', 'clients', 0.6)),
-      camera.focusOnPoint(new Vector2(0, 175), {zoom: 1.08, duration: narrator.duration('recap-paths') - 2.6}),
+      camera.focusOnPoint(new Vector2(0, 175), {zoom: 1.08, duration: narrator.duration('recap-paths') - 2.6, clear: sources.boxes}),
     )),
   );
 

@@ -149,8 +149,8 @@ export default makeScene2D('roles', function* (view) {
       sources.retext('source', {label: 'WebSocket client', detail: 'mirror process'}),
     )),
     delay(1.2, chain(
-      camera.focusOn(servers.node('server'), {zoom: 1.2, duration: 1.6}),
-      camera.focusOn(() => sources.node('source').absolutePosition(), {zoom: 1.15, duration: 1.8}),
+      camera.focusOn(servers.node('server'), {zoom: 1.2, duration: 1.6, clear: sources.boxes}),
+      camera.focusOn(() => sources.node('source').absolutePosition(), {zoom: 1.15, duration: 1.8, clear: sources.boxes}),
     )),
   );
   packages.forEach(pill => pill.remove());
@@ -180,7 +180,7 @@ export default makeScene2D('roles', function* (view) {
     delay(0.6, all(claims.reveal(0), claims.reveal(1), client.reveal(0))),
     delay(1.0, claims.retext('machine', {detail: 'the mirror'})),
     delay(2.2, sequence(0.3, ...claimed.map((id, index) => claim(id, dots[index])))),
-    delay(1.2, camera.focusOnPoint(new Vector2(60, claimsY), {zoom: 1.05, duration: narrator.duration('roles-claim') - 1.4})),
+    delay(1.2, camera.focusOnPoint(new Vector2(60, claimsY), {zoom: 1.05, duration: narrator.duration('roles-claim') - 1.4, clear: claims.boxes})),
   );
   sources.remove();
   servers.remove();
@@ -197,7 +197,7 @@ export default makeScene2D('roles', function* (view) {
     other.reveal(0),
     delay(0.4, rejected.grow(0.7)),
     delay(1.2, all(rejected.opacity(0, 0.6), dots[4].scale(1.4, 0.2).to(1, 0.3))),
-    camera.focusOnPoint(new Vector2(380, (claimsY + otherY) / 2 + 40), {zoom: 1.2, duration: 1.4}),
+    camera.focusOnPoint(new Vector2(380, (claimsY + otherY) / 2 + 40), {zoom: 1.2, duration: 1.4, clear: claims.boxes}),
   );
   rejected.remove();
 
