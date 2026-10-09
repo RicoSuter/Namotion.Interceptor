@@ -218,6 +218,7 @@ public class SonosPlayerOperationTests
         (nameof(SonosPlayer.TogglePlayback_IsEnabled), player.TogglePlayback_IsEnabled),
         (nameof(SonosPlayer.PlayFavorite_IsEnabled), player.PlayFavorite_IsEnabled),
         (nameof(SonosPlayer.PlayUri_IsEnabled), player.PlayUri_IsEnabled),
+        (nameof(SonosPlayer.PlayStream_IsEnabled), player.PlayStream_IsEnabled),
         (nameof(SonosPlayer.SetShuffle_IsEnabled), player.SetShuffle_IsEnabled),
         (nameof(SonosPlayer.SetRepeat_IsEnabled), player.SetRepeat_IsEnabled),
         (nameof(SonosPlayer.SetSleepTimer_IsEnabled), player.SetSleepTimer_IsEnabled)
@@ -258,19 +259,59 @@ public class SonosPlayerOperationTests
     }
 
     [Fact]
-    public async Task WhenPlayingHttpUri_ThenRadioSchemeAndEscapedTitleAreSent()
+    public async Task WhenPlayingHttpUri_ThenUriIsSentUnchangedWithoutMetadataAndPlayFollows()
     {
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         await using var connected = await ConnectedSystem.StartAsync(speaker);
 
         // Act
-        await connected.Player.PlayUriAsync("http://stream.example.com/live.mp3", "Rock & Roll", CancellationToken.None);
+        await connected.Player.PlayUriAsync("http://files.example.com/chime.mp3", CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToList();
+        var setUri = calls.FindIndex(call => call.Action == "SetAVTransportURI");
+        Assert.True(setUri >= 0, "SetAVTransportURI was not sent.");
+        Assert.True(calls.FindIndex(call => call.Action == "Play") > setUri, "Play was not sent after setting the URI.");
+        var (transportUri, metadata) = ReadTransportUri(calls[setUri]);
+        Assert.Equal("http://files.example.com/chime.mp3", transportUri);
+        Assert.Equal(string.Empty, metadata);
+    }
+
+    [Fact]
+    public async Task WhenPlayingHttpStream_ThenRadioSchemeAndEscapedBroadcastMetadataAreSent()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+
+        // Act
+        await connected.Player.PlayStreamAsync("http://stream.example.com/live.mp3", "Rock & Roll", CancellationToken.None);
 
         // Assert
         var setUri = Assert.Single(speaker.Calls, call => call.Action == "SetAVTransportURI");
-        Assert.Contains("x-rincon-mp3radio://stream.example.com/live.mp3", setUri.Body);
-        Assert.Contains("Rock &amp;amp; Roll", setUri.Body);
+        var (transportUri, metadata) = ReadTransportUri(setUri);
+        Assert.Equal("x-rincon-mp3radio://stream.example.com/live.mp3", transportUri);
+        Assert.Contains("<dc:title>Rock &amp; Roll</dc:title>", metadata);
+        Assert.Contains("<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>", metadata);
+        Assert.Contains(speaker.Calls, call => call.Action == "Play");
+    }
+
+    [Theory]
+    [InlineData("ftp://stream.example.com/live.mp3")]
+    [InlineData("x-sonos-spotify:spotify%3atrack%3a1?sid=9")]
+    [InlineData("not a uri")]
+    public async Task WhenStreamUriHasUnsupportedScheme_ThenThrowsBeforeAnyCall(string uri)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+        var callsBefore = speaker.Calls.Count;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => connected.Player.PlayStreamAsync(uri, "Live", CancellationToken.None));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Equal(callsBefore, speaker.Calls.Count);
     }
 
     [Fact]
@@ -396,40 +437,52 @@ public class SonosPlayerOperationTests
         // Act & Assert
         Assert.Equal("roomNameOrUuid", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.JoinGroupAsync(null!, CancellationToken.None))).ParamName);
         Assert.Equal("name", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayFavoriteAsync(null!, CancellationToken.None))).ParamName);
-        Assert.Equal("uri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayUriAsync(null!, null, CancellationToken.None))).ParamName);
+        Assert.Equal("uri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayUriAsync(null!, CancellationToken.None))).ParamName);
+        Assert.Equal("uri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayStreamAsync(null!, null, CancellationToken.None))).ParamName);
         Assert.Equal("soundUri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayNotificationAsync(null!, 0.5m, CancellationToken.None))).ParamName);
     }
 
     [Fact]
-    public async Task WhenPlayingNativeUriWithTitle_ThenMetadataIsEmpty()
+    public async Task WhenPlayingNativeUri_ThenUriIsSentUnchangedWithoutMetadata()
     {
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         await using var connected = await ConnectedSystem.StartAsync(speaker);
 
         // Act
-        await connected.Player.PlayUriAsync("x-sonos-spotify:spotify%3atrack%3a1?sid=9", "Song", CancellationToken.None);
+        await connected.Player.PlayUriAsync("x-sonos-spotify:spotify%3atrack%3a1?sid=9", CancellationToken.None);
 
         // Assert
         var setUri = Assert.Single(speaker.Calls, call => call.Action == "SetAVTransportURI");
-        Assert.Contains("x-sonos-spotify:spotify%3atrack%3a1?sid=9", setUri.Body);
-        Assert.DoesNotContain("DIDL-Lite", setUri.Body);
+        var (transportUri, metadata) = ReadTransportUri(setUri);
+        Assert.Equal("x-sonos-spotify:spotify%3atrack%3a1?sid=9", transportUri);
+        Assert.Equal(string.Empty, metadata);
     }
 
     [Fact]
-    public async Task WhenPlayingRadioUriWithTitle_ThenTitleMetadataIsSent()
+    public async Task WhenPlayingRadioStreamUriWithTitle_ThenUriIsKeptAndTitleMetadataIsSent()
     {
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         await using var connected = await ConnectedSystem.StartAsync(speaker);
 
         // Act
-        await connected.Player.PlayUriAsync("x-rincon-mp3radio://stream.example.com/live.mp3", "Live", CancellationToken.None);
+        await connected.Player.PlayStreamAsync("x-rincon-mp3radio://stream.example.com/live.mp3", "Live", CancellationToken.None);
 
         // Assert
         var setUri = Assert.Single(speaker.Calls, call => call.Action == "SetAVTransportURI");
-        Assert.Contains("DIDL-Lite", setUri.Body);
-        Assert.Contains("Live", setUri.Body);
+        var (transportUri, metadata) = ReadTransportUri(setUri);
+        Assert.Equal("x-rincon-mp3radio://stream.example.com/live.mp3", transportUri);
+        Assert.Contains("<dc:title>Live</dc:title>", metadata);
+        Assert.Contains("object.item.audioItem.audioBroadcast", metadata);
+    }
+
+    // The metadata is DIDL-Lite carried as the text of the SOAP element, so parsing the envelope unescapes it once.
+    private static (string Uri, string Metadata) ReadTransportUri(SoapCall call)
+    {
+        var body = System.Xml.Linq.XDocument.Parse(call.Body);
+        string Read(string name) => body.Descendants().Single(element => element.Name.LocalName == name).Value;
+        return (Read("CurrentURI"), Read("CurrentURIMetaData"));
     }
 
     [Theory]

@@ -190,6 +190,10 @@ public partial class SonosPlayer : SonosDevice,
     public bool PlayUri_IsEnabled => CanControlCoordinator;
 
     [Derived]
+    [PropertyAttribute("PlayStream", KnownAttributes.IsEnabled)]
+    public bool PlayStream_IsEnabled => CanControlCoordinator;
+
+    [Derived]
     [PropertyAttribute("PlayNotification", KnownAttributes.IsEnabled)]
     public bool PlayNotification_IsEnabled => CanControl;
 
@@ -324,18 +328,39 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     /// <summary>
-    /// Plays a URI: http(s) streams and x-rincon-mp3radio URIs play as radio with the optional title; other native
-    /// Sonos URIs pass through without metadata.
+    /// Plays a URI once as a normal track, which ends and can be sought. http(s) and native Sonos URIs are sent
+    /// unchanged, without metadata.
     /// </summary>
     [Operation(Position = 21)]
-    public Task PlayUriAsync(string uri, string? title, CancellationToken cancellationToken)
+    public Task PlayUriAsync(string uri, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(uri);
-        var isStream = uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                       uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-        var transportUri = isStream ? SonosValues.ToStreamUri(uri) : uri;
-        var isRadio = isStream || uri.StartsWith("x-rincon-mp3radio:", StringComparison.OrdinalIgnoreCase);
-        var metadata = isRadio ? SonosValues.CreateStreamMetadata(title ?? uri) : string.Empty;
+
+        return RunOnCoordinatorAsync(async (connection, token) =>
+        {
+            await connection.SetTransportUriAsync(uri, string.Empty, token);
+            await connection.PlayAsync(token);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Plays a radio or live stream, which Sonos reconnects when it ends. http(s) URIs are played through the
+    /// x-rincon-mp3radio scheme; x-rincon-mp3radio URIs are used as they are. Both get the title as metadata.
+    /// </summary>
+    /// <exception cref="ArgumentException">The URI uses another scheme.</exception>
+    [Operation(Position = 22)]
+    public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        var isHttp = uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                     uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        if (!isHttp && !uri.StartsWith("x-rincon-mp3radio:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("The stream URI must start with http://, https:// or x-rincon-mp3radio:.", nameof(uri));
+        }
+
+        var transportUri = isHttp ? SonosValues.ToStreamUri(uri) : uri;
+        var metadata = SonosValues.CreateStreamMetadata(title ?? uri);
 
         return RunOnCoordinatorAsync(async (connection, token) =>
         {
@@ -347,7 +372,7 @@ public partial class SonosPlayer : SonosDevice,
     /// <summary>
     /// Plays a sound over the current playback, which resumes afterwards. Needs S2 speakers.
     /// </summary>
-    [Operation(Position = 22)]
+    [Operation(Position = 23)]
     public Task PlayNotificationAsync(string soundUri, [OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(soundUri);
@@ -363,14 +388,14 @@ public partial class SonosPlayer : SonosDevice,
         return RunOnPlayerAsync((connection, token) => connection.PlayNotificationAsync(sound, sonosVolume, token), cancellationToken);
     }
 
-    [Operation(Position = 23)]
+    [Operation(Position = 24)]
     public Task SwitchToTvAsync(CancellationToken cancellationToken)
     {
         EnsureHomeTheater();
         return RunOnPlayerAsync((connection, token) => connection.SwitchToTvAsync(token), cancellationToken);
     }
 
-    [Operation(Position = 24)]
+    [Operation(Position = 25)]
     public Task SwitchToLineInAsync(CancellationToken cancellationToken)
     {
         if (!HasLineIn)

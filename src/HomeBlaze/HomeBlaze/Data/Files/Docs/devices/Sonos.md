@@ -51,7 +51,8 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 | `SetVolume`, `ChangeVolume`, `RampVolume` | Volume as a fraction from 0 to 1, a relative change from -1 to 1, or a smooth ramp to a volume. Values out of range are rejected, not clamped. |
 | `Mute`, `Unmute` | Mute of this room |
 | `PlayFavorite` | Plays a Sonos favorite by name, see `SonosSystem.Favorites` |
-| `PlayUri` | Plays an http(s) stream as radio, with an optional title, or a native Sonos URI |
+| `PlayUri` | Plays an http(s) URI or a native Sonos URI once, as a normal track that ends and can be sought |
+| `PlayStream` | Plays an http(s) radio or live stream, with an optional title. Sonos reconnects the stream when it ends. |
 | `PlayNotification` | Plays a sound over the current playback, which then resumes (S2 speakers). The volume is a fraction from 0 to 1, played at 1 percent at least. |
 | `SwitchToTv`, `SwitchToLineIn` | Selects the TV or line-in input where available |
 | `SetShuffle`, `SetRepeat`, `SetSleepTimer` | Play mode and sleep timer of the whole group, sent to the group coordinator (zero cancels the timer) |
@@ -61,7 +62,7 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 
 Every operation is disabled while the system or the player is not connected. Operations sent to the group coordinator are also disabled while the coordinator is not connected.
 
-`PlayUri` plays an `http://` or `https://` stream through the `x-rincon-mp3radio` scheme, with the title as metadata. A URI that already starts with `x-rincon-mp3radio:` gets the same title metadata. Any other native Sonos URI is passed through unchanged, without metadata.
+`PlayUri` sends the URI to the speaker unchanged and without metadata, so Sonos plays a finite file such as an mp3 once and then stops. Native Sonos URIs (`x-sonos-...`, `x-rincon...`, `x-file-cifs:` and so on) are passed through the same way. `PlayStream` plays an `http://` or `https://` stream through the `x-rincon-mp3radio` scheme, with the title as metadata, so it shows as radio without a seek bar and Sonos reconnects when the stream ends. A URI that already starts with `x-rincon-mp3radio:` gets the same title metadata. Any other scheme is rejected.
 
 ### SonosGroup
 
@@ -110,7 +111,6 @@ Every operation is disabled while the system or the player is not connected. Ope
 - Favorites of type "shortcut" (for example Sonos Radio station shortcuts) carry no URI and are not listed; see the follow-ups.
 - A speaker that changes role (a standalone speaker becomes a surround or stereo partner, or a subwoofer moves to another room) keeps its old subject as an offline entry until restart.
 - If the event listener stops accepting requests (it logs an error), the system runs on polling only until the next reconnect, for example after a configuration change or three failed reconciliations in a row.
-- `PlayUri` always plays an `http://` or `https://` URI as radio, so a plain audio file shows no seek bar and cannot be sought. The `PlayTrack` operation of the HomeBlaze v1 Sonos library could play such a file as a seekable track.
 
 ## Troubleshooting
 
