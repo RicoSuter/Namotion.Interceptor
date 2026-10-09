@@ -68,6 +68,8 @@ Every operation is disabled while the system or the player is not connected. Ope
 
 `Play`, `Pause`, `Stop`, `Next`, `Previous`, `TogglePlayback`, `Seek`, and group-wide `SetVolume`, `ChangeVolume`, `Mute`, `Unmute`, with the same volume ranges as a player. Group volume keeps the volume ratio between the rooms.
 
+`PlayFavorite`, `PlayUri`, `PlayStream`, `SetShuffle`, `SetRepeat` and `SetSleepTimer` work as on a player and are sent to the coordinator.
+
 ### SonosSystem
 
 | Operation | Description |
@@ -100,7 +102,7 @@ Every operation is disabled while the system or the player is not connected. Ope
 
 ### SonosSystem
 
-`Players`, `Groups`, `Favorites` (records with `Title`, `Uri`, `IsContainer` and `ImageUri`; to play one, call `PlayFavorite` on a player with its title), `AreEventsActive`, `ActiveEventCallbackHost`, `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`.
+`Players`, `Groups`, `Favorites` (records with `Title`, `Uri`, `IsContainer` and `ImageUri`; to play one, call `PlayFavorite` on a player or group with its title), `AreEventsActive`, `ActiveEventCallbackHost`, `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`.
 
 ## Limitations
 

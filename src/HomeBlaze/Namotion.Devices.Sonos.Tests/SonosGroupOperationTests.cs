@@ -40,6 +40,50 @@ public class SonosGroupOperationTests
         Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetGroupMute");
     }
 
+    [Theory]
+    [InlineData("PlayFavorite", "SetAVTransportURI", "tunein%3a9557")]
+    [InlineData("PlayUri", "SetAVTransportURI", "<CurrentURI>http://files.example.com/chime.mp3</CurrentURI>")]
+    [InlineData("PlayStream", "SetAVTransportURI", "<CurrentURI>x-rincon-mp3radio://stream.example.com/live.mp3</CurrentURI>")]
+    [InlineData("SetShuffle", "SetPlayMode", "<NewPlayMode>SHUFFLE_NOREPEAT</NewPlayMode>")]
+    [InlineData("SetRepeat", "SetPlayMode", "<NewPlayMode>REPEAT_ALL</NewPlayMode>")]
+    [InlineData("SetSleepTimer", "ConfigureSleepTimer", "<NewSleepTimerDuration>00:30:00</NewSleepTimerDuration>")]
+    public async Task WhenGroupWideOperationIsCalled_ThenItIsSentToTheCoordinatorOnly(string operation, string expectedAction, string expectedArgument)
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true);
+        var group = household.System.Groups[TestFixtures.OfficeUuid];
+
+        // Act
+        await (operation switch
+        {
+            "PlayFavorite" => group.PlayFavoriteAsync("radio fm1", CancellationToken.None),
+            "PlayUri" => group.PlayUriAsync("http://files.example.com/chime.mp3", CancellationToken.None),
+            "PlayStream" => group.PlayStreamAsync("http://stream.example.com/live.mp3", "Live", CancellationToken.None),
+            "SetShuffle" => group.SetShuffleAsync(true, CancellationToken.None),
+            "SetRepeat" => group.SetRepeatAsync(SonosRepeatMode.All, CancellationToken.None),
+            "SetSleepTimer" => group.SetSleepTimerAsync(TimeSpan.FromMinutes(30), CancellationToken.None),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation))
+        });
+
+        // Assert
+        Assert.Contains(household.Office.Calls, call => call.Action == expectedAction && call.Body.Contains(expectedArgument));
+        Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == expectedAction);
+    }
+
+    [Fact]
+    public async Task WhenGroupPlaysUnknownFavorite_ThenThrowsListingTheFavorites()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+        var group = Assert.Single(connected.System.Groups).Value;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => group.PlayFavoriteAsync("Nothing", CancellationToken.None));
+        Assert.Equal("title", exception.ParamName);
+        Assert.Contains("Radio FM1", exception.Message);
+    }
+
     [Fact]
     public async Task WhenGroupSystemIsNotConnected_ThenPauseThrows()
     {
@@ -127,6 +171,12 @@ public class SonosGroupOperationTests
         Assert.False(group.ChangeVolume_IsEnabled);
         Assert.False(group.Mute_IsEnabled);
         Assert.False(group.Unmute_IsEnabled);
+        Assert.False(group.PlayFavorite_IsEnabled);
+        Assert.False(group.PlayUri_IsEnabled);
+        Assert.False(group.PlayStream_IsEnabled);
+        Assert.False(group.SetShuffle_IsEnabled);
+        Assert.False(group.SetRepeat_IsEnabled);
+        Assert.False(group.SetSleepTimer_IsEnabled);
     }
 
     [Fact]
@@ -146,5 +196,11 @@ public class SonosGroupOperationTests
         Assert.True(group.ChangeVolume_IsEnabled);
         Assert.True(group.Mute_IsEnabled);
         Assert.True(group.Unmute_IsEnabled);
+        Assert.True(group.PlayFavorite_IsEnabled);
+        Assert.True(group.PlayUri_IsEnabled);
+        Assert.True(group.PlayStream_IsEnabled);
+        Assert.True(group.SetShuffle_IsEnabled);
+        Assert.True(group.SetRepeat_IsEnabled);
+        Assert.True(group.SetSleepTimer_IsEnabled);
     }
 }

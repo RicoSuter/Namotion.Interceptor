@@ -124,6 +124,30 @@ public partial class SonosGroup :
     [PropertyAttribute("Unmute", KnownAttributes.IsEnabled)]
     public bool Unmute_IsEnabled => CanControl;
 
+    [Derived]
+    [PropertyAttribute("PlayFavorite", KnownAttributes.IsEnabled)]
+    public bool PlayFavorite_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("PlayUri", KnownAttributes.IsEnabled)]
+    public bool PlayUri_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("PlayStream", KnownAttributes.IsEnabled)]
+    public bool PlayStream_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("SetShuffle", KnownAttributes.IsEnabled)]
+    public bool SetShuffle_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("SetRepeat", KnownAttributes.IsEnabled)]
+    public bool SetRepeat_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("SetSleepTimer", KnownAttributes.IsEnabled)]
+    public bool SetSleepTimer_IsEnabled => CanControl;
+
     [Operation(Title = "Play", Icon = "PlayArrow", Position = 1, Description = "Starts or resumes playback of the group.")]
     public Task PlayAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.PlayAsync(token), cancellationToken);
@@ -176,6 +200,35 @@ public partial class SonosGroup :
     [Operation(Title = "Unmute", Icon = "VolumeUp", Position = 13, Description = "Unmutes every player in the group.")]
     public Task UnmuteAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.SetGroupMuteAsync(false, token), cancellationToken);
+
+    // Content, play mode and sleep timer are group state, so the coordinator's operations already target the group.
+
+    [Operation(Title = "Play Favorite", Position = 20, Description = "Plays the Sonos favorite with the given title on the group.")]
+    public Task PlayFavoriteAsync(string title, CancellationToken cancellationToken) =>
+        Coordinator.PlayFavoriteAsync(title, cancellationToken);
+
+    /// <inheritdoc cref="SonosPlayer.PlayUriAsync"/>
+    [Operation(Title = "Play URI", Position = 21, Description = "Plays a URI once as a normal track on the group, which ends and can be sought.")]
+    public Task PlayUriAsync(string uri, CancellationToken cancellationToken) =>
+        Coordinator.PlayUriAsync(uri, cancellationToken);
+
+    /// <inheritdoc cref="SonosPlayer.PlayStreamAsync"/>
+    [Operation(Title = "Play Stream", Position = 22, Description = "Plays an http(s) or x-rincon-mp3radio stream on the group as radio, which Sonos reconnects when it ends.")]
+    public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken) =>
+        Coordinator.PlayStreamAsync(uri, title, cancellationToken);
+
+    [Operation(Title = "Set Shuffle", Position = 30, Description = "Turns shuffle on or off for the group.")]
+    public Task SetShuffleAsync(bool shuffle, CancellationToken cancellationToken) =>
+        Coordinator.SetShuffleAsync(shuffle, cancellationToken);
+
+    [Operation(Title = "Set Repeat", Position = 31, Description = "Sets the repeat mode of the group.")]
+    public Task SetRepeatAsync(SonosRepeatMode repeat, CancellationToken cancellationToken) =>
+        Coordinator.SetRepeatAsync(repeat, cancellationToken);
+
+    /// <inheritdoc cref="SonosPlayer.SetSleepTimerAsync"/>
+    [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the group; zero cancels it.")]
+    public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken) =>
+        Coordinator.SetSleepTimerAsync(duration, cancellationToken);
 
     private async Task RunAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
     {
