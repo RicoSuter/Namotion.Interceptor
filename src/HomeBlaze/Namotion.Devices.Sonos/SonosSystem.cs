@@ -56,13 +56,13 @@ public partial class SonosSystem : BackgroundService,
     public partial int EventPort { get; set; }
 
     /// <summary>
-    /// The time between reconciliations of topology, state and favorites. Zero or less uses 30 seconds.
+    /// The time between reconciliations of topology, state and favorites, from 5 seconds to one hour. Zero or less uses 30 seconds.
     /// </summary>
     [Configuration]
     public partial TimeSpan PollingInterval { get; set; }
 
     /// <summary>
-    /// The delay before reconnecting after a failed connection. Zero or less uses 30 seconds.
+    /// The delay before reconnecting after a failed connection, from 5 seconds to one hour. Zero or less uses 30 seconds.
     /// </summary>
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
@@ -115,6 +115,11 @@ public partial class SonosSystem : BackgroundService,
     /// Searches the network for any speaker when neither SeedHost nor a known speaker answers. Tests replace it.
     /// </summary>
     internal Func<CancellationToken, Task<Uri?>> DiscoverSpeakerAsync { get; set; } = SonosDiscovery.FindSpeakerAsync;
+
+    /// <summary>
+    /// The shortest polling and retry interval; a shorter configured value is raised to it. Tests lower it.
+    /// </summary>
+    internal TimeSpan MinimumInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// The shortest subscription lifetime renewals are scheduled for, whatever a speaker grants. Tests shorten it.

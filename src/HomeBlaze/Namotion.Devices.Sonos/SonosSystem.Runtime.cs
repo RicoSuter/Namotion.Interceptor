@@ -48,9 +48,9 @@ public partial class SonosSystem
     private bool _isFavoritesReadFailing;
     private readonly HashSet<string> _failingSubscriptionKeys = new(StringComparer.Ordinal);
 
-    private TimeSpan EffectivePollingInterval => PollingInterval > TimeSpan.Zero ? PollingInterval : DefaultPollingInterval;
+    private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultPollingInterval, MinimumInterval);
 
-    private TimeSpan EffectiveRetryInterval => RetryInterval > TimeSpan.Zero ? RetryInterval : DefaultRetryInterval;
+    private TimeSpan EffectiveRetryInterval => SonosValues.GetEffectiveInterval(RetryInterval, DefaultRetryInterval, MinimumInterval);
 
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)

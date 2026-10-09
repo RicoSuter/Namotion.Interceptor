@@ -31,6 +31,7 @@ internal sealed class ConnectedSystem : IAsyncDisposable
             EventListenHost = "127.0.0.1",
             EventPort = eventPort ?? LoopbackHttpServer.GetFreePort(),
             RetryInterval = TimeSpan.FromSeconds(1),
+            MinimumInterval = TimeSpan.FromMilliseconds(100),
 
             // Tests never search the real network for speakers.
             DiscoverSpeakerAsync = _ => Task.FromResult<Uri?>(null)

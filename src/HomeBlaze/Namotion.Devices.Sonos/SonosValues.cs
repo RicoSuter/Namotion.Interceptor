@@ -31,6 +31,25 @@ internal static class SonosValues
     internal static bool IsSupersededPoll(DateTimeOffset pollStartedAt, DateTimeOffset lastPollStartedAt) =>
         pollStartedAt < lastPollStartedAt && lastPollStartedAt - pollStartedAt < PollReorderWindow;
 
+    /// <summary>
+    /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.
+    /// </summary>
+    internal static readonly TimeSpan MaximumInterval = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Returns the configured interval clamped to <paramref name="minimum"/> through <see cref="MaximumInterval"/>,
+    /// or <paramref name="fallback"/> when it is zero or negative.
+    /// </summary>
+    internal static TimeSpan GetEffectiveInterval(TimeSpan configured, TimeSpan fallback, TimeSpan minimum)
+    {
+        if (configured <= TimeSpan.Zero)
+        {
+            return fallback;
+        }
+
+        return configured < minimum ? minimum : configured > MaximumInterval ? MaximumInterval : configured;
+    }
+
     internal static string? NullIfEmpty(string? value) =>
         string.IsNullOrEmpty(value) ? null : value;
 
