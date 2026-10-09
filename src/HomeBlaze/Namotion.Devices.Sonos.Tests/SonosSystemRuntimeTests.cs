@@ -64,6 +64,77 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenSpeakersAcceptSubscriptionsButSendNoEvent_ThenEventsAreInactiveAndAWarningNamesTheCallback()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker { SendInitialEvents = false };
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var logger = new RecordingLogger<SonosSystem>();
+        var system = ConnectedSystem.CreateSystem(speaker.Host, logger: logger);
+        system.PollingInterval = TimeSpan.FromHours(1);
+        system.InitialEventTimeout = TimeSpan.FromMilliseconds(500);
+
+        try
+        {
+            // Act
+            await system.StartAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => logger.Warnings.Any(message => message.Contains("EventCallbackHost")),
+                ConnectedSystem.WaitTimeout,
+                message: "A missing initial event should be reported although the next poll is an hour away.");
+            Assert.True(system.IsConnected);
+            Assert.NotNull(speaker.GetCallback(AvTransportEventPath));
+            Assert.False(system.AreEventsActive);
+            Assert.Single(logger.Warnings, message => message.Contains("EventCallbackHost"));
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheFirstEventArrives_ThenEventsBecomeActive()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker { SendInitialEvents = false };
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var system = ConnectedSystem.CreateSystem(speaker.Host);
+        system.PollingInterval = TimeSpan.FromHours(1);
+
+        try
+        {
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => system.IsConnected && speaker.GetCallback(AvTransportEventPath) is not null && system.LastUpdated is not null,
+                ConnectedSystem.WaitTimeout,
+                message: "The system should connect and subscribe.");
+            Assert.False(system.AreEventsActive);
+
+            // Act
+            using var httpClient = new HttpClient();
+            using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), speaker.GetCallback(AvTransportEventPath))
+            {
+                Content = new StringContent(SonosEventBodies.AvTransport(("TransportState", "PLAYING")))
+            };
+            request.Headers.TryAddWithoutValidation("SID", FakeSonosSpeaker.SidFor(AvTransportEventPath));
+            using var response = await httpClient.SendAsync(request);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(system.AreEventsActive);
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenSeedHostIsUnreachable_ThenStatusIsError()
     {
         // Arrange
@@ -239,7 +310,10 @@ public class SonosSystemRuntimeTests
             var topologyReads = speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
 
             // Assert
-            Assert.True(system.AreEventsActive);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => system.AreEventsActive,
+                ConnectedSystem.WaitTimeout,
+                message: "The initial events of the subscriptions made by the refresh should activate events.");
             await AsyncTestHelpers.WaitUntilAsync(
                 () => speaker.Renewed.Contains(AvTransportEventPath),
                 ConnectedSystem.WaitTimeout,

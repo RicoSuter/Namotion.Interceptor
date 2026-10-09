@@ -63,6 +63,27 @@ public class SonosEventListenerTests
     }
 
     [Fact]
+    public async Task WhenNotifiesArrive_ThenTheSubscriptionHasReceivedAnEventAndTheFirstIsReportedOnce()
+    {
+        // Arrange
+        await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
+        using var httpClient = new HttpClient();
+        var reported = 0;
+        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance, firstEventReceived: () => Interlocked.Increment(ref reported));
+        var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
+        Assert.False(subscription.HasReceivedEvent);
+
+        // Act
+        await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<first />");
+        await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<second />");
+
+        // Assert
+        Assert.True(subscription.HasReceivedEvent);
+        Assert.Equal(1, reported);
+    }
+
+    [Fact]
     public async Task WhenNotifyCarriesUnknownSid_ThenReturnsPreconditionFailed()
     {
         // Arrange

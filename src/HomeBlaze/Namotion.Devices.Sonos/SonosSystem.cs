@@ -132,6 +132,12 @@ public partial class SonosSystem : BackgroundService,
     internal TimeSpan MinimumSubscriptionLifetime { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
+    /// How long after a speaker accepted a subscription its first event may take before a Warning reports that events
+    /// cannot reach the callback. Tests shorten it.
+    /// </summary>
+    internal TimeSpan InitialEventTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>
     /// How long a renewal that failed without an answer waits before it is tried again. Tests shorten it.
     /// </summary>
     internal TimeSpan FailedRenewalRetryDelay { get; set; } = TimeSpan.FromSeconds(30);

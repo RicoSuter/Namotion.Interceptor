@@ -45,8 +45,13 @@ public partial class SonosSystem
     private readonly Lock _loopWakeLock = new();
     private CancellationTokenSource? _loopWake;
 
+    // Serializes recomputing AreEventsActive: the first event of a subscription reports from the listener's thread
+    // while a reconciliation recomputes, and a stale result written last would stick until the next pass.
+    private readonly Lock _eventsActiveLock = new();
+
     // Guarded by _reconcileLock. A persistent failure is logged at Warning once and at Debug while it lasts.
     private bool _isFavoritesReadFailing;
+    private bool _isEventDeliveryFailing;
     private readonly HashSet<string> _failingSubscriptionKeys = new(StringComparer.Ordinal);
 
     private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultPollingInterval, MinimumInterval);
@@ -232,7 +237,7 @@ public partial class SonosSystem
 
             _httpClient = httpClient;
             _clientProvider = new SonosClientProvider(httpClient);
-            _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock);
+            _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock, UpdateAreEventsActive);
         }
     }
 
@@ -285,6 +290,7 @@ public partial class SonosSystem
         // may have set them after the early reset.
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
+        _isEventDeliveryFailing = false;
         Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
 
         SonosEventListener? eventListener;
@@ -319,6 +325,9 @@ public partial class SonosSystem
             }
 
             await eventListener.DisposeAsync();
+
+            // After the handlers drained: a first event that arrived during teardown may have set it.
+            UpdateAreEventsActive();
         }
 
         foreach (var connection in connections)
@@ -824,7 +833,7 @@ public partial class SonosSystem
         if (eventListener is null || !eventListener.IsListening)
         {
             // Never started, or its accept loop died (which it logs); polling keeps the state current.
-            AreEventsActive = false;
+            UpdateAreEventsActive();
             ActiveEventCallbackHost = null;
             Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
             return;
@@ -857,7 +866,8 @@ public partial class SonosSystem
                 }
             }
 
-            AreEventsActive = eventListener.Subscriptions.Any(subscription => subscription.Sid is not null);
+            UpdateAreEventsActive();
+            ReportMissingInitialEvents(eventListener);
         }
         finally
         {
@@ -866,15 +876,56 @@ public partial class SonosSystem
         }
     }
 
-    // Caller holds _reconcileLock, which guards the subscriptions' RenewAt.
+    private void UpdateAreEventsActive()
+    {
+        lock (_eventsActiveLock)
+        {
+            var eventListener = GetEventListener();
+            AreEventsActive = eventListener is { IsListening: true } &&
+                              eventListener.Subscriptions.Any(subscription => subscription.HasReceivedEvent);
+        }
+    }
+
+    // Caller holds _reconcileLock. Speakers send a full-state NOTIFY right after accepting a subscription, so a
+    // missing one means they cannot reach the callback, which outbound SUBSCRIBE requests never notice.
+    private void ReportMissingInitialEvents(SonosEventListener eventListener)
+    {
+        var now = Clock.GetTimestamp();
+        var overdue = eventListener.Subscriptions.FirstOrDefault(subscription =>
+            subscription.Sid is not null && !subscription.HasReceivedEvent && GetInitialEventDeadline(subscription) <= now);
+
+        if (overdue is null)
+        {
+            _isEventDeliveryFailing = false;
+        }
+        else if (!_isEventDeliveryFailing)
+        {
+            _isEventDeliveryFailing = true;
+            _logger.LogWarning(
+                "The Sonos speakers accepted the event subscriptions, but no event reached {CallbackUri} within {Timeout} ({Key}); polling keeps the state current. " +
+                "Check that no firewall blocks the port, that Docker publishes it, and that EventCallbackHost is an address the speakers can reach.",
+                eventListener.CallbackBaseUri, InitialEventTimeout, overdue.Key);
+        }
+    }
+
+    private long GetInitialEventDeadline(SonosEventSubscription subscription) =>
+        Clock.AddToTimestamp(subscription.SubscribedAt, InitialEventTimeout);
+
+    // Caller holds _reconcileLock, which guards the subscriptions' RenewAt. The loop also wakes when a first event
+    // is due, so a missing one is reported without waiting for the next poll.
     private void ScheduleRenewal(SonosEventListener eventListener)
     {
+        var now = Clock.GetTimestamp();
         var nextRenewalAt = TimeProviderExtensions.Never;
         foreach (var subscription in eventListener.Subscriptions)
         {
             if (subscription.Sid is not null)
             {
                 nextRenewalAt = Math.Min(nextRenewalAt, subscription.RenewAt);
+                if (!subscription.HasReceivedEvent && GetInitialEventDeadline(subscription) is var deadline && deadline > now)
+                {
+                    nextRenewalAt = Math.Min(nextRenewalAt, deadline);
+                }
             }
         }
 

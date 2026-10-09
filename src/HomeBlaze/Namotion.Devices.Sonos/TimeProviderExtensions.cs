@@ -14,11 +14,16 @@ internal static class TimeProviderExtensions
     /// <summary>
     /// Returns the timestamp the delay from now, saturating at <see cref="Never"/>.
     /// </summary>
-    internal static long GetTimestampAfter(this TimeProvider clock, TimeSpan delay)
+    internal static long GetTimestampAfter(this TimeProvider clock, TimeSpan delay) =>
+        clock.AddToTimestamp(clock.GetTimestamp(), delay);
+
+    /// <summary>
+    /// Returns the timestamp the delay after the given one, saturating at <see cref="Never"/>.
+    /// </summary>
+    internal static long AddToTimestamp(this TimeProvider clock, long timestamp, TimeSpan delay)
     {
-        var now = clock.GetTimestamp();
         var ticks = delay.TotalSeconds * clock.TimestampFrequency;
-        return ticks >= Never - now ? Never : now + (long)ticks;
+        return ticks >= Never - timestamp ? Never : timestamp + (long)ticks;
     }
 
     /// <summary>

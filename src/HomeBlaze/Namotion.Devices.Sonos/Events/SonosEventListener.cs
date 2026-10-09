@@ -20,6 +20,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly TimeSpan _minimumLifetime;
     private readonly TimeProvider _clock;
+    private readonly Action? _firstEventReceived;
     private readonly ConcurrentDictionary<string, SonosEventSubscription> _subscriptionsByKey = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SonosEventSubscription> _subscriptionsBySid = new(StringComparer.Ordinal);
 
@@ -35,17 +36,32 @@ internal sealed class SonosEventListener : IAsyncDisposable
     /// <param name="logger">The logger.</param>
     /// <param name="minimumLifetime">The shortest lifetime a renewal is scheduled for, whatever the speaker grants; one minute by default.</param>
     /// <param name="clock">The clock renewals are scheduled on; the system clock by default.</param>
-    internal SonosEventListener(HttpClient httpClient, ILogger logger, TimeSpan? minimumLifetime = null, TimeProvider? clock = null)
+    /// <param name="firstEventReceived">
+    /// Called on the thread of the NOTIFY when a subscription receives its first event. Runs as part of the handler,
+    /// so it must not block on disposing the listener either.
+    /// </param>
+    internal SonosEventListener(
+        HttpClient httpClient,
+        ILogger logger,
+        TimeSpan? minimumLifetime = null,
+        TimeProvider? clock = null,
+        Action? firstEventReceived = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _minimumLifetime = minimumLifetime ?? DefaultMinimumLifetime;
         _clock = clock ?? TimeProvider.System;
+        _firstEventReceived = firstEventReceived;
     }
 
     internal bool IsListening => !_disposing && !_acceptFailed && _listener?.IsListening == true;
 
     internal IReadOnlyCollection<SonosEventSubscription> Subscriptions => _subscriptionsByKey.Values.ToArray();
+
+    /// <summary>
+    /// The URI speakers send events to, without the subscription key; null until started.
+    /// </summary>
+    internal string? CallbackBaseUri => _callbackBaseUri;
 
     /// <summary>
     /// Starts listening. Throws <see cref="HttpListenerException"/> when the port is taken or cannot be bound,
@@ -115,6 +131,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
             var sid = GetHeader(response, "SID")
                 ?? throw new InvalidOperationException($"The subscription to {eventUri} returned no SID.");
+            subscription.SubscribedAt = _clock.GetTimestamp();
             subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
 
             // Unsubscribed while the request was in flight: Forget found no SID, so its caller sent nothing and the
@@ -366,6 +383,12 @@ internal sealed class SonosEventListener : IAsyncDisposable
                 _logger.LogWarning(exception, "Applying the Sonos event {Key} failed.", subscription.Key);
             }
 
+            // Any NOTIFY proves that the speaker reaches the callback, also one whose body failed to apply.
+            if (subscription.MarkEventReceived())
+            {
+                ReportFirstEvent(subscription);
+            }
+
             return HttpStatusCode.OK;
         }
         finally
@@ -374,6 +397,18 @@ internal sealed class SonosEventListener : IAsyncDisposable
             {
                 _handlersDrained.TrySetResult();
             }
+        }
+    }
+
+    private void ReportFirstEvent(SonosEventSubscription subscription)
+    {
+        try
+        {
+            _firstEventReceived?.Invoke();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Reporting the first Sonos event {Key} failed.", subscription.Key);
         }
     }
 

@@ -11,6 +11,8 @@ namespace Namotion.Devices.Sonos.Tests.Testing;
 /// </summary>
 internal sealed class FakeSonosSpeaker : IAsyncDisposable
 {
+    private static readonly HttpClient NotifyClient = new();
+
     private readonly LoopbackHttpServer _server;
     private readonly ConcurrentDictionary<string, string> _responses = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _faults = new(StringComparer.Ordinal);
@@ -62,6 +64,12 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// Answers every SUBSCRIBE, new or renewal, with HTTP 500.
     /// </summary>
     internal bool FailSubscriptions { get; set; }
+
+    /// <summary>
+    /// Sends an initial NOTIFY, without values, to the callback of every new subscription, as a speaker does right
+    /// after accepting it. Off acts as a speaker that cannot reach the callback.
+    /// </summary>
+    internal bool SendInitialEvents { get; set; } = true;
 
     internal static string SidFor(string eventPath) => "uuid:" + eventPath.Trim('/').Replace('/', '-');
 
@@ -205,6 +213,12 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
                 response.Headers["SID"] = SidFor(path);
                 response.Headers["TIMEOUT"] = $"Second-{SubscriptionTimeoutSeconds}";
+                if (SendInitialEvents && request.Headers["CALLBACK"] is { } newCallback)
+                {
+                    // Not awaited: Sonos sends the initial NOTIFY around its SUBSCRIBE response, often before it.
+                    _ = SendInitialEventAsync(newCallback.Trim('<', '>'), SidFor(path));
+                }
+
                 return;
 
             case "UNSUBSCRIBE":
@@ -256,6 +270,23 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
             default:
                 response.StatusCode = (int)HttpStatusCode.MethodNotAllowed;
                 return;
+        }
+    }
+
+    private static async Task SendInitialEventAsync(string callback, string sid)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), callback)
+            {
+                Content = new StringContent(SonosEventBodies.Properties())
+            };
+            request.Headers.TryAddWithoutValidation("SID", sid);
+            using var response = await NotifyClient.SendAsync(request);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            // The listener is gone, as after a stop; a real speaker gives up the same way.
         }
     }
 
