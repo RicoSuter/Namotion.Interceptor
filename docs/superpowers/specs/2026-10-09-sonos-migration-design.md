@@ -111,8 +111,9 @@ Dictionary keys are RINCON UUIDs (`RINCON_38420BD1533001400`). Groups are keyed 
 | `PollingInterval` | `[Configuration]` `TimeSpan` | Default 30 s. Non-positive falls back to default. |
 | `RetryInterval` | `[Configuration]` `TimeSpan` | Default 30 s. |
 | `Players`, `Groups` | `[State]` dictionaries | `internal set`, replaced only when membership changes. |
-| `Favorites` | `[State]` `string[]` | Favorite names, refreshed each poll. |
+| `Favorites` | `[State]` `string[]` | Names of the playable favorites, refreshed each poll. Shortcut favorites without a URI (Sonos Radio shortcuts) are skipped; see follow-ups. |
 | `AreEventsActive` | `[State]` `bool` | False when the listener could not start or no subscription succeeded. |
+| `ActiveEventCallbackHost` | `[State]` `string?` | The callback host in use (configured or detected); shown as placeholder in the edit form. |
 | `IsConnected`, `Status`, `StatusMessage`, `LastUpdated` | `[State]` | `internal set`. |
 | `Title`, `IconName`, `IconColor` | `[Derived]` | "Sonos System". |
 
@@ -297,6 +298,7 @@ Unit tests only, no live devices. Recorded payloads are embedded test files with
 ## Follow-ups (documented in Sonos.md, not implemented)
 
 - Alarms: list Sonos alarms as state, enable and disable operations (`AlarmClockService`).
+- Shortcut favorites through the Sonos local websocket favorites API.
 - Queue editing and browsing beyond favorites (Sonos playlists, music library).
 - Album art proxy so art loads when HomeBlaze is served over HTTPS.
 - Windows support for the event listener without a URL ACL (for example a raw socket listener).
