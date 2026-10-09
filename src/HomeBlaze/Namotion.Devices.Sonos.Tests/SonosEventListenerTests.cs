@@ -138,6 +138,53 @@ public class SonosEventListenerTests
     }
 
     [Fact]
+    public async Task WhenUnsubscribingAll_ThenRequestsAreSentConcurrently()
+    {
+        // Arrange
+        var bothArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var arrivedWhileOtherWasPending = new System.Collections.Concurrent.ConcurrentBag<bool>();
+        var arrivals = 0;
+        var nextSid = 0;
+        await using var speaker = new LoopbackHttpServer(async context =>
+        {
+            if (context.Request.HttpMethod == "UNSUBSCRIBE")
+            {
+                // Each UNSUBSCRIBE is held until both arrived, which a sequential teardown never achieves.
+                if (Interlocked.Increment(ref arrivals) == 2)
+                {
+                    bothArrived.TrySetResult();
+                }
+
+                try
+                {
+                    await bothArrived.Task.WaitAsync(WaitTimeout / 2);
+                    arrivedWhileOtherWasPending.Add(true);
+                }
+                catch (TimeoutException)
+                {
+                    arrivedWhileOtherWasPending.Add(false);
+                }
+
+                return;
+            }
+
+            await RespondWithSid(context, $"uuid:sub-{Interlocked.Increment(ref nextSid)}");
+        });
+        using var httpClient = new HttpClient();
+        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        listener.Start("127.0.0.1", LoopbackHttpServer.GetFreePort(), listenHost: "127.0.0.1");
+        await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/AVTransport/Event"), _ => { }, CancellationToken.None);
+        await listener.SubscribeAsync("RINCON_X/RenderingControl", new Uri(speaker.BaseUri, "/RenderingControl/Event"), _ => { }, CancellationToken.None);
+
+        // Act
+        await listener.UnsubscribeAllAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { true, true }, arrivedWhileOtherWasPending);
+        Assert.Empty(listener.Subscriptions);
+    }
+
+    [Fact]
     public async Task WhenRenewalIsRejected_ThenSubscriptionIsForgotten()
     {
         // Arrange

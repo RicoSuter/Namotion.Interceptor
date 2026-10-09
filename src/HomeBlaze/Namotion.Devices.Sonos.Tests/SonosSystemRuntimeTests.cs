@@ -162,7 +162,9 @@ public class SonosSystemRuntimeTests
         await connected.System.StopAsync(CancellationToken.None);
 
         // Assert
-        Assert.Contains(AvTransportEventPath, speaker.Unsubscribed);
+        Assert.Equal(
+            new[] { AvTransportEventPath, "/MediaRenderer/GroupRenderingControl/Event", "/MediaRenderer/RenderingControl/Event", "/ZoneGroupTopology/Event" },
+            speaker.Unsubscribed.Order(StringComparer.Ordinal));
         Assert.Equal(ServiceStatus.Stopped, connected.System.Status);
         Assert.False(connected.System.IsConnected);
         Assert.False(connected.Player.IsConnected);

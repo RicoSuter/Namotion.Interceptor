@@ -230,13 +230,19 @@ public partial class SonosSystem
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
 
-        // The stopping token is already cancelled on shutdown, so teardown gets its own short budget. Holding the
-        // reconcile lock keeps a command's reconciliation from subscribing again between unsubscribing and disposing.
-        using var teardownCancellation = new CancellationTokenSource(TeardownTimeout);
-        var hasReconcileLock = await TryEnterReconcileLockAsync(teardownCancellation.Token);
+        // The stopping token is already cancelled on shutdown, so teardown gets its own short budgets, one for the
+        // lock and one for the unsubscribes, so a slow reconciliation cannot use up the time for unsubscribing. Holding
+        // the reconcile lock keeps a command's reconciliation from subscribing again between unsubscribing and disposing.
+        bool hasReconcileLock;
+        using (var lockCancellation = new CancellationTokenSource(TeardownTimeout))
+        {
+            hasReconcileLock = await TryEnterReconcileLockAsync(lockCancellation.Token);
+        }
+
         try
         {
-            await ReleaseConnectionScopeAsync(teardownCancellation.Token);
+            using var unsubscribeCancellation = new CancellationTokenSource(TeardownTimeout);
+            await ReleaseConnectionScopeAsync(unsubscribeCancellation.Token);
         }
         finally
         {

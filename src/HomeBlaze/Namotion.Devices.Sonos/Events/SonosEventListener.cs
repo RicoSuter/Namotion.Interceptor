@@ -194,20 +194,22 @@ internal sealed class SonosEventListener : IAsyncDisposable
     }
 
     /// <summary>
-    /// Best effort: an unreachable speaker drops the subscription itself once it expires.
+    /// Unsubscribes every subscription concurrently. Best effort: an unreachable speaker drops the subscription itself
+    /// once it expires.
     /// </summary>
-    internal async Task UnsubscribeAllAsync(CancellationToken cancellationToken)
+    internal Task UnsubscribeAllAsync(CancellationToken cancellationToken) =>
+        Task.WhenAll(_subscriptionsByKey.Values.Select(subscription => TryUnsubscribeAsync(subscription, cancellationToken)));
+
+    private async Task TryUnsubscribeAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
     {
-        foreach (var subscription in _subscriptionsByKey.Values)
+        try
         {
-            try
-            {
-                await UnsubscribeAsync(subscription, cancellationToken);
-            }
-            catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
-            {
-                _logger.LogDebug(exception, "Unsubscribing Sonos events {Key} failed.", subscription.Key);
-            }
+            await UnsubscribeAsync(subscription, cancellationToken);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            _logger.LogInformation(exception,
+                "The Sonos event subscription {Key} could not be cancelled; the speaker drops it once it expires.", subscription.Key);
         }
     }
 
