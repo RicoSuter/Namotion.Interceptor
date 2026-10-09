@@ -304,8 +304,10 @@ public class SonosSystemRuntimeTests
             ConnectedSystem.WaitTimeout,
             message: "The failed renewal should be tried again.");
 
-        // Without the delay the overdue renewal would be retried at the one second floor of the loop.
-        Assert.True(attempts[1] - attempts[0] >= retryDelay - TimeSpan.FromMilliseconds(500), $"The retry came after {attempts[1] - attempts[0]}.");
+        // The delay counts from the failure, after the first attempt arrived, so the gap is at least the delay; the
+        // tolerance only covers clock granularity. Without the delay the retry would come at the loop's one second floor.
+        // No upper bound, since a loaded machine may retry late.
+        Assert.True(attempts[1] - attempts[0] >= retryDelay - TimeSpan.FromMilliseconds(100), $"The retry came after {attempts[1] - attempts[0]}.");
     }
 
     [Fact]

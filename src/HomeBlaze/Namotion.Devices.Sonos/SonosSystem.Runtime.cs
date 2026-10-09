@@ -821,7 +821,7 @@ public partial class SonosSystem
                          !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
                 {
                     // Keeps an unreachable speaker from being retried at every loop wake until the next poll drops it.
-                    subscription.RenewAt = now + FailedRenewalRetryDelay;
+                    subscription.RenewAt = DateTimeOffset.UtcNow + FailedRenewalRetryDelay;
                 }
             }
 
