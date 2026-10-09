@@ -38,7 +38,7 @@ public partial class SonosSystem : BackgroundService,
     private readonly Lock _topologyLock = new();
 
     /// <summary>
-    /// Any speaker of the household as host or host:port. Empty uses the last known speakers, then SSDP.
+    /// Any speaker of the household as host or host:port. Empty tries the speakers found since the system started, then SSDP discovery.
     /// </summary>
     [Configuration]
     public partial string? SeedHost { get; set; }
