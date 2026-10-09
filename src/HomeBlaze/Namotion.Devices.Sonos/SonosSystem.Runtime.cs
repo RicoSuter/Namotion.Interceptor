@@ -804,37 +804,66 @@ public partial class SonosSystem
         }
     }
 
-    private async Task PollPlayerAsync(SonosPlayer player, DateTimeOffset pollStartedAt, CancellationToken cancellationToken)
+    private Task PollPlayerAsync(SonosPlayer player, DateTimeOffset pollStartedAt, CancellationToken cancellationToken) =>
+        PollDeviceAsync(
+            player,
+            async (connection, newFaults, token) =>
+            {
+                if (player.NeedsStaticData)
+                {
+                    await ReadStaticDataAsync(player, connection, newFaults, token);
+                }
+
+                var reading = await connection.ReadPlayerAsync(player.IsHomeTheater, newFaults, token);
+                var group = Groups.GetValueOrDefault(player.Uuid);
+                var groupReading = group is null ? null : await connection.ReadGroupAsync(newFaults, token);
+
+                // Applied outside _connectionsLock: the apply takes the subjects' state locks and fires change
+                // notifications, whose subscribers may issue commands that take _connectionsLock. Stale values on a
+                // device that teardown already marked offline are harmless.
+                player.ApplyPoll(reading, pollStartedAt);
+                if (groupReading is not null)
+                {
+                    group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
+                }
+            },
+            "No connection to the player.",
+            "Polling the Sonos player in {Room} failed.",
+            player.RoomName,
+            cancellationToken);
+
+    private Task PollSatelliteAsync(SonosSatellite satellite, CancellationToken cancellationToken) =>
+        PollDeviceAsync(
+            satellite,
+            (connection, newFaults, token) => ReadStaticDataAsync(satellite, connection, newFaults, token),
+            "No connection to the satellite.",
+            "Reading the Sonos satellite {Uuid} failed.",
+            satellite.Uuid,
+            cancellationToken);
+
+    /// <summary>
+    /// Reads a device through its connection and reports it reachable, or unreachable when the read throws. A read the
+    /// speaker answers with a UPnP fault keeps its previous values; only a transport failure, which throws, makes the
+    /// device unreachable.
+    /// </summary>
+    private async Task PollDeviceAsync(
+        SonosDevice device,
+        Func<SonosConnection, List<SonosReadFault>, CancellationToken, Task> read,
+        string noConnectionMessage,
+        string failureMessage,
+        object? failureArgument,
+        CancellationToken cancellationToken)
     {
         SonosConnection? connection = null;
         try
         {
-            connection = FindConnection(player.Uuid)
-                ?? throw new InvalidOperationException("No connection to the player.");
+            connection = FindConnection(device.Uuid)
+                ?? throw new InvalidOperationException(noConnectionMessage);
 
-            // A read the speaker answers with a UPnP fault keeps its previous values; only a transport failure, which
-            // throws, makes the player unreachable.
             var newFaults = new List<SonosReadFault>();
-            if (player.NeedsStaticData)
-            {
-                await ReadStaticDataAsync(player, connection, newFaults, cancellationToken);
-            }
-
-            var reading = await connection.ReadPlayerAsync(player.IsHomeTheater, newFaults, cancellationToken);
-            var group = Groups.GetValueOrDefault(player.Uuid);
-            var groupReading = group is null ? null : await connection.ReadGroupAsync(newFaults, cancellationToken);
-            LogNewReadFaults(player, newFaults);
-
-            // Applied outside _connectionsLock: the apply takes the subjects' state locks and fires change
-            // notifications, whose subscribers may issue commands that take _connectionsLock. Stale values on a
-            // device that teardown already marked offline are harmless.
-            player.ApplyPoll(reading, pollStartedAt);
-            if (groupReading is not null)
-            {
-                group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
-            }
-
-            ReportPollSucceededIfCurrent(player, connection);
+            await read(connection, newFaults, cancellationToken);
+            LogNewReadFaults(device, newFaults);
+            ReportPollSucceededIfCurrent(device, connection);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -842,33 +871,8 @@ public partial class SonosSystem
         }
         catch (Exception exception)
         {
-            // Logged at Warning once per failure transition, so an offline player does not flood the log every poll.
-            LogFailure(ReportPollFailedIfCurrent(player, connection, exception.Message), exception,
-                "Polling the Sonos player in {Room} failed.", player.RoomName);
-        }
-    }
-
-    private async Task PollSatelliteAsync(SonosSatellite satellite, CancellationToken cancellationToken)
-    {
-        SonosConnection? connection = null;
-        try
-        {
-            connection = FindConnection(satellite.Uuid)
-                ?? throw new InvalidOperationException("No connection to the satellite.");
-
-            var newFaults = new List<SonosReadFault>();
-            await ReadStaticDataAsync(satellite, connection, newFaults, cancellationToken);
-            LogNewReadFaults(satellite, newFaults);
-            ReportPollSucceededIfCurrent(satellite, connection);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            LogFailure(ReportPollFailedIfCurrent(satellite, connection, exception.Message), exception,
-                "Reading the Sonos satellite {Uuid} failed.", satellite.Uuid);
+            // Logged at Warning once per failure transition, so an offline device does not flood the log every poll.
+            LogFailure(ReportPollFailedIfCurrent(device, connection, exception.Message), exception, failureMessage, failureArgument);
         }
     }
 
