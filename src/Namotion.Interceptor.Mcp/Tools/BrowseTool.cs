@@ -280,7 +280,7 @@ internal class BrowseTool
 
                 if (property.IsSubjectReference)
                 {
-                    node.Properties[segment] = new SubjectObjectProperty(Child: null, IsCollapsed: true);
+                    node.Properties[segment] = new SubjectObjectProperty(Child: null, IsCollapsed: true) { ItemType = itemType };
                 }
                 else if (property.IsSubjectDictionary)
                 {

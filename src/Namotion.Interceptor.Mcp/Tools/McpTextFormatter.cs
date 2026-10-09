@@ -129,8 +129,10 @@ internal static class McpTextFormatter
                         FormatCollapsedProperty(sb, propertyName, collapsed.Count, collapsed.ItemType, childIndent);
                         break;
 
-                    case SubjectObjectProperty { IsCollapsed: true }:
-                        // Single reference collapsed — nothing meaningful to show
+                    case SubjectObjectProperty { IsCollapsed: true } collapsed:
+                        sb.Append(childIndent);
+                        sb.Append(propertyName);
+                        sb.AppendLine(collapsed.ItemType is not null ? $"/ ({collapsed.ItemType})" : "/");
                         break;
                 }
             }

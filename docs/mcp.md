@@ -59,6 +59,7 @@ Key conventions:
 - **Property:** `name: value | type` or `name: value | type, writable`
 - **Attribute:** `@name: value` (scalar) or `@name: {json}` (complex object)
 - **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
+- **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
 - **Footer:** `[N subjects]` or `[N subjects, truncated]`
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
 
@@ -101,6 +102,7 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
   /Demo/MyDevice [MyApp.Device] "My Device"
     Temperature: 23.5 | number, writable
     Sensors/ (3x Sensor)
+    Controller/ (Controller)
 [2 subjects]
 ```
 
@@ -121,7 +123,8 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
             "$type": "MyApp.Device",
             "properties": {
               "Temperature": { "kind": "value", "value": 23.5, "type": "number" },
-              "Sensors": { "kind": "collection", "count": 3, "itemType": "Sensor", "isCollapsed": true }
+              "Sensors": { "kind": "collection", "count": 3, "itemType": "Sensor", "isCollapsed": true },
+              "Controller": { "kind": "object", "child": null, "isCollapsed": true, "itemType": "Controller" }
             }
           }
         }

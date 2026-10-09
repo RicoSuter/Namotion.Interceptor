@@ -381,6 +381,81 @@ public class BrowseToolTests
     }
 
     [Fact]
+    public async Task WhenDepthBoundaryWithSingleChild_ThenTextShowsChildSummary()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(room, config);
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 0 });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+
+        // Assert
+        var text = Assert.IsType<string>(result);
+        Assert.Contains("\n  Device/ (TestDevice)\n", text.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public async Task WhenDepthBoundaryWithSingleChild_ThenJsonShowsItemType()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(room, config);
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0 });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var device = json.GetProperty("result").GetProperty("properties").GetProperty("Device");
+        Assert.Equal("object", device.GetProperty("kind").GetString());
+        Assert.True(device.GetProperty("isCollapsed").GetBoolean());
+        Assert.Equal("TestDevice", device.GetProperty("itemType").GetString());
+    }
+
+    [Fact]
+    public async Task WhenDepthBoundaryWithNullSingleChild_ThenChildIsOmitted()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(room, config);
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var textResult = await browseTool.Handler(JsonSerializer.SerializeToElement(new { depth = 0 }), CancellationToken.None);
+        var jsonResult = await browseTool.Handler(JsonSerializer.SerializeToElement(new { format = "json", depth = 0 }), CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(jsonResult);
+
+        // Assert
+        Assert.DoesNotContain("Device", Assert.IsType<string>(textResult));
+        Assert.False(json.GetProperty("result").GetProperty("properties").TryGetProperty("Device", out _));
+    }
+
+    [Fact]
     public async Task WhenNoFormatSpecified_ThenDefaultsToText()
     {
         // Arrange
