@@ -31,6 +31,7 @@ Choose the narration voice with `voice:` in `script.yaml`:
 
 - `chatterbox` (default): Chatterbox's built-in voice.
 - `chatterbox-calm`: the same voice with a slower, more neutral delivery (lower exaggeration and CFG weight).
+- `clone:<file>` and `clone-calm:<file>`: Chatterbox cloning the voice of a recording relative to `videos/`, at the default or calm settings. Put 10 to 20 s of clean speech in any audio format into `voices/` (gitignored, so personal recordings are never committed), for example `clone:voices/rico.m4a`. TTS converts it to mono WAV at 24 kHz with edge silence trimmed and loudness normalized, cached in `voices/.prepared/` by content, so a new recording at the same path is synthesized again.
 - `kokoro:<name>`: a [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) English voice, for example `kokoro:af_heart`, `kokoro:am_michael` or `kokoro:bm_george`.
 
 Audio is cached by text, engine, voice and settings, so switching back to a voice reuses its earlier audio.

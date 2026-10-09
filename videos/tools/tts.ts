@@ -5,15 +5,15 @@ import {loadLexicon} from './lexicon';
 import {buildNarration, buildTiming} from './narration';
 import {episodeArgument, episodePaths, lexiconFile} from './paths';
 import {loadScript} from './schema/script';
-import {synthesize} from './speech';
-import {parseVoice, voiceIdentity, voiceRequest} from './voice';
+import {resolveVoice, synthesize} from './speech';
+import {parseVoice} from './voice';
 
 const paths = episodePaths(episodeArgument());
 // Narration needs only the script, so speech can be synthesized before the sample, demos and capture exist.
 const script = loadScript(paths.episodeDirectory);
-const voice = parseVoice(script.voice);
-const items = buildNarration(script, loadLexicon(lexiconFile), voiceIdentity(voice));
-synthesize(paths.audioDirectory, voiceRequest(voice), items.map(item => ({key: item.key, text: item.text})));
+const voice = resolveVoice(parseVoice(script.voice));
+const items = buildNarration(script, loadLexicon(lexiconFile), voice.identity);
+synthesize(paths.audioDirectory, voice.request, items.map(item => ({key: item.key, text: item.text})));
 
 // The tempo is applied to copies of the synthesized lines, so a tempo change only re-runs this fast step.
 const durations: Record<string, number> = {};
