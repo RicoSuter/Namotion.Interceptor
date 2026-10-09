@@ -23,9 +23,10 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 
     internal SonosPlayer Player { get; }
 
-    internal static SonosSystem CreateSystem(string seedHost, int? eventPort = null, ILogger<SonosSystem>? logger = null) =>
+    internal static SonosSystem CreateSystem(string seedHost, int? eventPort = null, ILogger<SonosSystem>? logger = null, TimeProvider? clock = null) =>
         new(new TestHttpClientFactory(), logger ?? NullLogger<SonosSystem>.Instance)
         {
+            Clock = clock ?? TimeProvider.System,
             SeedHost = seedHost,
             EventCallbackHost = "127.0.0.1",
             EventListenHost = "127.0.0.1",
@@ -42,13 +43,14 @@ internal sealed class ConnectedSystem : IAsyncDisposable
         string uuid = TestFixtures.KitchenUuid,
         string room = "Küche",
         Action<SonosSystem>? configure = null,
-        ILogger<SonosSystem>? logger = null)
+        ILogger<SonosSystem>? logger = null,
+        TimeProvider? clock = null)
     {
         speaker.RespondAsIdlePlayer(uuid, room);
         var system = await StartWithEventsAsync(
             () =>
             {
-                var system = CreateSystem(speaker.Host, logger: logger);
+                var system = CreateSystem(speaker.Host, logger: logger, clock: clock);
                 configure?.Invoke(system);
                 return system;
             },

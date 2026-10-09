@@ -40,7 +40,7 @@ public class SonosEventListenerTests
         Assert.Equal("upnp:event", received["NT"]);
         Assert.Equal("Second-1800", received["TIMEOUT"]);
         Assert.Equal("uuid:sub-1", subscription.Sid);
-        Assert.InRange(subscription.RenewAt, DateTimeOffset.UtcNow.AddMinutes(14), DateTimeOffset.UtcNow.AddMinutes(16));
+        Assert.InRange(TimeUntil(subscription.RenewAt), TimeSpan.FromMinutes(14), TimeSpan.FromMinutes(16));
     }
 
     [Fact]
@@ -287,7 +287,7 @@ public class SonosEventListenerTests
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
 
         // Assert
-        Assert.InRange(subscription.RenewAt, DateTimeOffset.UtcNow.AddSeconds(25), DateTimeOffset.UtcNow.AddSeconds(31));
+        Assert.InRange(TimeUntil(subscription.RenewAt), TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(31));
     }
 
     [Fact]
@@ -357,7 +357,7 @@ public class SonosEventListenerTests
 
         // Assert
         Assert.True(renewed);
-        Assert.InRange(subscription.RenewAt, DateTimeOffset.UtcNow.AddMinutes(4), DateTimeOffset.UtcNow.AddMinutes(6));
+        Assert.InRange(TimeUntil(subscription.RenewAt), TimeSpan.FromMinutes(4), TimeSpan.FromMinutes(6));
         Assert.Same(subscription, Assert.Single(listener.Subscriptions));
     }
 
@@ -610,6 +610,8 @@ public class SonosEventListenerTests
             // Disposing closes the connection, so the speaker side may see it reset.
         }
     }
+
+    private static TimeSpan TimeUntil(long timestamp) => TimeProvider.System.GetTimeUntil(timestamp);
 
     private static Task RespondWithSid(HttpListenerContext context, string sid)
     {

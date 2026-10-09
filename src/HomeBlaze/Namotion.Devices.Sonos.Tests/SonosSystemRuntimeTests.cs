@@ -196,6 +196,28 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenTheWallClockStepsBack_ThenSubscriptionsAreStillRenewedOnTime()
+    {
+        // Arrange
+        var clock = new SteppableClock();
+        await using var speaker = new FakeSonosSpeaker { SubscriptionTimeoutSeconds = 4 };
+        await using var connected = await ConnectedSystem.StartAsync(speaker, clock: clock, configure: system =>
+        {
+            system.PollingInterval = TimeSpan.FromHours(1);
+            system.MinimumSubscriptionLifetime = TimeSpan.FromSeconds(4);
+        });
+
+        // Act
+        clock.WallClockOffset = TimeSpan.FromHours(-1);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => speaker.Renewed.Contains(AvTransportEventPath),
+            ConnectedSystem.WaitTimeout,
+            message: "A backward wall-clock step must not postpone the renewal, or the subscription lapses.");
+    }
+
+    [Fact]
     public async Task WhenARefreshSubscribesWhileTheLoopSleeps_ThenTheNewSubscriptionsAreRenewedBeforeTheNextPoll()
     {
         // Arrange

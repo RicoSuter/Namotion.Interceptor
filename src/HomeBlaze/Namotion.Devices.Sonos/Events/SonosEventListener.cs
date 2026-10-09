@@ -19,6 +19,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
     private readonly TimeSpan _minimumLifetime;
+    private readonly TimeProvider _clock;
     private readonly ConcurrentDictionary<string, SonosEventSubscription> _subscriptionsByKey = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SonosEventSubscription> _subscriptionsBySid = new(StringComparer.Ordinal);
 
@@ -33,11 +34,13 @@ internal sealed class SonosEventListener : IAsyncDisposable
     /// <param name="httpClient">The client for SUBSCRIBE and UNSUBSCRIBE requests, borrowed and not disposed.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="minimumLifetime">The shortest lifetime a renewal is scheduled for, whatever the speaker grants; one minute by default.</param>
-    internal SonosEventListener(HttpClient httpClient, ILogger logger, TimeSpan? minimumLifetime = null)
+    /// <param name="clock">The clock renewals are scheduled on; the system clock by default.</param>
+    internal SonosEventListener(HttpClient httpClient, ILogger logger, TimeSpan? minimumLifetime = null, TimeProvider? clock = null)
     {
         _httpClient = httpClient;
         _logger = logger;
         _minimumLifetime = minimumLifetime ?? DefaultMinimumLifetime;
+        _clock = clock ?? TimeProvider.System;
     }
 
     internal bool IsListening => !_disposing && !_acceptFailed && _listener?.IsListening == true;
@@ -112,7 +115,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
             var sid = GetHeader(response, "SID")
                 ?? throw new InvalidOperationException($"The subscription to {eventUri} returned no SID.");
-            subscription.RenewAt = DateTimeOffset.UtcNow + GetLifetime(response) / 2;
+            subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
 
             // Unsubscribed while the request was in flight: Forget found no SID, so its caller sent nothing and the
             // speaker still holds the subscription. The lock makes exactly one of the two sides own the UNSUBSCRIBE.
@@ -164,7 +167,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
             return false;
         }
 
-        subscription.RenewAt = DateTimeOffset.UtcNow + GetLifetime(response) / 2;
+        subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
         return true;
     }
 

@@ -35,9 +35,10 @@ public partial class SonosSystem
     private SonosConnection? _seedConnection;
     private bool _disposed;
 
-    // UTC ticks of the earliest subscription renewal, long.MaxValue for none. Written under _reconcileLock, which
-    // also guards the subscriptions' RenewAt, and read by the connection loop while it holds no lock.
-    private long _nextRenewalTicks = long.MaxValue;
+    // The monotonic timestamp of the earliest subscription renewal, TimeProviderExtensions.Never for none. Written
+    // under _reconcileLock, which also guards the subscriptions' RenewAt, and read by the connection loop while it
+    // holds no lock.
+    private long _nextRenewalAt = TimeProviderExtensions.Never;
 
     // The connection loop's current sleep. Cancelling it wakes the loop to reschedule when a reconciliation outside
     // the loop, from a command, schedules an earlier renewal. Guarded by _loopWakeLock.
@@ -148,7 +149,7 @@ public partial class SonosSystem
     internal async Task RefreshAfterCommandAsync(SonosPlayer player, CancellationToken cancellationToken)
     {
         var coordinatorUuid = player.GroupCoordinatorUuid ?? player.Uuid;
-        var pollStartedAt = TimeProvider.System.GetUtcNow();
+        var pollStartedAt = Clock.GetUtcNow();
         var groupPlayers = Players.Values
             .Where(candidate => candidate.IsConnected && (candidate.GroupCoordinatorUuid ?? candidate.Uuid) == coordinatorUuid)
             .ToArray();
@@ -198,7 +199,7 @@ public partial class SonosSystem
             ApplyTopology(topology);
             SyncConnections();
 
-            var pollStartedAt = TimeProvider.System.GetUtcNow();
+            var pollStartedAt = Clock.GetUtcNow();
             var players = Players.Values.Where(player => player.IsInTopology).ToArray();
             await Task.WhenAll(players.Select(player => PollPlayerAsync(player, pollStartedAt, cancellationToken)));
             await Task.WhenAll(players
@@ -208,7 +209,7 @@ public partial class SonosSystem
 
             await RefreshFavoritesAsync(players, cancellationToken);
             await EnsureSubscriptionsAsync(cancellationToken);
-            LastUpdated = DateTimeOffset.Now;
+            LastUpdated = Clock.GetLocalNow();
         }
         finally
         {
@@ -231,7 +232,7 @@ public partial class SonosSystem
 
             _httpClient = httpClient;
             _clientProvider = new SonosClientProvider(httpClient);
-            _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime);
+            _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock);
         }
     }
 
@@ -284,7 +285,7 @@ public partial class SonosSystem
         // may have set them after the early reset.
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
-        Interlocked.Exchange(ref _nextRenewalTicks, long.MaxValue);
+        Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
 
         SonosEventListener? eventListener;
         HttpClient? httpClient;
@@ -458,7 +459,7 @@ public partial class SonosSystem
         MarkConnected();
 
         var consecutiveFailures = 0;
-        var nextPollAt = DateTimeOffset.UtcNow + EffectivePollingInterval;
+        var nextPollAt = Clock.GetTimestampAfter(EffectivePollingInterval);
         while (true)
         {
             bool isRenewalOnly;
@@ -474,9 +475,9 @@ public partial class SonosSystem
                     // Subscriptions live 30 minutes, which a long polling interval would let lapse, so the loop also
                     // wakes to renew them, without a full poll. Read after publishing the wake source: a renewal
                     // scheduled before is seen here, one scheduled after cancels the wait.
-                    var nextRenewalTicks = Interlocked.Read(ref _nextRenewalTicks);
-                    isRenewalOnly = nextRenewalTicks < nextPollAt.UtcTicks;
-                    var wait = (isRenewalOnly ? new DateTimeOffset(nextRenewalTicks, TimeSpan.Zero) : nextPollAt) - DateTimeOffset.UtcNow;
+                    var nextRenewalAt = Interlocked.Read(ref _nextRenewalAt);
+                    isRenewalOnly = nextRenewalAt < nextPollAt;
+                    var wait = Clock.GetTimeUntil(isRenewalOnly ? nextRenewalAt : nextPollAt);
                     if (await _configurationChanged.WaitAsync(wait > MinimumLoopWait ? wait : MinimumLoopWait, wake.Token))
                     {
                         return true;
@@ -527,7 +528,7 @@ public partial class SonosSystem
                 SetSeed(SelectNextSeed());
             }
 
-            nextPollAt = DateTimeOffset.UtcNow + EffectivePollingInterval;
+            nextPollAt = Clock.GetTimestampAfter(EffectivePollingInterval);
         }
     }
 
@@ -825,12 +826,12 @@ public partial class SonosSystem
             // Never started, or its accept loop died (which it logs); polling keeps the state current.
             AreEventsActive = false;
             ActiveEventCallbackHost = null;
-            Interlocked.Exchange(ref _nextRenewalTicks, long.MaxValue);
+            Interlocked.Exchange(ref _nextRenewalAt, TimeProviderExtensions.Never);
             return;
         }
 
         var desired = GetDesiredSubscriptions();
-        var now = DateTimeOffset.UtcNow;
+        var now = Clock.GetTimestamp();
         try
         {
             foreach (var subscription in eventListener.Subscriptions)
@@ -843,7 +844,7 @@ public partial class SonosSystem
                          !await RunSubscriptionRequestAsync(() => eventListener.RenewAsync(subscription, cancellationToken), subscription.Key, cancellationToken))
                 {
                     // Keeps an unreachable speaker from being retried at every loop wake until the next poll drops it.
-                    subscription.RenewAt = DateTimeOffset.UtcNow + FailedRenewalRetryDelay;
+                    subscription.RenewAt = Clock.GetTimestampAfter(FailedRenewalRetryDelay);
                 }
             }
 
@@ -868,16 +869,16 @@ public partial class SonosSystem
     // Caller holds _reconcileLock, which guards the subscriptions' RenewAt.
     private void ScheduleRenewal(SonosEventListener eventListener)
     {
-        var nextRenewalTicks = long.MaxValue;
+        var nextRenewalAt = TimeProviderExtensions.Never;
         foreach (var subscription in eventListener.Subscriptions)
         {
             if (subscription.Sid is not null)
             {
-                nextRenewalTicks = Math.Min(nextRenewalTicks, subscription.RenewAt.UtcTicks);
+                nextRenewalAt = Math.Min(nextRenewalAt, subscription.RenewAt);
             }
         }
 
-        if (nextRenewalTicks < Interlocked.Exchange(ref _nextRenewalTicks, nextRenewalTicks))
+        if (nextRenewalAt < Interlocked.Exchange(ref _nextRenewalAt, nextRenewalAt))
         {
             WakeLoopForRenewal();
         }
@@ -947,17 +948,17 @@ public partial class SonosSystem
     // The event handlers run on the listener's thread pool callbacks, concurrently with polling. The listener catches
     // and logs a parser's XmlException, and its disposal waits for running handlers, so they must not block on it.
 
-    private static void OnAvTransportEvent(SonosPlayer player, string body) =>
-        player.ApplyAvTransportEvent(UpnpEventParser.ParseAvTransport(body), TimeProvider.System.GetUtcNow());
+    private void OnAvTransportEvent(SonosPlayer player, string body) =>
+        player.ApplyAvTransportEvent(UpnpEventParser.ParseAvTransport(body), Clock.GetUtcNow());
 
-    private static void OnRenderingControlEvent(SonosPlayer player, string body) =>
-        player.ApplyRenderingControlEvent(UpnpEventParser.ParseRenderingControl(body), TimeProvider.System.GetUtcNow());
+    private void OnRenderingControlEvent(SonosPlayer player, string body) =>
+        player.ApplyRenderingControlEvent(UpnpEventParser.ParseRenderingControl(body), Clock.GetUtcNow());
 
     private void OnGroupRenderingControlEvent(string coordinatorUuid, string body)
     {
         if (Groups.TryGetValue(coordinatorUuid, out var group))
         {
-            group.ApplyGroupRenderingControlEvent(UpnpEventParser.ParseGroupRenderingControl(body), TimeProvider.System.GetUtcNow());
+            group.ApplyGroupRenderingControlEvent(UpnpEventParser.ParseGroupRenderingControl(body), Clock.GetUtcNow());
         }
     }
 

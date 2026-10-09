@@ -37,5 +37,8 @@ internal sealed class SonosEventSubscription
         set => _sid = value;
     }
 
-    internal DateTimeOffset RenewAt { get; set; }
+    /// <summary>
+    /// When to renew, as a monotonic <see cref="TimeProvider.GetTimestamp"/> value of the listener's clock.
+    /// </summary>
+    internal long RenewAt { get; set; }
 }

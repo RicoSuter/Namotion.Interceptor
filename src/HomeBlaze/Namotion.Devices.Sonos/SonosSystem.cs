@@ -117,6 +117,11 @@ public partial class SonosSystem : BackgroundService,
     internal Func<CancellationToken, Task<Uri?>> DiscoverSpeakerAsync { get; set; } = SonosDiscovery.FindSpeakerAsync;
 
     /// <summary>
+    /// The clock for timestamps and scheduling. Tests replace it.
+    /// </summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    /// <summary>
     /// The shortest polling and retry interval; a shorter configured value is raised to it. Tests lower it.
     /// </summary>
     internal TimeSpan MinimumInterval { get; set; } = TimeSpan.FromSeconds(5);
