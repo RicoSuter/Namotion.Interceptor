@@ -96,6 +96,11 @@ public partial class SonosSystem : BackgroundService,
     // Read by the connection loop in SonosSystem.Runtime.cs.
     internal IHttpClientFactory HttpClientFactory { get; }
 
+    /// <summary>
+    /// The host the event listener binds to; "+" accepts events on every interface. Tests bind loopback only.
+    /// </summary>
+    internal string EventListenHost { get; init; } = "+";
+
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {
         HttpClientFactory = httpClientFactory;
