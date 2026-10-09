@@ -15,7 +15,7 @@ const voice = resolveVoice(parseVoice(script.voice), script.tempo);
 const items = buildNarration(script, loadLexicon(lexiconFile), voice.identity);
 synthesize(paths.audioDirectory, voice.request, items.map(item => ({key: item.key, text: item.text})));
 
-// Kokoro synthesizes at the tempo itself; other voices get atempo copies, so their tempo change only re-runs this fast step.
+// Speech the engine cannot bring to the tempo itself gets an atempo copy (see tempoPlan), so such a tempo change only re-runs this fast step.
 const durations: Record<string, number> = {};
 for (const item of items) {
   applyTempo(paths.audioDirectory, item.key, item.audioKey, voice.atempo);

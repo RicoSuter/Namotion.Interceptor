@@ -63,12 +63,24 @@ export function voiceLabel(voice: Voice): string {
 }
 
 /**
- * How a voice reaches a narration tempo. Kokoro synthesizes at that speed itself, which keeps its prosody natural.
- * Chatterbox has no speed control, so its speech is synthesized at the natural pace and then sped up with ffmpeg's
- * pitch-preserving `atempo`.
+ * Highest speed Kokoro synthesizes at natively. Kokoro rounds every phoneme to whole frames, so above about 1.3 short
+ * phonemes collapse: a line's first article or a final consonant goes missing (measured with Whisper on the
+ * connectors episode). Faster tempos add `atempo` on top.
+ */
+export const kokoroMaximumSpeed = 1.25;
+
+/**
+ * How a voice reaches a narration tempo: the engine's native `speed` and the factor ffmpeg's pitch-preserving
+ * `atempo` applies afterwards. Kokoro synthesizes at the tempo itself, which keeps its prosody natural, up to
+ * `kokoroMaximumSpeed`. Chatterbox has no speed control, so its speech is synthesized at the natural pace and sped up.
  */
 export function tempoPlan(voice: Voice, tempo: number): {speed: number; atempo: number} {
-  return voice.engine === 'kokoro' ? {speed: tempo, atempo: 1} : {speed: 1, atempo: tempo};
+  if (voice.engine !== 'kokoro') {
+    return {speed: 1, atempo: tempo};
+  }
+  const speed = Math.min(tempo, kokoroMaximumSpeed);
+  // Rounded so the factor in cache keys and filter arguments carries no floating point noise.
+  return {speed, atempo: Number((tempo / speed).toFixed(4))};
 }
 
 /**

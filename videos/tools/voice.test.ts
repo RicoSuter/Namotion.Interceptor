@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {synthesisKey} from './narration';
-import {parseVoice, tempoPlan, voiceIdentity, voiceLabel, voiceRequest} from './voice';
+import {kokoroMaximumSpeed, parseVoice, tempoPlan, voiceIdentity, voiceLabel, voiceRequest} from './voice';
 
 describe('parseVoice', () => {
   it('WhenSpecNamesChatterbox_ThenUsesItsPreset', () => {
@@ -73,8 +73,16 @@ describe('voiceRequest', () => {
 describe('tempoPlan', () => {
   it('WhenVoiceIsKokoro_ThenEngineReachesTheTempoNatively', () => {
     // Act & Assert
-    expect(tempoPlan(parseVoice('kokoro:am_michael'), 1.34)).toEqual({speed: 1.34, atempo: 1});
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), 1.2)).toEqual({speed: 1.2, atempo: 1});
     expect(tempoPlan(parseVoice('kokoro:am_michael'), 1)).toEqual({speed: 1, atempo: 1});
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), 0.8)).toEqual({speed: 0.8, atempo: 1});
+  });
+
+  it('WhenKokoroTempoExceedsItsMaximumSpeed_ThenAtempoAddsTheRest', () => {
+    // Act & Assert
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), kokoroMaximumSpeed)).toEqual({speed: kokoroMaximumSpeed, atempo: 1});
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), 1.32)).toEqual({speed: 1.25, atempo: 1.056});
+    expect(tempoPlan(parseVoice('kokoro:am_michael'), 2)).toEqual({speed: 1.25, atempo: 1.6});
   });
 
   it('WhenVoiceIsChatterboxOrClone_ThenAtempoReachesTheTempo', () => {

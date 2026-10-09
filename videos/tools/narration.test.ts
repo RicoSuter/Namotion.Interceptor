@@ -94,13 +94,26 @@ describe('buildNarration tempo with Kokoro', () => {
 
     // Act
     const natural = buildNarration(kokoro, lexicon);
-    const faster = buildNarration({...kokoro, tempo: 1.34}, lexicon);
+    const faster = buildNarration({...kokoro, tempo: 1.2}, lexicon);
 
     // Assert
     expect(faster[0].key).not.toBe(natural[0].key);
     expect(faster.map(item => item.audioKey)).toEqual(faster.map(item => item.key));
-    expect(faster[0].key).toBe(buildNarration({...kokoro, tempo: 1.34}, lexicon)[0].key);
-    expect(buildNarration({...kokoro, tempo: 1.3}, lexicon)[0].key).not.toBe(faster[0].key);
+    expect(faster[0].key).toBe(buildNarration({...kokoro, tempo: 1.2}, lexicon)[0].key);
+    expect(buildNarration({...kokoro, tempo: 1.15}, lexicon)[0].key).not.toBe(faster[0].key);
+  });
+
+  it('WhenKokoroTempoExceedsItsMaximumSpeed_ThenSpeechAtTheMaximumGetsAnAtempoCopy', () => {
+    // Arrange
+    const kokoro = {...script, voice: 'kokoro:am_michael'};
+
+    // Act
+    const maximum = buildNarration({...kokoro, tempo: 1.25}, lexicon);
+    const faster = buildNarration({...kokoro, tempo: 1.32}, lexicon);
+
+    // Assert
+    expect(faster.map(item => item.key)).toEqual(maximum.map(item => item.key));
+    expect(faster[0].audioKey).toBe(`${maximum[0].key}-x1.056`);
   });
 });
 

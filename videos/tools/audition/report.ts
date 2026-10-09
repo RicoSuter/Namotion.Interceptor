@@ -60,7 +60,7 @@ export function auditionReadme(lines: AuditionLine[], results: AuditionResult[])
     '|---|---|---|---|---|---|---|---|',
     ...rows,
     '',
-    'Words per minute count the written words of the three lines over the length of their three clips, including the silence the engine leaves at the start and end of a clip, as the pipeline plays them at the listed tempo (Kokoro synthesizes at it natively, other voices are sped up with atempo). An episode runs slower than this, since every narrated beat adds 0.4 s of silence.',
+    'Words per minute count the written words of the three lines over the length of their three clips, including the silence the engine leaves at the start and end of a clip, as the pipeline plays them at the listed tempo (see the speed mapping in videos/README.md). An episode runs slower than this, since every narrated beat adds 0.4 s of silence.',
     '',
   ].join('\n');
 }
