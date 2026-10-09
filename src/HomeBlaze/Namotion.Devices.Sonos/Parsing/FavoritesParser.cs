@@ -7,11 +7,6 @@ namespace Namotion.Devices.Sonos.Parsing;
 /// </summary>
 internal static class FavoritesParser
 {
-    private static readonly XNamespace DidlNamespace = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/";
-    private static readonly XNamespace DcNamespace = "http://purl.org/dc/elements/1.1/";
-    private static readonly XNamespace UpnpNamespace = "urn:schemas-upnp-org:metadata-1-0/upnp/";
-    private static readonly XNamespace RinconNamespace = "urn:schemas-rinconnetworks-com:metadata-1-0/";
-
     /// <summary>
     /// Returns the playable favorites, none for a null or blank result. Speaker-relative cover art is resolved
     /// against <paramref name="baseUri"/>.
@@ -30,20 +25,20 @@ internal static class FavoritesParser
             return favorites;
         }
 
-        foreach (var item in root.Elements(DidlNamespace + "item"))
+        foreach (var item in root.Elements(SonosXml.DidlNamespace + "item"))
         {
-            var title = (string?)item.Element(DcNamespace + "title");
-            var uri = (string?)item.Element(DidlNamespace + "res");
+            var title = DidlParser.ReadTitle(item);
+            var uri = (string?)item.Element(SonosXml.DidlNamespace + "res");
 
             // Shortcut favorites (Sonos Radio stations) carry no URI and can only be started through the
             // Sonos websocket API, so they are not offered.
-            if (string.IsNullOrEmpty(title) || string.IsNullOrEmpty(uri))
+            if (title is null || string.IsNullOrEmpty(uri))
             {
                 continue;
             }
 
-            var metadata = (string?)item.Element(RinconNamespace + "resMD") ?? string.Empty;
-            var imageUri = SonosValues.ToAbsoluteUri((string?)item.Element(UpnpNamespace + "albumArtURI"), baseUri);
+            var metadata = (string?)item.Element(SonosXml.RinconNamespace + "resMD") ?? string.Empty;
+            var imageUri = SonosValues.ToAbsoluteUri((string?)item.Element(SonosXml.UpnpNamespace + "albumArtURI"), baseUri);
             favorites.Add(new SonosFavorite(title, uri, IsContainer(uri, metadata), imageUri) { Metadata = metadata });
         }
 

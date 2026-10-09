@@ -10,11 +10,6 @@ internal sealed record DidlTrack(string? Title, string? Artist, string? Album, s
 /// </summary>
 internal static class DidlParser
 {
-    private static readonly XNamespace DidlNamespace = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/";
-    private static readonly XNamespace DcNamespace = "http://purl.org/dc/elements/1.1/";
-    private static readonly XNamespace UpnpNamespace = "urn:schemas-upnp-org:metadata-1-0/upnp/";
-    private static readonly XNamespace RinconNamespace = "urn:schemas-rinconnetworks-com:metadata-1-0/";
-
     /// <summary>
     /// Returns null for absent, <c>NOT_IMPLEMENTED</c> or malformed metadata: it comes from third-party music
     /// services, and a track without readable metadata is a normal state, not a failure.
@@ -28,12 +23,12 @@ internal static class DidlParser
         }
 
         // Radio stations put the current song into streamContent and the station into title.
-        var streamContent = SonosValues.NullIfEmpty((string?)item.Element(RinconNamespace + "streamContent"));
+        var streamContent = SonosValues.NullIfEmpty((string?)item.Element(SonosXml.RinconNamespace + "streamContent"));
         return new DidlTrack(
             streamContent ?? ReadTitle(item),
-            SonosValues.NullIfEmpty((string?)item.Element(DcNamespace + "creator")),
-            SonosValues.NullIfEmpty((string?)item.Element(UpnpNamespace + "album")),
-            SonosValues.NullIfEmpty((string?)item.Element(UpnpNamespace + "albumArtURI")));
+            SonosValues.NullIfEmpty((string?)item.Element(SonosXml.DcNamespace + "creator")),
+            SonosValues.NullIfEmpty((string?)item.Element(SonosXml.UpnpNamespace + "album")),
+            SonosValues.NullIfEmpty((string?)item.Element(SonosXml.UpnpNamespace + "albumArtURI")));
     }
 
     /// <summary>
@@ -43,8 +38,11 @@ internal static class DidlParser
     internal static string? ParseTitle(string? metadata) =>
         ParseItem(metadata) is { } item ? ReadTitle(item) : null;
 
-    private static string? ReadTitle(XElement item) =>
-        SonosValues.NullIfEmpty((string?)item.Element(DcNamespace + "title"));
+    /// <summary>
+    /// Returns the <c>dc:title</c> of a DIDL item or container, null when it is absent or empty.
+    /// </summary>
+    internal static string? ReadTitle(XElement item) =>
+        SonosValues.NullIfEmpty((string?)item.Element(SonosXml.DcNamespace + "title"));
 
     private static XElement? ParseItem(string? metadata)
     {
@@ -63,6 +61,6 @@ internal static class DidlParser
             return null;
         }
 
-        return document.Root?.Element(DidlNamespace + "item") ?? document.Root?.Element(DidlNamespace + "container");
+        return document.Root?.Element(SonosXml.DidlNamespace + "item") ?? document.Root?.Element(SonosXml.DidlNamespace + "container");
     }
 }

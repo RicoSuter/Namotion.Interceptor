@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security;
+using Namotion.Devices.Sonos.Parsing;
 
 namespace Namotion.Devices.Sonos;
 
@@ -245,10 +246,22 @@ internal static class SonosValues
         "x-rincon-mp3radio" + uri[uri.IndexOf(':')..];
 
     internal static string CreateStreamMetadata(string title) =>
-        "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" " +
-        "xmlns:r=\"urn:schemas-rinconnetworks-com:metadata-1-0/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">" +
+        StreamMetadataPrefix + SecurityElement.Escape(title) + StreamMetadataSuffix;
+
+    private static readonly string StreamMetadataPrefix =
+        $"<DIDL-Lite xmlns:dc=\"{SonosXml.DcNamespace.NamespaceName}\" xmlns:upnp=\"{SonosXml.UpnpNamespace.NamespaceName}\" " +
+        $"xmlns:r=\"{SonosXml.RinconNamespace.NamespaceName}\" xmlns=\"{SonosXml.DidlNamespace.NamespaceName}\">" +
         "<item id=\"R:0/0/0\" parentID=\"R:0/0\" restricted=\"true\">" +
-        "<dc:title>" + SecurityElement.Escape(title) + "</dc:title>" +
+        "<dc:title>";
+
+    private const string StreamMetadataSuffix =
+        "</dc:title>" +
         "<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>" +
         "</item></DIDL-Lite>";
+
+    /// <summary>
+    /// Whether an equalizer level is on. Any level above zero is: the Arc Ultra reports its speech enhancement level
+    /// 1 to 4 as DialogLevel.
+    /// </summary>
+    internal static bool IsLevelOn(int level) => level != 0;
 }

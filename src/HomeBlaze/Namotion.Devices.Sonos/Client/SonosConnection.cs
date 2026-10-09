@@ -336,12 +336,11 @@ internal sealed class SonosConnection : IDisposable
     private static string EscapeMetadataAmpersands(string metadata) =>
         metadata.Contains('<') ? metadata.Replace("&", "&amp;", StringComparison.Ordinal) : metadata;
 
-    // Any level above zero is on: the Arc Ultra reports its speech enhancement level 1 to 4 as DialogLevel.
     private async Task<bool?> GetEqualizerAsync(string type, List<SonosReadFault> faults, CancellationToken cancellationToken)
     {
         var response = await ReadOrDefaultAsync("GetEQ " + type,
             () => RenderingControl.GetEQ(new RenderingControlService.GetEQRequest { InstanceID = InstanceId, EQType = type }, cancellationToken), faults);
-        return response is null ? null : response.CurrentValue != 0;
+        return response is null ? null : SonosValues.IsLevelOn(response.CurrentValue);
     }
 
     public void Dispose() => _device.Dispose();
