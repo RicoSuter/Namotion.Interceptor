@@ -8,7 +8,8 @@
     "validate": "tsx tools/validate.ts",
     "tts": "tsx tools/tts.ts",
     "capture": "tsx tools/capture/capture.ts",
-    "render": "DISABLE_TELEMETRY=true tsx tools/render.ts"
+    "render": "DISABLE_TELEMETRY=true tsx tools/render.ts",
+    "audition": "tsx tools/audition/audition.ts"
   },
   "dependencies": {
     "@codemirror/language": "6.13.1",

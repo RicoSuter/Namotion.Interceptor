@@ -36,6 +36,8 @@ Choose the narration voice with `voice:` in `script.yaml`:
 
 Audio is cached by text, engine, voice and settings, so switching back to a voice reuses its earlier audio.
 
+`npm run audition` compares voices on three fixed lines: it writes each built-in voice's clips, loudness-normalized to -16 LUFS, plus `audition.wav` (every voice in a row) and a `README.md` with durations and words per minute to `output/voice-audition/`. Append more voices, optionally labelled, to include them: `npm run audition -- clone-rico=clone:voices/rico.wav clone-rico-calm=clone-calm:voices/rico.wav kokoro:bf_emma`. Synthesis is cached, so a rerun only synthesizes new voices.
+
 To try a voice or tempo without changing `script.yaml`, pass `--voice <voice>` and `--tempo <factor>` to both `tts` and `render`, for example `npm run tts -- 03-connectors --voice clone:voices/rico.wav --tempo 1` and then `npm run render -- 03-connectors --voice clone:voices/rico.wav --tempo 1 --final`. The trial gets its own timing and render files (named after the voice and tempo, such as `03-connectors-final-clone-rico-x1.mp4`), so the regular ones stay as they are.
 
 Narration plays at the voice's natural pace (`tempo` 1) by default; set `tempo:` in `script.yaml` to speed it up or slow it down per episode. TTS caches the synthesized speech and a pitch-preserving copy per tempo (ffmpeg `atempo`), so a tempo change does not synthesize again.
