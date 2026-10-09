@@ -121,11 +121,13 @@ public class SonosSystemOperationTests
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync();
         household.Kitchen.RespondWithFault("GetZoneGroupState", 501);
+        var reads = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
 
         // Act
         await household.System.GroupAllAsync("Küche", CancellationToken.None);
 
         // Assert
         Assert.Contains(household.Office.Calls, call => call.Action == "SetAVTransportURI" && call.Body.Contains($"x-rincon:{TestFixtures.KitchenUuid}"));
+        Assert.True(household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > reads, "The topology read after grouping was not attempted.");
     }
 }

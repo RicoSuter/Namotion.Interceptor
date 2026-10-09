@@ -1,5 +1,3 @@
-using Namotion.Interceptor.Testing;
-
 namespace Namotion.Devices.Sonos.Tests.Testing;
 
 /// <summary>
@@ -28,38 +26,41 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
     internal static async Task<ConnectedHousehold> StartAsync(bool isGrouped = false)
     {
         var kitchen = new FakeSonosSpeaker();
-        var office = new FakeSonosSpeaker();
-        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
-        foreach (var speaker in new[] { kitchen, office })
-        {
-            if (isGrouped)
-            {
-                speaker.RespondWithGroup((TestFixtures.OfficeUuid, "Büro", office.BaseUri), (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
-            }
-            else
-            {
-                speaker.RespondWithTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", office.BaseUri));
-            }
-        }
-
-        var system = ConnectedSystem.CreateSystem(kitchen.Host);
-        var household = new ConnectedHousehold(kitchen, office, system);
+        FakeSonosSpeaker? office = null;
         try
         {
-            await system.StartAsync(CancellationToken.None);
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => system.IsConnected &&
-                      system.AreEventsActive &&
-                      system.Players.Count == 2 &&
-                      system.Players.Values.All(player => player.IsConnected && player.Model is not null),
-                ConnectedSystem.WaitTimeout,
-                message: "The system should connect to both speakers.");
-            return household;
+            office = new FakeSonosSpeaker();
+            kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+            office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
+            foreach (var speaker in new[] { kitchen, office })
+            {
+                if (isGrouped)
+                {
+                    speaker.RespondWithGroup((TestFixtures.OfficeUuid, "Büro", office.BaseUri), (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
+                }
+                else
+                {
+                    speaker.RespondWithTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", office.BaseUri));
+                }
+            }
+
+            var system = await ConnectedSystem.StartWithEventsAsync(
+                () => ConnectedSystem.CreateSystem(kitchen.Host),
+                system => system.IsConnected &&
+                          system.AreEventsActive &&
+                          system.Players.Count == 2 &&
+                          system.Players.Values.All(player => player.IsConnected && player.Model is not null),
+                "The system should connect to both speakers.");
+            return new ConnectedHousehold(kitchen, office, system);
         }
         catch
         {
-            await household.DisposeAsync();
+            await kitchen.DisposeAsync();
+            if (office is not null)
+            {
+                await office.DisposeAsync();
+            }
+
             throw;
         }
     }

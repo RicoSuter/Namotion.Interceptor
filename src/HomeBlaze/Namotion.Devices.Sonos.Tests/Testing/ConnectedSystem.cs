@@ -11,6 +11,8 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 {
     internal static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(30);
 
+    private const int MaxStartAttempts = 3;
+
     private ConnectedSystem(SonosSystem system, SonosPlayer player)
     {
         System = system;
@@ -42,15 +44,61 @@ internal sealed class ConnectedSystem : IAsyncDisposable
         ILogger<SonosSystem>? logger = null)
     {
         speaker.RespondAsIdlePlayer(uuid, room);
-        var system = CreateSystem(speaker.Host, logger: logger);
-        configure?.Invoke(system);
-        await system.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => system.IsConnected && system.Players.TryGetValue(uuid, out var player) && player.Model is not null && system.AreEventsActive,
-            WaitTimeout,
-            message: "The system should connect to the fake speaker and subscribe to its events.");
+        var system = await StartWithEventsAsync(
+            () =>
+            {
+                var system = CreateSystem(speaker.Host, logger: logger);
+                configure?.Invoke(system);
+                return system;
+            },
+            system => system.IsConnected && system.Players.TryGetValue(uuid, out var player) && player.Model is not null && system.AreEventsActive,
+            "The system should connect to the fake speaker and subscribe to its events.");
 
         return new ConnectedSystem(system, system.Players[uuid]);
+    }
+
+    /// <summary>
+    /// Starts a system from <paramref name="create"/> and waits until it is ready. The system binds its event port
+    /// itself, after the free port was chosen, so a system that connected without its listener is replaced by one on
+    /// another port. A system that does not become ready is stopped and disposed.
+    /// </summary>
+    internal static async Task<SonosSystem> StartWithEventsAsync(Func<SonosSystem> create, Func<SonosSystem, bool> isReady, string message)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var system = create();
+            try
+            {
+                await system.StartAsync(CancellationToken.None);
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => isReady(system) || (system.IsConnected && system.ActiveEventCallbackHost is null),
+                    WaitTimeout,
+                    message: message);
+
+                if (isReady(system))
+                {
+                    return system;
+                }
+
+                if (attempt == MaxStartAttempts)
+                {
+                    throw new InvalidOperationException($"{message} The event listener found no free port.");
+                }
+            }
+            catch
+            {
+                await StopAsync(system);
+                throw;
+            }
+
+            await StopAsync(system);
+        }
+    }
+
+    private static async Task StopAsync(SonosSystem system)
+    {
+        await system.StopAsync(CancellationToken.None);
+        system.Dispose();
     }
 
     public async ValueTask DisposeAsync()

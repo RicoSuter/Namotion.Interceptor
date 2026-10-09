@@ -71,7 +71,7 @@ public class SonosPlayerOperationTests
     [Fact]
     public void WhenPlayerIsAloneAndHasNoDuration_ThenGroupAndSeekOperationsAreDisabled()
     {
-        // Act
+        // Arrange
         var player = CreateDisconnectedKitchen();
 
         // Assert
@@ -84,7 +84,7 @@ public class SonosPlayerOperationTests
     [Fact]
     public void WhenSystemIsNotConnected_ThenPlayerOperationsAreDisabled()
     {
-        // Act
+        // Arrange
         var player = CreateDisconnectedKitchen();
 
         // Assert

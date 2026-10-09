@@ -55,7 +55,7 @@ public class SonosGroupOperationTests
     [Fact]
     public void WhenGroupSystemIsNotConnected_ThenOperationsAreDisabled()
     {
-        // Act
+        // Arrange
         var system = SonosSystemTopologyTests.CreateSystem();
         system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
         var group = system.Groups[TestFixtures.LivingRoomUuid];

@@ -8,7 +8,9 @@ namespace Namotion.Devices.Sonos.Tests.Testing;
 /// </summary>
 internal sealed class LoopbackHttpServer : IAsyncDisposable
 {
-    private readonly HttpListener _listener = new();
+    private const int MaxStartAttempts = 5;
+
+    private readonly HttpListener _listener;
     private readonly Func<HttpListenerContext, Task> _handler;
     private readonly Task _loop;
     private int _disposed;
@@ -16,9 +18,24 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
     internal LoopbackHttpServer(Func<HttpListenerContext, Task> handler)
     {
         _handler = handler;
-        Port = GetFreePort();
-        _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
-        _listener.Start();
+        HttpListener? listener = null;
+        Port = StartOnFreePort(port =>
+        {
+            var candidate = new HttpListener();
+            candidate.Prefixes.Add($"http://127.0.0.1:{port}/");
+            try
+            {
+                candidate.Start();
+            }
+            catch
+            {
+                candidate.Close();
+                throw;
+            }
+
+            listener = candidate;
+        });
+        _listener = listener!;
         _loop = RunAsync();
     }
 
@@ -33,6 +50,27 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    /// <summary>
+    /// Starts something on a free port and returns the port. Another process can take a free port before it is bound,
+    /// so a start that fails with <see cref="HttpListenerException"/> is retried on another port.
+    /// </summary>
+    internal static int StartOnFreePort(Action<int> start)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = GetFreePort();
+            try
+            {
+                start(port);
+                return port;
+            }
+            catch (HttpListenerException) when (attempt < MaxStartAttempts)
+            {
+                // Taken in between; try another port.
+            }
+        }
     }
 
     private async Task RunAsync()
