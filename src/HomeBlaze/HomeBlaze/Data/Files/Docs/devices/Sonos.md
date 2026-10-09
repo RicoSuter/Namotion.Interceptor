@@ -38,7 +38,7 @@ SonosSystem
 └── Groups[<coordinator uuid>]  SonosGroup, the rooms playing together
 ```
 
-Keys are the RINCON ids of the speakers, so paths stay valid across restarts and IP changes. A group is keyed by its coordinator; a room that is not grouped is a group of one, as in the Sonos app. A speaker that disappears from the topology stays in place and reports `IsConnected = false` until restart.
+Keys are the RINCON ids of the speakers, so paths stay valid across restarts and IP changes. A group is keyed by its coordinator; a room that is not grouped is a group of one, as in the Sonos app. A speaker that disappears from the topology stays in place and reports `IsConnected = false` until it reappears.
 
 ## Operations
 
@@ -109,6 +109,8 @@ Every operation is disabled while the system or the player is not connected. Ope
 - Notification clips use the Sonos audio clip API, which needs S2 speakers.
 - Favorites of type "shortcut" (for example Sonos Radio station shortcuts) carry no URI and are not listed; see the follow-ups.
 - A speaker that changes role (a standalone speaker becomes a surround or stereo partner, or a subwoofer moves to another room) keeps its old subject as an offline entry until restart.
+- If the event listener stops accepting requests (it logs an error), the system runs on polling only until the next reconnect, for example after a configuration change or three failed reconciliations in a row.
+- `PlayUri` always plays an `http://` or `https://` URI as radio, so a plain audio file shows no seek bar and cannot be sought. The `PlayTrack` operation of the HomeBlaze v1 Sonos library could play such a file as a seekable track.
 
 ## Troubleshooting
 
