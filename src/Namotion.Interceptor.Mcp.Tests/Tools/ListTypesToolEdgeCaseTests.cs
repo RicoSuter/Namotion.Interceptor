@@ -42,6 +42,40 @@ public class ListTypesToolEdgeCaseTests
     }
 
     [Fact]
+    public async Task WhenInterfaceMethodHasWellKnownParameterTypes_ThenParametersCarryFormatEnumAndNullability()
+    {
+        // Arrange
+        var typeProvider = new TestTypeProvider(
+            new McpTypeInfo("IHasMethod", "With methods", IsInterface: true, Type: typeof(IHasMethod)));
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            TypeProviders = { typeProvider }
+        };
+        var factory = new McpToolFactory(() => null!, config);
+        var tool = factory.CreateTools().First(t => t.Name == "list_types");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var seek = json.GetProperty("types").EnumerateArray().First()
+            .GetProperty("methods").EnumerateArray()
+            .First(m => m.GetProperty("name").GetString() == "Seek");
+        var parameters = seek.GetProperty("parameters").EnumerateArray().ToArray();
+
+        Assert.Equal("string", parameters[0].GetProperty("type").GetString());
+        Assert.Equal("[d.]hh:mm:ss[.fffffff]", parameters[0].GetProperty("format").GetString());
+
+        Assert.Equal("string", parameters[1].GetProperty("type").GetString());
+        Assert.True(parameters[1].GetProperty("nullable").GetBoolean());
+        Assert.Equal(7, parameters[1].GetProperty("enum").GetArrayLength());
+    }
+
+    [Fact]
     public async Task WhenInterfaceHasNoMethods_ThenMethodsArrayIsEmpty()
     {
         // Arrange
@@ -145,6 +179,7 @@ public class ListTypesToolEdgeCaseTests
     {
         string ReadOnlyValue { get; }
         string DoSomething(string input);
+        void Seek(TimeSpan position, DayOfWeek? day);
     }
 
     public interface INoMethods

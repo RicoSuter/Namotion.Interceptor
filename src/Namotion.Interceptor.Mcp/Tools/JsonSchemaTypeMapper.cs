@@ -19,7 +19,7 @@ public static class JsonSchemaTypeMapper
             type = underlying;
         }
 
-        if (type == typeof(string) || type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(Guid))
+        if (type == typeof(string) || type == typeof(char) || type == typeof(Uri) || GetFormat(type) is not null)
         {
             return "string";
         }
@@ -51,5 +51,52 @@ public static class JsonSchemaTypeMapper
         }
 
         return "object";
+    }
+
+    /// <summary>
+    /// Gets the string format a value of <paramref name="type"/> is written and read in by System.Text.Json:
+    /// a JSON Schema format name (<c>date-time</c>, <c>date</c>, <c>uuid</c>, <c>uri</c>) or, for
+    /// <see cref="TimeSpan"/> and <see cref="TimeOnly"/>, the pattern. Null when the type has no string format.
+    /// </summary>
+    public static string? GetFormat(Type? type)
+    {
+        if (type is null)
+        {
+            return null;
+        }
+
+        type = Nullable.GetUnderlyingType(type) ?? type;
+
+        if (type == typeof(TimeSpan))
+        {
+            return "[d.]hh:mm:ss[.fffffff]";
+        }
+
+        if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
+        {
+            return "date-time";
+        }
+
+        if (type == typeof(DateOnly))
+        {
+            return "date";
+        }
+
+        if (type == typeof(TimeOnly))
+        {
+            return "HH:mm:ss[.fffffff]";
+        }
+
+        if (type == typeof(Guid))
+        {
+            return "uuid";
+        }
+
+        if (type == typeof(Uri))
+        {
+            return "uri";
+        }
+
+        return null;
     }
 }

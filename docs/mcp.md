@@ -206,6 +206,8 @@ Write a property value by path. Blocked when `IsReadOnly` is true.
 
 List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
 
+Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus `format` for values written as strings (`[d.]hh:mm:ss[.fffffff]` for `TimeSpan`, `date-time`, `date`, `uuid`, `uri`), `enum` with the allowed names of an enum, `nullable`, and an optional `description`. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `kind` | `all` | Filter by kind: `interfaces`, `concrete`, or `all` |
