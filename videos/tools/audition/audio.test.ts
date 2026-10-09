@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {concatWithGapsArgs, countWords, normalizeLoudnessArgs, parseLoudnessMeasurement, wordsPerMinute} from './audio';
+import {concatWithGapsArgs, normalizeLoudnessArgs, parseLoudnessMeasurement, wordsPerMinute} from './audio';
 
 const loudnormLog = `size=N/A time=00:00:07.20 bitrate=N/A speed= 361x
 [Parsed_loudnorm_0 @ 0x3fdb1680]
@@ -72,9 +72,8 @@ describe('concatWithGapsArgs', () => {
 });
 
 describe('wordsPerMinute', () => {
-  it('WhenWordsAreCounted_ThenPunctuationAndSpacingDoNotMatter', () => {
+  it('WhenWordsAndSecondsAreGiven_ThenReturnsTheRatePerMinute', () => {
     // Act & Assert
-    expect(countWords('  Nothing is lost,  while the network is down. ')).toBe(8);
     expect(wordsPerMinute(30, 10)).toBe(180);
   });
 });

@@ -18,7 +18,7 @@ Kokoro voices need the optional `kokoro` extra, which `npm run tts` installs on 
 ## Producing an episode
 
 ```bash
-npm run validate -- <episode>   # schema, code regions, demo and terminal references
+npm run validate -- <episode>   # duration per chapter, then schema, code regions, demo and terminal references
 npm run capture -- <episode>    # browser clips and terminal output (starts the sample app)
 npm run tts -- <episode>        # narration audio (cached), sped up to the script's tempo, and beat timing
 npm run render -- <episode>     # draft at 15 fps, plus contact sheet and review report
@@ -48,7 +48,9 @@ The tempo maps to the engine like this:
 
 Kokoro's own speed keeps the prosody natural, but Kokoro rounds every sound to whole frames, and above about 1.3 short sounds collapse (a line's first "a" or "the" goes missing, "claims" becomes "claimed"), so faster tempos continue with the pitch-preserving `atempo`. TTS caches the synthesized speech by Kokoro's speed and the `atempo` copies by their factor, so a tempo change that only changes the `atempo` factor does not synthesize again.
 
-At tempo 1.32, `kokoro:am_michael` speaks about 200 words per minute on the audition lines and runs at about 172 words per minute of finished video, the pauses between beats included (the connectors episode: 1881 words in 10.9 minutes). Budget about 1700 to 1750 words for a 10 minute episode with it, and about 1900 to 1950 with `chatterbox` at tempo 1.
+## Length
+
+Episodes run 10 to 12 minutes, 10 unless the user asks for more. With the default voice a minute of finished video holds about 165 words, the pauses between beats included (1608 words in 9.9 minutes and 1881 words in 10.9 minutes on two trial episodes), so budget about 1650 words for 10 minutes. `npm run validate` prints the words and seconds per chapter: estimated from the script's voice and tempo (`speechRates` in `tools/estimate.ts`), or measured from `timing.json` once `npm run tts` has run.
 
 Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default; nothing is burned into the picture), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
 

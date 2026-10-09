@@ -1,9 +1,14 @@
+import {existsSync, readFileSync} from 'node:fs';
+import type {Timing} from '../theme/timing';
 import {validateEpisode} from './episode';
-import {allBeats} from './schema/script';
+import {durationReport, formatDurationReport} from './estimate';
 import {episodeArgument, episodePaths} from './paths';
+import {loadScript} from './schema/script';
 
 const paths = episodePaths(episodeArgument());
-const script = await validateEpisode(paths.episodeDirectory);
-const words = allBeats(script).reduce((total, beat) => total + (beat.narration?.split(/\s+/).length ?? 0), 0);
-// The default voice speaks about 200 words per minute (measured on the smoke and connectors episodes).
-console.log(`${script.episode}: ${allBeats(script).length} beats, ${words} words, about ${(words / 200).toFixed(1)} min of narration`);
+// The durations need only the script, so they print before the checks of files that may not exist yet.
+const script = loadScript(paths.episodeDirectory);
+const timing = existsSync(paths.timingFile) ? (JSON.parse(readFileSync(paths.timingFile, 'utf8')) as Timing) : null;
+console.log(formatDurationReport(script, durationReport(script, timing)));
+await validateEpisode(paths.episodeDirectory);
+console.log(`${script.episode} is valid`);

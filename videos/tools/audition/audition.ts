@@ -1,12 +1,13 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {countWords} from '../estimate';
 import {probeDuration, runFfmpeg} from '../ffmpeg';
 import {applyLexicon, loadLexicon} from '../lexicon';
 import {synthesisKey, tempoKey} from '../narration';
 import {lexiconFile, outputDirectory} from '../paths';
 import {applyTempo, resolveVoice, synthesize} from '../speech';
 import {parseVoice} from '../voice';
-import {concatWithGapsArgs, countWords, measureLoudnessArgs, normalizeLoudnessArgs, parseLoudnessMeasurement} from './audio';
+import {concatWithGapsArgs, measureLoudnessArgs, normalizeLoudnessArgs, parseLoudnessMeasurement} from './audio';
 import {auditionReadme, lineGapSeconds, parseAuditionVoice, voiceGapSeconds, type AuditionLine, type AuditionResult} from './report';
 
 // Usage: npm run audition [-- [<label>=]<voice>[@<tempo>] ...]

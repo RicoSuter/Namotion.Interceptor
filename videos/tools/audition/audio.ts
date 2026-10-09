@@ -60,10 +60,6 @@ function pcmOutput(output: string): string[] {
   return ['-ar', `${auditionSampleRate}`, '-ac', '1', '-c:a', 'pcm_s16le', output];
 }
 
-export function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(word => word.length > 0).length;
-}
-
 export function wordsPerMinute(words: number, seconds: number): number {
   return (words / seconds) * 60;
 }

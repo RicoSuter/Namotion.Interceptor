@@ -6,7 +6,7 @@ argument-hint: "<doc.md> [<doc.md> ...] [auto-approve]"
 
 # Learning video
 
-Turn one doc, or a group of docs about one library, into a self-contained narrated episode of about 10 to 15 minutes. The episode is code: a script, Revideo scenes, a compiled companion sample, demo scripts and capture settings. Rendered media is regenerated from them.
+Turn one doc, or a group of docs about one library, into a self-contained narrated episode (length and word budget: `videos/README.md`). The episode is code: a script, Revideo scenes, a compiled companion sample, demo scripts and capture settings. Rendered media is regenerated from them.
 
 The pipeline lives in `videos/` (see `videos/README.md`). The reference for how an episode is built is the complete smoke episode in `videos/episodes/smoke/`: read its `script.yaml`, `scenes/main.tsx`, `diagrams/flow.ts`, `demos/status.ts`, `capture.ts`, `project.ts` and `sample/` before writing anything.
 
@@ -69,7 +69,7 @@ When the user asks for a revision of an earlier stage (changed docs, new chapter
 Copy `.claude/skills/learning-video/templates/outline.md` to `videos/episodes/<nn>-<name>/outline.md` and fill it in.
 
 - Order by importance: hook, setup, core feature, the real sample running live, advanced topics, recap. The viewer who stops after half the video should have learned the most useful half.
-- Give every chapter a time budget. The total matches the target length (default 10 to 15 minutes; a spike or the user may set another). Hook and recap stay under 45 seconds each.
+- Give every chapter a time budget. The total matches the target length in `videos/README.md`. Hook and recap stay under 45 seconds each.
 - Per chapter: what the viewer learns, what is on screen, the sample code (file and region names to create), and the API members used with their source files.
 - Describe the companion sample: projects, ports, pages, simulator events, what the demos record.
 - List doc sections deliberately left out, each with a reason.
@@ -98,10 +98,6 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 
 - Spoken English: short sentences, one idea per beat, active voice, "you" for the viewer.
 - 8 to 25 words per beat (about 3 to 10 seconds). Split longer thoughts into several beats so the picture can change with them.
-- Budget the words by voice, measured on finished episodes including the pauses between beats:
-  - `kokoro:am_michael` at tempo 1.32: 162 to 172 words per minute of finished video, lower when the narration has long words (connectors: 1881 words in 10.9 minutes; tracking, with words like transaction and asynchronous: 1600 words in 9.9 minutes, the speech alone at 2.8 words per second). A 10 minute episode is about 1600 to 1750 words; per chapter, words = budget seconds x 2.7 to 2.85. The schema-only estimate below runs about 5 % short of the measured total.
-  - `chatterbox` at tempo 1: about 195 words per minute of finished video (9.7 minutes; the speech alone runs at about 3.5 words per second times the tempo). A 10 minute episode is about 1900 to 1950 words; per chapter, words = budget seconds x 3.2.
-  - Short lines run slower than long ones, since every narrated beat adds 0.4 s of silence and the engine's own edge silence: Kokoro at tempo 1.32 speaks the three audition lines at 200 words per minute.
 - Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); subtitles show the narration text as written. Better: let the code card show the identifier and narrate what it does.
 - Kokoro reads `async` as "a sink" and may turn a line's first "Is" into "As"; say "asynchronous" and start such lines with another word.
 - Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, the longest match wins, a replacement is never matched again, and subtitles keep the original.
@@ -133,13 +129,7 @@ Go through every beat and fix the script until all hold:
 - [ ] `grep -n -i namotion episodes/<episode>/script.yaml` finds nothing in narration (intro episode excepted).
 - [ ] Every chapter is within about 15 % of its outline budget.
 
-Estimate the duration per chapter. `npm run validate` also checks code files, regions, demos and terminal captures, which do not exist yet at this gate, so use this schema-only estimate now:
-
-```bash
-npx tsx -e "import {loadScript} from './tools/schema/script.ts'; const script = loadScript('episodes/<episode>'); let total = 0; for (const chapter of script.chapters) { const words = chapter.beats.reduce((sum, beat) => sum + (beat.narration?.split(/\s+/).length ?? 0), 0); const seconds = words / ((script.voice.startsWith('kokoro:') ? 2.35 : 3.5) * script.tempo) + chapter.beats.reduce((sum, beat) => sum + 0.4 + (beat.hold ?? 0), 0); total += seconds; console.log(chapter.id.padEnd(24), String(words).padStart(5), 'words', seconds.toFixed(0).padStart(5), 's'); } console.log('total'.padEnd(36), (total / 60).toFixed(1), 'min');"
-```
-
-A schema error fails this command with the exact path. A YAML value that starts with a double quote must be quoted as a whole, so start a `visual` with a word (`The message "change" arcs ...`). Add `# Status: awaiting approval` as the first line of `script.yaml`.
+Estimate the duration per chapter with `npm run validate -- <episode>`: it prints words and seconds per chapter before it checks code files, regions, demos and terminal captures, which do not exist yet at this gate, so ignore those errors now. A schema error fails this command with the exact path. A YAML value that starts with a double quote must be quoted as a whole, so start a `visual` with a word (`The message "change" arcs ...`). Add `# Status: awaiting approval` as the first line of `script.yaml`.
 
 Then measure the real duration: `npm run tts -- <episode>` needs only the script, so start it now in the background (see Stage 5) and keep working on the sample meanwhile. Adjust the script until the measured total lands in the target range; only changed lines are synthesized again.
 
@@ -347,7 +337,7 @@ Change `theme/` or `tools/` only for a fix or a reusable improvement, in its own
 dotnet build src/Namotion.Interceptor.slnx
 cd videos
 npm run typecheck
-npm run validate -- <episode>     # prints beats, words and minutes; fails on missing files, regions, demos, terminal names
+npm run validate -- <episode>     # words and seconds per chapter; fails on missing files, regions, demos, terminal names
 ```
 
 ## Stage 5: Produce
@@ -356,7 +346,7 @@ Run in order from `videos/`:
 
 | Command | Output |
 |---|---|
-| `npm run validate -- <episode>` | `<episode>: N beats, W words, about M min of narration` |
+| `npm run validate -- <episode>` | words and seconds per chapter, then `<episode> is valid` |
 | `npm run capture -- <episode>` | `public/generated/<episode>/terminal/*.txt`, `clips/*.mp4` and `clips/clips.json`. `--only <name>` recaptures one demo or terminal |
 | `npm run tts -- <episode>` | `public/generated/<episode>/audio/*.wav` and `timing.json`; prints seconds per chapter and the total |
 | `npm run render -- <episode>` | draft at 15 fps: `output/<episode>-draft.mp4` with the narration as a soft subtitle track (`mov_text`, English, off by default), the same subtitles as `output/<episode>.srt`, `output/<episode>-contact.png`, `output/<episode>-review.md`, `output/<episode>-frames/` |
@@ -408,7 +398,6 @@ FFMPEG=$(node -e "import('@ffmpeg-installer/ffmpeg').then(m => console.log(m.def
 - **Demo resolution.** Demos record at `deviceScaleFactor` 2 (a 1280 by 800 page becomes 2560 by 1600) so zooms stay crisp. Keep the default.
 - **Chrome sandbox.** Rendering launches Chrome with `--no-sandbox` (Ubuntu blocks its user namespace sandbox); this is handled in `tools/render.ts`.
 - **Episode id.** `episode:` in `script.yaml` must equal the folder name.
-- **Validate before files exist.** `npm run validate` fails until the sample regions, demos and `capture.ts` exist; use the schema-only estimate at gate 2, and `npm run tts`, which does not need them, for the measured duration.
 - **World coordinates.** `Camera.focusOn` takes world coordinates, whose origin is the top left corner of the frame; `node.absolutePosition()` is one. A scene point such as `new Vector2(0, 40)` passed to `focusOn` pans to the corner. Use `focusOnPoint` for points in content coordinates.
 - **Background motion does not count.** The review's freeze detection runs on the picture minus a blurred copy of it, so the slow background glows never hide a still beat; only edges, text and particles count as motion.
 - **Small motion counts as still.** The review's freeze detection ignores small changes: a particle along an edge, a number ticking in a clip, a single node nudge. A beat whose only motion is small is reported as still. Give such beats a slow camera move across most of their length (`focusOnPoint` with a zoom of 1.05 to 1.15).
