@@ -2,15 +2,15 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {probeDuration, runFfmpeg} from '../ffmpeg';
 import {applyLexicon, loadLexicon} from '../lexicon';
-import {synthesisKey} from '../narration';
+import {synthesisKey, tempoKey} from '../narration';
 import {lexiconFile, outputDirectory} from '../paths';
-import {resolveVoice, synthesize} from '../speech';
+import {applyTempo, resolveVoice, synthesize} from '../speech';
 import {parseVoice} from '../voice';
 import {concatWithGapsArgs, countWords, measureLoudnessArgs, normalizeLoudnessArgs, parseLoudnessMeasurement} from './audio';
 import {auditionReadme, lineGapSeconds, parseAuditionVoice, voiceGapSeconds, type AuditionLine, type AuditionResult} from './report';
 
-// Usage: npm run audition [-- [<label>=]<voice> ...]
-// Auditions the built-in voices and then the given ones, for example clone-rico=clone:voices/rico.wav.
+// Usage: npm run audition [-- [<label>=]<voice>[@<tempo>] ...]
+// Auditions the built-in voices and then the given ones, for example clone-rico=clone:voices/rico.wav or kokoro:am_michael@1.3.
 
 const builtInVoices = ['chatterbox', 'chatterbox-calm', 'kokoro:af_heart', 'kokoro:am_michael', 'kokoro:bm_george'];
 
@@ -29,19 +29,21 @@ const voices = [...builtInVoices, ...process.argv.slice(2)].map(parseAuditionVoi
 
 mkdirSync(cacheDirectory, {recursive: true});
 const results: AuditionResult[] = [];
-for (const {label, spec} of voices) {
-  console.log(`\n${label} (${spec})`);
-  const resolved = resolveVoice(parseVoice(spec));
+for (const {label, spec, tempo} of voices) {
+  console.log(`\n${label} (${spec} at tempo ${tempo})`);
+  const resolved = resolveVoice(parseVoice(spec), tempo);
   const items = lines.map(line => {
     const text = applyLexicon(line.text, lexicon);
-    return {line, key: synthesisKey(text, resolved.identity), text};
+    const key = synthesisKey(text, resolved.identity);
+    return {line, key, audioKey: tempoKey(key, resolved.atempo), text};
   });
   synthesize(cacheDirectory, resolved.request, items.map(item => ({key: item.key, text: item.text})));
 
   const clips: string[] = [];
   let peakBeforeNormalization = -Infinity;
   for (const item of items) {
-    const synthesized = join(cacheDirectory, `${item.key}.wav`);
+    applyTempo(cacheDirectory, item.key, item.audioKey, resolved.atempo);
+    const synthesized = join(cacheDirectory, `${item.audioKey}.wav`);
     const measurement = parseLoudnessMeasurement(runFfmpeg(measureLoudnessArgs(synthesized)));
     peakBeforeNormalization = Math.max(peakBeforeNormalization, Number(measurement.input_tp));
     const clip = join(auditionDirectory, `${label}-${item.line.id}.wav`);
@@ -53,6 +55,7 @@ for (const {label, spec} of voices) {
   results.push({
     label,
     spec,
+    tempo,
     allSeconds: probeDuration(all),
     speechSeconds: clips.reduce((total, clip) => total + probeDuration(clip), 0),
     words,
