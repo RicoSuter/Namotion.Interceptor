@@ -51,7 +51,7 @@ Kokoro's own speed keeps the prosody natural, but Kokoro rounds every sound to w
 
 At tempo 1.32, `kokoro:am_michael` speaks about 200 words per minute on the audition lines and runs at about 172 words per minute of finished video, the pauses between beats included (the connectors episode: 1881 words in 10.9 minutes). Budget about 1700 to 1750 words for a 10 minute episode with it, and about 1900 to 1950 with `chatterbox` at tempo 1.
 
-Output goes to `output/`: the MP4 with the narration as a soft subtitle track (English, off by default; nothing is burned into the picture), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
+Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default; nothing is burned into the picture), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
 
 ## Layout
 
