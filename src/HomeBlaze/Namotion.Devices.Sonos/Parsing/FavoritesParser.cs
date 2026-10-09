@@ -16,9 +16,17 @@ internal static class FavoritesParser
     private static readonly XNamespace DcNamespace = "http://purl.org/dc/elements/1.1/";
     private static readonly XNamespace RinconNamespace = "urn:schemas-rinconnetworks-com:metadata-1-0/";
 
-    internal static IReadOnlyList<SonosFavorite> Parse(string result)
+    /// <summary>
+    /// Returns the playable favorites, none for a null or blank result.
+    /// </summary>
+    internal static IReadOnlyList<SonosFavorite> Parse(string? result)
     {
         var favorites = new List<SonosFavorite>();
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return favorites;
+        }
+
         var root = XDocument.Parse(result).Root;
         if (root is null)
         {

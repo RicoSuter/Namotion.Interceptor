@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Testing;
 
@@ -20,8 +21,8 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 
     internal SonosPlayer Player { get; }
 
-    internal static SonosSystem CreateSystem(string seedHost, int? eventPort = null) =>
-        new(new TestHttpClientFactory(), NullLogger<SonosSystem>.Instance)
+    internal static SonosSystem CreateSystem(string seedHost, int? eventPort = null, ILogger<SonosSystem>? logger = null) =>
+        new(new TestHttpClientFactory(), logger ?? NullLogger<SonosSystem>.Instance)
         {
             SeedHost = seedHost,
             EventCallbackHost = "127.0.0.1",
@@ -37,10 +38,11 @@ internal sealed class ConnectedSystem : IAsyncDisposable
         FakeSonosSpeaker speaker,
         string uuid = TestFixtures.KitchenUuid,
         string room = "Küche",
-        Action<SonosSystem>? configure = null)
+        Action<SonosSystem>? configure = null,
+        ILogger<SonosSystem>? logger = null)
     {
         speaker.RespondAsIdlePlayer(uuid, room);
-        var system = CreateSystem(speaker.Host);
+        var system = CreateSystem(speaker.Host, logger: logger);
         configure?.Invoke(system);
         await system.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(

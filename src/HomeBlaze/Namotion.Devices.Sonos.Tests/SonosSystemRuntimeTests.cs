@@ -1,5 +1,6 @@
 using System.Net;
 using HomeBlaze.Abstractions;
+using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -189,6 +190,60 @@ public class SonosSystemRuntimeTests
         // Assert
         Assert.Equal(topologyReads, speaker.Calls.Count(call => call.Action == "GetZoneGroupState"));
         Assert.True(connected.System.AreEventsActive);
+    }
+
+    [Fact]
+    public async Task WhenReadingFavoritesKeepsFailing_ThenOnlyEachNewFailureIsAWarning()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        speaker.RespondWithFault("Browse", 501);
+
+        // Act
+        await connected.System.RefreshAsync(CancellationToken.None);
+        await connected.System.RefreshAsync(CancellationToken.None);
+        speaker.ClearFault("Browse");
+        await connected.System.RefreshAsync(CancellationToken.None);
+        speaker.RespondWithFault("Browse", 501);
+        await connected.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(2, logger.Warnings.Count(message => message.Contains("favorites")));
+        Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Debug && entry.Message.Contains("favorites"));
+    }
+
+    [Fact]
+    public async Task WhenSubscribingKeepsFailing_ThenEachSubscriptionWarnsOnce()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker { FailSubscriptions = true };
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var logger = new RecordingLogger<SonosSystem>();
+        var system = ConnectedSystem.CreateSystem(speaker.Host, logger: logger);
+        system.PollingInterval = TimeSpan.FromHours(1);
+
+        try
+        {
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(() => system.IsConnected, ConnectedSystem.WaitTimeout, message: "The system should connect.");
+
+            // Act
+            await system.RefreshAsync(CancellationToken.None);
+            await system.RefreshAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(4, logger.Warnings.Count(message => message.Contains("subscription")));
+            Assert.Equal(8, logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("subscription")));
+            Assert.False(system.AreEventsActive);
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
     }
 
     [Fact]

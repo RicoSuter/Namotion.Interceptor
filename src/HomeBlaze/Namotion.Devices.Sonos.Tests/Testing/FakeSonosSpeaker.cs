@@ -45,6 +45,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// </summary>
     internal int SubscriptionTimeoutSeconds { get; set; } = 1800;
 
+    /// <summary>
+    /// Answers every SUBSCRIBE, new or renewal, with HTTP 500.
+    /// </summary>
+    internal bool FailSubscriptions { get; set; }
+
     internal static string SidFor(string eventPath) => "uuid:" + eventPath.Trim('/').Replace('/', '-');
 
     internal string? GetCallback(string eventPath) =>
@@ -128,6 +133,10 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         {
             case "GET" when path == "/xml/device_description.xml":
                 await WriteAsync(response, DeviceDescription);
+                return;
+
+            case "SUBSCRIBE" when FailSubscriptions:
+                response.StatusCode = (int)HttpStatusCode.InternalServerError;
                 return;
 
             case "SUBSCRIBE":

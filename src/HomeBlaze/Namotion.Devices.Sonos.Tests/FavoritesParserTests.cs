@@ -28,6 +28,19 @@ public class FavoritesParserTests
         Assert.False(radio.IsContainer);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" \n ")]
+    public void WhenResultIsBlank_ThenNoFavoritesAreReturned(string? result)
+    {
+        // Act
+        var favorites = FavoritesParser.Parse(result);
+
+        // Assert
+        Assert.Empty(favorites);
+    }
+
     [Fact]
     public void WhenFavoriteIsContainer_ThenIsContainerIsTrue()
     {

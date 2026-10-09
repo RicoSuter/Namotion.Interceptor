@@ -40,6 +40,10 @@ public partial class SonosSystem
     // also guards the subscriptions' RenewAt, and read by the connection loop while it holds no lock.
     private long _nextRenewalTicks = long.MaxValue;
 
+    // Guarded by _reconcileLock. A persistent failure is logged at Warning once and at Debug while it lasts.
+    private bool _isFavoritesReadFailing;
+    private readonly HashSet<string> _failingSubscriptionKeys = new(StringComparer.Ordinal);
+
     private TimeSpan EffectivePollingInterval => PollingInterval > TimeSpan.Zero ? PollingInterval : DefaultPollingInterval;
 
     private TimeSpan EffectiveRetryInterval => RetryInterval > TimeSpan.Zero ? RetryInterval : DefaultRetryInterval;
@@ -712,6 +716,7 @@ public partial class SonosSystem
         try
         {
             SetFavorites(await seedConnection.ReadFavoritesAsync(cancellationToken));
+            _isFavoritesReadFailing = false;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -719,7 +724,15 @@ public partial class SonosSystem
         }
         catch (Exception exception)
         {
-            _logger.LogWarning(exception, "Reading the Sonos favorites failed.");
+            if (_isFavoritesReadFailing)
+            {
+                _logger.LogDebug(exception, "Reading the Sonos favorites failed again.");
+            }
+            else
+            {
+                _isFavoritesReadFailing = true;
+                _logger.LogWarning(exception, "Reading the Sonos favorites failed.");
+            }
         }
     }
 
@@ -781,6 +794,7 @@ public partial class SonosSystem
         try
         {
             await request();
+            _failingSubscriptionKeys.Remove(key);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -790,7 +804,15 @@ public partial class SonosSystem
         catch (Exception exception)
         {
             // Includes the listener's OperationCanceledException for a subscription unsubscribed concurrently.
-            _logger.LogWarning(exception, "The Sonos event subscription {Key} failed; polling keeps its state current.", key);
+            if (_failingSubscriptionKeys.Add(key))
+            {
+                _logger.LogWarning(exception, "The Sonos event subscription {Key} failed; polling keeps its state current.", key);
+            }
+            else
+            {
+                _logger.LogDebug(exception, "The Sonos event subscription {Key} failed again.", key);
+            }
+
             return false;
         }
     }
