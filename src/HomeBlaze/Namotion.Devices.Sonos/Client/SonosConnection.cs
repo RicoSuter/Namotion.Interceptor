@@ -209,15 +209,20 @@ internal sealed class SonosConnection : IDisposable
     internal Task LeaveGroupAsync(CancellationToken cancellationToken) =>
         AvTransport.BecomeCoordinatorOfStandaloneGroup(cancellationToken);
 
+    // Both group volume commands scale the members from the last snapshot, so a fresh one keeps the current volume
+    // ratio between them; without it, a member changed in the Sonos app since would jump back.
+
     internal async Task SetGroupVolumeAsync(int volume, CancellationToken cancellationToken)
     {
-        // The snapshot is what makes Sonos keep the volume ratio between the members.
         await GroupRenderingControl.SnapshotGroupVolume(cancellationToken);
         await GroupRenderingControl.SetGroupVolume(new GroupRenderingControlService.SetGroupVolumeRequest { InstanceID = InstanceId, DesiredVolume = volume }, cancellationToken);
     }
 
-    internal Task ChangeGroupVolumeAsync(int adjustment, CancellationToken cancellationToken) =>
-        GroupRenderingControl.SetRelativeGroupVolume(new GroupRenderingControlService.SetRelativeGroupVolumeRequest { InstanceID = InstanceId, Adjustment = adjustment }, cancellationToken);
+    internal async Task ChangeGroupVolumeAsync(int adjustment, CancellationToken cancellationToken)
+    {
+        await GroupRenderingControl.SnapshotGroupVolume(cancellationToken);
+        await GroupRenderingControl.SetRelativeGroupVolume(new GroupRenderingControlService.SetRelativeGroupVolumeRequest { InstanceID = InstanceId, Adjustment = adjustment }, cancellationToken);
+    }
 
     internal Task SetGroupMuteAsync(bool mute, CancellationToken cancellationToken) =>
         GroupRenderingControl.SetGroupMute(new GroupRenderingControlService.SetGroupMuteRequest { InstanceID = InstanceId, DesiredMute = mute }, cancellationToken);

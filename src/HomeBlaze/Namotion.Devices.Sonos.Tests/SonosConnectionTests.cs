@@ -281,6 +281,23 @@ public class SonosConnectionTests
     }
 
     [Fact]
+    public async Task WhenChangingGroupVolume_ThenSnapshotsBeforeChanging()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+
+        // Act
+        await connection.ChangeGroupVolumeAsync(-5, CancellationToken.None);
+
+        // Assert
+        var calls = speaker.Calls.ToArray();
+        Assert.Equal(["SnapshotGroupVolume", "SetRelativeGroupVolume"], calls.Select(call => call.Action));
+        Assert.Equal("-5", GetArgument(calls[1], "Adjustment"));
+    }
+
+    [Fact]
     public async Task WhenSpeakerIsUnreachable_ThenSetVolumeThrows()
     {
         // Arrange
