@@ -103,6 +103,7 @@ describe('buildTiming', () => {
       {id: 'third', chapter: 'two', chapterTitle: 'Two', start: 5 + narrationPadding, duration: 1 + narrationPadding + 0.5, audio: `/generated/smoke/audio/${items[1].audioKey}.wav`, caption: 'Done.'},
     ]);
     expect(timing.totalDuration).toBeCloseTo(6.5 + 2 * narrationPadding);
+    expect(timing.title).toBe('Smoke');
   });
 
   it('WhenOnlyTheSynthesizedDurationIsKnown_ThenThrows', () => {
@@ -128,6 +129,7 @@ describe('toSrt', () => {
     // Arrange
     const timing = {
       episode: 'smoke',
+      title: 'Smoke',
       totalDuration: 5,
       beats: [
         {id: 'a', chapter: 'one', chapterTitle: 'One', start: 0, duration: 1.25, audio: null, caption: 'Hello.'},

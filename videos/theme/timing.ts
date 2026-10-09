@@ -11,11 +11,13 @@ export interface TimingBeat {
 
 export interface Timing {
   episode: string;
+  /** Title of the video from script.yaml, shown in the chapter header. */
+  title: string;
   totalDuration: number;
   beats: TimingBeat[];
 }
 
-export const emptyTiming: Timing = {episode: '', totalDuration: 0, beats: []};
+export const emptyTiming: Timing = {episode: '', title: '', totalDuration: 0, beats: []};
 
 export function findBeat(timing: Timing, id: string): TimingBeat {
   const beat = timing.beats.find(candidate => candidate.id === id);

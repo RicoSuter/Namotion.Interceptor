@@ -65,7 +65,7 @@ export function buildTiming(script: Script, items: NarrationItem[], durations: R
     });
     start += duration;
   }
-  return {episode: script.episode, totalDuration: start, beats};
+  return {episode: script.episode, title: script.title, totalDuration: start, beats};
 }
 
 export function toSrt(timing: Timing): string {

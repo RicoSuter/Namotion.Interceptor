@@ -4,6 +4,7 @@ import {assignFreezes, beatMidpoints, parseFreezes} from './review';
 
 const timing: Timing = {
   episode: 'smoke',
+  title: 'Smoke',
   totalDuration: 12,
   beats: [
     {id: 'a', chapter: 'one', chapterTitle: 'One', start: 0, duration: 4, audio: null, caption: 'A'},

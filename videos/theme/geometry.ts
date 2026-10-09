@@ -153,19 +153,34 @@ export function scrollToFocus(viewportHeight: number, contentHeight: number, foc
   return Math.min(Math.max(centered, 0), maximum);
 }
 
-/** The chapter header's corner of the frame, in view coordinates (origin at the frame center): content keeps out of it. */
-export const headerZone = {left: 280, bottom: -436} as const;
+/** The chapter header's region of the frame with its clearance, in view coordinates (origin at the frame center), reaching up to the top edge: content keeps out of it. */
+export interface HeaderZone {
+  left: number;
+  right: number;
+  bottom: number;
+}
+
+/** Left and right edges and the top edge of one content node, in the camera's content coordinates. */
+export interface ContentEdges {
+  left: number;
+  right: number;
+  top: number;
+}
 
 /**
- * Camera position that keeps content clear of the chapter header: when the content's top right corner, given in
- * the camera's content coordinates, would reach into the header zone at this zoom, the position moves down just
- * enough; otherwise it is returned unchanged.
+ * Camera position that keeps content clear of the chapter header: when a content node, given in the camera's
+ * content coordinates, would reach into the header zone at this zoom, the position moves down just enough for the
+ * node reaching in furthest; otherwise it is returned unchanged.
  */
-export function clearOfHeader(contentTop: number, contentRight: number, zoom: number, position: Point): Point {
-  const top = contentTop * zoom + position.y;
-  const right = contentRight * zoom + position.x;
-  if (right <= headerZone.left || top >= headerZone.bottom) {
-    return position;
+export function clearOfHeader(contents: readonly ContentEdges[], zoom: number, position: Point, zone: HeaderZone): Point {
+  let shift = 0;
+  for (const content of contents) {
+    const left = content.left * zoom + position.x;
+    const right = content.right * zoom + position.x;
+    const top = content.top * zoom + position.y;
+    if (left < zone.right && right > zone.left && top < zone.bottom) {
+      shift = Math.max(shift, zone.bottom - top);
+    }
   }
-  return {x: position.x, y: position.y + headerZone.bottom - top};
+  return shift === 0 ? position : {x: position.x, y: position.y + shift};
 }

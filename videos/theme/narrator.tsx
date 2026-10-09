@@ -11,7 +11,7 @@ import {findBeat, type Timing} from './timing';
  * to the view and keeps both on the current beat's chapter.
  */
 export class Narrator {
-  private readonly header = new ChapterHeader();
+  private readonly header: ChapterHeader;
   private readonly background: Background;
   private readonly chapters: string[];
   private started = false;
@@ -19,6 +19,7 @@ export class Narrator {
   public constructor(private readonly view: View2D, private readonly timing: Timing) {
     const variant = useScene().variables.get<BackgroundVariant>('background', defaultBackground)();
     this.background = new Background({variant});
+    this.header = new ChapterHeader({videoTitle: timing.title});
     this.chapters = [...new Set(timing.beats.map(beat => beat.chapter))];
     view.add(this.background);
     view.add(this.header);

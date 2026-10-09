@@ -1,13 +1,14 @@
 import {Layout, Node, type NodeProps} from '@revideo/2d';
 import {all, transformVectorAsPoint, Vector2, type ThreadGenerator, type Vector2Signal} from '@revideo/core';
 import {clearOfHeader} from '../geometry';
+import {ChapterHeader} from './ChapterHeader';
 import {durations, enterEasing, moveEasing} from '../style';
 
 export interface FocusOptions {
   zoom?: number;
   duration?: number;
   /**
-   * Content to keep clear of the chapter header in the top right corner: when the move would push its top edge
+   * Content to keep clear of the chapter header in the top left corner: when the move would push a top edge
    * under the header, the camera centers a little higher on the content instead.
    */
   clear?: Layout | Layout[];
@@ -52,16 +53,20 @@ export class Camera extends Node {
 
   private *glide(point: Vector2, zoom: number, duration: number, clear: Layout | Layout[] | undefined): ThreadGenerator {
     let position = point.scale(-zoom);
-    if (clear) {
-      const corners = [clear].flat().flatMap(node => {
+    const header = clear ? ChapterHeader.of(this) : null;
+    if (clear && header) {
+      const edges = [clear].flat().map(node => {
         const half = node.size().scale(0.5);
         const toLocal = this.worldToLocal().multiply(node.localToWorld());
-        return [new Vector2(-half.x, -half.y), new Vector2(half.x, -half.y), new Vector2(half.x, half.y)]
+        const corners = [new Vector2(-half.x, -half.y), new Vector2(half.x, -half.y), new Vector2(-half.x, half.y), new Vector2(half.x, half.y)]
           .map(corner => transformVectorAsPoint(corner, toLocal));
+        return {
+          left: Math.min(...corners.map(corner => corner.x)),
+          right: Math.max(...corners.map(corner => corner.x)),
+          top: Math.min(...corners.map(corner => corner.y)),
+        };
       });
-      const top = Math.min(...corners.map(corner => corner.y));
-      const right = Math.max(...corners.map(corner => corner.x));
-      position = new Vector2(clearOfHeader(top, right, zoom, position));
+      position = new Vector2(clearOfHeader(edges, zoom, position, header.zone()));
     }
     const centered = position.scale(-1 / zoom);
     yield* all(this.scale(zoom, duration, moveEasing), this.position(position, duration, moveEasing), this.lead(centered, duration));

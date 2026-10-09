@@ -4,6 +4,7 @@ import {beatRanges} from './beatRanges';
 
 const timing: Timing = {
   episode: 'smoke',
+  title: 'Smoke',
   totalDuration: 10,
   beats: [
     {id: 'a', chapter: 'one', chapterTitle: 'One', start: 0, duration: 2, audio: null, caption: null},

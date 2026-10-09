@@ -23,7 +23,7 @@ npm run render -- <episode>     # draft at 15 fps, plus contact sheet and review
 npm run render -- <episode> --final
 ```
 
-Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <chapter title>", top right) from the scene runtime. Choose the background with `background:` in `script.yaml` (`drift`, `chapter-tint`, `edge-aurora` or `follow-light`) or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
+Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <video title> | <chapter title>", top left) from the scene runtime. Choose the background with `background:` in `script.yaml` (`drift`, `chapter-tint`, `edge-aurora` or `follow-light`) or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
 
 Narration plays at `tempo` 1.1 by default (set `tempo:` in `script.yaml` to change it per episode). TTS caches the synthesized speech and a pitch-preserving copy per tempo (ffmpeg `atempo`), so a tempo change does not synthesize again.
 
