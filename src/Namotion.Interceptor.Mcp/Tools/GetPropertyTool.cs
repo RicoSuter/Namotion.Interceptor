@@ -71,7 +71,7 @@ internal class GetPropertyTool
             ["type"] = JsonSchemaTypeMapper.ToJsonSchemaType(property.Type)
         };
 
-        if (!_configuration.IsReadOnly && property.HasSetter)
+        if (!_configuration.IsReadOnly && property.HasSetter && McpToolHelper.HasPublicSetter(property))
         {
             response["isWritable"] = true;
         }

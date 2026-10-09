@@ -28,3 +28,9 @@ public partial class TestContainer
         Children = new Dictionary<string, TestContainer>();
     }
 }
+
+[InterceptorSubject]
+public partial class TestSensor
+{
+    public partial decimal Reading { get; internal set; }
+}

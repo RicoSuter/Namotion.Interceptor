@@ -91,6 +91,34 @@ public class GetPropertyToolTests
     }
 
     [Fact]
+    public async Task WhenSetterIsNotPublic_ThenIsWritableIsOmitted()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var sensor = new TestSensor(context) { Reading = 42m };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false
+        };
+        var factory = new McpToolFactory(sensor, config);
+        var tool = factory.CreateTools().First(t => t.Name == "get_property");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "Reading" });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.Equal(42m, json.GetProperty("value").GetDecimal());
+        Assert.False(json.TryGetProperty("isWritable", out _));
+    }
+
+    [Fact]
     public async Task WhenPropertyHasAttributes_ThenAttributesAreIncluded()
     {
         // Arrange

@@ -95,14 +95,14 @@ public partial class LuxtronikHotWater
     /// Gets the electrical energy consumed for hot water.
     /// </summary>
     [LuxtronikInputRegister(10314, ModbusDataType.S32, Scale = 100)]
-    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 9)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, IsEstimated = true, Position = 9)]
     public partial decimal? TotalElectricalEnergy { get; internal set; }
 
     /// <summary>
     /// Gets the thermal energy produced for hot water.
     /// </summary>
     [LuxtronikInputRegister(10324, ModbusDataType.S32, Scale = 100, MinimumFirmware = "3.92.0")]
-    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 10)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, IsEstimated = true, Position = 10)]
     public partial decimal? TotalThermalEnergy { get; internal set; }
 
     /// <summary>
