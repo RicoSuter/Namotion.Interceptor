@@ -25,7 +25,7 @@ describe('parseScript', () => {
     const script = parseScript(validScript);
 
     // Assert
-    expect(script.voice).toBe('chatterbox');
+    expect(script.voice).toBe('kokoro:am_michael');
     expect(allBeats(script).map(beat => [beat.chapter, beat.id])).toEqual([['basics', 'hello'], ['basics', 'pause']]);
   });
 
@@ -35,7 +35,7 @@ describe('parseScript', () => {
 
     // Assert
     expect(script.tempo).toBe(1.05);
-    expect(parseScript(validScript).tempo).toBe(1);
+    expect(parseScript(validScript).tempo).toBe(1.32);
   });
 
   it('WhenBackgroundIsKnown_ThenKeepsItAndRejectsOthers', () => {

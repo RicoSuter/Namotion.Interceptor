@@ -20,7 +20,7 @@ export const componentNames = [
 ] as const;
 
 /** Narration speed when script.yaml sets no tempo. */
-export const defaultTempo = 1;
+export const defaultTempo = 1.32;
 
 const kebabCase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const identifier = z.string().regex(kebabCase, 'ids are kebab-case');

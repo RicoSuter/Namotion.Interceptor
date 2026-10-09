@@ -27,11 +27,11 @@ npm run render -- <episode> --final
 
 Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <video title> | <chapter title>", top left) from the scene runtime. Choose the background with `background:` in `script.yaml` (`drift`, `chapter-tint`, `edge-aurora` or `follow-light`) or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
 
-Choose the narration voice with `voice:` in `script.yaml`. New episodes use `kokoro:am_michael` at `tempo: 1.32`: about 200 words per minute of speech and the fewest transcription errors when checked with Whisper, and Kokoro synthesizes a 10 minute episode in about a minute instead of about ten.
+Choose the narration voice with `voice:` and its speed with `tempo:` in `script.yaml` (1 is the voice's natural pace, 0.5 to 2 allowed). Both are optional: the default is `kokoro:am_michael` at tempo 1.32, the voice with the fewest transcription errors when checked with Whisper, and Kokoro synthesizes a 10 minute episode in about a minute instead of the ten Chatterbox needs. Other voices:
 
-- `chatterbox` (default when `voice:` is omitted): Chatterbox's built-in voice.
+- `kokoro:<name>`: any [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) English voice, for example `kokoro:af_heart` or `kokoro:bm_george`.
+- `chatterbox`: Chatterbox's built-in voice.
 - `chatterbox-calm`: the same voice with a slower, more neutral delivery (lower exaggeration and CFG weight).
-- `kokoro:<name>`: a [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) English voice, for example `kokoro:af_heart`, `kokoro:am_michael` or `kokoro:bm_george`.
 
 Audio is cached by text, engine, voice and settings, so switching back to a voice reuses its earlier audio.
 
@@ -39,7 +39,7 @@ Audio is cached by text, engine, voice and settings, so switching back to a voic
 
 To try a voice or tempo without changing `script.yaml`, pass `--voice <voice>` and `--tempo <factor>` to both `tts` and `render`, for example `npm run tts -- smoke --voice kokoro:bf_emma --tempo 1.2` and then `npm run render -- smoke --voice kokoro:bf_emma --tempo 1.2 --final`. The trial gets its own timing and render files (named after the voice and tempo, such as `smoke-final-kokoro-bf_emma-x1.2.mp4`), so the regular ones stay as they are.
 
-Narration plays at the voice's natural pace (`tempo` 1) by default; set `tempo:` in `script.yaml` to speed it up or slow it down per episode. The tempo maps to the engine like this:
+The tempo maps to the engine like this:
 
 | Voice | Tempo up to 1.25 | Tempo above 1.25 |
 |---|---|---|

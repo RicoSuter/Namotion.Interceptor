@@ -82,9 +82,8 @@ Copy `.claude/skills/learning-video/templates/outline.md` to `videos/episodes/<n
 Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder and replace its content. The schema is `videos/tools/schema/script.ts`:
 
 - `episode` (the folder name), `title`, `chapters`.
-- `voice` (optional, default `chatterbox`): the narration voice, see Voices in `videos/README.md`. New episodes use `voice: kokoro:am_michael` with `tempo: 1.32` (as the template does): about 200 words per minute of speech, the fewest Whisper transcription errors of the voices measured, and a 10 minute episode synthesizes in about a minute. Changing the voice synthesizes every line again.
+- `voice` and `tempo` (optional): leave them out for the default voice, see `videos/README.md`. Changing the voice synthesizes every line again.
 - `background` (optional): the background variant, one of `drift`, `chapter-tint`, `edge-aurora`, `follow-light`; the theme default (`defaultBackground` in `theme/backgrounds.ts`) when omitted. See Backgrounds.
-- `tempo` (optional, default 1, the voice's natural pace): speech speed factor between 0.5 and 2; beat timing uses the durations at this tempo. Kokoro voices synthesize at the tempo with Kokoro's own speed up to 1.25, which keeps the prosody natural; above 1.25 they synthesize at 1.25 and a pitch-preserving ffmpeg `atempo` copy adds the rest (tempo 1.32 is speed 1.25 times atempo 1.056), because Kokoro drops short sounds such as a line's first "a" at higher speeds. Chatterbox voices synthesize at their natural pace and get an `atempo` copy at the tempo. Synthesized speech is cached under a key that includes Kokoro's speed and the copies under one that includes the atempo factor, so a tempo change that only changes the atempo factor takes seconds.
 - Chapter: `id` (kebab-case), `title`, `beats`.
 - Beat:
   - `id`: kebab-case, unique in the episode. Prefix with the chapter (`setup-context`).

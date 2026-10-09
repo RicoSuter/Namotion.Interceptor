@@ -19,7 +19,7 @@ export type VoiceRequest =
   | {engine: 'chatterbox'; exaggeration: number; cfgWeight: number}
   | {engine: 'kokoro'; name: string; speed: number};
 
-export const defaultVoice = 'chatterbox';
+export const defaultVoice = 'kokoro:am_michael';
 
 const kokoroName = /^[ab][fm]_[a-z]+$/;
 

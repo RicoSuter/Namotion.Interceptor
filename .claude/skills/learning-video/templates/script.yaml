@@ -1,9 +1,7 @@
 # Status: awaiting approval
 # The episode id must equal the episode folder name.
-episode: 03-example
+episode: nn-example
 title: Example feature
-voice: kokoro:am_michael
-tempo: 1.32
 chapters:
   - id: hook
     title: Example feature

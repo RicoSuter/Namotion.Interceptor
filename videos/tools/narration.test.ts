@@ -5,6 +5,8 @@ import {applyNarrationOptions, buildNarration, buildTiming, narrationPadding, te
 const script = parseScript(`
 episode: smoke
 title: Smoke
+voice: chatterbox
+tempo: 1
 chapters:
   - id: one
     title: One
