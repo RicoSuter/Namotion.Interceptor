@@ -3,23 +3,20 @@ using System.Xml.Linq;
 namespace Namotion.Devices.Sonos.Parsing;
 
 /// <summary>
-/// A Sonos favorite that can be started over UPnP, with the metadata Sonos stored for it.
-/// </summary>
-internal sealed record SonosFavorite(string Title, string Uri, string Metadata, bool IsContainer);
-
-/// <summary>
 /// Parses the DIDL-Lite result of <c>Browse("FV:2")</c>.
 /// </summary>
 internal static class FavoritesParser
 {
     private static readonly XNamespace DidlNamespace = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/";
     private static readonly XNamespace DcNamespace = "http://purl.org/dc/elements/1.1/";
+    private static readonly XNamespace UpnpNamespace = "urn:schemas-upnp-org:metadata-1-0/upnp/";
     private static readonly XNamespace RinconNamespace = "urn:schemas-rinconnetworks-com:metadata-1-0/";
 
     /// <summary>
-    /// Returns the playable favorites, none for a null or blank result.
+    /// Returns the playable favorites, none for a null or blank result. Speaker-relative cover art is resolved
+    /// against <paramref name="baseUri"/>.
     /// </summary>
-    internal static IReadOnlyList<SonosFavorite> Parse(string? result)
+    internal static IReadOnlyList<SonosFavorite> Parse(string? result, Uri? baseUri)
     {
         var favorites = new List<SonosFavorite>();
         if (string.IsNullOrWhiteSpace(result))
@@ -46,7 +43,8 @@ internal static class FavoritesParser
             }
 
             var metadata = (string?)item.Element(RinconNamespace + "resMD") ?? string.Empty;
-            favorites.Add(new SonosFavorite(title, uri, metadata, IsContainer(uri, metadata)));
+            var imageUri = SonosValues.ToAbsoluteUri((string?)item.Element(UpnpNamespace + "albumArtURI"), baseUri);
+            favorites.Add(new SonosFavorite(title, uri, IsContainer(uri, metadata), imageUri) { Metadata = metadata });
         }
 
         return favorites;

@@ -32,6 +32,37 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenSameFavoritesAreSetAgain_ThenTheArrayIsNotReplaced()
+    {
+        // Arrange
+        var system = CreateSystem();
+        system.SetFavorites([new SonosFavorite("Radio", "x-sonosapi-stream:1", false, null) { Metadata = "<DIDL-Lite/>" }]);
+        var first = system.Favorites;
+
+        // Act
+        system.SetFavorites([new SonosFavorite("Radio", "x-sonosapi-stream:1", false, null) { Metadata = "<DIDL-Lite/>" }]);
+
+        // Assert
+        Assert.Same(first, system.Favorites);
+    }
+
+    [Fact]
+    public void WhenOnlyStoredMetadataChanges_ThenTheArrayIsReplaced()
+    {
+        // Arrange
+        var system = CreateSystem();
+        system.SetFavorites([new SonosFavorite("Radio", "x-sonosapi-stream:1", false, null) { Metadata = "<DIDL-Lite/>" }]);
+        var first = system.Favorites;
+
+        // Act
+        system.SetFavorites([new SonosFavorite("Radio", "x-sonosapi-stream:1", false, null) { Metadata = "<DIDL-Lite>token</DIDL-Lite>" }]);
+
+        // Assert
+        Assert.NotSame(first, system.Favorites);
+        Assert.Equal("<DIDL-Lite>token</DIDL-Lite>", system.FindFavorite("radio")!.Metadata);
+    }
+
+    [Fact]
     public void WhenTopologyApplied_ThenPlayersAreKeyedByUuid()
     {
         // Arrange

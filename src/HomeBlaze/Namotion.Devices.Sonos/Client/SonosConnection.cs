@@ -56,7 +56,7 @@ internal sealed class SonosConnection : IDisposable
     internal async Task<IReadOnlyList<SonosFavorite>> ReadFavoritesAsync(CancellationToken cancellationToken)
     {
         var response = await _device.ContentDirectoryService.Browse("FV:2", Count: 100, cancellationToken: cancellationToken);
-        return FavoritesParser.Parse(response.Result);
+        return FavoritesParser.Parse(response.Result, BaseUri);
     }
 
     /// <summary>

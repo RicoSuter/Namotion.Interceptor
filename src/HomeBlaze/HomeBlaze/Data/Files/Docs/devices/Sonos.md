@@ -99,7 +99,7 @@ Every operation is disabled while the system or the player is not connected. Ope
 
 ### SonosSystem
 
-`Players`, `Groups`, `Favorites`, `AreEventsActive`, `ActiveEventCallbackHost`, `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`.
+`Players`, `Groups`, `Favorites` (records with `Title`, `Uri`, `IsContainer` and `ImageUri`; to play one, call `PlayFavorite` on a player with its title), `AreEventsActive`, `ActiveEventCallbackHost`, `IsConnected`, `Status`, `StatusMessage`, `LastUpdated`.
 
 ## Limitations
 

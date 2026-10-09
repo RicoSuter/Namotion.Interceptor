@@ -36,7 +36,6 @@ public partial class SonosSystem : BackgroundService,
 
     // Topology arrives from the poll and from ZoneGroupTopology events, so applying it is serialized.
     private readonly Lock _topologyLock = new();
-    private volatile IReadOnlyList<SonosFavorite> _favorites = [];
 
     /// <summary>
     /// Any speaker of the household as host or host:port. Empty uses the last known speakers, then SSDP.
@@ -75,10 +74,10 @@ public partial class SonosSystem : BackgroundService,
     public partial Dictionary<string, SonosGroup> Groups { get; internal set; }
 
     /// <summary>
-    /// The names of the favorites <see cref="SonosPlayer.PlayFavoriteAsync"/> accepts.
+    /// The favorites <see cref="SonosPlayer.PlayFavoriteAsync"/> accepts by title. The array is replaced, never mutated.
     /// </summary>
     [State(Position = 3)]
-    public partial string[] Favorites { get; internal set; }
+    public partial SonosFavorite[] Favorites { get; internal set; }
 
     [State(Position = 4)]
     public partial bool AreEventsActive { get; internal set; }
@@ -316,15 +315,13 @@ public partial class SonosSystem : BackgroundService,
     }
 
     internal SonosFavorite? FindFavorite(string name) =>
-        _favorites.FirstOrDefault(favorite => string.Equals(favorite.Title, name, StringComparison.OrdinalIgnoreCase));
+        Favorites.FirstOrDefault(favorite => string.Equals(favorite.Title, name, StringComparison.OrdinalIgnoreCase));
 
     internal void SetFavorites(IReadOnlyList<SonosFavorite> favorites)
     {
-        _favorites = favorites;
-        var names = favorites.Select(favorite => favorite.Title).ToArray();
-        if (!names.SequenceEqual(Favorites))
+        if (!favorites.SequenceEqual(Favorites))
         {
-            Favorites = names;
+            Favorites = [.. favorites];
         }
     }
 

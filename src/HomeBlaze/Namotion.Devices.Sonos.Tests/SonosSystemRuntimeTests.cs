@@ -33,7 +33,7 @@ public class SonosSystemRuntimeTests
         Assert.Equal(0.44m, player.Volume);
         Assert.Equal(SonosTransportState.Paused, player.TransportState);
         Assert.Equal(SonosSource.SpotifyConnect, player.Source);
-        Assert.Equal(new[] { "Radio FM1", "SRF 3" }, system.Favorites);
+        Assert.Equal(new[] { "Radio FM1", "SRF 3" }, system.Favorites.Select(favorite => favorite.Title));
         Assert.Equal(0.44m, Assert.Single(system.Groups).Value.Volume);
         Assert.NotNull(system.LastUpdated);
     }

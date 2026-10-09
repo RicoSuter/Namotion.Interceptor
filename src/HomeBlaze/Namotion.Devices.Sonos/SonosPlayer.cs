@@ -298,7 +298,7 @@ public partial class SonosPlayer : SonosDevice,
         ArgumentNullException.ThrowIfNull(name);
         var favorite = _system.FindFavorite(name)
             ?? throw new ArgumentException(
-                $"Unknown Sonos favorite '{name}'. Known favorites: {string.Join(", ", _system.Favorites)}.", nameof(name));
+                $"Unknown Sonos favorite '{name}'. Known favorites: {string.Join(", ", _system.Favorites.Select(known => known.Title))}.", nameof(name));
 
         return RunOnCoordinatorAsync(async (connection, token) =>
         {
