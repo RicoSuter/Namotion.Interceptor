@@ -362,7 +362,7 @@ public partial class Motor
 | Option | Description | Example |
 |--------|-------------|---------|
 | `Title` | Display name (defaults to method name without "Async") | `"Set Speed"` |
-| `Description` | Help text shown in dialogs | `"Sets the motor target speed"` |
+| `Description` | Help text shown in the operation dialog and returned to agents by MCP `list_methods`, so write it to stand alone | `"Sets the motor target speed"` |
 | `Icon` | MudBlazor icon name | `"Speed"`, `"Stop"` |
 | `Position` | Sort position in operations list | `1`, `2`, `3` |
 | `RequiresConfirmation` | Show confirmation dialog before executing | `true` |
@@ -380,6 +380,17 @@ public partial class Motor
 - `DateTime`, `DateTimeOffset`, `Guid`, `TimeSpan`
 - Nullable versions of the above (`int?`, `bool?`, etc.)
 - Enums and nullable enums
+
+**Parameter units:**
+
+`[OperationParameter(Unit = ...)]` gives a parameter a `StateUnit`. The operation dialog shows the unit after the input, and MCP `list_methods` returns it in the parameter's `description`.
+
+```csharp
+[Operation(Title = "Set Volume", Description = "Sets the volume of this player.")]
+public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
+```
+
+A `Percent` parameter is a fraction from 0 to 1, as described under units above: the dialog takes 0 to 100 and divides by 100, while agents pass the fraction. The description is shown to both, so it leaves the numeric range to the unit instead of stating "0 to 1".
 
 **Operations vs Configuration:**
 - Use `[Configuration]` for values that should persist and can be edited at any time
