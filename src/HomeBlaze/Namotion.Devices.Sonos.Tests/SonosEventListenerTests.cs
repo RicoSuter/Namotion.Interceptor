@@ -2,9 +2,11 @@ using System.Collections.Specialized;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Events;
 using Namotion.Devices.Sonos.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -404,6 +406,73 @@ public class SonosEventListenerTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
         Assert.Equal("uuid:sub-1", await unsubscribeSid.Task.WaitAsync(WaitTimeout));
         Assert.Empty(listener.Subscriptions);
+    }
+
+    [Theory]
+    [InlineData(500, LogLevel.Information)]
+    [InlineData(412, LogLevel.Debug)]
+    public async Task WhenUnsubscribeIsAnsweredWithAnError_ThenOnlyAnUnknownSubscriptionIsLoggedAtDebug(int statusCode, LogLevel expectedLevel)
+    {
+        // Arrange
+        await using var speaker = new LoopbackHttpServer(context =>
+        {
+            if (context.Request.HttpMethod == "UNSUBSCRIBE")
+            {
+                context.Response.StatusCode = statusCode;
+                return Task.CompletedTask;
+            }
+
+            return RespondWithSid(context, "uuid:sub-1");
+        });
+        using var httpClient = new HttpClient();
+        var logger = new RecordingLogger();
+        await using var listener = new SonosEventListener(httpClient, logger);
+        LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
+
+        // Act
+        await listener.UnsubscribeAllAsync(CancellationToken.None);
+
+        // Assert
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(expectedLevel, entry.Level);
+        Assert.Contains("RINCON_X/AVTransport", entry.Message);
+    }
+
+    [Fact]
+    public async Task WhenTheOrphanOfAPendingSubscribeCannotBeUnsubscribed_ThenItIsLoggedAtInformation()
+    {
+        // Arrange
+        var subscribeReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSubscribe = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var speaker = new LoopbackHttpServer(async context =>
+        {
+            if (context.Request.HttpMethod == "UNSUBSCRIBE")
+            {
+                context.Response.StatusCode = 500;
+                return;
+            }
+
+            subscribeReceived.TrySetResult();
+            await releaseSubscribe.Task;
+            await RespondWithSid(context, "uuid:sub-1");
+        });
+        using var httpClient = new HttpClient();
+        var logger = new RecordingLogger();
+        await using var listener = new SonosEventListener(httpClient, logger);
+        LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
+        var pending = listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
+        await subscribeReceived.Task.WaitAsync(WaitTimeout);
+
+        // Act
+        await listener.UnsubscribeAllAsync(CancellationToken.None);
+        releaseSubscribe.SetResult();
+
+        // Assert
+        await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Contains("uuid:sub-1", entry.Message);
     }
 
     [Fact]

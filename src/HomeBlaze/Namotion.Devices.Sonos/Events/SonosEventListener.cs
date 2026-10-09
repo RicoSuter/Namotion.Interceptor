@@ -175,10 +175,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
         using var request = new HttpRequestMessage(new HttpMethod("UNSUBSCRIBE"), subscription.EventUri);
         request.Headers.TryAddWithoutValidation("SID", sid);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogDebug("Unsubscribing Sonos events {Key} returned {StatusCode}.", subscription.Key, response.StatusCode);
-        }
+        LogUnsubscribeRejection(response.StatusCode, "Sonos events " + subscription.Key);
     }
 
     private async Task TryUnsubscribeOrphanAsync(Uri eventUri, string sid, CancellationToken cancellationToken)
@@ -188,14 +185,26 @@ internal sealed class SonosEventListener : IAsyncDisposable
             using var request = new HttpRequestMessage(new HttpMethod("UNSUBSCRIBE"), eventUri);
             request.Headers.TryAddWithoutValidation("SID", sid);
             using var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug("Unsubscribing the orphaned Sonos subscription {Sid} returned {StatusCode}.", sid, response.StatusCode);
-            }
+            LogUnsubscribeRejection(response.StatusCode, "the orphaned Sonos subscription " + sid);
         }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
         {
-            _logger.LogDebug(exception, "Unsubscribing the orphaned Sonos subscription {Sid} failed.", sid);
+            _logger.LogInformation(exception,
+                "The orphaned Sonos subscription {Sid} could not be cancelled; the speaker drops it once it expires.", sid);
+        }
+    }
+
+    private void LogUnsubscribeRejection(HttpStatusCode statusCode, string subscription)
+    {
+        if (statusCode == HttpStatusCode.PreconditionFailed)
+        {
+            // The speaker no longer knows the subscription, so nothing is left behind.
+            _logger.LogDebug("Unsubscribing {Subscription} returned {StatusCode}; it was already gone.", subscription, statusCode);
+        }
+        else if ((int)statusCode is < 200 or > 299)
+        {
+            _logger.LogInformation(
+                "Unsubscribing {Subscription} returned {StatusCode}; the speaker drops it once it expires.", subscription, statusCode);
         }
     }
 
