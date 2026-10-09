@@ -146,6 +146,7 @@
   <Folder Name="/Videos/">
     <Project Path="../videos/domain/Coffee/Coffee.csproj" />
     <Project Path="../videos/domain/Coffee.Tests/Coffee.Tests.csproj" />
+    <Project Path="../videos/episodes/01-tracking/sample/Tracking.Sample.csproj" />
     <Project Path="../videos/episodes/03-connectors/sample/Client/Connectors.Client.csproj" />
     <Project Path="../videos/episodes/03-connectors/sample/Server/Connectors.Server.csproj" />
     <Project Path="../videos/episodes/smoke/sample/Smoke.Sample.csproj" />

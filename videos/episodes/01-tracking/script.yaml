@@ -120,7 +120,7 @@ chapters:
         components: [CodeCard, FlowDiagram]
         code: {file: ../../domain/Coffee/CoffeeMachine.cs, region: Derived}
       - id: derived-chain
-        narration: Is hot is derived too, from the boiler's temperature and its target. The library follows that chain down to the real properties.
+        narration: The boiler's hot flag is derived too, from its temperature and its target. The library follows that chain down to the real properties.
         visual: The code card morphs into the IsHot region of Boiler.cs; Temperature and TargetTemperature nodes grow in front of IsHot and their edges draw.
         components: [CodeCard, FlowDiagram, Camera]
         code: {file: ../../domain/Coffee/Boiler.cs, region: IsHot}
@@ -261,7 +261,7 @@ chapters:
         components: [CodeCard, Camera]
         code: {file: sample/Steps.cs, region: Queue}
       - id: streams-order
-        narration: One caveat for every channel. With concurrent writers, changes can arrive out of order, so compare the revision, or simply read the property again.
+        narration: One caveat for every channel. With several threads writing at once, changes can arrive out of order, so compare the revision, or simply read the property again.
         visual: Two change chips with revisions 41 and 42 slide in beside the card in the wrong order, then swap places; the camera follows.
         components: [CodeCard, Card, Camera]
         code: {file: sample/Steps.cs, region: Queue}
@@ -290,7 +290,7 @@ chapters:
         visual: A particle runs from Ristretto up to the machine; then the Ristretto edge turns dashed, the node dims and a "detached" pill replaces "attached", before it returns to normal.
         components: [FlowDiagram, Card, Camera]
       - id: lifecycle-shared
-        narration: A subject referenced from two places stays attached until its last reference is gone.
+        narration: A subject that two properties point to stays attached until its last reference is gone.
         visual: A second edge draws to the Lungo node from a dashed favorites node; a "2 references" pill appears; one edge fades and the pill turns to "1 reference".
         components: [FlowDiagram, Card]
       - id: lifecycle-events
@@ -371,7 +371,7 @@ chapters:
         components: [CodeCard, Camera]
         code: {file: sample/MachineHost.cs, region: ContextWithTransactions}
       - id: tx-async-code
-        narration: Then brew async begins a transaction on the machine's context, before the ready check.
+        narration: Then the asynchronous brew method begins a transaction on the machine's own context, before the ready check.
         visual: The card morphs into the BrewAsync region of CoffeeMachine.cs and the tab renames; the BeginTransactionAsync lines are focused.
         components: [CodeCard, Camera]
         code: {file: ../../domain/Coffee/CoffeeMachine.cs, region: BrewAsync}
@@ -408,7 +408,7 @@ chapters:
         visual: An error pill rises from the faded box to an endpoint card labeled "POST /brew-async/brew/Ristretto" with "400".
         components: [Card, Camera]
       - id: tx-live-right
-        narration: The right machine brews with brew async. Same ristretto, same rejection, but the machine never moved.
+        narration: The right machine uses the asynchronous brew. Same ristretto, same rejection, but the machine never moved.
         hold: 0.8
         visual: The machine windows return with the stuck clip; the camera moves to the right window as Ristretto is pressed; the headline stays Ready and the error line appears.
         components: [BrowserFrame, Camera]
