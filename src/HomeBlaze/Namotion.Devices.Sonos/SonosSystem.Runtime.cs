@@ -253,8 +253,8 @@ public partial class SonosSystem
         {
             var seedConnection = GetSeedConnection();
             var appliedTopologyEvents = GetAppliedTopologyEvents();
-            var topology = await seedConnection.ReadTopologyAsync(cancellationToken);
-            ApplyPolledTopology(topology, appliedTopologyEvents);
+            var zoneGroupState = await seedConnection.ReadZoneGroupStateAsync(cancellationToken);
+            ApplyPolledTopology(zoneGroupState, appliedTopologyEvents);
             SyncConnections();
 
             var pollStartedAt = Clock.GetUtcNow();
@@ -1112,7 +1112,7 @@ public partial class SonosSystem
         var zoneGroupState = UpnpEventParser.ParseZoneGroupState(body);
         if (!string.IsNullOrEmpty(zoneGroupState))
         {
-            ApplyTopologyEvent(ZoneGroupStateParser.Parse(zoneGroupState));
+            ApplyTopologyEvent(zoneGroupState);
             SyncConnections();
         }
     }

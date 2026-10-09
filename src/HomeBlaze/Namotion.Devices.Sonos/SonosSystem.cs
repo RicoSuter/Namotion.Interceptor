@@ -50,6 +50,10 @@ public partial class SonosSystem : BackgroundService,
     private HashSet<string> _unconfirmedMissingPlayers = new(StringComparer.Ordinal);
     private bool _hasConnectionTopology;
 
+    // The raw ZoneGroupState of the applied topology, so an unchanged one, which is what nearly every poll and event
+    // carries, is neither parsed nor applied again. Null when unknown. Written under _topologyLock.
+    private string? _appliedZoneGroupState;
+
     /// <summary>
     /// Any speaker of the household as host or host:port. Empty tries the speakers found since the system started, then SSDP discovery.
     /// </summary>
@@ -289,10 +293,12 @@ public partial class SonosSystem : BackgroundService,
     }
 
     /// <summary>
-    /// Applies a topology read by a poll, unless a topology event was applied after the read started: the event is newer.
+    /// Applies a ZoneGroupState read by a poll, unless a topology event was applied after the read started: the event
+    /// is newer. Throws <see cref="System.Xml.XmlException"/> or <see cref="FormatException"/> when it cannot be parsed.
     /// </summary>
-    internal void ApplyPolledTopology(SonosTopology topology, long appliedTopologyEventsBeforeRead)
+    internal void ApplyPolledTopology(string zoneGroupState, long appliedTopologyEventsBeforeRead)
     {
+        var topology = ParseUnlessApplied(zoneGroupState);
         lock (_topologyLock)
         {
             if (_appliedTopologyEvents != appliedTopologyEventsBeforeRead)
@@ -301,15 +307,20 @@ public partial class SonosSystem : BackgroundService,
                 return;
             }
 
-            ApplyTopology(topology);
+            ApplyZoneGroupState(zoneGroupState, topology);
         }
     }
 
-    internal void ApplyTopologyEvent(SonosTopology topology)
+    /// <summary>
+    /// Applies a ZoneGroupState from a topology event. Throws <see cref="System.Xml.XmlException"/> or
+    /// <see cref="FormatException"/> when it cannot be parsed.
+    /// </summary>
+    internal void ApplyTopologyEvent(string zoneGroupState)
     {
+        var topology = ParseUnlessApplied(zoneGroupState);
         lock (_topologyLock)
         {
-            if (ApplyTopology(topology))
+            if (ApplyZoneGroupState(zoneGroupState, topology))
             {
                 _appliedTopologyEvents++;
             }
@@ -325,7 +336,32 @@ public partial class SonosSystem : BackgroundService,
         {
             _hasConnectionTopology = false;
             _unconfirmedMissingPlayers.Clear();
+            _appliedZoneGroupState = null;
         }
+    }
+
+    // Parsed outside _topologyLock; null for the applied ZoneGroupState, which ApplyZoneGroupState then skips, or
+    // parses after all when another one was applied in between.
+    private SonosTopology? ParseUnlessApplied(string zoneGroupState) =>
+        zoneGroupState == Volatile.Read(ref _appliedZoneGroupState) ? null : ZoneGroupStateParser.Parse(zoneGroupState);
+
+    // Caller holds _topologyLock.
+    private bool ApplyZoneGroupState(string zoneGroupState, SonosTopology? topology)
+    {
+        if (zoneGroupState == _appliedZoneGroupState)
+        {
+            // Applying the same topology again changes nothing but this, see ApplyTopology.
+            _unconfirmedMissingPlayers.Clear();
+            return true;
+        }
+
+        if (!ApplyTopology(topology ?? ZoneGroupStateParser.Parse(zoneGroupState)))
+        {
+            return false;
+        }
+
+        Volatile.Write(ref _appliedZoneGroupState, zoneGroupState);
+        return true;
     }
 
     /// <summary>
@@ -356,6 +392,7 @@ public partial class SonosSystem : BackgroundService,
 
             _unconfirmedMissingPlayers.Clear();
             _hasConnectionTopology = true;
+            Volatile.Write(ref _appliedZoneGroupState, null);
             Dictionary<string, SonosPlayer>? updatedPlayers = null;
             foreach (var group in topology.Groups)
             {

@@ -190,6 +190,46 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenAnUnchangedTopologyFollowsOneThatMissesAPlayer_ThenTheMissingPlayerNeedsTwoReadsAgain()
+    {
+        // Arrange
+        var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
+        var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
+        var household = FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office);
+        var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
+        var system = CreateSystem();
+        system.ApplyPolledTopology(household, system.GetAppliedTopologyEvents());
+        ReportAllReachable(system);
+
+        // Act
+        system.ApplyPolledTopology(withoutKitchen, system.GetAppliedTopologyEvents());
+        system.ApplyPolledTopology(household, system.GetAppliedTopologyEvents());
+        system.ApplyPolledTopology(withoutKitchen, system.GetAppliedTopologyEvents());
+
+        // Assert
+        Assert.True(system.Players[TestFixtures.KitchenUuid].IsConnected);
+    }
+
+    [Fact]
+    public void WhenAnUnchangedTopologyEventArrivesDuringAPoll_ThenThePolledTopologyIsSkipped()
+    {
+        // Arrange
+        var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
+        var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
+        var household = FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office);
+        var system = CreateSystem();
+        system.ApplyTopologyEvent(household);
+        var appliedTopologyEventsBeforeRead = system.GetAppliedTopologyEvents();
+
+        // Act
+        system.ApplyTopologyEvent(household);
+        system.ApplyPolledTopology(FakeSonosSpeaker.CreateGroupTopology(office, kitchen), appliedTopologyEventsBeforeRead);
+
+        // Assert
+        Assert.Equal(2, system.Groups.Count);
+    }
+
+    [Fact]
     public void WhenMissingPlayerReappears_ThenInstanceIsKeptAndConnected()
     {
         // Arrange

@@ -81,6 +81,30 @@ public class SonosConnectionTests
     }
 
     [Fact]
+    public async Task WhenFavoritesAreReadAgain_ThenOnlyAChangedPageIsParsedAgain()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondToBrowsePage(0, TestFixtures.Read("favorites.xml"), numberReturned: 4, totalMatches: 4);
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+        var first = await connection.ReadFavoritesAsync(CancellationToken.None);
+
+        // Act
+        var unchanged = await connection.ReadFavoritesAsync(CancellationToken.None);
+        speaker.RespondToBrowsePage(0,
+            "<DIDL-Lite xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\">" +
+            "<item id=\"FV:2/5\" parentID=\"FV:2\" restricted=\"false\"><dc:title>Radio Extra</dc:title><res>x-rincon-mp3radio://radio.example/stream</res></item></DIDL-Lite>",
+            numberReturned: 1, totalMatches: 1);
+        var changed = await connection.ReadFavoritesAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(first.Count, unchanged.Count);
+        Assert.All(first.Zip(unchanged), pair => Assert.Same(pair.First, pair.Second));
+        Assert.Equal(["Radio Extra"], changed.Select(favorite => favorite.Title));
+    }
+
+    [Fact]
     public async Task WhenOneReadAnswersWithAFault_ThenOnlyItsValuesAreUnknownAndTheFaultIsReportedOnce()
     {
         // Arrange

@@ -32,6 +32,9 @@ internal sealed class SonosConnection : IDisposable
     // a command refresh can poll the same player as the reconciliation.
     private readonly FailureTracker _faultingReads = new();
 
+    // The pages of the last favorites read, replaced as a whole.
+    private FavoritesPage[] _favoritesPages = [];
+
     /// <param name="baseUri">The base URI of the unit.</param>
     /// <param name="uuid">The RINCON id of the unit, null while unknown.</param>
     /// <param name="httpClient">The client for all requests, borrowed and not disposed.</param>
@@ -71,30 +74,48 @@ internal sealed class SonosConnection : IDisposable
             : new SonosZoneInfo(zoneInfo.SerialNumber, zoneInfo.MACAddress, zoneInfo.HardwareVersion, zoneInfo.DisplaySoftwareVersion);
     }
 
-    internal async Task<SonosTopology> ReadTopologyAsync(CancellationToken cancellationToken)
+    internal async Task<SonosTopology> ReadTopologyAsync(CancellationToken cancellationToken) =>
+        ZoneGroupStateParser.Parse(await ReadZoneGroupStateAsync(cancellationToken));
+
+    /// <summary>
+    /// Reads the raw ZoneGroupState XML, which <see cref="ZoneGroupStateParser"/> parses.
+    /// </summary>
+    internal async Task<string> ReadZoneGroupStateAsync(CancellationToken cancellationToken)
     {
         var response = await _device.ZoneGroupTopologyService.GetZoneGroupState(cancellationToken);
-        return ZoneGroupStateParser.Parse(response.ZoneGroupState);
+        return response.ZoneGroupState;
     }
 
     internal async Task<IReadOnlyList<SonosFavorite>> ReadFavoritesAsync(CancellationToken cancellationToken)
     {
         const int pageSize = 100;
+        var previousPages = _favoritesPages;
+        var pages = new List<FavoritesPage>();
         var favorites = new List<SonosFavorite>();
         var startingIndex = 0;
         while (true)
         {
             var response = await _device.ContentDirectoryService.Browse("FV:2", StartingIndex: startingIndex, Count: pageSize, cancellationToken: cancellationToken);
-            favorites.AddRange(FavoritesParser.Parse(response.Result, BaseUri));
+
+            // Favorites rarely change, so a page with the same result as last time reuses its records.
+            var pageIndex = pages.Count;
+            var page = pageIndex < previousPages.Length && previousPages[pageIndex].Result == response.Result
+                ? previousPages[pageIndex]
+                : new FavoritesPage(response.Result, FavoritesParser.Parse(response.Result, BaseUri));
+            pages.Add(page);
+            favorites.AddRange(page.Favorites);
 
             // Counted by the items returned, not the favorites parsed, which skip shortcuts.
             startingIndex += response.NumberReturned;
             if (response.NumberReturned <= 0 || startingIndex >= response.TotalMatches)
             {
+                _favoritesPages = [.. pages];
                 return favorites;
             }
         }
     }
+
+    private sealed record FavoritesPage(string? Result, IReadOnlyList<SonosFavorite> Favorites);
 
     /// <summary>
     /// Reads one player. Requests go one after another: a poll is a dozen small calls, and players are polled in
