@@ -67,14 +67,14 @@ internal static class SonosDiscovery
     /// Returns the local IPv4 address the OS would use to reach the host, or null when the host has no IPv4 address,
     /// cannot be resolved or no route exists.
     /// </summary>
-    internal static string? DetectLocalAddress(string remoteHost)
+    internal static async Task<string?> DetectLocalAddressAsync(string remoteHost, CancellationToken cancellationToken)
     {
         try
         {
             var host = remoteHost.Trim().Trim('[', ']');
             var remoteAddress = IPAddress.TryParse(host, out var address)
                 ? address
-                : Dns.GetHostAddresses(host, AddressFamily.InterNetwork).FirstOrDefault();
+                : (await Dns.GetHostAddressesAsync(host, AddressFamily.InterNetwork, cancellationToken)).FirstOrDefault();
 
             if (remoteAddress is not { AddressFamily: AddressFamily.InterNetwork })
             {

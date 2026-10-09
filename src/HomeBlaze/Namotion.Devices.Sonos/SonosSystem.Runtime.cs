@@ -97,7 +97,7 @@ public partial class SonosSystem
                         ? "No Sonos speaker found. Set SeedHost when multicast discovery is blocked, for example under Docker bridge networking."
                         : $"The SeedHost '{SeedHost}' did not answer, and no other Sonos speaker was found.");
 
-                StartEventListener(seedUri.Host);
+                await StartEventListenerAsync(seedUri.Host, stoppingToken);
                 reconnectImmediately = await RunConnectedAsync(seedUri, stoppingToken);
             }
             catch (Exception exception) when (stoppingToken.IsCancellationRequested)
@@ -516,10 +516,10 @@ public partial class SonosSystem
         }
     }
 
-    private void StartEventListener(string seedHost)
+    private async Task StartEventListenerAsync(string seedHost, CancellationToken cancellationToken)
     {
         var callbackHost = string.IsNullOrWhiteSpace(EventCallbackHost)
-            ? SonosDiscovery.DetectLocalAddress(seedHost)
+            ? await SonosDiscovery.DetectLocalAddressAsync(seedHost, cancellationToken)
             : EventCallbackHost.Trim();
 
         if (callbackHost is null)

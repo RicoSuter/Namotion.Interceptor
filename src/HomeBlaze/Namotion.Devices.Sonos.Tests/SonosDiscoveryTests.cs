@@ -44,10 +44,10 @@ public class SonosDiscoveryTests
     }
 
     [Fact]
-    public void WhenDetectingLocalAddressForLoopback_ThenReturnsLoopback()
+    public async Task WhenDetectingLocalAddressForLoopback_ThenReturnsLoopback()
     {
         // Act
-        var address = SonosDiscovery.DetectLocalAddress("127.0.0.1");
+        var address = await SonosDiscovery.DetectLocalAddressAsync("127.0.0.1", CancellationToken.None);
 
         // Assert
         Assert.Equal("127.0.0.1", address);
@@ -56,10 +56,10 @@ public class SonosDiscoveryTests
     [Theory]
     [InlineData("::1")]
     [InlineData("[::1]")]
-    public void WhenDetectingLocalAddressForIpv6_ThenReturnsNull(string host)
+    public async Task WhenDetectingLocalAddressForIpv6_ThenReturnsNull(string host)
     {
         // Act
-        var address = SonosDiscovery.DetectLocalAddress(host);
+        var address = await SonosDiscovery.DetectLocalAddressAsync(host, CancellationToken.None);
 
         // Assert
         Assert.Null(address);
