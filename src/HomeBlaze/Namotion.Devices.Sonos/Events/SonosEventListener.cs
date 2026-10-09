@@ -119,12 +119,15 @@ internal sealed class SonosEventListener : IAsyncDisposable
             bool orphaned;
             lock (subscription.SyncRoot)
             {
-                subscription.Sid = sid;
                 orphaned = !_subscriptionsByKey.TryGetValue(key, out var current) || !ReferenceEquals(current, subscription);
                 if (!orphaned)
                 {
+                    // Indexed before the SID is published: Resolve reads without the lock, and once a subscription
+                    // has its SID it no longer accepts a NOTIFY by path, so the other order answers one with 412.
                     _subscriptionsBySid[sid] = subscription;
                 }
+
+                subscription.Sid = sid;
             }
 
             if (orphaned)
