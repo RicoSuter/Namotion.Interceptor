@@ -1,16 +1,12 @@
 using HomeBlaze.Abstractions;
-using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor;
 using Xunit;
 
 namespace Namotion.Devices.MyStrom.Tests;
 
 public class MyStromSwitchTests
 {
-    private static MyStromSwitch CreateSwitch()
-    {
-        var httpClientFactory = new TestHttpClientFactory();
-        return new MyStromSwitch(httpClientFactory, NullLogger<MyStromSwitch>.Instance);
-    }
+    private static MyStromSwitch CreateSwitch() => new();
 
     [Fact]
     public void WhenCreated_ThenHasDefaultValues()
@@ -194,8 +190,24 @@ public class MyStromSwitchTests
         Assert.True(subject.IsWireless);
     }
 
-    private class TestHttpClientFactory : IHttpClientFactory
+    [Fact]
+    public async Task WhenNotStarted_ThenTurnOnThrows()
     {
-        public HttpClient CreateClient(string name) => new();
+        // Arrange
+        var subject = CreateSwitch();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => subject.TurnOnAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public void WhenCreated_ThenDeviceInformationIsNotASubjectProperty()
+    {
+        // Act
+        IInterceptorSubject subject = CreateSwitch();
+
+        // Assert
+        Assert.DoesNotContain("Information", subject.Properties.Keys);
+        Assert.Contains(nameof(MyStromSwitch.MacAddress), subject.Properties.Keys);
     }
 }

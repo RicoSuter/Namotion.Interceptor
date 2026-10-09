@@ -1,6 +1,7 @@
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -28,7 +29,9 @@ public class ConfigurableSubjectSerializerTests
             typeof(Level1Subject),
             typeof(Level2Subject),
             typeof(Level3Subject),
-            typeof(SubjectWithMixedProperties)
+            typeof(SubjectWithMixedProperties),
+            typeof(ActivatableTestSubject),
+            typeof(ActivatableTestParent)
         ]);
 
         var services = new ServiceCollection();
@@ -415,6 +418,62 @@ public class ConfigurableSubjectSerializerTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public void WhenDeserializedSubjectHasAHostedService_ThenItIsActivated()
+    {
+        // Arrange
+        var json = """{"$type":"HomeBlaze.Services.Tests.Serialization.ActivatableTestSubject","configProperty":"x"}""";
+
+        // Act
+        var subject = (IInterceptorSubject)_serializer.Deserialize(json)!;
+
+        // Assert
+        Assert.Single(subject.GetHostedServiceAttachments());
+    }
+
+    [Fact]
+    public void WhenDeserializedSubjectHasNoHostedService_ThenNothingIsAttached()
+    {
+        // Arrange
+        var json = """{"$type":"HomeBlaze.Services.Tests.Serialization.TestSubject","configProperty":"x"}""";
+
+        // Act
+        var subject = (IInterceptorSubject)_serializer.Deserialize(json)!;
+
+        // Assert
+        Assert.Empty(subject.GetHostedServiceAttachments());
+    }
+
+    [Fact]
+    public void WhenDeserializedSubjectConfiguresASubjectWithAHostedService_ThenTheNestedSubjectIsActivated()
+    {
+        // Arrange
+        var json = """{"$type":"HomeBlaze.Services.Tests.Serialization.ActivatableTestParent","child":{"configProperty":"x"}}""";
+
+        // Act
+        var parent = (ActivatableTestParent)_serializer.Deserialize(json)!;
+
+        // Assert
+        Assert.NotNull(parent.Child);
+        Assert.Equal("x", parent.Child.ConfigProperty);
+        Assert.Single(parent.Child.GetHostedServiceAttachments());
+    }
+
+    [Fact]
+    public void WhenDeserializedSubjectConfiguresAPolymorphicSubjectWithAHostedService_ThenTheNestedSubjectIsActivated()
+    {
+        // Arrange
+        var json = """{"$type":"HomeBlaze.Services.Tests.Serialization.ActivatableTestParent","device":{"$type":"HomeBlaze.Services.Tests.Serialization.ActivatableTestSubject","configProperty":"x"}}""";
+
+        // Act
+        var parent = (ActivatableTestParent)_serializer.Deserialize(json)!;
+
+        // Assert
+        var device = Assert.IsType<ActivatableTestSubject>(parent.Device);
+        Assert.Equal("x", device.ConfigProperty);
+        Assert.Single(device.GetHostedServiceAttachments());
+    }
+
     #endregion
 
     #region UpdateConfiguration Tests
@@ -486,6 +545,29 @@ public class ConfigurableSubjectSerializerTests
         // Assert
         Assert.Equal("updated-one", subject.ConfigOne);
         Assert.Equal(100, subject.ConfigTwo); // Unchanged
+    }
+
+    [Fact]
+    public void WhenUpdatedConfigurationReplacesASubjectWithAHostedService_ThenTheNewSubjectIsActivated()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+        var parent = new ActivatableTestParent(context);
+        var json = """{ "child": { "configProperty": "updated" } }""";
+
+        // Act
+        _serializer.UpdateConfiguration(parent, json);
+
+        // Assert
+        Assert.NotNull(parent.Child);
+        Assert.Equal("updated", parent.Child.ConfigProperty);
+        Assert.Single(parent.Child.GetHostedServiceAttachments());
     }
 
     #endregion

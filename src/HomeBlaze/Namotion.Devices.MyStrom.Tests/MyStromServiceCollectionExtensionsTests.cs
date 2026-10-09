@@ -10,7 +10,6 @@ public class MyStromServiceCollectionExtensionsTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddHttpClient();
 
         // Act
         services.AddMyStromSwitch(subject =>
@@ -31,7 +30,6 @@ public class MyStromServiceCollectionExtensionsTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddHttpClient();
 
         // Act
         services.AddMyStromSwitch();
@@ -41,5 +39,21 @@ public class MyStromServiceCollectionExtensionsTests
         var subject = serviceProvider.GetRequiredService<MyStromSwitch>();
         Assert.Null(subject.HostAddress);
         Assert.Equal(TimeSpan.FromSeconds(15), subject.PollingInterval);
+    }
+
+    [Fact]
+    public void WhenTwoKeyedSwitchesAreRegistered_ThenEachHasItsOwnConfiguration()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddKeyedMyStromSwitch("kitchen", subject => subject.HostAddress = "192.168.1.10");
+        services.AddKeyedMyStromSwitch("garage", subject => subject.HostAddress = "192.168.1.11");
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        Assert.Equal("192.168.1.10", serviceProvider.GetRequiredKeyedService<MyStromSwitch>("kitchen").HostAddress);
+        Assert.Equal("192.168.1.11", serviceProvider.GetRequiredKeyedService<MyStromSwitch>("garage").HostAddress);
     }
 }

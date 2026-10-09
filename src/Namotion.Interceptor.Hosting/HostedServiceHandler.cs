@@ -17,6 +17,21 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// <summary>How long the drain waits between reads of the in flight count.</summary>
     private const int DrainPollMilliseconds = 1;
 
+    /// <summary>The fewest additions between two prunes of the tracked activations.</summary>
+    private const int MinimumPruneInterval = 64;
+
+    private readonly bool _activateSubjectHostedServices;
+
+    /// <summary>
+    /// The activations this handler ran, keyed by attachment, or null when the owner did not ask for
+    /// them, so an ordinary host accumulates nothing. Retains a subject that has left the graph until
+    /// the owner's teardown, deliberately, so its activation can still be detached.
+    /// </summary>
+    private readonly ConcurrentDictionary<HostedServiceAttachment<IHostedService>, IInterceptorSubject>? _trackedActivations;
+
+    /// <summary>Additions to <see cref="_trackedActivations"/> left before the next prune.</summary>
+    private int _additionsUntilPrune = MinimumPruneInterval;
+
     private readonly HostedServiceGate _gate = new();
     private readonly ConcurrentDictionary<HostedServiceSlot, IInterceptorSubject> _stopOnDrain = new();
     // Reference equality, as everywhere a subject is a key: two value equal subjects sharing one entry
@@ -47,7 +62,65 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     /// </summary>
     private volatile ILogger? _logger;
 
+    /// <summary>
+    /// The provider an automatic activation this handler starts creates its service with, set by the
+    /// same service provider factory as the logger. Read when the service is created rather than when
+    /// the subject is activated, so a subject attached while the context is still being configured
+    /// still gets the host's provider once its start runs. Volatile for the reason on <see cref="_logger"/>.
+    /// </summary>
+    private volatile IServiceProvider _serviceProvider = EmptyServiceProvider.Instance;
+
+    internal IServiceProvider ServiceProvider => _serviceProvider;
+
+    /// <param name="activateSubjectHostedServices">
+    /// Whether every <see cref="ISubjectHostedServiceFactory"/> subject is activated as it attaches.
+    /// Defaults to the <c>WithHostedServices</c> default.
+    /// </param>
+    /// <param name="trackActivations">
+    /// Whether the activations this handler runs are recorded for <see cref="TrackedActivations"/>.
+    /// </param>
+    public HostedServiceHandler(bool activateSubjectHostedServices = true, bool trackActivations = false)
+    {
+        _activateSubjectHostedServices = activateSubjectHostedServices;
+        _trackedActivations = trackActivations ? new() : null;
+    }
+
+    /// <summary>
+    /// The activation of every subject that attached to this handler's graph, published here or found
+    /// live, and of every explicit activation published while the subject was in it, possibly
+    /// including ones detached since. Empty unless the handler was created with <c>trackActivations</c>.
+    /// </summary>
+    internal IEnumerable<KeyValuePair<HostedServiceAttachment<IHostedService>, IInterceptorSubject>> TrackedActivations
+        => _trackedActivations ?? Enumerable.Empty<KeyValuePair<HostedServiceAttachment<IHostedService>, IInterceptorSubject>>();
+
+    /// <summary>Records the subject's activation when this handler tracks activations, else does nothing.</summary>
+    internal void TrackActivation(IInterceptorSubject subject, HostedServiceAttachment<IHostedService> activation)
+    {
+        if (_trackedActivations is not { } tracked
+            || !tracked.TryAdd(activation, subject)
+            || Interlocked.Decrement(ref _additionsUntilPrune) != 0)
+        {
+            return;
+        }
+
+        // An explicitly detached activation needs no teardown, so a host whose service detaches the
+        // activation of each child it replaces stays bounded. A child only dropped from the graph stays
+        // tracked, and reachable, until teardown, deliberately, so teardown can detach it. Amortized:
+        // each prune is paid for by at least as many additions as entries it leaves.
+        foreach (var entry in tracked)
+        {
+            if (entry.Key.Slot.IsDetached)
+            {
+                tracked.TryRemove(entry);
+            }
+        }
+
+        Volatile.Write(ref _additionsUntilPrune, Math.Max(MinimumPruneInterval, tracked.Count));
+    }
+
     internal void SetLogger(ILogger logger) => _logger = logger;
+
+    internal void SetServiceProvider(IServiceProvider serviceProvider) => _serviceProvider = serviceProvider;
 
     // The hooks below are test seams, null in production.
 
@@ -98,6 +171,14 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             ? hostedService.GetOrAddSubjectSlot()
             : null;
 
+        if (_activateSubjectHostedServices && subject is ISubjectHostedServiceFactory factory)
+        {
+            // Ahead of the attachments read, so the loop below starts the activation like any other
+            // attachment. Publishes only: liveness is written just below, under the lifecycle lock
+            // this runs in, and nothing here resolves a handler or blocks.
+            EnsureActivation(subject, factory);
+        }
+
         var attachments = subject.GetHostedServiceAttachments();
         if (subjectSlot is null && attachments.IsEmpty)
         {
@@ -113,9 +194,25 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             TryTakeOwnershipAndStart(subject, subjectSlot);
         }
 
+        // The activation ahead of the other attachments, whatever its position: a sibling taken
+        // first whose take the gate re-read undoes asks the activation for its signal before this
+        // handler owns it, is handed null, and its stop runs unordered.
         foreach (var attachment in attachments)
         {
-            TryTakeOwnershipAndStart(subject, ((IHostedServiceSlotAccess)attachment).Slot);
+            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            if (slot.IsActivation)
+            {
+                TryTakeOwnershipAndStart(subject, slot);
+            }
+        }
+
+        foreach (var attachment in attachments)
+        {
+            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            if (!slot.IsActivation)
+            {
+                TryTakeOwnershipAndStart(subject, slot);
+            }
         }
 
         if (_gate.IsDraining)
@@ -124,6 +221,21 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             // subject on a dead handler for the rest of that handler's life.
             _liveSubjects.TryRemove(subject, out _);
         }
+    }
+
+    /// <summary>
+    /// Publishes the subject's activation attachment unless a live one exists, and tracks whichever is
+    /// live. The service is created with the provider of the handler starting it, read at that time.
+    /// </summary>
+    private void EnsureActivation(IInterceptorSubject subject, ISubjectHostedServiceFactory factory)
+    {
+        // The read-only lookup first, and not only to spare the re-attach of an activated subject the
+        // allocation: GetOrAddActivation waits for a reservation it finds to be published, and the one
+        // flow that can reach here while it holds such a reservation itself is a context entry made
+        // from inside an explicit activation on this same thread, which this read answers without waiting.
+        var activation = subject.TryGetLiveActivation()
+            ?? subject.GetOrAddActivation(factory, serviceProvider: null, out _);
+        TrackActivation(subject, activation);
     }
 
     private void DetachSubject(IInterceptorSubject subject)
@@ -151,13 +263,25 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             _ = EnqueueStopIfOwned(subject, subjectSlot, waitFor: null, CancellationToken.None);
         }
 
+        // The activation the other stops here are ordered behind is the one in the array read above,
+        // never the one the subject's slot holds now: a stop this detach orders behind the activation
+        // must be behind a stop this detach enqueues itself. An explicit detach that resolved no
+        // handler removes the activation from the array, marks it and enqueues nothing, and a signal
+        // asked of it in between would be set by nobody.
+        HostedServiceSlot? activationSlot = null;
         foreach (var attachment in attachments)
         {
-            _ = EnqueueStopIfOwned(
-                subject,
-                ((IHostedServiceSlotAccess)attachment).Slot,
-                waitFor: subjectSlot?.GetStopToAwait(this),
-                CancellationToken.None);
+            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            if (slot.IsActivation)
+            {
+                activationSlot = slot;
+            }
+        }
+
+        foreach (var attachment in attachments)
+        {
+            var slot = ((IHostedServiceSlotAccess)attachment).Slot;
+            _ = EnqueueStopIfOwned(subject, slot, GetStopToAwait(slot, subjectSlot, activationSlot), CancellationToken.None);
         }
 
         // After the stops are enqueued and never from a body:
@@ -214,12 +338,12 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             // Undoes a take the drain's snapshot may have missed, and only one this call installed. A
             // stop rather than a bare retirement, because the start above may already be committed:
             // docs/design/hosting-service-ownership.md#why-the-ownership-decision-is-inside-the-queue-lock.
-            // An attachment's undo stop waits for its subject's stop like every other attachment stop,
-            // and the release below makes this the only stop the drain can get onto that queue. Only
-            // while still owned: the drain can finish and another handler take the slot before this
-            // runs, and every release that can take this ownership first has already enqueued a stop
-            // behind the start.
-            _ = EnqueueStopIfOwned(subject, slot, waitFor: SubjectStopToAwait(subject, slot), CancellationToken.None);
+            // An attachment's undo stop is ordered like every other attachment stop, and the release
+            // below makes this the only stop the drain can get onto that queue. Only while still
+            // owned: the drain can finish and another handler take the slot before this runs, and
+            // every release that can take this ownership first has already enqueued a stop behind
+            // the start.
+            _ = EnqueueStopIfOwned(subject, slot, GetStopToAwait(subject, slot), CancellationToken.None);
             slot.ReleaseOwnership(this);
         }
 
@@ -227,13 +351,53 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     /// <summary>
-    /// The subject stop an attachment stop enqueued now has to wait for, or null for a subject slot
-    /// and for an attachment whose subject has no stop of this handler's pending.
+    /// <see cref="GetStopToAwait(HostedServiceSlot, HostedServiceSlot?, HostedServiceSlot?)"/>
+    /// for the drain and the gate re-read's undo, which hold no attachments array: the activation is
+    /// the subject's live one.
     /// </summary>
-    private Task? SubjectStopToAwait(IInterceptorSubject subject, HostedServiceSlot slot)
-        => slot.Subject is null && subject is IHostedService
-            ? subject.TryGetSubjectSlot()?.GetStopToAwait(this)
+    /// <remarks>
+    /// Asked on an activation this handler still owns, the signal is created there and set only by a
+    /// stop that takes it, which every stop enqueued on an activation slot does, the explicit
+    /// detach's included. One routed past the signal would leave every stop ordered here parked until
+    /// the shutdown deadline. A live activation an explicit detach has removed but not yet marked is
+    /// handed out here only when a handler was resolved for that detach, which is the case for both
+    /// callers: the drain owns it, and the undo runs on a subject the handler is live for.
+    /// </remarks>
+    private Task? GetStopToAwait(IInterceptorSubject subject, HostedServiceSlot slot)
+    {
+        var subjectSlot = subject is IHostedService ? subject.TryGetSubjectSlot() : null;
+
+        // The type test first, so a subject that cannot have an activation reads no data for one, and
+        // only for a slot whose wait can be the activation's.
+        var activationSlot = slot.Subject is null && !slot.IsActivation && subject is ISubjectHostedServiceFactory
+            ? subject.TryGetLiveActivation()?.Slot
             : null;
+
+        return GetStopToAwait(slot, subjectSlot, activationSlot);
+    }
+
+    /// <summary>
+    /// The stop a stop of <paramref name="slot"/> enqueued now has to wait for, or null when there is
+    /// nothing to order it behind. A subject slot waits for nothing. An activation slot waits for
+    /// the subject's stop. Any other attachment waits for the stop of <paramref name="activationSlot"/>
+    /// and, when this handler has none pending there, for the subject's stop. Each is the stop this
+    /// handler has pending on that slot or is going to enqueue, as on
+    /// <see cref="HostedServiceSlot.GetStopToAwait"/>.
+    /// </summary>
+    private Task? GetStopToAwait(HostedServiceSlot slot, HostedServiceSlot? subjectSlot, HostedServiceSlot? activationSlot)
+    {
+        if (slot.Subject is not null)
+        {
+            return null;
+        }
+
+        if (slot.IsActivation)
+        {
+            return subjectSlot?.GetStopToAwait(this);
+        }
+
+        return activationSlot?.GetStopToAwait(this) ?? subjectSlot?.GetStopToAwait(this);
+    }
 
     private async Task RunStartAsync(
         IInterceptorSubject subject,
@@ -504,25 +668,27 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
     }
 
     /// <summary>
-    /// Enqueues an attachment's stop whoever owns its slot, for an explicit detach.
+    /// Enqueues an attachment's stop whoever owns its slot, for an explicit detach. Takes no signal:
+    /// an activation's explicit detach enqueues through <see cref="EnqueueStopIfOwned"/> first and
+    /// falls back to this only when another handler, or none, owns the slot.
     /// </summary>
     internal Task EnqueueAttachmentStop(IInterceptorSubject subject, HostedServiceSlot slot, CancellationToken cancellationToken)
         => slot.EnqueueAsync(this, CreateStopBody(subject, slot, signal: null, waitFor: null, cancellationToken));
 
     /// <summary>
     /// Enqueues a stop only while this handler still owns the slot, the two decided under one
-    /// acquisition of the queue lock. A subject slot's stop carries the slot's stop signal, chosen
-    /// with the enqueue; an attachment's stop waits for <paramref name="waitFor"/>, its subject's stop,
-    /// when there is one. Returns null when the enqueue was refused.
+    /// acquisition of the queue lock. The stop of a slot that carries a stop signal, a subject's or
+    /// an activation's, takes that signal, chosen with the enqueue; every stop waits for
+    /// <paramref name="waitFor"/> first when there is one. Returns null when the enqueue was refused.
     /// </summary>
-    private Task? EnqueueStopIfOwned(
+    internal Task? EnqueueStopIfOwned(
         IInterceptorSubject subject,
         HostedServiceSlot slot,
         Task? waitFor,
         CancellationToken cancellationToken)
-        => slot.Subject is null
-            ? slot.EnqueueIfOwnedAsync(this, CreateStopBody(subject, slot, signal: null, waitFor, cancellationToken))
-            : slot.EnqueueSubjectStopIfOwnedAsync(this, signal => CreateStopBody(subject, slot, signal, waitFor, cancellationToken));
+        => slot.CarriesStopSignal
+            ? slot.EnqueueStopWithSignalIfOwnedAsync(this, signal => CreateStopBody(subject, slot, signal, waitFor, cancellationToken))
+            : slot.EnqueueIfOwnedAsync(this, CreateStopBody(subject, slot, signal: null, waitFor, cancellationToken));
 
     private Func<Task> CreateStopBody(
         IInterceptorSubject subject,
@@ -651,22 +817,39 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             return false;
         }
 
-        // An empty transition on the same queue. Enqueuing never runs a body, so this completes only
-        // once the start enqueued ahead of it has run.
-        await slot
-            .EnqueueAsync(this, () => Task.CompletedTask)
-            .WaitAsync(cancellationToken)
-            .ConfigureAwait(false);
+        return await WaitForSlotStartAsync(slot, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Waits for the start this handler enqueued on the slot and rethrows the fault it recorded.
+    /// Returns false when nothing was started. The caller checks ownership and liveness first.
+    /// </summary>
+    internal async Task<bool> WaitForSlotStartAsync(HostedServiceSlot slot, CancellationToken cancellationToken)
+    {
+        await WaitForQueuedTransitionsAsync(slot, cancellationToken).ConfigureAwait(false);
 
         if (slot.StartFault is { } fault)
         {
-            // Captured rather than rethrown, for the reason on AttachHostedServiceAsync.
+            // Captured rather than rethrown, for the reason on ReleaseFaultedAttachmentAndThrow.
             ExceptionDispatchInfo.Throw(fault);
         }
 
         // Read at all because the guards above cannot cover a drain beginning while this wait is
         // queued behind the start: the start body then gates itself out and sets nothing.
         return slot.Current is not null;
+    }
+
+    /// <summary>
+    /// Waits for every transition already queued on the slot to have run, the start this handler
+    /// enqueued included, and reads no outcome. The token bounds the wait only.
+    /// </summary>
+    internal Task WaitForQueuedTransitionsAsync(HostedServiceSlot slot, CancellationToken cancellationToken)
+    {
+        // An empty transition on the same queue. Enqueuing never runs a body, so this completes only
+        // once the start enqueued ahead of it has run.
+        return slot
+            .EnqueueAsync(this, () => Task.CompletedTask)
+            .WaitAsync(cancellationToken);
     }
 
     internal bool IsLive(IInterceptorSubject subject) => _liveSubjects.ContainsKey(subject);
@@ -759,8 +942,9 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
         }
 
         // The same shape per owned subject as a context detach: a subject's own stop has to return
-        // before the attachments it uses are stopped and disposed underneath it. Subject stops first,
-        // so each attachment stop finds its subject's signal already chosen rather than creating it.
+        // before its activated service and the attachments it uses are stopped and disposed underneath
+        // it. Subject stops first, so each stop ordered behind one finds its signal already chosen
+        // rather than creating it.
         foreach (var (slot, subject) in snapshot)
         {
             if (slot.Subject is not null)
@@ -775,7 +959,7 @@ internal sealed class HostedServiceHandler : IHostedService, ILifecycleHandler
             {
                 // Discarded rather than collected: the count is what the drain waits on, and a stop
                 // this enqueue refused is one another handler now owns.
-                _ = EnqueueStopIfOwned(subject, slot, SubjectStopToAwait(subject, slot), cancellationToken);
+                _ = EnqueueStopIfOwned(subject, slot, GetStopToAwait(subject, slot), cancellationToken);
             }
         }
 

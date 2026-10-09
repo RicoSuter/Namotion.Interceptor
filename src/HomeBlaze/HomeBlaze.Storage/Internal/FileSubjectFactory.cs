@@ -5,6 +5,7 @@ using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 
 namespace HomeBlaze.Storage.Internal;
 
@@ -59,6 +60,8 @@ internal sealed class FileSubjectFactory
                 await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
+            // After the content loads, so the service reads it rather than an empty file.
+            subject?.ActivateHostedService(_serviceProvider);
             return subject;
         }
 
@@ -109,11 +112,13 @@ internal sealed class FileSubjectFactory
         try
         {
             // ActivatorUtilities resolves DI services + passes explicit args
-            return (IInterceptorSubject)ActivatorUtilities.CreateInstance(
+            var subject = (IInterceptorSubject)ActivatorUtilities.CreateInstance(
                 _serviceProvider,
                 type,
                 storage,   // explicit arg
                 blobPath); // explicit arg
+
+            return subject;
         }
         catch (Exception ex)
         {

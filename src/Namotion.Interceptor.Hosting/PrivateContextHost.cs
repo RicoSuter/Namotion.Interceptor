@@ -8,21 +8,30 @@ namespace Namotion.Interceptor.Hosting;
 /// <summary>
 /// Runs one subject in a private context, with property tracking, lifecycle, a hosting handler
 /// nothing else shares and whatever <see cref="IPrivateContextConfigurator.ConfigureContext"/> adds.
-/// Stopping or disposing it stops and disposes what it started and detaches the subject from the
-/// private context, so the subject and its children are plain data again.
+/// Returned by
+/// <see cref="PrivateContextHostExtensions.StartAsync{TSubject}(TSubject, CancellationToken)"/>. Stopping or
+/// disposing it stops and disposes what it started, detaches the subject from the private context and
+/// removes every activation the host ran, so the subject and its children are plain data again.
 /// </summary>
-internal sealed class PrivateContextHost : IAsyncDisposable
+public sealed class PrivateContextHost : IAsyncDisposable
 {
-    private readonly HostedServiceHandler _handler = new();
+    private readonly HostedServiceHandler _handler = new(trackActivations: true);
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger? _logger;
 
     private IInterceptorSubject? _subject;
     private IInterceptorSubjectContext? _context;
     private TaskCompletionSource? _stop;
 
-    internal PrivateContextHost(IServiceProvider serviceProvider)
+    internal PrivateContextHost(IServiceProvider? serviceProvider)
     {
-        _logger = serviceProvider.GetService(typeof(ILogger<HostedServiceHandler>)) as ILogger;
+        _serviceProvider = serviceProvider ?? EmptyServiceProvider.Instance;
+
+        // The activation the handler publishes as the subject attaches carries no provider of its own
+        // and creates its service with the handler's, and the explicit activation in StartAsync finds
+        // that activation and keeps it, so the handler's provider is the one the service gets.
+        _handler.SetServiceProvider(_serviceProvider);
+        _logger = _serviceProvider.GetService(typeof(ILogger<HostedServiceHandler>)) as ILogger;
         if (_logger is not null)
         {
             _handler.SetLogger(_logger);
@@ -31,10 +40,11 @@ internal sealed class PrivateContextHost : IAsyncDisposable
 
     /// <summary>
     /// Attaches <paramref name="subjectToAttach"/> to the private context when given, else uses the
-    /// subject <see cref="Attach"/> attached. Then opens the handler and waits for the subject's own
-    /// start when it is a hosted service. On any failure, stops the host before rethrowing, so no half
-    /// started subject is left behind. The token bounds that teardown as well, so a cancellation tears
-    /// down without waiting for a start that is still running.
+    /// subject <see cref="Attach"/> attached. Then opens the handler, waits for the subject's own start
+    /// when it is a hosted service, activates it and waits for the activated service's start. On any
+    /// failure, stops the host before rethrowing, so no half started subject is left behind. The token
+    /// bounds that teardown as well, so a cancellation tears down without waiting for a start that is
+    /// still running.
     /// </summary>
     internal async Task StartAsync(IInterceptorSubject? subjectToAttach, CancellationToken cancellationToken)
     {
@@ -52,6 +62,8 @@ internal sealed class PrivateContextHost : IAsyncDisposable
             {
                 await _handler.WaitForStartAsync(subject, cancellationToken).ConfigureAwait(false);
             }
+
+            await subject.ActivateHostedServiceAsync(_serviceProvider, _handler, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -93,6 +105,13 @@ internal sealed class PrivateContextHost : IAsyncDisposable
         // subject alone.
         _subject = subject;
 
+        // An activation an earlier host left behind would be reused, with that host's provider. No
+        // handler is reachable here, so the detach only clears the subject's data.
+        if (subject.TryGetLiveActivation() is { } stale)
+        {
+            subject.DetachHostedService(stale);
+        }
+
         // Complete before the subject joins: a lifecycle handler added afterwards never sees the
         // attach of the subjects already in the graph.
         var context = InterceptorSubjectContext
@@ -113,8 +132,8 @@ internal sealed class PrivateContextHost : IAsyncDisposable
 
     /// <summary>
     /// Stops and disposes everything the host started, then detaches the subject from the private
-    /// context. Later calls, and <see cref="DisposeAsync"/>, return the first call's task and ignore
-    /// their token.
+    /// context and removes every activation the host ran. Later calls, and
+    /// <see cref="DisposeAsync"/>, return the first call's task and ignore their token.
     /// </summary>
     /// <remarks>
     /// The token bounds the wait for the services to stop. Once it expires the task still completes
@@ -163,10 +182,47 @@ internal sealed class PrivateContextHost : IAsyncDisposable
         }
         finally
         {
-            if (_context is not null)
+            try
             {
-                _subject?.Context.RemoveFallbackContext(_context);
+                if (_context is not null)
+                {
+                    _subject?.Context.RemoveFallbackContext(_context);
+                }
+            }
+            finally
+            {
+                DetachActivations();
             }
         }
     }
+
+    /// <summary>
+    /// Detaches every activation the host ran, the subject's and those of its children, so a
+    /// later context that opted out of activation does not start them.
+    /// </summary>
+    private void DetachActivations()
+    {
+        // After the fallback removal, which takes the whole subtree out of the private graph, so each
+        // detach only clears data: the drain has already stopped and disposed the instances, or queued
+        // the stop that will. Detaching one already gone is a no-op.
+        foreach (var (activation, subject) in _handler.TrackedActivations)
+        {
+            if (IsUnhosted(subject))
+            {
+                subject.DetachHostedService(activation);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether no hosting handler is reachable from the subject. A child that moved into another
+    /// hosting graph while this host ran keeps its activation and keeps running there after this host
+    /// stops, whether or not that graph activates automatically, because that host now runs it.
+    /// </summary>
+    /// <remarks>
+    /// A child moving at the very moment of teardown can be read as unhosted and reach the new host
+    /// without a service, the same class of misuse as two concurrent starts of one subject.
+    /// </remarks>
+    private static bool IsUnhosted(IInterceptorSubject subject)
+        => subject.Context.GetServices<HostedServiceHandler>().IsEmpty;
 }

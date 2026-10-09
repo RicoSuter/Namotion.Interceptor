@@ -29,7 +29,7 @@ public class ConfigurableSubjectSerializer
         _serviceProvider = serviceProvider;
         _options = new JsonSerializerOptions
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider),
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -89,6 +89,15 @@ public class ConfigurableSubjectSerializer
         }
 
         PopulateConfigurationProperties(subject, type, root);
+
+        // The root is constructed here rather than by the JSON resolver, which activates the nested
+        // subjects. After configuration, so the service the activation creates reads configured values.
+        // Do not reuse this to build subjects mirrored from another instance: they must not run a service.
+        if (subject is IInterceptorSubject interceptorSubject)
+        {
+            interceptorSubject.ActivateHostedService(_serviceProvider);
+        }
+
         return subject;
     }
 

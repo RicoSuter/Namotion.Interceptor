@@ -2,6 +2,7 @@ namespace Namotion.Interceptor.Hosting;
 
 /// <summary>
 /// Adds what a subject needs to the context it runs in when it runs in a private context, through
+/// <see cref="PrivateContextHostExtensions.StartAsync{TSubject}(TSubject, CancellationToken)"/>, or through
 /// <c>AddSubject</c> or <c>AddKeyedSubject</c> without a context resolver. Never called for a shared
 /// context: whoever owns it decides what it contains.
 /// </summary>

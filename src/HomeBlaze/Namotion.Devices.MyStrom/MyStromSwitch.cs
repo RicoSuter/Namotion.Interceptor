@@ -1,15 +1,16 @@
 using System.ComponentModel;
-using System.Net.Http.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Abstractions.Networking;
 using HomeBlaze.Abstractions.Sensors;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.MyStrom.Model;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Devices.MyStrom;
@@ -17,7 +18,7 @@ namespace Namotion.Devices.MyStrom;
 [Category("Devices")]
 [Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
 [InterceptorSubject]
-public partial class MyStromSwitch : BackgroundService,
+public partial class MyStromSwitch :
     IConfigurable,
     IMonitoredService,
     ITitleProvider,
@@ -27,13 +28,16 @@ public partial class MyStromSwitch : BackgroundService,
     IPowerRelay,
     IPowerMeter,
     ITemperatureSensor,
-    INetworkAdapter
+    INetworkAdapter,
+    ISubjectHostedServiceFactory
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<MyStromSwitch> _logger;
-    private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
+    // Waited on by the poller. A subject nobody activated has no waiter.
+    internal readonly SemaphoreSlim ConfigurationChanged = new(0, 1);
 
-    private MyStromSwitchInformation? _information;
+    private MyStromPoller? _activeService;
+
+    // A field, because the generator registers every property, internal ones too, as subject data.
+    internal MyStromSwitchInformation? Information;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -96,27 +100,27 @@ public partial class MyStromSwitch : BackgroundService,
 
     [Derived]
     [State]
-    public string? MacAddress => _information?.Mac;
+    public string? MacAddress => Information?.Mac;
 
     [Derived]
     [State]
-    public string? IpAddress => _information?.Ip;
+    public string? IpAddress => Information?.Ip;
 
     [Derived]
     [State]
-    public string? SubnetMask => _information?.Mask;
+    public string? SubnetMask => Information?.Mask;
 
     [Derived]
     [State]
-    public string? Gateway => _information?.Gateway;
+    public string? Gateway => Information?.Gateway;
 
     [Derived]
     [State(Position = 401)]
-    public string? DeviceType => _information?.Type;
+    public string? DeviceType => Information?.Type;
 
     [Derived]
     [State(Position = 402)]
-    public string? FirmwareVersion => _information?.Version;
+    public string? FirmwareVersion => Information?.Version;
 
     public bool? IsWireless => true;
     public int? SignalStrength => null;
@@ -129,11 +133,8 @@ public partial class MyStromSwitch : BackgroundService,
     [PropertyAttribute("TurnOff", KnownAttributes.IsEnabled)]
     public bool TurnOff_IsEnabled => IsConnected && IsOn == true && AllowTurnOff;
 
-    public MyStromSwitch(IHttpClientFactory httpClientFactory, ILogger<MyStromSwitch> logger)
+    public MyStromSwitch()
     {
-        _httpClientFactory = httpClientFactory;
-        _logger = logger;
-
         Name = string.Empty;
         HostAddress = null;
         AllowTurnOff = true;
@@ -152,159 +153,33 @@ public partial class MyStromSwitch : BackgroundService,
     }
 
     [Operation(Title = "Turn On", Icon = "PowerSettingsNew", Position = 1)]
-    public async Task TurnOnAsync(CancellationToken cancellationToken)
-    {
-        using var client = _httpClientFactory.CreateClient();
-        await client.GetAsync($"http://{HostAddress}/relay?state=1", cancellationToken);
-        await RefreshReportAsync(client, cancellationToken);
-    }
+    public Task TurnOnAsync(CancellationToken cancellationToken)
+        => GetActiveService().SetRelayAsync(true, cancellationToken);
 
     [Operation(Title = "Turn Off", Icon = "PowerOff", Position = 2)]
-    public async Task TurnOffAsync(CancellationToken cancellationToken)
-    {
-        if (!AllowTurnOff)
-            return;
-
-        using var client = _httpClientFactory.CreateClient();
-        await client.GetAsync($"http://{HostAddress}/relay?state=0", cancellationToken);
-        await RefreshReportAsync(client, cancellationToken);
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            if (string.IsNullOrEmpty(HostAddress))
-            {
-                Status = ServiceStatus.Stopped;
-                StatusMessage = "No IP address configured";
-                try
-                {
-                    await _configChangedSignal.WaitAsync(stoppingToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                continue;
-            }
-
-            try
-            {
-                Status = ServiceStatus.Starting;
-                StatusMessage = "Connecting...";
-
-                using var client = _httpClientFactory.CreateClient();
-                await FetchInformationAsync(client, stoppingToken);
-
-                Status = ServiceStatus.Running;
-                StatusMessage = null;
-                IsConnected = true;
-
-                await RunPollingLoopAsync(client, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                _logger.LogError(exception, "MyStrom switch {HostAddress} connection failed", HostAddress);
-                IsConnected = false;
-                Status = ServiceStatus.Error;
-                StatusMessage = exception.Message;
-                IsOn = null;
-                MeasuredPower = null;
-                Temperature = null;
-
-                await Task.Delay(RetryInterval, stoppingToken);
-            }
-        }
-
-        Status = ServiceStatus.Stopped;
-        StatusMessage = null;
-    }
-
-    private async Task RunPollingLoopAsync(HttpClient client, CancellationToken stoppingToken)
-    {
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await RefreshReportAsync(client, stoppingToken);
-                await RefreshTemperatureAsync(client, stoppingToken);
-                LastUpdated = DateTimeOffset.UtcNow;
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                _logger.LogWarning(exception, "MyStrom switch {HostAddress} poll failed", HostAddress);
-                IsConnected = false;
-                Status = ServiceStatus.Error;
-                StatusMessage = exception.Message;
-                return; // Exit polling loop to trigger reconnect
-            }
-
-            try
-            {
-                var signaled = await _configChangedSignal.WaitAsync(PollingInterval, stoppingToken);
-                if (signaled)
-                {
-                    _information = null;
-                    return; // Exit polling loop to reinitialize
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-        }
-    }
-
-    private async Task FetchInformationAsync(HttpClient client, CancellationToken cancellationToken)
-    {
-        var response = await client.GetAsync($"http://{HostAddress}/info", cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        _information = await response.Content.ReadFromJsonAsync<MyStromSwitchInformation>(cancellationToken);
-    }
-
-    private async Task RefreshReportAsync(HttpClient client, CancellationToken cancellationToken)
-    {
-        var response = await client.GetAsync($"http://{HostAddress}/report", cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var report = await response.Content.ReadFromJsonAsync<MyStromSwitchReport>(cancellationToken);
-        if (report != null)
-        {
-            IsOn = report.IsRelayOn;
-            MeasuredPower = Math.Round(report.Power, 1);
-            TotalImportedEnergy = Math.Round(report.EnergySinceBoot / 3600m, 2);
-            Uptime = TimeSpan.FromSeconds(report.TimeSinceBoot);
-            IsConnected = true;
-        }
-    }
-
-    private async Task RefreshTemperatureAsync(HttpClient client, CancellationToken cancellationToken)
-    {
-        var response = await client.GetAsync($"http://{HostAddress}/api/v1/temperature", cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var temperature = await response.Content.ReadFromJsonAsync<MyStromSwitchTemperature>(cancellationToken);
-        if (temperature != null)
-        {
-            Temperature = Math.Round(temperature.Compensated, 2);
-        }
-    }
+    public Task TurnOffAsync(CancellationToken cancellationToken)
+        => AllowTurnOff ? GetActiveService().SetRelayAsync(false, cancellationToken) : Task.CompletedTask;
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
     {
-        try { _configChangedSignal.Release(); }
+        try { ConfigurationChanged.Release(); }
         catch (SemaphoreFullException) { }
 
         return Task.CompletedTask;
     }
+
+    IHostedService ISubjectHostedServiceFactory.CreateHostedService(IServiceProvider serviceProvider)
+        => new MyStromPoller(this,
+            serviceProvider.GetService<IHttpClientFactory>(),
+            serviceProvider.GetService<ILogger<MyStromPoller>>());
+
+    internal void SetActiveService(MyStromPoller service) => Volatile.Write(ref _activeService, service);
+
+    // Compare and exchange, so a poller that finishes after its successor started does not clear it.
+    internal void ClearActiveService(MyStromPoller service) => Interlocked.CompareExchange(ref _activeService, null, service);
+
+    private MyStromPoller GetActiveService()
+        => Volatile.Read(ref _activeService)
+            ?? throw new InvalidOperationException(
+                "The switch is not running. Start it, or register it with AddMyStromSwitch, before invoking an operation.");
 }
