@@ -14,8 +14,10 @@ public partial class Boiler
 
     public partial bool HeaterOn { get; set; }
 
+    #region IsHot
     [Derived]
     public bool IsHot => Temperature >= TargetTemperature - 1;
+    #endregion
 
     public Boiler()
     {

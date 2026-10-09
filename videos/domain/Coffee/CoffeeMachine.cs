@@ -1,4 +1,6 @@
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Coffee;
 
@@ -70,6 +72,28 @@ public partial class CoffeeMachine
         ActiveRecipeName = recipe.Name;
         Boiler.TargetTemperature = recipe.Temperature;
         Pump.IsRunning = true;
+    }
+    #endregion
+
+    #region BrewAsync
+    public async Task BrewAsync(string recipeName, CancellationToken cancellationToken = default)
+    {
+        var context = ((IInterceptorSubject)this).Context;
+        using var transaction = await context.BeginTransactionAsync(
+            TransactionFailureHandling.Rollback, cancellationToken: cancellationToken);
+
+        if (!IsReady)
+        {
+            throw new InvalidOperationException($"The machine is not ready: {Status}.");
+        }
+
+        var recipe = Recipes[recipeName];
+        State = CoffeeMachineState.Brewing;
+        ActiveRecipeName = recipe.Name;
+        Boiler.TargetTemperature = recipe.Temperature;
+        Pump.IsRunning = true;
+
+        await transaction.CommitAsync(cancellationToken);
     }
     #endregion
 }
