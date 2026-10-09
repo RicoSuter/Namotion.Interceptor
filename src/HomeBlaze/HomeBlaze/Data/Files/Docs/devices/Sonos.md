@@ -11,7 +11,7 @@ One `SonosSystem` represents a Sonos household. It finds the speakers itself, sh
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SeedHost` | string | null | Any speaker of the household as `host` or `host:port`. Empty tries the speakers known from the last run, then SSDP discovery. |
+| `SeedHost` | string | null | Any speaker of the household as `host` or `host:port`. Empty tries the speakers found since HomeBlaze started, then SSDP discovery. |
 | `EventCallbackHost` | string | null | The address speakers send events to. Empty detects the local address that routes to the seed speaker. |
 | `EventPort` | int | 6329 | The port of the event listener. |
 | `PollingInterval` | TimeSpan | 30 seconds | How often topology, state and favorites are reconciled. |
@@ -19,7 +19,7 @@ One `SonosSystem` represents a Sonos household. It finds the speakers itself, sh
 
 ### Discovery
 
-The system needs one reachable speaker. It reads the household topology from that speaker, which lists every room, satellite and group with their addresses. The seed speaker is chosen in this order: `SeedHost` if set, otherwise each speaker known from the last run in turn (each gets a 2 second probe, speakers still in the topology first), otherwise a search over SSDP multicast. SSDP does not cross Docker bridge networks, so set `SeedHost` to any speaker IP in that case.
+The system needs one reachable speaker. It reads the household topology from that speaker, which lists every room, satellite and group with their addresses. The seed speaker is chosen in this order: `SeedHost` if set, otherwise each speaker found since HomeBlaze started in turn (each gets a 2 second probe, speakers still in the topology first), otherwise a search over SSDP multicast. The known speakers are only kept in memory and are used when the connection is re-established, so after a restart without `SeedHost` discovery starts with SSDP. SSDP does not cross Docker bridge networks, so set `SeedHost` to any speaker IP in that case.
 
 ### Events
 
@@ -27,7 +27,7 @@ Speakers push changes to `http://<EventCallbackHost>:<EventPort>/event/...`. The
 
 - Under Docker host networking the detected address works. Under bridge networking it is the container address, which speakers cannot reach: set `EventCallbackHost` to the host IP and publish `EventPort`.
 - Open `EventPort` in the host firewall.
-- If the callback port cannot be bound (it is taken, or on Windows there is no URL ACL), or no local IPv4 address routes to the speaker, the system runs on polling alone. It does the same when no subscription succeeds. `AreEventsActive` is then false, `ActiveEventCallbackHost` is empty and the widgets show "Events: polling only". Spotify Connect track details are only delivered through events, so they stay empty in that mode.
+- If the callback port cannot be bound (it is taken, or on Windows there is no URL ACL), or no local IPv4 address routes to the speaker, the system runs on polling alone. It does the same when the listener starts but no subscription succeeds. `AreEventsActive` is false in all these cases and the widgets show "Events: polling only". `ActiveEventCallbackHost` is empty when the listener could not start or no local address was found, and keeps the callback host when the listener started but no subscription succeeded. Spotify Connect track details are only delivered through events, so they stay empty in that mode.
 
 ## Subjects
 
@@ -70,7 +70,7 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 | Operation | Description |
 |-----------|-------------|
 | `Refresh` | Reconciles now instead of at the next poll |
-| `GroupAll` | Groups every room with the given room |
+| `GroupAll` | Groups every connected room with the given room |
 | `UngroupAll` | Makes every room standalone |
 
 ## State Properties
@@ -79,14 +79,17 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 
 | Property | Description |
 |----------|-------------|
+| `Uuid`, `RoomName` | The RINCON id and the room name |
 | `TransportState`, `IsPlaying`, `Source` | Playback state and where the audio comes from (TV, line-in, Spotify Connect, AirPlay, radio, queue) |
 | `Volume`, `IsMuted` | Volume 0 to 1 and mute |
 | `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackImageUri`, `CurrentTrackUri`, `CurrentTrackPosition`, `CurrentTrackDuration` | The current track |
 | `Shuffle`, `Repeat`, `SleepTimerRemaining` | Play mode and sleep timer of the group |
 | `Bass`, `Treble`, `Loudness`, `NightMode`, `SpeechEnhancement` | Sound settings; night mode and speech enhancement only on home theater players |
 | `GroupCoordinatorUuid`, `IsGroupCoordinator` | Group membership |
+| `IsHomeTheater`, `HasLineIn` | Whether the player is a home theater player and whether it has a line-in |
+| `Satellites` | The bonded surround, subwoofer or stereo partner speakers of the room |
 | `BatteryLevel`, `IsCharging` | Battery of portable speakers |
-| `Model`, `ProductCode`, `SerialNumber`, `HardwareRevision`, `SoftwareVersion`, `IpAddress`, `MacAddress`, `IsWireless`, `IsConnected` | Identity, network and connection |
+| `Model`, `ProductCode`, `SerialNumber`, `HardwareRevision`, `SoftwareVersion`, `IpAddress`, `MacAddress`, `IsWireless`, `IsConnected`, `StatusMessage` | Identity, network and connection |
 
 ### SonosGroup
 
@@ -104,6 +107,13 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 - Notification clips use the Sonos audio clip API, which needs S2 speakers.
 - Favorites of type "shortcut" (for example Sonos Radio station shortcuts) carry no URI and are not listed; see the follow-ups.
 - A speaker that changes role (a standalone speaker becomes a surround or stereo partner, or a subwoofer moves to another room) keeps its old subject as an offline entry until restart.
+
+## Troubleshooting
+
+- **No Sonos speaker found:** discovery uses SSDP multicast, which does not cross VLANs or Docker bridge networks and can be blocked by a firewall. Set `SeedHost` to the IP of any speaker.
+- **"Events: polling only":** the speakers must be able to reach `EventPort` on the HomeBlaze host, so allow inbound TCP on that port from the speakers. Under Docker bridge networking set `EventCallbackHost` to the host IP and publish `EventPort`; Docker host networking works with the detected address. State still updates through polling.
+- **Events never start on Windows:** the listener binds all interfaces (`+`), which needs a URL ACL for the port or administrator rights. Without it the system runs on polling only.
+- **Night mode and speech enhancement do nothing or stay empty:** they exist only on home theater players (`IsHomeTheater`); the operations are disabled on other speakers.
 
 ## Follow-ups
 
