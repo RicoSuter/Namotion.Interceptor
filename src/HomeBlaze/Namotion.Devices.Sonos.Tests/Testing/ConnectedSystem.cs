@@ -23,20 +23,29 @@ internal sealed class ConnectedSystem : IAsyncDisposable
 
     internal SonosPlayer Player { get; }
 
-    internal static SonosSystem CreateSystem(string seedHost, int? eventPort = null, ILogger<SonosSystem>? logger = null, TimeProvider? clock = null) =>
-        new(new TestHttpClientFactory(), logger ?? NullLogger<SonosSystem>.Instance)
+    internal static SonosSystem CreateSystem(
+        string seedHost,
+        int? eventPort = null,
+        ILogger<SonosSystem>? logger = null,
+        TimeProvider? clock = null,
+        Action<SonosSystem>? configure = null)
+    {
+        var system = new SonosSystem(new TestHttpClientFactory(), logger ?? NullLogger<SonosSystem>.Instance)
         {
             Clock = clock ?? TimeProvider.System,
             SeedHost = seedHost,
             EventCallbackHost = "127.0.0.1",
             EventListenHost = "127.0.0.1",
-            EventPort = eventPort ?? LoopbackHttpServer.GetFreePort(),
+            EventPort = eventPort ?? LoopbackPorts.GetFreePort(),
             RetryInterval = TimeSpan.FromSeconds(1),
             MinimumInterval = TimeSpan.FromMilliseconds(100),
 
             // Tests never search the real network for speakers.
             DiscoverSpeakerAsync = _ => Task.FromResult<Uri?>(null)
         };
+        configure?.Invoke(system);
+        return system;
+    }
 
     internal static async Task<ConnectedSystem> StartAsync(
         FakeSonosSpeaker speaker,
@@ -48,12 +57,7 @@ internal sealed class ConnectedSystem : IAsyncDisposable
     {
         speaker.RespondAsIdlePlayer(uuid, room);
         var system = await StartWithEventsAsync(
-            () =>
-            {
-                var system = CreateSystem(speaker.Host, logger: logger, clock: clock);
-                configure?.Invoke(system);
-                return system;
-            },
+            () => CreateSystem(speaker.Host, logger: logger, clock: clock, configure: configure),
             system => system.IsConnected && system.Players.TryGetValue(uuid, out var player) && player.Model is not null && system.AreEventsActive,
             "The system should connect to the fake speaker and subscribe to its events.");
 
@@ -103,17 +107,16 @@ internal sealed class ConnectedSystem : IAsyncDisposable
     /// </summary>
     internal static IAsyncDisposable Own(SonosSystem system) => new SystemScope(system);
 
-    private static async Task StopAsync(SonosSystem system)
+    /// <summary>
+    /// Stops and disposes a system.
+    /// </summary>
+    internal static async Task StopAsync(SonosSystem system)
     {
         await system.StopAsync(CancellationToken.None);
         system.Dispose();
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await System.StopAsync(CancellationToken.None);
-        System.Dispose();
-    }
+    public ValueTask DisposeAsync() => new(StopAsync(System));
 
     private sealed class SystemScope(SonosSystem system) : IAsyncDisposable
     {

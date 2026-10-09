@@ -128,7 +128,7 @@ public class SonosSystemRuntimeTests
     public async Task WhenSeedHostIsUnreachable_ThenStatusIsError()
     {
         // Arrange
-        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}");
+        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackPorts.GetFreePort()}");
         await using var owner = ConnectedSystem.Own(system);
 
         // Act
@@ -149,7 +149,7 @@ public class SonosSystemRuntimeTests
         var logger = new RecordingLogger<SonosSystem>();
         await using var speaker = new FakeSonosSpeaker();
         await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger);
-        var deadHost = $"127.0.0.1:{LoopbackHttpServer.GetFreePort()}";
+        var deadHost = $"127.0.0.1:{LoopbackPorts.GetFreePort()}";
 
         // Act
         connected.System.SeedHost = deadHost;
@@ -169,7 +169,7 @@ public class SonosSystemRuntimeTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}");
+        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackPorts.GetFreePort()}");
         system.DiscoverSpeakerAsync = _ => Task.FromResult<Uri?>(speaker.BaseUri);
         await using var owner = ConnectedSystem.Own(system);
 
@@ -188,7 +188,7 @@ public class SonosSystemRuntimeTests
     {
         // Arrange
         var logger = new RecordingLogger<SonosSystem>();
-        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}", logger: logger);
+        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackPorts.GetFreePort()}", logger: logger);
         await using var owner = ConnectedSystem.Own(system);
 
         // Act

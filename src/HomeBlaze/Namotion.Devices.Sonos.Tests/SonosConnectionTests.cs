@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
+using Namotion.Interceptor.Testing;
 using Sonos.Base.Services;
 using Xunit;
 
@@ -424,7 +425,7 @@ public class SonosConnectionTests
         // Arrange
         using var httpClient = new HttpClient();
         using var connection = new SonosConnection(
-            new Uri($"http://127.0.0.1:{LoopbackHttpServer.GetFreePort()}/"), Uuid, httpClient);
+            new Uri($"http://127.0.0.1:{LoopbackPorts.GetFreePort()}/"), Uuid, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<HttpRequestException>(() => connection.SetVolumeAsync(50, CancellationToken.None));

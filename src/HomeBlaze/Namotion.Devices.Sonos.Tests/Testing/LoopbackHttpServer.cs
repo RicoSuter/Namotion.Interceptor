@@ -1,5 +1,5 @@
 using System.Net;
-using System.Net.Sockets;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Devices.Sonos.Tests.Testing;
 
@@ -8,8 +8,6 @@ namespace Namotion.Devices.Sonos.Tests.Testing;
 /// </summary>
 internal sealed class LoopbackHttpServer : IAsyncDisposable
 {
-    private const int MaxStartAttempts = 5;
-
     private readonly HttpListener _listener;
     private readonly Func<HttpListenerContext, Task> _handler;
     private readonly Task _loop;
@@ -19,7 +17,7 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
     {
         _handler = handler;
         HttpListener? listener = null;
-        Port = StartOnFreePort(port =>
+        Port = LoopbackPorts.StartOnFreePort(port =>
         {
             var candidate = new HttpListener();
             candidate.Prefixes.Add($"http://127.0.0.1:{port}/");
@@ -42,36 +40,6 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
     internal int Port { get; }
 
     internal Uri BaseUri => new($"http://127.0.0.1:{Port}/");
-
-    internal static int GetFreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    /// <summary>
-    /// Starts something on a free port and returns the port. Another process can take a free port before it is bound,
-    /// so a start that fails with <see cref="HttpListenerException"/> is retried on another port.
-    /// </summary>
-    internal static int StartOnFreePort(Action<int> start)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            var port = GetFreePort();
-            try
-            {
-                start(port);
-                return port;
-            }
-            catch (HttpListenerException) when (attempt < MaxStartAttempts)
-            {
-                // Taken in between; try another port.
-            }
-        }
-    }
 
     private async Task RunAsync()
     {

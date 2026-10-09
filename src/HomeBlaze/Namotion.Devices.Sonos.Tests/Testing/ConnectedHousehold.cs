@@ -50,12 +50,7 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
             }
 
             var system = await ConnectedSystem.StartWithEventsAsync(
-                () =>
-                {
-                    var system = ConnectedSystem.CreateSystem(kitchen.Host, logger: logger);
-                    configure?.Invoke(system);
-                    return system;
-                },
+                () => ConnectedSystem.CreateSystem(kitchen.Host, logger: logger, configure: configure),
                 system => system.IsConnected &&
                           system.AreEventsActive &&
                           system.Players.Count == 2 &&
@@ -77,8 +72,7 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await System.StopAsync(CancellationToken.None);
-        System.Dispose();
+        await ConnectedSystem.StopAsync(System);
         await Kitchen.DisposeAsync();
         await Office.DisposeAsync();
     }

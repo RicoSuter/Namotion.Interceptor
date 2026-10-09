@@ -81,7 +81,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// <summary>
     /// The SID this speaker grants for the event path, unique per speaker as on real ones.
     /// </summary>
-    internal string SidFor(string eventPath) => $"uuid:{_server.Port}-{eventPath.Trim('/').Replace('/', '-')}";
+    private string SidFor(string eventPath) => $"uuid:{_server.Port}-{eventPath.Trim('/').Replace('/', '-')}";
 
     internal string? GetCallback(string eventPath) =>
         _callbacks.TryGetValue(eventPath, out var callback) ? callback : null;
