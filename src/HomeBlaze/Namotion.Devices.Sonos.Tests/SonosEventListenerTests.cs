@@ -12,6 +12,7 @@ namespace Namotion.Devices.Sonos.Tests;
 public class SonosEventListenerTests
 {
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan NegativeCheckDuration = TimeSpan.FromMilliseconds(300);
 
     [Fact]
     public async Task WhenSubscribing_ThenSendsCallbackNotificationTypeAndTimeout()
@@ -342,6 +343,144 @@ public class SonosEventListenerTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
         Assert.Equal("uuid:sub-1", await unsubscribeSid.Task.WaitAsync(WaitTimeout));
         Assert.Empty(listener.Subscriptions);
+    }
+
+    [Fact]
+    public async Task WhenNotifyDeclaresNoLengthAndBodyIsOversized_ThenReturnsRequestEntityTooLarge()
+    {
+        // Arrange
+        await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
+        using var httpClient = new HttpClient();
+        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        var port = LoopbackHttpServer.GetFreePort();
+        listener.Start("127.0.0.1", port, listenHost: "127.0.0.1");
+        var handlerCalls = 0;
+        await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => handlerCalls++, CancellationToken.None);
+
+        // Act
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        await using var stream = client.GetStream();
+        var headerBytes = Encoding.ASCII.GetBytes(
+            $"NOTIFY /event/RINCON_X/AVTransport HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nSID: uuid:sub-1\r\nNT: upnp:event\r\nNTS: upnp:propchange\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+        var chunkSize = 1024 * 1024 + 1;
+        var chunkBytes = new byte[chunkSize];
+        Array.Fill(chunkBytes, (byte)'a');
+        await stream.WriteAsync(headerBytes);
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"{chunkSize:X}\r\n"));
+        await stream.WriteAsync(chunkBytes);
+        await stream.WriteAsync(Encoding.ASCII.GetBytes("\r\n0\r\n\r\n"));
+        using var reader = new StreamReader(stream, Encoding.ASCII);
+        var statusLine = await reader.ReadLineAsync().WaitAsync(WaitTimeout);
+
+        // Assert
+        Assert.Equal("HTTP/1.1 413 Request Entity Too Large", statusLine);
+        Assert.Equal(0, handlerCalls);
+    }
+
+    [Fact]
+    public async Task WhenStartedAndDisposed_ThenIsListeningFollowsTheLifecycle()
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        var wasListeningBeforeStart = listener.IsListening;
+
+        // Act
+        listener.Start("127.0.0.1", LoopbackHttpServer.GetFreePort(), listenHost: "127.0.0.1");
+        var wasListeningAfterStart = listener.IsListening;
+        await listener.DisposeAsync();
+
+        // Assert
+        Assert.False(wasListeningBeforeStart);
+        Assert.True(wasListeningAfterStart);
+        Assert.False(listener.IsListening);
+    }
+
+    [Fact]
+    public async Task WhenUsedAfterDispose_ThenStartAndSubscribeThrowObjectDisposed()
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        listener.Start("127.0.0.1", LoopbackHttpServer.GetFreePort(), listenHost: "127.0.0.1");
+        await listener.DisposeAsync();
+
+        // Act & Assert
+        Assert.Throws<ObjectDisposedException>(() =>
+            listener.Start("127.0.0.1", LoopbackHttpServer.GetFreePort(), listenHost: "127.0.0.1"));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            listener.SubscribeAsync("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1/Event"), _ => { }, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WhenPortIsTaken_ThenStartThrowsAndTheListenerCanStartOnAnotherPort()
+    {
+        // Arrange
+        using var httpClient = new HttpClient();
+        await using var first = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var second = new SonosEventListener(httpClient, NullLogger.Instance);
+        var port = LoopbackHttpServer.GetFreePort();
+        first.Start("127.0.0.1", port, listenHost: "127.0.0.1");
+
+        // Act & Assert
+        Assert.Throws<HttpListenerException>(() => second.Start("127.0.0.1", port, listenHost: "127.0.0.1"));
+        second.Start("127.0.0.1", LoopbackHttpServer.GetFreePort(), listenHost: "127.0.0.1");
+        Assert.True(second.IsListening);
+    }
+
+    [Fact]
+    public async Task WhenHandlerIsRunning_ThenDisposeWaitsForItToFinish()
+    {
+        // Arrange
+        await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
+        using var httpClient = new HttpClient();
+        var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        var port = LoopbackHttpServer.GetFreePort();
+        listener.Start("127.0.0.1", port, listenHost: "127.0.0.1");
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHandler = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handlerFinished = false;
+        await listener.SubscribeAsync(
+            "RINCON_X/AVTransport",
+            new Uri(speaker.BaseUri, "/Event"),
+            _ =>
+            {
+                handlerStarted.SetResult();
+                releaseHandler.Task.Wait(WaitTimeout);
+                handlerFinished = true;
+            },
+            CancellationToken.None);
+        var notifyTask = SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
+        await handlerStarted.Task.WaitAsync(WaitTimeout);
+
+        // Act
+        var disposeTask = listener.DisposeAsync().AsTask();
+        // A negative check has to observe for some time; a correct implementation never fails it.
+        var completedWhileHandlerRuns = true;
+        try
+        {
+            await disposeTask.WaitAsync(NegativeCheckDuration);
+        }
+        catch (TimeoutException)
+        {
+            completedWhileHandlerRuns = false;
+        }
+
+        releaseHandler.SetResult();
+        await disposeTask.WaitAsync(WaitTimeout);
+
+        // Assert
+        Assert.False(completedWhileHandlerRuns);
+        Assert.True(handlerFinished);
+        try
+        {
+            await notifyTask.WaitAsync(WaitTimeout);
+        }
+        catch (HttpRequestException)
+        {
+            // Disposing closes the connection, so the speaker side may see it reset.
+        }
     }
 
     private static Task RespondWithSid(HttpListenerContext context, string sid)

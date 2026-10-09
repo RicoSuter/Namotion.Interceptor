@@ -21,6 +21,11 @@ internal sealed class SonosEventSubscription
 
     internal Uri EventUri { get; }
 
+    /// <summary>
+    /// Serializes recording the SID against forgetting the subscription.
+    /// </summary>
+    internal object SyncRoot { get; } = new();
+
     internal Action<string> Handler { get; }
 
     /// <summary>

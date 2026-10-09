@@ -24,6 +24,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private string? _callbackBaseUri;
     private volatile bool _disposing;
     private volatile bool _acceptFailed;
+    private int _inFlightHandlers;
+    private readonly TaskCompletionSource _handlersDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     internal SonosEventListener(HttpClient httpClient, ILogger logger)
     {
@@ -36,27 +38,43 @@ internal sealed class SonosEventListener : IAsyncDisposable
     internal IReadOnlyCollection<SonosEventSubscription> Subscriptions => _subscriptionsByKey.Values.ToArray();
 
     /// <summary>
-    /// Starts listening. Throws <see cref="HttpListenerException"/> when the port is taken or cannot be bound.
+    /// Starts listening. Throws <see cref="HttpListenerException"/> when the port is taken or cannot be bound,
+    /// <see cref="InvalidOperationException"/> when already started and <see cref="ObjectDisposedException"/> after disposal.
     /// </summary>
     internal void Start(string callbackHost, int port, string listenHost = "+")
     {
+        ObjectDisposedException.ThrowIf(_disposing, this);
         if (_listener is not null)
         {
             throw new InvalidOperationException("The Sonos event listener is already started.");
         }
 
         var listener = new HttpListener();
-        listener.Prefixes.Add($"http://{listenHost}:{port}/");
-        listener.Start();
+        try
+        {
+            listener.Prefixes.Add($"http://{listenHost}:{port}/");
+            listener.Start();
+        }
+        catch
+        {
+            listener.Close();
+            throw;
+        }
 
         _listener = listener;
         _callbackBaseUri = $"http://{callbackHost}:{port}{EventPathPrefix}";
         _acceptLoop = AcceptLoopAsync(listener);
     }
 
+    /// <summary>
+    /// Subscribes to the events of a service. Throws <see cref="InvalidOperationException"/> when the key is already
+    /// subscribed or the listener is not started, and <see cref="OperationCanceledException"/> when the subscription
+    /// is unsubscribed concurrently.
+    /// </summary>
     internal async Task<SonosEventSubscription> SubscribeAsync(
         string key, Uri eventUri, Action<string> handler, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposing, this);
         if (_callbackBaseUri is null)
         {
             throw new InvalidOperationException("The Sonos event listener must be started before subscribing.");
@@ -84,14 +102,22 @@ internal sealed class SonosEventListener : IAsyncDisposable
             var sid = GetHeader(response, "SID")
                 ?? throw new InvalidOperationException($"The subscription to {eventUri} returned no SID.");
             subscription.RenewAt = DateTimeOffset.UtcNow + GetLifetime(response) / 2;
-            _subscriptionsBySid[sid] = subscription;
-            subscription.Sid = sid;
 
-            // Unsubscribed while the request was in flight: UnsubscribeAsync had no SID to send, so the speaker
-            // still holds the subscription and nothing here would renew or release it.
-            if (!_subscriptionsByKey.TryGetValue(key, out var current) || !ReferenceEquals(current, subscription))
+            // Unsubscribed while the request was in flight: Forget found no SID, so its caller sent nothing and the
+            // speaker still holds the subscription. The lock makes exactly one of the two sides own the UNSUBSCRIBE.
+            bool orphaned;
+            lock (subscription.SyncRoot)
             {
-                _subscriptionsBySid.TryRemove(new KeyValuePair<string, SonosEventSubscription>(sid, subscription));
+                subscription.Sid = sid;
+                orphaned = !_subscriptionsByKey.TryGetValue(key, out var current) || !ReferenceEquals(current, subscription);
+                if (!orphaned)
+                {
+                    _subscriptionsBySid[sid] = subscription;
+                }
+            }
+
+            if (orphaned)
+            {
                 await TryUnsubscribeOrphanAsync(eventUri, sid, cancellationToken);
                 throw new OperationCanceledException($"The Sonos event {key} was unsubscribed while subscribing.");
             }
@@ -130,8 +156,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
     internal async Task UnsubscribeAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
     {
-        Forget(subscription);
-        if (subscription.Sid is not { } sid)
+        if (Forget(subscription) is not { } sid)
         {
             return;
         }
@@ -181,37 +206,50 @@ internal sealed class SonosEventListener : IAsyncDisposable
         }
     }
 
-    private void Forget(SonosEventSubscription subscription)
+    /// <returns>The SID the speaker knows the subscription by, or null when the SUBSCRIBE response has not arrived.</returns>
+    private string? Forget(SonosEventSubscription subscription)
     {
-        _subscriptionsByKey.TryRemove(new KeyValuePair<string, SonosEventSubscription>(subscription.Key, subscription));
-        if (subscription.Sid is { } sid)
+        lock (subscription.SyncRoot)
         {
-            _subscriptionsBySid.TryRemove(new KeyValuePair<string, SonosEventSubscription>(sid, subscription));
+            _subscriptionsByKey.TryRemove(new KeyValuePair<string, SonosEventSubscription>(subscription.Key, subscription));
+            var sid = subscription.Sid;
+            if (sid is not null)
+            {
+                _subscriptionsBySid.TryRemove(new KeyValuePair<string, SonosEventSubscription>(sid, subscription));
+            }
+
+            return sid;
         }
     }
 
     private async Task AcceptLoopAsync(HttpListener listener)
     {
-        while (listener.IsListening)
+        try
         {
-            HttpListenerContext context;
-            try
+            while (listener.IsListening)
             {
-                context = await listener.GetContextAsync();
+                var context = await listener.GetContextAsync();
+                _ = HandleAsync(context);
             }
-            catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException or InvalidOperationException)
+        }
+        catch (Exception exception)
+        {
+            if (_disposing || !listener.IsListening)
             {
-                if (!_disposing && listener.IsListening)
-                {
-                    // Ending the loop is deliberate: retrying a failing listener would spin.
-                    _acceptFailed = true;
-                    _logger.LogError(exception, "The Sonos event listener stopped accepting requests.");
-                }
-
                 return;
             }
 
-            _ = HandleAsync(context);
+            // Ending the loop is deliberate: retrying a failing listener would spin.
+            _acceptFailed = true;
+            _logger.LogError(exception, "The Sonos event listener stopped accepting requests.");
+            try
+            {
+                listener.Stop();
+            }
+            catch (Exception stopException)
+            {
+                _logger.LogDebug(stopException, "Stopping the failed Sonos event listener failed.");
+            }
         }
     }
 
@@ -221,7 +259,7 @@ internal sealed class SonosEventListener : IAsyncDisposable
         HttpStatusCode status;
         try
         {
-            status = await ProcessAsync(context.Request);
+            status = await ProcessAsync(context);
         }
         catch (Exception exception)
         {
@@ -248,8 +286,9 @@ internal sealed class SonosEventListener : IAsyncDisposable
         }
     }
 
-    private async Task<HttpStatusCode> ProcessAsync(HttpListenerRequest request)
+    private async Task<HttpStatusCode> ProcessAsync(HttpListenerContext context)
     {
+        var request = context.Request;
         if (request.HttpMethod != "NOTIFY")
         {
             return HttpStatusCode.MethodNotAllowed;
@@ -262,32 +301,68 @@ internal sealed class SonosEventListener : IAsyncDisposable
             return HttpStatusCode.PreconditionFailed;
         }
 
-        if (request.ContentLength64 > MaxNotifyBodyBytes)
+        var body = request.ContentLength64 > MaxNotifyBodyBytes ? null : await ReadBodyAsync(request);
+        if (body is null)
         {
+            // Closing the connection keeps the listener from draining the unread rest of the body.
+            context.Response.KeepAlive = false;
             return HttpStatusCode.RequestEntityTooLarge;
         }
 
-        string body;
-        using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
-        {
-            body = await reader.ReadToEndAsync();
-        }
-
-        if (_disposing)
-        {
-            return HttpStatusCode.ServiceUnavailable;
-        }
-
+        // Counted before the disposing check: DisposeAsync sets the flag first and then waits for the count, so
+        // a handler is either refused here or waited for there.
+        Interlocked.Increment(ref _inFlightHandlers);
         try
         {
-            subscription.Handler(body);
+            if (_disposing)
+            {
+                return HttpStatusCode.ServiceUnavailable;
+            }
+
+            try
+            {
+                subscription.Handler(body);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Applying the Sonos event {Key} failed.", subscription.Key);
+            }
+
+            return HttpStatusCode.OK;
         }
-        catch (Exception exception)
+        finally
         {
-            _logger.LogWarning(exception, "Applying the Sonos event {Key} failed.", subscription.Key);
+            if (Interlocked.Decrement(ref _inFlightHandlers) == 0 && _disposing)
+            {
+                _handlersDrained.TrySetResult();
+            }
+        }
+    }
+
+    /// <returns>The body, or null when it exceeds <see cref="MaxNotifyBodyBytes"/>. Also bounds chunked bodies, which declare no length.</returns>
+    private static async Task<string?> ReadBodyAsync(HttpListenerRequest request)
+    {
+        using var buffered = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var read = await request.InputStream.ReadAsync(buffer);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffered.Length + read > MaxNotifyBodyBytes)
+            {
+                return null;
+            }
+
+            buffered.Write(buffer, 0, read);
         }
 
-        return HttpStatusCode.OK;
+        buffered.Position = 0;
+        using var reader = new StreamReader(buffered, request.ContentEncoding);
+        return await reader.ReadToEndAsync();
     }
 
     private SonosEventSubscription? Resolve(HttpListenerRequest request)
@@ -340,6 +415,15 @@ internal sealed class SonosEventListener : IAsyncDisposable
                 await _acceptLoop;
             }
         }
+
+        // A full-fence read pairs with the Interlocked operations of the handlers: the last handler to leave
+        // signals once the flag is set, and when none is running the signal comes from here.
+        if (Interlocked.CompareExchange(ref _inFlightHandlers, 0, 0) == 0)
+        {
+            _handlersDrained.TrySetResult();
+        }
+
+        await _handlersDrained.Task;
 
         _subscriptionsByKey.Clear();
         _subscriptionsBySid.Clear();
