@@ -70,7 +70,7 @@ HomeBlaze has no login. Keep it on a trusted network or put it behind a reverse 
 
 - Raspberry Pi 3 and 4 GPIO: uncomment the `/dev/gpiomem` device in the compose file. GPIO on Raspberry Pi 5 is not supported in the container yet: Pi 5 exposes `/dev/gpiochip*` instead of `/dev/gpiomem` and needs the `libgpiod` library, which the image does not include. See [GPIO](../devices/Gpio.md#linux-dependencies) for the library requirement.
 - The Hue bridge has no IP address setting. HomeBlaze discovers it by trying the Philips cloud discovery endpoint, mDNS, SSDP and a local network scan, in that order. In Docker's default network only the cloud endpoint works, and Philips rate-limits it. For reliable discovery, run HomeBlaze with `network_mode: host` on Linux instead.
-- Host networking bypasses the compose service names: remove the `ports` section, and set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341).
+- Host networking bypasses the compose service names: remove the `ports` section, and set `ConnectionStrings__seq` to `http://localhost:5341` (Seq is published on the host at port 5341). HomeBlaze then listens directly on host port 8080; if that port is taken, for example by another HomeBlaze instance, set `ASPNETCORE_HTTP_PORTS` to a free port such as `"8090"`.
 
 ## From source
 
