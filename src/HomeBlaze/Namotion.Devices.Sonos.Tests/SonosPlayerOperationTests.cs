@@ -1,3 +1,4 @@
+using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Sonos.Base.Services;
 using Xunit;
@@ -79,6 +80,101 @@ public class SonosPlayerOperationTests
         Assert.False(player.SetNightMode_IsEnabled);
         Assert.False(player.Play_IsEnabled);
     }
+
+    [Fact]
+    public void WhenSystemIsNotConnected_ThenPlayerOperationsAreDisabled()
+    {
+        // Act
+        var player = CreateDisconnectedKitchen();
+
+        // Assert
+        Assert.All(GetPlayerOperationStates(player), state => Assert.False(state.IsEnabled, state.Name));
+        Assert.All(GetCoordinatorOperationStates(player), state => Assert.False(state.IsEnabled, state.Name));
+    }
+
+    [Fact]
+    public void WhenSystemIsConnected_ThenPlayerAndCoordinatorOperationsAreEnabled()
+    {
+        // Arrange
+        var system = SonosSystemTopologyTests.CreateSystem();
+        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+        var player = system.Players[TestFixtures.KitchenUuid];
+
+        // Act
+        system.IsConnected = true;
+
+        // Assert
+        Assert.All(GetPlayerOperationStates(player), state => Assert.True(state.IsEnabled, state.Name));
+        Assert.All(GetCoordinatorOperationStates(player), state => Assert.True(state.IsEnabled, state.Name));
+    }
+
+    [Fact]
+    public void WhenMembersCoordinatorIsOffline_ThenOnlyCoordinatorOperationsAreDisabled()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var coordinator = system.Players[TestFixtures.OfficeUuid];
+        var member = system.Players[TestFixtures.KitchenUuid];
+        Assert.All(GetCoordinatorOperationStates(member), state => Assert.True(state.IsEnabled, state.Name));
+
+        // Act
+        coordinator.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.All(GetCoordinatorOperationStates(member), state => Assert.False(state.IsEnabled, state.Name));
+        Assert.All(GetPlayerOperationStates(member), state => Assert.True(state.IsEnabled, state.Name));
+        Assert.True(member.LeaveGroup_IsEnabled);
+    }
+
+    /// <summary>
+    /// A connected household of the office coordinating a group with the kitchen.
+    /// </summary>
+    internal static SonosSystem CreateGroupedSystem()
+    {
+        var system = SonosSystemTopologyTests.CreateSystem();
+        system.ApplyTopology(ZoneGroupStateParser.Parse($"""
+            <ZoneGroupState><ZoneGroups>
+              <ZoneGroup Coordinator="{TestFixtures.OfficeUuid}" ID="{TestFixtures.OfficeUuid}:1">
+                <ZoneGroupMember UUID="{TestFixtures.OfficeUuid}" Location="http://10.0.0.116:1400/xml/device_description.xml" ZoneName="Büro" />
+                <ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="http://10.0.0.121:1400/xml/device_description.xml" ZoneName="Küche" />
+              </ZoneGroup>
+            </ZoneGroups></ZoneGroupState>
+            """));
+        system.IsConnected = true;
+        return system;
+    }
+
+    // Commands sent to the player itself. SwitchToTv, SwitchToLineIn, SetNightMode and SetSpeechEnhancement also
+    // need a capability the fixture players lack, and Seek needs a track duration, so they are covered elsewhere.
+    private static (string Name, bool IsEnabled)[] GetPlayerOperationStates(SonosPlayer player) =>
+    [
+        (nameof(SonosPlayer.SetVolume_IsEnabled), player.SetVolume_IsEnabled),
+        (nameof(SonosPlayer.ChangeVolume_IsEnabled), player.ChangeVolume_IsEnabled),
+        (nameof(SonosPlayer.RampVolume_IsEnabled), player.RampVolume_IsEnabled),
+        (nameof(SonosPlayer.Mute_IsEnabled), player.Mute_IsEnabled),
+        (nameof(SonosPlayer.Unmute_IsEnabled), player.Unmute_IsEnabled),
+        (nameof(SonosPlayer.PlayNotification_IsEnabled), player.PlayNotification_IsEnabled),
+        (nameof(SonosPlayer.SetBass_IsEnabled), player.SetBass_IsEnabled),
+        (nameof(SonosPlayer.SetTreble_IsEnabled), player.SetTreble_IsEnabled),
+        (nameof(SonosPlayer.SetLoudness_IsEnabled), player.SetLoudness_IsEnabled),
+        (nameof(SonosPlayer.JoinGroup_IsEnabled), player.JoinGroup_IsEnabled)
+    ];
+
+    // Commands routed to the group coordinator.
+    private static (string Name, bool IsEnabled)[] GetCoordinatorOperationStates(SonosPlayer player) =>
+    [
+        (nameof(SonosPlayer.Play_IsEnabled), player.Play_IsEnabled),
+        (nameof(SonosPlayer.Pause_IsEnabled), player.Pause_IsEnabled),
+        (nameof(SonosPlayer.Stop_IsEnabled), player.Stop_IsEnabled),
+        (nameof(SonosPlayer.Next_IsEnabled), player.Next_IsEnabled),
+        (nameof(SonosPlayer.Previous_IsEnabled), player.Previous_IsEnabled),
+        (nameof(SonosPlayer.TogglePlayback_IsEnabled), player.TogglePlayback_IsEnabled),
+        (nameof(SonosPlayer.PlayFavorite_IsEnabled), player.PlayFavorite_IsEnabled),
+        (nameof(SonosPlayer.PlayUri_IsEnabled), player.PlayUri_IsEnabled),
+        (nameof(SonosPlayer.SetShuffle_IsEnabled), player.SetShuffle_IsEnabled),
+        (nameof(SonosPlayer.SetRepeat_IsEnabled), player.SetRepeat_IsEnabled),
+        (nameof(SonosPlayer.SetSleepTimer_IsEnabled), player.SetSleepTimer_IsEnabled)
+    ];
 
     [Fact]
     public async Task WhenSettingVolume_ThenSonosVolumeIsSent()

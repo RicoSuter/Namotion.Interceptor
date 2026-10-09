@@ -44,10 +44,10 @@
             <MudIconButton Icon="@Icons.Material.Filled.SkipNext" Disabled="@(Player?.Next_IsEnabled != true)"
                            OnClick="@(() => RunAsync(player => player.NextAsync(CancellationToken.None)))" />
             <MudIconButton Icon="@(Player?.IsMuted == true ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
-                           Disabled="@(Player?.Play_IsEnabled != true)"
+                           Disabled="@(!(Player?.IsMuted == true ? Player.Unmute_IsEnabled : Player?.Mute_IsEnabled == true))"
                            OnClick="@(() => RunAsync(player => player.IsMuted == true ? player.UnmuteAsync(CancellationToken.None) : player.MuteAsync(CancellationToken.None)))" />
             <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
-                       Disabled="@(Player?.Play_IsEnabled != true)"
+                       Disabled="@(Player?.SetVolume_IsEnabled != true)"
                        Value="@((int)((Player?.Volume ?? 0m) * 100m))"
                        ValueChanged="@(value => RunAsync(player => player.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
         </MudStack>

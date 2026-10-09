@@ -130,33 +130,68 @@ public partial class SonosPlayer : SonosDevice,
 
     private bool CanControl => IsConnected && _system.IsConnected;
 
+    // Commands for group playback go to the coordinator, so it must be reachable as well.
+    private bool CanControlCoordinator => CanControl && GetCoordinator().IsConnected;
+
     [Derived]
     [PropertyAttribute("Play", KnownAttributes.IsEnabled)]
-    public bool Play_IsEnabled => CanControl;
+    public bool Play_IsEnabled => CanControlCoordinator;
 
     [Derived]
     [PropertyAttribute("Pause", KnownAttributes.IsEnabled)]
-    public bool Pause_IsEnabled => CanControl;
+    public bool Pause_IsEnabled => CanControlCoordinator;
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => CanControl;
+    public bool Stop_IsEnabled => CanControlCoordinator;
 
     [Derived]
     [PropertyAttribute("Next", KnownAttributes.IsEnabled)]
-    public bool Next_IsEnabled => CanControl;
+    public bool Next_IsEnabled => CanControlCoordinator;
 
     [Derived]
     [PropertyAttribute("Previous", KnownAttributes.IsEnabled)]
-    public bool Previous_IsEnabled => CanControl;
+    public bool Previous_IsEnabled => CanControlCoordinator;
 
     [Derived]
     [PropertyAttribute("TogglePlayback", KnownAttributes.IsEnabled)]
-    public bool TogglePlayback_IsEnabled => CanControl;
+    public bool TogglePlayback_IsEnabled => CanControlCoordinator;
 
     [Derived]
     [PropertyAttribute("Seek", KnownAttributes.IsEnabled)]
-    public bool Seek_IsEnabled => CanControl && CurrentTrackDuration > TimeSpan.Zero;
+    public bool Seek_IsEnabled => CanControlCoordinator && CurrentTrackDuration > TimeSpan.Zero;
+
+    [Derived]
+    [PropertyAttribute("SetVolume", KnownAttributes.IsEnabled)]
+    public bool SetVolume_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("ChangeVolume", KnownAttributes.IsEnabled)]
+    public bool ChangeVolume_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("RampVolume", KnownAttributes.IsEnabled)]
+    public bool RampVolume_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("Mute", KnownAttributes.IsEnabled)]
+    public bool Mute_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("Unmute", KnownAttributes.IsEnabled)]
+    public bool Unmute_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("PlayFavorite", KnownAttributes.IsEnabled)]
+    public bool PlayFavorite_IsEnabled => CanControlCoordinator;
+
+    [Derived]
+    [PropertyAttribute("PlayUri", KnownAttributes.IsEnabled)]
+    public bool PlayUri_IsEnabled => CanControlCoordinator;
+
+    [Derived]
+    [PropertyAttribute("PlayNotification", KnownAttributes.IsEnabled)]
+    public bool PlayNotification_IsEnabled => CanControl;
 
     [Derived]
     [PropertyAttribute("SwitchToTv", KnownAttributes.IsEnabled)]
@@ -173,6 +208,34 @@ public partial class SonosPlayer : SonosDevice,
     [Derived]
     [PropertyAttribute("SetSpeechEnhancement", KnownAttributes.IsEnabled)]
     public bool SetSpeechEnhancement_IsEnabled => CanControl && IsHomeTheater;
+
+    [Derived]
+    [PropertyAttribute("SetShuffle", KnownAttributes.IsEnabled)]
+    public bool SetShuffle_IsEnabled => CanControlCoordinator;
+
+    [Derived]
+    [PropertyAttribute("SetRepeat", KnownAttributes.IsEnabled)]
+    public bool SetRepeat_IsEnabled => CanControlCoordinator;
+
+    [Derived]
+    [PropertyAttribute("SetSleepTimer", KnownAttributes.IsEnabled)]
+    public bool SetSleepTimer_IsEnabled => CanControlCoordinator;
+
+    [Derived]
+    [PropertyAttribute("SetBass", KnownAttributes.IsEnabled)]
+    public bool SetBass_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("SetTreble", KnownAttributes.IsEnabled)]
+    public bool SetTreble_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("SetLoudness", KnownAttributes.IsEnabled)]
+    public bool SetLoudness_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("JoinGroup", KnownAttributes.IsEnabled)]
+    public bool JoinGroup_IsEnabled => CanControl;
 
     [Derived]
     [PropertyAttribute("LeaveGroup", KnownAttributes.IsEnabled)]

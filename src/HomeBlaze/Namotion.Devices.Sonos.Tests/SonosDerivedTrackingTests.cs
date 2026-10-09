@@ -51,6 +51,25 @@ public class SonosDerivedTrackingTests
         Assert.Contains(nameof(SonosGroup.CurrentTrackTitle), firedEvents);
     }
 
+    [Fact]
+    public void WhenCoordinatorGoesOffline_ThenMemberPlayIsEnabledRaisesPropertyChanged()
+    {
+        // Arrange
+        var system = Track(SonosPlayerOperationTests.CreateGroupedSystem());
+        var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
+        var member = Track(system.Players[TestFixtures.KitchenUuid]);
+        Assert.True(member.Play_IsEnabled);
+        var firedEvents = TrackPropertyChanged(member);
+
+        // Act
+        coordinator.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.False(member.Play_IsEnabled);
+        Assert.Contains(nameof(SonosPlayer.Play_IsEnabled), firedEvents);
+        Assert.DoesNotContain(nameof(SonosPlayer.SetVolume_IsEnabled), firedEvents);
+    }
+
     private static T Track<T>(T subject) where T : IInterceptorSubject
     {
         subject.Context.AddFallbackContext(InterceptorSubjectContext

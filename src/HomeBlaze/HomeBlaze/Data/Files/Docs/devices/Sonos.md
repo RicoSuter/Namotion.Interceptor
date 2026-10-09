@@ -59,6 +59,8 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 | `SetNightMode`, `SetSpeechEnhancement` | Home theater sound settings |
 | `JoinGroup`, `LeaveGroup` | Joins another room's group by room name, or becomes standalone. `LeaveGroup` is available for any member of a group of two or more rooms. |
 
+Every operation is disabled while the system or the player is not connected. Operations sent to the group coordinator are also disabled while the coordinator is not connected.
+
 `PlayUri` plays an `http://` or `https://` stream through the `x-rincon-mp3radio` scheme, with the title as metadata. A URI that already starts with `x-rincon-mp3radio:` gets the same title metadata. Any other native Sonos URI is passed through unchanged, without metadata.
 
 ### SonosGroup
