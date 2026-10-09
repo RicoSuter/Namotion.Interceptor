@@ -20,6 +20,6 @@
         <Satellite UUID="RINCON_A0000000000801400" Location="http://10.0.0.242:1400/xml/device_description.xml" ZoneName="Sub" Invisible="1" SoftwareVersion="86.10-80260" HTSatChanMapSet="RINCON_A0000000000701400:LF,RF;RINCON_A0000000000801400:SW" WirelessMode="0" EthLink="0" MoreInfo="" />
       </ZoneGroupMember>
     </ZoneGroup>
-  </ZoneGroups>
+  <ZoneGroup Coordinator="RINCON_A0000000000B01400" ID="RINCON_A0000000000B01400:1"><ZoneGroupMember UUID="RINCON_A0000000000B01400" Location="http://10.0.0.150:1400/xml/device_description.xml" ZoneName="BOOST" IsZoneBridge="1" SoftwareVersion="97.1-80312" WirelessMode="0" EthLink="1" MoreInfo="" /></ZoneGroup></ZoneGroups>
   <VanishedDevices />
 </ZoneGroupState>

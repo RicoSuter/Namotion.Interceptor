@@ -26,6 +26,17 @@ public class ZoneGroupStateParserTests
     }
 
     [Fact]
+    public void WhenHouseholdHasAZoneBridge_ThenItIsNotAPlayer()
+    {
+        // Act
+        var topology = ParseHousehold();
+
+        // Assert
+        Assert.DoesNotContain(topology.Groups.SelectMany(group => group.Players), player => player.Uuid == "RINCON_A0000000000B01400");
+        Assert.DoesNotContain(topology.Groups, group => group.CoordinatorUuid == "RINCON_A0000000000B01400");
+    }
+
+    [Fact]
     public void WhenParsingHomeTheater_ThenSatelliteRolesComeFromTheChannelMap()
     {
         // Act

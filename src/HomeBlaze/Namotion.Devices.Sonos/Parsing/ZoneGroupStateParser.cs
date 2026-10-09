@@ -20,7 +20,8 @@ internal static class ZoneGroupStateParser
             var players = new List<SonosTopologyPlayer>();
             foreach (var member in members)
             {
-                if (IsInvisible(member))
+                // A Boost or Bridge only extends the Sonos network and has no renderer to poll or control.
+                if (IsInvisible(member) || (string?)member.Attribute("IsZoneBridge") == "1")
                 {
                     continue;
                 }
