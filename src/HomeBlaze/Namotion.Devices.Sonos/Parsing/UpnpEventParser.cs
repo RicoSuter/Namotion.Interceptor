@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace Namotion.Devices.Sonos.Parsing;
@@ -10,6 +11,7 @@ internal static class UpnpEventParser
 {
     private static readonly XNamespace EventNamespace = "urn:schemas-upnp-org:event-1-0";
 
+    /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
     internal static AvTransportChange ParseAvTransport(string body)
     {
         var values = ParseLastChange(body);
@@ -22,6 +24,7 @@ internal static class UpnpEventParser
             values.GetValueOrDefault("CurrentTrackMetaData"));
     }
 
+    /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
     internal static RenderingControlChange ParseRenderingControl(string body)
     {
         var values = ParseLastChange(body);
@@ -35,12 +38,14 @@ internal static class UpnpEventParser
             GetBool(values, "DialogLevel"));
     }
 
+    /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
     internal static GroupRenderingControlChange ParseGroupRenderingControl(string body)
     {
         var properties = ParseProperties(body);
         return new GroupRenderingControlChange(GetInt(properties, "GroupVolume"), GetBool(properties, "GroupMute"));
     }
 
+    /// <remarks>Throws <see cref="XmlException"/> when the body is malformed.</remarks>
     internal static string? ParseZoneGroupState(string body) =>
         ParseProperties(body).GetValueOrDefault("ZoneGroupState");
 
@@ -102,5 +107,7 @@ internal static class UpnpEventParser
             : null;
 
     private static bool? GetBool(Dictionary<string, string> values, string name) =>
-        values.TryGetValue(name, out var value) ? value == "1" : null;
+        values.TryGetValue(name, out var value)
+            ? value switch { "1" => true, "0" => false, _ => null }
+            : null;
 }

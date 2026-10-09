@@ -1,5 +1,6 @@
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
+using System.Xml;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -29,7 +30,7 @@ public class UpnpEventParserTests
         Assert.Equal(SpotifyUri, change.TrackUri);
         Assert.Equal(SpotifyUri, change.MediaUri);
         Assert.Equal("0:03:25", change.TrackDuration);
-        Assert.Contains("<dc:title>Song</dc:title>", change.TrackMetaData);
+        Assert.Equal("Song", DidlParser.ParseTrack(change.TrackMetaData)?.Title);
     }
 
     [Fact]
@@ -94,5 +95,50 @@ public class UpnpEventParserTests
 
         // Assert
         Assert.Equal(zoneGroupState, result);
+    }
+
+    [Fact]
+    public void WhenRenderingControlEventHasNotImplementedBooleans_ThenTheyAreNull()
+    {
+        // Arrange
+        var body = SonosEventBodies.RenderingControl(
+            ("Mute", "Master", "NOT_IMPLEMENTED"),
+            ("NightMode", null, "NOT_IMPLEMENTED"),
+            ("Volume", "Master", "NOT_IMPLEMENTED"));
+
+        // Act
+        var change = UpnpEventParser.ParseRenderingControl(body);
+
+        // Assert
+        Assert.Null(change.Mute);
+        Assert.Null(change.NightMode);
+        Assert.Null(change.Volume);
+    }
+
+    [Fact]
+    public void WhenAvTransportEventHasUnknownStrings_ThenTheyPassThroughRaw()
+    {
+        // Arrange
+        var body = SonosEventBodies.AvTransport(
+            ("CurrentTrackURI", "NOT_IMPLEMENTED"),
+            ("CurrentTrackMetaData", ""));
+
+        // Act
+        var change = UpnpEventParser.ParseAvTransport(body);
+
+        // Assert
+        Assert.Equal("NOT_IMPLEMENTED", change.TrackUri);
+        Assert.Equal("", change.TrackMetaData);
+    }
+
+    [Fact]
+    public void WhenBodyIsMalformed_ThenParsingThrowsXmlException()
+    {
+        // Arrange
+        var body = "<e:propertyset xmlns:e=\"urn:schemas-upnp-org:event-1-0\"><e:property>";
+
+        // Act & Assert
+        Assert.Throws<XmlException>(() => UpnpEventParser.ParseAvTransport(body));
+        Assert.Throws<XmlException>(() => UpnpEventParser.ParseRenderingControl(body));
     }
 }
