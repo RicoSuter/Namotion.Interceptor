@@ -336,6 +336,97 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenTheSeedIsASatellite_ThenFavoritesAreReadFromAPlayer()
+    {
+        // Arrange
+        const string subwooferUuid = "RINCON_A0000000000201400";
+        await using var subwoofer = new FakeSonosSpeaker();
+        await using var kitchen = new FakeSonosSpeaker();
+        subwoofer.RespondAsIdlePlayer(subwooferUuid, "Küche");
+        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        foreach (var speaker in new[] { subwoofer, kitchen })
+        {
+            RespondWithHomeTheater(speaker, kitchen.BaseUri, subwooferUuid, subwoofer.BaseUri);
+        }
+
+        // Satellites answer a favorites Browse with a bare HTTP 500.
+        subwoofer.RespondWithServerError("Browse");
+        var system = ConnectedSystem.CreateSystem(subwoofer.Host);
+
+        try
+        {
+            // Act
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => system.IsConnected,
+                ConnectedSystem.WaitTimeout,
+                message: "The system should connect through the subwoofer.");
+
+            // Assert
+            Assert.True(system.Players[TestFixtures.KitchenUuid].Satellites.ContainsKey(subwooferUuid));
+            Assert.Equal(new[] { "Radio FM1", "SRF 3" }, system.Favorites.Select(favorite => favorite.Title));
+            Assert.DoesNotContain(subwoofer.Calls, call => call.Action == "Browse");
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheFirstPlayerFailsToReadFavorites_ThenTheyAreReadFromTheNextPlayer()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync();
+        household.System.PollingInterval = TimeSpan.FromHours(1);
+        household.System.SetFavorites([]);
+        household.Kitchen.RespondWithServerError("Browse");
+        household.Office.RespondWithServerError("Browse");
+
+        // Act
+        household.Office.ClearServerError("Browse");
+        await household.System.RefreshAsync(CancellationToken.None);
+        var favoritesWithOfficeAnswering = household.System.Favorites.Select(favorite => favorite.Title).ToArray();
+        household.System.SetFavorites([]);
+        household.Office.RespondWithServerError("Browse");
+        household.Kitchen.ClearServerError("Browse");
+        await household.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(new[] { "Radio FM1", "SRF 3" }, favoritesWithOfficeAnswering);
+        Assert.Equal(new[] { "Radio FM1", "SRF 3" }, household.System.Favorites.Select(favorite => favorite.Title));
+    }
+
+    [Fact]
+    public async Task WhenAGroupCoordinatorIsConnected_ThenFavoritesAreReadFromItBeforeOtherPlayers()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync();
+        household.System.PollingInterval = TimeSpan.FromHours(1);
+
+        // The kitchen stays first among the players, but the office becomes the coordinator.
+        foreach (var speaker in new[] { household.Kitchen, household.Office })
+        {
+            speaker.RespondWithGroup(
+                (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri),
+                (TestFixtures.KitchenUuid, "Küche", household.Kitchen.BaseUri));
+        }
+
+        var kitchenBrowses = household.Kitchen.Calls.Count(call => call.Action == "Browse");
+        var officeBrowses = household.Office.Calls.Count(call => call.Action == "Browse");
+
+        // Act
+        await household.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(TestFixtures.KitchenUuid, household.System.Players.Keys.First());
+        Assert.Equal(TestFixtures.OfficeUuid, household.KitchenPlayer.GroupCoordinatorUuid);
+        Assert.Equal(kitchenBrowses, household.Kitchen.Calls.Count(call => call.Action == "Browse"));
+        Assert.Equal(officeBrowses + 1, household.Office.Calls.Count(call => call.Action == "Browse"));
+    }
+
+    [Fact]
     public async Task WhenSubscribingKeepsFailing_ThenEachSubscriptionWarnsOnce()
     {
         // Arrange
@@ -602,5 +693,16 @@ public class SonosSystemRuntimeTests
         {
             system.Dispose();
         }
+    }
+
+    private static void RespondWithHomeTheater(FakeSonosSpeaker speaker, Uri playerUri, string subwooferUuid, Uri subwooferUri)
+    {
+        var channelMap = $"{TestFixtures.KitchenUuid}:LF,RF;{subwooferUuid}:SW";
+        speaker.Respond("GetZoneGroupState", ("ZoneGroupState",
+            "<ZoneGroupState><ZoneGroups>" +
+            $"""<ZoneGroup Coordinator="{TestFixtures.KitchenUuid}" ID="{TestFixtures.KitchenUuid}:1">""" +
+            $"""<ZoneGroupMember UUID="{TestFixtures.KitchenUuid}" Location="{playerUri}xml/device_description.xml" ZoneName="Küche" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="">""" +
+            $"""<Satellite UUID="{subwooferUuid}" Location="{subwooferUri}xml/device_description.xml" ZoneName="Küche" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="{channelMap}" EthLink="0" MoreInfo="" />""" +
+            "</ZoneGroupMember></ZoneGroup></ZoneGroups></ZoneGroupState>"));
     }
 }

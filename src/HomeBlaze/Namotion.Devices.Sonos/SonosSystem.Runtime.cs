@@ -206,7 +206,7 @@ public partial class SonosSystem
                 .Where(satellite => satellite.IsInTopology && satellite.NeedsStaticData)
                 .Select(satellite => PollSatelliteAsync(satellite, cancellationToken)));
 
-            await RefreshFavoritesAsync(seedConnection, cancellationToken);
+            await RefreshFavoritesAsync(players, cancellationToken);
             await EnsureSubscriptionsAsync(cancellationToken);
             LastUpdated = DateTimeOffset.Now;
         }
@@ -770,28 +770,50 @@ public partial class SonosSystem
         device.ApplyStaticData(description, zoneInfo.SerialNumber, zoneInfo.MacAddress, zoneInfo.HardwareVersion, zoneInfo.DisplayVersion);
     }
 
-    private async Task RefreshFavoritesAsync(SonosConnection seedConnection, CancellationToken cancellationToken)
+    // Read through a player, not the seed: the seed may be a satellite, and satellites answer the favorites Browse
+    // with HTTP 500.
+    private async Task RefreshFavoritesAsync(SonosPlayer[] players, CancellationToken cancellationToken)
     {
-        try
+        Exception? failure = null;
+        var candidates = players
+            .Where(player => player.IsConnected)
+            .OrderBy(player => player.IsGroupCoordinator ? 0 : 1)
+            .Select(player => (Player: player, Connection: FindConnection(player.Uuid)))
+            .Where(candidate => candidate.Connection is not null)
+            .ToArray();
+
+        for (var index = 0; index < candidates.Length; index++)
         {
-            SetFavorites(await seedConnection.ReadFavoritesAsync(cancellationToken));
-            _isFavoritesReadFailing = false;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            if (_isFavoritesReadFailing)
+            var (player, connection) = candidates[index];
+            try
             {
-                _logger.LogDebug(exception, "Reading the Sonos favorites failed again.");
+                SetFavorites(await connection!.ReadFavoritesAsync(cancellationToken));
+                _isFavoritesReadFailing = false;
+                return;
             }
-            else
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                _isFavoritesReadFailing = true;
-                _logger.LogWarning(exception, "Reading the Sonos favorites failed.");
+                throw;
             }
+            catch (Exception exception)
+            {
+                failure = exception;
+                if (index < candidates.Length - 1)
+                {
+                    _logger.LogDebug(exception, "Reading the Sonos favorites from {Room} failed; trying the next player.", player.RoomName);
+                }
+            }
+        }
+
+        failure ??= new InvalidOperationException("No connected Sonos player to read the favorites from.");
+        if (_isFavoritesReadFailing)
+        {
+            _logger.LogDebug(failure, "Reading the Sonos favorites failed again.");
+        }
+        else
+        {
+            _isFavoritesReadFailing = true;
+            _logger.LogWarning(failure, "Reading the Sonos favorites failed.");
         }
     }
 

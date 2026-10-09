@@ -14,6 +14,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     private readonly LoopbackHttpServer _server;
     private readonly ConcurrentDictionary<string, string> _responses = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _faults = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _serverErrors = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<SoapCall> _calls = new();
     private readonly ConcurrentDictionary<string, string> _callbacks = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _unsubscribed = new();
@@ -82,6 +83,13 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal void RespondWithFault(string action, int errorCode) => _faults[action] = errorCode;
 
     internal void ClearFault(string action) => _faults.TryRemove(action, out _);
+
+    /// <summary>
+    /// Answers the action with a bare HTTP 500 and an empty body, as a satellite answers a ContentDirectory Browse.
+    /// </summary>
+    internal void RespondWithServerError(string action) => _serverErrors[action] = true;
+
+    internal void ClearServerError(string action) => _serverErrors.TryRemove(action, out _);
 
     /// <summary>
     /// Records but does not answer the action until the returned source completes.
@@ -211,6 +219,13 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
                 if (_holds.TryGetValue(action, out var hold))
                 {
                     await hold.Task;
+                }
+
+                if (_serverErrors.ContainsKey(action))
+                {
+                    response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                    response.ContentLength64 = 0;
+                    return;
                 }
 
                 if (_faults.TryGetValue(action, out var errorCode))
