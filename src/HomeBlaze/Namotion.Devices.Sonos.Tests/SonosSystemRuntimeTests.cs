@@ -161,6 +161,81 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
+    public async Task WhenSeedHostStopsAnswering_ThenAKnownPlayerBecomesTheSeed()
+    {
+        // Arrange
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, logger: logger);
+        var deadHost = $"127.0.0.1:{LoopbackHttpServer.GetFreePort()}";
+
+        // Act
+        connected.System.SeedHost = deadHost;
+        await connected.System.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => logger.Warnings.Any(message => message.Contains(deadHost)) &&
+                  connected.System.IsConnected && connected.System.Status == ServiceStatus.Running,
+            ConnectedSystem.WaitTimeout,
+            message: "An unreachable SeedHost should fall back to the known speakers.");
+    }
+
+    [Fact]
+    public async Task WhenSeedHostDoesNotAnswerAndNoPlayerIsKnown_ThenDiscoveryFindsTheSeed()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        speaker.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}");
+        system.DiscoverSpeakerAsync = _ => Task.FromResult<Uri?>(speaker.BaseUri);
+
+        try
+        {
+            // Act
+            await system.StartAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => system.IsConnected && system.Players.ContainsKey(TestFixtures.KitchenUuid),
+                ConnectedSystem.WaitTimeout,
+                message: "An unreachable SeedHost should fall back to discovery.");
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheConnectionKeepsFailing_ThenOnlyTheFirstFailureIsAWarning()
+    {
+        // Arrange
+        var logger = new RecordingLogger<SonosSystem>();
+        var system = ConnectedSystem.CreateSystem($"127.0.0.1:{LoopbackHttpServer.GetFreePort()}", logger: logger);
+
+        try
+        {
+            // Act
+            await system.StartAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => logger.Entries.Count(entry => entry.Level == LogLevel.Debug && entry.Message.Contains("connection failed")) >= 2,
+                ConnectedSystem.WaitTimeout,
+                message: "The repeated failures should be logged at Debug.");
+            Assert.Single(logger.Warnings, message => message.Contains("connection failed"));
+            Assert.Single(logger.Warnings, message => message.Contains("did not answer"));
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task WhenSeedHostIsInvalid_ThenStatusIsErrorUntilConfigurationFixesIt()
     {
         // Arrange

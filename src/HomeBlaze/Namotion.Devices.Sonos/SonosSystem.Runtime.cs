@@ -54,6 +54,10 @@ public partial class SonosSystem
     // while a reconciliation recomputes, and a stale result written last would stick until the next pass.
     private readonly Lock _eventsActiveLock = new();
 
+    // Written by the connection loop only. A persistent failure is logged at Warning once and at Debug while it lasts.
+    private string? _connectionFailure;
+    private bool _isSeedHostUnreachable;
+
     // Guarded by _reconcileLock. A persistent failure is logged at Warning once and at Debug while it lasts.
     private bool _isFavoritesReadFailing;
     private bool _isEventDeliveryFailing;
@@ -96,8 +100,9 @@ public partial class SonosSystem
             {
                 OpenConnectionScope();
                 var seedUri = await FindSeedAsync(stoppingToken)
-                    ?? throw new InvalidOperationException(
-                        "No Sonos speaker found. Set SeedHost when multicast discovery is blocked, for example under Docker bridge networking.");
+                    ?? throw new InvalidOperationException(string.IsNullOrWhiteSpace(SeedHost)
+                        ? "No Sonos speaker found. Set SeedHost when multicast discovery is blocked, for example under Docker bridge networking."
+                        : $"The SeedHost '{SeedHost}' did not answer, and no other Sonos speaker was found.");
 
                 StartEventListener(seedUri.Host);
                 reconnectImmediately = await RunConnectedAsync(seedUri, stoppingToken);
@@ -110,7 +115,17 @@ public partial class SonosSystem
             }
             catch (Exception exception)
             {
-                _logger.LogWarning(exception, "Sonos system connection failed.");
+                // A long outage retries every interval, so only a new failure is a Warning.
+                if (exception.Message != _connectionFailure)
+                {
+                    _connectionFailure = exception.Message;
+                    _logger.LogWarning(exception, "Sonos system connection failed.");
+                }
+                else
+                {
+                    _logger.LogDebug(exception, "Sonos system connection failed again.");
+                }
+
                 Status = ServiceStatus.Error;
                 StatusMessage = exception.Message;
             }
@@ -449,31 +464,49 @@ public partial class SonosSystem
         }
     }
 
+    /// <summary>
+    /// Returns the configured SeedHost when it answers, otherwise a known speaker that answers, otherwise one found
+    /// over SSDP. Throws <see cref="InvalidOperationException"/> for an invalid SeedHost.
+    /// </summary>
     private async Task<Uri?> FindSeedAsync(CancellationToken cancellationToken)
     {
+        Uri? seedHostUri = null;
         var seedHost = SeedHost;
         if (!string.IsNullOrWhiteSpace(seedHost))
         {
             try
             {
-                return SonosDiscovery.CreateDeviceUri(seedHost);
+                seedHostUri = SonosDiscovery.CreateDeviceUri(seedHost);
             }
             catch (ArgumentException exception)
             {
                 throw new InvalidOperationException($"The SeedHost '{seedHost}' is invalid: {exception.Message}", exception);
             }
+
+            // The full request timeout, not the probe budget for known speakers: the configured seed is preferred.
+            if (await ProbeSeedAsync(seedHostUri, RequestTimeout, cancellationToken))
+            {
+                _isSeedHostUnreachable = false;
+                return seedHostUri;
+            }
+
+            if (!_isSeedHostUnreachable)
+            {
+                _isSeedHostUnreachable = true;
+                _logger.LogWarning("The Sonos SeedHost {SeedHost} did not answer; trying the known speakers, then discovery.", seedHost);
+            }
         }
 
         // Players still in the last topology first: a missing one was more likely unplugged or replaced.
         var knownSeeds = Players.Values
-            .Where(player => player.BaseUri is not null)
+            .Where(player => player.BaseUri is not null && player.BaseUri != seedHostUri)
             .OrderBy(player => player.IsInTopology ? 0 : 1)
             .Select(player => player.BaseUri!)
             .Distinct();
 
         foreach (var knownSeed in knownSeeds)
         {
-            if (await ProbeSeedAsync(knownSeed, cancellationToken))
+            if (await ProbeSeedAsync(knownSeed, SeedProbeTimeout, cancellationToken))
             {
                 return knownSeed;
             }
@@ -494,7 +527,7 @@ public partial class SonosSystem
         }
     }
 
-    private async Task<bool> ProbeSeedAsync(Uri seedUri, CancellationToken cancellationToken)
+    private async Task<bool> ProbeSeedAsync(Uri seedUri, TimeSpan timeout, CancellationToken cancellationToken)
     {
         HttpClient httpClient;
         SonosClientProvider clientProvider;
@@ -505,12 +538,12 @@ public partial class SonosSystem
         }
 
         using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        probeCancellation.CancelAfter(SeedProbeTimeout);
+        probeCancellation.CancelAfter(timeout);
         using var connection = new SonosConnection(seedUri, null, httpClient, clientProvider);
         try
         {
             await connection.ReadTopologyAsync(probeCancellation.Token);
-            _logger.LogDebug("The known Sonos speaker {Uri} answered and becomes the seed.", seedUri);
+            _logger.LogDebug("The Sonos speaker {Uri} answered and becomes the seed.", seedUri);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -519,7 +552,7 @@ public partial class SonosSystem
         }
         catch (Exception exception)
         {
-            _logger.LogDebug(exception, "The known Sonos speaker {Uri} did not answer.", seedUri);
+            _logger.LogDebug(exception, "The Sonos speaker {Uri} did not answer.", seedUri);
             return false;
         }
     }
@@ -655,6 +688,7 @@ public partial class SonosSystem
 
     private void MarkConnected()
     {
+        _connectionFailure = null;
         IsConnected = true;
         Status = ServiceStatus.Running;
         StatusMessage = null;
