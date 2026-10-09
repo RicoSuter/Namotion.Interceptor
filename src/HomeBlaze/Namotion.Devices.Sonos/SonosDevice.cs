@@ -92,7 +92,7 @@ public abstract partial class SonosDevice :
     public partial string? StatusMessage { get; internal set; }
 
     [Derived]
-    public string? Title => $"{Model ?? "Sonos"} ({RoomName})";
+    public virtual string? Title => $"{Model ?? "Sonos"} ({RoomName})";
 
     [Derived]
     public virtual string? IconName => "Speaker";

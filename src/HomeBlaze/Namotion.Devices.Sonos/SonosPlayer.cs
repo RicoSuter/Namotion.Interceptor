@@ -554,8 +554,9 @@ public partial class SonosPlayer : SonosDevice,
                 updatedSatellites[satelliteTopology.Uuid] = satellite;
             }
 
+            // A satellite's own zone name is not always its room: subwoofers report "Sub".
             satellite.Role = satelliteTopology.Role;
-            satellite.ApplyTopology(satelliteTopology.RoomName, satelliteTopology.BaseUri, satelliteTopology.SoftwareVersion, satelliteTopology.IsWireless);
+            satellite.ApplyTopology(topology.RoomName, satelliteTopology.BaseUri, satelliteTopology.SoftwareVersion, satelliteTopology.IsWireless);
         }
 
         foreach (var (uuid, satellite) in satellites)

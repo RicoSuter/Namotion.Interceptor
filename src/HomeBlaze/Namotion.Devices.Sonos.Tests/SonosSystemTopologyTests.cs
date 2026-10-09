@@ -97,6 +97,25 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenTopologyApplied_ThenSatellitesTakeTheRoomOfTheirPlayerAndTitlesNameTheRole()
+    {
+        // Arrange
+        var system = CreateSystem();
+
+        // Act
+        system.ApplyTopology(ReadHousehold());
+
+        // Assert
+        var satellites = system.Players[TestFixtures.LivingRoomUuid].Satellites;
+        var subwoofer = satellites["RINCON_A0000000000201400"];
+        Assert.Equal("Wohnzimmer", subwoofer.RoomName);
+        Assert.Equal("Sonos (Wohnzimmer, subwoofer)", subwoofer.Title);
+        Assert.Equal("Sonos (Wohnzimmer, rear left)", satellites["RINCON_A0000000000301400"].Title);
+        Assert.Equal("Sonos (Wohnzimmer, rear right)", satellites["RINCON_A0000000000401400"].Title);
+        Assert.Equal(3, satellites.Values.Select(satellite => satellite.Title).Distinct().Count());
+    }
+
+    [Fact]
     public void WhenTopologyAppliedTwice_ThenInstancesAreKept()
     {
         // Arrange
