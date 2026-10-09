@@ -435,8 +435,8 @@ public class SonosPlayerOperationTests
         var player = CreateDisconnectedKitchen();
 
         // Act & Assert
-        Assert.Equal("roomNameOrUuid", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.JoinGroupAsync(null!, CancellationToken.None))).ParamName);
-        Assert.Equal("name", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayFavoriteAsync(null!, CancellationToken.None))).ParamName);
+        Assert.Equal("room", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.JoinGroupAsync(null!, CancellationToken.None))).ParamName);
+        Assert.Equal("title", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayFavoriteAsync(null!, CancellationToken.None))).ParamName);
         Assert.Equal("uri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayUriAsync(null!, CancellationToken.None))).ParamName);
         Assert.Equal("uri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayStreamAsync(null!, null, CancellationToken.None))).ParamName);
         Assert.Equal("soundUri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayNotificationAsync(null!, 0.5m, CancellationToken.None))).ParamName);

@@ -9,7 +9,7 @@ public static class SonosServiceCollectionExtensions
     /// <summary>
     /// Adds a <see cref="SonosSystem"/> as a hosted subject.
     /// </summary>
-    public static IServiceCollection AddSonos(
+    public static IServiceCollection AddSonosSystem(
         this IServiceCollection services,
         Action<SonosSystem>? configure = null,
         Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)

@@ -12,7 +12,7 @@ namespace Namotion.Devices.Sonos;
 /// A physical Sonos unit: a room player or a satellite bonded to one.
 /// </summary>
 [InterceptorSubject]
-public partial class SonosDevice :
+public abstract partial class SonosDevice :
     IDeviceInfo,
     INetworkAdapter,
     ISoftwareState,
@@ -23,7 +23,7 @@ public partial class SonosDevice :
     private bool _hasStaticData;
     private string? _staticDataFirmwareBuild;
 
-    internal SonosDevice(string uuid)
+    private protected SonosDevice(string uuid)
     {
         Uuid = uuid;
         RoomName = string.Empty;

@@ -155,7 +155,7 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// Reads topology, state and favorites now instead of at the next poll.
     /// </summary>
-    [Operation(Position = 1, Description = "Reads topology, state and favorites now instead of at the next poll.")]
+    [Operation(Title = "Refresh", Icon = "Refresh", Position = 1, Description = "Reads topology, state and favorites now instead of at the next poll.")]
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         EnsureConnected();
@@ -165,11 +165,13 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// Groups every connected room with the given room (party mode).
     /// </summary>
-    [Operation(Position = 2, Description = "Groups every connected room with the given room (party mode).")]
-    public Task GroupAllAsync(string coordinatorRoom, CancellationToken cancellationToken)
+    /// <param name="room">The room name or UUID of the player that becomes the coordinator.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    [Operation(Title = "Group All Rooms", Position = 2, Description = "Groups every connected room with the given room, by room name or UUID (party mode).")]
+    public Task GroupAllAsync(string room, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(coordinatorRoom);
-        var coordinator = FindPlayer(coordinatorRoom) ?? throw CreateUnknownRoomException(coordinatorRoom, nameof(coordinatorRoom));
+        ArgumentNullException.ThrowIfNull(room);
+        var coordinator = FindPlayer(room) ?? throw CreateUnknownRoomException(room, nameof(room));
         return GroupAllCoreAsync(coordinator, cancellationToken);
     }
 
@@ -197,7 +199,7 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// Makes every room standalone.
     /// </summary>
-    [Operation(Position = 3, Description = "Makes every room standalone.")]
+    [Operation(Title = "Ungroup All Rooms", Position = 3, Description = "Makes every room standalone.")]
     public async Task UngroupAllAsync(CancellationToken cancellationToken)
     {
         EnsureConnected();
@@ -324,8 +326,8 @@ public partial class SonosSystem : BackgroundService,
         return missingMatch;
     }
 
-    internal SonosFavorite? FindFavorite(string name) =>
-        Favorites.FirstOrDefault(favorite => string.Equals(favorite.Title, name, StringComparison.OrdinalIgnoreCase));
+    internal SonosFavorite? FindFavorite(string title) =>
+        Favorites.FirstOrDefault(favorite => string.Equals(favorite.Title, title, StringComparison.OrdinalIgnoreCase));
 
     internal void SetFavorites(IReadOnlyList<SonosFavorite> favorites)
     {

@@ -245,73 +245,73 @@ public partial class SonosPlayer : SonosDevice,
     [PropertyAttribute("LeaveGroup", KnownAttributes.IsEnabled)]
     public bool LeaveGroup_IsEnabled => CanControl && _system.Groups.GetValueOrDefault(GroupCoordinatorUuid ?? Uuid)?.Members.Length > 1;
 
-    [Operation(Position = 1, Description = "Starts or resumes playback of the player's group.")]
+    [Operation(Title = "Play", Icon = "PlayArrow", Position = 1, Description = "Starts or resumes playback of the player's group.")]
     public Task PlayAsync(CancellationToken cancellationToken) =>
         RunOnCoordinatorAsync((connection, token) => connection.PlayAsync(token), cancellationToken);
 
-    [Operation(Position = 2, Description = "Pauses playback of the player's group.")]
+    [Operation(Title = "Pause", Icon = "Pause", Position = 2, Description = "Pauses playback of the player's group.")]
     public Task PauseAsync(CancellationToken cancellationToken) =>
         RunOnCoordinatorAsync((connection, token) => connection.PauseAsync(token), cancellationToken);
 
-    [Operation(Position = 3, Description = "Stops playback of the player's group.")]
+    [Operation(Title = "Stop", Icon = "Stop", Position = 3, Description = "Stops playback of the player's group.")]
     public Task StopAsync(CancellationToken cancellationToken) =>
         RunOnCoordinatorAsync((connection, token) => connection.StopAsync(token), cancellationToken);
 
-    [Operation(Position = 4, Description = "Skips to the next track of the player's group.")]
+    [Operation(Title = "Next", Icon = "SkipNext", Position = 4, Description = "Skips to the next track of the player's group.")]
     public Task NextAsync(CancellationToken cancellationToken) =>
         RunOnCoordinatorAsync((connection, token) => connection.NextAsync(token), cancellationToken);
 
-    [Operation(Position = 5, Description = "Goes back to the previous track of the player's group.")]
+    [Operation(Title = "Previous", Icon = "SkipPrevious", Position = 5, Description = "Goes back to the previous track of the player's group.")]
     public Task PreviousAsync(CancellationToken cancellationToken) =>
         RunOnCoordinatorAsync((connection, token) => connection.PreviousAsync(token), cancellationToken);
 
-    [Operation(Position = 6, Description = "Pauses the player's group when it plays, otherwise starts playback.")]
+    [Operation(Title = "Play or Pause", Position = 6, Description = "Pauses the player's group when it plays, otherwise starts playback.")]
     public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
         RunOnCoordinatorAsync((connection, token) => connection.TogglePlaybackAsync(token), cancellationToken);
 
-    [Operation(Position = 7, Description = "Seeks the current track of the player's group to the given position.")]
+    [Operation(Title = "Seek", Position = 7, Description = "Seeks the current track of the player's group to the given position.")]
     public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
         return RunOnCoordinatorAsync((connection, token) => connection.SeekAsync(position, token), cancellationToken);
     }
 
-    [Operation(Position = 10, Description = "Sets the volume of this player, from 0 to 1.")]
+    [Operation(Title = "Set Volume", Position = 10, Description = "Sets the volume of this player.")]
     public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
         SonosValues.ThrowIfVolumeOutOfRange(volume);
         return RunOnPlayerAsync((connection, token) => connection.SetVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
     }
 
-    [Operation(Position = 11, Description = "Changes the volume of this player by a relative amount, from -1 to 1.")]
+    [Operation(Title = "Change Volume", Position = 11, Description = "Changes the volume of this player by a relative amount.")]
     public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
     {
         SonosValues.ThrowIfVolumeAdjustmentOutOfRange(delta);
         return RunOnPlayerAsync((connection, token) => connection.ChangeVolumeAsync(SonosValues.ToSonosVolumeAdjustment(delta), token), cancellationToken);
     }
 
-    [Operation(Position = 12, Description = "Ramps the volume of this player gradually to the given value, from 0 to 1.")]
+    [Operation(Title = "Ramp Volume", Position = 12, Description = "Ramps the volume of this player gradually to the given value.")]
     public Task RampVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
         SonosValues.ThrowIfVolumeOutOfRange(volume);
         return RunOnPlayerAsync((connection, token) => connection.RampVolumeAsync(SonosValues.ToSonosVolume(volume), token), cancellationToken);
     }
 
-    [Operation(Position = 13, Description = "Mutes this player.")]
+    [Operation(Title = "Mute", Icon = "VolumeOff", Position = 13, Description = "Mutes this player.")]
     public Task MuteAsync(CancellationToken cancellationToken) =>
         RunOnPlayerAsync((connection, token) => connection.SetMuteAsync(true, token), cancellationToken);
 
-    [Operation(Position = 14, Description = "Unmutes this player.")]
+    [Operation(Title = "Unmute", Icon = "VolumeUp", Position = 14, Description = "Unmutes this player.")]
     public Task UnmuteAsync(CancellationToken cancellationToken) =>
         RunOnPlayerAsync((connection, token) => connection.SetMuteAsync(false, token), cancellationToken);
 
-    [Operation(Position = 20, Description = "Plays the Sonos favorite with the given title on the player's group.")]
-    public Task PlayFavoriteAsync(string name, CancellationToken cancellationToken)
+    [Operation(Title = "Play Favorite", Position = 20, Description = "Plays the Sonos favorite with the given title on the player's group.")]
+    public Task PlayFavoriteAsync(string title, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(name);
-        var favorite = _system.FindFavorite(name)
+        ArgumentNullException.ThrowIfNull(title);
+        var favorite = _system.FindFavorite(title)
             ?? throw new ArgumentException(
-                $"Unknown Sonos favorite '{name}'. Known favorites: {string.Join(", ", _system.Favorites.Select(known => known.Title))}.", nameof(name));
+                $"Unknown Sonos favorite '{title}'. Known favorites: {string.Join(", ", _system.Favorites.Select(known => known.Title))}.", nameof(title));
 
         return RunOnCoordinatorAsync(async (connection, token) =>
         {
@@ -331,7 +331,7 @@ public partial class SonosPlayer : SonosDevice,
     /// Plays a URI once as a normal track, which ends and can be sought. http(s) and native Sonos URIs are sent
     /// unchanged, without metadata.
     /// </summary>
-    [Operation(Position = 21, Description = "Plays a URI once as a normal track on the player's group, which ends and can be sought.")]
+    [Operation(Title = "Play URI", Position = 21, Description = "Plays a URI once as a normal track on the player's group, which ends and can be sought.")]
     public Task PlayUriAsync(string uri, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(uri);
@@ -348,7 +348,7 @@ public partial class SonosPlayer : SonosDevice,
     /// x-rincon-mp3radio scheme; x-rincon-mp3radio URIs are used as they are. Both get the title as metadata.
     /// </summary>
     /// <exception cref="ArgumentException">The URI uses another scheme.</exception>
-    [Operation(Position = 22, Description = "Plays an http(s) or x-rincon-mp3radio stream on the player's group as radio, which Sonos reconnects when it ends.")]
+    [Operation(Title = "Play Stream", Position = 22, Description = "Plays an http(s) or x-rincon-mp3radio stream on the player's group as radio, which Sonos reconnects when it ends.")]
     public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(uri);
@@ -372,7 +372,7 @@ public partial class SonosPlayer : SonosDevice,
     /// <summary>
     /// Plays a sound over the current playback, which resumes afterwards. Needs S2 speakers.
     /// </summary>
-    [Operation(Position = 23, Description = "Plays an http(s) sound over the current playback of this player, which resumes afterwards; needs S2 speakers.")]
+    [Operation(Title = "Play Notification", Position = 23, Description = "Plays an http(s) sound over the current playback of this player, which resumes afterwards; needs S2 speakers.")]
     public Task PlayNotificationAsync(string soundUri, [OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(soundUri);
@@ -388,14 +388,14 @@ public partial class SonosPlayer : SonosDevice,
         return RunOnPlayerAsync((connection, token) => connection.PlayNotificationAsync(sound, sonosVolume, token), cancellationToken);
     }
 
-    [Operation(Position = 24, Description = "Switches this home theater player to its TV input.")]
+    [Operation(Title = "Switch to TV", Position = 24, Description = "Switches this home theater player to its TV input.")]
     public Task SwitchToTvAsync(CancellationToken cancellationToken)
     {
         EnsureHomeTheater();
         return RunOnPlayerAsync((connection, token) => connection.SwitchToTvAsync(token), cancellationToken);
     }
 
-    [Operation(Position = 25, Description = "Switches this player to its line-in input.")]
+    [Operation(Title = "Switch to Line-In", Position = 25, Description = "Switches this player to its line-in input.")]
     public Task SwitchToLineInAsync(CancellationToken cancellationToken)
     {
         if (!HasLineIn)
@@ -406,14 +406,14 @@ public partial class SonosPlayer : SonosDevice,
         return RunOnPlayerAsync((connection, token) => connection.SwitchToLineInAsync(token), cancellationToken);
     }
 
-    [Operation(Position = 30, Description = "Turns shuffle on or off for the player's group.")]
+    [Operation(Title = "Set Shuffle", Position = 30, Description = "Turns shuffle on or off for the player's group.")]
     public Task SetShuffleAsync(bool shuffle, CancellationToken cancellationToken)
     {
         var playMode = SonosValues.FormatPlayMode(shuffle, GetCoordinator().Repeat ?? SonosRepeatMode.Off);
         return RunOnCoordinatorAsync((connection, token) => connection.SetPlayModeAsync(playMode, token), cancellationToken);
     }
 
-    [Operation(Position = 31, Description = "Sets the repeat mode of the player's group.")]
+    [Operation(Title = "Set Repeat", Position = 31, Description = "Sets the repeat mode of the player's group.")]
     public Task SetRepeatAsync(SonosRepeatMode repeat, CancellationToken cancellationToken)
     {
         var playMode = SonosValues.FormatPlayMode(GetCoordinator().Shuffle ?? false, repeat);
@@ -423,14 +423,14 @@ public partial class SonosPlayer : SonosDevice,
     /// <summary>
     /// Sets the sleep timer; zero cancels it.
     /// </summary>
-    [Operation(Position = 32, Description = "Sets the sleep timer of the player's group; zero cancels it.")]
+    [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the player's group; zero cancels it.")]
     public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(duration, TimeSpan.Zero);
         return RunOnCoordinatorAsync((connection, token) => connection.SetSleepTimerAsync(duration, token), cancellationToken);
     }
 
-    [Operation(Position = 40, Description = "Sets the bass of this player, from -10 to 10.")]
+    [Operation(Title = "Set Bass", Position = 40, Description = "Sets the bass of this player, from -10 to 10.")]
     public Task SetBassAsync(int bass, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(bass, -10);
@@ -438,7 +438,7 @@ public partial class SonosPlayer : SonosDevice,
         return RunOnPlayerAsync((connection, token) => connection.SetBassAsync(bass, token), cancellationToken);
     }
 
-    [Operation(Position = 41, Description = "Sets the treble of this player, from -10 to 10.")]
+    [Operation(Title = "Set Treble", Position = 41, Description = "Sets the treble of this player, from -10 to 10.")]
     public Task SetTrebleAsync(int treble, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(treble, -10);
@@ -446,33 +446,38 @@ public partial class SonosPlayer : SonosDevice,
         return RunOnPlayerAsync((connection, token) => connection.SetTrebleAsync(treble, token), cancellationToken);
     }
 
-    [Operation(Position = 42, Description = "Turns loudness compensation on or off for this player.")]
+    [Operation(Title = "Set Loudness", Position = 42, Description = "Turns loudness compensation on or off for this player.")]
     public Task SetLoudnessAsync(bool loudness, CancellationToken cancellationToken) =>
         RunOnPlayerAsync((connection, token) => connection.SetLoudnessAsync(loudness, token), cancellationToken);
 
-    [Operation(Position = 43, Description = "Turns night mode on or off for this home theater player.")]
+    [Operation(Title = "Set Night Mode", Position = 43, Description = "Turns night mode on or off for this home theater player.")]
     public Task SetNightModeAsync(bool nightMode, CancellationToken cancellationToken)
     {
         EnsureHomeTheater();
         return RunOnPlayerAsync((connection, token) => connection.SetEqualizerAsync("NightMode", nightMode, token), cancellationToken);
     }
 
-    [Operation(Position = 44, Description = "Turns speech enhancement on or off for this home theater player.")]
+    [Operation(Title = "Set Speech Enhancement", Position = 44, Description = "Turns speech enhancement on or off for this home theater player.")]
     public Task SetSpeechEnhancementAsync(bool speechEnhancement, CancellationToken cancellationToken)
     {
         EnsureHomeTheater();
         return RunOnPlayerAsync((connection, token) => connection.SetEqualizerAsync("DialogLevel", speechEnhancement, token), cancellationToken);
     }
 
-    [Operation(Position = 50, Description = "Joins this player to the group of the room with the given name or UUID.")]
-    public Task JoinGroupAsync(string roomNameOrUuid, CancellationToken cancellationToken)
+    /// <summary>
+    /// Joins this player to the group of another room.
+    /// </summary>
+    /// <param name="room">The room name or UUID of a player in the group to join.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    [Operation(Title = "Join Group", Position = 50, Description = "Joins this player to the group of the given room, by room name or UUID.")]
+    public Task JoinGroupAsync(string room, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(roomNameOrUuid);
-        var target = _system.FindPlayer(roomNameOrUuid)
-            ?? throw _system.CreateUnknownRoomException(roomNameOrUuid, nameof(roomNameOrUuid));
+        ArgumentNullException.ThrowIfNull(room);
+        var target = _system.FindPlayer(room)
+            ?? throw _system.CreateUnknownRoomException(room, nameof(room));
         if (ReferenceEquals(target, this))
         {
-            throw new ArgumentException("A player cannot join its own group.", nameof(roomNameOrUuid));
+            throw new ArgumentException("A player cannot join its own group.", nameof(room));
         }
 
         var coordinatorUuid = target.GroupCoordinatorUuid ?? target.Uuid;
@@ -484,7 +489,7 @@ public partial class SonosPlayer : SonosDevice,
         return RunGroupingOnPlayerAsync((connection, token) => connection.JoinAsync(coordinatorUuid, token), cancellationToken);
     }
 
-    [Operation(Position = 51, Description = "Removes this player from its group so it plays standalone.")]
+    [Operation(Title = "Leave Group", Position = 51, Description = "Removes this player from its group so it plays standalone.")]
     public Task LeaveGroupAsync(CancellationToken cancellationToken) =>
         RunGroupingOnPlayerAsync((connection, token) => connection.LeaveGroupAsync(token), cancellationToken);
 

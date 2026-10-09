@@ -50,7 +50,7 @@ Keys are the RINCON ids of the speakers, so paths stay valid across restarts and
 | `Seek` | Jumps within the current track (only when it has a duration) |
 | `SetVolume`, `ChangeVolume`, `RampVolume` | Volume as a fraction from 0 to 1, a relative change from -1 to 1, or a smooth ramp to a volume. Values out of range are rejected, not clamped. |
 | `Mute`, `Unmute` | Mute of this room |
-| `PlayFavorite` | Plays a Sonos favorite by name, see `SonosSystem.Favorites` |
+| `PlayFavorite` | Plays a Sonos favorite by title, see `SonosSystem.Favorites` |
 | `PlayUri` | Plays an http(s) URI or a native Sonos URI once, as a normal track that ends and can be sought |
 | `PlayStream` | Plays an http(s) radio or live stream, with an optional title. Sonos reconnects the stream when it ends. |
 | `PlayNotification` | Plays a sound over the current playback, which then resumes (S2 speakers). The volume is a fraction from 0 to 1, played at 1 percent at least. |

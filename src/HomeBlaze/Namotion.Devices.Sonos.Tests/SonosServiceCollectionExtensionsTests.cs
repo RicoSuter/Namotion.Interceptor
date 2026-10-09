@@ -6,7 +6,7 @@ namespace Namotion.Devices.Sonos.Tests;
 public class SonosServiceCollectionExtensionsTests
 {
     [Fact]
-    public void WhenAddSonos_ThenConfigureIsApplied()
+    public void WhenAddSonosSystem_ThenConfigureIsApplied()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -14,7 +14,7 @@ public class SonosServiceCollectionExtensionsTests
         services.AddLogging();
 
         // Act
-        services.AddSonos(system => system.SeedHost = "10.0.0.121");
+        services.AddSonosSystem(system => system.SeedHost = "10.0.0.121");
         using var serviceProvider = services.BuildServiceProvider();
 
         // Assert

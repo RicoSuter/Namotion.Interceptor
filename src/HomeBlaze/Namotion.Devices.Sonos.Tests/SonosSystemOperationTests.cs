@@ -82,7 +82,7 @@ public class SonosSystemOperationTests
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentNullException>(() => system.GroupAllAsync(null!, CancellationToken.None));
-        Assert.Equal("coordinatorRoom", exception.ParamName);
+        Assert.Equal("room", exception.ParamName);
     }
 
     [Fact]
