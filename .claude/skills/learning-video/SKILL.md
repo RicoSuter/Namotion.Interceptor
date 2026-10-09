@@ -62,6 +62,7 @@ When the user asks for a revision of an earlier stage (changed docs, new chapter
   - `src/Namotion.Interceptor.<Feature>.Tests/VerifyChecksTests.PublicApi.verified.txt` where it exists (the complete public surface);
   - the existing samples `src/Namotion.Interceptor.*Sample*/` for working wiring.
 - [ ] Note every mismatch between doc and code. Follow the code; list the mismatch in the outline under "Doc mismatches" so the user can fix the doc.
+- [ ] Before the outline, prove every behavior the story depends on with a throwaway test, for example one in `videos/domain/Coffee.Tests` that prints the change sequence through an `ImmediateScheduler` subscription; delete it afterwards. Docs can promise more than the code keeps: the tracking episode was planned around a transaction that hides a brew's intermediate notifications, but a commit replays each write and publishes it at once, so the story became all or nothing instead.
 
 ## Stage 2: Outline (gate 1)
 
@@ -90,7 +91,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
   - `narration`: one spoken line. The beat lasts as long as its audio plus 0.4 s.
   - `hold`: extra seconds after the narration, or the whole length of a silent beat. A beat needs `narration`, `hold`, or both.
   - `visual`: the storyboard. What appears, what moves where, what the camera does.
-  - `components`: one or more of `CodeCard`, `FlowDiagram`, `SequenceDiagram`, `ObjectGraph`, `LiveChart`, `LayerStack`, `BrowserFrame`, `Terminal`, `ChapterCard`, `Card`, `Camera`. `ObjectGraph`, `LiveChart` and `LayerStack` are allowed by the schema but have no implementation in `theme/components/` yet (see Stage 4).
+  - `components`: one or more of exactly these names (an `Arrow` or `Pill` is part of the visual, not a component): `CodeCard`, `FlowDiagram`, `SequenceDiagram`, `ObjectGraph`, `LiveChart`, `LayerStack`, `BrowserFrame`, `Terminal`, `ChapterCard`, `Card`, `Camera`. `ObjectGraph`, `LiveChart` and `LayerStack` are allowed by the schema but have no implementation in `theme/components/` yet (see Stage 4).
   - `code: {file, region}`: file relative to the episode folder (`sample/Program.cs`, `../../domain/Coffee/Boiler.cs`).
   - `demo`: name of `demos/<name>.ts`. `terminal`: name of a terminal capture in `capture.ts`.
 
@@ -98,11 +99,12 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
 
 - Spoken English: short sentences, one idea per beat, active voice, "you" for the viewer.
 - 8 to 25 words per beat (about 3 to 10 seconds). Split longer thoughts into several beats so the picture can change with them.
-- Budget the words by voice, measured on the connectors episode (1881 words) including the pauses between beats:
-  - `kokoro:am_michael` at tempo 1.32: about 172 words per minute of finished video (10.9 minutes; the speech alone runs at about 3.1 words per second, 2.35 times the tempo). A 10 minute episode is about 1700 to 1750 words; per chapter, words = budget seconds x 2.85.
+- Budget the words by voice, measured on finished episodes including the pauses between beats:
+  - `kokoro:am_michael` at tempo 1.32: 162 to 172 words per minute of finished video, lower when the narration has long words (connectors: 1881 words in 10.9 minutes; tracking, with words like transaction and asynchronous: 1600 words in 9.9 minutes, the speech alone at 2.8 words per second). A 10 minute episode is about 1600 to 1750 words; per chapter, words = budget seconds x 2.7 to 2.85. The schema-only estimate below runs about 5 % short of the measured total.
   - `chatterbox` at tempo 1: about 195 words per minute of finished video (9.7 minutes; the speech alone runs at about 3.5 words per second times the tempo). A 10 minute episode is about 1900 to 1950 words; per chapter, words = budget seconds x 3.2.
   - Short lines run slower than long ones, since every narrated beat adds 0.4 s of silence and the engine's own edge silence: Kokoro at tempo 1.32 speaks the three audition lines at 200 words per minute.
 - Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); subtitles show the narration text as written. Better: let the code card show the identifier and narrate what it does.
+- Kokoro reads `async` as "a sink" and may turn a line's first "Is" into "As"; say "asynchronous" and start such lines with another word.
 - Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, the longest match wins, a replacement is never matched again, and subtitles keep the original.
 - An entry can override `say` for one engine with a `kokoro` or `chatterbox` key; the script's voice picks the engine, and cloned voices use `chatterbox`. Kokoro reads phoneme markup, `{match: OPC UA, say: O P C U A, kokoro: '[OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/)'}`, which Chatterbox would read aloud, so keep a plain spelling in `say`. To find phonemes, print what Kokoro makes of the plain spelling and of a markup candidate, then adjust and listen (from `videos/tools/tts`):
 
@@ -167,6 +169,7 @@ Then measure the real duration: `npm run tts -- <episode>` needs only the script
 - [ ] Wrap every piece of code the video shows in `#region <Name>` / `#endregion`. Names are PascalCase and unique per file. Nested region marker lines are dropped from the shown code, so a region can contain smaller regions for close-ups.
 - [ ] Code for intermediate versions (the "before" of a morph) is compiled too, for example a static method per version in a `Steps.cs` file that builds but is never called.
 - [ ] Size regions for the card: at the default code size (30 px) a 1240 by 780 card shows 14 lines of about 60 characters; at 28 px a 1560 wide card fits about 88 characters, at 26 px a 1500 wide card about 90. A card needs `76 + 20 + 40` px plus 1.5 times the font size per line. Lines longer than the card are clipped, not wrapped, so break long signatures and calls in the sample itself. Longer regions need `focus` scrolling or a smaller `codeFontSize` (26 at the smallest).
+- [ ] Several instances of one hosted service, such as a simulator per machine: `AddHostedService` registers an implementation type only once, so add each with `AddSingleton<IHostedService>(serviceProvider => ...)`. A before and after comparison is simpler as two machines in one app, each in its own context, than as two processes (01-tracking routes them by id with `MapGroup("/{machine}")`).
 - [ ] Keep console output short so terminal captures read well (smoke `Program.cs`: `SuppressStatusMessages` and `AddSimpleConsole(options => options.SingleLine = true)`).
 - [ ] For reproducible scripted events (a fault, a temperature drop) write a hosted service that runs `new CoffeeMachineSimulator(machine, seed, events)` with `SimulatorEvent(TimeSpan At, Action<CoffeeMachine> Apply)` instead of `CoffeeMachineSimulatorService`.
 - [ ] Extend the shared domain only when the episode needs it. Add, never rename, regions and members; keep `videos/domain/Coffee.Tests` passing.
@@ -203,15 +206,17 @@ Browser demos record pages of the sample. Design them for video, following `epis
 - When two processes appear side by side, design each page for a column (for example 800 by 720) and record both in one split page; see Demos and capture.
 - Viewport 1280 by 800, no scrolling. Background `#1c1c1e`, cards `#2c2c2e` with radius 28 and a soft shadow (`0 12px 40px rgba(0, 0, 0, 0.45)`), text `#f5f5f7`, secondary `#a1a1a6`, accents from `theme/palette.ts`. No borders.
 - `font-family: Inter`; capture registers Inter and JetBrains Mono in every page. Headline around 100 px, values 56 px or more, labels 28 px, nothing under 22 px. `font-variant-numeric: tabular-nums` for changing numbers, CSS transitions for smooth bars and colors.
-- Stable element ids the demo script can wait on, and large buttons when the demo clicks them.
+- Stable element ids the demo script can wait on, and large buttons when the demo clicks them. Set `document.body.dataset.live = 'true'` after the first successful poll, so a split page can wait for any page it shows.
+- A page that lists changes must survive the demo's reset: an asynchronous scheduler delivers changes after the reset endpoint has returned, so the clear records its time and drops changes whose `ChangedTimestamp` is older (01-tracking `ChangeStream.Clear`).
 
 ### Demos and capture
 
 - `demos/<name>.ts` default-exports a `Demo` (`tools/capture/config.ts`): `async (page, {baseUrl, baseUrls, mark}) => {...}`. It is choreography: `page.goto`, real clicks, `page.waitForFunction` for app state that varies (temperature reached, status text), `page.waitForTimeout` for pacing, and about 1.5 s of hold on the end state.
 - Call `mark('<name>')` at moments a scene cuts on (a click, a state reached). Capture writes their clip times to `clips/marks.json`, and `BrowserFrame.mark('<name>')` returns them, so scenes play ranges such as `{from: browser.mark('click') - 0.5, to: browser.mark('done')}` instead of seconds that shift with every capture.
 - A demo module may also export `prepare: DemoPreparation`, which runs before the recording starts: wait until an app is ready or reset its state there (for example with `fetch`), so the clip does not begin with a long wait.
-- Keep a clip between 0.5 and 4 times its beat length. `BrowserFrame.play` speeds it up to 4x; a longer clip loses its start, a shorter one plays at no less than 0.5x. A beat can play part of a clip with `play(duration, {from, to})`; split one clip over consecutive beats with marks.
-- Each demo records one page. To show two processes in sync, record one split page: the demo calls `page.setContent` with two iframes side by side (one per app, from `baseUrls`), the viewport is their combined size, and the scene shows each half in its own window with `BrowserFrame`'s `crop: {left, width}`. `episodes/03-connectors/split.ts` and `scenes/shared.tsx` (`MachineWindows`) are a worked example.
+- Keep a clip between 0.5 and 4 times the length of the beats that play it; add up every beat that plays the same clip before capturing, and lengthen the demo's holds when they are more than twice as long as the clip. `BrowserFrame.play` speeds it up to 4x; a longer clip loses its start, a shorter one plays at no less than 0.5x. A beat can play part of a clip with `play(duration, {from, to})`; split one clip over consecutive beats with marks.
+- To place camera targets and callouts on a recorded page, extract one frame of the clip at the viewport width (`ffmpeg -ss <s> -i clips/<demo>.mp4 -frames:v 1 -vf scale=<viewport width>:-1 frame.png`) and read element positions off it in CSS pixels, which `pagePoint` takes.
+- Each demo records one page. To show two processes, or two pages of one app, in sync, record one split page: the demo calls `page.setContent` with two iframes side by side, the viewport is their combined size, and the scene shows each half in its own window with `BrowserFrame`'s `crop: {left, width}`. Copy `episodes/01-tracking/split.ts` (`openSplit(page, leftUrl, rightUrl)`) and `SplitWindows` from its `scenes/shared.tsx`, which work for any two pages.
 - `capture.ts` (see smoke):
 
 ```ts
