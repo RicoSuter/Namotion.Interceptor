@@ -55,16 +55,14 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenTheWallClockStepsBack_ThenLaterPollsAreStillApplied()
+    public void WhenALaterOrderedPollArrives_ThenItApplies()
     {
         // Arrange
-        var clock = new SteppableClock();
-        var system = CreateHousehold(clock);
+        var system = CreateHousehold();
         var player = system.Players[KitchenUuid];
         player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), system.NextOrder());
 
         // Act
-        clock.WallClockOffset = TimeSpan.FromMinutes(-10);
         player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(10, null, null, null, null, null, null)), system.NextOrder());
         player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(20, null, null, null, null, null, null)), system.NextOrder());
 

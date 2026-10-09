@@ -80,16 +80,14 @@ public class SonosGroupStateTests
     }
 
     [Fact]
-    public void WhenTheWallClockStepsBack_ThenLaterGroupPollsAreStillApplied()
+    public void WhenALaterOrderedGroupPollArrives_ThenItApplies()
     {
         // Arrange
-        var clock = new SteppableClock();
-        var system = CreateHousehold(clock);
+        var system = CreateHousehold();
         var group = system.Groups[LivingRoomUuid];
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), system.NextOrder());
 
         // Act
-        clock.WallClockOffset = TimeSpan.FromMinutes(-10);
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), system.NextOrder());
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(20, true), system.NextOrder());
 

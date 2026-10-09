@@ -12,7 +12,7 @@ internal struct PollEventOrder
     /// <summary>
     /// Records an event applied at <paramref name="order"/>.
     /// </summary>
-    internal void RecordEvent(long order) => _lastEventAt = order;
+    internal void RecordEvent(long order) => _lastEventAt = Math.Max(_lastEventAt, order);
 
     /// <summary>
     /// Records a poll that started at <paramref name="pollStartedAt"/> and returns whether its values apply: false

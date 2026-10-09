@@ -74,6 +74,7 @@ internal static class SonosDiscovery
     /// Returns the local IPv4 address the OS would use to reach the host, or null when the host has no IPv4 address,
     /// cannot be resolved or no route exists.
     /// </summary>
+    /// <remarks>Throws <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.</remarks>
     internal static async Task<string?> DetectLocalAddressAsync(string remoteHost, CancellationToken cancellationToken)
     {
         try
