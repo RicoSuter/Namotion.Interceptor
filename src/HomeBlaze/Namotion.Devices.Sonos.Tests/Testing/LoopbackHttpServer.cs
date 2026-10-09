@@ -60,12 +60,36 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            context.Response.StatusCode = 500;
+            TrySetStatus(context.Response, 500);
             Console.Error.WriteLine(exception);
         }
-        finally
+
+        try
         {
             context.Response.Close();
+        }
+        catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException or InvalidOperationException)
+        {
+            try
+            {
+                context.Response.Abort();
+            }
+            catch (Exception abortException) when (abortException is HttpListenerException or ObjectDisposedException)
+            {
+                // The connection is already gone.
+            }
+        }
+    }
+
+    private static void TrySetStatus(HttpListenerResponse response, int statusCode)
+    {
+        try
+        {
+            response.StatusCode = statusCode;
+        }
+        catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException or InvalidOperationException)
+        {
+            // The response is already sent or the connection is gone.
         }
     }
 
