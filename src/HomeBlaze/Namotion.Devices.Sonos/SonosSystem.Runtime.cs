@@ -75,10 +75,10 @@ public partial class SonosSystem
                 StartEventListener(seedUri.Host);
                 reconnectImmediately = await RunConnectedAsync(seedUri, stoppingToken);
             }
-            catch (Exception exception) when (stoppingToken.IsCancellationRequested &&
-                                              exception is OperationCanceledException or ObjectDisposedException)
+            catch (Exception exception) when (stoppingToken.IsCancellationRequested)
             {
-                // Stopped, or disposed without stopping first.
+                // Stopping (or disposed without stopping first) aborts whatever was in flight; that is no failure.
+                _logger.LogDebug(exception, "The Sonos system connection ended while stopping.");
                 break;
             }
             catch (Exception exception)
@@ -226,6 +226,10 @@ public partial class SonosSystem
 
     private async Task ReleaseConnectionScopeAsync(CancellationToken cancellationToken)
     {
+        // Again, now that no reconciliation runs: one that was in flight may have set them after the early reset.
+        AreEventsActive = false;
+        ActiveEventCallbackHost = null;
+
         SonosEventListener? eventListener;
         HttpClient? httpClient;
         List<SonosConnection> connections;
@@ -528,8 +532,9 @@ public partial class SonosSystem
         }
     }
 
+    // Caller holds _connectionsLock.
     private bool IsCurrentConnection(string uuid, SonosConnection connection) =>
-        ReferenceEquals(FindConnection(uuid), connection);
+        ReferenceEquals(_connections.GetValueOrDefault(uuid), connection);
 
     private SonosEventListener? GetEventListener()
     {
@@ -555,20 +560,24 @@ public partial class SonosSystem
             var group = Groups.GetValueOrDefault(player.Uuid);
             var groupReading = group is null ? null : await connection.ReadGroupAsync(cancellationToken);
 
-            // Teardown may have released the connection while the reads were in flight; their results must not
-            // report the player reachable again.
-            if (!IsCurrentConnection(player.Uuid, connection))
+            // Teardown may have released the connection while the reads were in flight. Checking and applying under
+            // the lock teardown clears the connections with, before it marks devices offline, keeps a late result
+            // from reporting the player reachable again.
+            lock (_connectionsLock)
             {
-                return;
-            }
+                if (!IsCurrentConnection(player.Uuid, connection))
+                {
+                    return;
+                }
 
-            player.ApplyPoll(reading, pollStartedAt);
-            if (groupReading is not null)
-            {
-                group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
-            }
+                player.ApplyPoll(reading, pollStartedAt);
+                if (groupReading is not null)
+                {
+                    group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
+                }
 
-            player.ReportPollSucceeded();
+                player.ReportPollSucceeded();
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -596,9 +605,12 @@ public partial class SonosSystem
                 ?? throw new InvalidOperationException("No connection to the satellite.");
 
             await ReadStaticDataAsync(satellite, connection, cancellationToken);
-            if (IsCurrentConnection(satellite.Uuid, connection))
+            lock (_connectionsLock)
             {
-                satellite.ReportPollSucceeded();
+                if (IsCurrentConnection(satellite.Uuid, connection))
+                {
+                    satellite.ReportPollSucceeded();
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

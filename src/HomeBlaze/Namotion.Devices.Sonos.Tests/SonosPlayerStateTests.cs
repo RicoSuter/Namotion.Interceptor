@@ -50,6 +50,21 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
+    public void WhenPollStartsLongBeforeTheLastPoll_ThenItIsTakenAsAClockJumpAndApplied()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), T0.AddMinutes(10));
+
+        // Act
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(10, null, null, null, null, null, null)), T0);
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(20, null, null, null, null, null, null)), T0.AddSeconds(30));
+
+        // Assert
+        Assert.Equal(0.2m, player.Volume);
+    }
+
+    [Fact]
     public void WhenAvTransportEventApplied_ThenTrackStateUpdates()
     {
         // Arrange

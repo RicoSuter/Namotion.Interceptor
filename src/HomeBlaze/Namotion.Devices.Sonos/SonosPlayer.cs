@@ -240,7 +240,7 @@ public partial class SonosPlayer : SonosDevice,
         lock (_stateLock)
         {
             // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one.
-            if (pollStartedAt < _lastPollStartedAt)
+            if (SonosValues.IsSupersededPoll(pollStartedAt, _lastPollStartedAt))
             {
                 return;
             }

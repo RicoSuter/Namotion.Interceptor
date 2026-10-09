@@ -59,6 +59,21 @@ public class SonosGroupStateTests
     }
 
     [Fact]
+    public void WhenGroupPollStartsLongBeforeTheLastPoll_ThenItIsTakenAsAClockJumpAndApplied()
+    {
+        // Arrange
+        var group = CreateSystem().Groups[TestFixtures.LivingRoomUuid];
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(35, false), T0.AddMinutes(10));
+
+        // Act
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), T0);
+
+        // Assert
+        Assert.Equal(0.1m, group.Volume);
+        Assert.True(group.IsMuted);
+    }
+
+    [Fact]
     public void WhenCoordinatorPlays_ThenGroupReportsCoordinatorTrack()
     {
         // Arrange

@@ -113,14 +113,17 @@ public partial class SonosGroup :
     {
         lock (_stateLock)
         {
-            // An older poll completing after a newer one, or after a newer event, would roll the state back.
-            if (pollStartedAt < _lastPollStartedAt || _lastEventAt > pollStartedAt)
+            // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one.
+            if (SonosValues.IsSupersededPoll(pollStartedAt, _lastPollStartedAt))
             {
                 return;
             }
 
             _lastPollStartedAt = pollStartedAt;
-            Apply(change);
+            if (_lastEventAt <= pollStartedAt)
+            {
+                Apply(change);
+            }
         }
     }
 

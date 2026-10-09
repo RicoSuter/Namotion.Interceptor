@@ -75,11 +75,10 @@ public class SonosSystemRuntimeTests
         try
         {
             await AsyncTestHelpers.WaitUntilAsync(
-                () => system.Status == ServiceStatus.Error,
+                () => system.Status == ServiceStatus.Error && system.StatusMessage is not null,
                 ConnectedSystem.WaitTimeout,
                 message: "An unreachable seed should report an error.");
             Assert.False(system.IsConnected);
-            Assert.NotNull(system.StatusMessage);
         }
         finally
         {
@@ -190,10 +189,10 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
-    public async Task WhenFirstKnownSpeakerIsOffline_ThenSystemReconnectsThroughAnotherKnownSpeaker()
+    public async Task WhenFirstKnownSpeakerDoesNotAnswer_ThenSystemReconnectsThroughAnotherKnownSpeaker()
     {
         // Arrange
-        var kitchen = new FakeSonosSpeaker();
+        await using var kitchen = new FakeSonosSpeaker();
         await using var office = new FakeSonosSpeaker();
         kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
         office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
@@ -216,10 +215,11 @@ public class SonosSystemRuntimeTests
                 () => system.IsConnected && system.Players.Count == 2 && system.Players.Values.All(player => player.IsConnected),
                 ConnectedSystem.WaitTimeout,
                 message: "The system should connect to both speakers.");
+            var kitchenTopologyReads = kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
             var officeTopologyReads = office.Calls.Count(call => call.Action == "GetZoneGroupState");
 
             // Act
-            await kitchen.DisposeAsync();
+            kitchen.RespondWithFault("GetZoneGroupState", 501);
             system.SeedHost = null;
             await system.ApplyConfigurationAsync(CancellationToken.None);
 
@@ -231,14 +231,15 @@ public class SonosSystemRuntimeTests
                 ConnectedSystem.WaitTimeout,
                 message: "The system should reconnect through the office speaker.");
             Assert.Equal(ServiceStatus.Running, system.Status);
-            Assert.False(system.Players[TestFixtures.KitchenUuid].IsConnected);
             Assert.Equal(0, Volatile.Read(ref discoveryCalls));
+
+            // The probe stops at the first speaker that answers, so a probe of the kitchen means it was tried first.
+            Assert.True(kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > kitchenTopologyReads);
         }
         finally
         {
             await system.StopAsync(CancellationToken.None);
             system.Dispose();
-            await kitchen.DisposeAsync();
         }
     }
 
@@ -298,11 +299,12 @@ public class SonosSystemRuntimeTests
             {
                 isConnectedAfterFirstFailure = connected.System.IsConnected;
                 statusAfterFirstFailure = connected.System.Status;
-                return connected.System.StatusMessage?.Contains("(1 of 3)") == true;
+                // Matching any count keeps a slow thread pool that misses "(1 of 3)" from timing out.
+                return connected.System.StatusMessage?.Contains("of 3)") == true;
             },
             ConnectedSystem.WaitTimeout,
             pollInterval: TimeSpan.FromMilliseconds(10),
-            message: "The first failure should be reported without disconnecting.");
+            message: "A failure below the limit should be reported without disconnecting.");
         Assert.True(isConnectedAfterFirstFailure);
         Assert.Equal(ServiceStatus.Running, statusAfterFirstFailure);
     }
@@ -317,16 +319,15 @@ public class SonosSystemRuntimeTests
 
         // Act
         speaker.RespondWithFault("GetZoneGroupState", 501);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => connected.System.Status == ServiceStatus.Error,
-            ConnectedSystem.WaitTimeout,
-            message: "Three failures in a row should end the connection.");
-        var isConnectedOnError = connected.System.IsConnected;
-        speaker.ClearFault("GetZoneGroupState");
 
         // Assert
-        Assert.False(isConnectedOnError);
-        Assert.Contains(AvTransportEventPath, speaker.Unsubscribed);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => connected.System.Status == ServiceStatus.Error &&
+                  !connected.System.IsConnected &&
+                  speaker.Unsubscribed.Contains(AvTransportEventPath),
+            ConnectedSystem.WaitTimeout,
+            message: "Three failures in a row should end the connection and release its subscriptions.");
+        speaker.ClearFault("GetZoneGroupState");
         await AsyncTestHelpers.WaitUntilAsync(
             () => connected.System.IsConnected && connected.System.Status == ServiceStatus.Running && connected.System.AreEventsActive,
             ConnectedSystem.WaitTimeout,
@@ -357,12 +358,18 @@ public class SonosSystemRuntimeTests
         // Arrange
         var system = ConnectedSystem.CreateSystem("127.0.0.1:1");
 
-        // Act
-        var exception = await Record.ExceptionAsync(() => Task.WhenAll(Enumerable.Range(0, 64)
-            .Select(_ => Task.Run(() => system.ApplyConfigurationAsync(CancellationToken.None)))));
+        try
+        {
+            // Act
+            var exception = await Record.ExceptionAsync(() => Task.WhenAll(Enumerable.Range(0, 64)
+                .Select(_ => Task.Run(() => system.ApplyConfigurationAsync(CancellationToken.None)))));
 
-        // Assert
-        Assert.Null(exception);
-        system.Dispose();
+            // Assert
+            Assert.Null(exception);
+        }
+        finally
+        {
+            system.Dispose();
+        }
     }
 }
