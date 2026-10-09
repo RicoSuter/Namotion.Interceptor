@@ -29,7 +29,7 @@ internal static class DidlParser
         XDocument document;
         try
         {
-            document = XDocument.Parse(metadata);
+            document = SonosXml.Parse(metadata);
         }
         catch (XmlException)
         {

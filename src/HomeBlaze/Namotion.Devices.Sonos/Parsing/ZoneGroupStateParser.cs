@@ -12,7 +12,7 @@ internal static class ZoneGroupStateParser
     /// </remarks>
     internal static SonosTopology Parse(string xml)
     {
-        var document = XDocument.Parse(xml);
+        var document = SonosXml.Parse(xml);
         var groups = new List<SonosTopologyGroup>();
         foreach (var groupElement in document.Descendants("ZoneGroup"))
         {

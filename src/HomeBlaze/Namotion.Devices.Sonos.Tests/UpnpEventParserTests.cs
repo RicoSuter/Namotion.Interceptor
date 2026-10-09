@@ -141,4 +141,17 @@ public class UpnpEventParserTests
         Assert.Throws<XmlException>(() => UpnpEventParser.ParseAvTransport(body));
         Assert.Throws<XmlException>(() => UpnpEventParser.ParseRenderingControl(body));
     }
+
+    [Fact]
+    public void WhenBodyDeclaresADocumentType_ThenParsingThrowsXmlException()
+    {
+        // Arrange
+        const string body = """
+            <!DOCTYPE e:propertyset [<!ENTITY volume "50">]>
+            <e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"><e:property><GroupVolume>&volume;</GroupVolume></e:property></e:propertyset>
+            """;
+
+        // Act & Assert
+        Assert.Throws<XmlException>(() => UpnpEventParser.ParseGroupRenderingControl(body));
+    }
 }

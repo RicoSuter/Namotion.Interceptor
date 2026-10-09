@@ -27,7 +27,7 @@ internal static class FavoritesParser
             return favorites;
         }
 
-        var root = XDocument.Parse(result).Root;
+        var root = SonosXml.Parse(result).Root;
         if (root is null)
         {
             return favorites;

@@ -52,7 +52,7 @@ internal static class UpnpEventParser
     private static Dictionary<string, string> ParseProperties(string body)
     {
         var properties = new Dictionary<string, string>(StringComparer.Ordinal);
-        var root = XDocument.Parse(body).Root;
+        var root = SonosXml.Parse(body).Root;
         if (root is null)
         {
             return properties;
@@ -81,7 +81,7 @@ internal static class UpnpEventParser
             return values;
         }
 
-        var instance = XDocument.Parse(lastChange).Root?.Elements()
+        var instance = SonosXml.Parse(lastChange).Root?.Elements()
             .FirstOrDefault(element => element.Name.LocalName == "InstanceID");
         if (instance is null)
         {

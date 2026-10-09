@@ -13,7 +13,7 @@ internal static class DeviceDescriptionParser
 
     internal static SonosDeviceDescription Parse(string xml)
     {
-        var document = XDocument.Parse(xml);
+        var document = SonosXml.Parse(xml);
         var device = document.Root?.Element(DeviceNamespace + "device");
 
         // Service ids look like "urn:upnp-org:serviceId:AVTransport"; nested devices hold the media services.
