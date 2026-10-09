@@ -226,7 +226,8 @@ public partial class SonosSystem
 
     private async Task ReleaseConnectionScopeAsync(CancellationToken cancellationToken)
     {
-        // Again, now that no reconciliation runs: one that was in flight may have set them after the early reset.
+        // Again, after waiting for an in-flight reconciliation or for the budget to expire: one that was in flight
+        // may have set them after the early reset.
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
 
@@ -532,9 +533,21 @@ public partial class SonosSystem
         }
     }
 
-    // Caller holds _connectionsLock.
-    private bool IsCurrentConnection(string uuid, SonosConnection connection) =>
-        ReferenceEquals(_connections.GetValueOrDefault(uuid), connection);
+    /// <summary>
+    /// Reports the device reachable unless teardown released the connection while the poll was in flight. Teardown
+    /// clears the connections under the same lock before it marks devices offline, so a late success cannot undo
+    /// that. This is the only subject write made under _connectionsLock; it takes no subject state lock.
+    /// </summary>
+    private void ReportPollSucceededIfCurrent(SonosDevice device, SonosConnection connection)
+    {
+        lock (_connectionsLock)
+        {
+            if (ReferenceEquals(_connections.GetValueOrDefault(device.Uuid), connection))
+            {
+                device.ReportPollSucceeded();
+            }
+        }
+    }
 
     private SonosEventListener? GetEventListener()
     {
@@ -560,24 +573,16 @@ public partial class SonosSystem
             var group = Groups.GetValueOrDefault(player.Uuid);
             var groupReading = group is null ? null : await connection.ReadGroupAsync(cancellationToken);
 
-            // Teardown may have released the connection while the reads were in flight. Checking and applying under
-            // the lock teardown clears the connections with, before it marks devices offline, keeps a late result
-            // from reporting the player reachable again.
-            lock (_connectionsLock)
+            // Applied outside _connectionsLock: the apply takes the subjects' state locks and fires change
+            // notifications, whose subscribers may issue commands that take _connectionsLock. Stale values on a
+            // device that teardown already marked offline are harmless.
+            player.ApplyPoll(reading, pollStartedAt);
+            if (groupReading is not null)
             {
-                if (!IsCurrentConnection(player.Uuid, connection))
-                {
-                    return;
-                }
-
-                player.ApplyPoll(reading, pollStartedAt);
-                if (groupReading is not null)
-                {
-                    group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
-                }
-
-                player.ReportPollSucceeded();
+                group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
             }
+
+            ReportPollSucceededIfCurrent(player, connection);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -605,13 +610,7 @@ public partial class SonosSystem
                 ?? throw new InvalidOperationException("No connection to the satellite.");
 
             await ReadStaticDataAsync(satellite, connection, cancellationToken);
-            lock (_connectionsLock)
-            {
-                if (IsCurrentConnection(satellite.Uuid, connection))
-                {
-                    satellite.ReportPollSucceeded();
-                }
-            }
+            ReportPollSucceededIfCurrent(satellite, connection);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

@@ -67,9 +67,10 @@ public class SonosGroupStateTests
 
         // Act
         group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(10, true), T0);
+        group.ApplyGroupRenderingControlPoll(new GroupRenderingControlChange(20, true), T0.AddSeconds(30));
 
         // Assert
-        Assert.Equal(0.1m, group.Volume);
+        Assert.Equal(0.2m, group.Volume);
         Assert.True(group.IsMuted);
     }
 
