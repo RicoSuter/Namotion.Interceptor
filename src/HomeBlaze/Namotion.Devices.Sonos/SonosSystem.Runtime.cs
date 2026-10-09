@@ -54,9 +54,9 @@ public partial class SonosSystem
     // A persistent failure is logged at Warning once and at Debug while it lasts, see LogFailure.
     private readonly FailureTracker _failures = new();
 
-    private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultPollingInterval, MinimumInterval);
+    private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultInterval, MinimumInterval);
 
-    private TimeSpan EffectiveRetryInterval => SonosValues.GetEffectiveInterval(RetryInterval, DefaultRetryInterval, MinimumInterval);
+    private TimeSpan EffectiveRetryInterval => SonosValues.GetEffectiveInterval(RetryInterval, DefaultInterval, MinimumInterval);
 
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)

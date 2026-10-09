@@ -20,10 +20,10 @@
                      Label="Event port" Min="1" Max="65535" Class="mt-4" />
 
     <MudNumericField @bind-Value="_pollingIntervalSeconds" @bind-Value:after="OnFieldChanged"
-                     Label="Polling interval (seconds)" Min="5" Max="3600" Class="mt-4" />
+                     Label="Polling interval (seconds)" Min="SonosSystem.MinimumIntervalSeconds" Max="SonosSystem.MaximumIntervalSeconds" Class="mt-4" />
 
     <MudNumericField @bind-Value="_retryIntervalSeconds" @bind-Value:after="OnFieldChanged"
-                     Label="Retry interval (seconds)" Min="5" Max="3600" Class="mt-4" />
+                     Label="Retry interval (seconds)" Min="SonosSystem.MinimumIntervalSeconds" Max="SonosSystem.MaximumIntervalSeconds" Class="mt-4" />
 
     @if (!IsCreating && SystemSubject is not null)
     {
@@ -70,8 +70,8 @@
 
     public bool IsValid =>
         _eventPort is >= 1 and <= 65535 &&
-        _pollingIntervalSeconds is >= 5 and <= 3600 &&
-        _retryIntervalSeconds is >= 5 and <= 3600;
+        _pollingIntervalSeconds is >= SonosSystem.MinimumIntervalSeconds and <= SonosSystem.MaximumIntervalSeconds &&
+        _retryIntervalSeconds is >= SonosSystem.MinimumIntervalSeconds and <= SonosSystem.MaximumIntervalSeconds;
 
     public bool IsDirty =>
         NormalizeHost(_seedHost) != NormalizeHost(_originalSeedHost) ||
@@ -88,9 +88,9 @@
     {
         _seedHost = SystemSubject?.SeedHost;
         _eventCallbackHost = SystemSubject?.EventCallbackHost;
-        _eventPort = SystemSubject?.EventPort ?? 6329;
-        _pollingIntervalSeconds = (int)(SystemSubject?.PollingInterval.TotalSeconds ?? 30);
-        _retryIntervalSeconds = (int)(SystemSubject?.RetryInterval.TotalSeconds ?? 30);
+        _eventPort = SystemSubject?.EventPort ?? SonosSystem.DefaultEventPort;
+        _pollingIntervalSeconds = (int)(SystemSubject?.PollingInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
+        _retryIntervalSeconds = (int)(SystemSubject?.RetryInterval.TotalSeconds ?? SonosSystem.DefaultIntervalSeconds);
         StoreOriginals();
     }
 

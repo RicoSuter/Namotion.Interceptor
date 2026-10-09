@@ -34,9 +34,27 @@ public partial class SonosSystem : BackgroundService,
     IIconProvider,
     ILastUpdatedProvider
 {
-    internal const int DefaultEventPort = 6329;
-    internal static readonly TimeSpan DefaultPollingInterval = TimeSpan.FromSeconds(30);
-    internal static readonly TimeSpan DefaultRetryInterval = TimeSpan.FromSeconds(30);
+    /// <summary>
+    /// The default <see cref="EventPort"/>.
+    /// </summary>
+    public const int DefaultEventPort = 6329;
+
+    /// <summary>
+    /// The default <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds.
+    /// </summary>
+    public const int DefaultIntervalSeconds = 30;
+
+    /// <summary>
+    /// The shortest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a shorter one is raised to it.
+    /// </summary>
+    public const int MinimumIntervalSeconds = 5;
+
+    /// <summary>
+    /// The longest <see cref="PollingInterval"/> and <see cref="RetryInterval"/>, in seconds; a longer one is lowered to it.
+    /// </summary>
+    public const int MaximumIntervalSeconds = 3600;
+
+    internal static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(DefaultIntervalSeconds);
 
     private readonly ILogger<SonosSystem> _logger;
 
@@ -164,7 +182,7 @@ public partial class SonosSystem : BackgroundService,
     /// <summary>
     /// The shortest polling and retry interval; a shorter configured value is raised to it. Tests lower it.
     /// </summary>
-    internal TimeSpan MinimumInterval { get; set; } = TimeSpan.FromSeconds(5);
+    internal TimeSpan MinimumInterval { get; set; } = TimeSpan.FromSeconds(MinimumIntervalSeconds);
 
     /// <summary>
     /// The shortest subscription lifetime renewals are scheduled for, whatever a speaker grants. Tests shorten it.
@@ -188,8 +206,8 @@ public partial class SonosSystem : BackgroundService,
         _logger = logger;
 
         EventPort = DefaultEventPort;
-        PollingInterval = DefaultPollingInterval;
-        RetryInterval = DefaultRetryInterval;
+        PollingInterval = DefaultInterval;
+        RetryInterval = DefaultInterval;
         Players = new Dictionary<string, SonosPlayer>(StringComparer.Ordinal);
         Groups = new Dictionary<string, SonosGroup>(StringComparer.Ordinal);
         Favorites = [];

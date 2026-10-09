@@ -30,7 +30,7 @@ internal static class SonosValues
     /// <summary>
     /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.
     /// </summary>
-    internal static readonly TimeSpan MaximumInterval = TimeSpan.FromHours(1);
+    internal static readonly TimeSpan MaximumInterval = TimeSpan.FromSeconds(SonosSystem.MaximumIntervalSeconds);
 
     /// <summary>
     /// Returns the configured interval clamped to <paramref name="minimum"/> through <see cref="MaximumInterval"/>,
