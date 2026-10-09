@@ -39,20 +39,6 @@
 
     private SonosGroup? Group => Subject as SonosGroup;
 
-    private async Task RunAsync(Func<SonosGroup, Task> command)
-    {
-        if (Group is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await command(Group);
-        }
-        catch (Exception exception)
-        {
-            Snackbar.Add($"Sonos: {exception.Message}", Severity.Error);
-        }
-    }
+    private Task RunAsync(Func<SonosGroup, Task> command) =>
+        Group is { } group ? SonosCommands.RunAsync(Snackbar, () => command(group)) : Task.CompletedTask;
 }

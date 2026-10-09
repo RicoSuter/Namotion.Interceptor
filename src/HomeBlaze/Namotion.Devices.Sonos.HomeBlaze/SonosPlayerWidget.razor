@@ -60,20 +60,6 @@
 
     private SonosPlayer? Player => Subject as SonosPlayer;
 
-    private async Task RunAsync(Func<SonosPlayer, Task> command)
-    {
-        if (Player is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await command(Player);
-        }
-        catch (Exception exception)
-        {
-            Snackbar.Add($"Sonos: {exception.Message}", Severity.Error);
-        }
-    }
+    private Task RunAsync(Func<SonosPlayer, Task> command) =>
+        Player is { } player ? SonosCommands.RunAsync(Snackbar, () => command(player)) : Task.CompletedTask;
 }
