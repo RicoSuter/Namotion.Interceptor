@@ -1,6 +1,3 @@
-node_modules/
 output/
 public/generated/
 tools/tts/.venv/
-**/bin/
-**/obj/

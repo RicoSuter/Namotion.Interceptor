@@ -77,7 +77,7 @@ describe('tempoPlan', () => {
 });
 
 describe('voiceIdentity', () => {
-  it('WhenKokoroSpeedChanges_ThenKeyChangesAndSpeedOneKeepsTheEarlierKey', () => {
+  it('WhenKokoroSpeedChanges_ThenKeyChanges', () => {
     // Arrange
     const voice = parseVoice('kokoro:am_michael');
 
@@ -86,7 +86,6 @@ describe('voiceIdentity', () => {
     const faster = synthesisKey('Hello.', voiceIdentity(voice, 1.3));
 
     // Assert
-    expect(natural).toBe(synthesisKey('Hello.', {voice: {name: 'am_michael'}, engine: 'kokoro-1'}));
     expect(synthesisKey('Hello.', voiceIdentity(voice, 1))).toBe(natural);
     expect(faster).not.toBe(natural);
     expect(synthesisKey('Hello.', voiceIdentity(voice, 1.34))).not.toBe(faster);
@@ -95,14 +94,6 @@ describe('voiceIdentity', () => {
   it('WhenChatterboxGetsASpeed_ThenThrows', () => {
     // Act & Assert
     expect(() => voiceIdentity(parseVoice('chatterbox'), 1.2)).toThrow(/has no native speed/);
-  });
-
-  it('WhenVoiceIsDefaultChatterbox_ThenKeyMatchesAudioCachedBeforeVoicesWereConfigurable', () => {
-    // Act
-    const key = synthesisKey('Hello.', voiceIdentity(parseVoice('chatterbox')));
-
-    // Assert
-    expect(key).toBe(synthesisKey('Hello.', {voice: 'default', engine: 'chatterbox-1'}));
   });
 
   it('WhenEngineOrSettingsDiffer_ThenKeysDiffer', () => {

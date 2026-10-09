@@ -25,8 +25,6 @@ export interface TerminalCapture {
   name: string;
   command: string;
   args: string[];
-  /** Relative to the episode directory. */
-  cwd?: string;
   /** Stop the process once its output matches this regular expression. */
   until?: string;
   timeoutSeconds?: number;
@@ -41,7 +39,6 @@ export interface AppConfig {
   project: string;
   port: number;
   readyPath: string;
-  environment?: Record<string, string>;
 }
 
 export interface CaptureConfig {

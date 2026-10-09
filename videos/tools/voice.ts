@@ -87,13 +87,10 @@ export function voiceRequest(voice: Voice, speed = 1): VoiceRequest {
  */
 export function voiceIdentity(voice: Voice, speed = 1): {voice: unknown; engine: string} {
   if (voice.engine === 'kokoro') {
-    // Speed 1 keeps the identity it had before Kokoro took a speed, so its cached audio stays valid.
-    return {voice: speed === 1 ? {name: voice.name} : {name: voice.name, speed}, engine: engineVersions.kokoro};
+    return {voice: {name: voice.name, speed}, engine: engineVersions.kokoro};
   }
   if (speed !== 1) {
     throw new Error(`Voice '${voiceLabel(voice)}' has no native speed; its tempo is applied with atempo`);
   }
-  const settings = chatterboxPresets[voice.preset];
-  // The built-in voice at default settings keeps the identity it had before voices were configurable, so its cached audio stays valid.
-  return {voice: voice.preset === 'default' ? 'default' : settings, engine: engineVersions.chatterbox};
+  return {voice: chatterboxPresets[voice.preset], engine: engineVersions.chatterbox};
 }

@@ -10,8 +10,6 @@ public partial class CoffeeMachine
 {
     public partial string Name { get; set; }
 
-    public partial string SerialNumber { get; set; }
-
     public partial CoffeeMachineState State { get; set; }
 
     public partial string? ActiveRecipeName { get; set; }
@@ -47,7 +45,6 @@ public partial class CoffeeMachine
     public CoffeeMachine()
     {
         Name = "Coffee Machine";
-        SerialNumber = "CM-0001";
         Boiler = new Boiler();
         Pump = new Pump();
         WaterTank = new WaterTank();

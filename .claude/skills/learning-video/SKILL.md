@@ -90,7 +90,7 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
   - `narration`: one spoken line. The beat lasts as long as its audio plus 0.4 s.
   - `hold`: extra seconds after the narration, or the whole length of a silent beat. A beat needs `narration`, `hold`, or both.
   - `visual`: the storyboard. What appears, what moves where, what the camera does.
-  - `components`: one or more of exactly these names (an `Arrow` or `Pill` is part of the visual, not a component): `CodeCard`, `FlowDiagram`, `SequenceDiagram`, `ObjectGraph`, `LiveChart`, `LayerStack`, `BrowserFrame`, `Terminal`, `ChapterCard`, `Card`, `Camera`. `ObjectGraph`, `LiveChart` and `LayerStack` are allowed by the schema but have no implementation in `theme/components/` yet (see Stage 4).
+  - `components`: one or more of exactly these names (an `Arrow` or `Pill` is part of the visual, not a component): `CodeCard`, `FlowDiagram`, `SequenceDiagram`, `BrowserFrame`, `Terminal`, `ChapterCard`, `Card`, `Camera`.
   - `code: {file, region}`: file relative to the episode folder (`sample/Program.cs`, `../../domain/Coffee/Boiler.cs`).
   - `demo`: name of `demos/<name>.ts`. `terminal`: name of a terminal capture in `capture.ts`.
 
@@ -220,7 +220,7 @@ export default defineCapture({
 });
 ```
 
-  Capture starts the `app` (with `--urls http://localhost:<port>`, optional `environment`) and records every demo against it. For a sample with several processes use `apps: [{name: 'server', ...}, {name: 'client', ...}]` instead: they start in order, each awaited until `readyPath` answers, and demos get every URL in `baseUrls` by name (`baseUrl` is the first). Terminal captures run before the apps start, each as its own process, so give them another port; mark one `whileAppsRun: true` when it needs a running app, for example a client that connects to the server. `until` is a regular expression that ends a long-running command, and the transcript ends at the line it matched. Use ports unique to the episode.
+  Capture starts the `app` (with `--urls http://localhost:<port>`) and records every demo against it. For a sample with several processes use `apps: [{name: 'server', ...}, {name: 'client', ...}]` instead: they start in order, each awaited until `readyPath` answers, and demos get every URL in `baseUrls` by name (`baseUrl` is the first). Terminal captures run before the apps start, each as its own process, so give them another port; mark one `whileAppsRun: true` when it needs a running app, for example a client that connects to the server. `until` is a regular expression that ends a long-running command, and the transcript ends at the line it matched. Use ports unique to the episode.
 
 ### Diagrams
 
@@ -319,15 +319,13 @@ All in `theme/components/`; read the file before using a component in a new way.
 | `CodeCard` | `{fileName, width, height, code?, codeFontSize?}` plus Rect props | `show(code, duration)` types in; `morph(code, duration, fileName?)` animates the diff and can rename the tab; `focus(from, to, duration)` highlights zero-based inclusive lines of the region and dims the rest, scrolling if needed; `unfocus()`; `linesCenter(from, to)` world point for the camera |
 | `FlowDiagram` | `{definition: FlowDefinition}`; `yield* flow.build()` once before revealing | `reveal(step)`; `pulse(from, to, duration)` sends a particle along an edge (only along `from` to `to`, so add reverse edges for the way back); `retext(id, {label?, detail?})` gives a node a new role; `node(id)` for camera targets; `boxes` (every node) for camera `clear` |
 | `SequenceDiagram` | `{participants, width = 1500, height = 760, rowHeight = 110}`; about 5 messages fit at defaults | `appear()`; `message(from, to, label, {reply?})` draws the next row and highlights the receiver; `activate(id)`; `headers` for camera `clear` |
-| `Terminal` | `{transcript: useTerminal('<name>'), width, maximumRows = 12, title?}`; wraps long lines | `run(duration)` types the command and streams the output to end within the duration |
+| `Terminal` | `{transcript: useTerminal('<name>'), width, title?}`; wraps long lines, keeps 12 rows | `run(duration)` types the command and streams the output to end within the duration |
 | `BrowserFrame` | `{demo: '<name>', address, width, aspectRatio = 1.6, crop?: {left, width}}`; then `yield browser` | `play(duration, {from?, to?})` fits the clip to the duration; `mark(name)` is the clip time of a demo mark |
 | `Card` | Rect props plus `fill`; rounded, soft shadow | standard node signals (`opacity`, `scale`, `position`) |
 | `WindowFrame` | `{width, height, title?, address?, bodyFill?}`; add content to `.body` | standard node signals |
-| `Arrow` | `{curve, color?, lineWidth?, headSize?, dashed?, drawn?}`; curves from `theme/geometry.ts` (`sideCurve`, `messageCurve`); color defaults to `palette.edge` | `grow(duration)`; `line.getPointAtPercentage(p)` for a point on the curve |
+| `Arrow` | `{curve, color?, lineWidth?, dashed?}`; curves from `theme/geometry.ts` (`sideCurve`, `messageCurve`); color defaults to `palette.edge` | `grow(duration)`; `line.getPointAtPercentage(p)` for a point on the curve |
 
-Tokens: `palette` (`background`, `card`, `elevated`, `separator`, `text`, `secondaryText`, `edge` for neutral connectors, accents `blue`, `cyan`, `green`, `orange`, `pink`, `purple`); `style.ts` has `radius`, `shadow`, `smallShadow`, `fonts`, `fontSize` (label 30, detail 22, code 30, terminal 30, title 112, header 22), `safeMargin` (96 by 54, the header's distance from the frame edges), `spacing`, `durations` (0.3, 0.6, 1.2), `moveEasing` for moves and the camera, `enterEasing` for arrivals, `arrivalSpring` for `spring(arrivalSpring, from, to, setter)`.
-
-`ObjectGraph`, `LiveChart` and `LayerStack` are not implemented. Compose the beat from existing components (an object tree as a `'down'` `FlowDiagram`, values in a `Card`), or implement the component in `theme/components/` following `FlowDiagram` and `Card`, show it in the smoke episode, and commit it separately.
+Tokens: `palette` (`background`, `card`, `elevated`, `separator`, `text`, `secondaryText`, `edge` for neutral connectors, accents `blue`, `cyan`, `green`, `orange`, `pink`, `purple`); `style.ts` has `radius`, `shadow`, `smallShadow`, `fonts`, `fontSize` (label 30, detail 22, code 30, terminal 30, title 112, header 22), `safeMargin` (96 by 54, the header's distance from the frame edges), `durations` (0.3, 0.6, 1.2), `moveEasing` for moves and the camera, `enterEasing` for arrivals, `arrivalSpring` for `spring(arrivalSpring, from, to, setter)`.
 
 Change `theme/` or `tools/` only for a fix or a reusable improvement, in its own commit, and keep `npm test`, `npm run typecheck` and `npm run render -- smoke` passing.
 

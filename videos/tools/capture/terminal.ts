@@ -1,5 +1,4 @@
 import {spawn} from 'node:child_process';
-import {resolve} from 'node:path';
 import type {TerminalCapture} from './config';
 
 export function stripAnsi(text: string): string {
@@ -18,12 +17,11 @@ export function cutAfterMatch(output: string, until: RegExp | null): string {
 
 /** Runs the command and returns a transcript: the prompt line followed by its combined output. */
 export function runTerminalCapture(capture: TerminalCapture, episodeDirectory: string): Promise<string> {
-  const cwd = resolve(episodeDirectory, capture.cwd ?? '.');
   const until = capture.until ? new RegExp(capture.until) : null;
   const timeout = (capture.timeoutSeconds ?? 120) * 1000;
 
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(capture.command, capture.args, {cwd, env: {...process.env, NO_COLOR: '1', DOTNET_NOLOGO: '1'}});
+    const child = spawn(capture.command, capture.args, {cwd: episodeDirectory, env: {...process.env, NO_COLOR: '1', DOTNET_NOLOGO: '1'}});
     let output = '';
     let stopped = false;
     const stop = () => {

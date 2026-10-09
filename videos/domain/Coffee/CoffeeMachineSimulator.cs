@@ -24,7 +24,7 @@ public sealed class CoffeeMachineSimulator
     {
         _machine = machine;
         _random = new Random(seed);
-        _events = new Queue<SimulatorEvent>((events ?? []).OrderBy(e => e.At));
+        _events = new Queue<SimulatorEvent>((events ?? []).OrderBy(simulatorEvent => simulatorEvent.At));
     }
 
     public void Step(TimeSpan delta)

@@ -6,9 +6,8 @@ import {ChapterHeader} from './components/ChapterHeader';
 import {findBeat, type Timing} from './timing';
 
 /**
- * Plays each beat's narration and keeps the beat on screen for its timed duration. The narration text is not
- * drawn: render muxes it into the video as a soft subtitle track. Adds the background layer and the chapter header
- * to the view and keeps both on the current beat's chapter.
+ * Plays each beat's narration and keeps the beat on screen for its timed duration. Adds the background layer and
+ * the chapter header to the view and keeps both on the current beat's chapter.
  */
 export class Narrator {
   private readonly header: ChapterHeader;

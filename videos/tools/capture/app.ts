@@ -13,7 +13,7 @@ export async function startApp(app: AppConfig, episodeDirectory: string): Promis
     'dotnet',
     ['run', '--project', resolve(episodeDirectory, app.project), '--urls', baseUrl],
     // Own process group so stop() also ends the app process that dotnet run starts.
-    {detached: true, stdio: ['ignore', 'inherit', 'inherit'], env: {...process.env, ...app.environment}},
+    {detached: true, stdio: ['ignore', 'inherit', 'inherit'], },
   );
   const stop = () => {
     if (child.pid !== undefined && child.exitCode === null) {

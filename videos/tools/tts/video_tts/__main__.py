@@ -15,7 +15,6 @@ def main() -> None:
     items = [Item(key=item["key"], text=item["text"]) for item in request["items"]]
 
     durations = synthesize_all(items, output_directory, lambda: create_engine(voice))
-    (output_directory / "durations.json").write_text(json.dumps(durations, indent=2), encoding="utf-8")
     print(f"{len(items)} lines, {sum(durations.values()):.1f} s of audio")
 
 

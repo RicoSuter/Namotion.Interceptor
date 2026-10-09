@@ -9,11 +9,11 @@ export interface TerminalProps extends Omit<RectProps, 'height'> {
   /** Captured transcript: the prompt line followed by the output. */
   transcript: string;
   width: number;
-  /** Rows of output kept on screen; older rows scroll up. The window fits its content up to this. */
-  maximumRows?: number;
   title?: string;
 }
 
+/** Rows of output kept on screen; older rows scroll up. The window fits its content up to this. */
+const maximumRows = 12;
 const padding = 36;
 const lineHeight = 46;
 /** Advance of one JetBrains Mono character relative to the font size. */
@@ -29,11 +29,11 @@ export class Terminal extends WindowFrame {
   private readonly visibleRows: number;
 
   public constructor(props: TerminalProps) {
-    const {transcript, title, maximumRows, ...rest} = props;
+    const {transcript, title, ...rest} = props;
     const parsed = parseTranscript(transcript);
     const columns = Math.floor((props.width - padding * 2) / (fontSize.terminal * characterWidth));
     const output = wrapLines(parsed.output, columns);
-    const visibleRows = Math.min(output.length + 1, maximumRows ?? 12);
+    const visibleRows = Math.min(output.length + 1, maximumRows);
     super({...rest, height: titleBarHeight + padding * 2 + visibleRows * lineHeight, title: title ?? 'Terminal', bodyFill: '#161618'});
     this.command = parsed.command;
     this.visibleRows = visibleRows;

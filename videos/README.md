@@ -52,7 +52,7 @@ Kokoro's own speed keeps the prosody natural, but Kokoro rounds every sound to w
 
 Episodes run 10 to 12 minutes, 10 unless the user asks for more. With the default voice a minute of finished video holds about 165 words, the pauses between beats included (1608 words in 9.9 minutes and 1881 words in 10.9 minutes on two trial episodes), so budget about 1650 words for 10 minutes. `npm run validate` prints the words and seconds per chapter: estimated from the script's voice and tempo (`speechRates` in `tools/estimate.ts`), or measured from `timing.json` once `npm run tts` has run.
 
-Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default; nothing is burned into the picture), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
+Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md` (chapter durations and beats without motion).
 
 ## Layout
 

@@ -14,7 +14,7 @@ chapters:
       - id: first
         narration: Heat to 93 °C.
         visual: Boiler heats.
-        components: [ObjectGraph]
+        components: [CodeCard]
       - id: second
         hold: 2
         visual: Pause.

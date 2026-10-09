@@ -1,5 +1,4 @@
 import {easeInOutCubic, easeOutCubic, makeSpring, type Spring} from '@revideo/core';
-import {palette} from './palette';
 
 export const radius = {card: 24, small: 12, pill: 999} as const;
 
@@ -15,8 +14,6 @@ export const fontSize = {label: 30, detail: 22, code: 30, terminal: 30, title: 1
 
 /** Distance of frame overlays such as the chapter header from the frame edges (title safe area at 1080p). */
 export const safeMargin = {x: 96, y: 54} as const;
-
-export const spacing = {xs: 8, s: 16, m: 24, l: 40, xl: 64, xxl: 96} as const;
 
 export const durations = {fast: 0.3, normal: 0.6, slow: 1.2} as const;
 

@@ -104,7 +104,7 @@ public class CoffeeMachineSimulatorTests
         var applied = 0;
         var events = new[]
         {
-            new SimulatorEvent(TimeSpan.FromSeconds(1), m => { applied++; m.WaterTank.Level = 5; })
+            new SimulatorEvent(TimeSpan.FromSeconds(1), target => { applied++; target.WaterTank.Level = 5; })
         };
         var simulator = new CoffeeMachineSimulator(machine, events: events);
 
