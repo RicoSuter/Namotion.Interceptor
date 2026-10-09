@@ -136,6 +136,11 @@ public partial class SonosPlayer : SonosDevice,
     [State(Position = 31)]
     public bool IsGroupCoordinator => GroupCoordinatorUuid is null || GroupCoordinatorUuid == Uuid;
 
+    /// <summary>
+    /// The key of the player's group in <see cref="SonosSystem.Groups"/>: its coordinator's RINCON id.
+    /// </summary>
+    internal string GroupKey => GroupCoordinatorUuid ?? Uuid;
+
     [Derived]
     [State(Position = 32)]
     public bool IsHomeTheater => ServiceIds.Contains("HTControl");
@@ -272,7 +277,7 @@ public partial class SonosPlayer : SonosDevice,
 
     [Derived]
     [PropertyAttribute("LeaveGroup", KnownAttributes.IsEnabled)]
-    public bool LeaveGroup_IsEnabled => CanControl && _system.Groups.GetValueOrDefault(GroupCoordinatorUuid ?? Uuid)?.Members.Length > 1;
+    public bool LeaveGroup_IsEnabled => CanControl && _system.Groups.GetValueOrDefault(GroupKey)?.Members.Length > 1;
 
     [Operation(Title = "Play", Icon = "PlayArrow", Position = 1, Description = "Starts or resumes playback of the player's group.")]
     public Task PlayAsync(CancellationToken cancellationToken) =>
@@ -517,8 +522,8 @@ public partial class SonosPlayer : SonosDevice,
             throw new ArgumentException("A player cannot join its own group.", nameof(room));
         }
 
-        var coordinatorUuid = target.GroupCoordinatorUuid ?? target.Uuid;
-        if ((GroupCoordinatorUuid ?? Uuid) == coordinatorUuid)
+        var coordinatorUuid = target.GroupKey;
+        if (GroupKey == coordinatorUuid)
         {
             return Task.CompletedTask;
         }
@@ -540,12 +545,15 @@ public partial class SonosPlayer : SonosDevice,
 
     // The coordinator of the player's group, or the player itself when it coordinates or the coordinator is unknown.
     private SonosPlayer GetCoordinator() =>
-        _system.Players.GetValueOrDefault(GroupCoordinatorUuid ?? Uuid) ?? this;
+        _system.Players.GetValueOrDefault(GroupKey) ?? this;
 
     private Task RunOnCoordinatorAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
-        RunAsync(GroupCoordinatorUuid ?? Uuid, command, cancellationToken);
+        RunAsync(GroupKey, command, cancellationToken);
 
-    private Task RunOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
+    /// <summary>
+    /// Runs a command through this player's connection, then reads its group back.
+    /// </summary>
+    internal Task RunOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
         RunAsync(Uuid, command, cancellationToken);
 
     private async Task RunGroupingOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)

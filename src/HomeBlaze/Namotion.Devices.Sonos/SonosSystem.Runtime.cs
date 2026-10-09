@@ -178,10 +178,10 @@ public partial class SonosSystem
 
         using (scopeCancellation)
         {
-            var coordinatorUuid = player.GroupCoordinatorUuid ?? player.Uuid;
+            var groupKey = player.GroupKey;
             var pollStartedAt = Clock.GetUtcNow();
             var groupPlayers = Players.Values
-                .Where(candidate => candidate.IsConnected && (candidate.GroupCoordinatorUuid ?? candidate.Uuid) == coordinatorUuid)
+                .Where(candidate => candidate.IsConnected && candidate.GroupKey == groupKey)
                 .ToArray();
 
             try

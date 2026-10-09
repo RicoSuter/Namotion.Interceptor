@@ -235,20 +235,8 @@ public partial class SonosGroup :
     public Task SetSleepTimerAsync(TimeSpan duration, CancellationToken cancellationToken) =>
         Coordinator.SetSleepTimerAsync(duration, cancellationToken);
 
-    private async Task RunAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
-    {
-        var coordinator = Coordinator;
-        var connection = _system.GetConnectionForCommand(coordinator.Uuid);
-        try
-        {
-            await command(connection, cancellationToken);
-        }
-        finally
-        {
-            // Also after a failure: a multi-step command may have partly applied. The refresh logs its own failures.
-            await _system.RefreshAfterCommandAsync(coordinator, cancellationToken);
-        }
-    }
+    private Task RunAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
+        Coordinator.RunOnPlayerAsync(command, cancellationToken);
 
     internal void Update(string groupId, SonosPlayer[] members)
     {
