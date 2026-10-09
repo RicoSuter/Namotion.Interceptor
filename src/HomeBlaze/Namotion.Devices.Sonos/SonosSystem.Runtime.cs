@@ -31,7 +31,6 @@ public partial class SonosSystem
     // Guarded by _connectionsLock and replaced for every connection attempt. The scope owns the HttpClient:
     // SonosConnection and SonosEventListener only borrow it.
     private HttpClient? _httpClient;
-    private SonosClientProvider? _clientProvider;
     private SonosEventListener? _eventListener;
     private SonosConnection? _seedConnection;
     private bool _disposed;
@@ -306,7 +305,6 @@ public partial class SonosSystem
 
             _httpClient = httpClient;
             _scopeCancellation = new CancellationTokenSource();
-            _clientProvider = new SonosClientProvider(httpClient);
             _eventListener = new SonosEventListener(httpClient, _logger, MinimumSubscriptionLifetime, Clock, UpdateAreEventsActive);
         }
     }
@@ -409,7 +407,6 @@ public partial class SonosSystem
             _connections.Clear();
             _seedConnection = null;
             _eventListener = null;
-            _clientProvider = null;
             _httpClient = null;
             _scopeCancellation = null;
         }
@@ -530,16 +527,14 @@ public partial class SonosSystem
     private async Task<bool> ProbeSeedAsync(Uri seedUri, TimeSpan timeout, CancellationToken cancellationToken)
     {
         HttpClient httpClient;
-        SonosClientProvider clientProvider;
         lock (_connectionsLock)
         {
             httpClient = _httpClient ?? throw new InvalidOperationException("No Sonos connection scope is open.");
-            clientProvider = _clientProvider!;
         }
 
         using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         probeCancellation.CancelAfter(timeout);
-        using var connection = new SonosConnection(seedUri, null, httpClient, clientProvider);
+        using var connection = new SonosConnection(seedUri, null, httpClient);
         try
         {
             await connection.ReadTopologyAsync(probeCancellation.Token);
@@ -704,7 +699,7 @@ public partial class SonosSystem
             }
 
             _seedConnection?.Dispose();
-            _seedConnection = new SonosConnection(seedUri, null, _httpClient!, _clientProvider!);
+            _seedConnection = new SonosConnection(seedUri, null, _httpClient!);
         }
     }
 
@@ -737,7 +732,7 @@ public partial class SonosSystem
     {
         lock (_connectionsLock)
         {
-            if (_httpClient is null || _clientProvider is null)
+            if (_httpClient is null)
             {
                 return;
             }
@@ -771,7 +766,7 @@ public partial class SonosSystem
             existing.Dispose();
         }
 
-        _connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, _httpClient!, _clientProvider!, _logger);
+        _connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, _httpClient!, _logger);
         device.InvalidateStaticData();
     }
 

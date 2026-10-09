@@ -33,12 +33,16 @@ internal sealed class SonosConnection : IDisposable
     // a command refresh can poll the same player as the reconciliation.
     private readonly ConcurrentDictionary<string, byte> _faultingReads = new(StringComparer.Ordinal);
 
-    internal SonosConnection(Uri baseUri, string? uuid, HttpClient httpClient, ISonosServiceProvider provider, ILogger? logger = null)
+    /// <param name="baseUri">The base URI of the unit.</param>
+    /// <param name="uuid">The RINCON id of the unit, null while unknown.</param>
+    /// <param name="httpClient">The client for all requests, borrowed and not disposed.</param>
+    /// <param name="logger">The logger.</param>
+    internal SonosConnection(Uri baseUri, string? uuid, HttpClient httpClient, ILogger? logger = null)
     {
         BaseUri = baseUri;
         _httpClient = httpClient;
         _logger = logger ?? NullLogger.Instance;
-        _deviceOptions = new SonosDeviceOptions(baseUri, provider, uuid);
+        _deviceOptions = new SonosDeviceOptions(baseUri, new SonosClientProvider(httpClient), uuid);
         _device = new SonosBaseDevice(_deviceOptions);
     }
 

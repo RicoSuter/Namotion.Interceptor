@@ -12,7 +12,7 @@ public class SonosConnectionTests
     private const string Uuid = TestFixtures.KitchenUuid;
 
     private static SonosConnection CreateConnection(FakeSonosSpeaker speaker, HttpClient httpClient) =>
-        new(speaker.BaseUri, Uuid, httpClient, new SonosClientProvider(httpClient));
+        new(speaker.BaseUri, Uuid, httpClient);
 
     [Fact]
     public async Task WhenReadingPlayer_ThenSoapResponsesAreMapped()
@@ -400,7 +400,7 @@ public class SonosConnectionTests
         // Arrange
         using var httpClient = new HttpClient();
         using var connection = new SonosConnection(
-            new Uri($"http://127.0.0.1:{LoopbackHttpServer.GetFreePort()}/"), Uuid, httpClient, new SonosClientProvider(httpClient));
+            new Uri($"http://127.0.0.1:{LoopbackHttpServer.GetFreePort()}/"), Uuid, httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<HttpRequestException>(() => connection.SetVolumeAsync(50, CancellationToken.None));
