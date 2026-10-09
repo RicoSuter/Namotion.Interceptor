@@ -24,6 +24,10 @@ public partial class SonosPlayer : SonosDevice,
     private DateTimeOffset _lastAvTransportEventAt = DateTimeOffset.MinValue;
     private DateTimeOffset _lastRenderingControlEventAt = DateTimeOffset.MinValue;
 
+    // Every event and poll repeats the metadata, so the last parse is reused while the raw string is unchanged.
+    private string? _lastTrackMetaData;
+    private DidlTrack? _lastTrack;
+
     internal SonosPlayer(SonosSystem system, string uuid)
         : base(uuid)
     {
@@ -280,7 +284,13 @@ public partial class SonosPlayer : SonosDevice,
 
         if (SonosValues.IsKnown(change.TrackMetaData))
         {
-            var track = DidlParser.ParseTrack(change.TrackMetaData);
+            if (change.TrackMetaData != _lastTrackMetaData)
+            {
+                _lastTrack = DidlParser.ParseTrack(change.TrackMetaData);
+                _lastTrackMetaData = change.TrackMetaData;
+            }
+
+            var track = _lastTrack;
             CurrentTrackTitle = track?.Title;
             CurrentTrackArtist = track?.Artist;
             CurrentTrackAlbum = track?.Album;

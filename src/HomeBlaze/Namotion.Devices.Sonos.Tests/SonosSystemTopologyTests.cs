@@ -105,6 +105,80 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenMissingPlayerReappears_ThenInstanceIsKeptAndConnected()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+        var kitchen = system.Players[TestFixtures.KitchenUuid];
+        system.ApplyTopology(new SonosTopology(household.Groups.Where(group => group.CoordinatorUuid != TestFixtures.KitchenUuid).ToArray()));
+
+        // Act
+        system.ApplyTopology(household);
+
+        // Assert
+        Assert.Same(kitchen, system.Players[TestFixtures.KitchenUuid]);
+        Assert.True(kitchen.IsConnected);
+        Assert.True(system.Groups.ContainsKey(TestFixtures.KitchenUuid));
+    }
+
+    [Fact]
+    public void WhenSatelliteMissingFromTopology_ThenItStaysButIsOffline()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+        const string subwooferUuid = "RINCON_A0000000000201400";
+        var subwoofer = system.Players[TestFixtures.LivingRoomUuid].Satellites[subwooferUuid];
+        var withoutSubwoofer = new SonosTopology(household.Groups
+            .Select(group => group with
+            {
+                Players = group.Players
+                    .Select(member => member with { Satellites = member.Satellites.Where(satellite => satellite.Uuid != subwooferUuid).ToArray() })
+                    .ToArray()
+            })
+            .ToArray());
+
+        // Act
+        system.ApplyTopology(withoutSubwoofer);
+
+        // Assert
+        Assert.Same(subwoofer, system.Players[TestFixtures.LivingRoomUuid].Satellites[subwooferUuid]);
+        Assert.False(subwoofer.IsConnected);
+        Assert.True(system.Players[TestFixtures.LivingRoomUuid].Satellites["RINCON_A0000000000401400"].IsConnected);
+    }
+
+    [Fact]
+    public void WhenCoordinatorIsHandedOver_ThenGroupIsKeyedByTheNewCoordinator()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        var livingRoomGroup = household.Groups.Single(group => group.CoordinatorUuid == TestFixtures.LivingRoomUuid);
+        var kitchenGroup = household.Groups.Single(group => group.CoordinatorUuid == TestFixtures.KitchenUuid);
+        var others = household.Groups.Where(group => group != livingRoomGroup && group != kitchenGroup).ToArray();
+        system.ApplyTopology(new SonosTopology([.. others, livingRoomGroup with { Players = [.. livingRoomGroup.Players, kitchenGroup.Players[0]] }]));
+        var handedOver = livingRoomGroup with
+        {
+            CoordinatorUuid = TestFixtures.KitchenUuid,
+            Players = [kitchenGroup.Players[0], .. livingRoomGroup.Players]
+        };
+
+        // Act
+        system.ApplyTopology(new SonosTopology([.. others, handedOver]));
+
+        // Assert
+        Assert.False(system.Groups.ContainsKey(TestFixtures.LivingRoomUuid));
+        var group = system.Groups[TestFixtures.KitchenUuid];
+        Assert.Same(system.Players[TestFixtures.KitchenUuid], group.Coordinator);
+        Assert.Equal("Küche + Wohnzimmer", group.Title);
+        Assert.True(system.Players[TestFixtures.KitchenUuid].IsGroupCoordinator);
+        Assert.False(system.Players[TestFixtures.LivingRoomUuid].IsGroupCoordinator);
+    }
+
+    [Fact]
     public void WhenTopologyApplied_ThenGroupsAreKeyedByCoordinator()
     {
         // Arrange
@@ -161,6 +235,50 @@ public class SonosSystemTopologyTests
         Assert.Equal(1m, system.Players[TestFixtures.TerraceUuid].BatteryLevel);
         Assert.True(system.Players[TestFixtures.TerraceUuid].IsCharging);
         Assert.Null(system.Players[TestFixtures.KitchenUuid].BatteryLevel);
+    }
+
+    [Fact]
+    public void WhenReplacedSpeakerSharesRoomName_ThenFindPlayerReturnsTheConnectedOne()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+        const string replacementUuid = "RINCON_A0000000000901400";
+        var replacement = new SonosTopology(household.Groups
+            .Select(group => group.CoordinatorUuid == TestFixtures.KitchenUuid
+                ? group with
+                {
+                    Id = replacementUuid + ":1",
+                    CoordinatorUuid = replacementUuid,
+                    Players = [group.Players[0] with { Uuid = replacementUuid, BaseUri = new Uri("http://10.0.0.122:1400/") }]
+                }
+                : group)
+            .ToArray());
+        system.ApplyTopology(replacement);
+
+        // Act
+        var player = system.FindPlayer("Küche");
+
+        // Assert
+        Assert.Same(system.Players[replacementUuid], player);
+        Assert.Same(system.Players[TestFixtures.KitchenUuid], system.FindPlayer(TestFixtures.KitchenUuid));
+    }
+
+    [Fact]
+    public void WhenOnlyMissingPlayerHasRoomName_ThenFindPlayerFallsBackToIt()
+    {
+        // Arrange
+        var system = CreateSystem();
+        var household = ReadHousehold();
+        system.ApplyTopology(household);
+        system.ApplyTopology(new SonosTopology(household.Groups.Where(group => group.CoordinatorUuid != TestFixtures.KitchenUuid).ToArray()));
+
+        // Act
+        var player = system.FindPlayer("Küche");
+
+        // Assert
+        Assert.Same(system.Players[TestFixtures.KitchenUuid], player);
     }
 
     [Theory]

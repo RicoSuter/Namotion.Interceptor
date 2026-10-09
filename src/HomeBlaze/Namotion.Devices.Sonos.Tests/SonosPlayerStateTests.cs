@@ -66,7 +66,7 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenTransportStateIsNotImplemented_ThenTransportStateIsKept()
+    public void WhenEventReportsNotImplementedTransportState_ThenTransportStateIsKept()
     {
         // Arrange
         var player = CreateKitchen();
@@ -74,10 +74,49 @@ public class SonosPlayerStateTests
 
         // Act
         player.ApplyAvTransportEvent(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null), T0.AddSeconds(1));
-        player.ApplyPoll(Reading(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null)), T0.AddSeconds(2));
 
         // Assert
         Assert.Equal(SonosTransportState.Playing, player.TransportState);
+    }
+
+    [Fact]
+    public void WhenPollReportsNotImplementedTransportState_ThenTransportStateIsKept()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
+
+        // Act
+        player.ApplyPoll(Reading(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null)), T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+    }
+
+    [Fact]
+    public void WhenSameMetadataArrivesAfterIpChange_ThenImageUriFollowsTheNewAddress()
+    {
+        // Arrange
+        var system = SonosSystemTopologyTests.CreateSystem();
+        var household = SonosSystemTopologyTests.ReadHousehold();
+        system.ApplyTopology(household);
+        var player = system.Players[TestFixtures.KitchenUuid];
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
+        system.ApplyTopology(new SonosTopology(household.Groups
+            .Select(group => group with
+            {
+                Players = group.Players
+                    .Select(member => member.Uuid == TestFixtures.KitchenUuid ? member with { BaseUri = new Uri("http://10.0.0.199:1400/") } : member)
+                    .ToArray()
+            })
+            .ToArray()));
+
+        // Act
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal("Song", player.CurrentTrackTitle);
+        Assert.Equal("http://10.0.0.199:1400/getaa?s=1&u=x", player.CurrentTrackImageUri);
     }
 
     [Fact]

@@ -190,8 +190,22 @@ public partial class SonosSystem : BackgroundService,
             return byUuid;
         }
 
-        return players.Values.FirstOrDefault(player =>
-            string.Equals(player.RoomName, roomNameOrUuid, StringComparison.OrdinalIgnoreCase));
+        // A replaced speaker keeps its room name on the old, missing UUID, so a player in the topology wins.
+        SonosPlayer? missingMatch = null;
+        foreach (var player in players.Values)
+        {
+            if (string.Equals(player.RoomName, roomNameOrUuid, StringComparison.OrdinalIgnoreCase))
+            {
+                if (player.IsInTopology)
+                {
+                    return player;
+                }
+
+                missingMatch ??= player;
+            }
+        }
+
+        return missingMatch;
     }
 
     internal SonosFavorite? FindFavorite(string name) =>
