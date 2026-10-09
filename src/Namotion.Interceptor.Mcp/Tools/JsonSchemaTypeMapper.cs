@@ -12,14 +12,9 @@ public static class JsonSchemaTypeMapper
             return null;
         }
 
-        // Unwrap Nullable<T>
-        var underlying = Nullable.GetUnderlyingType(type);
-        if (underlying is not null)
-        {
-            type = underlying;
-        }
+        type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(string) || type == typeof(char) || type == typeof(Uri) || GetFormat(type) is not null)
+        if (IsWrittenAsString(type))
         {
             return "string";
         }
@@ -40,11 +35,6 @@ public static class JsonSchemaTypeMapper
             return "number";
         }
 
-        if (type.IsEnum)
-        {
-            return "string";
-        }
-
         if (type.IsArray || (type.IsGenericType && typeof(System.Collections.IEnumerable).IsAssignableFrom(type)))
         {
             return "array";
@@ -54,9 +44,9 @@ public static class JsonSchemaTypeMapper
     }
 
     /// <summary>
-    /// Gets the string format a value of <paramref name="type"/> is written and read in by System.Text.Json:
-    /// a JSON Schema format name (<c>date-time</c>, <c>date</c>, <c>uuid</c>, <c>uri</c>) or, for
-    /// <see cref="TimeSpan"/> and <see cref="TimeOnly"/>, the pattern. Null when the type has no string format.
+    /// Gets the standard JSON Schema format name of the string a value of <paramref name="type"/> is written as by
+    /// System.Text.Json: <c>date-time</c>, <c>date</c>, <c>uuid</c> or <c>uri</c>. Null when no standard format
+    /// matches; <see cref="GetPattern"/> covers <see cref="TimeSpan"/> and <see cref="TimeOnly"/>.
     /// </summary>
     public static string? GetFormat(Type? type)
     {
@@ -67,11 +57,6 @@ public static class JsonSchemaTypeMapper
 
         type = Nullable.GetUnderlyingType(type) ?? type;
 
-        if (type == typeof(TimeSpan))
-        {
-            return "[d.]hh:mm:ss[.fffffff]";
-        }
-
         if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
         {
             return "date-time";
@@ -80,11 +65,6 @@ public static class JsonSchemaTypeMapper
         if (type == typeof(DateOnly))
         {
             return "date";
-        }
-
-        if (type == typeof(TimeOnly))
-        {
-            return "HH:mm:ss[.fffffff]";
         }
 
         if (type == typeof(Guid))
@@ -99,4 +79,37 @@ public static class JsonSchemaTypeMapper
 
         return null;
     }
+
+    /// <summary>
+    /// Gets a JSON Schema <c>pattern</c> (a regular expression) for the string a value of <paramref name="type"/> is
+    /// written and read as by System.Text.Json, for types without a standard format: <see cref="TimeSpan"/>
+    /// (<c>[-][d.]hh:mm:ss[.fffffff]</c>) and <see cref="TimeOnly"/> (<c>HH:mm:ss[.fffffff]</c>). Null otherwise.
+    /// </summary>
+    public static string? GetPattern(Type? type)
+    {
+        if (type is null)
+        {
+            return null;
+        }
+
+        type = Nullable.GetUnderlyingType(type) ?? type;
+
+        if (type == typeof(TimeSpan))
+        {
+            return @"^-?(\d+\.)?\d{2}:\d{2}:\d{2}(\.\d{1,7})?$";
+        }
+
+        if (type == typeof(TimeOnly))
+        {
+            return @"^\d{2}:\d{2}:\d{2}(\.\d{1,7})?$";
+        }
+
+        return null;
+    }
+
+    // The types System.Text.Json writes as JSON strings by default; enums are listed and read by name.
+    internal static bool IsWrittenAsString(Type type) =>
+        type == typeof(string) || type == typeof(char) || type.IsEnum ||
+        type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(DateOnly) ||
+        type == typeof(TimeOnly) || type == typeof(TimeSpan) || type == typeof(Guid) || type == typeof(Uri);
 }

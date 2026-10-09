@@ -118,7 +118,7 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
-    public async Task WhenListMethodsWithTimeSpanEnumAndNullableParameters_ThenDescribesFormatValuesAndNullability()
+    public async Task WhenListMethodsWithTimeSpanEnumAndNullableParameters_ThenDescribesPatternValuesAndNullability()
     {
         // Arrange
         var (room, _, factory) = CreateTestSetup(isReadOnly: false);
@@ -140,7 +140,7 @@ public class HomeBlazeMcpToolProviderTests
         // Assert
         var parameters = method.GetProperty("parameters").EnumerateArray().ToArray();
         Assert.Equal("string", parameters[0].GetProperty("type").GetString());
-        Assert.Equal("[d.]hh:mm:ss[.fffffff]", parameters[0].GetProperty("format").GetString());
+        Assert.Equal(JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan)), parameters[0].GetProperty("pattern").GetString());
         Assert.Equal(["Off", "All", "One"], parameters[1].GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
         Assert.True(parameters[2].GetProperty("nullable").GetBoolean());
     }

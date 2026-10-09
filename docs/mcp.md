@@ -200,13 +200,13 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true.
+Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
 ### `list_types`
 
 List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
 
-Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus `format` for values written as strings (`[d.]hh:mm:ss[.fffffff]` for `TimeSpan`, `date-time`, `date`, `uuid`, `uri`), `enum` with the allowed names of an enum, `nullable`, and an optional `description`. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
+Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the standard JSON Schema `format` of a string value (`date-time`, `date`, `uuid`, `uri`), a `pattern` regular expression for `TimeSpan` (`[-][d.]hh:mm:ss[.fffffff]`) and `TimeOnly` (`HH:mm:ss[.fffffff]`), `enum` with the allowed names of an enum, `nullable`, and an optional `description`. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|

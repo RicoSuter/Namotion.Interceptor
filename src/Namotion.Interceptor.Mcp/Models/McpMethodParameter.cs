@@ -21,18 +21,25 @@ public sealed record McpMethodParameter
     public required string Type { get; init; }
 
     /// <summary>
-    /// The string format of the argument, see <see cref="JsonSchemaTypeMapper.GetFormat"/>.
+    /// The standard JSON Schema format of a string argument, see <see cref="JsonSchemaTypeMapper.GetFormat"/>.
     /// </summary>
     [JsonPropertyName("format")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Format { get; init; }
 
     /// <summary>
+    /// The regular expression a string argument must match, see <see cref="JsonSchemaTypeMapper.GetPattern"/>.
+    /// </summary>
+    [JsonPropertyName("pattern")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Pattern { get; init; }
+
+    /// <summary>
     /// The allowed names of an enum argument.
     /// </summary>
     [JsonPropertyName("enum")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IReadOnlyList<string>? Enum { get; init; }
+    public IReadOnlyList<string>? EnumValues { get; init; }
 
     /// <summary>
     /// Whether the argument may be null.
@@ -57,14 +64,15 @@ public sealed record McpMethodParameter
     /// <param name="description">A hint on the meaning of the value, such as its unit or range.</param>
     public static McpMethodParameter Create(string name, Type type, bool isNullable = false, string? description = null)
     {
-        var underlyingType = System.Nullable.GetUnderlyingType(type);
+        var underlyingType = Nullable.GetUnderlyingType(type);
         var valueType = underlyingType ?? type;
         return new McpMethodParameter
         {
             Name = name,
             Type = JsonSchemaTypeMapper.ToJsonSchemaType(valueType) ?? "object",
             Format = JsonSchemaTypeMapper.GetFormat(valueType),
-            Enum = valueType.IsEnum ? System.Enum.GetNames(valueType) : null,
+            Pattern = JsonSchemaTypeMapper.GetPattern(valueType),
+            EnumValues = valueType.IsEnum ? Enum.GetNames(valueType) : null,
             IsNullable = isNullable || underlyingType is not null,
             Description = description
         };

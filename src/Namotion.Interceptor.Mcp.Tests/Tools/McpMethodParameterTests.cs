@@ -1,12 +1,13 @@
 using System.Text.Json;
 using Namotion.Interceptor.Mcp.Models;
+using Namotion.Interceptor.Mcp.Tools;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
 public class McpMethodParameterTests
 {
     [Fact]
-    public void WhenParameterIsTimeSpan_ThenTypeIsStringWithFormat()
+    public void WhenParameterIsTimeSpan_ThenTypeIsStringWithPattern()
     {
         // Act
         var parameter = McpMethodParameter.Create("position", typeof(TimeSpan));
@@ -14,8 +15,9 @@ public class McpMethodParameterTests
         // Assert
         Assert.Equal("position", parameter.Name);
         Assert.Equal("string", parameter.Type);
-        Assert.Equal("[d.]hh:mm:ss[.fffffff]", parameter.Format);
-        Assert.Null(parameter.Enum);
+        Assert.Null(parameter.Format);
+        Assert.Equal(JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan)), parameter.Pattern);
+        Assert.Null(parameter.EnumValues);
         Assert.False(parameter.IsNullable);
     }
 
@@ -27,7 +29,7 @@ public class McpMethodParameterTests
 
         // Assert
         Assert.Equal("string", parameter.Type);
-        Assert.Equal(Enum.GetNames<DayOfWeek>(), parameter.Enum);
+        Assert.Equal(Enum.GetNames<DayOfWeek>(), parameter.EnumValues);
     }
 
     [Fact]
@@ -68,14 +70,18 @@ public class McpMethodParameterTests
     }
 
     [Fact]
-    public void WhenParameterHasFormatAndEnum_ThenSerializesThem()
+    public void WhenParameterHasFormatPatternAndEnum_ThenSerializesThem()
     {
         // Act
+        var dateJson = JsonSerializer.Serialize(McpMethodParameter.Create("start", typeof(DateTimeOffset)));
         var timeSpanJson = JsonSerializer.Serialize(McpMethodParameter.Create("position", typeof(TimeSpan)));
         var enumJson = JsonSerializer.Serialize(McpMethodParameter.Create("mode", typeof(TestMode)));
 
         // Assert
-        Assert.Equal("""{"name":"position","type":"string","format":"[d.]hh:mm:ss[.fffffff]"}""", timeSpanJson);
+        Assert.Equal("""{"name":"start","type":"string","format":"date-time"}""", dateJson);
+        var timeSpan = JsonDocument.Parse(timeSpanJson).RootElement;
+        Assert.Equal(["name", "type", "pattern"], timeSpan.EnumerateObject().Select(property => property.Name));
+        Assert.Equal(JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan)), timeSpan.GetProperty("pattern").GetString());
         Assert.Equal("""{"name":"mode","type":"string","enum":["Off","On"]}""", enumJson);
     }
 

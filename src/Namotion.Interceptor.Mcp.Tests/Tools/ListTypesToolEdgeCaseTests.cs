@@ -42,7 +42,7 @@ public class ListTypesToolEdgeCaseTests
     }
 
     [Fact]
-    public async Task WhenInterfaceMethodHasWellKnownParameterTypes_ThenParametersCarryFormatEnumAndNullability()
+    public async Task WhenInterfaceMethodHasWellKnownParameterTypes_ThenParametersCarryPatternEnumAndNullability()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -68,7 +68,7 @@ public class ListTypesToolEdgeCaseTests
         var parameters = seek.GetProperty("parameters").EnumerateArray().ToArray();
 
         Assert.Equal("string", parameters[0].GetProperty("type").GetString());
-        Assert.Equal("[d.]hh:mm:ss[.fffffff]", parameters[0].GetProperty("format").GetString());
+        Assert.Equal(JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan)), parameters[0].GetProperty("pattern").GetString());
 
         Assert.Equal("string", parameters[1].GetProperty("type").GetString());
         Assert.True(parameters[1].GetProperty("nullable").GetBoolean());
