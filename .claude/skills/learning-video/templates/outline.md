@@ -4,7 +4,7 @@ Status: awaiting approval
 
 - Episode: `<nn>-<name>`
 - Sources: `docs/<doc>.md`
-- Target length: 10 to 12 min
+- Target length: 10 min
 - Viewer: a .NET developer who knows C# and has not used the library before.
 
 ## Promise
@@ -51,7 +51,7 @@ Ranked by importance. Budgets total the target length.
 ## Companion sample
 
 - Projects: `sample/<Name>.Sample.csproj` (<what it hosts>)
-- Ports: app <port>, terminal capture <port>
+- Ports: app <5300 + 10 × nn>, further apps and terminal captures <the following ports>
 - Pages: `/` status page polling `/status` (<values shown>)
 - Simulator: default, or scripted events (<event at time>)
 - Demos: `<demo-name>` records <what happens, which end state it holds>

@@ -2,6 +2,30 @@
 
 Narrated learning videos generated from the library documentation. Episodes are produced with the `learning-video` skill in `.claude/skills/learning-video/`.
 
+## Series
+
+Each episode covers the docs of one row and lives in `episodes/<folder>/`. Status is `open`, `in progress` or `done`; the next episode is the lowest `open` row.
+
+| # | Folder | Docs | Status |
+|---|---|---|---|
+| 00 | `00-intro` | `README.md`, `docs/interceptor.md`, `docs/generator.md` | open |
+| 01 | `01-tracking` | `docs/tracking.md`, `docs/tracking-transactions.md` | open |
+| 02 | `02-registry` | `docs/registry.md` | open |
+| 03 | `03-connectors` | `docs/connectors.md`, `docs/connectors-subject-updates.md`, `docs/connectors-monitoring.md` | open |
+| 04 | `04-opcua` | `docs/connectors-opcua.md`, `docs/connectors-opcua-client.md`, `docs/connectors-opcua-server.md`, `docs/connectors-opcua-mapping.md` | open |
+| 05 | `05-mqtt` | `docs/connectors-mqtt.md` | open |
+| 06 | `06-websocket` | `docs/connectors-websocket.md` | open |
+| 07 | `07-modbus` | `docs/connectors-modbus.md` | open |
+| 08 | `08-validation` | `docs/validation.md` | open |
+| 09 | `09-hosting` | `docs/hosting.md` | open |
+| 10 | `10-dynamic` | `docs/dynamic.md` | open |
+| 11 | `11-aspnetcore` | `docs/aspnetcore.md` | open |
+| 12 | `12-graphql` | `docs/graphql.md` | open |
+| 13 | `13-blazor` | `docs/blazor.md` | open |
+| 14 | `14-mcp` | `docs/mcp.md` | open |
+
+`episodes/smoke/` is not part of the series: a short episode that uses every shared component and helper, rendered to check changes to `theme/` and `tools/`.
+
 ## Setup
 
 Requirements: Node 24, [uv](https://docs.astral.sh/uv/), .NET 10, an NVIDIA GPU for fast speech synthesis (CPU works, slowly).
@@ -26,7 +50,14 @@ npm run render -- <episode> --final
 npm run transcribe -- <episode> # Whisper transcript of every narrated beat, lists the beats that differ from the script
 ```
 
-Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <video title> | <chapter title>", top left) from the scene runtime. Choose the background with `background:` in `script.yaml` (`drift`, `chapter-tint`, `edge-aurora` or `follow-light`) or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
+Every scene gets a background layer and a chapter header ("Namotion.Interceptor | <video title> | <chapter title>", top left) from the scene runtime. Choose the background with `background:` in `script.yaml` or `--background <variant>` on the render command; `--beats <id>,<id> --out <name>` renders only those beats, for quick comparisons.
+
+| Background | Look |
+|---|---|
+| `drift` (default) | four large, soft blue, purple and teal glows drifting on a one minute loop |
+| `chapter-tint` | the same glows with a hue pair per chapter, cross fading when the chapter changes |
+| `edge-aurora` | glows along the top and bottom edges that slowly breathe; the center stays neutral |
+| `follow-light` | one soft light behind the camera's focus that reaches a new target ahead of the camera |
 
 Choose the narration voice with `voice:` and its speed with `tempo:` in `script.yaml` (1 is the voice's natural pace, 0.5 to 2 allowed). Both are optional: the default is `kokoro:am_michael` at tempo 1.32, the voice with the fewest transcription errors when checked with Whisper, and Kokoro synthesizes a 10 minute episode in about a minute instead of the ten Chatterbox needs. Other voices:
 
@@ -51,7 +82,9 @@ Kokoro's own speed keeps the prosody natural, but Kokoro rounds every sound to w
 
 ## Length
 
-Episodes run 10 to 12 minutes, 10 unless the user asks for more. With the default voice a minute of finished video holds about 165 words, the pauses between beats included (1608 words in 9.9 minutes and 1881 words in 10.9 minutes on two trial episodes), so budget about 1650 words for 10 minutes. `npm run validate` prints the words and seconds per chapter: estimated from the script's voice and tempo (`speechRates` in `tools/estimate.ts`), or measured from `timing.json` once `npm run tts` has run.
+Episodes run 10 to 12 minutes, 10 by default. With the default voice a minute of finished video holds about 165 words, the pauses between beats included (1608 words in 9.9 minutes and 1881 words in 10.9 minutes on two trial episodes), so budget about 1650 words for 10 minutes. `npm run validate` prints the words and seconds per chapter: estimated from the script's voice and tempo (`speechRates` in `tools/estimate.ts`), or measured from `timing.json` once `npm run tts` has run.
+
+## Output and checks
 
 Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for the whole track and a peak limiter at -2 dBFS, so every voice plays at the same level), the narration text as a soft subtitle track (English, off by default), the same subtitles as an SRT file, `<episode>-contact.png` (one frame per beat) and `<episode>-review.md`: chapter durations, beats without motion, loudness of the whole video and of every 30 s window, and whether each beat's speech starts in the video where it starts in its narration clip. `npm run transcribe` writes `<episode>-transcript.md`; it runs Whisper (`openai/whisper-small.en`, downloaded on first use) on the narration clips of the last `npm run tts`, and word boundaries, punctuation, number words and the lexicon's spoken forms do not count as differences.
 
