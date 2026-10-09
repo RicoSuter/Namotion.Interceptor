@@ -8,7 +8,7 @@ argument-hint: "<doc.md> [<doc.md> ...] [auto-approve]"
 
 Turn one doc, or a group of docs about one library, into a self-contained narrated episode of about 10 to 15 minutes. The episode is code: a script, Revideo scenes, a compiled companion sample, demo scripts and capture settings. Rendered media is regenerated from them.
 
-The pipeline lives in `videos/` (see `videos/README.md`). The design is in `docs/superpowers/specs/2026-10-08-learning-videos-design.md`. The reference for how an episode is built is the complete smoke episode in `videos/episodes/smoke/`: read its `script.yaml`, `scenes/main.tsx`, `diagrams/flow.ts`, `demos/status.ts`, `capture.ts`, `project.ts` and `sample/` before writing anything.
+The pipeline lives in `videos/` (see `videos/README.md`). The reference for how an episode is built is the complete smoke episode in `videos/episodes/smoke/`: read its `script.yaml`, `scenes/main.tsx`, `diagrams/flow.ts`, `demos/status.ts`, `capture.ts`, `project.ts` and `sample/` before writing anything.
 
 All commands below run from `videos/` unless they start with `dotnet` (run those from the repository root).
 

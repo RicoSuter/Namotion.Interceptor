@@ -389,5 +389,3 @@ src/HomeBlaze/HomeBlaze/Data/OpcUa/
 benchmark_*.md
 .claude/scheduled_tasks.lock
 
-# Brainstorming companion mockups
-.superpowers/

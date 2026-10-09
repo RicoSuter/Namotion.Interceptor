@@ -1,6 +1,6 @@
 # Learning videos
 
-Narrated learning videos generated from the library documentation. Design: [docs/superpowers/specs/2026-10-08-learning-videos-design.md](../docs/superpowers/specs/2026-10-08-learning-videos-design.md).
+Narrated learning videos generated from the library documentation. Episodes are produced with the `learning-video` skill in `.claude/skills/learning-video/`.
 
 ## Setup
 
