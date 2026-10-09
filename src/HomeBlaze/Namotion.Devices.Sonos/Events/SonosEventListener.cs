@@ -14,7 +14,9 @@ internal sealed class SonosEventListener : IAsyncDisposable
     private const string EventPathPrefix = "/event/";
     private const long MaxNotifyBodyBytes = 1024 * 1024;
     private static readonly TimeSpan DefaultSubscriptionLifetime = TimeSpan.FromMinutes(30);
-    private static readonly TimeSpan DefaultMinimumLifetime = TimeSpan.FromMinutes(1);
+    private static readonly string RequestedTimeout = $"Second-{(int)DefaultSubscriptionLifetime.TotalSeconds}";
+    private static readonly HttpMethod SubscribeMethod = new("SUBSCRIBE");
+    private static readonly HttpMethod UnsubscribeMethod = new("UNSUBSCRIBE");
 
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
@@ -34,8 +36,8 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
     /// <param name="httpClient">The client for SUBSCRIBE and UNSUBSCRIBE requests, borrowed and not disposed.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="minimumLifetime">The shortest lifetime a renewal is scheduled for, whatever the speaker grants; one minute by default.</param>
-    /// <param name="clock">The clock renewals are scheduled on; the system clock by default.</param>
+    /// <param name="minimumLifetime">The shortest lifetime a renewal is scheduled for, whatever the speaker grants.</param>
+    /// <param name="clock">The clock renewals are scheduled on.</param>
     /// <param name="firstEventReceived">
     /// Called on the thread of the NOTIFY when a subscription receives its first event. Runs as part of the handler,
     /// so it must not block on disposing the listener either.
@@ -43,14 +45,14 @@ internal sealed class SonosEventListener : IAsyncDisposable
     internal SonosEventListener(
         HttpClient httpClient,
         ILogger logger,
-        TimeSpan? minimumLifetime = null,
-        TimeProvider? clock = null,
+        TimeSpan minimumLifetime,
+        TimeProvider clock,
         Action? firstEventReceived = null)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _minimumLifetime = minimumLifetime ?? DefaultMinimumLifetime;
-        _clock = clock ?? TimeProvider.System;
+        _minimumLifetime = minimumLifetime;
+        _clock = clock;
         _firstEventReceived = firstEventReceived;
     }
 
@@ -121,10 +123,10 @@ internal sealed class SonosEventListener : IAsyncDisposable
 
         try
         {
-            using var request = new HttpRequestMessage(new HttpMethod("SUBSCRIBE"), eventUri);
+            using var request = new HttpRequestMessage(SubscribeMethod, eventUri);
             request.Headers.TryAddWithoutValidation("CALLBACK", $"<{_callbackBaseUri}{key}>");
             request.Headers.TryAddWithoutValidation("NT", "upnp:event");
-            request.Headers.TryAddWithoutValidation("TIMEOUT", "Second-1800");
+            request.Headers.TryAddWithoutValidation("TIMEOUT", RequestedTimeout);
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -168,51 +170,30 @@ internal sealed class SonosEventListener : IAsyncDisposable
     /// <summary>
     /// Renews a subscription. A rejected renewal forgets the subscription so the caller subscribes again.
     /// </summary>
-    internal async Task<bool> RenewAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
+    internal async Task RenewAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
     {
         var sid = subscription.Sid
             ?? throw new InvalidOperationException($"The Sonos event {subscription.Key} has no SID to renew.");
 
-        using var request = new HttpRequestMessage(new HttpMethod("SUBSCRIBE"), subscription.EventUri);
+        using var request = new HttpRequestMessage(SubscribeMethod, subscription.EventUri);
         request.Headers.TryAddWithoutValidation("SID", sid);
-        request.Headers.TryAddWithoutValidation("TIMEOUT", "Second-1800");
+        request.Headers.TryAddWithoutValidation("TIMEOUT", RequestedTimeout);
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             Forget(subscription);
-            return false;
+            return;
         }
 
         subscription.RenewAt = _clock.GetTimestampAfter(GetLifetime(response) / 2);
-        return true;
     }
 
     internal async Task UnsubscribeAsync(SonosEventSubscription subscription, CancellationToken cancellationToken)
     {
-        if (Forget(subscription) is not { } sid)
+        if (Forget(subscription) is { } sid)
         {
-            return;
-        }
-
-        using var request = new HttpRequestMessage(new HttpMethod("UNSUBSCRIBE"), subscription.EventUri);
-        request.Headers.TryAddWithoutValidation("SID", sid);
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        if (response.IsSuccessStatusCode)
-        {
-            return;
-        }
-
-        // 412: the speaker no longer knows the subscription, so nothing is left behind.
-        if (response.StatusCode == HttpStatusCode.PreconditionFailed)
-        {
-            _logger.LogDebug("Unsubscribing the Sonos events {Key} returned {StatusCode}; the subscription was already gone.",
-                subscription.Key, response.StatusCode);
-        }
-        else
-        {
-            _logger.LogInformation("Unsubscribing the Sonos events {Key} returned {StatusCode}; the speaker drops the subscription once it expires.",
-                subscription.Key, response.StatusCode);
+            await SendUnsubscribeAsync(subscription.EventUri, sid, subscription.Key, cancellationToken);
         }
     }
 
@@ -220,24 +201,32 @@ internal sealed class SonosEventListener : IAsyncDisposable
     {
         try
         {
-            using var request = new HttpRequestMessage(new HttpMethod("UNSUBSCRIBE"), eventUri);
-            request.Headers.TryAddWithoutValidation("SID", sid);
-            using var response = await _httpClient.SendAsync(request, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.PreconditionFailed)
-            {
-                _logger.LogDebug("Unsubscribing the orphaned Sonos subscription {Sid} returned {StatusCode}; it was already gone.",
-                    sid, response.StatusCode);
-            }
-            else if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogInformation("Unsubscribing the orphaned Sonos subscription {Sid} returned {StatusCode}; the speaker drops it once it expires.",
-                    sid, response.StatusCode);
-            }
+            await SendUnsubscribeAsync(eventUri, sid, $"orphaned {sid}", cancellationToken);
         }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
         {
             _logger.LogInformation(exception,
                 "The orphaned Sonos subscription {Sid} could not be cancelled; the speaker drops it once it expires.", sid);
+        }
+    }
+
+    // The label names the subscription in the log text: its key, or its SID for an orphan.
+    private async Task SendUnsubscribeAsync(Uri eventUri, string sid, string label, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(UnsubscribeMethod, eventUri);
+        request.Headers.TryAddWithoutValidation("SID", sid);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+
+        // 412: the speaker no longer knows the subscription, so nothing is left behind.
+        if (response.StatusCode == HttpStatusCode.PreconditionFailed)
+        {
+            _logger.LogDebug("Unsubscribing the Sonos events {Subscription} returned {StatusCode}; the subscription was already gone.",
+                label, response.StatusCode);
+        }
+        else if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogInformation("Unsubscribing the Sonos events {Subscription} returned {StatusCode}; the speaker drops the subscription once it expires.",
+                label, response.StatusCode);
         }
     }
 

@@ -16,6 +16,9 @@ public class SonosEventListenerTests
     private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan NegativeCheckDuration = TimeSpan.FromMilliseconds(300);
 
+    private static SonosEventListener CreateListener(HttpClient httpClient, ILogger? logger = null, Action? firstEventReceived = null) =>
+        new(httpClient, logger ?? NullLogger.Instance, TimeSpan.FromMinutes(1), TimeProvider.System, firstEventReceived);
+
     [Fact]
     public async Task WhenSubscribing_ThenSendsCallbackNotificationTypeAndTimeout()
     {
@@ -27,7 +30,7 @@ public class SonosEventListenerTests
             return RespondWithSid(context, "uuid:sub-1");
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act
@@ -49,7 +52,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), body => received.TrySetResult(body), CancellationToken.None);
@@ -69,7 +72,7 @@ public class SonosEventListenerTests
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
         var reported = 0;
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance, firstEventReceived: () => Interlocked.Increment(ref reported));
+        await using var listener = CreateListener(httpClient, firstEventReceived: () => Interlocked.Increment(ref reported));
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
         Assert.False(subscription.HasReceivedEvent);
@@ -89,7 +92,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var handlerCalls = 0;
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => handlerCalls++, CancellationToken.None);
@@ -115,7 +118,7 @@ public class SonosEventListenerTests
             notifyStatus.TrySetResult(await SendNotifyAsync(httpClient, callback, "uuid:sub-1", "<initial />"));
             await RespondWithSid(context, "uuid:sub-1");
         });
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -143,7 +146,7 @@ public class SonosEventListenerTests
             return RespondWithSid(context, "uuid:sub-1");
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
 
@@ -190,7 +193,7 @@ public class SonosEventListenerTests
             await RespondWithSid(context, $"uuid:sub-{Interlocked.Increment(ref nextSid)}");
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/AVTransport/Event"), _ => { }, CancellationToken.None);
         await listener.SubscribeAsync("RINCON_X/RenderingControl", new Uri(speaker.BaseUri, "/RenderingControl/Event"), _ => { }, CancellationToken.None);
@@ -218,15 +221,14 @@ public class SonosEventListenerTests
             return RespondWithSid(context, "uuid:sub-1");
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
 
         // Act
-        var renewed = await listener.RenewAsync(subscription, CancellationToken.None);
+        await listener.RenewAsync(subscription, CancellationToken.None);
 
         // Assert
-        Assert.False(renewed);
         Assert.Empty(listener.Subscriptions);
     }
 
@@ -235,7 +237,7 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act
@@ -251,7 +253,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.SubscribeAsync(
             "RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => throw new InvalidOperationException("boom"), CancellationToken.None);
@@ -269,7 +271,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var handlerCalls = 0;
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => handlerCalls++, CancellationToken.None);
@@ -301,7 +303,7 @@ public class SonosEventListenerTests
             return Task.CompletedTask;
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act
@@ -317,7 +319,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var first = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
 
@@ -332,7 +334,7 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -344,7 +346,7 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act & Assert
@@ -369,15 +371,14 @@ public class SonosEventListenerTests
             return RespondWithSid(context, "uuid:sub-1");
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var subscription = await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
 
         // Act
-        var renewed = await listener.RenewAsync(subscription, CancellationToken.None);
+        await listener.RenewAsync(subscription, CancellationToken.None);
 
         // Assert
-        Assert.True(renewed);
         Assert.InRange(TimeUntil(subscription.RenewAt), TimeSpan.FromMinutes(4), TimeSpan.FromMinutes(6));
         Assert.Same(subscription, Assert.Single(listener.Subscriptions));
     }
@@ -387,7 +388,7 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var subscription = new SonosEventSubscription("RINCON_X/AVTransport", new Uri("http://127.0.0.1:1/Event"), _ => { });
 
         // Act & Assert
@@ -414,7 +415,7 @@ public class SonosEventListenerTests
             await RespondWithSid(context, "uuid:sub-1");
         });
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var pending = listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
         await subscribeReceived.Task.WaitAsync(WaitTimeout);
@@ -447,7 +448,7 @@ public class SonosEventListenerTests
         });
         using var httpClient = new HttpClient();
         var logger = new RecordingLogger();
-        await using var listener = new SonosEventListener(httpClient, logger);
+        await using var listener = CreateListener(httpClient, logger);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
 
@@ -480,7 +481,7 @@ public class SonosEventListenerTests
         });
         using var httpClient = new HttpClient();
         var logger = new RecordingLogger();
-        await using var listener = new SonosEventListener(httpClient, logger);
+        await using var listener = CreateListener(httpClient, logger);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var pending = listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => { }, CancellationToken.None);
         await subscribeReceived.Task.WaitAsync(WaitTimeout);
@@ -502,7 +503,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        await using var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var handlerCalls = 0;
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => handlerCalls++, CancellationToken.None);
@@ -534,7 +535,7 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        var listener = CreateListener(httpClient);
         var wasListeningBeforeStart = listener.IsListening;
 
         // Act
@@ -553,7 +554,7 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        var listener = CreateListener(httpClient);
         LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         await listener.DisposeAsync();
 
@@ -569,8 +570,8 @@ public class SonosEventListenerTests
     {
         // Arrange
         using var httpClient = new HttpClient();
-        await using var first = new SonosEventListener(httpClient, NullLogger.Instance);
-        await using var second = new SonosEventListener(httpClient, NullLogger.Instance);
+        await using var first = CreateListener(httpClient);
+        await using var second = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => first.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
 
         // Act & Assert
@@ -585,7 +586,7 @@ public class SonosEventListenerTests
         // Arrange
         await using var speaker = new LoopbackHttpServer(context => RespondWithSid(context, "uuid:sub-1"));
         using var httpClient = new HttpClient();
-        var listener = new SonosEventListener(httpClient, NullLogger.Instance);
+        var listener = CreateListener(httpClient);
         var port = LoopbackHttpServer.StartOnFreePort(candidate => listener.Start("127.0.0.1", candidate, listenHost: "127.0.0.1"));
         var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseHandler = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
