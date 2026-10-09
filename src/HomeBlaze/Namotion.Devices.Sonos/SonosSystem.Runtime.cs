@@ -113,8 +113,7 @@ public partial class SonosSystem
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!IsConnected)
             {
-                throw new InvalidOperationException(
-                    "The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
+                throw CreateNotConnectedException();
             }
 
             if (!Players.TryGetValue(uuid, out var player) || !player.IsConnected || !_connections.TryGetValue(uuid, out var connection))
@@ -141,8 +140,8 @@ public partial class SonosSystem
     }
 
     /// <summary>
-    /// Runs grouping commands, then reads the topology back. A failure reads it back too, since earlier commands
-    /// may already have regrouped rooms, and the command's exception propagates.
+    /// Runs grouping commands, then reads the topology back, also after a failure, since earlier commands may
+    /// already have regrouped rooms. Only the commands' exception propagates; a failed read is logged.
     /// </summary>
     internal async Task RunGroupingCommandsAsync(Func<CancellationToken, Task> commands, CancellationToken cancellationToken)
     {
@@ -152,20 +151,24 @@ public partial class SonosSystem
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                await ReconcileAsync(cancellationToken);
-            }
-            catch (Exception reconcileException) when (reconcileException is not OperationCanceledException)
-            {
-                // The grouping failure is what the caller needs; the next poll retries the read.
-                _logger.LogWarning(reconcileException, "Reading the Sonos topology after a failed grouping command failed.");
-            }
-
+            await TryReconcileAfterGroupingAsync(cancellationToken);
             throw;
         }
 
-        await ReconcileAsync(cancellationToken);
+        await TryReconcileAfterGroupingAsync(cancellationToken);
+    }
+
+    private async Task TryReconcileAfterGroupingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ReconcileAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The next poll retries the read.
+            _logger.LogWarning(exception, "Reading the Sonos topology after a grouping command failed.");
+        }
     }
 
     internal async Task ReconcileAsync(CancellationToken cancellationToken)

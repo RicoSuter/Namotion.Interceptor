@@ -151,12 +151,142 @@ public class SonosPlayerOperationTests
         // Arrange
         await using var speaker = new FakeSonosSpeaker();
         await using var connected = await ConnectedSystem.StartAsync(speaker);
+        speaker.Respond("GetTransportSettings", ("PlayMode", "REPEAT_ALL"), ("RecQualityMode", "NOT_IMPLEMENTED"));
+        await connected.System.RefreshAsync(CancellationToken.None);
+        Assert.Equal(SonosRepeatMode.All, connected.Player.Repeat);
 
         // Act
         await connected.Player.SetShuffleAsync(true, CancellationToken.None);
 
         // Assert
-        Assert.Contains(speaker.Calls, call => call.Action == "SetPlayMode" && call.Body.Contains("<NewPlayMode>SHUFFLE_NOREPEAT</NewPlayMode>"));
+        Assert.Contains(speaker.Calls, call => call.Action == "SetPlayMode" && call.Body.Contains("<NewPlayMode>SHUFFLE</NewPlayMode>"));
+    }
+
+    [Fact]
+    public async Task WhenMemberSetsShuffle_ThenCoordinatorRepeatIsKeptAndCoordinatorIsCommanded()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true);
+        household.Office.Respond("GetTransportSettings", ("PlayMode", "REPEAT_ALL"), ("RecQualityMode", "NOT_IMPLEMENTED"));
+        await household.System.RefreshAsync(CancellationToken.None);
+        Assert.Equal(SonosRepeatMode.All, household.OfficePlayer.Repeat);
+        Assert.Equal(SonosRepeatMode.Off, household.KitchenPlayer.Repeat);
+
+        // Act
+        await household.KitchenPlayer.SetShuffleAsync(true, CancellationToken.None);
+
+        // Assert
+        Assert.Contains(household.Office.Calls, call => call.Action == "SetPlayMode" && call.Body.Contains("<NewPlayMode>SHUFFLE</NewPlayMode>"));
+        Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetPlayMode");
+    }
+
+    [Fact]
+    public async Task WhenMemberPlays_ThenPlayIsSentToTheCoordinator()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true);
+
+        // Act
+        await household.KitchenPlayer.PlayAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains(household.Office.Calls, call => call.Action == "Play");
+        Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "Play");
+    }
+
+    [Fact]
+    public async Task WhenPlayersAreGrouped_ThenLeaveGroupIsEnabledForEveryMember()
+    {
+        // Act
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true);
+
+        // Assert
+        Assert.True(household.KitchenPlayer.LeaveGroup_IsEnabled);
+        Assert.True(household.OfficePlayer.LeaveGroup_IsEnabled);
+    }
+
+    [Fact]
+    public async Task WhenConnectedPlayerIsAlone_ThenLeaveGroupIsDisabled()
+    {
+        // Act
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+
+        // Assert
+        Assert.False(connected.Player.LeaveGroup_IsEnabled);
+    }
+
+    [Fact]
+    public async Task WhenJoiningTheGroupThePlayerIsIn_ThenNothingIsSent()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true);
+
+        // Act
+        await household.KitchenPlayer.JoinGroupAsync("Büro", CancellationToken.None);
+        await household.OfficePlayer.JoinGroupAsync("Küche", CancellationToken.None);
+
+        // Assert
+        Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetAVTransportURI");
+        Assert.DoesNotContain(household.Office.Calls, call => call.Action == "SetAVTransportURI");
+    }
+
+    [Fact]
+    public void WhenSystemIsNotConnected_ThenPlayReturnsFaultedTask()
+    {
+        // Arrange
+        var player = CreateDisconnectedKitchen();
+
+        // Act
+        var task = player.PlayAsync(CancellationToken.None);
+
+        // Assert
+        Assert.IsType<InvalidOperationException>(task.Exception?.InnerException);
+    }
+
+    [Fact]
+    public async Task WhenNameArgumentsAreNull_ThenThrowArgumentNull()
+    {
+        // Arrange
+        var player = CreateDisconnectedKitchen();
+
+        // Act & Assert
+        Assert.Equal("roomNameOrUuid", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.JoinGroupAsync(null!, CancellationToken.None))).ParamName);
+        Assert.Equal("name", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayFavoriteAsync(null!, CancellationToken.None))).ParamName);
+        Assert.Equal("uri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayUriAsync(null!, null, CancellationToken.None))).ParamName);
+        Assert.Equal("soundUri", (await Assert.ThrowsAsync<ArgumentNullException>(() => player.PlayNotificationAsync(null!, 0.5m, CancellationToken.None))).ParamName);
+    }
+
+    [Fact]
+    public async Task WhenPlayingNativeUriWithTitle_ThenMetadataIsEmpty()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+
+        // Act
+        await connected.Player.PlayUriAsync("x-sonos-spotify:spotify%3atrack%3a1?sid=9", "Song", CancellationToken.None);
+
+        // Assert
+        var setUri = Assert.Single(speaker.Calls, call => call.Action == "SetAVTransportURI");
+        Assert.Contains("x-sonos-spotify:spotify%3atrack%3a1?sid=9", setUri.Body);
+        Assert.DoesNotContain("DIDL-Lite", setUri.Body);
+    }
+
+    [Fact]
+    public async Task WhenPlayingRadioUriWithTitle_ThenTitleMetadataIsSent()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+
+        // Act
+        await connected.Player.PlayUriAsync("x-rincon-mp3radio://stream.example.com/live.mp3", "Live", CancellationToken.None);
+
+        // Assert
+        var setUri = Assert.Single(speaker.Calls, call => call.Action == "SetAVTransportURI");
+        Assert.Contains("DIDL-Lite", setUri.Body);
+        Assert.Contains("Live", setUri.Body);
     }
 
     [Theory]

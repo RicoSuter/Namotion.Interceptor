@@ -62,8 +62,20 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         Respond("GetZoneGroupState", ("ZoneGroupState",
             "<ZoneGroupState><ZoneGroups>" +
             string.Concat(players.Select(player =>
-                $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1"><ZoneGroupMember UUID="{player.Uuid}" Location="{player.BaseUri}xml/device_description.xml" ZoneName="{player.RoomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" /></ZoneGroup>""")) +
+                $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1">{CreateMember(player)}</ZoneGroup>""")) +
             "</ZoneGroups></ZoneGroupState>"));
+
+    /// <summary>
+    /// Answers GetZoneGroupState with one group of all players, coordinated by the first.
+    /// </summary>
+    internal void RespondWithGroup(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
+        Respond("GetZoneGroupState", ("ZoneGroupState",
+            "<ZoneGroupState><ZoneGroups>" +
+            $"""<ZoneGroup Coordinator="{players[0].Uuid}" ID="{players[0].Uuid}:1">{string.Concat(players.Select(CreateMember))}</ZoneGroup>""" +
+            "</ZoneGroups></ZoneGroupState>"));
+
+    private static string CreateMember((string Uuid, string RoomName, Uri BaseUri) player) =>
+        $"""<ZoneGroupMember UUID="{player.Uuid}" Location="{player.BaseUri}xml/device_description.xml" ZoneName="{player.RoomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" />""";
 
     /// <summary>
     /// Answers as a single-room household whose only player is this speaker, paused on Spotify Connect.

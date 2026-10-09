@@ -1,5 +1,4 @@
 using Namotion.Devices.Sonos.Tests.Testing;
-using Namotion.Interceptor.Testing;
 using Sonos.Base.Services;
 using Xunit;
 
@@ -55,70 +54,58 @@ public class SonosSystemOperationTests
     }
 
     [Fact]
+    public async Task WhenGroupingAllIntoNullRoom_ThenThrowsArgumentNull()
+    {
+        // Arrange
+        var system = SonosSystemTopologyTests.CreateSystem();
+        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentNullException>(() => system.GroupAllAsync(null!, CancellationToken.None));
+        Assert.Equal("coordinatorRoom", exception.ParamName);
+    }
+
+    [Fact]
     public async Task WhenGroupingAll_ThenOtherRoomsJoinTheCoordinator()
     {
         // Arrange
-        await using var kitchen = new FakeSonosSpeaker();
-        await using var office = new FakeSonosSpeaker();
-        var system = await StartHouseholdAsync(kitchen, office);
+        await using var household = await ConnectedHousehold.StartAsync();
 
-        try
-        {
-            // Act
-            await system.GroupAllAsync("Küche", CancellationToken.None);
+        // Act
+        await household.System.GroupAllAsync("Küche", CancellationToken.None);
 
-            // Assert
-            Assert.Contains(office.Calls, call => call.Action == "SetAVTransportURI" && call.Body.Contains($"x-rincon:{TestFixtures.KitchenUuid}"));
-            Assert.DoesNotContain(kitchen.Calls, call => call.Action == "SetAVTransportURI");
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        Assert.Contains(household.Office.Calls, call => call.Action == "SetAVTransportURI" && call.Body.Contains($"x-rincon:{TestFixtures.KitchenUuid}"));
+        Assert.DoesNotContain(household.Kitchen.Calls, call => call.Action == "SetAVTransportURI");
     }
 
     [Fact]
     public async Task WhenGroupingAllFails_ThenFaultPropagatesAndTopologyIsReadAgain()
     {
         // Arrange
-        await using var kitchen = new FakeSonosSpeaker();
-        await using var office = new FakeSonosSpeaker();
-        var system = await StartHouseholdAsync(kitchen, office);
-        office.RespondWithFault("SetAVTransportURI", 800);
+        await using var household = await ConnectedHousehold.StartAsync();
+        household.Office.RespondWithFault("SetAVTransportURI", 800);
+        var reads = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
 
-        try
-        {
-            var reads = kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
+        // Act
+        var exception = await Assert.ThrowsAsync<SonosServiceException>(() => household.System.GroupAllAsync("Küche", CancellationToken.None));
 
-            // Act
-            var exception = await Assert.ThrowsAsync<SonosServiceException>(() => system.GroupAllAsync("Küche", CancellationToken.None));
-
-            // Assert
-            Assert.Equal(800, exception.UpnpErrorCode);
-            Assert.True(kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > reads, "The topology was not read again after the failed grouping.");
-        }
-        finally
-        {
-            await system.StopAsync(CancellationToken.None);
-            system.Dispose();
-        }
+        // Assert
+        Assert.Equal(800, exception.UpnpErrorCode);
+        Assert.True(household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > reads, "The topology was not read again after the failed grouping.");
     }
 
-    private static async Task<SonosSystem> StartHouseholdAsync(FakeSonosSpeaker kitchen, FakeSonosSpeaker office)
+    [Fact]
+    public async Task WhenGroupingSucceedsButTopologyReadFails_ThenGroupingCompletes()
     {
-        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
-        var household = new[] { (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", office.BaseUri) };
-        kitchen.RespondWithTopology(household);
-        office.RespondWithTopology(household);
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync();
+        household.Kitchen.RespondWithFault("GetZoneGroupState", 501);
 
-        var system = ConnectedSystem.CreateSystem(kitchen.Host);
-        await system.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => system.IsConnected && system.Players.Count == 2 && system.Players.Values.All(player => player.IsConnected),
-            ConnectedSystem.WaitTimeout,
-            message: "The system should connect to both speakers.");
-        return system;
+        // Act
+        await household.System.GroupAllAsync("Küche", CancellationToken.None);
+
+        // Assert
+        Assert.Contains(household.Office.Calls, call => call.Action == "SetAVTransportURI" && call.Body.Contains($"x-rincon:{TestFixtures.KitchenUuid}"));
     }
 }

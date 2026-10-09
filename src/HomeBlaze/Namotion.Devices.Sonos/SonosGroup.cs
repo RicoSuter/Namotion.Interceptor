@@ -89,8 +89,40 @@ public partial class SonosGroup :
     public bool Pause_IsEnabled => CanControl;
 
     [Derived]
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("Next", KnownAttributes.IsEnabled)]
+    public bool Next_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("Previous", KnownAttributes.IsEnabled)]
+    public bool Previous_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("TogglePlayback", KnownAttributes.IsEnabled)]
+    public bool TogglePlayback_IsEnabled => CanControl;
+
+    [Derived]
     [PropertyAttribute("Seek", KnownAttributes.IsEnabled)]
     public bool Seek_IsEnabled => CanControl && CurrentTrackDuration > TimeSpan.Zero;
+
+    [Derived]
+    [PropertyAttribute("SetVolume", KnownAttributes.IsEnabled)]
+    public bool SetVolume_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("ChangeVolume", KnownAttributes.IsEnabled)]
+    public bool ChangeVolume_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("Mute", KnownAttributes.IsEnabled)]
+    public bool Mute_IsEnabled => CanControl;
+
+    [Derived]
+    [PropertyAttribute("Unmute", KnownAttributes.IsEnabled)]
+    public bool Unmute_IsEnabled => CanControl;
 
     [Operation(Position = 1)]
     public Task PlayAsync(CancellationToken cancellationToken) =>

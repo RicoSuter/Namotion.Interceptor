@@ -176,7 +176,7 @@ public partial class SonosPlayer : SonosDevice,
 
     [Derived]
     [PropertyAttribute("LeaveGroup", KnownAttributes.IsEnabled)]
-    public bool LeaveGroup_IsEnabled => CanControl && !IsGroupCoordinator;
+    public bool LeaveGroup_IsEnabled => CanControl && _system.Groups.GetValueOrDefault(GroupCoordinatorUuid ?? Uuid)?.Members.Length > 1;
 
     [Operation(Position = 1)]
     public Task PlayAsync(CancellationToken cancellationToken) =>
@@ -232,6 +232,7 @@ public partial class SonosPlayer : SonosDevice,
     [Operation(Position = 20)]
     public Task PlayFavoriteAsync(string name, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(name);
         var favorite = _system.FindFavorite(name)
             ?? throw new ArgumentException(
                 $"Unknown Sonos favorite '{name}'. Known favorites: {string.Join(", ", _system.Favorites)}.", nameof(name));
@@ -251,7 +252,8 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     /// <summary>
-    /// Plays a URI: http(s) streams play as radio with the optional title; native Sonos URIs pass through.
+    /// Plays a URI: http(s) streams and x-rincon-mp3radio URIs play as radio with the optional title; other native
+    /// Sonos URIs pass through without metadata.
     /// </summary>
     [Operation(Position = 21)]
     public Task PlayUriAsync(string uri, string? title, CancellationToken cancellationToken)
@@ -260,7 +262,8 @@ public partial class SonosPlayer : SonosDevice,
         var isStream = uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
                        uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
         var transportUri = isStream ? SonosValues.ToStreamUri(uri) : uri;
-        var metadata = isStream || title is not null ? SonosValues.CreateStreamMetadata(title ?? uri) : string.Empty;
+        var isRadio = isStream || uri.StartsWith("x-rincon-mp3radio:", StringComparison.OrdinalIgnoreCase);
+        var metadata = isRadio ? SonosValues.CreateStreamMetadata(title ?? uri) : string.Empty;
 
         return RunOnCoordinatorAsync(async (connection, token) =>
         {
@@ -275,6 +278,7 @@ public partial class SonosPlayer : SonosDevice,
     [Operation(Position = 22)]
     public Task PlayNotificationAsync(string soundUri, [OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(soundUri);
         if (!Uri.TryCreate(soundUri, UriKind.Absolute, out var sound) || (sound.Scheme != Uri.UriSchemeHttp && sound.Scheme != Uri.UriSchemeHttps))
         {
             throw new ArgumentException("The sound URI must be an absolute http or https URI.", nameof(soundUri));
@@ -306,14 +310,14 @@ public partial class SonosPlayer : SonosDevice,
     [Operation(Position = 30)]
     public Task SetShuffleAsync(bool shuffle, CancellationToken cancellationToken)
     {
-        var playMode = SonosValues.FormatPlayMode(shuffle, Repeat ?? SonosRepeatMode.Off);
+        var playMode = SonosValues.FormatPlayMode(shuffle, GetCoordinator().Repeat ?? SonosRepeatMode.Off);
         return RunOnCoordinatorAsync((connection, token) => connection.SetPlayModeAsync(playMode, token), cancellationToken);
     }
 
     [Operation(Position = 31)]
     public Task SetRepeatAsync(SonosRepeatMode repeat, CancellationToken cancellationToken)
     {
-        var playMode = SonosValues.FormatPlayMode(Shuffle ?? false, repeat);
+        var playMode = SonosValues.FormatPlayMode(GetCoordinator().Shuffle ?? false, repeat);
         return RunOnCoordinatorAsync((connection, token) => connection.SetPlayModeAsync(playMode, token), cancellationToken);
     }
 
@@ -364,24 +368,26 @@ public partial class SonosPlayer : SonosDevice,
     [Operation(Position = 50)]
     public Task JoinGroupAsync(string roomNameOrUuid, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(roomNameOrUuid);
         var target = _system.FindPlayer(roomNameOrUuid)
             ?? throw _system.CreateUnknownRoomException(roomNameOrUuid, nameof(roomNameOrUuid));
-        var coordinatorUuid = target.GroupCoordinatorUuid ?? target.Uuid;
-        if (ReferenceEquals(target, this) || coordinatorUuid == Uuid)
+        if (ReferenceEquals(target, this))
         {
             throw new ArgumentException("A player cannot join its own group.", nameof(roomNameOrUuid));
         }
 
-        var connection = _system.GetConnectionForCommand(Uuid);
-        return _system.RunGroupingCommandsAsync(token => connection.JoinAsync(coordinatorUuid, token), cancellationToken);
+        var coordinatorUuid = target.GroupCoordinatorUuid ?? target.Uuid;
+        if ((GroupCoordinatorUuid ?? Uuid) == coordinatorUuid)
+        {
+            return Task.CompletedTask;
+        }
+
+        return RunGroupingOnPlayerAsync((connection, token) => connection.JoinAsync(coordinatorUuid, token), cancellationToken);
     }
 
     [Operation(Position = 51)]
-    public Task LeaveGroupAsync(CancellationToken cancellationToken)
-    {
-        var connection = _system.GetConnectionForCommand(Uuid);
-        return _system.RunGroupingCommandsAsync(connection.LeaveGroupAsync, cancellationToken);
-    }
+    public Task LeaveGroupAsync(CancellationToken cancellationToken) =>
+        RunGroupingOnPlayerAsync((connection, token) => connection.LeaveGroupAsync(token), cancellationToken);
 
     private void EnsureHomeTheater()
     {
@@ -391,14 +397,25 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
+    // Play mode is group state, so it is read from the coordinator subject.
+    private SonosPlayer GetCoordinator() =>
+        _system.Players.GetValueOrDefault(GroupCoordinatorUuid ?? Uuid) ?? this;
+
     private Task RunOnCoordinatorAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
-        RunAsync(_system.GetConnectionForCommand(GroupCoordinatorUuid ?? Uuid), command, cancellationToken);
+        RunAsync(GroupCoordinatorUuid ?? Uuid, command, cancellationToken);
 
     private Task RunOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
-        RunAsync(_system.GetConnectionForCommand(Uuid), command, cancellationToken);
+        RunAsync(Uuid, command, cancellationToken);
 
-    private async Task RunAsync(SonosConnection connection, Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
+    private async Task RunGroupingOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
     {
+        var connection = _system.GetConnectionForCommand(Uuid);
+        await _system.RunGroupingCommandsAsync(token => command(connection, token), cancellationToken);
+    }
+
+    private async Task RunAsync(string targetUuid, Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
+    {
+        var connection = _system.GetConnectionForCommand(targetUuid);
         try
         {
             await command(connection, cancellationToken);

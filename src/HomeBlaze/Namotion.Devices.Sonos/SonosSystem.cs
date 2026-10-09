@@ -150,6 +150,7 @@ public partial class SonosSystem : BackgroundService,
     [Operation(Position = 2)]
     public Task GroupAllAsync(string coordinatorRoom, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(coordinatorRoom);
         var coordinator = FindPlayer(coordinatorRoom) ?? throw CreateUnknownRoomException(coordinatorRoom, nameof(coordinatorRoom));
         var coordinatorConnection = GetConnectionForCommand(coordinator.Uuid);
 
@@ -194,10 +195,12 @@ public partial class SonosSystem : BackgroundService,
     {
         if (!IsConnected)
         {
-            throw new InvalidOperationException(
-                "The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
+            throw CreateNotConnectedException();
         }
     }
+
+    private InvalidOperationException CreateNotConnectedException() =>
+        new("The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
 
     internal void ApplyTopology(SonosTopology topology)
     {
