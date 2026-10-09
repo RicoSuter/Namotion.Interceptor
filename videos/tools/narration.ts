@@ -43,7 +43,7 @@ export function buildNarration(script: Script, lexicon: LexiconEntry[], identity
   return allBeats(script)
     .filter(beat => beat.narration !== undefined)
     .map(beat => {
-      const text = applyLexicon(beat.narration!, lexicon);
+      const text = applyLexicon(beat.narration!, lexicon, voice.engine);
       const key = synthesisKey(text, cacheIdentity);
       return {beatId: beat.id, key, audioKey: tempoKey(key, atempo), text};
     });

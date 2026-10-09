@@ -48,6 +48,19 @@ describe('buildNarration', () => {
     // Assert
     expect(items[0].key).not.toBe(buildNarration(script, lexicon)[0].key);
   });
+
+  it('WhenLexiconHasEngineOverride_ThenTheScriptVoiceEngineSelectsTheSpokenForm', () => {
+    // Arrange
+    const overridden = [{match: '°C', say: 'degrees', kokoro: 'degrees Celsius'}];
+
+    // Act
+    const kokoro = buildNarration({...script, voice: 'kokoro:am_michael'}, overridden);
+    const chatterbox = buildNarration(script, overridden);
+
+    // Assert
+    expect(kokoro[0].text).toBe('Heat to 93 degrees Celsius.');
+    expect(chatterbox[0].text).toBe('Heat to 93 degrees.');
+  });
 });
 
 describe('tempoKey', () => {

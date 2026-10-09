@@ -103,7 +103,20 @@ Copy `.claude/skills/learning-video/templates/script.yaml` to the episode folder
   - `chatterbox` at tempo 1: about 195 words per minute of finished video (9.7 minutes; the speech alone runs at about 3.5 words per second times the tempo). A 10 minute episode is about 1900 to 1950 words; per chapter, words = budget seconds x 3.2.
   - Short lines run slower than long ones, since every narrated beat adds 0.4 s of silence and the engine's own edge silence: Kokoro at tempo 1.32 speaks the three audition lines at 200 words per minute.
 - Write identifiers as spoken words when they must be said ("is ready", not `IsReady`); subtitles show the narration text as written. Better: let the code card show the identifier and narrate what it does.
-- Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, subtitles keep the original.
+- Terms the voice mispronounces go into `videos/tools/tts/lexicon.yaml` (`{match: OPC UA, say: O P C U A}`); matching is whole word and case-sensitive, the longest match wins, a replacement is never matched again, and subtitles keep the original.
+- An entry can override `say` for one engine with a `kokoro` or `chatterbox` key; the script's voice picks the engine, and cloned voices use `chatterbox`. Kokoro reads phoneme markup, `{match: OPC UA, say: O P C U A, kokoro: '[OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/)'}`, which Chatterbox would read aloud, so keep a plain spelling in `say`. To find phonemes, print what Kokoro makes of the plain spelling and of a markup candidate, then adjust and listen (from `videos/tools/tts`):
+
+```bash
+uv run --extra kokoro python -c "
+from video_tts.kokoro_engine import _create_pipeline
+pipeline = _create_pipeline('a')
+for text in ['Over O P C U A.', 'Over [OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/).']:
+    for result in pipeline(text, voice='am_michael', speed=1.25):
+        print(text, '->', result.phonemes)
+"
+```
+
+  The phonemes printed for a markup line must equal the markup, or Kokoro did not take it. In a group of letters spoken together, primary stress `ˈ` on the last letter usually sounds most natural (`ˌAɛspˈi` for ASP, `[ASP.NET](/ˌAɛspˈi dɑt nˈɛt/)`).
 - Open the first chapter with a hook: the problem and a glimpse of the result. End with a short recap of what the viewer can now do, plus optional pointers.
 
 ### Storyboard checks

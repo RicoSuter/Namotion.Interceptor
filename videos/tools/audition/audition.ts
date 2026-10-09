@@ -31,9 +31,10 @@ mkdirSync(cacheDirectory, {recursive: true});
 const results: AuditionResult[] = [];
 for (const {label, spec, tempo} of voices) {
   console.log(`\n${label} (${spec} at tempo ${tempo})`);
-  const resolved = resolveVoice(parseVoice(spec), tempo);
+  const voice = parseVoice(spec);
+  const resolved = resolveVoice(voice, tempo);
   const items = lines.map(line => {
-    const text = applyLexicon(line.text, lexicon);
+    const text = applyLexicon(line.text, lexicon, voice.engine);
     const key = synthesisKey(text, resolved.identity);
     return {line, key, audioKey: tempoKey(key, resolved.atempo), text};
   });
