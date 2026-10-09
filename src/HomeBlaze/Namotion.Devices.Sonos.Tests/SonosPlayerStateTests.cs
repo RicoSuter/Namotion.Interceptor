@@ -7,7 +7,7 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosPlayerStateTests
 {
-    private const string SpotifyUri = "x-sonos-vli:RINCON_A0000000000601400:2,spotify:94963e711df088cf";
+    private const string SpotifyUri = TestFixtures.SpotifyConnectUri;
     private static readonly DateTimeOffset T0 = new(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
 
     private static SonosPlayer CreateKitchen()

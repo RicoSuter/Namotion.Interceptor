@@ -1,3 +1,4 @@
+using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -167,7 +168,7 @@ public class SonosValuesTests
     [InlineData("", SonosSource.None)]
     [InlineData("x-sonos-htastream:RINCON_A0000000000701400:spdif", SonosSource.Tv)]
     [InlineData("x-rincon-stream:RINCON_A0000000000601400", SonosSource.LineIn)]
-    [InlineData("x-sonos-vli:RINCON_A0000000000601400:2,spotify:94963e711df088cf", SonosSource.SpotifyConnect)]
+    [InlineData(TestFixtures.SpotifyConnectUri, SonosSource.SpotifyConnect)]
     [InlineData("x-sonos-vli:RINCON_A0000000000601400:1,airplay:4F9A2B", SonosSource.AirPlay)]
     [InlineData("x-sonos-vli:RINCON_A0000000000601400:3,unknown:1", SonosSource.Other)]
     [InlineData("x-rincon-mp3radio://stream.example.com/live.mp3", SonosSource.Radio)]

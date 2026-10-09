@@ -7,7 +7,7 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class FavoritesParserTests
 {
-    private static readonly Uri SpeakerUri = new("http://192.168.1.20:1400/");
+    private static readonly Uri SpeakerUri = new("http://10.0.0.20:1400/");
 
     [Fact]
     public void WhenParsingFavorites_ThenShortcutsWithoutUriAreSkipped()
@@ -48,7 +48,7 @@ public class FavoritesParserTests
         var station = FavoritesParser.Parse(TestFixtures.Read("favorites.xml"), SpeakerUri).Single(favorite => favorite.Title == "SRF 3");
 
         // Assert
-        Assert.Equal("http://192.168.1.20:1400/getaa?s=1&u=x-sonosapi-stream%3atunein%3a9464", station.ImageUri);
+        Assert.Equal("http://10.0.0.20:1400/getaa?s=1&u=x-sonosapi-stream%3atunein%3a9464", station.ImageUri);
     }
 
     [Fact]
