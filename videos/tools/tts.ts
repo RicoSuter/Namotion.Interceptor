@@ -2,7 +2,7 @@ import {existsSync, renameSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {probeDuration, runFfmpeg} from './ffmpeg';
 import {loadLexicon} from './lexicon';
-import {buildNarration, buildTiming} from './narration';
+import {applyNarrationOptions, buildNarration, buildTiming} from './narration';
 import {episodeArgument, episodePaths, lexiconFile} from './paths';
 import {loadScript} from './schema/script';
 import {resolveVoice, synthesize} from './speech';
@@ -10,7 +10,7 @@ import {parseVoice} from './voice';
 
 const paths = episodePaths(episodeArgument());
 // Narration needs only the script, so speech can be synthesized before the sample, demos and capture exist.
-const script = loadScript(paths.episodeDirectory);
+const {script, timingFileName} = applyNarrationOptions(loadScript(paths.episodeDirectory), process.argv.slice(3));
 const voice = resolveVoice(parseVoice(script.voice));
 const items = buildNarration(script, loadLexicon(lexiconFile), voice.identity);
 synthesize(paths.audioDirectory, voice.request, items.map(item => ({key: item.key, text: item.text})));
@@ -28,7 +28,7 @@ for (const item of items) {
   durations[item.audioKey] = probeDuration(audioFile);
 }
 const timing = buildTiming(script, items, durations);
-writeFileSync(paths.timingFile, JSON.stringify(timing, null, 2));
+writeFileSync(join(paths.generatedDirectory, timingFileName), JSON.stringify(timing, null, 2));
 
 for (const chapter of script.chapters) {
   const seconds = timing.beats.filter(beat => beat.chapter === chapter.id).reduce((total, beat) => total + beat.duration, 0);

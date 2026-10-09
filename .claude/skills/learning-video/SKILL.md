@@ -342,6 +342,7 @@ Run in order from `videos/`:
 | `npm run render -- <episode>` | draft at 15 fps: `output/<episode>-draft.mp4` with the narration as a soft subtitle track (`mov_text`, English, off by default), the same subtitles as `output/<episode>.srt`, `output/<episode>-contact.png`, `output/<episode>-review.md`, `output/<episode>-frames/` |
 | `npm run render -- <episode> --final` | `output/<episode>-final.mp4` at 30 fps, plus the same review files |
 | `npm run render -- <episode> [--final] --beats a,b --background <variant> --out <name>` | only the listed beats, joined into `output/<name>.mp4`, for comparisons |
+| `npm run tts` and `npm run render` with `--voice <voice> --tempo <factor>` | a trial narration with its own timing and render files; the regular ones stay untouched (see Voices in `videos/README.md`) |
 
 - Speech synthesis takes 1 to 3 s per 1 s of speech on the first run, depending on the GPU (about 10 minutes for a 10 minute episode on an RTX 3080). Audio is cached by text, voice and settings, so later runs only synthesize changed lines; the tempo copies are cached separately, so a tempo change takes seconds. TTS reads only the script, so it can run as soon as the script exists.
 - Capture, TTS and render can each take longer than a 10 minute command timeout. Run them in the background with output to a log file and poll the log.

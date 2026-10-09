@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {parseScript} from './schema/script';
-import {buildNarration, buildTiming, narrationPadding, tempoKey, toSrt} from './narration';
+import {applyNarrationOptions, buildNarration, buildTiming, narrationPadding, tempoKey, toSrt} from './narration';
 
 const script = parseScript(`
 episode: smoke
@@ -122,6 +122,43 @@ describe('buildTiming', () => {
 
     // Act & Assert
     expect(() => buildTiming(script, items, {})).toThrow(/No audio duration for beat 'first'/);
+  });
+});
+
+describe('applyNarrationOptions', () => {
+  it('WhenNoOverrideIsGiven_ThenScriptAndRegularTimingAreKept', () => {
+    // Act
+    const result = applyNarrationOptions(script, ['--final', '--beats', 'first']);
+
+    // Assert
+    expect(result).toEqual({script, variant: '', timingFileName: 'timing.json'});
+  });
+
+  it('WhenVoiceAndTempoAreOverridden_ThenVariantGetsItsOwnTiming', () => {
+    // Act
+    const result = applyNarrationOptions(script, ['--voice', 'clone:voices/rico-clean.wav', '--tempo', '1.05']);
+
+    // Assert
+    expect(result.script.voice).toBe('clone:voices/rico-clean.wav');
+    expect(result.script.tempo).toBe(1.05);
+    expect(result.variant).toBe('clone-rico-clean-x1.05');
+    expect(result.timingFileName).toBe('timing-clone-rico-clean-x1.05.json');
+  });
+
+  it('WhenOnlyVoiceIsOverridden_ThenScriptTempoIsKept', () => {
+    // Act
+    const result = applyNarrationOptions(script, ['--voice', 'kokoro:af_heart']);
+
+    // Assert
+    expect(result.variant).toBe('kokoro-af_heart-x1');
+    expect(buildNarration(result.script, lexicon)[0].key).toBe(buildNarration({...script, voice: 'kokoro:af_heart'}, lexicon)[0].key);
+  });
+
+  it('WhenOverrideIsInvalid_ThenThrows', () => {
+    // Act & Assert
+    expect(() => applyNarrationOptions(script, ['--tempo', '3'])).toThrow(/--tempo must be a number between 0.5 and 2/);
+    expect(() => applyNarrationOptions(script, ['--voice', 'robot'])).toThrow(/Unknown voice 'robot'/);
+    expect(() => applyNarrationOptions(script, ['--voice', '--final'])).toThrow(/--voice needs a value/);
   });
 });
 

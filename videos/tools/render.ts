@@ -7,23 +7,28 @@ import {beatRanges} from './beatRanges';
 import {validateEpisode} from './episode';
 import {probeVideoDuration, runFfmpeg} from './ffmpeg';
 import {disableSubtitleTracks} from './mp4';
-import {toSrt} from './narration';
+import {applyNarrationOptions, toSrt} from './narration';
 import {episodeArgument, episodePaths, outputDirectory, videosRoot} from './paths';
 import {writeReview} from './review';
 
 const paths = episodePaths(episodeArgument());
 const preset = process.argv.includes('--final') ? 'final' : 'draft';
-const script = await validateEpisode(paths.episodeDirectory);
+const narration = applyNarrationOptions(await validateEpisode(paths.episodeDirectory), process.argv.slice(3));
+const script = narration.script;
+const timingFile = join(paths.generatedDirectory, narration.timingFileName);
+// A narration override (--voice, --tempo) renders to its own files, next to the regular render.
+const variant = narration.variant ? `-${narration.variant}` : '';
 const background = (option('--background') ?? script.background ?? defaultBackground) as BackgroundVariant;
 if (!backgroundVariants.includes(background)) {
   throw new Error(`Unknown background '${background}'. Choose one of ${backgroundVariants.join(', ')}.`);
 }
 const beats = option('--beats')?.split(',');
 
-if (!existsSync(paths.timingFile)) {
-  throw new Error(`No timing for '${paths.episode}'. Run 'npm run tts -- ${paths.episode}' first.`);
+if (!existsSync(timingFile)) {
+  const options = narration.variant ? ` --voice ${script.voice} --tempo ${script.tempo}` : '';
+  throw new Error(`No timing for '${paths.episode}'. Run 'npm run tts -- ${paths.episode}${options}' first.`);
 }
-const timing = JSON.parse(readFileSync(paths.timingFile, 'utf8')) as Timing;
+const timing = JSON.parse(readFileSync(timingFile, 'utf8')) as Timing;
 
 const terminal: Record<string, string> = {};
 if (existsSync(paths.terminalDirectory)) {
@@ -58,7 +63,7 @@ async function render(outFile: string, range?: [number, number]): Promise<string
 
 if (beats) {
   // Only the listed beats, for example to compare a theme change: one render per range, joined without subtitles.
-  const name = option('--out') ?? `${paths.episode}-${preset}-${background}`;
+  const name = option('--out') ?? `${paths.episode}-${preset}-${background}${variant}`;
   const ranges = beatRanges(timing, beats);
   const parts: string[] = [];
   for (const [index, range] of ranges.entries()) {
@@ -76,15 +81,15 @@ if (beats) {
   process.exit(0);
 }
 
-const videoFile = await render(`${paths.episode}-${preset}.mp4`);
+const videoFile = await render(`${paths.episode}-${preset}${variant}.mp4`);
 
-const subtitleFile = join(outputDirectory, `${paths.episode}.srt`);
+const subtitleFile = join(outputDirectory, `${paths.episode}${variant}.srt`);
 writeFileSync(subtitleFile, toSrt(timing));
 const absoluteVideoFile = join(videosRoot, videoFile);
 // One pass copies the video, pads the audio and adds the narration as a soft subtitle track. The renderer ends
 // the audio track with the last clip; the bundled ffmpeg ignores -shortest with apad and copied video, so the
 // length is set explicitly.
-const finishedVideoFile = join(outputDirectory, `${paths.episode}-${preset}.finished.mp4`);
+const finishedVideoFile = join(outputDirectory, `${paths.episode}-${preset}${variant}.finished.mp4`);
 runFfmpeg([
   '-i', absoluteVideoFile, '-i', subtitleFile,
   '-map', '0:v', '-map', '0:a?', '-map', '1:s',

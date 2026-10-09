@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import type {Timing, TimingBeat} from '../theme/timing';
 import {applyLexicon, type LexiconEntry} from './lexicon';
 import {allBeats, type Script} from './schema/script';
-import {parseVoice, voiceIdentity} from './voice';
+import {parseVoice, voiceIdentity, voiceLabel} from './voice';
 
 /** Silence after each narrated line, in seconds. */
 export const narrationPadding = 0.4;
@@ -70,6 +70,38 @@ export function buildTiming(script: Script, items: NarrationItem[], durations: R
     start += duration;
   }
   return {episode: script.episode, title: script.title, totalDuration: start, beats};
+}
+
+/**
+ * Applies the `--voice <voice>` and `--tempo <factor>` options of the tts and render commands to the script. An
+ * override names a variant, for example `clone-rico-x1`, whose timing and renders get their own files, so a trial
+ * narration never replaces the episode's regular ones. Without an override the variant is empty.
+ */
+export function applyNarrationOptions(script: Script, args: string[]): {script: Script; variant: string; timingFileName: string} {
+  const voice = optionValue(args, '--voice');
+  const tempoText = optionValue(args, '--tempo');
+  if (voice === undefined && tempoText === undefined) {
+    return {script, variant: '', timingFileName: 'timing.json'};
+  }
+  const tempo = tempoText === undefined ? script.tempo : Number(tempoText);
+  if (!Number.isFinite(tempo) || tempo < 0.5 || tempo > 2) {
+    throw new Error(`--tempo must be a number between 0.5 and 2, got '${tempoText}'`);
+  }
+  const overridden = {...script, voice: voice ?? script.voice, tempo};
+  const variant = `${voiceLabel(parseVoice(overridden.voice))}-x${tempo}`;
+  return {script: overridden, variant, timingFileName: `timing-${variant}.json`};
+}
+
+function optionValue(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  if (index < 0) {
+    return undefined;
+  }
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith('--')) {
+    throw new Error(`${name} needs a value`);
+  }
+  return value;
 }
 
 export function toSrt(timing: Timing): string {
