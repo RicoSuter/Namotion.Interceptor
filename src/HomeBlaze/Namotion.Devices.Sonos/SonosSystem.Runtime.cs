@@ -16,8 +16,11 @@ public partial class SonosSystem
     private const string TopologySubscriptionKey = "seed/ZoneGroupTopology";
     private const string DisconnectedMessage = "The Sonos system is disconnected.";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan UnsubscribeTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
 
+    // Never disposed: neither exposes a wait handle, so there is nothing to release, and disposing them while the
+    // loop is still unwinding from a Dispose without StopAsync made its last waits throw or hang.
     private readonly SemaphoreSlim _configurationChanged = new(0, 1);
     private readonly SemaphoreSlim _reconcileLock = new(1, 1);
     private readonly Lock _connectionsLock = new();
@@ -40,7 +43,14 @@ public partial class SonosSystem
     {
         if (_configurationChanged.CurrentCount == 0)
         {
-            _configurationChanged.Release();
+            try
+            {
+                _configurationChanged.Release();
+            }
+            catch (SemaphoreFullException)
+            {
+                // A concurrent call signalled first; one pending restart covers both.
+            }
         }
 
         return Task.CompletedTask;
@@ -65,8 +75,10 @@ public partial class SonosSystem
                 StartEventListener(seedUri.Host);
                 reconnectImmediately = await RunConnectedAsync(seedUri, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (Exception exception) when (stoppingToken.IsCancellationRequested &&
+                                              exception is OperationCanceledException or ObjectDisposedException)
             {
+                // Stopped, or disposed without stopping first.
                 break;
             }
             catch (Exception exception)
@@ -181,6 +193,39 @@ public partial class SonosSystem
         AreEventsActive = false;
         ActiveEventCallbackHost = null;
 
+        // The stopping token is already cancelled on shutdown, so teardown gets its own short budget. Holding the
+        // reconcile lock keeps a command's reconciliation from subscribing again between unsubscribing and disposing.
+        using var teardownCancellation = new CancellationTokenSource(TeardownTimeout);
+        var hasReconcileLock = await TryEnterReconcileLockAsync(teardownCancellation.Token);
+        try
+        {
+            await ReleaseConnectionScopeAsync(teardownCancellation.Token);
+        }
+        finally
+        {
+            if (hasReconcileLock)
+            {
+                _reconcileLock.Release();
+            }
+        }
+    }
+
+    private async Task<bool> TryEnterReconcileLockAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _reconcileLock.WaitAsync(cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("A Sonos reconciliation did not finish within the teardown budget; tearing down anyway.");
+            return false;
+        }
+    }
+
+    private async Task ReleaseConnectionScopeAsync(CancellationToken cancellationToken)
+    {
         SonosEventListener? eventListener;
         HttpClient? httpClient;
         List<SonosConnection> connections;
@@ -205,9 +250,7 @@ public partial class SonosSystem
         {
             try
             {
-                // The stopping token is already cancelled on shutdown, so unsubscribing gets its own short budget.
-                using var unsubscribeCancellation = new CancellationTokenSource(UnsubscribeTimeout);
-                await eventListener.UnsubscribeAllAsync(unsubscribeCancellation.Token);
+                await eventListener.UnsubscribeAllAsync(cancellationToken);
             }
             catch (Exception exception)
             {
@@ -262,15 +305,24 @@ public partial class SonosSystem
             }
         }
 
-        var knownPlayer = Players.Values.FirstOrDefault(player => player.BaseUri is not null);
-        if (knownPlayer is not null)
+        // Players still in the last topology first: a missing one was more likely unplugged or replaced.
+        var knownSeeds = Players.Values
+            .Where(player => player.BaseUri is not null)
+            .OrderBy(player => player.IsInTopology ? 0 : 1)
+            .Select(player => player.BaseUri!)
+            .Distinct();
+
+        foreach (var knownSeed in knownSeeds)
         {
-            return knownPlayer.BaseUri;
+            if (await ProbeSeedAsync(knownSeed, cancellationToken))
+            {
+                return knownSeed;
+            }
         }
 
         try
         {
-            return await SonosDiscovery.FindSpeakerAsync(cancellationToken);
+            return await DiscoverSpeakerAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -280,6 +332,36 @@ public partial class SonosSystem
         {
             _logger.LogWarning(exception, "Searching for Sonos speakers over SSDP failed.");
             return null;
+        }
+    }
+
+    private async Task<bool> ProbeSeedAsync(Uri seedUri, CancellationToken cancellationToken)
+    {
+        HttpClient httpClient;
+        SonosClientProvider clientProvider;
+        lock (_connectionsLock)
+        {
+            httpClient = _httpClient ?? throw new InvalidOperationException("No Sonos connection scope is open.");
+            clientProvider = _clientProvider!;
+        }
+
+        using var probeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        probeCancellation.CancelAfter(SeedProbeTimeout);
+        using var connection = new SonosConnection(seedUri, null, httpClient, clientProvider);
+        try
+        {
+            await connection.ReadTopologyAsync(probeCancellation.Token);
+            _logger.LogDebug("The known Sonos speaker {Uri} answered and becomes the seed.", seedUri);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "The known Sonos speaker {Uri} did not answer.", seedUri);
+            return false;
         }
     }
 
@@ -329,7 +411,7 @@ public partial class SonosSystem
                 consecutiveFailures = 0;
                 MarkConnected();
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (Exception) when (stoppingToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -446,6 +528,9 @@ public partial class SonosSystem
         }
     }
 
+    private bool IsCurrentConnection(string uuid, SonosConnection connection) =>
+        ReferenceEquals(FindConnection(uuid), connection);
+
     private SonosEventListener? GetEventListener()
     {
         lock (_connectionsLock)
@@ -467,11 +552,20 @@ public partial class SonosSystem
             }
 
             var reading = await connection.ReadPlayerAsync(player.IsHomeTheater, cancellationToken);
-            player.ApplyPoll(reading, pollStartedAt);
+            var group = Groups.GetValueOrDefault(player.Uuid);
+            var groupReading = group is null ? null : await connection.ReadGroupAsync(cancellationToken);
 
-            if (Groups.TryGetValue(player.Uuid, out var group))
+            // Teardown may have released the connection while the reads were in flight; their results must not
+            // report the player reachable again.
+            if (!IsCurrentConnection(player.Uuid, connection))
             {
-                group.ApplyGroupRenderingControlPoll(await connection.ReadGroupAsync(cancellationToken), pollStartedAt);
+                return;
+            }
+
+            player.ApplyPoll(reading, pollStartedAt);
+            if (groupReading is not null)
+            {
+                group!.ApplyGroupRenderingControlPoll(groupReading, pollStartedAt);
             }
 
             player.ReportPollSucceeded();
@@ -502,7 +596,10 @@ public partial class SonosSystem
                 ?? throw new InvalidOperationException("No connection to the satellite.");
 
             await ReadStaticDataAsync(satellite, connection, cancellationToken);
-            satellite.ReportPollSucceeded();
+            if (IsCurrentConnection(satellite.Uuid, connection))
+            {
+                satellite.ReportPollSucceeded();
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -667,8 +764,5 @@ public partial class SonosSystem
         {
             _disposed = true;
         }
-
-        _configurationChanged.Dispose();
-        _reconcileLock.Dispose();
     }
 }

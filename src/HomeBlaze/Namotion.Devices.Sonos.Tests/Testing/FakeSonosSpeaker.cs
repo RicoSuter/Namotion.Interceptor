@@ -53,14 +53,25 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// </summary>
     internal void RespondWithFault(string action, int errorCode) => _faults[action] = errorCode;
 
+    internal void ClearFault(string action) => _faults.TryRemove(action, out _);
+
+    /// <summary>
+    /// Answers GetZoneGroupState with a household of standalone players, each at its own base URI.
+    /// </summary>
+    internal void RespondWithTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
+        Respond("GetZoneGroupState", ("ZoneGroupState",
+            "<ZoneGroupState><ZoneGroups>" +
+            string.Concat(players.Select(player =>
+                $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1"><ZoneGroupMember UUID="{player.Uuid}" Location="{player.BaseUri}xml/device_description.xml" ZoneName="{player.RoomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" /></ZoneGroup>""")) +
+            "</ZoneGroups></ZoneGroupState>"));
+
     /// <summary>
     /// Answers as a single-room household whose only player is this speaker, paused on Spotify Connect.
     /// </summary>
     internal void RespondAsIdlePlayer(string uuid, string roomName)
     {
         const string spotifyUri = "x-sonos-vli:RINCON_A0000000000601400:2,spotify:94963e711df088cf";
-        Respond("GetZoneGroupState", ("ZoneGroupState",
-            $"""<ZoneGroupState><ZoneGroups><ZoneGroup Coordinator="{uuid}" ID="{uuid}:1"><ZoneGroupMember UUID="{uuid}" Location="{BaseUri}xml/device_description.xml" ZoneName="{roomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" /></ZoneGroup></ZoneGroups></ZoneGroupState>"""));
+        RespondWithTopology((uuid, roomName, BaseUri));
         Respond("GetZoneInfo",
             ("SerialNumber", "00-00-00-00-00-06:D"), ("SoftwareVersion", "97.1-80312"), ("DisplaySoftwareVersion", "18.8"),
             ("HardwareVersion", "1.38.1.10-2.1"), ("IPAddress", "127.0.0.1"), ("MACAddress", "00:00:00:00:00:06"),

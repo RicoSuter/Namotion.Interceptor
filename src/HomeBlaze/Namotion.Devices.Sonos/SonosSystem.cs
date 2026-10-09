@@ -6,6 +6,7 @@ using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Abstractions.Networking;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Interceptor.Attributes;
 
@@ -100,6 +101,11 @@ public partial class SonosSystem : BackgroundService,
     /// The host the event listener binds to; "+" accepts events on every interface. Tests bind loopback only.
     /// </summary>
     internal string EventListenHost { get; init; } = "+";
+
+    /// <summary>
+    /// Searches the network for any speaker when neither SeedHost nor a known speaker answers. Tests replace it.
+    /// </summary>
+    internal Func<CancellationToken, Task<Uri?>> DiscoverSpeakerAsync { get; set; } = SonosDiscovery.FindSpeakerAsync;
 
     public SonosSystem(IHttpClientFactory httpClientFactory, ILogger<SonosSystem> logger)
     {

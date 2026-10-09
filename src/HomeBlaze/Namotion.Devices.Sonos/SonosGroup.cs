@@ -21,6 +21,7 @@ public partial class SonosGroup :
     private readonly SonosSystem _system;
     private readonly Lock _stateLock = new();
     private DateTimeOffset _lastEventAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastPollStartedAt = DateTimeOffset.MinValue;
 
     internal SonosGroup(SonosSystem system, SonosPlayer coordinator)
     {
@@ -112,10 +113,14 @@ public partial class SonosGroup :
     {
         lock (_stateLock)
         {
-            if (_lastEventAt <= pollStartedAt)
+            // An older poll completing after a newer one, or after a newer event, would roll the state back.
+            if (pollStartedAt < _lastPollStartedAt || _lastEventAt > pollStartedAt)
             {
-                Apply(change);
+                return;
             }
+
+            _lastPollStartedAt = pollStartedAt;
+            Apply(change);
         }
     }
 

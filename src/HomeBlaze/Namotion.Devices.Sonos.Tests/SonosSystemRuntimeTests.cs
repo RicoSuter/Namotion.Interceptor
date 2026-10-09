@@ -186,5 +186,183 @@ public class SonosSystemRuntimeTests
             () => speaker.Calls.Count(call => call.Action == "GetZoneGroupState") > initialTopologyReads && connected.System.IsConnected,
             ConnectedSystem.WaitTimeout,
             message: "A configuration change should rebuild the connection.");
+        Assert.Contains(AvTransportEventPath, speaker.Unsubscribed);
+    }
+
+    [Fact]
+    public async Task WhenFirstKnownSpeakerIsOffline_ThenSystemReconnectsThroughAnotherKnownSpeaker()
+    {
+        // Arrange
+        var kitchen = new FakeSonosSpeaker();
+        await using var office = new FakeSonosSpeaker();
+        kitchen.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
+        office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
+        var household = new[] { (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", office.BaseUri) };
+        kitchen.RespondWithTopology(household);
+        office.RespondWithTopology(household);
+
+        var discoveryCalls = 0;
+        var system = ConnectedSystem.CreateSystem(kitchen.Host);
+        system.DiscoverSpeakerAsync = _ =>
+        {
+            Interlocked.Increment(ref discoveryCalls);
+            return Task.FromResult<Uri?>(null);
+        };
+
+        try
+        {
+            await system.StartAsync(CancellationToken.None);
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => system.IsConnected && system.Players.Count == 2 && system.Players.Values.All(player => player.IsConnected),
+                ConnectedSystem.WaitTimeout,
+                message: "The system should connect to both speakers.");
+            var officeTopologyReads = office.Calls.Count(call => call.Action == "GetZoneGroupState");
+
+            // Act
+            await kitchen.DisposeAsync();
+            system.SeedHost = null;
+            await system.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => office.Calls.Count(call => call.Action == "GetZoneGroupState") > officeTopologyReads &&
+                      system.IsConnected &&
+                      system.Players[TestFixtures.OfficeUuid].IsConnected,
+                ConnectedSystem.WaitTimeout,
+                message: "The system should reconnect through the office speaker.");
+            Assert.Equal(ServiceStatus.Running, system.Status);
+            Assert.False(system.Players[TestFixtures.KitchenUuid].IsConnected);
+            Assert.Equal(0, Volatile.Read(ref discoveryCalls));
+        }
+        finally
+        {
+            await system.StopAsync(CancellationToken.None);
+            system.Dispose();
+            await kitchen.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenNoKnownSpeakerAnswers_ThenDiscoveryFindsTheSeed()
+    {
+        // Arrange
+        var kitchen = new FakeSonosSpeaker();
+        await using var office = new FakeSonosSpeaker();
+        office.RespondAsIdlePlayer(TestFixtures.OfficeUuid, "Büro");
+        var discoveryCalls = 0;
+
+        try
+        {
+            await using var connected = await ConnectedSystem.StartAsync(kitchen, configure: system =>
+                system.DiscoverSpeakerAsync = _ =>
+                {
+                    Interlocked.Increment(ref discoveryCalls);
+                    return Task.FromResult<Uri?>(office.BaseUri);
+                });
+
+            // Act
+            await kitchen.DisposeAsync();
+            connected.System.SeedHost = null;
+            await connected.System.ApplyConfigurationAsync(CancellationToken.None);
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => connected.System.IsConnected &&
+                      connected.System.Players.TryGetValue(TestFixtures.OfficeUuid, out var player) && player.IsConnected,
+                ConnectedSystem.WaitTimeout,
+                message: "The system should fall back to discovery and connect through the office speaker.");
+            Assert.Equal(1, Volatile.Read(ref discoveryCalls));
+        }
+        finally
+        {
+            await kitchen.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WhenOneReconcileFails_ThenSystemStaysConnected()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
+            system.PollingInterval = TimeSpan.FromSeconds(1));
+        bool? isConnectedAfterFirstFailure = null;
+        ServiceStatus? statusAfterFirstFailure = null;
+
+        // Act
+        speaker.RespondWithFault("GetZoneGroupState", 501);
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                isConnectedAfterFirstFailure = connected.System.IsConnected;
+                statusAfterFirstFailure = connected.System.Status;
+                return connected.System.StatusMessage?.Contains("(1 of 3)") == true;
+            },
+            ConnectedSystem.WaitTimeout,
+            pollInterval: TimeSpan.FromMilliseconds(10),
+            message: "The first failure should be reported without disconnecting.");
+        Assert.True(isConnectedAfterFirstFailure);
+        Assert.Equal(ServiceStatus.Running, statusAfterFirstFailure);
+    }
+
+    [Fact]
+    public async Task WhenThreeReconcilesFail_ThenStatusIsErrorAndSystemReconnects()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system =>
+            system.PollingInterval = TimeSpan.FromMilliseconds(200));
+
+        // Act
+        speaker.RespondWithFault("GetZoneGroupState", 501);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => connected.System.Status == ServiceStatus.Error,
+            ConnectedSystem.WaitTimeout,
+            message: "Three failures in a row should end the connection.");
+        var isConnectedOnError = connected.System.IsConnected;
+        speaker.ClearFault("GetZoneGroupState");
+
+        // Assert
+        Assert.False(isConnectedOnError);
+        Assert.Contains(AvTransportEventPath, speaker.Unsubscribed);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => connected.System.IsConnected && connected.System.Status == ServiceStatus.Running && connected.System.AreEventsActive,
+            ConnectedSystem.WaitTimeout,
+            message: "The system should reconnect once the speaker answers again.");
+    }
+
+    [Fact]
+    public async Task WhenDisposedWithoutStop_ThenLoopEndsQuietly()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        var connected = await ConnectedSystem.StartAsync(speaker);
+
+        // Act
+        connected.System.Dispose();
+        await connected.System.ExecuteTask!.WaitAsync(ConnectedSystem.WaitTimeout);
+        var exception = await Record.ExceptionAsync(() => connected.System.ApplyConfigurationAsync(CancellationToken.None));
+
+        // Assert
+        Assert.True(connected.System.ExecuteTask.IsCompletedSuccessfully);
+        Assert.Equal(ServiceStatus.Stopped, connected.System.Status);
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task WhenConfigurationIsAppliedConcurrently_ThenNoCallThrows()
+    {
+        // Arrange
+        var system = ConnectedSystem.CreateSystem("127.0.0.1:1");
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => Task.WhenAll(Enumerable.Range(0, 64)
+            .Select(_ => Task.Run(() => system.ApplyConfigurationAsync(CancellationToken.None)))));
+
+        // Assert
+        Assert.Null(exception);
+        system.Dispose();
     }
 }

@@ -28,6 +28,28 @@ public class SonosPlayerStateTests
         new(avTransport, TimeSpan.FromSeconds(42), null, renderingControl ?? new RenderingControlChange(null, null, null, null, null, null, null));
 
     [Fact]
+    public void WhenOlderPollCompletesAfterNewerPoll_ThenOlderPollIsDropped()
+    {
+        // Arrange
+        var player = CreateKitchen();
+        player.ApplyPoll(Reading(SpotifyPlaying(), new RenderingControlChange(50, null, null, null, null, null, null)), T0.AddSeconds(2));
+
+        // Act
+        player.ApplyPoll(
+            new SonosPlayerReading(
+                new AvTransportChange("PAUSED_PLAYBACK", null, null, null, null, null),
+                TimeSpan.FromSeconds(7),
+                null,
+                new RenderingControlChange(10, null, null, null, null, null, null)),
+            T0.AddSeconds(1));
+
+        // Assert
+        Assert.Equal(0.5m, player.Volume);
+        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+        Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
+    }
+
+    [Fact]
     public void WhenAvTransportEventApplied_ThenTrackStateUpdates()
     {
         // Arrange

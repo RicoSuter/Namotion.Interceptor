@@ -27,14 +27,21 @@ internal sealed class ConnectedSystem : IAsyncDisposable
             EventCallbackHost = "127.0.0.1",
             EventListenHost = "127.0.0.1",
             EventPort = eventPort ?? LoopbackHttpServer.GetFreePort(),
-            RetryInterval = TimeSpan.FromSeconds(1)
+            RetryInterval = TimeSpan.FromSeconds(1),
+
+            // Tests never search the real network for speakers.
+            DiscoverSpeakerAsync = _ => Task.FromResult<Uri?>(null)
         };
 
     internal static async Task<ConnectedSystem> StartAsync(
-        FakeSonosSpeaker speaker, string uuid = TestFixtures.KitchenUuid, string room = "Küche")
+        FakeSonosSpeaker speaker,
+        string uuid = TestFixtures.KitchenUuid,
+        string room = "Küche",
+        Action<SonosSystem>? configure = null)
     {
         speaker.RespondAsIdlePlayer(uuid, room);
         var system = CreateSystem(speaker.Host);
+        configure?.Invoke(system);
         await system.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(
             () => system.IsConnected && system.Players.TryGetValue(uuid, out var player) && player.Model is not null && system.AreEventsActive,

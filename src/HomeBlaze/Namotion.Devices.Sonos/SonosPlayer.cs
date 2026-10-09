@@ -23,6 +23,7 @@ public partial class SonosPlayer : SonosDevice,
     private readonly Lock _stateLock = new();
     private DateTimeOffset _lastAvTransportEventAt = DateTimeOffset.MinValue;
     private DateTimeOffset _lastRenderingControlEventAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastPollStartedAt = DateTimeOffset.MinValue;
 
     // Every event and poll repeats the metadata, so the last parse is reused while the raw string is unchanged.
     private string? _lastTrackMetaData;
@@ -238,6 +239,14 @@ public partial class SonosPlayer : SonosDevice,
     {
         lock (_stateLock)
         {
+            // Command refreshes poll outside the reconciliation, so an older poll can complete after a newer one.
+            if (pollStartedAt < _lastPollStartedAt)
+            {
+                return;
+            }
+
+            _lastPollStartedAt = pollStartedAt;
+
             // A poll that started before the latest event read state the event has since replaced.
             if (_lastAvTransportEventAt <= pollStartedAt)
             {

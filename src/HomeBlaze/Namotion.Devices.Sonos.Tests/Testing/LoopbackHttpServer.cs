@@ -11,6 +11,7 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
     private readonly HttpListener _listener = new();
     private readonly Func<HttpListenerContext, Task> _handler;
     private readonly Task _loop;
+    private int _disposed;
 
     internal LoopbackHttpServer(Func<HttpListenerContext, Task> handler)
     {
@@ -93,8 +94,16 @@ internal sealed class LoopbackHttpServer : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Stops the server; a test may call it early to take a speaker offline, so a second call does nothing.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         _listener.Stop();
         _listener.Close();
         await _loop;
