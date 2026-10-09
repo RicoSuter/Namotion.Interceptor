@@ -6,8 +6,6 @@ export const videosRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const ttsProjectDirectory = join(videosRoot, 'tools', 'tts');
 export const lexiconFile = join(ttsProjectDirectory, 'lexicon.yaml');
 export const outputDirectory = join(videosRoot, 'output');
-/** Personal voice recordings for cloning; gitignored. */
-export const voicesDirectory = join(videosRoot, 'voices');
 
 export interface EpisodePaths {
   episode: string;

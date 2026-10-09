@@ -25,7 +25,6 @@ class ChatterboxEngine:
         self._torch.manual_seed(seed)
         wav = self._model.generate(
             text,
-            audio_prompt_path=str(self._voice.reference) if self._voice.reference else None,
             exaggeration=self._voice.exaggeration,
             cfg_weight=self._voice.cfg_weight,
         )

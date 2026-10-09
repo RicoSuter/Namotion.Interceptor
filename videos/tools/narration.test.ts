@@ -179,13 +179,13 @@ describe('applyNarrationOptions', () => {
 
   it('WhenVoiceAndTempoAreOverridden_ThenVariantGetsItsOwnTiming', () => {
     // Act
-    const result = applyNarrationOptions(script, ['--voice', 'clone:voices/rico-clean.wav', '--tempo', '1.05']);
+    const result = applyNarrationOptions(script, ['--voice', 'chatterbox-calm', '--tempo', '1.05']);
 
     // Assert
-    expect(result.script.voice).toBe('clone:voices/rico-clean.wav');
+    expect(result.script.voice).toBe('chatterbox-calm');
     expect(result.script.tempo).toBe(1.05);
-    expect(result.variant).toBe('clone-rico-clean-x1.05');
-    expect(result.timingFileName).toBe('timing-clone-rico-clean-x1.05.json');
+    expect(result.variant).toBe('chatterbox-calm-x1.05');
+    expect(result.timingFileName).toBe('timing-chatterbox-calm-x1.05.json');
   });
 
   it('WhenOnlyVoiceIsOverridden_ThenScriptTempoIsKept', () => {

@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,19 +11,10 @@ from video_tts.voices import ChatterboxVoice, KokoroVoice, parse_voice
 
 def test_when_request_names_chatterbox_then_voice_carries_settings() -> None:
     # Act
-    voice = parse_voice({"engine": "chatterbox", "reference": None, "exaggeration": 0.35, "cfgWeight": 0.3})
+    voice = parse_voice({"engine": "chatterbox", "exaggeration": 0.35, "cfgWeight": 0.3})
 
     # Assert
-    assert voice == ChatterboxVoice(reference=None, exaggeration=0.35, cfg_weight=0.3)
-
-
-def test_when_request_has_reference_then_voice_clones_it() -> None:
-    # Act
-    voice = parse_voice({"engine": "chatterbox", "reference": "/voices/a.wav", "exaggeration": 0.5, "cfgWeight": 0.5})
-
-    # Assert
-    assert isinstance(voice, ChatterboxVoice)
-    assert voice.reference == Path("/voices/a.wav")
+    assert voice == ChatterboxVoice(exaggeration=0.35, cfg_weight=0.3)
 
 
 def test_when_request_names_kokoro_then_voice_has_its_name() -> None:
@@ -56,10 +46,10 @@ class FakeChatterboxModel:
         return torch.zeros(1, 10)
 
 
-def test_when_chatterbox_generates_then_settings_and_reference_are_passed() -> None:
+def test_when_chatterbox_generates_then_settings_are_passed() -> None:
     # Arrange
     model = FakeChatterboxModel()
-    engine = ChatterboxEngine(ChatterboxVoice(reference=Path("/voices/a.wav"), exaggeration=0.35, cfg_weight=0.3), model=model)
+    engine = ChatterboxEngine(ChatterboxVoice(exaggeration=0.35, cfg_weight=0.3), model=model)
 
     # Act
     audio = engine.generate("Hello.", seed=1)
@@ -67,7 +57,7 @@ def test_when_chatterbox_generates_then_settings_and_reference_are_passed() -> N
     # Assert
     assert audio.shape == (10,)
     assert engine.sample_rate == 24000
-    assert model.calls == [("Hello.", {"audio_prompt_path": "/voices/a.wav", "exaggeration": 0.35, "cfg_weight": 0.3})]
+    assert model.calls == [("Hello.", {"exaggeration": 0.35, "cfg_weight": 0.3})]
 
 
 def test_when_kokoro_returns_chunks_then_audio_is_concatenated() -> None:

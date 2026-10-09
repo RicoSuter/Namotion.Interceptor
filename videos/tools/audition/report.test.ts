@@ -8,7 +8,7 @@ describe('auditionReadme', () => {
     const results = [
       {label: 'chatterbox-default', spec: 'chatterbox', tempo: 1, allSeconds: 20, speechSeconds: 18.8, words: 63, peakBeforeNormalization: -2.04},
       {label: 'kokoro-af_heart', spec: 'kokoro:af_heart', tempo: 1.3, allSeconds: 50.5, speechSeconds: 49.3, words: 63, peakBeforeNormalization: -0.04},
-      {label: 'clone-rico', spec: 'clone:voices/rico.wav', tempo: 1, allSeconds: 10, speechSeconds: 8.8, words: 63, peakBeforeNormalization: -6},
+      {label: 'calm', spec: 'chatterbox-calm', tempo: 1, allSeconds: 10, speechSeconds: 8.8, words: 63, peakBeforeNormalization: -6},
     ];
 
     // Act
@@ -18,16 +18,15 @@ describe('auditionReadme', () => {
     expect(readme).toContain('- A (intro): Hello there.');
     expect(readme).toContain('| 1 | chatterbox-default | `chatterbox` | 1 | 0:00.0 | 20.0 s | 201 | -2.0 dBTP |');
     expect(readme).toContain('| 2 | kokoro-af_heart | `kokoro:af_heart` | 1.3 | 0:21.5 | 50.5 s | 77 | -0.0 dBTP |');
-    expect(readme).toContain('| 3 | clone-rico | `clone:voices/rico.wav` | 1 | 1:13.5 | 10.0 s | 430 | -6.0 dBTP |');
+    expect(readme).toContain('| 3 | calm | `chatterbox-calm` | 1 | 1:13.5 | 10.0 s | 430 | -6.0 dBTP |');
   });
 });
 
 describe('parseAuditionVoice', () => {
   it('WhenArgumentHasALabel_ThenLabelNamesTheFiles', () => {
     // Act & Assert
-    expect(parseAuditionVoice('clone-rico-raw=clone:voices/rico.wav')).toEqual({label: 'clone-rico-raw', spec: 'clone:voices/rico.wav', tempo: 1});
+    expect(parseAuditionVoice('quiet=chatterbox-calm')).toEqual({label: 'quiet', spec: 'chatterbox-calm', tempo: 1});
     expect(parseAuditionVoice('kokoro:bf_emma')).toEqual({label: 'kokoro-bf_emma', spec: 'kokoro:bf_emma', tempo: 1});
-    expect(parseAuditionVoice('clone:voices/a=b.wav')).toEqual({label: 'clone-a-b', spec: 'clone:voices/a=b.wav', tempo: 1});
   });
 
   it('WhenArgumentHasATempo_ThenDefaultLabelNamesIt', () => {

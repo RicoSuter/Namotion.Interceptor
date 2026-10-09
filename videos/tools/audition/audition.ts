@@ -10,7 +10,7 @@ import {concatWithGapsArgs, countWords, measureLoudnessArgs, normalizeLoudnessAr
 import {auditionReadme, lineGapSeconds, parseAuditionVoice, voiceGapSeconds, type AuditionLine, type AuditionResult} from './report';
 
 // Usage: npm run audition [-- [<label>=]<voice>[@<tempo>] ...]
-// Auditions the built-in voices and then the given ones, for example clone-rico=clone:voices/rico.wav or kokoro:am_michael@1.3.
+// Auditions the built-in voices and then the given ones, for example calm=chatterbox-calm@1.1 or kokoro:am_michael@1.3.
 
 const builtInVoices = ['chatterbox', 'chatterbox-calm', 'kokoro:af_heart', 'kokoro:am_michael', 'kokoro:bm_george'];
 

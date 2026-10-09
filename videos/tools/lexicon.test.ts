@@ -26,14 +26,12 @@ describe('applyLexicon', () => {
     expect(spoken).toBe('Connect over [OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/), then U A alone.');
   });
 
-  it('WhenEntryHasKokoroOverride_ThenChatterboxAndCloneVoicesUseThePlainForm', () => {
+  it('WhenEntryHasKokoroOverride_ThenChatterboxUsesThePlainForm', () => {
     // Act
-    const builtIn = applyLexicon('OPC UA', entries, parseVoice('chatterbox').engine);
-    const clone = applyLexicon('OPC UA', entries, parseVoice('clone:voices/narrator.wav').engine);
+    const spoken = applyLexicon('OPC UA', entries, parseVoice('chatterbox-calm').engine);
 
     // Assert
-    expect(builtIn).toBe('O P C U A');
-    expect(clone).toBe('O P C U A');
+    expect(spoken).toBe('O P C U A');
   });
 
   it('WhenTermIsPartOfAWord_ThenItIsNotReplaced', () => {

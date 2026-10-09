@@ -12,7 +12,7 @@ const paths = episodePaths(episodeArgument());
 // Narration needs only the script, so speech can be synthesized before the sample, demos and capture exist.
 const {script, timingFileName} = applyNarrationOptions(loadScript(paths.episodeDirectory), process.argv.slice(3));
 const voice = resolveVoice(parseVoice(script.voice), script.tempo);
-const items = buildNarration(script, loadLexicon(lexiconFile), voice.identity);
+const items = buildNarration(script, loadLexicon(lexiconFile));
 synthesize(paths.audioDirectory, voice.request, items.map(item => ({key: item.key, text: item.text})));
 
 // Speech the engine cannot bring to the tempo itself gets an atempo copy (see tempoPlan), so such a tempo change only re-runs this fast step.

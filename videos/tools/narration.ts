@@ -32,14 +32,11 @@ export function tempoKey(key: string, atempo: number): string {
   return atempo === 1 ? key : `${key}-x${atempo}`;
 }
 
-/**
- * Builds the narrated lines at the script's tempo (see `tempoPlan`). `identity` is the voice's cache identity at
- * that tempo, as `resolveVoice` returns it; by default that of the script's voice, which a cloned voice cannot use.
- */
-export function buildNarration(script: Script, lexicon: LexiconEntry[], identity?: {voice: unknown; engine: string}): NarrationItem[] {
+/** Builds the narrated lines at the script's tempo, see `tempoPlan`. */
+export function buildNarration(script: Script, lexicon: LexiconEntry[]): NarrationItem[] {
   const voice = parseVoice(script.voice);
   const {speed, atempo} = tempoPlan(voice, script.tempo);
-  const cacheIdentity = identity ?? voiceIdentity(voice, null, speed);
+  const cacheIdentity = voiceIdentity(voice, speed);
   return allBeats(script)
     .filter(beat => beat.narration !== undefined)
     .map(beat => {
@@ -80,7 +77,7 @@ export function buildTiming(script: Script, items: NarrationItem[], durations: R
 
 /**
  * Applies the `--voice <voice>` and `--tempo <factor>` options of the tts and render commands to the script. An
- * override names a variant, for example `clone-rico-x1`, whose timing and renders get their own files, so a trial
+ * override names a variant, for example `kokoro-af_heart-x1`, whose timing and renders get their own files, so a trial
  * narration never replaces the episode's regular ones. Without an override the variant is empty.
  */
 export function applyNarrationOptions(script: Script, args: string[]): {script: Script; variant: string; timingFileName: string} {
