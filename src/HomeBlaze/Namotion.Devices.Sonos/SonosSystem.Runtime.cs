@@ -771,7 +771,7 @@ public partial class SonosSystem
             existing.Dispose();
         }
 
-        _connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, _httpClient!, _clientProvider!);
+        _connections[device.Uuid] = new SonosConnection(baseUri, device.Uuid, _httpClient!, _clientProvider!, _logger);
         device.InvalidateStaticData();
     }
 

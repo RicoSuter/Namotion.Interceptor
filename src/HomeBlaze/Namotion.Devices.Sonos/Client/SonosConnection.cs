@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Sonos.Parsing;
 using Sonos.Base;
 using Sonos.Base.Services;
@@ -18,18 +20,26 @@ internal sealed class SonosConnection : IDisposable
     private const int InstanceId = 0;
     private const string MasterChannel = "Master";
 
+    // The audio clip websocket is not covered by the HttpClient timeout.
+    private static readonly TimeSpan NotificationTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan NotificationCloseTimeout = TimeSpan.FromSeconds(2);
+
     private readonly HttpClient _httpClient;
+    private readonly ILogger _logger;
+    private readonly SonosDeviceOptions _deviceOptions;
     private readonly SonosBaseDevice _device;
 
     // The reads that answer with a UPnP fault, so each is reported once when it starts faulting. Concurrent because
     // a command refresh can poll the same player as the reconciliation.
     private readonly ConcurrentDictionary<string, byte> _faultingReads = new(StringComparer.Ordinal);
 
-    internal SonosConnection(Uri baseUri, string? uuid, HttpClient httpClient, ISonosServiceProvider provider)
+    internal SonosConnection(Uri baseUri, string? uuid, HttpClient httpClient, ISonosServiceProvider provider, ILogger? logger = null)
     {
         BaseUri = baseUri;
         _httpClient = httpClient;
-        _device = new SonosBaseDevice(new SonosDeviceOptions(baseUri, provider, uuid));
+        _logger = logger ?? NullLogger.Instance;
+        _deviceOptions = new SonosDeviceOptions(baseUri, provider, uuid);
+        _device = new SonosBaseDevice(_deviceOptions);
     }
 
     internal Uri BaseUri { get; }
@@ -222,8 +232,47 @@ internal sealed class SonosConnection : IDisposable
         await _device.Play(cancellationToken);
     }
 
-    internal Task<bool> PlayNotificationAsync(Uri soundUri, int volume, CancellationToken cancellationToken) =>
-        _device.QueueNotification(new NotificationOptions(soundUri, volume), cancellationToken);
+    /// <summary>
+    /// Queues an audio clip over the speaker's websocket. Each call uses a Sonos.Base device of its own: Sonos.Base
+    /// keeps one websocket per device and cannot start it again once it failed or the speaker closed it, so a shared
+    /// one would fail every later notification. The speaker's answer is not read, so a rejected clip is not reported.
+    /// </summary>
+    internal async Task<bool> PlayNotificationAsync(Uri soundUri, int volume, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(NotificationTimeout);
+        var device = new SonosBaseDevice(_deviceOptions);
+        try
+        {
+            return await device.QueueNotification(new NotificationOptions(soundUri, volume), timeout.Token);
+        }
+        finally
+        {
+            await CloseNotificationDeviceAsync(device);
+        }
+    }
+
+    private async Task CloseNotificationDeviceAsync(SonosBaseDevice device)
+    {
+        // Closing gracefully lets the speaker take the clip before the connection goes; Sonos.Base waits for the
+        // close without a token, so it gets a budget.
+        var closing = device.DisposeAsync().AsTask();
+        try
+        {
+            await closing.WaitAsync(NotificationCloseTimeout);
+        }
+        catch (Exception exception)
+        {
+            // Observed here or in the continuation below, whichever way the close ends.
+            _ = closing.ContinueWith(static task => task.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            _logger.LogDebug(exception, "Closing the Sonos notification websocket of {Uri} failed.", BaseUri);
+        }
+        finally
+        {
+            // Releases a socket that never opened or did not close in time; Sonos.Base's DisposeAsync skips both.
+            device.Dispose();
+        }
+    }
 
     internal Task SwitchToTvAsync(CancellationToken cancellationToken) => _device.SwitchToSpdif(cancellationToken);
 

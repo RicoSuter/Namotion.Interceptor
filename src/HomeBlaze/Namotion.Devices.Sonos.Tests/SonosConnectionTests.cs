@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using System.Xml.Linq;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
@@ -376,6 +377,25 @@ public class SonosConnectionTests
         var calls = speaker.Calls.ToArray();
         Assert.Equal(["SnapshotGroupVolume", "SetRelativeGroupVolume"], calls.Select(call => call.Action));
         Assert.Equal("-5", GetArgument(calls[1], "Adjustment"));
+    }
+
+    [Fact]
+    public async Task WhenANotificationFails_ThenTheNextOneConnectsAgain()
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        using var httpClient = new HttpClient();
+        using var connection = CreateConnection(speaker, httpClient);
+        var soundUri = new Uri("http://127.0.0.1/sound.mp3");
+
+        // Act
+        var first = await Record.ExceptionAsync(() => connection.PlayNotificationAsync(soundUri, 30, CancellationToken.None));
+        var second = await Record.ExceptionAsync(() => connection.PlayNotificationAsync(soundUri, 30, CancellationToken.None));
+
+        // Assert: nothing serves the audio clip websocket, so both fail to connect. A socket kept from the first call
+        // would fail the second without trying, because a websocket cannot be started again.
+        Assert.IsType<WebSocketException>(first);
+        Assert.IsType<WebSocketException>(second);
     }
 
     [Fact]
