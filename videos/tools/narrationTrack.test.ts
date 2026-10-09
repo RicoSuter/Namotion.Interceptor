@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {narrationTrackArgs} from './narrationTrack';
+import {narrationLoudness, narrationTrackArgs, normalizeNarrationArgs, parseIntegratedLoudness} from './narrationTrack';
 
 const timing = {
   episode: 'smoke',
@@ -46,5 +46,36 @@ describe('narrationTrackArgs', () => {
   it('WhenNoBeatIsSelected_ThenThrows', () => {
     // Act & Assert
     expect(() => narrationTrackArgs(timing, new Set(['x']), '/videos/public', 'out.wav')).toThrow(/No beats/);
+  });
+});
+
+describe('parseIntegratedLoudness', () => {
+  it('WhenLogEndsWithASummary_ThenReadsItsIntegratedLoudness', () => {
+    // Arrange
+    const log = '[Parsed_ebur128_0] t: 0.1 M: -30.0 S: -30.0 I: -27.9 LUFS LRA: 0.0 LU\n[Parsed_ebur128_0] Summary:\n\n  Integrated loudness:\n    I:         -27.4 LUFS\n    Threshold: -37.8 LUFS\n';
+
+    // Act & Assert
+    expect(parseIntegratedLoudness(log)).toBe(-27.4);
+    expect(() => parseIntegratedLoudness('t: 0.1 I: -27.9 LUFS')).toThrow(/No integrated loudness/);
+  });
+});
+
+describe('normalizeNarrationArgs', () => {
+  it('WhenTrackIsQuiet_ThenOneGainReachesTheTargetAndALimiterCatchesThePeaks', () => {
+    // Act
+    const args = normalizeNarrationArgs('in.wav', -27.4, 'out.wav');
+
+    // Assert
+    expect(narrationLoudness).toBe(-16);
+    expect(args).toEqual([
+      '-i', 'in.wav',
+      '-af', 'volume=11.40dB,alimiter=limit=0.7943:attack=5:level=false,atrim=start=0.005,asetpts=PTS-STARTPTS',
+      '-c:a', 'pcm_s16le', 'out.wav',
+    ]);
+  });
+
+  it('WhenTrackIsSilent_ThenItKeepsItsLevel', () => {
+    // Act & Assert
+    expect(normalizeNarrationArgs('in.wav', -70, 'out.wav')[3]).toMatch(/^volume=0\.00dB,/);
   });
 });
