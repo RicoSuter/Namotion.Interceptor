@@ -138,10 +138,10 @@ public partial class SonosSystem : BackgroundService,
     /// Reads topology, state and favorites now instead of at the next poll.
     /// </summary>
     [Operation(Position = 1)]
-    public Task RefreshAsync(CancellationToken cancellationToken)
+    public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         EnsureConnected();
-        return ReconcileAsync(cancellationToken);
+        await ReconcileAsync(cancellationToken);
     }
 
     /// <summary>
@@ -152,9 +152,13 @@ public partial class SonosSystem : BackgroundService,
     {
         ArgumentNullException.ThrowIfNull(coordinatorRoom);
         var coordinator = FindPlayer(coordinatorRoom) ?? throw CreateUnknownRoomException(coordinatorRoom, nameof(coordinatorRoom));
-        var coordinatorConnection = GetConnectionForCommand(coordinator.Uuid);
+        return GroupAllCoreAsync(coordinator, cancellationToken);
+    }
 
-        return RunGroupingCommandsAsync(async token =>
+    private async Task GroupAllCoreAsync(SonosPlayer coordinator, CancellationToken cancellationToken)
+    {
+        var coordinatorConnection = GetConnectionForCommand(coordinator.Uuid);
+        await RunGroupingCommandsAsync(async token =>
         {
             // Only a coordinator can be joined, so a grouped target first becomes standalone.
             if (!coordinator.IsGroupCoordinator)
@@ -176,10 +180,10 @@ public partial class SonosSystem : BackgroundService,
     /// Makes every room standalone.
     /// </summary>
     [Operation(Position = 3)]
-    public Task UngroupAllAsync(CancellationToken cancellationToken)
+    public async Task UngroupAllAsync(CancellationToken cancellationToken)
     {
         EnsureConnected();
-        return RunGroupingCommandsAsync(async token =>
+        await RunGroupingCommandsAsync(async token =>
         {
             foreach (var player in Players.Values)
             {
@@ -199,6 +203,8 @@ public partial class SonosSystem : BackgroundService,
         }
     }
 
+    // A not-connected error faults the returned task, like any other failure of a command, while argument and
+    // capability validation (null or unknown names, a missing home theater or line-in) throws synchronously.
     private InvalidOperationException CreateNotConnectedException() =>
         new("The Sonos system is not connected. " + (StatusMessage ?? "Waiting for the connection to be established."));
 

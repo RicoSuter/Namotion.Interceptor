@@ -18,13 +18,30 @@ public class SonosSystemOperationTests
     }
 
     [Fact]
-    public async Task WhenRefreshingWhileDisconnected_ThenThrows()
+    public void WhenRefreshingWhileDisconnected_ThenReturnsFaultedTask()
     {
         // Arrange
         var system = SonosSystemTopologyTests.CreateSystem();
 
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => system.RefreshAsync(CancellationToken.None));
+        // Act
+        var task = system.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains("not connected", Assert.IsType<InvalidOperationException>(task.Exception?.InnerException).Message);
+    }
+
+    [Fact]
+    public void WhenGroupingAllWhileDisconnected_ThenReturnsFaultedTask()
+    {
+        // Arrange
+        var system = SonosSystemTopologyTests.CreateSystem();
+        system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
+
+        // Act
+        var task = system.GroupAllAsync("Küche", CancellationToken.None);
+
+        // Assert
+        Assert.Contains("not connected", Assert.IsType<InvalidOperationException>(task.Exception?.InnerException).Message);
     }
 
     [Fact]
@@ -43,14 +60,17 @@ public class SonosSystemOperationTests
     }
 
     [Fact]
-    public async Task WhenUngroupingAllWhileDisconnected_ThenThrows()
+    public void WhenUngroupingAllWhileDisconnected_ThenReturnsFaultedTask()
     {
         // Arrange
         var system = SonosSystemTopologyTests.CreateSystem();
         system.ApplyTopology(SonosSystemTopologyTests.ReadHousehold());
 
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => system.UngroupAllAsync(CancellationToken.None));
+        // Act
+        var task = system.UngroupAllAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Contains("not connected", Assert.IsType<InvalidOperationException>(task.Exception?.InnerException).Message);
     }
 
     [Fact]
