@@ -49,6 +49,13 @@ public interface ISubjectSource : ISubjectConnector
     /// subject state the write needs before <see cref="Tracking.Transactions.SubjectTransaction.CommitAsync"/>,
     /// and see <see cref="Tracking.Transactions.ITransactionWriter"/> for the full committing access boundary.
     /// </para>
+    /// <para>
+    /// After the peer accepts a written value, the source must eventually apply the peer's value for that
+    /// property to the model without waiting for another local write, through the same inbound path as its
+    /// other updates so that it lands after any initial-state load in progress. A subscription, a broadcast
+    /// that includes the writer, polling, or a read after the write all comply. A write reported as failed
+    /// in the <see cref="WriteResult"/> needs no read-back.
+    /// </para>
     /// </remarks>
     /// <param name="changes">The collection of subject property changes.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
