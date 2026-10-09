@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Globalization;
-using System.Text;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -128,24 +127,8 @@ public static class StateUnitExtensions
     // The property panel splits on '\n' to render one line per element. Subject collections and subject dictionaries
     // never arrive here because the panel lists them as child subjects instead; a dictionary of plain values does, and
     // renders one "[key, value]" line per entry.
-    private static string JoinElements(IEnumerable elements)
-    {
-        var builder = new StringBuilder();
-        var isFirst = true;
-        foreach (var element in elements)
-        {
-            if (!isFirst)
-            {
-                builder.Append('\n');
-            }
-
-            isFirst = false;
-
-            builder.Append(element == null ? "null" : element.ToString() ?? "");
-        }
-
-        return builder.ToString();
-    }
+    private static string JoinElements(IEnumerable elements) =>
+        string.Join('\n', elements.Cast<object?>().Select(element => element is null ? "null" : element.ToString() ?? ""));
 
     /// <summary>
     /// Formats a decimal value with auto-scaling within its unit family.
