@@ -58,7 +58,7 @@ public class SonosEventListenerTests
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), body => received.TrySetResult(body), CancellationToken.None);
 
         // Act
-        var status = await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
+        var status = await FakeSonosSpeaker.SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, status);
@@ -78,8 +78,8 @@ public class SonosEventListenerTests
         Assert.False(subscription.HasReceivedEvent);
 
         // Act
-        await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<first />");
-        await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<second />");
+        await FakeSonosSpeaker.SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<first />");
+        await FakeSonosSpeaker.SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<second />");
 
         // Assert
         Assert.True(subscription.HasReceivedEvent);
@@ -98,7 +98,7 @@ public class SonosEventListenerTests
         await listener.SubscribeAsync("RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => handlerCalls++, CancellationToken.None);
 
         // Act
-        var status = await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:stale", "<body />");
+        var status = await FakeSonosSpeaker.SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:stale", "<body />");
 
         // Assert
         Assert.Equal(HttpStatusCode.PreconditionFailed, status);
@@ -115,7 +115,7 @@ public class SonosEventListenerTests
         {
             // Sonos sends the initial full state before answering SUBSCRIBE.
             var callback = context.Request.Headers["CALLBACK"]!.Trim('<', '>');
-            notifyStatus.TrySetResult(await SendNotifyAsync(httpClient, callback, "uuid:sub-1", "<initial />"));
+            notifyStatus.TrySetResult(await FakeSonosSpeaker.SendNotifyAsync(httpClient, callback, "uuid:sub-1", "<initial />"));
             await RespondWithSid(context, "uuid:sub-1");
         });
         await using var listener = CreateListener(httpClient);
@@ -259,7 +259,7 @@ public class SonosEventListenerTests
             "RINCON_X/AVTransport", new Uri(speaker.BaseUri, "/Event"), _ => throw new InvalidOperationException("boom"), CancellationToken.None);
 
         // Act
-        var status = await SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
+        var status = await FakeSonosSpeaker.SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, status);
@@ -632,7 +632,7 @@ public class SonosEventListenerTests
                 handlerFinished = true;
             },
             CancellationToken.None);
-        var notifyTask = SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
+        var notifyTask = FakeSonosSpeaker.SendNotifyAsync(httpClient, $"http://127.0.0.1:{port}/event/RINCON_X/AVTransport", "uuid:sub-1", "<body />");
         await handlerStarted.Task.WaitAsync(WaitTimeout);
 
         // Act
@@ -672,18 +672,5 @@ public class SonosEventListenerTests
         context.Response.Headers["TIMEOUT"] = "Second-1800";
         context.Response.StatusCode = 200;
         return Task.CompletedTask;
-    }
-
-    private static async Task<HttpStatusCode> SendNotifyAsync(HttpClient httpClient, string callback, string sid, string body)
-    {
-        using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), callback)
-        {
-            Content = new StringContent(body)
-        };
-        request.Headers.TryAddWithoutValidation("SID", sid);
-        request.Headers.TryAddWithoutValidation("NT", "upnp:event");
-        request.Headers.TryAddWithoutValidation("NTS", "upnp:propchange");
-        using var response = await httpClient.SendAsync(request);
-        return response.StatusCode;
     }
 }

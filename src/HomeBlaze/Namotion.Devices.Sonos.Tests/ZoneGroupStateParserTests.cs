@@ -6,14 +6,11 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class ZoneGroupStateParserTests
 {
-    private static SonosTopology ParseHousehold() =>
-        ZoneGroupStateParser.Parse(TestFixtures.Read("zone-group-state.xml"));
-
     [Fact]
     public void WhenParsingHousehold_ThenEachGroupHasItsVisiblePlayer()
     {
         // Act
-        var topology = ParseHousehold();
+        var topology = TestFixtures.ReadHousehold();
 
         // Assert
         Assert.Equal(4, topology.Groups.Count);
@@ -29,7 +26,7 @@ public class ZoneGroupStateParserTests
     public void WhenHouseholdHasAZoneBridge_ThenItIsNotAPlayer()
     {
         // Act
-        var topology = ParseHousehold();
+        var topology = TestFixtures.ReadHousehold();
 
         // Assert
         Assert.DoesNotContain(topology.Groups.SelectMany(group => group.Players), player => player.Uuid == "RINCON_A0000000000B01400");
@@ -40,7 +37,7 @@ public class ZoneGroupStateParserTests
     public void WhenParsingHomeTheater_ThenSatelliteRolesComeFromTheChannelMap()
     {
         // Act
-        var livingRoom = ParseHousehold().Groups[0].Players[0];
+        var livingRoom = TestFixtures.ReadHousehold().Groups[0].Players[0];
 
         // Assert
         Assert.Equal(3, livingRoom.Satellites.Count);
@@ -54,7 +51,7 @@ public class ZoneGroupStateParserTests
     public void WhenParsingMember_ThenBaseUriVersionAndWirelessAreRead()
     {
         // Act
-        var topology = ParseHousehold();
+        var topology = TestFixtures.ReadHousehold();
         var livingRoom = topology.Groups[0].Players[0];
         var kitchen = topology.Groups[2].Players[0];
 
@@ -69,7 +66,7 @@ public class ZoneGroupStateParserTests
     public void WhenParsingPortable_ThenMoreInfoIsKept()
     {
         // Act
-        var terrace = ParseHousehold().Groups[1].Players[0];
+        var terrace = TestFixtures.ReadHousehold().Groups[1].Players[0];
 
         // Assert
         Assert.Contains("BattPct:100", terrace.MoreInfo);

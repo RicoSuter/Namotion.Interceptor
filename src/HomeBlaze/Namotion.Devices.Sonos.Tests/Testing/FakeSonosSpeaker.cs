@@ -175,15 +175,26 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// <summary>
     /// Sends a NOTIFY with the body to the callback of the event path, as the speaker that holds the subscription.
     /// </summary>
-    internal async Task<HttpStatusCode> NotifyAsync(string eventPath, string body)
+    internal Task<HttpStatusCode> NotifyAsync(string eventPath, string body) =>
+        SendNotifyAsync(
+            NotifyClient,
+            GetCallback(eventPath) ?? throw new InvalidOperationException($"Nothing subscribed to {eventPath}."),
+            SidFor(eventPath),
+            body);
+
+    /// <summary>
+    /// Sends a NOTIFY with the body and SID to a callback URI, as a speaker does.
+    /// </summary>
+    internal static async Task<HttpStatusCode> SendNotifyAsync(HttpClient httpClient, string callback, string sid, string body)
     {
-        using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), GetCallback(eventPath)
-            ?? throw new InvalidOperationException($"Nothing subscribed to {eventPath}."))
+        using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), callback)
         {
             Content = new StringContent(body)
         };
-        request.Headers.TryAddWithoutValidation("SID", SidFor(eventPath));
-        using var response = await NotifyClient.SendAsync(request);
+        request.Headers.TryAddWithoutValidation("SID", sid);
+        request.Headers.TryAddWithoutValidation("NT", "upnp:event");
+        request.Headers.TryAddWithoutValidation("NTS", "upnp:propchange");
+        using var response = await httpClient.SendAsync(request);
         return response.StatusCode;
     }
 
@@ -328,12 +339,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     {
         try
         {
-            using var request = new HttpRequestMessage(new HttpMethod("NOTIFY"), callback)
-            {
-                Content = new StringContent(SonosEventBodies.Properties())
-            };
-            request.Headers.TryAddWithoutValidation("SID", sid);
-            using var response = await NotifyClient.SendAsync(request);
+            await SendNotifyAsync(NotifyClient, callback, sid, SonosEventBodies.Properties());
         }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
         {
