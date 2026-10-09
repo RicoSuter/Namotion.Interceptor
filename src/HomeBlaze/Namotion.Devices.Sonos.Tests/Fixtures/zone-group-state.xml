@@ -1,0 +1,25 @@
+<ZoneGroupState>
+  <ZoneGroups>
+    <ZoneGroup Coordinator="RINCON_A0000000000101400" ID="RINCON_A0000000000101400:1010349259">
+      <ZoneGroupMember UUID="RINCON_A0000000000101400" Location="http://10.0.0.101:1400/xml/device_description.xml" ZoneName="Wohnzimmer" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000101400:LF,RF;RINCON_A0000000000201400:SW;RINCON_A0000000000301400:LR,LTR;RINCON_A0000000000401400:RR,RTR" WirelessMode="0" EthLink="1" MoreInfo="">
+        <Satellite UUID="RINCON_A0000000000401400" Location="http://10.0.0.120:1400/xml/device_description.xml" ZoneName="Wohnzimmer" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000101400:LF,RF;RINCON_A0000000000401400:RR,RTR" WirelessMode="3" EthLink="0" MoreInfo="" />
+        <Satellite UUID="RINCON_A0000000000201400" Location="http://10.0.0.108:1400/xml/device_description.xml" ZoneName="Sub" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000101400:LF,RF;RINCON_A0000000000201400:SW" WirelessMode="0" EthLink="0" MoreInfo="" />
+        <Satellite UUID="RINCON_A0000000000301400" Location="http://10.0.0.136:1400/xml/device_description.xml" ZoneName="Wohnzimmer" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000101400:LF,RF;RINCON_A0000000000301400:LR,LTR" WirelessMode="3" EthLink="0" MoreInfo="" />
+      </ZoneGroupMember>
+    </ZoneGroup>
+    <ZoneGroup Coordinator="RINCON_A0000000000501400" ID="RINCON_A0000000000501400:3894694580">
+      <ZoneGroupMember UUID="RINCON_A0000000000501400" Location="http://10.0.0.137:1400/xml/device_description.xml" ZoneName="Terasse" SoftwareVersion="97.1-80312" WirelessMode="1" EthLink="0" MoreInfo="RawBattPct:100,BattPct:100,BattChg:CHARGING,BattTmp:23" />
+    </ZoneGroup>
+    <ZoneGroup Coordinator="RINCON_A0000000000601400" ID="RINCON_A0000000000601400:451005965">
+      <ZoneGroupMember UUID="RINCON_A0000000000601400" Location="http://10.0.0.121:1400/xml/device_description.xml" ZoneName="Küche" SoftwareVersion="97.1-80312" WirelessMode="1" EthLink="0" MoreInfo="" />
+    </ZoneGroup>
+    <ZoneGroup Coordinator="RINCON_A0000000000701400" ID="RINCON_A0000000000701400:2697524507">
+      <ZoneGroupMember UUID="RINCON_A0000000000701400" Location="http://10.0.0.116:1400/xml/device_description.xml" ZoneName="Büro" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000701400:LF,RF;RINCON_A0000000000801400:SW;RINCON_A0000000000901400:LR;RINCON_A0000000000A01400:RR" WirelessMode="0" EthLink="0" MoreInfo="">
+        <Satellite UUID="RINCON_A0000000000901400" Location="http://10.0.0.118:1400/xml/device_description.xml" ZoneName="Büro" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000701400:LF,RF;RINCON_A0000000000901400:LR" WirelessMode="0" EthLink="0" MoreInfo="" />
+        <Satellite UUID="RINCON_A0000000000A01400" Location="http://10.0.0.110:1400/xml/device_description.xml" ZoneName="Büro" Invisible="1" SoftwareVersion="97.1-80312" HTSatChanMapSet="RINCON_A0000000000701400:LF,RF;RINCON_A0000000000A01400:RR" WirelessMode="0" EthLink="0" MoreInfo="" />
+        <Satellite UUID="RINCON_A0000000000801400" Location="http://10.0.0.242:1400/xml/device_description.xml" ZoneName="Sub" Invisible="1" SoftwareVersion="86.10-80260" HTSatChanMapSet="RINCON_A0000000000701400:LF,RF;RINCON_A0000000000801400:SW" WirelessMode="0" EthLink="0" MoreInfo="" />
+      </ZoneGroupMember>
+    </ZoneGroup>
+  </ZoneGroups>
+  <VanishedDevices />
+</ZoneGroupState>
