@@ -19,13 +19,13 @@ Defects:
 - "Create" is enabled while the configure form is invalid. `SubjectEditPanel` learns its validity after its first render and does not notify the dialog.
 - After "Back", picking a different type keeps the subject created for the first type, because the subject is assigned with `??=`.
 - The grid and canvas callers discard the name, yet the dialog requires a valid file name there.
-- The grid and canvas callers offer types that have no widget component, although a cell renders its child through that component.
+- A name that already exists in the folder is accepted, and the storage then overwrites the existing file.
 
 ## Goals
 
 - Pick the type first, with search and a group filter.
 - Ask for the name on the configure page, prefilled with a suggestion, and state clearly that it becomes part of the subject's ID.
-- Offer only types that make sense for the caller.
+- Do not offer types that must not be created standalone.
 - Fix the defects listed above.
 
 ## Non-Goals
@@ -34,7 +34,7 @@ Defects:
 - Renaming existing subjects.
 - Changes to the individual setup and edit components of the subject types.
 - Refreshing the type registry when a plugin is loaded at runtime.
-- Filter rules beyond the single optional per-caller type filter described below.
+- Per-caller type filters. Hiding types without a widget component from the grid and canvas was considered and dropped: the regression test for hosted subjects created inside a grid adds a history store to a cell, which is such a type, so that path is supported and stays reachable.
 
 ## User Experience
 
@@ -64,11 +64,11 @@ Defects:
 
 ### Differences per caller
 
-| Caller | Name field | Type filter |
-|--------|-----------|-------------|
-| Storage folder "Create" | "File name" with `.json` suffix, existing names are the folder's children | none |
-| Markdown editor embed | "Name" without suffix, becomes the `subject(Name)` block name | none |
-| Grid and canvas "add" | not shown | only types that have a widget component |
+| Caller | Name field |
+|--------|-----------|
+| Storage folder "Create" | "File name" with `.json` suffix, existing names are the folder's children |
+| Markdown editor embed | "Name" without suffix, becomes the `subject(Name)` block name, existing names are the page's other subject blocks |
+| Grid and canvas "add" | not shown |
 
 ## Type Metadata
 
@@ -98,7 +98,7 @@ The dialog is split into three units with one purpose each.
 
 Plain C#, no UI dependency.
 
-- Builds the list of creatable types from `SubjectTypeRegistry.RegisteredTypes`: types that implement `IConfigurable`, minus `[ExcludeFromCreation]`, minus `[SingleInstance]` types that already have an instance under `RootManager.Root`, minus types rejected by the caller's optional filter.
+- Builds the list of creatable types from `SubjectTypeRegistry.RegisteredTypes`: types that implement `IConfigurable`, minus `[ExcludeFromCreation]`, minus `[SingleInstance]` types that already have an instance in the subject graph.
 - Maps each type to a `SubjectTypeDescriptor` record with the type, display name, description, group and icon name, applying the fallbacks.
 - Sorts groups alphabetically with "Other" last, and types by display name.
 - Filters descriptors by search text and group, and returns the count per group for the current search.
@@ -120,7 +120,6 @@ Hosts the picker and the configure page, and owns the name field, the back navig
 
 - `BeforeSave`: unchanged meaning.
 - `Name`: null when the caller wants no name, otherwise the label, the suffix and the existing names.
-- `TypeFilter`: optional predicate over the subject type.
 
 `ISubjectSetupService.CreateSubjectAsync` receives a request carrying the existing names, so that `VirtualFolder` and `FluentStorageContainer` can pass the keys of their `Children`. `CreateSubjectResult.Name` becomes nullable for callers that ask for no name.
 
@@ -143,7 +142,6 @@ Unit tests for `SubjectTypeCatalog` (`HomeBlaze.Services.Tests`):
 
 - `[ExcludeFromCreation]` types are not listed.
 - A `[SingleInstance]` type is listed without an instance and not listed with one.
-- The caller's type filter is applied.
 - Fallbacks for display name, group and icon.
 - Group order with "Other" last, and type order by display name.
 - Search over display name, class name, description and group, and the per-group counts.
@@ -159,7 +157,7 @@ End-to-end tests (`HomeBlaze.E2E.Tests`, `SubjectSetupDialogTests` rewritten for
 - "Create" is disabled while a required field is empty.
 - A name that already exists in the folder is rejected.
 - A successful create adds the subject to the folder under the chosen name.
-- The grid "add" dialog shows no name field and does not list a type without a widget component.
+- The grid "add" dialog shows no name field, and a hosted subject created there with its "Enabled" setting cleared still starts disabled.
 
 No component-level tests are added. The repository has no bUnit, and the picker is a thin view over the catalog.
 
