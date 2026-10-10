@@ -152,36 +152,36 @@ public partial class SonosGroup :
     [PropertyAttribute("SetSleepTimer", KnownAttributes.IsEnabled)]
     public bool SetSleepTimer_IsEnabled => CanControl;
 
+    // Playback, content, play mode and sleep timer are group state, so the coordinator's operations already target
+    // the group. Only volume and mute have group commands of their own.
+
     [Operation(Title = "Play", Icon = "PlayArrow", Position = 1, Description = "Starts or resumes playback of the group.")]
     public Task PlayAsync(CancellationToken cancellationToken) =>
-        RunAsync((connection, token) => connection.PlayAsync(token), cancellationToken);
+        Coordinator.PlayAsync(cancellationToken);
 
     [Operation(Title = "Pause", Icon = "Pause", Position = 2, Description = "Pauses playback of the group.")]
     public Task PauseAsync(CancellationToken cancellationToken) =>
-        RunAsync((connection, token) => connection.PauseAsync(token), cancellationToken);
+        Coordinator.PauseAsync(cancellationToken);
 
     [Operation(Title = "Stop", Icon = "Stop", Position = 3, Description = "Stops playback of the group.")]
     public Task StopAsync(CancellationToken cancellationToken) =>
-        RunAsync((connection, token) => connection.StopAsync(token), cancellationToken);
+        Coordinator.StopAsync(cancellationToken);
 
     [Operation(Title = "Next", Icon = "SkipNext", Position = 4, Description = "Skips to the next track of the group.")]
     public Task NextAsync(CancellationToken cancellationToken) =>
-        RunAsync((connection, token) => connection.NextAsync(token), cancellationToken);
+        Coordinator.NextAsync(cancellationToken);
 
     [Operation(Title = "Previous", Icon = "SkipPrevious", Position = 5, Description = "Goes back to the previous track of the group.")]
     public Task PreviousAsync(CancellationToken cancellationToken) =>
-        RunAsync((connection, token) => connection.PreviousAsync(token), cancellationToken);
+        Coordinator.PreviousAsync(cancellationToken);
 
     [Operation(Title = "Play or Pause", Position = 6, Description = "Pauses the group when it plays, otherwise starts playback.")]
     public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
-        RunAsync((connection, token) => connection.TogglePlaybackAsync(token), cancellationToken);
+        Coordinator.TogglePlaybackAsync(cancellationToken);
 
     [Operation(Title = "Seek", Position = 7, Description = "Seeks the current track of the group to the given position.")]
-    public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThan(position, TimeSpan.Zero);
-        return RunAsync((connection, token) => connection.SeekAsync(position, token), cancellationToken);
-    }
+    public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken) =>
+        Coordinator.SeekAsync(position, cancellationToken);
 
     [Operation(Title = "Set Volume", Position = 10, Description = "Sets the group volume.")]
     public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
@@ -204,8 +204,6 @@ public partial class SonosGroup :
     [Operation(Title = "Unmute", Icon = "VolumeUp", Position = 13, Description = "Unmutes every player in the group.")]
     public Task UnmuteAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.SetGroupMuteAsync(false, token), cancellationToken);
-
-    // Content, play mode and sleep timer are group state, so the coordinator's operations already target the group.
 
     [Operation(Title = "Play Favorite", Position = 20, Description = "Plays the Sonos favorite with the given title on the group.")]
     public Task PlayFavoriteAsync(string title, CancellationToken cancellationToken) =>
