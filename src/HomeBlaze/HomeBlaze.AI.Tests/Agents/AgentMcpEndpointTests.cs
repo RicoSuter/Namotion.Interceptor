@@ -30,12 +30,9 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddSingleton(_registry);
+        builder.Services.AddHomeBlazeAgents();
         builder.Services.AddMcpServer()
-            .WithHttpTransport(options =>
-            {
-                options.Stateless = true;
-                options.ConfigureSessionOptions = AgentMcpEndpoint.ConfigureSessionOptions;
-            })
+            .WithHttpTransport(options => options.Stateless = true)
             // Production always has global handlers (the external MCP server); mirror that.
             .WithListToolsHandler((_, _) => ValueTask.FromResult(new ListToolsResult
             {
@@ -222,22 +219,48 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         Assert.Null(agentClient.ServerCapabilities.Completions);
     }
 
-    [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task WhenTheTransportIsNotConfiguredForTheAgentRoute_ThenMappingThrows(bool stateless, bool configureSessionOptions)
+    [Fact]
+    public void WhenAgentServicesAreResolved_ThenTheyUseTheRegisteredRegistryAndTheServerAddress()
+    {
+        // Act
+        var services = _app!.Services.GetRequiredService<AgentServices>();
+
+        // Assert
+        Assert.Same(_registry, services.TokenRegistry);
+        Assert.Same(TimeProvider.System, services.TimeProvider);
+        Assert.IsType<HomeBlazeAgentToolSource>(services.ToolSource);
+        var port = new Uri(_baseAddress).Port;
+        Assert.Equal($"http://127.0.0.1:{port}/mcp/agents", services.EndpointAddress.GetAgentEndpoint()?.ToString());
+    }
+
+    [Fact]
+    public async Task WhenTheTransportIsNotStateless_ThenMappingThrows()
+    {
+        // Arrange
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Services.AddHomeBlazeAgents();
+        builder.Services.AddMcpServer().WithHttpTransport(options => options.Stateless = false);
+        await using var app = builder.Build();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => app.MapHomeBlazeAgentMcp());
+    }
+
+    [Fact]
+    public async Task WhenTheAgentServicesAreNotAdded_ThenMappingThrowsEvenWithAStatelessTransportAndACallback()
     {
         // Arrange
         var builder = WebApplication.CreateSlimBuilder();
         builder.Services.AddSingleton(new AgentTurnTokenRegistry());
         builder.Services.AddMcpServer().WithHttpTransport(options =>
         {
-            options.Stateless = stateless;
-            options.ConfigureSessionOptions = configureSessionOptions ? AgentMcpEndpoint.ConfigureSessionOptions : null;
+            options.Stateless = true;
+            options.ConfigureSessionOptions = (_, _, _) => Task.CompletedTask;
         });
         await using var app = builder.Build();
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => app.MapHomeBlazeAgentMcp());
+        var exception = Assert.Throws<InvalidOperationException>(() => app.MapHomeBlazeAgentMcp());
+        Assert.Contains(nameof(AgentServiceCollectionExtensions.AddHomeBlazeAgents), exception.Message);
     }
 }

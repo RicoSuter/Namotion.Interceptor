@@ -23,12 +23,22 @@ public static class AgentMcpEndpoint
     private static readonly object ToolSetItemKey = new();
 
     /// <summary>
-    /// Maps the agent route and its token check. The MCP server must use the stateless HTTP transport with
-    /// <see cref="ConfigureSessionOptions"/>, which <c>AddHomeBlazeAgents</c> configures.
+    /// Maps the agent route and its token check. The services must be registered with
+    /// <see cref="AgentServiceCollectionExtensions.AddHomeBlazeAgents"/>, which hooks
+    /// <see cref="ConfigureSessionOptions"/> into the MCP HTTP transport, and the transport must be stateless.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The HTTP transport is not stateless or has no session options callback.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="AgentServiceCollectionExtensions.AddHomeBlazeAgents"/> was not called, or the HTTP transport is not
+    /// stateless or has no session options callback.
+    /// </exception>
     public static WebApplication MapHomeBlazeAgentMcp(this WebApplication app)
     {
+        if (app.Services.GetService<AgentServicesMarker>() is null)
+        {
+            throw new InvalidOperationException(
+                $"The agent MCP route requires the agent services; call {nameof(AgentServiceCollectionExtensions.AddHomeBlazeAgents)} on the service collection.");
+        }
+
         var transportOptions = app.Services.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
         if (!transportOptions.Stateless || transportOptions.ConfigureSessionOptions is null)
         {
