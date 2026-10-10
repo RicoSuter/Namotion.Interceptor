@@ -15,8 +15,9 @@ namespace HomeBlaze.E2E.Tests;
 [Trait("Category", "Integration")]
 public class NestedSubjectSaveTests
 {
-    private const string PagePath = "Demo/LayoutFile.md";
+    private const string PagePath = "Demo/LayoutPage.md";
     private const string LayoutPath = "Demo/Layout.json";
+    private const string SavedColumnSpan = "\"columnSpan\": 3";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -32,37 +33,22 @@ public class NestedSubjectSaveTests
         var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
         var layoutFilePath = Path.Combine(rootManager.DataDirectory, "TestData", LayoutPath);
         var originalContent = await File.ReadAllTextAsync(layoutFilePath);
-        var cell = GetLayoutSubject(rootManager).Cells.Single();
+        var cell = ((GridLayout)GetDemoFolder(rootManager).Children["Layout"]).Cells.Single();
         var originalColumnSpan = cell.ColumnSpan;
+
+        // The output copy outlives a run, so one that was stopped before its cleanup would leave the value behind.
+        Assert.DoesNotContain(SavedColumnSpan, originalContent);
 
         try
         {
-            var page = await _fixture.CreatePageAsync();
-            await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
-            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Inline").ClickAsync();
-
-            var editCellButton = page.GetByTitle("Edit Cell");
-            await Assertions.Expect(editCellButton).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editCellButton.ClickAsync();
-
-            var dialog = page.Locator(".mud-dialog");
-            var columnSpanField = dialog.GetByLabel("Column Span");
-            await Assertions.Expect(columnSpanField).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await columnSpanField.FillAsync("3");
+            var (page, dialog) = await OpenCellDialogWithColumnSpanThreeAsync();
 
             // Act
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
 
             // Assert: the notification is the last step of the save, so everything it writes is written by now.
             await Assertions.Expect(page.GetByText("Configuration saved.")).ToBeVisibleAsync(new() { Timeout = 30000 });
-
-            var savedContent = await File.ReadAllTextAsync(layoutFilePath);
-            Assert.Contains("\"columnSpan\": 3", savedContent);
+            Assert.Contains(SavedColumnSpan, await File.ReadAllTextAsync(layoutFilePath));
         }
         finally
         {
@@ -72,7 +58,7 @@ public class NestedSubjectSaveTests
     }
 
     [Fact]
-    public async Task WhenCellOfLayoutThatNoFileStoresIsSaved_ThenWarningIsShown()
+    public async Task WhenCellOfUnstoredLayoutIsSaved_ThenWarningIsShown()
     {
         // Arrange: the layout takes the place of the stored one in the tree, but the storage knows no file for it.
         var rootManager = _fixture.ServerServices.GetRequiredService<RootManager>();
@@ -91,24 +77,7 @@ public class NestedSubjectSaveTests
         try
         {
             folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren) { ["Layout"] = layout };
-
-            var page = await _fixture.CreatePageAsync();
-            await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
-            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-            var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-            await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editMenu.ClickAsync();
-            await page.GetByText("Inline").ClickAsync();
-
-            var editCellButton = page.GetByTitle("Edit Cell");
-            await Assertions.Expect(editCellButton).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await editCellButton.ClickAsync();
-
-            var dialog = page.Locator(".mud-dialog");
-            var columnSpanField = dialog.GetByLabel("Column Span");
-            await Assertions.Expect(columnSpanField).ToBeVisibleAsync(new() { Timeout = 30000 });
-            await columnSpanField.FillAsync("3");
+            var (page, dialog) = await OpenCellDialogWithColumnSpanThreeAsync();
 
             // Act
             await dialog.GetByRole(AriaRole.Button, new() { Name = "Save" }).ClickAsync();
@@ -125,12 +94,32 @@ public class NestedSubjectSaveTests
         }
     }
 
+    private async Task<(IPage Page, ILocator Dialog)> OpenCellDialogWithColumnSpanThreeAsync()
+    {
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{PagePath}");
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
+        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editMenu.ClickAsync();
+        await page.GetByText("Inline").ClickAsync();
+
+        var editCellButton = page.GetByTitle("Edit Cell");
+        await Assertions.Expect(editCellButton).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await editCellButton.ClickAsync();
+
+        var dialog = page.Locator(".mud-dialog");
+        var columnSpanField = dialog.GetByLabel("Column Span");
+        await Assertions.Expect(columnSpanField).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await columnSpanField.FillAsync("3");
+
+        return (page, dialog);
+    }
+
     private static VirtualFolder GetDemoFolder(RootManager rootManager)
     {
         var root = (FluentStorageContainer)rootManager.Root!;
         return (VirtualFolder)root.Children["Demo"];
     }
-
-    private static GridLayout GetLayoutSubject(RootManager rootManager)
-        => (GridLayout)GetDemoFolder(rootManager).Children["Layout"];
 }

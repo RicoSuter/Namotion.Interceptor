@@ -130,6 +130,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
+        // The page stores its embedded subjects, each with what is nested in its configuration.
+        if (subject.TryGetConfigurationOwner(candidate => Children.Values.Contains(candidate)) == null)
+            return false;
+
         // Rebuild markdown with all embedded subjects serialized
         Content = RebuildMarkdownContent();
 

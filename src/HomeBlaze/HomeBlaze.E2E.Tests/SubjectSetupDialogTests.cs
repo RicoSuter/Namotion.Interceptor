@@ -1,4 +1,7 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Services;
+using HomeBlaze.Storage;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 
 namespace HomeBlaze.E2E.Tests;
@@ -309,6 +312,49 @@ public class SubjectSetupDialogTests
         // Test 3: Valid name enables Next button
         await nameInput.FillAsync("validname");
         await Assertions.Expect(nextButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    #endregion
+
+    #region Storage Tests
+
+    [Fact]
+    public async Task WhenSubjectIsCreatedInStorage_ThenItIsStoredWithoutWarning()
+    {
+        // Arrange
+        var name = $"created{Guid.NewGuid():N}";
+        var root = (FluentStorageContainer)_fixture.ServerServices.GetRequiredService<RootManager>().Root!;
+
+        try
+        {
+            var page = await _fixture.CreatePageAsync();
+            await OpenSubjectBrowserAsync(page);
+            await OpenWizardAsync(page);
+            await EnterNameAsync(page, name);
+            await SelectTypeAsync(page, "type-card-gridlayout");
+
+            var createButton = page.Locator("[data-testid='create-button']");
+            await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+            // Act
+            await createButton.ClickAsync();
+
+            // Assert - the wizard persists nothing here. Its caller stores the subject once the wizard has
+            // closed, and the pane then lists it by its title.
+            await Assertions.Expect(page.Locator("#scrollContainer").GetByText("Grid", new() { Exact = true }))
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(page.GetByText("Configuration applied but not saved")).ToHaveCountAsync(0);
+
+            var storedContent = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json"));
+            Assert.Contains("HomeBlaze.Components.GridLayout", storedContent);
+        }
+        finally
+        {
+            if (root.Children.TryGetValue(name, out var created))
+            {
+                await root.DeleteSubjectAsync(created, CancellationToken.None);
+            }
+        }
     }
 
     #endregion

@@ -133,8 +133,8 @@
     /// <summary>
     /// Writes the configuration that contains the subject through the nearest IConfigurationWriter among its
     /// parents, else the root manager, and applies it. Nothing is written for a subject that is part of no
-    /// configuration, such as a file, which its edit component has saved. Warns when the writer stores no
-    /// configuration that contains the subject, in which case the edits are applied but not saved.
+    /// configuration, such as a file, which its edit component has saved. Warns when the writer wrote nothing,
+    /// in which case the edits are applied but not saved.
     /// </summary>
     public async Task PersistAsync(CancellationToken cancellationToken)
     {

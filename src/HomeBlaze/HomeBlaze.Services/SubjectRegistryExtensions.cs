@@ -122,10 +122,10 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Finds the subject that matches the predicate and whose configuration contains the subject: the subject
-    /// itself when it matches, else the nearest matching parent that holds it through [Configuration] properties only.
+    /// Finds the nearest subject that matches the predicate and whose configuration contains this subject: the
+    /// subject itself when it matches, else a parent that holds it through [Configuration] properties only.
     /// </summary>
-    /// <returns>Null when no such subject matches the predicate.</returns>
+    /// <returns>Null when there is none.</returns>
     public static IInterceptorSubject? TryGetConfigurationOwner(
         this IInterceptorSubject subject,
         Func<IInterceptorSubject, bool> isOwner)
@@ -147,13 +147,13 @@ public static class SubjectRegistryExtensions
                     continue;
 
                 var parentSubject = parent.Property.Subject;
+                if (!visited.Add(parentSubject))
+                    continue;
+
                 if (isOwner(parentSubject))
                     return parentSubject;
 
-                if (visited.Add(parentSubject))
-                {
-                    queue.Enqueue(parentSubject);
-                }
+                queue.Enqueue(parentSubject);
             }
         }
 

@@ -429,6 +429,48 @@ public class MarkdownFileTests
         ```
         """;
 
+    [Fact]
+    public async Task WhenEmbeddedSubjectIsWritten_ThenPageIsWritten()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "embedded-write.md", CreatePageWithMotor("# Heading", targetSpeed: 1000));
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-write.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        var motor = Assert.IsType<Motor>(markdown.Children["mymotor"]);
+        motor.TargetSpeed = 2000;
+
+        // Act
+        var isWritten = await markdown.WriteConfigurationAsync(motor, CancellationToken.None);
+
+        // Assert
+        Assert.True(isWritten);
+        Assert.Contains("\"targetSpeed\": 2000", await ReadFileAsync(storage, "embedded-write.md"));
+    }
+
+    [Fact]
+    public async Task WhenSubjectOutsideThePageIsWritten_ThenNothingIsWritten()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        var originalContent = CreatePageWithMotor("# Heading", targetSpeed: 1000);
+        await WriteFileAsync(storage, "embedded-outside.md", originalContent);
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-outside.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        var embedded = Assert.IsType<Motor>(markdown.Children["mymotor"]);
+        embedded.TargetSpeed = 2000;
+        var outside = new Motor(serviceProvider.GetRequiredService<IInterceptorSubjectContext>());
+
+        // Act
+        var isWritten = await markdown.WriteConfigurationAsync(outside, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(originalContent, await ReadFileAsync(storage, "embedded-outside.md"));
+    }
+
     private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()
     {
         var typeProvider = new TypeProvider();
@@ -464,6 +506,13 @@ public class MarkdownFileTests
         var parser = serviceProvider.GetRequiredService<MarkdownContentParser>();
         var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
         return new MarkdownFile(storage, path, parser, serializer);
+    }
+
+    private static async Task<string> ReadFileAsync(FluentStorageContainer storage, string path)
+    {
+        await using var stream = await storage.ReadBlobAsync(path, CancellationToken.None);
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
     }
 
     private static async Task WriteFileAsync(FluentStorageContainer storage, string path, string content)

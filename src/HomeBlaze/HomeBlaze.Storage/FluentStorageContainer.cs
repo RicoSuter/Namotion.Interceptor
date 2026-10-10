@@ -29,6 +29,7 @@ public partial class FluentStorageContainer :
 
     private readonly StoragePathRegistry _pathRegistry = new();
     private readonly Lock _hierarchyLock = new();
+    private readonly SemaphoreSlim _configurationWriteLock = new(1, 1);
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
     private readonly ILogger<FluentStorageContainer>? _logger;
@@ -448,13 +449,23 @@ public partial class FluentStorageContainer :
         if (fileSubject == null || !_pathRegistry.TryGetPath(fileSubject, out var path))
             return false;
 
-        var fullPath = GetFileSystemPath(path);
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+        // Several subjects map to one file, so their writes can overlap. The file is serialized inside the lock,
+        // so that the write that runs last holds the edits of the ones before it.
+        await _configurationWriteLock.WaitAsync(cancellationToken);
+        try
+        {
+            var fullPath = GetFileSystemPath(path);
+            _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        var json = _subjectFactory.Serialize(fileSubject);
-        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
+            var json = _subjectFactory.Serialize(fileSubject);
+            _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+            await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _configurationWriteLock.Release();
+        }
 
         _logger?.LogDebug("Saved subject to storage: {Path}", path);
         return true;
