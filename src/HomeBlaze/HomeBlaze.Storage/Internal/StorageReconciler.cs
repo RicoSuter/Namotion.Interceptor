@@ -28,6 +28,9 @@ internal sealed class StorageReconciler
     // Cancelled when the connection ends. Nothing is assigned to the tree after that.
     private readonly CancellationToken _connectionToken;
 
+    // True while a pass runs, and after one that ended before it applied its result.
+    private bool _hasUnfinishedPass;
+
     public StorageReconciler(
         IBlobStorage client,
         FluentStorageContainer storage,
@@ -54,8 +57,16 @@ internal sealed class StorageReconciler
     /// <param name="namedPaths">Paths an event named. They are compared by content even when their version is unchanged.</param>
     /// <param name="allNamed">Treats every file as named, for when events were lost.</param>
     /// <param name="cancellationToken">Cancels the pass. It ends at its next storage call or between two files.</param>
+    /// <exception cref="StorageUnresponsiveException">
+    /// The storage did not answer in time. The pass ends without applying anything, and the next pass does the
+    /// work again.
+    /// </exception>
     public async Task ReconcileAsync(IReadOnlySet<string> namedPaths, bool allNamed, CancellationToken cancellationToken)
     {
+        // A pass that ended early took its named paths with it, so the pass after it compares every file.
+        var isEveryFileNamed = allNamed || _hasUnfinishedPass;
+        _hasUnfinishedPass = true;
+
         var listing = await ListAsync(cancellationToken);
         var movableEntries = RemoveMissingEntries(listing);
 
@@ -76,7 +87,7 @@ internal sealed class StorageReconciler
 
             try
             {
-                var isNamed = allNamed || namedPaths.Contains(listed.Path);
+                var isNamed = isEveryFileNamed || namedPaths.Contains(listed.Path);
                 if (!_index.TryGet(listed.Path, out var entry) || NeedsLoad(entry, listed, isNamed))
                 {
                     hasMovedSubjects |= await AddAsync(listed, movableEntries, cancellationToken);
@@ -87,8 +98,10 @@ internal sealed class StorageReconciler
                 }
             }
             // Filtered by the token of the pass, not by the kind of exception: subject code that times out throws
-            // an OperationCanceledException of its own, which is a failed load like any other.
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+            // an OperationCanceledException of its own, which is a failed load like any other. An unresponsive
+            // storage ends the pass instead: recorded as failed, the file would not be loaded again until it
+            // changes, and so would every file after it.
+            catch (Exception exception) when (exception is not StorageUnresponsiveException && !cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
                 RecordFailure(listed);
@@ -96,6 +109,7 @@ internal sealed class StorageReconciler
         }
 
         Apply(hasMovedSubjects);
+        _hasUnfinishedPass = false;
     }
 
     /// <summary>
@@ -202,8 +216,7 @@ internal sealed class StorageReconciler
 
     public async Task<StorageVersion> GetVersionAsync(string path, CancellationToken cancellationToken)
     {
-        var blobs = await _client.GetBlobsAsync([path], cancellationToken)
-            .WithStorageTimeoutAsync(_timeProvider, cancellationToken);
+        var blobs = await _client.GetBlobsAsync([path], cancellationToken);
         var blob = blobs.FirstOrDefault();
         return blob == null ? default : new StorageVersion(blob.Size ?? 0, blob.LastModificationTime);
     }
@@ -247,8 +260,7 @@ internal sealed class StorageReconciler
 
     private async Task<Dictionary<string, StorageListing>> ListAsync(CancellationToken cancellationToken)
     {
-        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken)
-            .WithStorageTimeoutAsync(_timeProvider, cancellationToken);
+        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
         var listing = new Dictionary<string, StorageListing>(StringComparer.Ordinal);
         foreach (var blob in blobs)
@@ -488,7 +500,7 @@ internal sealed class StorageReconciler
             : throw new InvalidOperationException($"No entry for '{path}'.");
 
     private async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)
-        => await _client.OpenReadAsync(path, cancellationToken).WithStorageTimeoutAsync(_timeProvider, cancellationToken)
+        => await _client.OpenReadAsync(path, cancellationToken)
            ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)

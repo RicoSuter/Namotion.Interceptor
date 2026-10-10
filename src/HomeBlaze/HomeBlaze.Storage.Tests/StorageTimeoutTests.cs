@@ -9,6 +9,7 @@ public class StorageTimeoutTests : StorageTestBase
 {
     private readonly ManualTimeProvider _timeProvider = new();
     private PausableBlobStorage? _client;
+    private int _idleTimerCount;
 
     [Fact]
     public async Task WhenListingHangs_ThenPassFailsAndNextPassSucceeds()
@@ -25,6 +26,7 @@ public class StorageTimeoutTests : StorageTestBase
         await LetHangingCallTimeOutAsync();
         await pass;
         var statusAfterFailedPass = storage.Status;
+        await ReleaseHangingCallAsync(storage);
         await storage.ReconcileAsync();
 
         // Assert
@@ -34,7 +36,7 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenReadOfOneFileHangs_ThenOnlyThatFileIsMissing()
+    public async Task WhenReadOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
     {
         // Arrange
         var storage = await ConnectPausableAsync();
@@ -47,10 +49,89 @@ public class StorageTimeoutTests : StorageTestBase
         // Act
         await LetHangingCallTimeOutAsync();
         await pass;
+        var statusAfterFailedPass = storage.Status;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(["Second.md"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Empty(childrenAfterFailedPass);
         Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["First.md", "Second.md"], storage.Children.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenPassFailsAfterLoadingSomeFiles_ThenNextPassPlacesThemWithoutLoadingThemAgain()
+    {
+        // Arrange
+        var storage = await ConnectPausableAsync();
+        WriteFile("First.gated");
+        WriteFile("Second.gated");
+        var firstGate = GatedFile.PauseNextLoad();
+        var secondGate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await firstGate.WhenReachedAsync();
+        firstGate.Release();
+        await secondGate.WhenReachedAsync();
+        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        secondGate.Release();
+        await readReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Empty(childrenAfterFailedPass);
+        Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
+        Assert.Equal(3, GatedFile.LoadCount);
+    }
+
+    [Fact]
+    public async Task WhenNamedPassFails_ThenNextPassComparesEveryFileByContent()
+    {
+        // Arrange
+        WriteFile("Data.gated", "first");
+        var storage = await ConnectPausableAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
+        var originalTime = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
+        WriteFile("Data.gated", "other");
+        File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), originalTime);
+        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        var pass = storage.ReconcileAsync(Named("Data.gated"));
+        await listingReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("other", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenCallBlocksInsideTheClient_ThenCallerGetsUnresponsiveAndWorkerIsFree()
+    {
+        // Arrange
+        var storage = await ConnectPausableAsync();
+        var existsReached = _client!.BlockNext(nameof(IBlobStorage.ExistsAsync));
+        var add = storage.AddSubjectAsync("Motor.json", CreateMotor(), CancellationToken.None);
+        await existsReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+
+        // Assert
+        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => add);
+        await storage.ReconcileAsync();
+        Assert.Equal(StorageStatus.Error, storage.Status);
+        Assert.Empty(storage.Children);
     }
 
     [Fact]
@@ -109,29 +190,35 @@ public class StorageTimeoutTests : StorageTestBase
         await LetHangingCallTimeOutAsync();
 
         // Assert
-        await Assert.ThrowsAsync<TimeoutException>(() => add);
+        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => add);
         await storage.ReconcileAsync();
         Assert.Empty(storage.Children);
     }
 
     private async Task<FluentStorageContainer> ConnectPausableAsync()
     {
-        var storage = await ConnectAsync(configure: storage =>
+        var storage = await ConnectAsync(configure: container =>
         {
-            storage.TimeProvider = _timeProvider;
-            storage.ClientDecorator = client => _client = new PausableBlobStorage(client);
+            container.TimeProvider = _timeProvider;
+            container.ClientDecorator = client => _client = new PausableBlobStorage(client);
         });
 
-        // The wait of a call that has completed holds its timer a moment longer. Gone now, it cannot be taken
-        // for the wait of the call that hangs.
-        await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 0);
+        _idleTimerCount = _timeProvider.ArmedTimerCount;
         return storage;
     }
 
     private async Task LetHangingCallTimeOutAsync()
     {
-        // A call has arrived in the storage before its caller starts the wait that the limit ends.
-        await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 1);
+        // The call can arrive in the storage before its caller has started the wait that the limit ends.
+        await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == _idleTimerCount + 1);
         _timeProvider.Advance(StorageCallTimeout.Limit);
+    }
+
+    private async Task ReleaseHangingCallAsync(FluentStorageContainer storage)
+    {
+        _client!.Release();
+
+        // The call that was given up returns on another thread, and calls are refused until it has.
+        await AsyncTestHelpers.WaitUntilAsync(() => !storage.IsStorageUnresponsive);
     }
 }

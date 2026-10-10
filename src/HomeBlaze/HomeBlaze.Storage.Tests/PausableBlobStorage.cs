@@ -16,9 +16,21 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource? _reached;
     private string? _pausedOperation;
+    private string? _blockedOperation;
+    private int _callCount;
+    private int _openedStreamCount;
+    private int _disposedStreamCount;
+
+    /// <summary>The number of calls that have arrived in the storage.</summary>
+    public int CallCount => Volatile.Read(ref _callCount);
+
+    public int OpenedStreamCount => Volatile.Read(ref _openedStreamCount);
+
+    public int DisposedStreamCount => Volatile.Read(ref _disposedStreamCount);
 
     /// <summary>
-    /// Makes the next call of the operation hang. The returned task completes when that call has arrived.
+    /// Makes the next call of the operation hang after it has returned its task. The returned task completes
+    /// when that call has arrived.
     /// </summary>
     public Task PauseNext(string operation)
     {
@@ -27,41 +39,83 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
         return _reached.Task.WaitAsync(Timeout);
     }
 
+    /// <summary>
+    /// Makes the next call of the operation block the thread of its caller, as a storage does that works before
+    /// it returns its task. The returned task completes when that call has arrived.
+    /// </summary>
+    public Task BlockNext(string operation)
+    {
+        _reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _blockedOperation = operation;
+        return _reached.Task.WaitAsync(Timeout);
+    }
+
+    /// <summary>
+    /// Lets the call that hangs go on into the storage, as a storage does that responds again.
+    /// </summary>
+    public void Release() => _released.TrySetResult();
+
+    /// <summary>
+    /// Makes the call that hangs fail, as a storage does that gives up later than its caller.
+    /// </summary>
+    public void FailHangingCall(Exception exception) => _released.TrySetException(exception);
+
     public async Task<IReadOnlyCollection<Blob>> ListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
     {
-        await PauseAsync(nameof(ListAsync));
+        await ArriveAsync(nameof(ListAsync));
         return await inner.ListAsync(options, cancellationToken);
     }
 
     public async Task WriteAsync(string fullPath, Stream dataStream, bool append = false, CancellationToken cancellationToken = default)
     {
-        await PauseAsync(nameof(WriteAsync));
+        await ArriveAsync(nameof(WriteAsync));
         await inner.WriteAsync(fullPath, dataStream, append, cancellationToken);
     }
 
     public async Task<Stream> OpenReadAsync(string fullPath, CancellationToken cancellationToken = default)
     {
-        await PauseAsync(nameof(OpenReadAsync));
+        await ArriveAsync(nameof(OpenReadAsync));
         var stream = await inner.OpenReadAsync(fullPath, cancellationToken);
 
         // Null for a file that does not exist, although the signature does not say so.
-        return stream is null ? null! : new PausableStream(stream, this);
+        if (stream is null)
+        {
+            return null!;
+        }
+
+        Interlocked.Increment(ref _openedStreamCount);
+        return new PausableStream(stream, this);
     }
 
-    public Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => inner.DeleteAsync(fullPaths, cancellationToken);
+    public async Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+    {
+        await ArriveAsync(nameof(DeleteAsync));
+        await inner.DeleteAsync(fullPaths, cancellationToken);
+    }
 
-    public Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => inner.ExistsAsync(fullPaths, cancellationToken);
+    public async Task<IReadOnlyCollection<bool>> ExistsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+    {
+        await ArriveAsync(nameof(ExistsAsync));
+        return await inner.ExistsAsync(fullPaths, cancellationToken);
+    }
 
-    public Task<IReadOnlyCollection<Blob>> GetBlobsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
-        => inner.GetBlobsAsync(fullPaths, cancellationToken);
+    public async Task<IReadOnlyCollection<Blob>> GetBlobsAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
+    {
+        await ArriveAsync(nameof(GetBlobsAsync));
+        return await inner.GetBlobsAsync(fullPaths, cancellationToken);
+    }
 
-    public Task SetBlobsAsync(IEnumerable<Blob> blobs, CancellationToken cancellationToken = default)
-        => inner.SetBlobsAsync(blobs, cancellationToken);
+    public async Task SetBlobsAsync(IEnumerable<Blob> blobs, CancellationToken cancellationToken = default)
+    {
+        await ArriveAsync(nameof(SetBlobsAsync));
+        await inner.SetBlobsAsync(blobs, cancellationToken);
+    }
 
-    public Task<ITransaction> OpenTransactionAsync()
-        => inner.OpenTransactionAsync();
+    public async Task<ITransaction> OpenTransactionAsync()
+    {
+        await ArriveAsync(nameof(OpenTransactionAsync));
+        return await inner.OpenTransactionAsync();
+    }
 
     public void Dispose()
     {
@@ -69,6 +123,20 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
         // released, it would go on into the storage and write into a directory that the test deletes next.
         _released.TrySetCanceled();
         inner.Dispose();
+    }
+
+    // Not asynchronous itself, so a blocked call blocks before the call has returned its task.
+    private Task ArriveAsync(string operation)
+    {
+        Interlocked.Increment(ref _callCount);
+        if (_blockedOperation == operation)
+        {
+            _blockedOperation = null;
+            _reached!.TrySetResult();
+            _released.Task.GetAwaiter().GetResult();
+        }
+
+        return PauseAsync(operation);
     }
 
     private async Task PauseAsync(string operation)
@@ -83,6 +151,8 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
 
     private sealed class PausableStream(Stream stream, PausableBlobStorage storage) : Stream
     {
+        private int _isDisposed;
+
         public override bool CanRead => stream.CanRead;
 
         public override bool CanSeek => stream.CanSeek;
@@ -121,8 +191,9 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && Interlocked.Exchange(ref _isDisposed, 1) == 0)
             {
+                Interlocked.Increment(ref storage._disposedStreamCount);
                 stream.Dispose();
             }
 

@@ -12,6 +12,7 @@ internal sealed class StorageConnection : IDisposable
 {
     private readonly CancellationTokenSource _endedSource = new();
     private readonly Lock _fileWatcherLock = new();
+    private readonly TimeLimitedBlobStorage _client;
     private readonly ILogger? _logger;
 
     private StorageFileWatcher? _fileWatcher;
@@ -25,16 +26,20 @@ internal sealed class StorageConnection : IDisposable
         TimeProvider timeProvider,
         ILogger? logger)
     {
-        Client = client;
+        _client = new TimeLimitedBlobStorage(client, timeProvider, logger);
         StorageDirectory = storageDirectory;
         TimeProvider = timeProvider;
         Index = new StorageIndex();
-        Reconciler = new StorageReconciler(client, storage, subjectFactory, serializer, Index, timeProvider, logger, _endedSource.Token);
+        Reconciler = new StorageReconciler(_client, storage, subjectFactory, serializer, Index, timeProvider, logger, _endedSource.Token);
         Worker = new StorageWorker(logger);
         _logger = logger;
     }
 
-    public IBlobStorage Client { get; }
+    /// <summary>The storage. Every call on it returns within <see cref="StorageCallTimeout.Limit"/>.</summary>
+    public IBlobStorage Client => _client;
+
+    /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
+    public bool IsStorageUnresponsive => _client.IsUnresponsive;
 
     /// <summary>The directory of a storage on disk, null for any other storage.</summary>
     public string? StorageDirectory { get; }
