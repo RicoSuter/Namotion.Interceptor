@@ -52,12 +52,12 @@ chapters:
     title: Two pages
     beats:
       - id: pages-arrive
-        narration: One recording can show two pages side by side, here the controls and the status of the same machine.
+        narration: One recording can show two pages side by side, the controls and the status of the same machine.
         visual: Two browser windows spring in, each showing one half of the same split recording.
         components: [BrowserFrame]
         demo: two-pages
       - id: pages-click
-        narration: A click on brew sends the recipe to the machine, and the status page follows.
+        narration: Clicking brew sends the recipe to the machine, and the status page follows.
         visual: The button is clicked; an arrow grows from the controls window to the status window and an Espresso pill rides along it; the camera eases toward the status window.
         components: [BrowserFrame, Camera, Card]
         demo: two-pages

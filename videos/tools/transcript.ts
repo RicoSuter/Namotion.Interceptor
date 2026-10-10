@@ -14,9 +14,12 @@ export interface TranscriptResult {
   matches: boolean;
 }
 
-/** Normalizes a line for comparison with a transcript: lower case, punctuation dropped, number words as digits, common homophones unified. */
+/**
+ * Normalizes a line for comparison with a transcript: lower case, punctuation dropped (`.NET` reads `dotnet`), number
+ * words as digits, common homophones unified.
+ */
 export function normalizeTranscript(text: string): string {
-  const words = text.toLowerCase().replace(/[-–]/g, ' ').replace(/[^a-z0-9#' ]/g, ' ').split(/\s+/).filter(word => word.length > 0);
+  const words = text.toLowerCase().replace(/\.net\b/g, ' dotnet').replace(/[-–]/g, ' ').replace(/[^a-z0-9#' ]/g, ' ').split(/\s+/).filter(word => word.length > 0);
   const numbers: string[] = [];
   for (let index = 0; index < words.length; index++) {
     const ten = tens.indexOf(words[index]);

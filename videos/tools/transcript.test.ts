@@ -24,6 +24,7 @@ describe('transcriptMatches', () => {
   it('WhenTranscriptSplitsOrJoinsWords_ThenItMatches', () => {
     // Act & Assert
     expect(transcriptMatches('Open a WebSocket and call write changes.', 'Open a web socket and call WriteChanges.', lexicon)).toBe(true);
+    expect(transcriptMatches('Start the sample with dotnet run.', 'Start the sample with.NET Run.', lexicon)).toBe(true);
   });
 
   it('WhenTranscriptHearsTheSpokenForm_ThenItMatches', () => {
