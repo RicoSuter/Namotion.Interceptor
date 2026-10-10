@@ -13,15 +13,16 @@ Each episode covers the docs of one row and lives in `episodes/<folder>/`. Statu
 | 02 | `02-validation` | `docs/validation.md` | open |
 | 03 | `03-registry` | `docs/registry.md`, `docs/dynamic.md` | open |
 | 04 | `04-hosting` | `docs/hosting.md` | open |
-| 05 | `05-connectors` | `docs/connectors.md`, `docs/connectors-monitoring.md` | open |
-| 06 | `06-opcua` | `docs/connectors-opcua.md`, `docs/connectors-opcua-client.md`, `docs/connectors-opcua-server.md`, `docs/connectors-opcua-mapping.md` | open |
-| 07 | `07-mqtt` | `docs/connectors-mqtt.md` | open |
-| 08 | `08-websocket` | `docs/connectors-websocket.md`, `docs/connectors-subject-updates.md` | open |
-| 09 | `09-modbus` | `docs/connectors-modbus.md` | open |
-| 10 | `10-aspnetcore` | `docs/aspnetcore.md` (mention subject updates from `docs/connectors-subject-updates.md` briefly) | open |
-| 11 | `11-mcp` | `docs/mcp.md` | open |
-| 12 | `12-blazor` | `docs/blazor.md` | open |
-| 13 | `13-graphql` | `docs/graphql.md` | open |
+| 05 | `05-subject-design` | `docs/subject-guidelines.md` (mainly the rules and contracts every subject must follow; modeling recommendations second) | open |
+| 06 | `06-connectors` | `docs/connectors.md`, `docs/connectors-monitoring.md` | open |
+| 07 | `07-opcua` | `docs/connectors-opcua.md`, `docs/connectors-opcua-client.md`, `docs/connectors-opcua-server.md`, `docs/connectors-opcua-mapping.md` | open |
+| 08 | `08-mqtt` | `docs/connectors-mqtt.md` | open |
+| 09 | `09-websocket` | `docs/connectors-websocket.md`, `docs/connectors-subject-updates.md` | open |
+| 10 | `10-modbus` | `docs/connectors-modbus.md` | open |
+| 11 | `11-aspnetcore` | `docs/aspnetcore.md` (mention subject updates from `docs/connectors-subject-updates.md` briefly) | open |
+| 12 | `12-mcp` | `docs/mcp.md` | open |
+| 13 | `13-blazor` | `docs/blazor.md` | open |
+| 14 | `14-graphql` | `docs/graphql.md` | open |
 
 `episodes/smoke/` is not part of the series: a short episode that uses every shared component and helper, rendered to check changes to `theme/` and `tools/`.
 
