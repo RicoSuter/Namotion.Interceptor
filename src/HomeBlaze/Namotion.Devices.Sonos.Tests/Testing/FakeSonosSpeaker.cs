@@ -40,6 +40,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
     internal IReadOnlyCollection<SoapCall> Calls => _calls.ToArray();
 
+    /// <summary>
+    /// How often the household topology was read from this speaker.
+    /// </summary>
+    internal int TopologyReadCount => _calls.Count(call => call.Action == "GetZoneGroupState");
+
     internal IReadOnlyCollection<string> Unsubscribed => _unsubscribed.ToArray();
 
     /// <summary>

@@ -127,4 +127,96 @@ public class SonosSystemOperationTests
         Assert.Contains(household.Office.Calls, call => call.Action == "SetAVTransportURI" && call.GetArgument("CurrentURI") == $"x-rincon:{TestFixtures.KitchenUuid}");
         Assert.True(household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") > reads, "The topology read after grouping was not attempted.");
     }
+
+    [Fact]
+    public async Task WhenTheTopologyShowsGroupingAllAtOnce_ThenTheWaitEndsAfterOneRead()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var readsBefore = household.Kitchen.TopologyReadCount;
+
+        // Act
+        await household.System.GroupAllAsync("Küche", CancellationToken.None);
+
+        // Assert: one read of the wait and the one of the reconciliation.
+        Assert.Equal(2, household.Kitchen.TopologyReadCount - readsBefore);
+        Assert.Equal(TestFixtures.KitchenUuid, household.OfficePlayer.GroupCoordinatorUuid);
+        Assert.Single(household.System.Groups);
+    }
+
+    [Fact]
+    public async Task WhenTheTopologyShowsGroupingAllLate_ThenGroupAllReturnsWithEveryRoomInTheGroup()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var kitchen = household.Kitchen;
+        var kitchenMember = (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri);
+        var officeMember = (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri);
+        var standalone = FakeSonosSpeaker.CreateStandaloneTopology(kitchenMember, officeMember);
+        kitchen.CallReceived = null;
+        household.Office.CallReceived = call =>
+        {
+            if (call.Action == "SetAVTransportURI")
+            {
+                // Sonos regroups after answering, so the first read still shows the old groups.
+                kitchen.RespondOnce("GetZoneGroupState", ("ZoneGroupState", standalone));
+                kitchen.RespondWithGroup(kitchenMember, officeMember);
+            }
+        };
+        var readsBefore = kitchen.TopologyReadCount;
+
+        // Act
+        await household.System.GroupAllAsync("Küche", CancellationToken.None);
+
+        // Assert: two reads of the wait and the one of the reconciliation.
+        Assert.Equal(3, kitchen.TopologyReadCount - readsBefore);
+        Assert.Equal(TestFixtures.KitchenUuid, household.OfficePlayer.GroupCoordinatorUuid);
+        Assert.Single(household.System.Groups);
+    }
+
+    [Fact]
+    public async Task WhenTheTopologyShowsUngroupingAllAtOnce_ThenTheWaitEndsAfterOneRead()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var readsBefore = household.Kitchen.TopologyReadCount;
+
+        // Act
+        await household.System.UngroupAllAsync(CancellationToken.None);
+
+        // Assert: one read of the wait and the one of the reconciliation.
+        Assert.Equal(2, household.Kitchen.TopologyReadCount - readsBefore);
+        Assert.True(household.KitchenPlayer.IsGroupCoordinator);
+        Assert.Equal(2, household.System.Groups.Count);
+    }
+
+    [Fact]
+    public async Task WhenTheTopologyShowsUngroupingAllLate_ThenUngroupAllReturnsWithEveryRoomStandalone()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var kitchen = household.Kitchen;
+        var kitchenMember = (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri);
+        var officeMember = (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri);
+        var grouped = FakeSonosSpeaker.CreateGroupTopology(officeMember, kitchenMember);
+        household.Office.CallReceived = null;
+        kitchen.CallReceived = call =>
+        {
+            if (call.Action == "BecomeCoordinatorOfStandaloneGroup")
+            {
+                // Sonos regroups after answering, so the first read still shows the old group.
+                kitchen.RespondOnce("GetZoneGroupState", ("ZoneGroupState", grouped));
+                kitchen.RespondWithTopology(kitchenMember, officeMember);
+            }
+        };
+        var readsBefore = kitchen.TopologyReadCount;
+
+        // Act
+        await household.System.UngroupAllAsync(CancellationToken.None);
+
+        // Assert: two reads of the wait and the one of the reconciliation.
+        Assert.Equal(3, kitchen.TopologyReadCount - readsBefore);
+        Assert.True(household.KitchenPlayer.IsGroupCoordinator);
+        Assert.Equal(2, household.System.Groups.Count);
+    }
 }

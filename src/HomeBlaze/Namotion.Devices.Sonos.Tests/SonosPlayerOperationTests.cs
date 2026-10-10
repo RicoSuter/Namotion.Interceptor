@@ -195,19 +195,81 @@ public class SonosPlayerOperationTests
     }
 
     [Fact]
+    public async Task WhenTheTopologyShowsACoordinatorLeavingLate_ThenLeaveGroupReturnsWithItsMemberStandalone()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var kitchen = household.Kitchen;
+        var grouped = FakeSonosSpeaker.CreateGroupTopology(
+            (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri), (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
+        kitchen.CallReceived = null;
+        household.Office.CallReceived = call =>
+        {
+            if (call.Action == "BecomeCoordinatorOfStandaloneGroup")
+            {
+                // The coordinator is its own group before and after, so only its member shows that the regroup is pending.
+                kitchen.RespondOnce("GetZoneGroupState", ("ZoneGroupState", grouped));
+                kitchen.RespondWithTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri));
+            }
+        };
+        var readsBefore = kitchen.TopologyReadCount;
+
+        // Act
+        await household.OfficePlayer.LeaveGroupAsync(CancellationToken.None);
+
+        // Assert: two reads of the wait and the one of the reconciliation.
+        Assert.Equal(3, kitchen.TopologyReadCount - readsBefore);
+        Assert.True(household.KitchenPlayer.IsGroupCoordinator);
+        Assert.Equal(2, household.System.Groups.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheTopologyShowsALeaveAtOnce_ThenTheWaitEndsAfterOneRead(bool coordinatorLeaves)
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var leaving = coordinatorLeaves ? household.OfficePlayer : household.KitchenPlayer;
+        var readsBefore = household.Kitchen.TopologyReadCount;
+
+        // Act
+        await leaving.LeaveGroupAsync(CancellationToken.None);
+
+        // Assert: one read of the wait and the one of the reconciliation.
+        Assert.Equal(2, household.Kitchen.TopologyReadCount - readsBefore);
+        Assert.True(household.KitchenPlayer.IsGroupCoordinator);
+        Assert.Equal(2, household.System.Groups.Count);
+    }
+
+    [Fact]
+    public async Task WhenTheTopologyShowsAJoinAtOnce_ThenTheWaitEndsAfterOneRead()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var readsBefore = household.Kitchen.TopologyReadCount;
+
+        // Act
+        await household.KitchenPlayer.JoinGroupAsync("Büro", CancellationToken.None);
+
+        // Assert: one read of the wait and the one of the reconciliation.
+        Assert.Equal(2, household.Kitchen.TopologyReadCount - readsBefore);
+        Assert.Equal(TestFixtures.OfficeUuid, household.KitchenPlayer.GroupCoordinatorUuid);
+    }
+
+    [Fact]
     public async Task WhenTheTopologyNeverShowsTheJoin_ThenJoinGroupStillCompletesAfterAFewReads()
     {
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
         household.Kitchen.CallReceived = household.Office.CallReceived = null;
-        var readsBefore = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
+        var readsBefore = household.Kitchen.TopologyReadCount;
 
         // Act
         await household.KitchenPlayer.JoinGroupAsync("Büro", CancellationToken.None).WaitAsync(ConnectedSystem.WaitTimeout);
 
-        // Assert
-        var reads = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") - readsBefore;
-        Assert.InRange(reads, 3, 6);
+        // Assert: the four reads of the wait and the one of the reconciliation.
+        Assert.Equal(5, household.Kitchen.TopologyReadCount - readsBefore);
         Assert.True(household.KitchenPlayer.IsGroupCoordinator);
     }
 
@@ -230,13 +292,13 @@ public class SonosPlayerOperationTests
                 }
             }
         };
-        var readsBefore = CountTopologyReads(kitchen);
+        var readsBefore = kitchen.TopologyReadCount;
 
         // Act
         await household.KitchenPlayer.JoinGroupAsync("Büro", CancellationToken.None).WaitAsync(ConnectedSystem.WaitTimeout);
 
         // Assert
-        Assert.Equal(5, CountTopologyReads(kitchen) - readsBefore);
+        Assert.Equal(5, kitchen.TopologyReadCount - readsBefore);
         Assert.True(household.OfficePlayer.IsConnected);
         Assert.Equal(2, household.System.Groups.Count);
     }
@@ -339,9 +401,6 @@ public class SonosPlayerOperationTests
         Assert.All(GetPlayerOperationStates(member), state => Assert.True(state.IsEnabled, state.Name));
         Assert.True(member.LeaveGroup_IsEnabled);
     }
-
-    private static int CountTopologyReads(FakeSonosSpeaker speaker) =>
-        speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
 
     // Commands sent to the player itself. SwitchToTv, SwitchToLineIn, SetNightMode and SetSpeechEnhancement also
     // need a capability the fixture players lack, and Seek needs a track duration, so they are covered elsewhere.
