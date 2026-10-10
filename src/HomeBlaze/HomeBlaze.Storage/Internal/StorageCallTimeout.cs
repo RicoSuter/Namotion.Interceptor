@@ -7,7 +7,8 @@ namespace HomeBlaze.Storage.Internal;
 /// <remarks>
 /// Only the wait ends: the call is not cancelled and finishes or fails on its own. Calls on the storage client
 /// are limited by <see cref="TimeLimitedBlobStorage"/>, and the methods here limit the reading of a stream to
-/// its end. Not limited is subject code that reads a stream it got from the storage.
+/// its end. Both report the limit as <see cref="StorageUnresponsiveException"/>. Not limited is subject code
+/// that reads a stream it got from the storage.
 /// </remarks>
 internal static class StorageCallTimeout
 {
@@ -32,12 +33,12 @@ internal static class StorageCallTimeout
         return call.IsCompleted;
     }
 
-    /// <exception cref="TimeoutException">The call did not complete within <see cref="Limit"/>.</exception>
+    /// <exception cref="StorageUnresponsiveException">The call did not complete within <see cref="Limit"/>.</exception>
     public static Task<TResult> WithStorageTimeoutAsync<TResult>(
         this Task<TResult> call, TimeProvider timeProvider, CancellationToken cancellationToken)
         => call.IsCompleted ? call : LimitAsync(call, timeProvider, cancellationToken);
 
-    /// <exception cref="TimeoutException">The call did not complete within <see cref="Limit"/>.</exception>
+    /// <exception cref="StorageUnresponsiveException">The call did not complete within <see cref="Limit"/>.</exception>
     public static Task WithStorageTimeoutAsync(
         this Task call, TimeProvider timeProvider, CancellationToken cancellationToken)
         => call.IsCompleted ? call : LimitAsync(call, timeProvider, cancellationToken);
@@ -54,7 +55,8 @@ internal static class StorageCallTimeout
         if (!await call.WaitWithinLimitAsync(timeProvider, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            throw new TimeoutException($"The storage did not deliver the content within {Limit.TotalSeconds:0} seconds.");
+            throw new StorageUnresponsiveException(
+                $"The storage did not deliver the content of a file within {Limit.TotalSeconds:0} seconds.");
         }
 
         await call;

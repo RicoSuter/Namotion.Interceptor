@@ -135,7 +135,7 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenReadingContentOfOneFileHangs_ThenOnlyThatFileIsMissing()
+    public async Task WhenReadingContentOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
     {
         // Arrange
         var storage = await ConnectPausableAsync();
@@ -148,14 +148,19 @@ public class StorageTimeoutTests : StorageTestBase
         // Act
         await LetHangingCallTimeOutAsync();
         await pass;
+        var statusAfterFailedPass = storage.Status;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(["Second"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Empty(childrenAfterFailedPass);
         Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["First", "Second"], storage.Children.Keys.Order());
     }
 
     [Fact]
-    public async Task WhenHashingContentOfOneFileHangs_ThenOnlyThatFileIsMissing()
+    public async Task WhenHashingContentOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
     {
         // Arrange
         var storage = await ConnectPausableAsync();
@@ -171,10 +176,15 @@ public class StorageTimeoutTests : StorageTestBase
         // Act
         await LetHangingCallTimeOutAsync();
         await pass;
+        var statusAfterFailedPass = storage.Status;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(["Second.gated"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Empty(childrenAfterFailedPass);
         Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
     }
 
     [Fact]
