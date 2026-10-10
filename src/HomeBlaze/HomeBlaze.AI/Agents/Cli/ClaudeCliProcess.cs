@@ -1,0 +1,229 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Text;
+
+namespace HomeBlaze.AI.Agents.Cli;
+
+/// <summary>One CLI invocation.</summary>
+/// <param name="FileName">Path or name of the CLI executable.</param>
+/// <param name="Arguments">Arguments, passed without a shell.</param>
+/// <param name="WorkingDirectory">Working directory of the process.</param>
+/// <param name="StandardInput">Written to standard input, which is then closed.</param>
+public sealed record ClaudeCliInvocation(string FileName, IReadOnlyList<string> Arguments, string WorkingDirectory, string StandardInput);
+
+/// <summary>What a CLI invocation produced.</summary>
+/// <param name="ExitCode">Exit code of the process.</param>
+/// <param name="SessionId">Session id from the result, or from the init line when no result was written.</param>
+/// <param name="ResultText">Text of the result line.</param>
+/// <param name="IsError">Whether the result line is marked as an error.</param>
+/// <param name="ResultSubtype">Subtype of the result line, for example <c>success</c> or <c>error_during_execution</c>.</param>
+/// <param name="ErrorCode">Error code of the last assistant line that carried one, for example <c>authentication_failed</c>.</param>
+/// <param name="Usage">Token usage of the result line.</param>
+/// <param name="RateLimit">The last reported subscription utilization.</param>
+/// <param name="StandardError">Standard error, truncated to a size limit.</param>
+public sealed record ClaudeCliRunResult(
+    int ExitCode,
+    string? SessionId,
+    string? ResultText,
+    bool IsError,
+    string? ResultSubtype,
+    string? ErrorCode,
+    AgentUsage? Usage,
+    AgentRateLimit? RateLimit,
+    string StandardError);
+
+/// <summary>
+/// Runs the Claude CLI, streams its text deltas and collects its result. Cancellation kills the whole process tree.
+/// </summary>
+public sealed class ClaudeCliProcess
+{
+    private const int MaxStandardErrorLength = 16 * 1024;
+
+    private static readonly TimeSpan KilledProcessExitTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Runs the invocation to completion.
+    /// </summary>
+    /// <exception cref="AgentTurnException">The CLI could not be started (<see cref="AgentFailureKind.Configuration"/>).</exception>
+    /// <exception cref="OperationCanceledException">The token was cancelled; the process tree has been killed.</exception>
+    public async Task<ClaudeCliRunResult> RunAsync(
+        ClaudeCliInvocation invocation, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var startInfo = new ProcessStartInfo(invocation.FileName)
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            WorkingDirectory = invocation.WorkingDirectory,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+        };
+        foreach (var argument in invocation.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            process.Start();
+        }
+        catch (Win32Exception exception)
+        {
+            throw new AgentTurnException(
+                AgentFailureKind.Configuration,
+                $"The Claude CLI '{invocation.FileName}' could not be started ({exception.Message}). Install Claude Code for the HomeBlaze user and log in, or set the CLI path.",
+                innerException: exception);
+        }
+
+        Task<string>? standardErrorTask = null;
+        Task? standardInputTask = null;
+        try
+        {
+            // Killing closes the pipes, so the pending reads end even where a pipe read does not observe the token.
+            using var killOnCancellation = cancellationToken.Register(static state => KillProcessTree((Process)state!), process);
+
+            // Standard error is drained and standard input written concurrently with reading standard output, so a
+            // full pipe on either side cannot block the CLI while this method waits on another stream.
+            standardErrorTask = ReadLimitedAsync(process.StandardError, cancellationToken);
+            standardInputTask = WriteStandardInputAsync(process.StandardInput, invocation.StandardInput, cancellationToken);
+
+            string? sessionId = null;
+            string? errorCode = null;
+            AgentRateLimit? rateLimit = null;
+            ClaudeResultEvent? result = null;
+            while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
+            {
+                switch (ClaudeStreamJsonParser.Parse(line))
+                {
+                    case ClaudeInitEvent init:
+                        sessionId = init.SessionId;
+                        break;
+                    case ClaudeTextDeltaEvent delta:
+                        progress.Report(new AgentTextDelta(delta.Text));
+                        break;
+                    case ClaudeRateLimitEvent limit:
+                        rateLimit = limit.RateLimit;
+                        break;
+                    case ClaudeAssistantErrorEvent error:
+                        errorCode = error.Code;
+                        break;
+                    case ClaudeResultEvent final:
+                        result = final;
+                        break;
+                }
+            }
+
+            // End of output can also come from the kill on cancellation, which must not read as a completed run.
+            cancellationToken.ThrowIfCancellationRequested();
+            await standardInputTask;
+            await process.WaitForExitAsync(cancellationToken);
+            var standardError = await standardErrorTask.WaitAsync(cancellationToken);
+            return new ClaudeCliRunResult(
+                process.ExitCode,
+                result?.SessionId ?? sessionId,
+                result?.Text,
+                result?.IsError ?? false,
+                result?.Subtype,
+                errorCode,
+                result?.Usage,
+                rateLimit,
+                standardError);
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                KillProcessTree(process);
+                try
+                {
+                    // Waiting reaps the killed process before it is disposed and lets the pipe readers reach the end.
+                    await process.WaitForExitAsync(CancellationToken.None).WaitAsync(KilledProcessExitTimeout);
+                }
+                catch (TimeoutException)
+                {
+                    // The kill was requested; disposing the process does not depend on it having exited.
+                }
+            }
+
+            ObserveFailure(standardErrorTask);
+            ObserveFailure(standardInputTask);
+        }
+    }
+
+    private static void KillProcessTree(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or AggregateException)
+        {
+            // The process exited in the meantime, or a descendant could not be killed; neither can be acted on here.
+        }
+    }
+
+    private static void ObserveFailure(Task? task)
+    {
+        if (task is { IsCompletedSuccessfully: false })
+        {
+            task.ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    private static async Task WriteStandardInputAsync(StreamWriter writer, string input, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await writer.WriteAsync(input.AsMemory(), cancellationToken);
+            await writer.FlushAsync(cancellationToken);
+        }
+        catch (IOException)
+        {
+            // The CLI exited before reading its input; its output and exit code explain why.
+        }
+        finally
+        {
+            try
+            {
+                writer.Close();
+            }
+            catch (IOException)
+            {
+                // Closing flushes what is left, which fails the same way when the CLI has exited.
+            }
+        }
+    }
+
+    private static async Task<string> ReadLimitedAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var builder = new StringBuilder();
+        var buffer = new char[4096];
+        try
+        {
+            int read;
+            while ((read = await reader.ReadAsync(buffer, cancellationToken)) > 0)
+            {
+                // Reading continues past the limit, because a CLI blocked on a full standard error pipe never exits.
+                if (builder.Length < MaxStandardErrorLength)
+                {
+                    builder.Append(buffer, 0, Math.Min(read, MaxStandardErrorLength - builder.Length));
+                }
+            }
+        }
+        catch (IOException)
+        {
+            // The pipe broke; what was read so far is the diagnostic.
+        }
+
+        return builder.ToString();
+    }
+}
