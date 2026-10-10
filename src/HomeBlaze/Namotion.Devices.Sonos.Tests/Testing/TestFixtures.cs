@@ -69,12 +69,13 @@ internal static class TestFixtures
     }
 
     /// <summary>
-    /// Takes a device offline as two failed polls in a row do.
+    /// Takes a device offline as the system does after two failed polls in a row.
     /// </summary>
     internal static void TakeOffline(SonosDevice device)
     {
         device.ReportPollFailed("The speaker does not answer.");
         device.ReportPollFailed("The speaker does not answer.");
+        device.ForgetStateOfOutage();
     }
 
     /// <summary>

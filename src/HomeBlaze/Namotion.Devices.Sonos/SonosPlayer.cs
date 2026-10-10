@@ -211,6 +211,19 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
+    internal override void ForgetStateOfOutage()
+    {
+        lock (_stateLock)
+        {
+            // A read the speaker answers with a fault keeps the current value, which after an outage would be the
+            // one from before it. An answer in between made the player reachable again and its state current.
+            if (!IsReachable)
+            {
+                ReportedPlaybackState = null;
+            }
+        }
+    }
+
     internal void ApplyPlayerTopology(SonosTopologyPlayer topology, string coordinatorUuid)
     {
         ApplyTopology(topology.RoomName, topology.BaseUri, topology.SoftwareVersion, topology.IsWireless);

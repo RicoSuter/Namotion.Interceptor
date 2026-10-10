@@ -168,6 +168,14 @@ public abstract partial class SonosDevice :
     }
 
     /// <summary>
+    /// Drops the state an outage invalidates once the device is unreachable. The caller holds no lock of the system.
+    /// </summary>
+    internal virtual void ForgetStateOfOutage()
+    {
+        // Identity and settings stay valid across an outage.
+    }
+
+    /// <summary>
     /// Makes the device unreachable at once, for a released connection rather than a failed poll.
     /// </summary>
     /// <returns>Whether the device became unreachable or its message changed.</returns>

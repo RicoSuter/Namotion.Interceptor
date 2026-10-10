@@ -293,6 +293,12 @@ public partial class SonosSystem
             // Logged at Warning once, when the device becomes unreachable, and at Debug otherwise, so neither a single
             // lost poll nor an offline device floods the log.
             LogFailure(ReportPollFailedIfCurrent(device, connection, exception.Message), exception, failureMessage, failureArgument);
+
+            // Outside _connectionsLock, like every apply that takes a subject's state lock.
+            if (!device.IsReachable)
+            {
+                device.ForgetStateOfOutage();
+            }
         }
     }
 

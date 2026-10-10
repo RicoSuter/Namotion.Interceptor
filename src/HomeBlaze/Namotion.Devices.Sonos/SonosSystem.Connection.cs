@@ -247,6 +247,7 @@ public partial class SonosSystem
         foreach (var device in GetDevices(Players.Values))
         {
             device.MarkUnreachable(DisconnectedMessage);
+            device.ForgetStateOfOutage();
         }
     }
 

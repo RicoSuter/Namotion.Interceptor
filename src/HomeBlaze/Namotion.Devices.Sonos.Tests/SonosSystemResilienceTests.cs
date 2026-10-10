@@ -172,6 +172,31 @@ public class SonosSystemResilienceTests
     }
 
     [Fact]
+    public async Task WhenAPlayerReturnsFromAnOutageWithATransportFault_ThenThePreOutageStateDoesNotResurface()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        household.Office.Respond("GetTransportInfo", ("CurrentTransportState", "PLAYING"), ("CurrentTransportStatus", "OK"), ("CurrentSpeed", "1"));
+        await household.System.RefreshAsync(CancellationToken.None);
+        var player = household.OfficePlayer;
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+        household.Office.RespondWithServerError("GetTransportInfo");
+        await household.System.RefreshAsync(CancellationToken.None);
+        await household.System.RefreshAsync(CancellationToken.None);
+        Assert.False(player.IsConnected);
+
+        // Act
+        household.Office.ClearServerError("GetTransportInfo");
+        household.Office.RespondWithFault("GetTransportInfo", 701);
+        await household.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(player.IsConnected);
+        Assert.Null(player.PlaybackState);
+    }
+
+    [Fact]
     public async Task WhenASatelliteDoesNotAnswer_ThenItIsOfflineWithOneWarningUntilItAnswers()
     {
         // Arrange

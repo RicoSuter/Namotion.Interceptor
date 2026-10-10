@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Media;
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
@@ -152,11 +153,44 @@ public class SonosOfflineStateTests
         TakeOffline(player);
 
         // Act
+        player.ApplyPoll(new SonosPlayerReading(Playing(), null, null, EmptyRenderingControl), T0 + 1);
         player.ReportPollSucceeded();
 
         // Assert
         Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
-        Assert.True(player.IsPlaying);
+    }
+
+    [Fact]
+    public void WhenPlayerReturnsFromAnOutageWithoutATransportState_ThenThePreOutageStateDoesNotResurface()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(Playing(), T0);
+        TakeOffline(player);
+
+        // Act
+        var faultedTransport = new AvTransportChange(null, "NORMAL", SpotifyConnectUri, SpotifyConnectUri, null, null);
+        player.ApplyPoll(new SonosPlayerReading(faultedTransport, null, null, EmptyRenderingControl), T0 + 1);
+        player.ReportPollSucceeded();
+
+        // Assert
+        Assert.True(player.IsConnected);
+        Assert.Null(player.PlaybackState);
+        Assert.Equal("Song", player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenAReachablePlayerIsAskedToForgetAnOutage_ThenItKeepsItsPlaybackState()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(Playing(), T0);
+
+        // Act
+        player.ForgetStateOfOutage();
+
+        // Assert
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
     }
 
     [Fact]
