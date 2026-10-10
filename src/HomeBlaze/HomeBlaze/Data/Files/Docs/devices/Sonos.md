@@ -92,14 +92,14 @@ Transport and track state of a group are the coordinator's; volume and mute are 
 
 ### Offline Handling
 
-- A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household.
+- A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
 - A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
 - A transport failure (timeout, connection refused) takes a unit offline with the error in `StatusMessage`. A UPnP fault answer does not; the values of that read keep their last state.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
 
 ## Widgets
 
-`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, and `SonosGroup` shows its rooms, track and group volume. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
+`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `MediaTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
 
 <!-- The backticks are HTML entities so that this page shows the block instead of instantiating it: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
 <pre><code>&#96;&#96;&#96;subject(livingRoom)
@@ -227,9 +227,16 @@ Operations are disabled while the system, the target or, for coordinator operati
 
 ### Track Details
 
-When the source or track changes (a new transport or track URI), track values that Sonos does not report for the new one are cleared rather than kept from the previous one, and the position is cleared until the next poll. While the track stays the same, unknown values keep the current ones: Spotify Connect polls answer `NOT_IMPLEMENTED` for details its events delivered, and radio polls omit the album art its events delivered.
+When the source or track changes (a new transport or track URI), track values that Sonos does not report for the new one are cleared rather than kept from the previous one, and the position is cleared until the next poll. While the track stays the same, unknown values keep the current ones: Spotify Connect polls answer `NOT_IMPLEMENTED` for details its events delivered, and radio polls omit the album art its events delivered. An event that reports the same track without album art clears it, because a stream keeps its track URI from song to song.
 
-Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the song the station reports (often "ARTIST - TITLE"), otherwise the station. A `ZPSTR_` placeholder such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title on the same stream and clears it when the stream starts or the station changes. A title that is only the end of the stream URL (`96` for `.../aac/96`), which Sonos reports when the station sends no song, is left empty while `MediaTitle` still names the station. A title or `MediaTitle` that is the stream URL itself, with or without its scheme, as other controllers write for a stream without a title, is left empty too.
+Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the song the station reports (often "ARTIST - TITLE"), otherwise the title Sonos reports for the stream. A `ZPSTR_` placeholder such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title on the same stream and clears it when the stream starts or the station changes.
+
+A title that only repeats the URL is left empty:
+
+- `CurrentTrackTitle` and `MediaTitle` when they are the radio or http(s) URL itself, with or without its scheme, as other controllers write for a stream without a title.
+- `CurrentTrackTitle` when it is the end of the stream URL's path, with or without the query (`96` for `.../aac/96`), which Sonos reports when the station sends no song. This applies to a track with a radio scheme and to an http(s) track that plays while the media is a station, such as an ad before the stream. `MediaTitle` still names the station.
+
+Everything else is kept. A `MediaTitle` that equals the end of the URL stays, since it may be the title given to `PlayStream`, and an http(s) file started with `PlayUri` shows its file name, the only title an untagged file has.
 
 ## How It Works
 
