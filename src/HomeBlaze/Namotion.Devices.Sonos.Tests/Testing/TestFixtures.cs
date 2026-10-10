@@ -45,6 +45,16 @@ internal static class TestFixtures
     }
 
     /// <summary>
+    /// Returns a system with the fixture household applied and every device reachable, as after its first poll.
+    /// </summary>
+    internal static SonosSystem CreateReachableHousehold()
+    {
+        var system = CreateHousehold();
+        ReportAllReachable(system);
+        return system;
+    }
+
+    /// <summary>
     /// Returns a connected household of the office coordinating a group with the kitchen.
     /// </summary>
     internal static SonosSystem CreateGroupedSystem()

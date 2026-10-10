@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit;
@@ -105,6 +106,39 @@ public class SonosSystemResilienceTests
         Assert.True(household.System.IsConnected);
         Assert.True(household.OfficePlayer.IsConnected);
         Assert.Null(household.OfficePlayer.StatusMessage);
+    }
+
+    [Fact]
+    public async Task WhenAPlayingPlayerStopsAnswering_ThenItNoLongerReportsPlayingUntilItAnswers()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        household.Office.Respond("GetTransportInfo", ("CurrentTransportState", "PLAYING"), ("CurrentTransportStatus", "OK"), ("CurrentSpeed", "1"));
+        await household.System.RefreshAsync(CancellationToken.None);
+        var player = household.OfficePlayer;
+        var group = household.System.Groups[TestFixtures.OfficeUuid];
+        Assert.True(player.IsPlaying);
+        Assert.True(group.IsPlaying);
+
+        // Act
+        household.Office.RespondWithServerError("GetTransportInfo");
+        await household.System.RefreshAsync(CancellationToken.None);
+        var playbackStateWhileFailing = player.PlaybackState;
+        var isPlayingWhileFailing = player.IsPlaying;
+        var isGroupPlayingWhileFailing = group.IsPlaying;
+        var sourceWhileFailing = player.Source;
+        household.Office.ClearServerError("GetTransportInfo");
+        await household.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Null(playbackStateWhileFailing);
+        Assert.False(isPlayingWhileFailing);
+        Assert.False(isGroupPlayingWhileFailing);
+        Assert.Equal(SonosSource.SpotifyConnect, sourceWhileFailing);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+        Assert.True(player.IsPlaying);
+        Assert.True(group.IsPlaying);
     }
 
     [Fact]

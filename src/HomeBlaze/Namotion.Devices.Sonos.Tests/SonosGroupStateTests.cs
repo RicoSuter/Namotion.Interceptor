@@ -206,7 +206,7 @@ public class SonosGroupStateTests
     public void WhenCoordinatorPlays_ThenGroupReportsCoordinatorTrack()
     {
         // Arrange
-        var system = CreateHousehold();
+        var system = CreateReachableHousehold();
         var group = system.Groups[TestFixtures.LivingRoomUuid];
 
         // Act

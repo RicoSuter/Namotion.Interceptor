@@ -72,9 +72,24 @@ public partial class SonosPlayer : SonosDevice,
 
     internal partial SonosSource? ReportedSource { get; set; }
 
+    /// <summary>
+    /// The playback state of the player's group, or null while it is unknown: before the first poll and while the
+    /// player or its coordinator is not connected.
+    /// </summary>
     [Derived]
-    public MediaPlaybackState? PlaybackState => GetCoordinator().ReportedPlaybackState;
+    public MediaPlaybackState? PlaybackState
+    {
+        get
+        {
+            // The last reported state of an offline speaker says nothing about now, unlike its last track.
+            var coordinator = GetCoordinator();
+            return IsConnected && coordinator.IsConnected ? coordinator.ReportedPlaybackState : null;
+        }
+    }
 
+    /// <summary>
+    /// Whether the player's group plays or buffers. False while <see cref="PlaybackState"/> is unknown.
+    /// </summary>
     [Derived]
     public bool IsPlaying => PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
 

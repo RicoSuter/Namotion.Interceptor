@@ -19,7 +19,7 @@ public class SonosDerivedTrackingTests
     public void WhenPlaybackStateChanges_ThenIsPlayingRaisesPropertyChanged()
     {
         // Arrange
-        var system = CreateHousehold();
+        var system = CreateReachableHousehold();
         var player = Track(system.Players[TestFixtures.KitchenUuid]);
         var firedEvents = TrackPropertyChanged(player);
 
@@ -84,6 +84,31 @@ public class SonosDerivedTrackingTests
         // Assert
         Assert.True(member.Shuffle);
         Assert.Contains(nameof(SonosPlayer.Shuffle), firedEvents);
+    }
+
+    [Fact]
+    public void WhenPlayingPlayerGoesOffline_ThenPlaybackStateAndIsPlayingRaisePropertyChanged()
+    {
+        // Arrange
+        var system = Track(CreateReachableHousehold());
+        var player = Track(system.Players[TestFixtures.KitchenUuid]);
+        var group = Track(system.Groups[TestFixtures.KitchenUuid]);
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", null, null, null, null, null), T0);
+        Assert.True(player.IsPlaying);
+        Assert.True(group.IsPlaying);
+        var firedEvents = TrackPropertyChanged(player);
+        var firedGroupEvents = TrackPropertyChanged(group);
+
+        // Act
+        player.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.False(player.IsPlaying);
+        Assert.Contains(nameof(SonosPlayer.PlaybackState), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.IsPlaying), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.IconName), firedEvents);
+        Assert.False(group.IsPlaying);
+        Assert.Contains(nameof(SonosGroup.IsPlaying), firedGroupEvents);
     }
 
     [Fact]
