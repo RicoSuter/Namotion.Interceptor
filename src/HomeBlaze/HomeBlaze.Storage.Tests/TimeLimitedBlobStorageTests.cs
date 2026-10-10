@@ -87,6 +87,52 @@ public sealed class TimeLimitedBlobStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenCallIsAbandonedByCancellation_ThenCallsAreRefusedUntilItReturnsAndItsResultIsDisposed()
+    {
+        // Arrange
+        using var content = new MemoryStream([1, 2, 3]);
+        await _storage.WriteAsync("Notes.md", content);
+        using var cancellation = new CancellationTokenSource();
+        var reached = _client.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var open = _storage.OpenReadAsync("Notes.md", cancellation.Token);
+        await reached;
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => open);
+
+        // Act
+        var refusal = await Record.ExceptionAsync(() => _storage.ExistsAsync(["Notes.md"]));
+        _client.Release();
+        await AsyncTestHelpers.WaitUntilAsync(() => !_storage.IsUnresponsive);
+        var exists = await _storage.ExistsAsync(["Notes.md"]);
+
+        // Assert
+        Assert.IsType<StorageUnresponsiveException>(refusal);
+        Assert.Equal(new[] { true }, exists);
+        Assert.Equal(1, _client.OpenedStreamCount);
+        Assert.Equal(1, _client.DisposedStreamCount);
+    }
+
+    [Fact]
+    public async Task WhenCallExceedsTheLimit_ThenExceptionNamesOperationAndPath()
+    {
+        // Arrange
+        var reached = _client.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        var open = _storage.OpenReadAsync("Docs/Notes.md");
+        await reached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        var exception = await Assert.ThrowsAsync<StorageUnresponsiveException>(() => open);
+        var refusal = await Assert.ThrowsAsync<StorageUnresponsiveException>(() => _storage.ExistsAsync(["Other.md"]));
+
+        // Assert
+        Assert.Contains(nameof(IBlobStorage.OpenReadAsync), exception.Message);
+        Assert.Contains("Docs/Notes.md", exception.Message);
+        Assert.Contains(nameof(IBlobStorage.ExistsAsync), refusal.Message);
+        Assert.Contains("Other.md", refusal.Message);
+    }
+
+    [Fact]
     public async Task WhenCallerCancels_ThenCallIsCancelledWithTheCallersToken()
     {
         // Arrange

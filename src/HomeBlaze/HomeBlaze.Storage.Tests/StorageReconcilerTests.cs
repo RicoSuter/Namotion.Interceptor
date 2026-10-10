@@ -674,13 +674,6 @@ public class StorageReconcilerTests : StorageTestBase
         await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
 
-    private DetachCounter CountDetachesOf(IInterceptorSubject subject)
-    {
-        var counter = new DetachCounter(subject);
-        Context!.AddService<ILifecycleHandler>(counter);
-        return counter;
-    }
-
     private sealed class LifecycleFlowRecorder : ILifecycleHandler
     {
         private readonly List<(IInterceptorSubject Subject, bool IsContextAttach, bool IsFlowSuppressed)> _changes = [];
@@ -722,21 +715,6 @@ public class StorageReconcilerTests : StorageTestBase
             }
 
             next(ref context);
-        }
-    }
-
-    private sealed class DetachCounter(IInterceptorSubject subject) : ILifecycleHandler
-    {
-        private int _count;
-
-        public int Count => Volatile.Read(ref _count);
-
-        public void HandleLifecycleChange(SubjectLifecycleChange change)
-        {
-            if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
-            {
-                Interlocked.Increment(ref _count);
-            }
         }
     }
 }

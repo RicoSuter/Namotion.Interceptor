@@ -2,6 +2,7 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -114,6 +115,13 @@ public abstract class StorageTestBase : IDisposable
     protected static IReadOnlySet<string> Named(params string[] relativePaths)
         => relativePaths.ToHashSet(StringComparer.Ordinal);
 
+    protected DetachCounter CountDetachesOf(IInterceptorSubject subject)
+    {
+        var counter = new DetachCounter(subject);
+        Context!.AddService<ILifecycleHandler>(counter);
+        return counter;
+    }
+
     public void Dispose()
     {
         foreach (var storage in _storages)
@@ -129,5 +137,20 @@ public abstract class StorageTestBase : IDisposable
         }
 
         GC.SuppressFinalize(this);
+    }
+
+    protected sealed class DetachCounter(IInterceptorSubject subject) : ILifecycleHandler
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            if (change.IsContextDetach && ReferenceEquals(change.Subject, subject))
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
     }
 }

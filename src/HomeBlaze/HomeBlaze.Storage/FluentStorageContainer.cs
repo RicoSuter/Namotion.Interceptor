@@ -415,8 +415,11 @@ public partial class FluentStorageContainer :
     private static async Task WriteAndRecordAsync(
         StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
-        using var stream = new MemoryStream(content);
+        // Not disposed when the write fails: a write that was given up reads from it once the storage goes on,
+        // and would otherwise leave an empty file.
+        var stream = new MemoryStream(content);
         await connection.Client.WriteAsync(entry.Path, stream, append: false, cancellationToken: cancellationToken);
+        await stream.DisposeAsync();
 
         entry.Hash = StorageHash.Compute(content);
         entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
@@ -425,25 +428,21 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Gets metadata about a blob.
     /// </summary>
+    /// <remarks>
+    /// On disk, asking for a path in a folder that does not exist creates that folder, as reading the path does.
+    /// </remarks>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
-        if (_connection?.StorageDirectory is { } storageDirectory)
-        {
-            // Asked for every markdown file that loads, so the directory is not listed to find one entry.
-            var file = new FileInfo(GetFileSystemPath(storageDirectory, path));
-            return file.Exists ? new BlobMetadata(file.Length, file.LastWriteTimeUtc) : null;
-        }
-
-        var blobs = await Connection.Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
-            recurse: false, cancellationToken: cancellationToken);
-        var blob = blobs.FirstOrDefault(b =>
-            b.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) ||
-            b.FullPath.TrimStart('/').Equals(path.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
-
-        if (blob == null)
+        var relativePath = StoragePath.Normalize(path);
+        if (relativePath.Length == 0)
             return null;
 
-        return new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime);
+        // Through the client also for a storage on disk: subjects ask while they load on the worker, and only
+        // a call on the client is limited.
+        var blobs = await Connection.Client.GetBlobsAsync([relativePath], cancellationToken);
+        return blobs.FirstOrDefault() is { } blob
+            ? new BlobMetadata(blob.Size ?? 0, blob.LastModificationTime?.UtcDateTime)
+            : null;
     }
 
     /// <summary>

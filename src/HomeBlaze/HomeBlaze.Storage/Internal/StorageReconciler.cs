@@ -63,14 +63,16 @@ internal sealed class StorageReconciler
     /// </exception>
     public async Task ReconcileAsync(IReadOnlySet<string> namedPaths, bool allNamed, CancellationToken cancellationToken)
     {
-        // A pass that ended early took its named paths with it, so the pass after it compares every file.
-        var isEveryFileNamed = allNamed || _hasUnfinishedPass;
+        // A pass that ended early took with it which paths were named and whether it moved a subject. The pass
+        // after it therefore compares every file, and applies as if a subject had moved.
+        var followsUnfinishedPass = _hasUnfinishedPass;
+        var isEveryFileNamed = allNamed || followsUnfinishedPass;
         _hasUnfinishedPass = true;
 
         var listing = await ListAsync(cancellationToken);
         var movableEntries = RemoveMissingEntries(listing);
 
-        var hasMovedSubjects = false;
+        var hasMovedSubjects = followsUnfinishedPass;
         foreach (var listed in listing.Values.OrderBy(entry => entry.Path, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -228,7 +230,7 @@ internal sealed class StorageReconciler
     {
         await using var stream = await OpenReadAsync(path, cancellationToken);
         return await StorageHash.ComputeAsync(stream, cancellationToken)
-            .WithStorageTimeoutAsync(_timeProvider, cancellationToken);
+            .WithStorageTimeoutAsync("hashing", path, _timeProvider, cancellationToken);
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
@@ -508,7 +510,8 @@ internal sealed class StorageReconciler
         await using var stream = await OpenReadAsync(path, cancellationToken);
 
         using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, cancellationToken).WithStorageTimeoutAsync(_timeProvider, cancellationToken);
+        await stream.CopyToAsync(buffer, cancellationToken)
+            .WithStorageTimeoutAsync("reading", path, _timeProvider, cancellationToken);
         return buffer.ToArray();
     }
 

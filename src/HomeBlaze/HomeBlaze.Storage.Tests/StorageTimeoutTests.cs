@@ -135,6 +135,60 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenMetadataCallBlocksWhileMarkdownFileLoads_ThenPassFailsAndLaterPassLoadsTheFile()
+    {
+        // Arrange
+        var storage = await ConnectPausableAsync();
+        WriteFile("Notes.md");
+        var metadataReached = _client!.BlockNext(nameof(IBlobStorage.GetBlobsAsync));
+        var pass = storage.ReconcileAsync();
+        await metadataReached;
+        var streamsOpenedBeforeMetadata = _client.OpenedStreamCount;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        var statusAfterFailedPass = storage.Status;
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(0, streamsOpenedBeforeMetadata);
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenPassFailsAfterMovingSubject_ThenNextPassKeepsTheInstanceAttached()
+    {
+        // Arrange
+        WriteFile("Old/Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectPausableAsync();
+        var motor = (Samples.Motor)((VirtualFolder)storage.Children["Old"]).Children["Motor"];
+        var detaches = CountDetachesOf(motor);
+        Directory.CreateDirectory(GetFullPath("Other"));
+        File.Move(GetFullPath("Old/Motor.json"), GetFullPath("Other/Motor.json"));
+        WriteFile("Zeta.bin");
+        var metadataReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var pass = storage.ReconcileAsync();
+        await metadataReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        var statusAfterFailedPass = storage.Status;
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        var other = Assert.IsType<VirtualFolder>(storage.Children["Other"]);
+        Assert.Same(motor, other.Children["Motor"]);
+        Assert.Equal(0, detaches.Count);
+    }
+
+    [Fact]
     public async Task WhenReadingContentOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
     {
         // Arrange
@@ -198,11 +252,16 @@ public class StorageTimeoutTests : StorageTestBase
 
         // Act
         await LetHangingCallTimeOutAsync();
+        var exception = await Record.ExceptionAsync(() => add);
+        var childrenAfterTimeout = storage.Children.Keys.ToList();
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
 
         // Assert
-        await Assert.ThrowsAsync<StorageUnresponsiveException>(() => add);
-        await storage.ReconcileAsync();
-        Assert.Empty(storage.Children);
+        Assert.IsType<StorageUnresponsiveException>(exception);
+        Assert.Empty(childrenAfterTimeout);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
     }
 
     private async Task<FluentStorageContainer> ConnectPausableAsync()

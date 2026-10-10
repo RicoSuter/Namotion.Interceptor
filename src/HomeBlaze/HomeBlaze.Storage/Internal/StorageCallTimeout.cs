@@ -33,30 +33,52 @@ internal static class StorageCallTimeout
         return call.IsCompleted;
     }
 
-    /// <exception cref="StorageUnresponsiveException">The call did not complete within <see cref="Limit"/>.</exception>
+    /// <summary>
+    /// Limits the reading of a stream of the storage, which is not a call on the client.
+    /// </summary>
+    /// <param name="call">The read that is running.</param>
+    /// <param name="operation">What is being done with the file, for the message of the exception.</param>
+    /// <param name="path">The file that is read.</param>
+    /// <param name="timeProvider">The clock of the limit.</param>
+    /// <param name="cancellationToken">Ends the wait with the caller's cancellation.</param>
+    /// <exception cref="StorageUnresponsiveException">The read did not complete within <see cref="Limit"/>.</exception>
     public static Task<TResult> WithStorageTimeoutAsync<TResult>(
-        this Task<TResult> call, TimeProvider timeProvider, CancellationToken cancellationToken)
-        => call.IsCompleted ? call : LimitAsync(call, timeProvider, cancellationToken);
+        this Task<TResult> call, string operation, string path, TimeProvider timeProvider, CancellationToken cancellationToken)
+        => call.IsCompleted ? call : LimitAsync(call, operation, path, timeProvider, cancellationToken);
 
-    /// <exception cref="StorageUnresponsiveException">The call did not complete within <see cref="Limit"/>.</exception>
+    /// <inheritdoc cref="WithStorageTimeoutAsync{TResult}"/>
     public static Task WithStorageTimeoutAsync(
-        this Task call, TimeProvider timeProvider, CancellationToken cancellationToken)
-        => call.IsCompleted ? call : LimitAsync(call, timeProvider, cancellationToken);
+        this Task call, string operation, string path, TimeProvider timeProvider, CancellationToken cancellationToken)
+        => call.IsCompleted ? call : LimitAsync(call, operation, path, timeProvider, cancellationToken);
+
+    /// <summary>
+    /// Marks the fault of a call that nobody waits for any more as observed.
+    /// </summary>
+    public static void ObserveFault(this Task call)
+        => call.ContinueWith(
+            static completed => completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     private static async Task<TResult> LimitAsync<TResult>(
-        Task<TResult> call, TimeProvider timeProvider, CancellationToken cancellationToken)
+        Task<TResult> call, string operation, string path, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
-        await LimitAsync((Task)call, timeProvider, cancellationToken);
+        await LimitAsync((Task)call, operation, path, timeProvider, cancellationToken);
         return await call;
     }
 
-    private static async Task LimitAsync(Task call, TimeProvider timeProvider, CancellationToken cancellationToken)
+    private static async Task LimitAsync(
+        Task call, string operation, string path, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         if (!await call.WaitWithinLimitAsync(timeProvider, cancellationToken))
         {
+            // Its stream is disposed while it still reads, so it usually fails later.
+            call.ObserveFault();
+
             cancellationToken.ThrowIfCancellationRequested();
             throw new StorageUnresponsiveException(
-                $"The storage did not deliver the content of a file within {Limit.TotalSeconds:0} seconds.");
+                $"The storage did not complete {operation} '{path}' within {Limit.TotalSeconds:0} seconds.");
         }
 
         await call;

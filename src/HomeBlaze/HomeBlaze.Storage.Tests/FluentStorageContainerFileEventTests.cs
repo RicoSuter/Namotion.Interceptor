@@ -582,6 +582,9 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
     [InlineData("Notes.md", true)]
     [InlineData("Docs/Notes.md", true)]
     [InlineData("Missing.md", false)]
+    [InlineData("Missing/Notes.md", false)]
+    [InlineData("Docs", false)]
+    [InlineData("", false)]
     public async Task WhenBlobMetadataIsRequested_ThenItReflectsTheFileOnDisk(string path, bool exists)
     {
         // Arrange
@@ -599,6 +602,24 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
             Assert.Equal(5, metadata.Size);
             Assert.Equal(File.GetLastWriteTimeUtc(GetFullPath(path)), metadata.LastModifiedUtc);
         }
+    }
+
+    [Fact]
+    public async Task WhenBlobMetadataIsRequestedFromInMemoryStorage_ThenItReflectsTheBlob()
+    {
+        // Arrange
+        var storage = await ConnectAsync(configure: container => container.StorageType = "inmemory");
+        using var content = new MemoryStream([1, 2, 3, 4, 5]);
+        await storage.WriteBlobAsync("Docs/Notes.md", content, CancellationToken.None);
+
+        // Act
+        var metadata = await storage.GetBlobMetadataAsync("Docs/Notes.md", CancellationToken.None);
+        var missing = await storage.GetBlobMetadataAsync("Docs/Missing.md", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(5, metadata?.Size);
+        Assert.NotNull(metadata?.LastModifiedUtc);
+        Assert.Null(missing);
     }
 
     [Fact]
