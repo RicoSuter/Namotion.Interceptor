@@ -133,7 +133,8 @@
     /// <summary>
     /// Writes the configuration that contains the subject through the nearest IConfigurationWriter among its
     /// parents, else the root manager, and applies it. Nothing is written for a subject that is part of no
-    /// configuration, such as a file, which its edit component has saved.
+    /// configuration, such as a file, which its edit component has saved. Warns when the writer stores no
+    /// configuration that contains the subject, in which case the edits are applied but not saved.
     /// </summary>
     public async Task PersistAsync(CancellationToken cancellationToken)
     {
@@ -148,8 +149,14 @@
             if (configurationOwner is IConfigurable configurable)
             {
                 var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
-                await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
+                var isWritten = await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
                 await configurable.ApplyConfigurationAsync(cancellationToken);
+
+                if (!isWritten)
+                {
+                    Snackbar.Add("Configuration applied but not saved. It will be lost on restart.", Severity.Warning);
+                    return;
+                }
             }
 
             Snackbar.Add("Configuration saved.", Severity.Info);

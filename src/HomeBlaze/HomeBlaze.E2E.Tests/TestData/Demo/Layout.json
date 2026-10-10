@@ -1,0 +1,20 @@
+{
+  "$type": "HomeBlaze.Components.GridLayout",
+  "rows": 1,
+  "columns": 4,
+  "cells": [
+    {
+      "$type": "HomeBlaze.Components.GridCell",
+      "row": 0,
+      "column": 0,
+      "rowSpan": 1,
+      "columnSpan": 1,
+      "child": {
+        "$type": "HomeBlaze.Samples.Motor",
+        "name": "LayoutMotor",
+        "targetSpeed": 2000,
+        "simulationInterval": "00:00:01.500"
+      }
+    }
+  ]
+}

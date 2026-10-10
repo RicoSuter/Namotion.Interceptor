@@ -199,12 +199,16 @@
                     return;
                 }
 
-                // Persisting finds its writer through the parents BeforeSave establishes.
-                BeforeSave?.Invoke(_createdSubject);
-
-                if (_editPanel != null)
+                // Persisting finds its writer through the parents BeforeSave establishes. Without them nothing
+                // stores the subject yet, and the caller persists it from the result.
+                if (BeforeSave != null)
                 {
-                    await _editPanel.PersistAsync(CancellationToken.None);
+                    BeforeSave(_createdSubject);
+
+                    if (_editPanel != null)
+                    {
+                        await _editPanel.PersistAsync(CancellationToken.None);
+                    }
                 }
 
                 MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, _subjectName)));

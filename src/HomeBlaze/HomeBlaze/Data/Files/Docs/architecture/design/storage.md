@@ -108,6 +108,8 @@ The `[State]` attribute marks runtime-only properties that are not persisted.
 
 `IConfigurationWriter` forms a chain resolved via the subject's parent hierarchy — the nearest parent that implements `IConfigurationWriter` handles persistence. This allows different storage containers to own different subtrees.
 
+A writer persists the configuration that contains the subject it is given. A storage container stores one subject per JSON file, so a subject nested in that file's configuration through `[Configuration]` properties, such as a cell of a grid layout, is written by rewriting the whole file. A writer returns `false` when it stores no configuration that contains the subject, and the edit dialog then reports that the change was applied but not saved.
+
 ## Dynamic Metadata and Annotations [Planned]
 
 User-created metadata (annotations, tags, links between subjects) are stored as dynamic attributes on the registry. These are persisted in their own JSON files, separate from subject configuration, so they survive restarts and can be reapplied to subjects as they are instantiated.
