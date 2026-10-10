@@ -415,7 +415,7 @@ internal sealed class StorageReconciler
             IInterceptorSubject subject;
             using (ExecutionContext.SuppressFlow())
             {
-                subject = _subjectFactory.CreateFile(_storage, listed.Path);
+                subject = _subjectFactory.CreateFile(_storage, StoragePath.ToFullPath(listed.Path));
             }
 
             if (subject is GenericFile genericFile)
@@ -448,7 +448,7 @@ internal sealed class StorageReconciler
         // assignment in Apply does.
         using (ExecutionContext.SuppressFlow())
         {
-            subject = _subjectFactory.CreateFromJson(_storage, path, json);
+            subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
         }
 
         if (subject is JsonFile file)

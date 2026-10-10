@@ -28,6 +28,24 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenFilesAreLoaded_ThenTheirFullPathStartsWithSlash()
+    {
+        // Arrange
+        WriteFile("Docs/Readme.md", "# Readme");
+        WriteFile("Docs/Data.bin");
+        WriteFile("Docs/Plain.json", "{}");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal("/Docs/Readme.md", Assert.IsType<MarkdownFile>(docs.Children["Readme.md"]).FullPath);
+        Assert.Equal("/Docs/Data.bin", Assert.IsType<GenericFile>(docs.Children["Data.bin"]).FullPath);
+        Assert.Equal("/Docs/Plain.json", Assert.IsType<JsonFile>(docs.Children["Plain.json"]).FullPath);
+    }
+
+    [Fact]
     public async Task WhenFileIsNamedButUnchanged_ThenItIsNotReloaded()
     {
         // Arrange

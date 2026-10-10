@@ -26,6 +26,12 @@ internal static class StoragePath
         return Normalize(folder.IsEmpty ? blob.Name : string.Concat(folder, "/", blob.Name));
     }
 
+    /// <summary>
+    /// The path as a file subject receives it: with the leading slash that the full path of a blob has.
+    /// </summary>
+    public static string ToFullPath(string path)
+        => "/" + path;
+
     public static string GetParent(string path)
     {
         var separatorIndex = path.LastIndexOf('/');
