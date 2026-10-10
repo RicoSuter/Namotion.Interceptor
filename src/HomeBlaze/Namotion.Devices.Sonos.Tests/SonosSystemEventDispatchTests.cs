@@ -56,7 +56,7 @@ public class SonosSystemEventDispatchTests
         // Assert
         Assert.Equal(HttpStatusCode.OK, status);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => member.CurrentTrackTitle == "Song" && member.IsPlaying,
+            () => member.CurrentTrackTitle == "Song" && member.IsPlaying == true,
             ConnectedSystem.WaitTimeout,
             message: "The member should show the track of its coordinator.");
         Assert.Equal("Artist", member.CurrentTrackArtist);

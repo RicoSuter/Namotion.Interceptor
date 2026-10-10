@@ -89,10 +89,15 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     /// <summary>
-    /// Whether the player's group plays or buffers. False while <see cref="PlaybackState"/> is unknown.
+    /// Whether the player's group plays or buffers, or null while <see cref="PlaybackState"/> is unknown.
     /// </summary>
     [Derived]
-    public bool IsPlaying => PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
+    public bool? IsPlaying => PlaybackState switch
+    {
+        null => null,
+        MediaPlaybackState.Playing or MediaPlaybackState.Buffering => true,
+        _ => false
+    };
 
     [Derived]
     public string? CurrentTrackTitle => GetCoordinator().ReportedTrackTitle;
@@ -189,7 +194,7 @@ public partial class SonosPlayer : SonosDevice,
     public partial Dictionary<string, SonosSatellite> Satellites { get; internal set; }
 
     [Derived]
-    public override string? IconName => IsPlaying ? "PlayCircle" : "Speaker";
+    public override string? IconName => IsPlaying == true ? "PlayCircle" : "Speaker";
 
     // The coordinator of the player's group, or the player itself when it coordinates or the coordinator is unknown.
     private SonosPlayer GetCoordinator() =>

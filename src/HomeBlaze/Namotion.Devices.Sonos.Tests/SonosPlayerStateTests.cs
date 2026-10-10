@@ -557,7 +557,7 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Null(playbackState);
-        Assert.False(isPlaying);
+        Assert.Null(isPlaying);
         Assert.Null(source);
     }
 
@@ -573,7 +573,7 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Null(player.PlaybackState);
-        Assert.False(player.IsPlaying);
+        Assert.Null(player.IsPlaying);
     }
 
     [Fact]

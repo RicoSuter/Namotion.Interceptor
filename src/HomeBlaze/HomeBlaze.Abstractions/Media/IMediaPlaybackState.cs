@@ -18,9 +18,15 @@ public interface IMediaPlaybackState
     MediaPlaybackState? PlaybackState { get; }
 
     /// <summary>
-    /// Whether media plays or is about to: the state is playing or buffering. False while the state is unknown.
+    /// Whether media plays or is about to: true while playing or buffering, false while paused or stopped, and
+    /// <c>null</c> while the state is unknown.
     /// </summary>
     [Derived]
     [State(Position = 140)]
-    bool IsPlaying => PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
+    bool? IsPlaying => PlaybackState switch
+    {
+        null => null,
+        MediaPlaybackState.Playing or MediaPlaybackState.Buffering => true,
+        _ => false
+    };
 }

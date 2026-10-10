@@ -100,7 +100,7 @@ A group reports its coordinator's playback and track, and its own volume and mut
 ### Offline Handling
 
 - A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
-- While a player is not connected, its `PlaybackState` is empty and `IsPlaying` is false, so an unplugged speaker never keeps reporting that it plays. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll.
+- While a player is not connected, its `PlaybackState` and `IsPlaying` are empty (unknown), so an unplugged speaker never keeps reporting that it plays, and its going offline does not read as playback that stopped. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll that reads it; the one from before the outage is forgotten.
 - A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
 - A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
@@ -150,7 +150,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | Property | Unit | Description |
 |----------|------|-------------|
 | `Uuid`, `RoomName` | | RINCON id and room name |
-| `PlaybackState`, `IsPlaying` | | `Stopped`, `Playing`, `Paused` or `Buffering` (Sonos's transitioning) of the room's group; empty while unknown, which includes while offline, see [Offline Handling](#offline-handling). `IsPlaying` is true for playing and buffering and false while unknown |
+| `PlaybackState`, `IsPlaying` | | `Stopped`, `Playing`, `Paused` or `Buffering` (Sonos's transitioning) of the room's group; empty while unknown, which includes while offline, see [Offline Handling](#offline-handling). `IsPlaying` is true for playing and buffering, false for paused and stopped, and empty while unknown |
 | `Volume`, `IsMuted` | 0..1 | This room |
 | `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackUri` | | The track of the room's group, see [Track Details](#track-details) |
 | `CurrentTrackImageUri` | URI | Album art; Sonos's relative `/getaa?...` paths are resolved against the coordinator, which serves it |

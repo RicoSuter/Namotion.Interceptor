@@ -49,7 +49,7 @@ public partial class SonosGroup :
     public MediaPlaybackState? PlaybackState => Coordinator.PlaybackState;
 
     [Derived]
-    public bool IsPlaying => Coordinator.IsPlaying;
+    public bool? IsPlaying => Coordinator.IsPlaying;
 
     [Derived]
     public string? CurrentTrackTitle => Coordinator.CurrentTrackTitle;

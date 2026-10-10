@@ -36,10 +36,10 @@
             {
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
                     <MudIcon Size="Size.Small"
-                             Icon="@(player.IsPlaying ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.Speaker)"
+                             Icon="@(player.IsPlaying == true ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.Speaker)"
                              Color="@(player.IsConnected ? Color.Default : Color.Error)" />
                     <MudText Typo="Typo.body2">@player.RoomName</MudText>
-                    @if (player.IsPlaying && SonosTrackText.GetTitle(player.CurrentTrackTitle, player.SourceTitle) is { } title)
+                    @if (player.IsPlaying == true && SonosTrackText.GetTitle(player.CurrentTrackTitle, player.SourceTitle) is { } title)
                     {
                         <MudText Typo="Typo.caption" Class="mud-text-secondary">@title</MudText>
                     }

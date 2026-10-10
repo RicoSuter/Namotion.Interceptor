@@ -34,7 +34,7 @@ public class SonosOfflineStateTests
 
         // Assert
         Assert.Null(player.PlaybackState);
-        Assert.False(player.IsPlaying);
+        Assert.Null(player.IsPlaying);
         Assert.Equal("Speaker", player.IconName);
         Assert.Equal("Song", player.CurrentTrackTitle);
         Assert.Equal("Artist", player.CurrentTrackArtist);
@@ -141,7 +141,7 @@ public class SonosOfflineStateTests
 
         // Assert
         Assert.Null(player.PlaybackState);
-        Assert.False(player.IsPlaying);
+        Assert.Null(player.IsPlaying);
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public class SonosOfflineStateTests
 
         // Assert
         Assert.Null(player.PlaybackState);
-        Assert.False(player.IsPlaying);
+        Assert.Null(player.IsPlaying);
         Assert.Equal("Song", player.CurrentTrackTitle);
     }
 
@@ -225,10 +225,10 @@ public class SonosOfflineStateTests
 
         // Assert
         Assert.Null(group.PlaybackState);
-        Assert.False(group.IsPlaying);
+        Assert.Null(group.IsPlaying);
         Assert.Equal("Song", group.CurrentTrackTitle);
         Assert.Null(member.PlaybackState);
-        Assert.False(member.IsPlaying);
+        Assert.Null(member.IsPlaying);
         Assert.Equal("Song", member.CurrentTrackTitle);
     }
 
@@ -246,7 +246,7 @@ public class SonosOfflineStateTests
 
         // Assert
         Assert.Null(member.PlaybackState);
-        Assert.False(member.IsPlaying);
+        Assert.Null(member.IsPlaying);
         Assert.Equal(MediaPlaybackState.Playing, coordinator.PlaybackState);
         Assert.True(system.Groups[OfficeUuid].IsPlaying);
     }

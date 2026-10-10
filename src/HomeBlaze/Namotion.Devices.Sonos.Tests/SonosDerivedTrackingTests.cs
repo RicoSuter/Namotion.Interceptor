@@ -103,11 +103,11 @@ public class SonosDerivedTrackingTests
         TakeOffline(player);
 
         // Assert
-        Assert.False(player.IsPlaying);
+        Assert.Null(player.IsPlaying);
         Assert.Contains(nameof(SonosPlayer.PlaybackState), firedEvents);
         Assert.Contains(nameof(SonosPlayer.IsPlaying), firedEvents);
         Assert.Contains(nameof(SonosPlayer.IconName), firedEvents);
-        Assert.False(group.IsPlaying);
+        Assert.Null(group.IsPlaying);
         Assert.Contains(nameof(SonosGroup.IsPlaying), firedGroupEvents);
     }
 
@@ -161,7 +161,7 @@ public class SonosDerivedTrackingTests
 
         // Assert
         Assert.Null(member.CurrentTrackTitle);
-        Assert.False(member.IsPlaying);
+        Assert.Null(member.IsPlaying);
         Assert.Contains(nameof(SonosPlayer.CurrentTrackTitle), firedEvents);
         Assert.Contains(nameof(SonosPlayer.IsPlaying), firedEvents);
     }
