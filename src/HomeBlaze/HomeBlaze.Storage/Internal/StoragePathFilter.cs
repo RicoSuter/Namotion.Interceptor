@@ -22,14 +22,36 @@ internal static class StoragePathFilter
     }
 
     /// <summary>
-    /// Checks whether the path is a temporary file that editors write before renaming it to the real name.
+    /// Checks whether the last segment of the path has a temporary name, as editors use for the file they write
+    /// before renaming it to the real name.
     /// </summary>
     public static bool IsTemporaryFile(ReadOnlySpan<char> path)
+        => IsTemporaryName(Path.GetFileName(path));
+
+    /// <summary>
+    /// Checks whether the path or one of its parent folders has a temporary name.
+    /// </summary>
+    /// <remarks>Only for paths within the storage: an absolute path can have such a folder above the storage.</remarks>
+    public static bool HasTemporarySegment(ReadOnlySpan<char> path)
     {
-        var fileName = Path.GetFileName(path);
-        return fileName.StartsWith('~') ||
-               fileName.EndsWith('~') ||
-               fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-               fileName.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
+        while (!path.IsEmpty)
+        {
+            var separatorIndex = path.IndexOfAny('/', '\\');
+            var segment = separatorIndex < 0 ? path : path[..separatorIndex];
+            if (IsTemporaryName(segment))
+            {
+                return true;
+            }
+
+            path = separatorIndex < 0 ? [] : path[(separatorIndex + 1)..];
+        }
+
+        return false;
     }
+
+    private static bool IsTemporaryName(ReadOnlySpan<char> name)
+        => name.StartsWith('~') ||
+           name.EndsWith('~') ||
+           name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+           name.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
 }

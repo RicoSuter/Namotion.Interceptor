@@ -77,16 +77,14 @@ internal sealed class JsonSubjectSynchronizer
         }
 
         // The hash alone decides: the size is not recorded by a scan or a write, and a missing or stale
-        // size must not reload a subject whose file is unchanged.
-        if (!_pathRegistry.HasHashChanged(relativePath, newHash))
+        // size must not reload a subject whose file is unchanged. Recording it is also what lets only one
+        // of two events that see the same new content apply it.
+        _pathRegistry.UpdateSize(relativePath, newSize);
+        if (!_pathRegistry.TryUpdateHash(relativePath, newHash))
         {
-            _pathRegistry.UpdateSize(relativePath, newSize);
             _logger?.LogDebug("File unchanged (same hash), skipping reload: {Path}", relativePath);
             return true;
         }
-
-        _pathRegistry.UpdateSize(relativePath, newSize);
-        _pathRegistry.UpdateHash(relativePath, newHash);
 
         // Deserialize and update
         try

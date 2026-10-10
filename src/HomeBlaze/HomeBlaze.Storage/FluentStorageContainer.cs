@@ -159,6 +159,11 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Initializing;
         try
         {
+            // A reconnect replaces both. A watcher left running would keep handling events of the previous directory.
+            _fileWatcher?.Dispose();
+            _fileWatcher = null;
+            var previousClient = _client;
+
             _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
             _client = StorageType switch
             {
@@ -166,6 +171,7 @@ public partial class FluentStorageContainer :
                 "inmemory" => StorageFactory.Blobs.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
             };
+            previousClient?.Dispose();
 
             _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
 
@@ -202,7 +208,7 @@ public partial class FluentStorageContainer :
         var children = new Dictionary<string, IInterceptorSubject>();
         foreach (var blob in blobs)
         {
-            if (IsIgnored(blob))
+            if (IsIgnored(blob.FullPath))
             {
                 continue;
             }
@@ -262,10 +268,9 @@ public partial class FluentStorageContainer :
         _logger?.LogInformation("Synchronized storage after lost file events.");
     }
 
-    // Temporary files are skipped because the watcher drops their events, so one that was added could never be removed.
-    private static bool IsIgnored(Blob blob)
-        => StoragePathFilter.IsHidden(blob.FullPath) ||
-           (!blob.IsFolder && StoragePathFilter.IsTemporaryFile(blob.FullPath));
+    // Temporary paths are skipped because the watcher drops their events, so one that was added could never be removed.
+    private static bool IsIgnored(ReadOnlySpan<char> relativePath)
+        => StoragePathFilter.IsHidden(relativePath) || StoragePathFilter.HasTemporarySegment(relativePath);
 
     internal async Task ProcessFileEventAsync(FileSystemEventArgs e)
     {
@@ -303,7 +308,7 @@ public partial class FluentStorageContainer :
     /// </param>
     private async Task SyncPathAsync(string relativePath, bool reportedAsCreated)
     {
-        if (StoragePathFilter.IsHidden(relativePath))
+        if (IsIgnored(relativePath))
             return;
 
         var fileSystemPath = GetFileSystemPath(relativePath);
@@ -348,7 +353,7 @@ public partial class FluentStorageContainer :
     {
         foreach (var blob in blobs)
         {
-            if (IsIgnored(blob))
+            if (IsIgnored(blob.FullPath))
                 continue;
 
             try
@@ -560,20 +565,41 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
+    /// <exception cref="ArgumentException">The path is hidden or temporary and would not be loaded again.</exception>
+    /// <exception cref="InvalidOperationException">The path or its key in the hierarchy is already taken.</exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        var fullPath = GetFileSystemPath(path);
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+        if (IsIgnored(path))
+            throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
+
+        // Covers a file that is on disk without a subject in the hierarchy, which the registry does not know.
+        if (await Client.ExistsAsync(path, cancellationToken))
+            throw new InvalidOperationException($"A file already exists at '{path}'.");
 
         var json = _subjectFactory.Serialize(subject);
-        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
-
-        if (AddToHierarchy(path, subject))
+        // Placed before the file is written: an event or a directory reconcile that sees the new file
+        // then finds the subject registered instead of adding a second instance.
+        lock (_hierarchyLock)
         {
-            _logger?.LogInformation("Added subject to storage: {Path}", path);
+            if (_pathRegistry.TryGetSubject(path, out _) || !AddToHierarchy(path, subject))
+                throw new InvalidOperationException($"A subject already exists at '{path}'.");
+
+            _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
         }
+
+        try
+        {
+            _fileWatcher?.MarkAsOwnWrite(GetFileSystemPath(path));
+            await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        }
+        catch
+        {
+            RemoveFromHierarchy(path, subject);
+            throw;
+        }
+
+        _logger?.LogInformation("Added subject to storage: {Path}", path);
     }
 
     /// <summary>
@@ -641,6 +667,13 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
+        if (_storageDirectory != null)
+        {
+            // Asked for every markdown file that loads, so the directory is not listed to find one entry.
+            var file = new FileInfo(GetFileSystemPath(path));
+            return file.Exists ? new BlobMetadata(file.Length, file.LastWriteTimeUtc) : null;
+        }
+
         var blobs = await Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
             recurse: false, cancellationToken: cancellationToken);
         var blob = blobs.FirstOrDefault(b =>

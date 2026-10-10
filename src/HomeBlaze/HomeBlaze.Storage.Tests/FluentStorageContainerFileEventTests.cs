@@ -13,7 +13,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
     private static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
 
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-storage-");
-    private FluentStorageContainer? _storage;
+    private readonly List<FluentStorageContainer> _storages = [];
     private ServiceProvider? _serviceProvider;
 
     public FluentStorageContainerFileEventTests()
@@ -482,6 +482,153 @@ public class FluentStorageContainerFileEventTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenSubjectIsAddedWithTakenName_ThenItThrowsAndExistingSubjectIsKept()
+    {
+        // Arrange
+        var originalJson = SerializeMotor("Existing");
+        WriteFile("Motor.json", originalJson);
+        var storage = await ConnectAsync();
+        var existing = storage.Children["Motor"];
+        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>()) { Name = "Added" };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            storage.AddSubjectAsync("Motor.json", added, CancellationToken.None));
+
+        Assert.Same(existing, storage.Children["Motor"]);
+        Assert.Equal(originalJson, File.ReadAllText(GetFullPath("Motor.json")));
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsAddedWithKeyOfFolder_ThenItThrowsAndNoFileIsWritten()
+    {
+        // Arrange
+        WriteFile("Docs/Readme.md");
+        var storage = await ConnectAsync();
+        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>());
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            storage.AddSubjectAsync("Docs.json", added, CancellationToken.None));
+
+        Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.False(File.Exists(GetFullPath("Docs.json")));
+    }
+
+    [Theory]
+    [InlineData(".Motor.json")]
+    [InlineData(".idea/Motor.json")]
+    [InlineData("Motor.json.tmp")]
+    public async Task WhenSubjectIsAddedWithIgnoredName_ThenItThrowsAndNoFileIsWritten(string path)
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>());
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            storage.AddSubjectAsync(path, added, CancellationToken.None));
+
+        Assert.Empty(storage.Children);
+        Assert.False(File.Exists(GetFullPath(path)));
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsAdded_ThenItIsWrittenAndPlaced()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>()) { Name = "Added" };
+
+        // Act
+        await storage.AddSubjectAsync("Devices/Motor.json", added, CancellationToken.None);
+
+        // Assert
+        var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
+        Assert.Same(added, devices.Children["Motor"]);
+        Assert.Contains("Added", File.ReadAllText(GetFullPath("Devices/Motor.json")));
+    }
+
+    [Theory]
+    [InlineData("Build.tmp/Output.md")]
+    [InlineData("~Backup/Notes.md")]
+    [InlineData("Docs/Old~/Notes.md")]
+    public async Task WhenFileIsCreatedInTemporaryDirectory_ThenItIsIgnored(string relativePath)
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile(relativePath);
+
+        // Act
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, relativePath));
+
+        // Assert
+        Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenTemporaryDirectoryIsRenamedToRealName_ThenOnlyRealFolderExists()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile("Docs.tmp/Readme.md");
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs.tmp/Readme.md"));
+        Directory.Move(GetFullPath("Docs.tmp"), GetFullPath("Docs"));
+
+        // Act: the watcher reports a rename from a temp name as a creation of the new path.
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+
+        // Assert
+        Assert.Equal(["Docs"], storage.Children.Keys);
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Readme.md"], docs.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenFileWatchingIsDisabledByReconfiguration_ThenPreviousWatcherStops()
+    {
+        // Arrange
+        var reconfigured = await ConnectAsync(enableFileWatching: true);
+        reconfigured.EnableFileWatching = false;
+        await reconfigured.ApplyConfigurationAsync(CancellationToken.None);
+
+        var watching = await ConnectAsync(enableFileWatching: true);
+
+        // Act: the second file is handled a full coalesce window after the first,
+        // so by then every watcher that is still running has handled the first one.
+        WriteFile("First.md");
+        await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("First.md"), WatcherTimeout);
+        WriteFile("Second.md");
+        await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("Second.md"), WatcherTimeout);
+
+        // Assert
+        Assert.Empty(reconfigured.Children);
+    }
+
+    [Theory]
+    [InlineData("Notes.md", true)]
+    [InlineData("Docs/Notes.md", true)]
+    [InlineData("Missing.md", false)]
+    public async Task WhenBlobMetadataIsRequested_ThenItReflectsTheFileOnDisk(string path, bool exists)
+    {
+        // Arrange
+        WriteFile("Notes.md", "12345");
+        WriteFile("Docs/Notes.md", "12345");
+        var storage = await ConnectAsync();
+
+        // Act
+        var metadata = await storage.GetBlobMetadataAsync(path, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(exists, metadata != null);
+        if (metadata != null)
+        {
+            Assert.Equal(5, metadata.Size);
+            Assert.Equal(File.GetLastWriteTimeUtc(GetFullPath(path)), metadata.LastModifiedUtc);
+        }
+    }
+
+    [Fact]
     public async Task WhenFilesAreCreatedConcurrently_ThenAllFilesAreAdded()
     {
         // Arrange
@@ -535,6 +682,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
         WriteFile("~Draft.md");
         WriteFile("Docs/Notes.md.tmp");
         WriteFile("Docs/Notes.md");
+        WriteFile("Build.tmp/Output.md");
 
         // Act
         var storage = await ConnectAsync();
@@ -644,7 +792,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
         };
 
         ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
-        _storage = storage;
+        _storages.Add(storage);
         await storage.ConnectAsync(CancellationToken.None);
         return storage;
     }
@@ -688,7 +836,11 @@ public class FluentStorageContainerFileEventTests : IDisposable
 
     public void Dispose()
     {
-        _storage?.Dispose();
+        foreach (var storage in _storages)
+        {
+            storage.Dispose();
+        }
+
         _serviceProvider?.Dispose();
         _directory.Delete(recursive: true);
     }

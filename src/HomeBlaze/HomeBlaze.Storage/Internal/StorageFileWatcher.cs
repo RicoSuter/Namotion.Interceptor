@@ -17,7 +17,8 @@ internal sealed class StorageFileWatcher : IDisposable
     private readonly Func<Task> _onRescanRequired;
     private readonly ILogger? _logger;
 
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _pendingWrites = new();
+    private readonly ConcurrentDictionary<string, long> _pendingWrites = new();
+    private readonly TimeProvider _timeProvider;
     private readonly FileEventCoalescer _coalescer;
 
     private FileSystemWatcher? _watcher;
@@ -35,7 +36,8 @@ internal sealed class StorageFileWatcher : IDisposable
         _logger = logger;
 
         // Note: We don't filter temp files before coalescing, a rename from or to one says what happened to the real file
-        _coalescer = new FileEventCoalescer(CoalesceWindow, ProcessBatch, timeProvider);
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _coalescer = new FileEventCoalescer(CoalesceWindow, ProcessBatch, _timeProvider);
     }
 
     public void Start()
@@ -84,6 +86,19 @@ internal sealed class StorageFileWatcher : IDisposable
         {
             _ = ProcessEventSafeAsync(coalescedEvent);
         }
+
+        // The coalesced event carries one old path at most. A second file renamed onto the same target
+        // within the window would otherwise leave its old path in the tree.
+        var carriedOldPath = (coalescedEvent as RenamedEventArgs)?.OldFullPath ?? coalescedEvent?.FullPath;
+        foreach (var fileEvent in events)
+        {
+            if (fileEvent is RenamedEventArgs renamed &&
+                !StoragePathFilter.IsTemporaryFile(renamed.OldFullPath) &&
+                !string.Equals(renamed.OldFullPath, carriedOldPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _ = ProcessEventSafeAsync(CreateEvent(WatcherChangeTypes.Deleted, renamed.OldFullPath));
+            }
+        }
     }
 
     /// <summary>
@@ -124,14 +139,17 @@ internal sealed class StorageFileWatcher : IDisposable
     /// </summary>
     public void MarkAsOwnWrite(string fullPath)
     {
-        _pendingWrites[fullPath] = DateTimeOffset.UtcNow;
+        var writeTimestamp = _timeProvider.GetTimestamp();
+        _pendingWrites[fullPath] = writeTimestamp;
+        _ = RemoveOwnWriteAfterGracePeriodAsync(fullPath, writeTimestamp);
+    }
 
-        // Schedule cleanup after grace period
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(WriteGracePeriod);
-            _pendingWrites.TryRemove(fullPath, out _);
-        });
+    private async Task RemoveOwnWriteAfterGracePeriodAsync(string fullPath, long writeTimestamp)
+    {
+        await Task.Delay(WriteGracePeriod, _timeProvider);
+
+        // Only this write's mark: a later write to the same path has replaced it and has its own grace period.
+        _pendingWrites.TryRemove(KeyValuePair.Create(fullPath, writeTimestamp));
     }
 
     /// <summary>
@@ -141,9 +159,9 @@ internal sealed class StorageFileWatcher : IDisposable
 
     private bool IsOwnWrite(string fullPath)
     {
-        if (_pendingWrites.TryGetValue(fullPath, out var writeTime))
+        if (_pendingWrites.TryGetValue(fullPath, out var writeTimestamp))
         {
-            return DateTimeOffset.UtcNow - writeTime < WriteGracePeriod;
+            return _timeProvider.GetElapsedTime(writeTimestamp) < WriteGracePeriod;
         }
         return false;
     }

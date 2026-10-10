@@ -14,7 +14,7 @@ internal sealed class FileEventCoalescer : IDisposable
     private readonly Action<List<FileSystemEventArgs>> _onBatch;
 
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, List<FileSystemEventArgs>> _eventsByPath = new();
+    private readonly Dictionary<string, List<FileSystemEventArgs>> _eventsByPath = new(StringComparer.OrdinalIgnoreCase);
 
     // Every window has the same length, so batches close in the order they were opened
     // and one timer aimed at the oldest batch serves all paths.
@@ -61,7 +61,7 @@ internal sealed class FileEventCoalescer : IDisposable
     /// </summary>
     public void Add(FileSystemEventArgs fileEvent)
     {
-        var path = fileEvent.FullPath.ToLowerInvariant();
+        var path = fileEvent.FullPath;
 
         lock (_lock)
         {

@@ -222,6 +222,48 @@ public class StorageFileWatcherTests
     }
 
     [Fact]
+    public void WhenTwoFilesAreRenamedOntoSameTargetWithinWindow_ThenBothOldPathsAreReported()
+    {
+        // Arrange
+        using var watcher = CreateWatcher();
+        var first = new RenamedEventArgs(WatcherChangeTypes.Renamed, BasePath, "Target.md", "First.md");
+        var second = new RenamedEventArgs(WatcherChangeTypes.Renamed, BasePath, "Target.md", "Second.md");
+
+        // Act
+        watcher.SimulateFileEvent(first);
+        watcher.SimulateFileEvent(second);
+        _timeProvider.Advance(CoalesceWindow);
+
+        // Assert
+        Assert.Contains(second, _processedEvents);
+        Assert.Contains(_processedEvents, e =>
+            e.ChangeType == WatcherChangeTypes.Deleted && e.FullPath == Path.Combine(BasePath, "First.md"));
+        Assert.Equal(2, _processedEvents.Count);
+    }
+
+    [Fact]
+    public void WhenPathIsWrittenAgainWithinGracePeriod_ThenLaterWriteStaysOwnWrite()
+    {
+        // Arrange
+        using var watcher = CreateWatcher();
+        var path = Path.Combine(BasePath, "Motor.json");
+
+        watcher.MarkAsOwnWrite(path);
+        _timeProvider.Advance(TimeSpan.FromSeconds(1.5));
+        watcher.MarkAsOwnWrite(path);
+
+        // The grace period of the first write ends here, one second into the second one.
+        _timeProvider.Advance(TimeSpan.FromSeconds(1));
+
+        // Act
+        watcher.SimulateFileEvent(Event(WatcherChangeTypes.Changed, "Motor.json"));
+        _timeProvider.Advance(CoalesceWindow);
+
+        // Assert
+        Assert.Empty(_processedEvents);
+    }
+
+    [Fact]
     public void WhenManyPathsGoIdle_ThenNoTimerStaysArmed()
     {
         // Arrange
