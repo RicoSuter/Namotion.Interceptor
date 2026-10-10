@@ -25,6 +25,10 @@ public partial class SonosPlayer : SonosDevice,
     private PollEventOrder _renderingControlOrder = new();
     private PollEventOrder _sleepTimerOrder = new();
 
+    // The Spotify Connect or AirPlay session the last AVTransport event described, see KeepSessionEventValues.
+    // Guarded by _stateLock.
+    private string? _eventSessionUri;
+
     internal SonosPlayer(SonosSystem system, string uuid)
         : base(uuid)
     {
@@ -326,6 +330,10 @@ public partial class SonosPlayer : SonosDevice,
         {
             _avTransportOrder.RecordEvent(order);
             ApplyAvTransport(change, isPoll: false);
+            if (SonosValues.IsKnown(change.MediaUri))
+            {
+                _eventSessionUri = SonosUris.IsSessionUri(change.MediaUri) ? change.MediaUri : null;
+            }
         }
     }
 
@@ -355,7 +363,7 @@ public partial class SonosPlayer : SonosDevice,
 
             if (appliesAvTransport)
             {
-                ApplyAvTransport(reading.AvTransport, isPoll: true);
+                ApplyAvTransport(KeepSessionEventValues(reading.AvTransport), isPoll: true);
                 if (reading.HasPosition)
                 {
                     ReportedTrackPosition = reading.Position;
@@ -372,6 +380,30 @@ public partial class SonosPlayer : SonosDevice,
                 ReportedSleepTimerRemaining = reading.SleepTimerRemaining;
             }
         }
+    }
+
+    // Caller holds _stateLock. The getters describe a Spotify Connect or AirPlay session rather than what it plays:
+    // the session as the track, the service as its title and no play mode. Its events carry the track, the playlist
+    // and the play mode, so a poll keeps them while the session an event described still plays.
+    private AvTransportChange KeepSessionEventValues(AvTransportChange polled)
+    {
+        if (_eventSessionUri is not { } sessionUri)
+        {
+            return polled;
+        }
+
+        if (MediaUri != sessionUri || (SonosValues.IsKnown(polled.MediaUri) && polled.MediaUri != sessionUri))
+        {
+            _eventSessionUri = null;
+            return polled;
+        }
+
+        return polled with
+        {
+            PlayMode = null,
+            TrackUri = polled.TrackUri == sessionUri ? null : polled.TrackUri,
+            MediaMetaData = null
+        };
     }
 
     private void ApplyAvTransport(AvTransportChange change, bool isPoll)

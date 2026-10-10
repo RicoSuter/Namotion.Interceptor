@@ -115,6 +115,102 @@ public class SonosPlayerStateTests
         Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
     }
 
+    private const string SpotifyTrackUri = "x-sonos-spotify:spotify:track:0000000000000000000000?sid=9&flags=0&sn=4";
+
+    // The events of a Spotify Connect session carry the track, the playlist and the play mode.
+    private static AvTransportChange SpotifySessionEvent() => new(
+        "PLAYING",
+        "SHUFFLE_NOREPEAT",
+        SpotifyUri,
+        SpotifyTrackUri,
+        "0:03:25",
+        SonosEventBodies.Didl("Song", "Artist", "Album", "/getaa?s=1&u=x"),
+        SonosEventBodies.Didl("Favorite Songs"));
+
+    // The getters describe the session instead: itself as the track, the service as its title and no play mode.
+    private static AvTransportChange SpotifySessionPoll(string sessionUri = SpotifyUri) => new(
+        "PLAYING",
+        "NORMAL",
+        sessionUri,
+        sessionUri,
+        "NOT_IMPLEMENTED",
+        "NOT_IMPLEMENTED",
+        SonosEventBodies.Didl("Spotify"));
+
+    [Fact]
+    public void WhenPollReadsTheSpotifyConnectSessionItsEventsDescribed_ThenTheTrackThePlaylistAndThePlayModeAreKept()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(SpotifySessionEvent(), T0);
+
+        // Act
+        player.ApplyPoll(Reading(SpotifySessionPoll()), T0 + 1);
+
+        // Assert
+        Assert.Equal(SpotifyTrackUri, player.CurrentTrackUri);
+        Assert.Equal("Favorite Songs", player.SourceTitle);
+        Assert.True(player.Shuffle);
+        Assert.Equal("Song", player.CurrentTrackTitle);
+        Assert.Equal(TimeSpan.FromSeconds(205), player.CurrentTrackDuration);
+        Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenEventFollowsAPollOfTheSameSpotifyConnectSession_ThenTheEventApplies()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(SpotifySessionEvent(), T0);
+        player.ApplyPoll(Reading(SpotifySessionPoll()), T0 + 1);
+
+        // Act
+        player.ApplyAvTransportEvent(
+            SpotifySessionEvent() with { PlayMode = "NORMAL", MediaMetaData = SonosEventBodies.Didl("Discover Weekly") },
+            T0 + 2);
+
+        // Assert
+        Assert.Equal("Discover Weekly", player.SourceTitle);
+        Assert.False(player.Shuffle);
+        Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
+    }
+
+    [Fact]
+    public void WhenOnlyPollsReadASpotifyConnectSession_ThenTheSessionIsTheTrack()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(QueueTrackPlaying(), T0);
+
+        // Act
+        player.ApplyPoll(Reading(SpotifySessionPoll()), T0 + 1);
+        player.ApplyPoll(Reading(SpotifySessionPoll()), T0 + 2);
+
+        // Assert
+        Assert.Equal(SpotifyUri, player.CurrentTrackUri);
+        Assert.Equal("Spotify", player.SourceTitle);
+        Assert.False(player.Shuffle);
+        Assert.Null(player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenPollReadsAnotherSpotifyConnectSession_ThenTheValuesOfThePreviousSessionAreReplaced()
+    {
+        // Arrange
+        const string otherSessionUri = "x-sonos-vli:RINCON_A0000000000601400:2,spotify:1111111111111111";
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(SpotifySessionEvent(), T0);
+
+        // Act
+        player.ApplyPoll(Reading(SpotifySessionPoll(otherSessionUri)), T0 + 1);
+
+        // Assert
+        Assert.Equal(otherSessionUri, player.CurrentTrackUri);
+        Assert.Equal("Spotify", player.SourceTitle);
+        Assert.False(player.Shuffle);
+        Assert.Null(player.CurrentTrackTitle);
+    }
+
     [Theory]
     [InlineData(SpotifyUri)]
     [InlineData("x-sonos-htastream:RINCON_A0000000000601400:spdif")]

@@ -34,7 +34,7 @@ internal static class SonosUris
             return SonosSource.Queue;
         }
 
-        if (uri.StartsWith("x-sonos-vli:", StringComparison.Ordinal))
+        if (IsSessionUri(uri))
         {
             if (uri.Contains(",spotify:", StringComparison.Ordinal))
             {
@@ -52,6 +52,13 @@ internal static class SonosUris
     /// </summary>
     internal static bool IsMemberTransportUri(string? uri) =>
         uri is not null && uri.StartsWith("x-rincon:", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether the URI is a session another app streams to the player, <c>x-sonos-vli:</c>, such as Spotify Connect
+    /// or AirPlay.
+    /// </summary>
+    internal static bool IsSessionUri(string uri) =>
+        uri.StartsWith("x-sonos-vli:", StringComparison.Ordinal);
 
     internal static bool IsRadioUri(string uri)
     {
