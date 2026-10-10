@@ -6,7 +6,7 @@ namespace HomeBlaze.Storage.Tests.Pages;
 public class MarkdownBlockWriterTests
 {
     private const string Source =
-        "before\n\n::::Demo.Card#main title=Old\nBody **text** {{ /A/B }}\n\n:::Demo.Motor speed=1\n```json\n{ \"cells\": [1] }\n```\n:::\n::::\n\nafter\n";
+        "before\n\n::Demo.Card#main title=Old\nBody **text** {{ /A/B }}\n\n::::Demo.Motor speed=1\n```json\n{ \"cells\": [1] }\n```\n::::\n::\n\nafter\n";
 
     private static MarkdownBlock Card => MarkdownPageParser.Parse(Source).Blocks[0];
 
@@ -24,7 +24,7 @@ public class MarkdownBlockWriterTests
 
         // Assert
         Assert.Equal(
-            Source.Replace("::::Demo.Card#main title=Old", "::::Demo.Card#main title=\"New Title\" count=2 enabled=true"),
+            Source.Replace("::Demo.Card#main title=Old", ":: Demo.Card#main title=\"New Title\" count=2 enabled=true"),
             result);
     }
 
@@ -39,7 +39,7 @@ public class MarkdownBlockWriterTests
 
         // Assert
         var motor = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
-        Assert.Equal(":::Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
+        Assert.Equal(":::: Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
         Assert.Equal("{\"cells\":[3]}", motor.ConfigurationJson!.Replace(" ", "").Replace("\n", ""));
     }
 
@@ -53,7 +53,7 @@ public class MarkdownBlockWriterTests
         var result = MarkdownBlockWriter.WriteConfiguration(Source, motorBlock, """{ "speed": 5 }""");
 
         // Assert
-        Assert.Contains(":::Demo.Motor speed=5\n:::\n::::", result);
+        Assert.Contains(":::: Demo.Motor speed=5\n::::\n::", result);
         Assert.DoesNotContain("```", result);
     }
 
@@ -67,27 +67,46 @@ public class MarkdownBlockWriterTests
         var result = MarkdownBlockWriter.WriteConfiguration(Source, card, """{ "title": "Old", "tags": ["a"] }""");
 
         // Assert
-        Assert.Contains("::::Demo.Card#main title=Old\n```json\n{\n  \"tags\": [\n    \"a\"\n  ]\n}\n```\nBody **text**", result);
+        Assert.Contains(":: Demo.Card#main title=Old\n```json\n{\n  \"tags\": [\n    \"a\"\n  ]\n}\n```\nBody **text**", result);
     }
 
     [Fact]
-    public void WhenBlockIsCreated_ThenItIsAClosedThreeColonBlock()
+    public void WhenBlockIsCreated_ThenItIsAClosedBlockWithAFenceOfTheGivenLength()
     {
         // Act
-        var block = MarkdownBlockWriter.CreateBlock("Demo.Motor", "m1", """{ "$type": "Demo.Motor", "name": "My Motor", "speed": 3 }""");
+        var block = MarkdownBlockWriter.CreateBlock(
+            "Demo.Motor", "m1", """{ "$type": "Demo.Motor", "name": "My Motor", "speed": 3 }""", fenceLength: 2);
 
         // Assert
-        Assert.Equal(":::Demo.Motor#m1 name=\"My Motor\" speed=3\n:::", block);
+        Assert.Equal(":: Demo.Motor#m1 name=\"My Motor\" speed=3\n::", block);
+    }
+
+    [Fact]
+    public void WhenBlockIsCreatedForTheInsideOfABlock_ThenBothOfItsLinesHaveTheLongerFence()
+    {
+        // Act
+        var block = MarkdownBlockWriter.CreateBlock("Demo.Motor", null, """{ "speed": 3 }""", fenceLength: 4);
+
+        // Assert
+        Assert.Equal(":::: Demo.Motor speed=3\n::::", block);
+    }
+
+    [Fact]
+    public void WhenBlockIsCreatedWithAFenceShorterThanTheMinimum_ThenItThrows()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => MarkdownBlockWriter.CreateBlock("Demo.Motor", null, "{}", fenceLength: 1));
     }
 
     [Fact]
     public void WhenCreatedBlockHasComplexValue_ThenItContainsAJsonFence()
     {
         // Act
-        var block = MarkdownBlockWriter.CreateBlock("Demo.Grid", null, """{ "rows": 1, "cells": [] }""");
+        var block = MarkdownBlockWriter.CreateBlock("Demo.Grid", null, """{ "rows": 1, "cells": [] }""", fenceLength: 3);
 
         // Assert
-        Assert.Equal(":::Demo.Grid rows=1\n```json\n{\n  \"cells\": []\n}\n```\n:::", block);
+        Assert.Equal("::: Demo.Grid rows=1\n```json\n{\n  \"cells\": []\n}\n```\n:::", block);
     }
 
     [Fact]
@@ -103,7 +122,7 @@ public class MarkdownBlockWriterTests
         // Assert
         var motor = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
         Assert.Null(motor.Error);
-        Assert.Equal(":::Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
+        Assert.Equal(":::: Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
         var configuration = JsonNode.Parse(motor.ConfigurationJson!)!.AsObject();
         Assert.Equal("first\nsecond", (string?)configuration["description"]);
     }
@@ -120,7 +139,7 @@ public class MarkdownBlockWriterTests
         // Assert
         var motor = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
         Assert.Null(motor.Error);
-        Assert.Equal(":::Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
+        Assert.Equal(":::: Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
         var configuration = JsonNode.Parse(motor.ConfigurationJson!)!.AsObject();
         Assert.Equal(7, (int?)configuration["my-key"]);
     }
@@ -190,7 +209,7 @@ public class MarkdownBlockWriterTests
         var lineEnding = MarkdownBlockWriter.GetLineEnding(source);
 
         // Act
-        var block = MarkdownBlockWriter.CreateBlock("Demo.Grid", "grid", """{ "rows": 2, "cells": [1] }""", lineEnding);
+        var block = MarkdownBlockWriter.CreateBlock("Demo.Grid", "grid", """{ "rows": 2, "cells": [1] }""", 2, lineEnding);
         var result = source.Insert("before\r\n\r\n".Length, block + lineEnding + lineEnding);
 
         // Assert

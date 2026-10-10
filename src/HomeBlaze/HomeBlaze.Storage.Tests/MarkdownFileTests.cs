@@ -373,8 +373,8 @@ public class MarkdownFileTests
         var motorContent = $"""
             # Heading
 
-            :::{typeof(Motor).FullName}#mymotor
-            :::
+            :: {typeof(Motor).FullName}#mymotor
+            ::
             """;
         await WriteFileAsync(storage, "embedded-type.md", motorContent);
         var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-type.md");
@@ -386,8 +386,8 @@ public class MarkdownFileTests
         var content = $"""
             # Heading
 
-            :::{typeof(FluentStorageContainer).FullName}#mymotor storageType=inmemory
-            :::
+            :: {typeof(FluentStorageContainer).FullName}#mymotor storageType=inmemory
+            ::
             """;
         await WriteFileAsync(storage, "embedded-type.md", content);
         await markdown.OnFileChangedAsync(CancellationToken.None);
@@ -400,8 +400,8 @@ public class MarkdownFileTests
     private static string CreatePageWithMotor(string heading, int targetSpeed) => $"""
         {heading}
 
-        :::{typeof(Motor).FullName}#mymotor name=MyMotor targetSpeed={targetSpeed}
-        :::
+        :: {typeof(Motor).FullName}#mymotor name=MyMotor targetSpeed={targetSpeed}
+        ::
         """;
 
     private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()

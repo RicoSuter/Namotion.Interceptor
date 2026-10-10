@@ -336,13 +336,16 @@ else
         // The editor gives the text with one line ending for all lines.
         var lineEnding = MarkdownBlockWriter.GetLineEnding(_currentContent);
         var typeName = result.Subject.GetType().FullName!;
-        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, lineEnding).Split(lineEnding);
 
         // Insert at cursor line (or end if no cursor)
         var position = await _editor.GetPosition();
         var lines = _currentContent.Split(lineEnding);
         var insertLine = position?.LineNumber ?? lines.Length;
         var newLines = new List<string>(lines);
+
+        // Inside the content of a block, the new block needs a longer fence than the block around it.
+        var fenceLength = MarkdownPageParser.Parse(_currentContent).GetFenceLengthForNewBlock(insertLine);
+        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, fenceLength, lineEnding).Split(lineEnding);
 
         // The parser accepts a block without blank lines around it. They keep the page text readable.
         if (insertLine > 1 && !string.IsNullOrWhiteSpace(lines[insertLine - 2]))

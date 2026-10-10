@@ -39,12 +39,12 @@ public class MarkdownSegmentBuilderTests
     {
         // Act
         var segments = Build("""
-            ::::Demo.Card
+            :: Demo.Card
             Text {{ /A/B }}
 
-            :::Demo.Widget path=/x
+            ::: Demo.Widget path=/x
             :::
-            ::::
+            ::
             """);
 
         // Assert
@@ -61,12 +61,12 @@ public class MarkdownSegmentBuilderTests
     {
         // Act
         var segments = Build("""
-            :::Demo.Grid
+            :: Demo.Grid
             ```json
             { "cells": [] }
             ```
             Visible text
-            :::
+            ::
             """);
 
         // Assert
@@ -82,14 +82,204 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             first
 
-            :::
-            unnamed
-            :::
+            :: Demo.Card title="open
+            inside
+            ::
+
+            last
             """);
 
         // Assert
         Assert.Empty(segments.OfType<BlockMarkdownSegment>());
-        Assert.Contains("<div class=\"markdown-block-error\" role=\"alert\">Line 3:", AllHtml(segments));
+        var html = WebUtility.HtmlDecode(AllHtml(segments));
+        Assert.Contains("<div class=\"markdown-block-error\" role=\"alert\">Line 3: The value of 'title' has no closing quote.</div>", html);
+        Assert.Contains("<p>first</p>", html);
+        Assert.Contains("<p>last</p>", html);
+        Assert.DoesNotContain("inside", html);
+    }
+
+    [Fact]
+    public void WhenClosingLineClosesNothing_ThenAnErrorBoxIsAtThatLineAndTheTextAroundItIsKept()
+    {
+        // Act
+        var segments = Build("""
+            first
+
+            :: Demo.Card
+            before
+            :::
+            after
+            ::
+
+            last
+            """);
+
+        // Assert
+        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        var content = AllHtml(card.Content);
+        Assert.Contains(
+            "<div class=\"markdown-block-error\" role=\"alert\">Line 5: This line of 3 ':' characters closes no block. " +
+            "A closing line needs as many characters as the head line of its block. Open here: line 3 (2 characters).</div>",
+            WebUtility.HtmlDecode(content));
+        Assert.Contains("<p>before</p>", content);
+        Assert.Contains("<p>after</p>", content);
+        var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
+        Assert.Contains("<p>first</p>", outside);
+        Assert.Contains("<p>last</p>", outside);
+        Assert.DoesNotContain("markdown-block-error", outside);
+    }
+
+    [Fact]
+    public void WhenClosingLineIsOnAPageWithoutOpenBlock_ThenAnErrorBoxSaysThatNoBlockIsOpen()
+    {
+        // Act
+        var segments = Build("""
+            first
+            ::
+            last
+            """);
+
+        // Assert
+        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
+        var html = WebUtility.HtmlDecode(AllHtml(segments));
+        Assert.Contains("Line 2: This line of 2 ':' characters closes no block. No block is open here.</div>", html);
+        Assert.Contains("<p>first</p>", html);
+        Assert.Contains("<p>last</p>", html);
+    }
+
+    [Fact]
+    public void WhenBlockIsNotClosedAtTheEndOfThePage_ThenAnErrorBoxReplacesItAndTheTextBeforeIsKept()
+    {
+        // Act
+        var segments = Build("""
+            first
+
+            :: Demo.Card
+            inside
+            """);
+
+        // Assert
+        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
+        var html = WebUtility.HtmlDecode(AllHtml(segments));
+        Assert.Contains("Line 3: This block is not closed. The line '::' that ends it is missing.</div>", html);
+        Assert.Contains("<p>first</p>", html);
+        Assert.DoesNotContain("inside", html);
+    }
+
+    [Fact]
+    public void WhenInnerBlockIsNotClosed_ThenAnErrorBoxReplacesItAndTheBlockAroundItAndTheTextAfterAreKept()
+    {
+        // Act
+        var segments = Build("""
+            first
+
+            :: Demo.Card
+            before
+            ::: Demo.Widget path=/x
+            inside
+            ::
+
+            last
+            """);
+
+        // Assert
+        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Equal("Demo.Card", card.Block.Head!.Name);
+        Assert.Empty(card.Content.OfType<BlockMarkdownSegment>());
+        var content = WebUtility.HtmlDecode(AllHtml(card.Content));
+        Assert.Contains("<p>before</p>", content);
+        Assert.Contains("Line 5: This block is not closed. The line ':::' that ends it is missing.</div>", content);
+        Assert.DoesNotContain("inside", content);
+        var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
+        Assert.Contains("<p>first</p>", outside);
+        Assert.Contains("<p>last</p>", outside);
+    }
+
+    [Fact]
+    public void WhenNestedBlockHasNoMoreCharactersThanTheBlockAroundIt_ThenAnErrorBoxReplacesItAndItsContentDoesNotSpill()
+    {
+        // Act
+        var segments = Build("""
+            first
+
+            :: Demo.Card
+            before
+            :: Demo.Widget path=/x
+            hidden
+            ::
+            after
+            ::
+
+            last
+            """);
+
+        // Assert
+        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Equal("Demo.Card", card.Block.Head!.Name);
+        var content = WebUtility.HtmlDecode(AllHtml(card.Content));
+        Assert.Contains("<p>before</p>", content);
+        Assert.Contains(
+            "Line 5: A block inside another block needs more ':' characters than the block around it. " +
+            "This block has 2 and the block around it, at line 3, has 2. Write ':::' here and on its closing line.</div>",
+            content);
+        Assert.DoesNotContain("hidden", content);
+        Assert.Contains("<p>after</p>", content);
+        var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
+        Assert.Contains("<p>first</p>", outside);
+        Assert.Contains("<p>last</p>", outside);
+        Assert.DoesNotContain("markdown-block-error", outside);
+    }
+
+    [Theory]
+    [InlineData("```")]
+    [InlineData("~~~~")]
+    public void WhenFenceLinesAreInsideFencedCodeInsideABlock_ThenTheyAreShownAsWrittenAndTheBlockContinues(string codeFence)
+    {
+        // Act
+        var segments = Build(
+            $":: Demo.Card\nbefore\n\n{codeFence}\n::: Demo.Widget path=/x\n:::\n::\n{codeFence}\n\nafter\n::\n\nlast");
+
+        // Assert
+        var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Empty(card.Content.OfType<BlockMarkdownSegment>());
+        var content = AllHtml(card.Content);
+        Assert.Contains("::: Demo.Widget path=/x\n:::\n::\n</code></pre>", content);
+        Assert.Contains("<p>after</p>", content);
+        var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
+        Assert.Contains("<p>last</p>", outside);
+        Assert.DoesNotContain("markdown-block-error", AllHtml(segments));
+    }
+
+    [Fact]
+    public void WhenBlockIsInsideAQuote_ThenAnErrorBoxIsInsideTheQuote()
+    {
+        // Act
+        var segments = Build("""
+            > quote
+            >
+            > :: Demo.Card
+            > inside
+            > ::
+
+            last
+            """);
+
+        // Assert
+        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
+        var html = AllHtml(segments);
+        Assert.Contains("Line 3: A block is only allowed directly on the page or directly inside another block.</div>", html);
+        Assert.Contains("<p>quote</p>", html);
+        Assert.Contains("<p>last</p>", html);
+    }
+
+    [Fact]
+    public void WhenThreeFenceCharactersAreInTheText_ThenTheyHaveNoOtherMeaning()
+    {
+        // Act
+        var segments = Build("A ::marked:: word and a ratio of 1:::2");
+
+        // Assert
+        Assert.Equal("<p>A ::marked:: word and a ratio of 1:::2</p>\n", AllHtml(segments));
     }
 
     [Fact]
@@ -133,9 +323,9 @@ public class MarkdownSegmentBuilderTests
     {
         // Act
         var segments = Build("""
-            ::: {.band}
+            :: {.band}
             text
-            :::
+            ::
             """);
 
         // Assert
@@ -171,8 +361,8 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             <!--BLOCK:0-->
 
-            :::Demo.Widget path=/x
-            :::
+            :: Demo.Widget path=/x
+            ::
             """);
 
         // Assert
@@ -202,9 +392,9 @@ public class MarkdownSegmentBuilderTests
     {
         // Act
         var segments = Build("""
-            :::Demo.Card
+            :: Demo.Card
             [Notes](notes.md)
-            :::
+            ::
             """, url => "/pages/" + url);
 
         // Assert
@@ -218,7 +408,7 @@ public class MarkdownSegmentBuilderTests
     [InlineData("```\nSpeed {{ a/B }} RPM")]
     [InlineData("Intro\n\n    Speed {{ a/B }} RPM")]
     [InlineData("Write `Speed {{ a/B }} RPM` here")]
-    [InlineData(":::Demo.Card\n```\nSpeed {{ a/B }} RPM\n```\n:::")]
+    [InlineData(":: Demo.Card\n```\nSpeed {{ a/B }} RPM\n```\n::")]
     public void WhenExpressionIsInsideMarkdownCode_ThenItIsShownAsWrittenAndIsNoSegment(string source)
     {
         // Act
@@ -301,14 +491,14 @@ public class MarkdownSegmentBuilderTests
         // Act
         var segments = Build("""
             ~~~~markdown
-            :::Demo.Widget path=/x
-            :::
+            :: Demo.Widget path=/x
+            ::
             ~~~~
             """);
 
         // Assert
         Assert.Empty(segments.OfType<BlockMarkdownSegment>());
-        Assert.Contains(":::Demo.Widget path=/x", AllHtml(segments));
+        Assert.Contains(":: Demo.Widget path=/x", AllHtml(segments));
     }
 
     [Fact]
@@ -318,9 +508,9 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             Before
 
-            :::Demo.Card
+            :: Demo.Card
             Use {{ to start an expression.
-            :::
+            ::
 
             After the card
 
@@ -342,9 +532,9 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             Use {{ to start an expression.
 
-            :::Demo.Card
+            :: Demo.Card
             Speed: {{ motor/Speed }}
-            :::
+            ::
 
             After the card
             """);
@@ -375,7 +565,7 @@ public class MarkdownSegmentBuilderTests
     public void WhenClosingMarkerOfBlockIsMissing_ThenItsContentIsStillInTheResult()
     {
         // Arrange
-        var page = MarkdownPageParser.Parse(":::Demo.Card\n:::");
+        var page = MarkdownPageParser.Parse(":: Demo.Card\n::");
         const string token = "0123456789abcdef0123456789abcdef";
 
         // Act
@@ -418,16 +608,16 @@ public class MarkdownSegmentBuilderTests
     [InlineData("Speed {{ a/B }} RPM and {{ c/D }} bar")]
     [InlineData("Write `{{ a/B }}` to show {{ c/D }} here")]
     [InlineData("```\nSpeed {{ a/B }} RPM\n```\n\nSpeed {{ c/D }} RPM")]
-    [InlineData("~~~~markdown\n:::Demo.Card\n{{ a/B }}\n:::\n~~~~")]
-    [InlineData(":::Demo.Card\nSpeed {{ a/B }} RPM\n:::\n\nAfter {{ c/D }}")]
-    [InlineData("::::Demo.Card\n:::Footer\nSpeed {{ a/B }} RPM\n:::\n::::")]
+    [InlineData("~~~~markdown\n:: Demo.Card\n{{ a/B }}\n::\n~~~~")]
+    [InlineData(":: Demo.Card\nSpeed {{ a/B }} RPM\n::\n\nAfter {{ c/D }}")]
+    [InlineData(":: Demo.Card\n::: Footer\nSpeed {{ a/B }} RPM\n:::\n::")]
     [InlineData("<div title=\"{{ a/B }}\">{{ c/D }}</div>")]
     [InlineData("Value <code>{{ a/B }}</code> now")]
     [InlineData("An expression starts with `{{` like {{ a/B }} here")]
     [InlineData("Open with {{ and close with `}}` here")]
     [InlineData("Use {{ to start one, like {{ a/B }} here")]
-    [InlineData("Before\n\n:::Demo.Card\nUse {{ to start an expression.\n:::\n\nSpeed: {{ a/B }}")]
-    [InlineData("Use {{ to start an expression.\n\n:::Demo.Card\nSpeed: {{ a/B }}\n:::")]
+    [InlineData("Before\n\n:: Demo.Card\nUse {{ to start an expression.\n::\n\nSpeed: {{ a/B }}")]
+    [InlineData("Use {{ to start an expression.\n\n:: Demo.Card\nSpeed: {{ a/B }}\n::")]
     [InlineData("""Value {{ Items["a"]/B }} and {{ A&B/C }} now""")]
     [InlineData("Value {{ a < b }} now and {{ c/D }}")]
     [InlineData("Value {{ a&b/C }} now")]

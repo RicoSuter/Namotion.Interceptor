@@ -20,8 +20,8 @@ public class MarkdownWidgetBlockTests
         var page = await fixture.AddPageAsync("page.md", $$"""
             text
 
-            :::{{LeafType}}#leaf name=123 count=5 enabled=true interval=00:00:01.500
-            :::
+            :: {{LeafType}}#leaf name=123 count=5 enabled=true interval=00:00:01.500
+            ::
             """);
 
         // Assert
@@ -41,8 +41,8 @@ public class MarkdownWidgetBlockTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :::{{LeafType}} name=a
-            :::
+            :: {{LeafType}} name=a
+            ::
             """);
 
         // Assert
@@ -57,11 +57,11 @@ public class MarkdownWidgetBlockTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :::{{LeafType}}#leaf count=7
+            :: {{LeafType}}#leaf count=7
             ```json
             { "count": 1, "tags": ["a", "b"] }
             ```
-            :::
+            ::
             """);
 
         // Assert
@@ -78,8 +78,8 @@ public class MarkdownWidgetBlockTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :::{{LeafType}}#leaf name=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
-            :::
+            :: {{LeafType}}#leaf name=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
+            ::
             """);
 
         // Assert
@@ -93,8 +93,8 @@ public class MarkdownWidgetBlockTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :::{{LeafType}}#leaf count=1
-            :::
+            :: {{LeafType}}#leaf count=1
+            ::
             """);
         var first = page.Children["leaf"];
 
@@ -102,8 +102,8 @@ public class MarkdownWidgetBlockTests
         await fixture.UpdatePageAsync(page, $$"""
             new text above
 
-            :::{{LeafType}}#leaf count=2
-            :::
+            :: {{LeafType}}#leaf count=2
+            ::
             """);
 
         // Assert
@@ -114,19 +114,19 @@ public class MarkdownWidgetBlockTests
     }
 
     [Theory]
-    [InlineData(":::Missing.Type\n:::", "Unknown type 'Missing.Type'. Use the full type name including the namespace.")]
+    [InlineData(":: Missing.Type\n::", "Unknown type 'Missing.Type'. Use the full type name including the namespace.")]
     [InlineData(
-        ":::HomeBlaze.Storage.Tests.Pages.TestPlain\n:::",
+        ":: HomeBlaze.Storage.Tests.Pages.TestPlain\n::",
         "The type 'HomeBlaze.Storage.Tests.Pages.TestPlain' cannot be used as a block because it does not implement IConfigurable.")]
-    [InlineData(":::" + LeafType + " cont=1\n:::", "has no configuration property 'cont'")]
-    [InlineData(":::" + LeafType + " count=abc\n:::", "'abc' is not a valid value for 'count'")]
-    [InlineData(":::" + LeafType + " count=1.5\n:::", "'1.5' is not a valid value for 'count'. Expected a value of type Int32")]
-    [InlineData(":::" + LeafType + " interval=abc\n:::", "'abc' is not a valid value for 'interval'. Expected a value of type TimeSpan")]
-    [InlineData(":::" + LeafType + "\n```json\n[1]\n```\n:::", "must contain a JSON object")]
-    [InlineData(":::" + LeafType + "\n```json\n{ \"count\": 1, \"count\": 2 }\n```\n:::", "without duplicate keys")]
-    [InlineData(":::" + LeafType + "\n```json\n{ \"cont\": 1 }\n```\n:::", "has no configuration property 'cont'")]
-    [InlineData(":::" + LeafType + "\ncontent\n:::", "has no default slot, so it cannot have content")]
-    [InlineData(":::" + LeafType + "#a\n:::\n\n:::" + LeafType + "#a\n:::", "used twice")]
+    [InlineData(":: " + LeafType + " cont=1\n::", "has no configuration property 'cont'")]
+    [InlineData(":: " + LeafType + " count=abc\n::", "'abc' is not a valid value for 'count'")]
+    [InlineData(":: " + LeafType + " count=1.5\n::", "'1.5' is not a valid value for 'count'. Expected a value of type Int32")]
+    [InlineData(":: " + LeafType + " interval=abc\n::", "'abc' is not a valid value for 'interval'. Expected a value of type TimeSpan")]
+    [InlineData(":: " + LeafType + "\n```json\n[1]\n```\n::", "must contain a JSON object")]
+    [InlineData(":: " + LeafType + "\n```json\n{ \"count\": 1, \"count\": 2 }\n```\n::", "without duplicate keys")]
+    [InlineData(":: " + LeafType + "\n```json\n{ \"cont\": 1 }\n```\n::", "has no configuration property 'cont'")]
+    [InlineData(":: " + LeafType + "\ncontent\n::", "has no default slot, so it cannot have content")]
+    [InlineData(":: " + LeafType + "#a\n::\n\n:: " + LeafType + "#a\n::", "used twice")]
     public async Task WhenBlockIsWrong_ThenAnErrorBoxReplacesIt(string content, string expectedMessage)
     {
         // Arrange
@@ -150,7 +150,7 @@ public class MarkdownWidgetBlockTests
         var fixture = await MarkdownPageFixture.CreateAsync();
 
         // Act
-        var page = await fixture.AddPageAsync("page.md", $":::{typeName}\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+        var page = await fixture.AddPageAsync("page.md", $":: {typeName}\n::\n\n:: {LeafType}#leaf count=1\n::");
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
@@ -169,7 +169,7 @@ public class MarkdownWidgetBlockTests
         // Act
         var page = await fixture.AddPageAsync(
             "page.md",
-            $":::HomeBlaze.Storage.Tests.Pages.TestThrowingConstructor\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+            $":: HomeBlaze.Storage.Tests.Pages.TestThrowingConstructor\n::\n\n:: {LeafType}#leaf count=1\n::");
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
@@ -185,13 +185,13 @@ public class MarkdownWidgetBlockTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
             "page.md",
-            $":::{FaultyType}#faulty mode=ok\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+            $":: {FaultyType}#faulty mode=ok\n::\n\n:: {LeafType}#leaf count=1\n::");
         var leaf = page.Children["leaf"];
 
         // Act
         await fixture.UpdatePageAsync(
             page,
-            $":::{FaultyType}#faulty mode={TestFaulty.ThrowMode}\n:::\n\n:::{LeafType}#leaf count=2\n:::");
+            $":: {FaultyType}#faulty mode={TestFaulty.ThrowMode}\n::\n\n:: {LeafType}#leaf count=2\n::");
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
@@ -213,7 +213,7 @@ public class MarkdownWidgetBlockTests
         // Act
         await fixture.AddPageAsync(
             "page.md",
-            $"text\n\n:::HomeBlaze.Storage.Tests.Pages.TestThrowingConstructor\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+            $"text\n\n:: HomeBlaze.Storage.Tests.Pages.TestThrowingConstructor\n::\n\n:: {LeafType}#leaf count=1\n::");
 
         // Assert
         var entry = Assert.Single(logger.Entries);
@@ -230,11 +230,11 @@ public class MarkdownWidgetBlockTests
         var logger = new RecordingLogger<MarkdownContentParser>();
         var fixture = await MarkdownPageFixture.CreateAsync(
             services => services.AddSingleton<ILogger<MarkdownContentParser>>(logger));
-        var page = await fixture.AddPageAsync("page.md", $":::{FaultyType}#faulty mode=ok\n:::");
+        var page = await fixture.AddPageAsync("page.md", $":: {FaultyType}#faulty mode=ok\n::");
         var entriesBefore = logger.Entries;
 
         // Act
-        await fixture.UpdatePageAsync(page, $":::{FaultyType}#faulty mode={TestFaulty.ThrowMode}\n:::");
+        await fixture.UpdatePageAsync(page, $":: {FaultyType}#faulty mode={TestFaulty.ThrowMode}\n::");
 
         // Assert
         Assert.Empty(entriesBefore);
@@ -254,7 +254,7 @@ public class MarkdownWidgetBlockTests
             services => services.AddSingleton<ILogger<MarkdownContentParser>>(logger));
 
         // Act
-        var page = await fixture.AddPageAsync("page.md", $":::{LeafType}#leaf unknown=1\n:::");
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType}#leaf unknown=1\n::");
 
         // Assert
         Assert.Contains("has no configuration property", MarkdownPageFixture.Html(page.Children));
@@ -268,13 +268,13 @@ public class MarkdownWidgetBlockTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
             "page.md",
-            $":::{FaultyType}#faulty mode=ok\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+            $":: {FaultyType}#faulty mode=ok\n::\n\n:: {LeafType}#leaf count=1\n::");
         var leaf = page.Children["leaf"];
 
         // Act
         await fixture.UpdatePageAsync(
             page,
-            $":::{FaultyType}#faulty mode={TestFaulty.CancelMode}\n:::\n\n:::{LeafType}#leaf count=2\n:::");
+            $":: {FaultyType}#faulty mode={TestFaulty.CancelMode}\n::\n\n:: {LeafType}#leaf count=2\n::");
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
@@ -290,7 +290,7 @@ public class MarkdownWidgetBlockTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var content = $"---\ntitle: Before\n---\n\n:::{FaultyType}#faulty mode=ok\n:::\n";
+        var content = $"---\ntitle: Before\n---\n\n:: {FaultyType}#faulty mode=ok\n::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var children = page.Children;
         var faulty = Assert.IsType<TestFaulty>(page.GetBlockSubject(0));
@@ -300,7 +300,7 @@ public class MarkdownWidgetBlockTests
         // Act
         var exception = await Record.ExceptionAsync(() => fixture.UpdatePageAsync(
             page,
-            $"---\ntitle: After\n---\n\nnew text\n\n:::{FaultyType}#faulty mode={TestFaulty.CancelMode}\n:::\n",
+            $"---\ntitle: After\n---\n\nnew text\n\n:: {FaultyType}#faulty mode={TestFaulty.CancelMode}\n::\n",
             cancellationSource.Token));
 
         // Assert
@@ -316,11 +316,11 @@ public class MarkdownWidgetBlockTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $":::{LeafType}#leaf count=1 name=x\n:::");
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType}#leaf count=1 name=x\n::");
         var first = page.Children["leaf"];
 
         // Act
-        await fixture.UpdatePageAsync(page, $":::{LeafType}#leaf count=1\n:::");
+        await fixture.UpdatePageAsync(page, $":: {LeafType}#leaf count=1\n::");
 
         // Assert
         var leaf = Assert.IsType<TestLeaf>(page.Children["leaf"]);
@@ -335,11 +335,11 @@ public class MarkdownWidgetBlockTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $":::{LeafType}#leaf count=1\n:::");
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType}#leaf count=1\n::");
         var first = page.Children["leaf"];
 
         // Act
-        await fixture.UpdatePageAsync(page, $":::{LeafType}#leaf count=2 name=x\n:::");
+        await fixture.UpdatePageAsync(page, $":: {LeafType}#leaf count=2 name=x\n::");
 
         // Assert
         var leaf = Assert.IsType<TestLeaf>(page.Children["leaf"]);
@@ -349,8 +349,8 @@ public class MarkdownWidgetBlockTests
     }
 
     [Theory]
-    [InlineData(":::" + LeafType + "#TestLeaf_2\n:::\n\n:::" + LeafType + "\n:::")]
-    [InlineData(":::" + LeafType + "\n:::\n\n:::" + LeafType + "#TestLeaf_0\n:::")]
+    [InlineData(":: " + LeafType + "#TestLeaf_2\n::\n\n:: " + LeafType + "\n::")]
+    [InlineData(":: " + LeafType + "\n::\n\n:: " + LeafType + "#TestLeaf_0\n::")]
     public async Task WhenIdEqualsAPositionalKey_ThenTheSecondBlockIsAnErrorBox(string content)
     {
         // Arrange
@@ -375,7 +375,7 @@ public class MarkdownWidgetBlockTests
         // Act
         var page = await fixture.AddPageAsync(
             "page.md",
-            $":::{LeafType}#a cont=1\n:::\n\n:::{LeafType}#a\n:::");
+            $":: {LeafType}#a cont=1\n::\n\n:: {LeafType}#a\n::");
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
@@ -422,7 +422,7 @@ public class MarkdownWidgetBlockTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var content = $"intro\n\n:::{LeafType}#first count=1\n:::\n\n:::{LeafType}#second count=2\n:::\n\noutro {{{{ /x }}}}\n";
+        var content = $"intro\n\n:: {LeafType}#first count=1\n::\n\n:: {LeafType}#second count=2\n::\n\noutro {{{{ /x }}}}\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var second = (TestLeaf)page.Children["second"];
         second.Count = 9;
@@ -436,8 +436,8 @@ public class MarkdownWidgetBlockTests
         var written = await fixture.ReadAsync("page.md");
         Assert.Equal(
             content.Replace(
-                $":::{LeafType}#second count=2",
-                $":::{LeafType}#second name=\"New Name\" count=9 enabled=false interval=00:00:00"),
+                $":: {LeafType}#second count=2",
+                $":: {LeafType}#second name=\"New Name\" count=9 enabled=false interval=00:00:00"),
             written);
     }
 
@@ -446,7 +446,7 @@ public class MarkdownWidgetBlockTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var content = $"intro\n\n:::{LeafType}#first count=1\n:::\n\n:::{LeafType}#second count=2\n:::\n\noutro\n";
+        var content = $"intro\n\n:: {LeafType}#first count=1\n::\n\n:: {LeafType}#second count=2\n::\n\noutro\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var first = (TestLeaf)page.Children["first"];
         var second = (TestLeaf)page.Children["second"];
@@ -461,8 +461,8 @@ public class MarkdownWidgetBlockTests
         Assert.True(firstHandled);
         Assert.True(secondHandled);
         var expected =
-            $"intro\n\n:::{LeafType}#first count=5 enabled=false interval=00:00:00\n:::\n\n" +
-            $":::{LeafType}#second count=7 enabled=false interval=00:00:00\n:::\n\noutro\n";
+            $"intro\n\n:: {LeafType}#first count=5 enabled=false interval=00:00:00\n::\n\n" +
+            $":: {LeafType}#second count=7 enabled=false interval=00:00:00\n::\n\noutro\n";
         Assert.Equal(expected, await fixture.ReadAsync("page.md"));
         Assert.Equal(expected, page.Content);
     }
@@ -472,7 +472,7 @@ public class MarkdownWidgetBlockTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $":::{LeafType}#leaf name=x count=1\n:::\n");
+        var page = await fixture.AddPageAsync("page.md", $":: {LeafType}#leaf name=x count=1\n::\n");
         var leaf = (TestLeaf)page.Children["leaf"];
         leaf.Name = null;
         await page.WriteConfigurationAsync(leaf, CancellationToken.None);

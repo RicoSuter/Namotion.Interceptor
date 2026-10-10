@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text.RegularExpressions;
-using Markdig.Extensions.CustomContainers;
 using Markdig.Renderers;
 using Markdig.Renderers.Html;
 using Markdig.Renderers.Html.Inlines;
@@ -41,6 +40,11 @@ public static partial class MarkdownSegmentBuilder
     private static partial Regex ExpressionRegex();
 
     private static readonly char[] Braces = ['{', '}'];
+
+    private static readonly string OldSubjectFenceError =
+        "The subject(name) fence is no longer supported. Write the subject as a block: a line with " +
+        $"{MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} Full.Type.Name#name key=value, " +
+        $"then a closing {MarkdownBlockFence.Create(MarkdownBlockFence.MinimumLength)} line.";
 
     // The characters that the path part of the expression pattern excludes.
     private static readonly char[] ExcludedFromPath = ['{', '}', '<'];
@@ -92,7 +96,7 @@ public static partial class MarkdownSegmentBuilder
         using var writer = new StringWriter();
         var renderer = new HtmlRenderer(writer) { LinkRewriter = linkRewriter };
         MarkdownPageParser.Pipeline.Setup(renderer);
-        renderer.ObjectRenderers.Replace<HtmlCustomContainerRenderer>(new BlockMarkerRenderer(page, token));
+        renderer.ObjectRenderers.Insert(0, new BlockMarkerRenderer(page, token));
 
         // Extensions configure the code renderers by exact type during Setup, so the
         // replacements are put in afterwards and take over what they configured.
@@ -193,17 +197,18 @@ public static partial class MarkdownSegmentBuilder
         return root;
     }
 
-    private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<CustomContainer>
+    private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<MarkdownBlockContainer>
     {
-        private readonly HtmlCustomContainerRenderer _styleRenderer = new();
-
-        protected override void Write(HtmlRenderer renderer, CustomContainer container)
+        protected override void Write(HtmlRenderer renderer, MarkdownBlockContainer container)
         {
             var block = page.GetBlock(container);
             switch (block.Kind)
             {
                 case MarkdownBlockKind.Style:
-                    _styleRenderer.Write(renderer, container);
+                    renderer.EnsureLine();
+                    renderer.Write("<div").WriteAttributes(container).Write('>');
+                    renderer.WriteChildren(container);
+                    renderer.WriteLine("</div>");
                     break;
 
                 case MarkdownBlockKind.Invalid:
@@ -267,9 +272,7 @@ public static partial class MarkdownSegmentBuilder
             if (block is FencedCodeBlock { Info: { } info } && info.StartsWith("subject(", StringComparison.Ordinal))
             {
                 renderer.EnsureLine();
-                renderer.Write(MarkdownErrorBox.Render(
-                    block.Line + 1,
-                    "The subject(name) fence is no longer supported. Write the subject as a block: a line with :::Full.Type.Name#name key=value, then a closing ::: line."));
+                renderer.Write(MarkdownErrorBox.Render(block.Line + 1, OldSubjectFenceError));
             }
             else
             {

@@ -137,7 +137,7 @@ public class MarkdownDecorationParserTests
     public void WhenContentHasWidgetBlock_ThenRegionCoversTheHeadLine()
     {
         // Arrange
-        const string content = "Line 1\n\n:::Demo.Motor#mymotor speed=3000\n:::\n";
+        const string content = "Line 1\n\n:: Demo.Motor#mymotor speed=3000\n::\n";
 
         // Act
         var region = Assert.Single(MarkdownDecorationParser.Parse(content));
@@ -153,7 +153,7 @@ public class MarkdownDecorationParserTests
     public void WhenBlockHasNoId_ThenNameIsTheShortTypeName()
     {
         // Act
-        var region = Assert.Single(MarkdownDecorationParser.Parse(":::Demo.Samples.Motor\n:::\n"));
+        var region = Assert.Single(MarkdownDecorationParser.Parse(":: Demo.Samples.Motor\n::\n"));
 
         // Assert
         Assert.Equal("Motor", region.Name);
@@ -163,7 +163,7 @@ public class MarkdownDecorationParserTests
     public void WhenBlockHasJsonFence_ThenRegionEndsAfterTheFence()
     {
         // Arrange
-        const string content = ":::Demo.Grid rows=1\n```json\n{ \"cells\": [] }\n```\n:::\n";
+        const string content = ":: Demo.Grid rows=1\n```json\n{ \"cells\": [] }\n```\n::\n";
 
         // Act
         var region = Assert.Single(MarkdownDecorationParser.Parse(content));
@@ -177,7 +177,7 @@ public class MarkdownDecorationParserTests
     public void WhenBlocksAreNested_ThenRegionsDoNotOverlap()
     {
         // Arrange
-        const string content = "::::Demo.Card title=A\ntext\n\n:::Demo.Widget path=/x\n:::\n::::\n";
+        const string content = ":: Demo.Card title=A\ntext\n\n::: Demo.Widget path=/x\n:::\n::\n";
 
         // Act
         var regions = MarkdownDecorationParser.Parse(content);
@@ -189,11 +189,28 @@ public class MarkdownDecorationParserTests
         Assert.True(regions[1].ContainsPosition(4, 5));
     }
 
+    [Theory]
+    [InlineData("::Demo.Motor speed=1", 21)]
+    [InlineData(":: Demo.Motor speed=1", 22)]
+    [InlineData("::::  Demo.Motor speed=1", 25)]
+    public void WhenHeadLineHasAnyFenceLengthAndSpacing_ThenTheRegionCoversTheWholeHeadLine(string headLine, int endColumn)
+    {
+        // Arrange
+        var content = $"text\n\n{headLine}\n{headLine[..headLine.IndexOf('D')].TrimEnd()}\n";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal((3, 1, 3, endColumn), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+        Assert.Equal("Motor", region.Name);
+    }
+
     [Fact]
     public void WhenSlotBlockHasNoSubject_ThenItGetsNoRegion()
     {
         // Arrange
-        const string content = "::::Demo.Card\n:::Footer\ntext\n:::\n::::\n";
+        const string content = ":: Demo.Card\n::: Footer\ntext\n:::\n::\n";
 
         // Act
         var regions = MarkdownDecorationParser.Parse(content, _ => null);
@@ -207,7 +224,7 @@ public class MarkdownDecorationParserTests
     {
         // Arrange
         var subject = new HtmlSegment("subject of the second block");
-        const string content = ":::Demo.Motor#first\n:::\n\n:::Demo.Motor#second\n:::\n";
+        const string content = ":: Demo.Motor#first\n::\n\n:: Demo.Motor#second\n::\n";
 
         // Act
         var regions = MarkdownDecorationParser.Parse(content, blockIndex => blockIndex == 1 ? subject : null);
@@ -223,7 +240,7 @@ public class MarkdownDecorationParserTests
     {
         // Arrange
         var subject = new HtmlSegment("subject of the slot");
-        const string content = "::::Demo.Card\n:::Footer\ntext\n:::\n::::\n";
+        const string content = ":: Demo.Card\n::: Footer\ntext\n:::\n::\n";
 
         // Act
         var regions = MarkdownDecorationParser.Parse(content, blockIndex => blockIndex == 1 ? subject : null);
@@ -235,11 +252,14 @@ public class MarkdownDecorationParserTests
         Assert.Equal(1, regions[1].BlockIndex);
     }
 
-    [Fact]
-    public void WhenBlockIsInvalid_ThenItGetsNoRegion()
+    [Theory]
+    [InlineData(":: Demo.Motor speed=\"1\ntext\n::\n")]
+    [InlineData(":: Demo.Motor speed=1\ntext\n")]
+    [InlineData("::\ntext\n")]
+    public void WhenBlockIsInvalid_ThenItGetsNoRegion(string content)
     {
         // Act
-        var regions = MarkdownDecorationParser.Parse(":::\ntext\n:::\n");
+        var regions = MarkdownDecorationParser.Parse(content);
 
         // Assert
         Assert.Empty(regions);

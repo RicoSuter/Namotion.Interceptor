@@ -2,7 +2,6 @@ using Markdig;
 using Markdig.Extensions.CustomContainers;
 using Markdig.Extensions.Mathematics;
 using Markdig.Extensions.Yaml;
-using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
@@ -21,7 +20,10 @@ public enum MarkdownBlockKind
     Invalid
 }
 
-/// <summary>One ::: block of a page with the source positions needed to write it back.</summary>
+/// <summary>
+/// One block of a page with the source positions needed to write it back. A closing line that closes
+/// no block is an invalid block of one line.
+/// </summary>
 public sealed class MarkdownBlock
 {
     public required MarkdownBlockKind Kind { get; init; }
@@ -33,8 +35,17 @@ public sealed class MarkdownBlock
 
     public string? Error { get; init; }
 
+    /// <summary>Number of fence characters at the start of the head line.</summary>
+    public int FenceLength { get; init; }
+
     /// <summary>1-based line of the head line.</summary>
     public int Line { get; init; }
+
+    /// <summary>
+    /// 1-based line of the closing line. A block without a closing line ends where the block around it
+    /// ends, or after the last line of the page.
+    /// </summary>
+    public int EndLine { get; init; }
 
     public MarkdownSpan HeadSpan { get; init; }
 
@@ -50,7 +61,7 @@ public sealed class MarkdownBlock
 
 public sealed class MarkdownPage
 {
-    private readonly Dictionary<CustomContainer, MarkdownBlock> _containers = new();
+    private readonly Dictionary<MarkdownBlockContainer, MarkdownBlock> _containers = new();
     private readonly List<MarkdownBlock> _allBlocks = [];
 
     // Ordered by start and never overlapping, which the search in IsInsideCode relies on.
@@ -106,9 +117,27 @@ public sealed class MarkdownPage
         return false;
     }
 
-    internal MarkdownBlock GetBlock(CustomContainer container) => _containers[container];
+    /// <summary>
+    /// Gets the fence length for a new block whose head line is inserted before the 1-based
+    /// <paramref name="line"/>: one more than the fence of the innermost block that the new block is
+    /// then inside of, and <see cref="MarkdownBlockFence.MinimumLength"/> directly on the page.
+    /// </summary>
+    public int GetFenceLengthForNewBlock(int line)
+    {
+        var fenceLength = MarkdownBlockFence.MinimumLength;
+        var blocks = Blocks;
+        while (blocks.FirstOrDefault(block => block.Line < line && line <= block.EndLine) is { } outer)
+        {
+            fenceLength = outer.FenceLength + 1;
+            blocks = outer.Children;
+        }
 
-    internal void Register(CustomContainer container, MarkdownBlock block)
+        return fenceLength;
+    }
+
+    internal MarkdownBlock GetBlock(MarkdownBlockContainer container) => _containers[container];
+
+    internal void Register(MarkdownBlockContainer container, MarkdownBlock block)
     {
         _containers[container] = block;
         if (block.Kind != MarkdownBlockKind.Style)
@@ -122,11 +151,7 @@ public sealed class MarkdownPage
 /// <summary>Turns page text into a tree of blocks. Knows nothing about subjects.</summary>
 public static class MarkdownPageParser
 {
-    internal static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .UseYamlFrontMatter()
-        .UsePreciseSourceLocation()
-        .Build();
+    internal static readonly MarkdownPipeline Pipeline = CreatePipeline();
 
     public static MarkdownPage Parse(string source)
     {
@@ -134,6 +159,19 @@ public static class MarkdownPageParser
         var page = new MarkdownPage(source, document, FindCodeSpans(source, document));
         Visit(document, page.BlockList, page, allowsBlocks: true, hasOwner: false);
         return page;
+    }
+
+    private static MarkdownPipeline CreatePipeline()
+    {
+        var builder = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .UseYamlFrontMatter()
+            .UsePreciseSourceLocation();
+
+        // Blocks have a parser of their own, so that a run of fence characters has one meaning only.
+        builder.Extensions.TryRemove<CustomContainerExtension>();
+        builder.Extensions.Add(new MarkdownBlockContainerExtension());
+        return builder.Build();
     }
 
     private static MarkdownSpan[] FindCodeSpans(string source, MarkdownDocument document)
@@ -189,16 +227,16 @@ public static class MarkdownPageParser
     {
         foreach (var child in container)
         {
-            if (child is CustomContainer customContainer)
+            if (child is MarkdownBlockContainer blockContainer)
             {
-                var block = CreateBlock(customContainer, page.Source, allowsBlocks, hasOwner);
-                page.Register(customContainer, block);
+                var block = CreateBlock(blockContainer, page.Source, allowsBlocks, hasOwner);
+                page.Register(blockContainer, block);
                 siblings.Add(block);
 
                 var isOwner = block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot;
                 if (block.Kind != MarkdownBlockKind.Invalid)
                 {
-                    Visit(customContainer, block.ChildList, page, allowsBlocks: isOwner, hasOwner: isOwner);
+                    Visit(blockContainer, block.ChildList, page, allowsBlocks: isOwner, hasOwner: isOwner);
                 }
             }
             else if (child is ContainerBlock other)
@@ -208,9 +246,9 @@ public static class MarkdownPageParser
         }
     }
 
-    private static MarkdownBlock CreateBlock(CustomContainer container, string source, bool allowsBlocks, bool hasOwner)
+    private static MarkdownBlock CreateBlock(
+        MarkdownBlockContainer container, string source, bool allowsBlocks, bool hasOwner)
     {
-        var line = container.Line + 1;
         var headStart = container.Span.Start;
         var headEnd = source.IndexOf('\n', headStart);
         if (headEnd < 0)
@@ -224,41 +262,59 @@ public static class MarkdownPageParser
         }
 
         var headSpan = new MarkdownSpan(headStart, headEnd - headStart);
+        var kind = MarkdownBlockKind.Invalid;
+        MarkdownBlockHead? head = null;
+        string? error;
 
-        MarkdownBlock Invalid(string error) => new()
+        if (container.IsClosingLine)
         {
-            Kind = MarkdownBlockKind.Invalid, Error = error, Line = line, HeadSpan = headSpan
-        };
-
-        if (string.IsNullOrEmpty(container.Info))
-        {
-            var attributes = container.TryGetAttributes();
-            var hasAttributes = attributes is not null &&
-                (attributes.Id is not null || attributes.Classes is { Count: > 0 } || attributes.Properties is { Count: > 0 });
-
-            return hasAttributes
-                ? new MarkdownBlock { Kind = MarkdownBlockKind.Style, Line = line, HeadSpan = headSpan }
-                : Invalid("A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it.");
+            error = FormatClosesNothing(container);
         }
-
-        if (!allowsBlocks)
+        else
         {
-            return Invalid("A block is only allowed directly on the page or directly inside another block.");
-        }
+            if (container.IsStyle)
+            {
+                error = FindNestingError(container);
+                if (error is null)
+                {
+                    kind = MarkdownBlockKind.Style;
+                }
+            }
+            else if (!allowsBlocks)
+            {
+                error = "A block is only allowed directly on the page or directly inside another block.";
+            }
+            else if (FindNestingError(container) is { } nestingError)
+            {
+                error = nestingError;
+            }
+            else if (MarkdownBlockHead.TryParse(source.Substring(headSpan.Start, headSpan.Length), out head, out error))
+            {
+                if (head.IsWidget || hasOwner)
+                {
+                    kind = head.IsWidget ? MarkdownBlockKind.Widget : MarkdownBlockKind.Slot;
+                }
+                else
+                {
+                    error = $"'{head.Name}' is not a type name. A slot block is only allowed directly inside a widget block.";
+                }
+            }
 
-        if (!MarkdownBlockHead.TryParse(source.Substring(headSpan.Start, headSpan.Length), out var head, out var error))
-        {
-            return Invalid(error);
-        }
+            // The box replaces the block with everything in it, so it also says why that is more than expected.
+            if (!container.IsClosed)
+            {
+                var notClosed =
+                    $"This block is not closed. The line '{MarkdownBlockFence.Create(container.FenceLength)}' that ends it is missing.";
 
-        if (!head.IsWidget && !hasOwner)
-        {
-            return Invalid($"'{head.Name}' is not a type name. A slot block is only allowed directly inside a widget block.");
+                error = error is null ? notClosed : $"{error} {notClosed}";
+                kind = MarkdownBlockKind.Invalid;
+            }
         }
 
         string? configurationJson = null;
         MarkdownSpan? configurationSpan = null;
-        if (container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
+        var isOwner = kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot;
+        if (isOwner && container.Count > 0 && container[0] is FencedCodeBlock { Info: "json" } configuration)
         {
             configurationJson = configuration.Lines.ToString();
             configurationSpan = new MarkdownSpan(configuration.Span.Start, configuration.Span.Length);
@@ -266,12 +322,46 @@ public static class MarkdownPageParser
 
         return new MarkdownBlock
         {
-            Kind = head.IsWidget ? MarkdownBlockKind.Widget : MarkdownBlockKind.Slot,
-            Head = head,
-            Line = line,
+            Kind = kind,
+            Head = isOwner ? head : null,
+            Error = error,
+            FenceLength = container.FenceLength,
+            Line = container.Line + 1,
+            EndLine = container.EndLine + 1,
             HeadSpan = headSpan,
             ConfigurationJson = configurationJson,
             ConfigurationSpan = configurationSpan
         };
+    }
+
+    private static string? FindNestingError(MarkdownBlockContainer container)
+    {
+        var outer = container.Parent;
+        while (outer is not null and not MarkdownBlockContainer)
+        {
+            outer = outer.Parent;
+        }
+
+        if (outer is not MarkdownBlockContainer outerBlock || container.FenceLength > outerBlock.FenceLength)
+        {
+            return null;
+        }
+
+        return $"A block inside another block needs more '{MarkdownBlockFence.Character}' characters than the block around it. " +
+               $"This block has {container.FenceLength} and the block around it, at line {outerBlock.Line + 1}, has {outerBlock.FenceLength}. " +
+               $"Write '{MarkdownBlockFence.Create(outerBlock.FenceLength + 1)}' here and on its closing line.";
+    }
+
+    private static string FormatClosesNothing(MarkdownBlockContainer closingLine)
+    {
+        var message = $"This line of {closingLine.FenceLength} '{MarkdownBlockFence.Character}' characters closes no block.";
+        if (closingLine.OpenBlocks.Count == 0)
+        {
+            return $"{message} No block is open here.";
+        }
+
+        var openBlocks = closingLine.OpenBlocks.Select(block => $"line {block.Line + 1} ({block.FenceLength} characters)");
+        return $"{message} A closing line needs as many characters as the head line of its block. " +
+               $"Open here: {string.Join(", ", openBlocks)}.";
     }
 }

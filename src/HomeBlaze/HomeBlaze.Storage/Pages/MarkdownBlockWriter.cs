@@ -58,17 +58,20 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
-    /// Creates the text of a new, empty widget block. Its lines end with <paramref name="lineEnding"/>,
-    /// except the last one, which has no line ending.
+    /// Creates the text of a new, empty widget block with a fence of <paramref name="fenceLength"/> characters.
+    /// Its lines end with <paramref name="lineEnding"/>, except the last one, which has no line ending.
     /// </summary>
     public static string CreateBlock(
-        string typeName, string? id, string configurationJson, string lineEnding = UnixLineEnding)
+        string typeName, string? id, string configurationJson, int fenceLength, string lineEnding = UnixLineEnding)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(fenceLength, MarkdownBlockFence.MinimumLength);
+
         var (arguments, remainder) = SplitConfiguration(configurationJson);
-        var head = new MarkdownBlockHead(3, typeName, id, arguments).Format();
+        var head = new MarkdownBlockHead(fenceLength, typeName, id, arguments).Format();
+        var closingLine = MarkdownBlockFence.Create(fenceLength);
         return remainder is null
-            ? $"{head}{lineEnding}:::"
-            : $"{head}{lineEnding}{FormatFence(remainder, lineEnding)}{lineEnding}:::";
+            ? $"{head}{lineEnding}{closingLine}"
+            : $"{head}{lineEnding}{FormatFence(remainder, lineEnding)}{lineEnding}{closingLine}";
     }
 
     /// <summary>

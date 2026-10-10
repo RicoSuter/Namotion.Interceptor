@@ -11,7 +11,7 @@ public enum DecorationRegionType
     Expression,
 
     /// <summary>
-    /// A widget block such as :::Full.Type.Name key=value.
+    /// The head line of a block with its type name and arguments, together with its json fence.
     /// </summary>
     SubjectBlock
 }

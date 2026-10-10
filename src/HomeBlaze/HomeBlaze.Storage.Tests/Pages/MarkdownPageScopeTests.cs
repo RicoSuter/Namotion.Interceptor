@@ -55,23 +55,23 @@ public class MarkdownPageScopeTests
 
     // One reference directly on the page, one in an open slot, and one in the content of a typed value of a list slot.
     private static string ReferencesAtEveryDepth(string path) => $$"""
-        :::{{Namespace}}.TestReference#direct path={{path}}
+        :: {{Namespace}}.TestReference#direct path={{path}}
+        ::
+
+        :: {{Namespace}}.TestPanel#panel
+        ::: {{Namespace}}.TestReference#inFragment path={{path}}
         :::
 
-        :::::{{Namespace}}.TestPanel#panel
-        :::{{Namespace}}.TestReference#inFragment path={{path}}
-        :::
-
-        ::::Row label=a
-        :::{{Namespace}}.TestReference#inRow path={{path}}
-        :::
+        ::: Row label=a
+        :::: {{Namespace}}.TestReference#inRow path={{path}}
         ::::
-
-        ::::Footer
-        :::{{Namespace}}.TestLeaf#leaf count=1
         :::
+
+        ::: Footer
+        :::: {{Namespace}}.TestLeaf#leaf count=1
         ::::
-        :::::
+        :::
+        ::
         """;
 
     [Fact]
@@ -82,10 +82,10 @@ public class MarkdownPageScopeTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            ::::{{{Namespace}}}.TestPanel#panel
-            :::{{{Namespace}}}.TestLeaf#leaf count=42
+            :: {{{Namespace}}}.TestPanel#panel
+            ::: {{{Namespace}}}.TestLeaf#leaf count=42
             :::
-            ::::
+            ::
 
             Count: {{ leaf/Count }}
             """);
@@ -102,12 +102,12 @@ public class MarkdownPageScopeTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :::{{{Namespace}}}.TestLeaf#leaf name=Top
-            :::
+            :: {{{Namespace}}}.TestLeaf#leaf name=Top
+            ::
 
-            :::{{{Namespace}}}.TestPanel#panel
+            :: {{{Namespace}}}.TestPanel#panel
             Nested {{ leaf/Name }} and {{ Title }}
-            :::
+            ::
             """);
 
         // Assert
@@ -122,10 +122,10 @@ public class MarkdownPageScopeTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var other = await fixture.AddPageAsync("other.md", "other");
         var page = await fixture.AddPageAsync("page.md", $$"""
-            ::::{{Namespace}}.TestPanel#panel
-            :::{{Namespace}}.TestLeaf#leaf
+            :: {{Namespace}}.TestPanel#panel
+            ::: {{Namespace}}.TestLeaf#leaf
             :::
-            ::::
+            ::
             """);
         var leaf = Flatten(page.Children.Values).OfType<TestLeaf>().Single();
         var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
@@ -164,10 +164,10 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            ::::{{{Namespace}}}.TestPanel#panel
-            :::{{{Namespace}}}.TestLeaf#leaf count=7
+            :: {{{Namespace}}}.TestPanel#panel
+            ::: {{{Namespace}}}.TestLeaf#leaf count=7
             :::
-            ::::
+            ::
 
             Count: {{ leaf/Count }}
             """);
@@ -185,8 +185,8 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :::{{{Namespace}}}.TestLeaf#leaf count=7
-            :::
+            :: {{{Namespace}}}.TestLeaf#leaf count=7
+            ::
 
             Count: {{ leaf/Count }}
 
@@ -209,8 +209,8 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :::{{{Namespace}}}.TestLeaf#leaf count=7
-            :::
+            :: {{{Namespace}}}.TestLeaf#leaf count=7
+            ::
 
             Write `{{ leaf/Count }}` or only `{{` to show {{ leaf/Count }} here.
             """);
@@ -340,8 +340,8 @@ public class MarkdownPageScopeTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var other = await fixture.AddPageAsync("other.md", "other");
         var page = await fixture.AddPageAsync("page.md", $$"""
-            :::{{Namespace}}.TestPanel#panel
-            :::
+            :: {{Namespace}}.TestPanel#panel
+            ::
             """);
         var panel = (TestPanel)page.Children["panel"];
         var leaf = new TestLeaf();
@@ -366,13 +366,13 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var content = $$$"""
-            :::{{{Namespace}}}.TestReference#reference path=leaf
-            :::
+            :: {{{Namespace}}}.TestReference#reference path=leaf
+            ::
 
-            ::::{{{Namespace}}}.TestPanel#panel
-            :::{{{Namespace}}}.TestLeaf#leaf count=1
+            :: {{{Namespace}}}.TestPanel#panel
+            ::: {{{Namespace}}}.TestLeaf#leaf count=1
             :::
-            ::::
+            ::
 
             Top {{ leaf/Count }}
             """;
@@ -406,12 +406,12 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var content = $$$"""
-            ::::{{{Namespace}}}.TestPanel#panel
-            :::{{{Namespace}}}.TestLeaf#leaf count=1
+            :: {{{Namespace}}}.TestPanel#panel
+            ::: {{{Namespace}}}.TestLeaf#leaf count=1
             :::
 
             Nested {{ leaf/Count }}
-            ::::
+            ::
             """;
 
         // The page is in the graph while it is parsed, so the expression is evaluated while the page has a context.
@@ -459,18 +459,18 @@ public class MarkdownPageScopeTests
         // change is not notified for these values. A read runs the getter and is what this test pins.
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await AddPageAsync(fixture, $$$"""
-            ::::{{{Namespace}}}.TestPanel#panel
-            :::{{{Namespace}}}.TestReference#byPath path=../later.md
+            :: {{{Namespace}}}.TestPanel#panel
+            ::: {{{Namespace}}}.TestReference#byPath path=../later.md
             :::
 
-            :::{{{Namespace}}}.TestReference#byName path=leaf
+            ::: {{{Namespace}}}.TestReference#byName path=leaf
             :::
 
-            :::{{{Namespace}}}.TestLeaf#leaf count=1
+            ::: {{{Namespace}}}.TestLeaf#leaf count=1
             :::
 
             Nested {{ leaf/Count }}
-            ::::
+            ::
             """, parseBeforeAttach);
         var leaf = Flatten(page.Children.Values).OfType<TestLeaf>().Single();
 

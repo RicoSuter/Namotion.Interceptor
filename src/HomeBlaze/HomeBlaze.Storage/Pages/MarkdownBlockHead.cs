@@ -7,7 +7,10 @@ namespace HomeBlaze.Storage.Pages;
 /// <summary>One key=value argument on the head line of a block.</summary>
 public sealed record MarkdownBlockArgument(string Key, string Value, bool IsQuoted);
 
-/// <summary>The parsed head line of a block: fence, name, optional #id and arguments.</summary>
+/// <summary>
+/// The parsed head line of a block: fence, name, optional #id and arguments. The name follows the fence
+/// with or without spaces, and <see cref="Format"/> writes one space.
+/// </summary>
 public sealed partial record MarkdownBlockHead(
     int FenceLength,
     string Name,
@@ -35,18 +38,23 @@ public sealed partial record MarkdownBlockHead(
 
         var text = line.Trim();
         var position = 0;
-        while (position < text.Length && text[position] == ':')
+        while (position < text.Length && text[position] == MarkdownBlockFence.Character)
         {
             position++;
         }
 
-        if (position < 3)
+        if (position < MarkdownBlockFence.MinimumLength)
         {
-            error = "A block starts with at least three colons.";
+            error = $"A block starts with at least {MarkdownBlockFence.MinimumLength} '{MarkdownBlockFence.Character}' characters.";
             return false;
         }
 
         var fenceLength = position;
+        while (position < text.Length && char.IsWhiteSpace(text[position]))
+        {
+            position++;
+        }
+
         var nameStart = position;
         while (position < text.Length && !char.IsWhiteSpace(text[position]) && text[position] != '#')
         {
@@ -174,7 +182,7 @@ public sealed partial record MarkdownBlockHead(
     public string Format()
     {
         var builder = new StringBuilder();
-        builder.Append(':', FenceLength).Append(Name);
+        builder.Append(MarkdownBlockFence.Character, FenceLength).Append(' ').Append(Name);
         if (Id is not null)
         {
             builder.Append('#').Append(Id);
