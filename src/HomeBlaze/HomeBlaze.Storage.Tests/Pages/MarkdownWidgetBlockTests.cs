@@ -1,4 +1,6 @@
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -178,6 +180,65 @@ public class MarkdownWidgetBlockTests
         Assert.False(page.Children.ContainsKey("faulty"));
         Assert.Same(leaf, page.Children["leaf"]);
         Assert.Equal(2, ((TestLeaf)leaf).Count);
+    }
+
+    [Fact]
+    public async Task WhenSubjectThrowsWhileItIsCreated_ThenOneWarningWithTheExceptionIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger<MarkdownContentParser>();
+        var fixture = await MarkdownPageFixture.CreateAsync(
+            services => services.AddSingleton<ILogger<MarkdownContentParser>>(logger));
+
+        // Act
+        await fixture.AddPageAsync(
+            "page.md",
+            $"text\n\n:::HomeBlaze.Storage.Tests.Pages.TestThrowingConstructor\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+
+        // Assert
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("constructor failed", Assert.IsType<InvalidOperationException>(entry.Exception).Message);
+        Assert.Contains("page.md", entry.Message);
+        Assert.Contains("line 3", entry.Message);
+    }
+
+    [Fact]
+    public async Task WhenSubjectThrowsWhileItsConfigurationIsApplied_ThenOneWarningWithTheExceptionIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger<MarkdownContentParser>();
+        var fixture = await MarkdownPageFixture.CreateAsync(
+            services => services.AddSingleton<ILogger<MarkdownContentParser>>(logger));
+        var page = await fixture.AddPageAsync("page.md", $":::{FaultyType}#faulty mode=ok\n:::");
+        var entriesBefore = logger.Entries;
+
+        // Act
+        await fixture.UpdatePageAsync(page, $":::{FaultyType}#faulty mode={TestFaulty.ThrowMode}\n:::");
+
+        // Assert
+        Assert.Empty(entriesBefore);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("apply failed", Assert.IsType<InvalidOperationException>(entry.Exception).Message);
+        Assert.Contains("page.md", entry.Message);
+        Assert.Contains("line 1", entry.Message);
+    }
+
+    [Fact]
+    public async Task WhenBlockHasAnErrorThatIsNoException_ThenNothingIsLogged()
+    {
+        // Arrange
+        var logger = new RecordingLogger<MarkdownContentParser>();
+        var fixture = await MarkdownPageFixture.CreateAsync(
+            services => services.AddSingleton<ILogger<MarkdownContentParser>>(logger));
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $":::{LeafType}#leaf unknown=1\n:::");
+
+        // Assert
+        Assert.Contains("has no configuration property", MarkdownPageFixture.Html(page.Children));
+        Assert.Empty(logger.Entries);
     }
 
     [Fact]

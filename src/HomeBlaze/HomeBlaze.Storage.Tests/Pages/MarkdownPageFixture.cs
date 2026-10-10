@@ -33,7 +33,8 @@ public sealed class MarkdownPageFixture
     /// <summary>The hosted subjects of this fixture that run. Filled once <see cref="StartHostedServicesAsync"/> ran.</summary>
     public TestHostedLog HostedLog { get; } = new();
 
-    public static async Task<MarkdownPageFixture> CreateAsync()
+    /// <param name="configureServices">Adds or replaces services before the service provider is built.</param>
+    public static async Task<MarkdownPageFixture> CreateAsync(Action<IServiceCollection>? configureServices = null)
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
@@ -53,6 +54,7 @@ public sealed class MarkdownPageFixture
         services.AddSingleton(_ => new SubjectPathResolver(() => storage));
         services.AddSingleton<RootManager>();
         services.AddSingleton<MarkdownContentParser>();
+        configureServices?.Invoke(services);
         var serviceProvider = services.BuildServiceProvider();
 
         // RootManager registers itself and the path resolver in the context from its constructor.

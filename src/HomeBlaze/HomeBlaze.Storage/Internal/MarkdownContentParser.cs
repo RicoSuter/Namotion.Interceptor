@@ -5,6 +5,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
@@ -20,6 +21,7 @@ public sealed partial class MarkdownContentParser
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly TypeProvider _typeProvider;
+    private readonly ILogger<MarkdownContentParser>? _logger;
 
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
@@ -123,11 +125,13 @@ public sealed partial class MarkdownContentParser
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
         SubjectPathResolver pathResolver,
-        TypeProvider typeProvider)
+        TypeProvider typeProvider,
+        ILogger<MarkdownContentParser>? logger = null)
     {
         _serializer = serializer;
         _pathResolver = pathResolver;
         _typeProvider = typeProvider;
+        _logger = logger;
     }
 
     /// <summary>
@@ -360,7 +364,13 @@ public sealed partial class MarkdownContentParser
         {
             // Constructors, ApplyConfigurationAsync and property setters run foreign code. One failing block must not
             // take the page down. A cancellation that the caller did not request is such a failure too, for example a
-            // timeout inside the subject.
+            // timeout inside the subject. The page shows the message only, so the log is where the stack trace is.
+            _logger?.LogWarning(
+                exception,
+                "The block at line {Line} of the page {Path} could not be created or updated.",
+                block.Line,
+                state.Page.FullPath);
+
             error = new BlockError(block.Line, $"{typeDescription} could not be created or updated: {exception.Message}");
         }
 
