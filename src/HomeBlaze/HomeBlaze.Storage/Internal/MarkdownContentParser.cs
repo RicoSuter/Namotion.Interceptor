@@ -1,54 +1,36 @@
 using System.Buffers;
+using System.Collections.Concurrent;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
-using Markdig;
-using Markdig.Renderers;
+using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Parses markdown content for embedded subjects and expressions.
-/// Extracted from MarkdownFile to maintain single responsibility.
+/// Turns the blocks and expressions of a markdown page into the child subjects of its <see cref="MarkdownFile"/>.
 /// </summary>
 public sealed partial class MarkdownContentParser
 {
-    // Constants for key prefixes
     private const string HtmlKeyPrefix = "Html_";
     private const string ExpressionKeyPrefix = "Expression_";
-    private const string SubjectMarkerPrefix = "<!--SUBJECT:";
-    private const string SubjectMarkerSuffix = "-->";
+
+    private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> ConfigurationPropertyCache = new();
+
+    // A JsonObject with a duplicate key parses and then throws on the first write, so the duplicate is rejected while parsing.
+    private static readonly JsonDocumentOptions StrictJsonOptions = new() { AllowDuplicateProperties = false };
 
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
-
-    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
-        .UseAdvancedExtensions()
-        .Build();
-
-    /// <summary>
-    /// Converts markdown to HTML with relative link rewriting.
-    /// </summary>
-    private static string ToHtml(string markdown, string basePath)
-    {
-        var document = Markdown.Parse(markdown, Pipeline);
-
-        using var writer = new StringWriter();
-        var renderer = new HtmlRenderer(writer)
-        {
-            LinkRewriter = url => RewriteLink(url, basePath)
-        };
-        Pipeline.Setup(renderer);
-        renderer.Render(document);
-        writer.Flush();
-
-        return writer.ToString();
-    }
+    private readonly TypeProvider _typeProvider;
 
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
@@ -151,24 +133,17 @@ public sealed partial class MarkdownContentParser
 
     public MarkdownContentParser(
         ConfigurableSubjectSerializer serializer,
-        SubjectPathResolver pathResolver)
+        SubjectPathResolver pathResolver,
+        TypeProvider typeProvider)
     {
         _serializer = serializer;
         _pathResolver = pathResolver;
+        _typeProvider = typeProvider;
     }
 
-    // Source-generated regexes for performance.
-    // ExpressionPattern is shared between SegmentMarkerRegex (HTML post-processing) and
-    // ExpressionRegex (raw-content rendering) so the two code paths agree on what a {{...}} is.
-    private const string ExpressionPattern = @"\{\{\s*([^}]+)\s*\}\}";
-
-    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n([\s\S]*?)```", RegexOptions.Singleline)]
-    private static partial Regex SubjectBlockRegex();
-
-    [GeneratedRegex(@"(<!--SUBJECT:([^>]+)-->|" + ExpressionPattern + ")")]
-    private static partial Regex SegmentMarkerRegex();
-
-    [GeneratedRegex(ExpressionPattern)]
+    // Shared with the segment builder so that rendering the raw content and splitting the HTML
+    // agree on what a {{...}} is.
+    [GeneratedRegex(MarkdownSegmentBuilder.ExpressionPattern)]
     private static partial Regex ExpressionRegex();
 
     /// <summary>
@@ -197,9 +172,9 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
-    /// Parses markdown content and reconciles with existing children.
+    /// Parses page content and reconciles it with the existing children.
     /// </summary>
-    public async Task<IDictionary<string, IInterceptorSubject>> ParseAsync(
+    public async Task<MarkdownParseResult> ParseAsync(
         string? content,
         MarkdownFile parent,
         IDictionary<string, IInterceptorSubject> existingChildren,
@@ -207,144 +182,149 @@ public sealed partial class MarkdownContentParser
     {
         if (string.IsNullOrEmpty(content))
         {
-            return new Dictionary<string, IInterceptorSubject>();
+            return MarkdownParseResult.Empty;
         }
 
-        var contentWithoutFrontmatter = FrontmatterParser.GetContentAfterFrontmatter(content);
-        var (markdownWithMarkers, subjectBlocks) = ExtractSubjectBlocks(contentWithoutFrontmatter);
-
+        var page = MarkdownPageParser.Parse(content);
         var basePath = GetLinkBasePath(parent);
-        var html = ToHtml(markdownWithMarkers, basePath);
-        var segments = ParseHtmlSegments(html, subjectBlocks);
-        return await ReconcileChildrenAsync(segments, parent, existingChildren, cancellationToken);
+        var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath));
+
+        var state = new ParseState(parent);
+        var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
+        return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
     }
 
-    private static (string markdown, Dictionary<string, string> subjectBlocks) ExtractSubjectBlocks(string markdown)
-    {
-        var subjectBlocks = new Dictionary<string, string>();
-
-        var result = SubjectBlockRegex().Replace(markdown, match =>
-        {
-            var name = match.Groups[1].Value;
-            var json = match.Groups[2].Value.Trim();
-            subjectBlocks[name] = json;
-            return $"{SubjectMarkerPrefix}{name}{SubjectMarkerSuffix}";
-        });
-
-        return (result, subjectBlocks);
-    }
-
-    private static List<ParsedSegment> ParseHtmlSegments(string html, Dictionary<string, string> subjectBlocks)
-    {
-        var segments = new List<ParsedSegment>();
-        var lastIndex = 0;
-
-        foreach (Match match in SegmentMarkerRegex().Matches(html))
-        {
-            // Add HTML before this match
-            if (match.Index > lastIndex)
-            {
-                var htmlSegment = html.Substring(lastIndex, match.Index - lastIndex);
-                segments.Add(new HtmlParsedSegment(htmlSegment));
-            }
-
-            if (match.Groups[2].Success)
-            {
-                // Subject marker
-                var name = match.Groups[2].Value;
-                if (subjectBlocks.TryGetValue(name, out var json))
-                {
-                    segments.Add(new SubjectParsedSegment(name, json));
-                }
-            }
-            else if (match.Groups[3].Success)
-            {
-                // Expression
-                var path = match.Groups[3].Value.Trim();
-                segments.Add(new ExpressionParsedSegment(path));
-            }
-
-            lastIndex = match.Index + match.Length;
-        }
-
-        // Add remaining HTML
-        if (lastIndex < html.Length)
-        {
-            segments.Add(new HtmlParsedSegment(html.Substring(lastIndex)));
-        }
-
-        return segments;
-    }
-
-    private async Task<IDictionary<string, IInterceptorSubject>> ReconcileChildrenAsync(
-        List<ParsedSegment> segments,
-        MarkdownFile parent,
-        IDictionary<string, IInterceptorSubject> oldChildren,
+    private async Task<IDictionary<string, IInterceptorSubject>> BuildChildrenAsync(
+        IReadOnlyList<MarkdownSegment> segments,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        ParseState state,
         CancellationToken cancellationToken)
     {
-        var newChildren = new Dictionary<string, IInterceptorSubject>();
-        var segmentIndex = 0;
+        var children = new Dictionary<string, IInterceptorSubject>();
 
-        foreach (var segment in segments)
+        for (var index = 0; index < segments.Count; index++)
         {
-            switch (segment)
+            switch (segments[index])
             {
-                case HtmlParsedSegment html:
-                    // Include index in key to handle duplicate HTML segments (e.g., "</td><td>" between cells)
-                    var htmlKey = $"{HtmlKeyPrefix}{segmentIndex}_{ComputeHash(html.Html)}";
-                    if (oldChildren.TryGetValue(htmlKey, out var existingHtml) && existingHtml is HtmlSegment)
-                    {
-                        newChildren[htmlKey] = existingHtml;
-                    }
-                    else
-                    {
-                        newChildren[htmlKey] = new HtmlSegment(html.Html);
-                    }
+                case HtmlMarkdownSegment html:
+                    AddHtml(children, existingChildren, index, html.Html);
                     break;
 
-                case ExpressionParsedSegment expr:
-                    // Include index in key to handle duplicate expressions
-                    var exprKey = $"{ExpressionKeyPrefix}{segmentIndex}_{ComputeHash(expr.Path)}";
-                    if (oldChildren.TryGetValue(exprKey, out var existingExpr) && existingExpr is RenderExpression)
-                    {
-                        newChildren[exprKey] = existingExpr;
-                    }
-                    else
-                    {
-                        newChildren[exprKey] = new RenderExpression(expr.Path, parent, _pathResolver);
-                    }
+                case ExpressionMarkdownSegment expression:
+                    var expressionKey = $"{ExpressionKeyPrefix}{index}_{ComputeHash(expression.Path)}";
+                    children[expressionKey] =
+                        existingChildren.TryGetValue(expressionKey, out var existingExpression) && existingExpression is RenderExpression
+                            ? existingExpression
+                            : new RenderExpression(expression.Path, state.Page, _pathResolver);
                     break;
 
-                case SubjectParsedSegment subj:
-                    var typeName = ExtractTypeName(subj.Json);
-                    if (oldChildren.TryGetValue(subj.Name, out var existing) &&
-                        existing.GetType().FullName == typeName)
+                case BlockMarkdownSegment block:
+                    var (key, subject, error) = await CreateWidgetAsync(block, existingChildren, index, state, cancellationToken);
+                    if (subject is null)
                     {
-                        // Same key + same type: update and apply config
-                        _serializer.UpdateConfiguration(existing, subj.Json);
-                        if (existing is IConfigurable configurable)
-                        {
-                            await configurable.ApplyConfigurationAsync(cancellationToken);
-                        }
-                        newChildren[subj.Name] = existing;
+                        AddHtml(children, existingChildren, index, MarkdownErrorBox.Render(block.Block.Line, error!));
                     }
                     else
                     {
-                        // Create new subject
-                        var newSubject = _serializer.Deserialize(subj.Json);
-                        if (newSubject != null)
-                        {
-                            // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-                            newChildren[subj.Name] = (IInterceptorSubject)newSubject;
-                        }
+                        children[key!] = subject;
                     }
+
                     break;
             }
-
-            segmentIndex++;
         }
 
-        return newChildren;
+        return children;
+    }
+
+    private static void AddHtml(
+        Dictionary<string, IInterceptorSubject> children,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        int index,
+        string html)
+    {
+        // The index is part of the key because the same HTML can occur several times.
+        var key = $"{HtmlKeyPrefix}{index}_{ComputeHash(html)}";
+        children[key] = existingChildren.TryGetValue(key, out var existing) && existing is HtmlSegment
+            ? existing
+            : new HtmlSegment(html);
+    }
+
+    private async Task<(string? Key, IInterceptorSubject? Subject, string? Error)> CreateWidgetAsync(
+        BlockMarkdownSegment segment,
+        IDictionary<string, IInterceptorSubject> existingChildren,
+        int index,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var block = segment.Block;
+        var head = block.Head!;
+
+        if (block.Kind == MarkdownBlockKind.Slot)
+        {
+            return (null, null, $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it.");
+        }
+
+        var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
+        if (type is null || !typeof(IConfigurable).IsAssignableFrom(type))
+        {
+            return (null, null, $"Unknown type '{head.Name}'. Use the full type name including the namespace.");
+        }
+
+        if (head.Id is not null && state.NamedSubjects.ContainsKey(head.Id))
+        {
+            return (null, null, $"The name '{head.Id}' is used twice on this page.");
+        }
+
+        if (!TryBuildConfiguration(type, block, out var json, out var configurationError))
+        {
+            return (null, null, configurationError);
+        }
+
+        var key = head.Id ?? $"{type.Name}_{index}";
+        existingChildren.TryGetValue(key, out var existing);
+        var subject = await CreateOrUpdateAsync(type, existing, json, cancellationToken);
+        if (subject is null)
+        {
+            return (null, null, $"The type '{head.Name}' could not be created.");
+        }
+
+        var contentError = await ApplyContentAsync(subject, type, segment.Content, state, cancellationToken);
+        if (contentError is not null)
+        {
+            return (null, null, contentError);
+        }
+
+        state.Register(block, head.Id, subject);
+        return (key, subject, null);
+    }
+
+    private async Task<IInterceptorSubject?> CreateOrUpdateAsync(
+        Type type, IInterceptorSubject? existing, string json, CancellationToken cancellationToken)
+    {
+        if (existing is not null && existing.GetType() == type)
+        {
+            _serializer.UpdateConfiguration(existing, json);
+            if (existing is IConfigurable configurable)
+            {
+                await configurable.ApplyConfigurationAsync(cancellationToken);
+            }
+
+            return existing;
+        }
+
+        return _serializer.Deserialize(json) as IInterceptorSubject;
+    }
+
+    // Replaced in the slots task. Until then a widget block cannot have content.
+    private Task<string?> ApplyContentAsync(
+        IInterceptorSubject subject,
+        Type type,
+        IReadOnlyList<MarkdownSegment> content,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var hasContent = content.Any(segment => segment is not HtmlMarkdownSegment html || !string.IsNullOrWhiteSpace(html.Html));
+        return Task.FromResult(hasContent ? $"{type.Name} cannot have content." : null);
     }
 
     private static string ComputeHash(string content)
@@ -364,26 +344,108 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private static string? ExtractTypeName(string json)
+    private static bool TryBuildConfiguration(Type type, MarkdownBlock block, out string json, out string? error)
     {
-        try
+        json = string.Empty;
+        error = null;
+
+        JsonObject? configuration;
+        if (block.ConfigurationJson is { } text)
         {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("type", out var typeElement))
+            try
             {
-                return typeElement.GetString();
+                configuration = JsonNode.Parse(text, documentOptions: StrictJsonOptions) as JsonObject;
+            }
+            catch (JsonException)
+            {
+                configuration = null;
+            }
+
+            if (configuration is null)
+            {
+                error = "The json block must contain a JSON object.";
+                return false;
             }
         }
-        catch
+        else
         {
-            // Invalid JSON - return null
+            configuration = new JsonObject();
         }
-        return null;
+
+        var properties = GetConfigurationProperties(type);
+        foreach (var argument in block.Head!.Arguments)
+        {
+            if (!properties.TryGetValue(argument.Key, out var propertyType))
+            {
+                error = $"{type.Name} has no configuration property '{argument.Key}'. Available: {string.Join(", ", properties.Keys.Order())}.";
+                return false;
+            }
+
+            if (!TryConvertArgument(argument, propertyType, out var node))
+            {
+                error = $"'{argument.Value}' is not a valid value for '{argument.Key}'.";
+                return false;
+            }
+
+            configuration[argument.Key] = node;
+        }
+
+        configuration["$type"] = type.FullName;
+        json = configuration.ToJsonString();
+        return true;
     }
 
-    // Parsed segment types - internal for testing
-    internal abstract record ParsedSegment;
-    internal sealed record HtmlParsedSegment(string Html) : ParsedSegment;
-    internal sealed record ExpressionParsedSegment(string Path) : ParsedSegment;
-    internal sealed record SubjectParsedSegment(string Name, string Json) : ParsedSegment;
+    private static IReadOnlyDictionary<string, Type> GetConfigurationProperties(Type type) =>
+        ConfigurationPropertyCache.GetOrAdd(type, static key => key
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null)
+            .ToDictionary(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name), property => property.PropertyType));
+
+    private static bool TryConvertArgument(MarkdownBlockArgument argument, Type propertyType, out JsonNode? node)
+    {
+        var target = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        if (target == typeof(bool))
+        {
+            var isBoolean = bool.TryParse(argument.Value, out var boolean);
+            node = JsonValue.Create(boolean);
+            return isBoolean;
+        }
+
+        var isNumeric = target == typeof(decimal) || (target.IsPrimitive && target != typeof(char));
+        if (isNumeric)
+        {
+            try
+            {
+                node = JsonNode.Parse(argument.Value);
+                return node is not null && node.GetValueKind() == JsonValueKind.Number;
+            }
+            catch (JsonException)
+            {
+                node = null;
+                return false;
+            }
+        }
+
+        node = JsonValue.Create(argument.Value);
+        return true;
+    }
+
+    private sealed class ParseState(MarkdownFile page)
+    {
+        public MarkdownFile Page { get; } = page;
+
+        public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
+
+        public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
+
+        public void Register(MarkdownBlock block, string? id, IInterceptorSubject subject)
+        {
+            BlockSubjects[block.Index] = subject;
+            if (id is not null)
+            {
+                NamedSubjects[id] = subject;
+            }
+        }
+    }
 }

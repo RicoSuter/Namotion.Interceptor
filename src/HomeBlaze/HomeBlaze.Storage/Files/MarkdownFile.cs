@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
@@ -7,8 +6,10 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
@@ -16,18 +17,19 @@ using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 namespace HomeBlaze.Storage.Files;
 
 /// <summary>
-/// Represents a Markdown file in storage with support for embedded subjects and expressions.
+/// Represents a Markdown file in storage with support for blocks and expressions.
 /// </summary>
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter
 {
-    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n[\s\S]*?```")]
-    private static partial Regex SubjectBlockRegex();
-
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
+
+    private MarkdownPage? _page;
+    private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects = new Dictionary<int, IInterceptorSubject>();
+    private IReadOnlyDictionary<string, IInterceptorSubject> _namedSubjects = new Dictionary<string, IInterceptorSubject>();
 
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
@@ -62,7 +64,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     /// <summary>
     /// Child subjects parsed from markdown content.
-    /// Contains HtmlSegments, RenderExpressions, and embedded subjects.
+    /// Contains HtmlSegments, RenderExpressions, and the subjects created by blocks.
     /// </summary>
     [InlinePaths]
     public partial IDictionary<string, IInterceptorSubject> Children { get; private set; }
@@ -106,8 +108,19 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         using var reader = new StreamReader(stream);
         Content = await reader.ReadToEndAsync(cancellationToken);
         Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
-        Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
+        var result = await _parser.ParseAsync(Content, this, Children, cancellationToken);
+        _page = result.Page;
+        _blockSubjects = result.BlockSubjects;
+        _namedSubjects = result.NamedSubjects;
+        Children = result.Children;
     }
+
+    /// <summary>
+    /// Gets the subject that the block with this index created, or null when the block created none.
+    /// The index is <see cref="MarkdownBlock.Index"/> of the page as last parsed.
+    /// </summary>
+    public IInterceptorSubject? GetBlockSubject(int blockIndex) =>
+        _blockSubjects.GetValueOrDefault(blockIndex);
 
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
     public string? ReadRawContent() => Content;
@@ -130,42 +143,46 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        // Rebuild markdown with all embedded subjects serialized
-        Content = RebuildMarkdownContent();
+        var page = _page;
+        if (page is null || FindBlock(subject) is not (var blockIndex, var blockSubject))
+        {
+            return false;
+        }
 
-        // Write to storage
-        var bytes = Encoding.UTF8.GetBytes(Content);
+        // The block spans index into the text the page was parsed from. Content can already be
+        // newer than that while a reload is still parsing, so it must not be the text written to.
+        var content = MarkdownBlockWriter.WriteConfiguration(
+            page.Source, page.AllBlocks[blockIndex], _serializer.Serialize(blockSubject));
+
+        // The spans moved, the block order did not, so the block subjects stay valid.
+        _page = MarkdownPageParser.Parse(content);
+        Content = content;
+
+        var bytes = Encoding.UTF8.GetBytes(content);
         using var stream = new MemoryStream(bytes);
         await WriteAsync(stream, cancellationToken);
-
         return true;
     }
 
-    private string RebuildMarkdownContent()
+    private (int BlockIndex, IInterceptorSubject Subject)? FindBlock(IInterceptorSubject subject)
     {
-        if (string.IsNullOrEmpty(Content))
+        // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
+        for (var current = subject; current is not null && !ReferenceEquals(current, this); current = GetSingleParent(current))
         {
-            return string.Empty;
+            foreach (var (blockIndex, blockSubject) in _blockSubjects)
+            {
+                if (ReferenceEquals(blockSubject, current))
+                {
+                    return (blockIndex, current);
+                }
+            }
         }
 
-        // Regex matches: ```subject(name)\n{json}```
-        return SubjectBlockRegex().Replace(
-            Content,
-            match =>
-            {
-                var name = match.Groups[1].Value;
-
-                // Find the child subject by name and serialize it
-                if (Children.TryGetValue(name, out var child))
-                {
-                    var json = _serializer.Serialize(child);
-                    return $"```subject({name})\n{json}\n```";
-                }
-
-                // Subject not found - keep original block unchanged
-                return match.Value;
-            });
+        return null;
     }
+
+    private static IInterceptorSubject? GetSingleParent(IInterceptorSubject subject) =>
+        subject.TryGetRegisteredSubject()?.Parents is { Length: 1 } parents ? parents[0].Property.Subject : null;
 
     private static string FormatFilename(string name)
     {
