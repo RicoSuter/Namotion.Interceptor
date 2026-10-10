@@ -14,6 +14,8 @@ namespace HomeBlaze.Storage.Tests;
 public partial class GatedFile : IStorageFile
 {
     private static readonly ConcurrentQueue<Gate> Gates = new();
+    private static int _loadCount;
+    private static int _failNextLoad;
 
     public IStorageContainer Storage { get; }
 
@@ -34,6 +36,9 @@ public partial class GatedFile : IStorageFile
         Name = Path.GetFileName(fullPath);
     }
 
+    /// <summary>The number of loads since the last <see cref="Reset"/>.</summary>
+    public static int LoadCount => Volatile.Read(ref _loadCount);
+
     /// <summary>
     /// Makes the next load pause until the returned gate is released. Loads without a gate run through.
     /// </summary>
@@ -44,7 +49,17 @@ public partial class GatedFile : IStorageFile
         return gate;
     }
 
-    public static void Reset() => Gates.Clear();
+    /// <summary>
+    /// Makes the next load throw.
+    /// </summary>
+    public static void FailNextLoad() => Volatile.Write(ref _failNextLoad, 1);
+
+    public static void Reset()
+    {
+        Gates.Clear();
+        Volatile.Write(ref _loadCount, 0);
+        Volatile.Write(ref _failNextLoad, 0);
+    }
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
         => Storage.ReadBlobAsync(FullPath, cancellationToken);
@@ -54,6 +69,12 @@ public partial class GatedFile : IStorageFile
 
     public async Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _loadCount);
+        if (Interlocked.Exchange(ref _failNextLoad, 0) == 1)
+        {
+            throw new InvalidOperationException("The load was made to fail.");
+        }
+
         await using var stream = await ReadAsync(cancellationToken);
         using var reader = new StreamReader(stream);
         var content = await reader.ReadToEndAsync(cancellationToken);

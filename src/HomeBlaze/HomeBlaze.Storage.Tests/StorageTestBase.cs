@@ -8,6 +8,11 @@ namespace HomeBlaze.Storage.Tests;
 /// <summary>
 /// A storage container on a temporary directory, wired with the application's interceptor context.
 /// </summary>
+/// <remarks>
+/// One collection for all derived classes: the gates and counters of <see cref="GatedFile"/> are static, so
+/// tests that use them must not run next to each other.
+/// </remarks>
+[Collection(nameof(StorageTestBase))]
 public abstract class StorageTestBase : IDisposable
 {
     protected static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);

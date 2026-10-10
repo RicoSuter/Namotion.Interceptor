@@ -125,7 +125,6 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
     [InlineData(".DS_Store")]
     [InlineData("._Home.md")]
     [InlineData(".idea/workspace.xml")]
-    [InlineData("Docs/.hidden.md")]
     public async Task WhenHiddenFileIsCreated_ThenItIsIgnored(string relativePath)
     {
         // Arrange
@@ -137,6 +136,23 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
 
         // Assert
         Assert.Empty(storage.Children);
+    }
+
+    [Theory]
+    [InlineData("Docs/.hidden.md")]
+    [InlineData("Docs/Old~/Notes.md")]
+    public async Task WhenIgnoredFileIsCreatedInVisibleDirectory_ThenOnlyTheDirectoryIsAdded(string relativePath)
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile(relativePath);
+
+        // Act
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, relativePath));
+
+        // Assert
+        Assert.Equal(["Docs"], storage.Children.Keys);
+        Assert.Empty(Assert.IsType<VirtualFolder>(storage.Children["Docs"]).Children);
     }
 
     [Fact]
@@ -352,7 +368,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile("New/Added.md");
 
         // Act
-        await storage.ResyncAsync();
+        await storage.ReconcileAsync(allNamed: true);
 
         // Assert
         Assert.Equal(["Docs", "Kept.md", "New"], storage.Children.Keys.Order());
@@ -388,7 +404,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         motor.Name = "Changed in memory";
 
         // Act
-        await storage.ResyncAsync();
+        await storage.ReconcileAsync(allNamed: true);
 
         // Assert
         Assert.Same(motor, storage.Children["Motor"]);
@@ -396,34 +412,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenTwoEventsLoadSameNewFile_ThenSubjectHasContentOfLaterLoad()
-    {
-        // Arrange
-        var storage = await ConnectAsync();
-        WriteFile("Data.gated", "first");
-
-        var firstGate = GatedFile.PauseNextLoad();
-        var firstAdd = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Data.gated"));
-        await firstGate.WhenReachedAsync();
-
-        WriteFile("Data.gated", "second");
-        var secondGate = GatedFile.PauseNextLoad();
-        var secondAdd = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Changed, "Data.gated"));
-        await secondGate.WhenReachedAsync();
-
-        // Act
-        firstGate.Release();
-        await firstAdd;
-        secondGate.Release();
-        await secondAdd;
-
-        // Assert
-        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
-        Assert.Equal("second", file.Content);
-    }
-
-    [Fact]
-    public async Task WhenFileIsDeletedWhileItsSubjectLoads_ThenNoSubjectIsAdded()
+    public async Task WhenFileIsDeletedWhileItsSubjectLoads_ThenNextPassRemovesIt()
     {
         // Arrange
         var storage = await ConnectAsync();
@@ -434,33 +423,33 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         await gate.WhenReachedAsync();
 
         File.Delete(GetFullPath("Data.gated"));
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Data.gated"));
+        var delete = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Data.gated"));
 
         // Act
         gate.Release();
-        await add;
+        await Task.WhenAll(add, delete);
 
         // Assert
         Assert.Empty(storage.Children);
     }
 
     [Fact]
-    public async Task WhenFileIsAddedWhileStorageIsResynchronized_ThenFileIsKept()
+    public async Task WhenFileIsAddedWhilePassRuns_ThenFileIsKept()
     {
         // Arrange
         var storage = await ConnectAsync();
         WriteFile("Slow.gated");
 
         var gate = GatedFile.PauseNextLoad();
-        var resync = storage.ResyncAsync();
+        var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
 
         WriteFile("Added.md");
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Added.md"));
+        var added = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Added.md"));
 
         // Act
         gate.Release();
-        await resync;
+        await Task.WhenAll(pass, added);
 
         // Assert
         Assert.Equal(["Added.md", "Slow.gated"], storage.Children.Keys.Order());
@@ -537,7 +526,6 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
     [Theory]
     [InlineData("Build.tmp/Output.md")]
     [InlineData("~Backup/Notes.md")]
-    [InlineData("Docs/Old~/Notes.md")]
     public async Task WhenFileIsCreatedInTemporaryDirectory_ThenItIsIgnored(string relativePath)
     {
         // Arrange
