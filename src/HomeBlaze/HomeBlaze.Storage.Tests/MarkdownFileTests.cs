@@ -2,11 +2,13 @@ using System.Text;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Tests.Pages;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
+[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownFileTests
 {
     [Fact]

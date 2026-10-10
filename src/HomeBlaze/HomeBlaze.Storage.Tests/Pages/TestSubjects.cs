@@ -122,6 +122,40 @@ public partial class TestRow : IConfigurable
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
+/// <summary>A subject that is not configurable, so a slot of this type cannot create its value.</summary>
+[InterceptorSubject]
+public partial class TestPlain;
+
+/// <summary>Has slots whose values fail when they are created or configured.</summary>
+[InterceptorSubject]
+public partial class TestFaultyHost : IConfigurable
+{
+    public TestFaultyHost()
+    {
+        FaultyValues = [];
+    }
+
+    [Slot("Faulty")]
+    public partial TestFaulty[] FaultyValues { get; set; }
+
+    [Slot]
+    public partial TestThrowingConstructor? Broken { get; set; }
+
+    [Slot]
+    public partial TestPlain? Plain { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class TestInvalidSlots : IConfigurable
+{
+    [Slot]
+    public partial string? Text { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
 public class TwoDefaults
 {
     [Slot(IsDefault = true)]

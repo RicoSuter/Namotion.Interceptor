@@ -9,6 +9,13 @@ namespace HomeBlaze.Storage.Tests.Pages;
 
 public sealed class MarkdownPageFixture
 {
+    /// <summary>
+    /// The xunit collection of every test class that writes to the in-memory blob storage.
+    /// The storage hashes each write with one shared hash instance that is not thread-safe,
+    /// so these classes must not run in parallel.
+    /// </summary>
+    public const string StorageCollection = "In-memory blob storage";
+
     private MarkdownPageFixture(FluentStorageContainer storage, IServiceProvider services)
     {
         Storage = storage;

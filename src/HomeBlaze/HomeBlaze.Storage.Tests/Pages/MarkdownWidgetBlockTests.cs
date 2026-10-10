@@ -2,6 +2,7 @@ using HomeBlaze.Storage.Internal;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
+[Collection(MarkdownPageFixture.StorageCollection)]
 public class MarkdownWidgetBlockTests
 {
     private const string LeafType = "HomeBlaze.Storage.Tests.Pages.TestLeaf";
@@ -102,7 +103,7 @@ public class MarkdownWidgetBlockTests
     [InlineData(":::" + LeafType + "\n```json\n[1]\n```\n:::", "must contain a JSON object")]
     [InlineData(":::" + LeafType + "\n```json\n{ \"count\": 1, \"count\": 2 }\n```\n:::", "without duplicate keys")]
     [InlineData(":::" + LeafType + "\n```json\n{ \"cont\": 1 }\n```\n:::", "has no configuration property 'cont'")]
-    [InlineData(":::" + LeafType + "\ncontent\n:::", "cannot have content")]
+    [InlineData(":::" + LeafType + "\ncontent\n:::", "has no default slot, so it cannot have content")]
     [InlineData(":::" + LeafType + "#a\n:::\n\n:::" + LeafType + "#a\n:::", "used twice")]
     public async Task WhenBlockIsWrong_ThenAnErrorBoxReplacesIt(string content, string expectedMessage)
     {

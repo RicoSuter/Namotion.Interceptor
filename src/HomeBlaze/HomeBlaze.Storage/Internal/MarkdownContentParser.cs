@@ -228,7 +228,7 @@ public sealed partial class MarkdownContentParser
                     var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
                     if (subject is null)
                     {
-                        AddHtml(children, existingChildren, index, MarkdownErrorBox.Render(block.Block.Line, error!));
+                        AddHtml(children, existingChildren, index, MarkdownErrorBox.Render(error!.Line, error.Message));
                     }
                     else
                     {
@@ -255,7 +255,7 @@ public sealed partial class MarkdownContentParser
             : new HtmlSegment(html);
     }
 
-    private async Task<(string? Key, IInterceptorSubject? Subject, string? Error)> CreateWidgetAsync(
+    private async Task<(string? Key, IInterceptorSubject? Subject, BlockError? Error)> CreateWidgetAsync(
         BlockMarkdownSegment segment,
         Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
@@ -269,64 +269,96 @@ public sealed partial class MarkdownContentParser
         // Claimed before every other check, so that a block that ends as an error box still owns its name.
         if (head.Id is not null && !state.ClaimedIds.Add(head.Id))
         {
-            return (null, null, FormatUsedTwice(head.Id));
+            return (null, null, new BlockError(block.Line, FormatUsedTwice(head.Id)));
         }
 
         if (block.Kind == MarkdownBlockKind.Slot)
         {
-            return (null, null, $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it.");
+            return (null, null, new BlockError(
+                block.Line,
+                $"'{head.Name}' is not a slot at this position. A slot block must be directly inside the widget that declares it."));
         }
 
         var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
         if (type is null || !typeof(IConfigurable).IsAssignableFrom(type))
         {
-            return (null, null, $"Unknown type '{head.Name}'. Use the full type name including the namespace.");
+            return (null, null, new BlockError(
+                block.Line, $"Unknown type '{head.Name}'. Use the full type name including the namespace."));
         }
 
         if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
         {
-            return (null, null, $"The type '{head.Name}' cannot be created because it is abstract, an interface or an open generic type.");
+            return (null, null, new BlockError(
+                block.Line,
+                $"The type '{head.Name}' cannot be created because it is abstract, an interface or an open generic type."));
         }
 
         // An id can equal the positional key of another block, for example #Card_3.
         var key = head.Id ?? $"{type.Name}_{index}";
         if (children.ContainsKey(key))
         {
-            return (null, null, FormatUsedTwice(key));
+            return (null, null, new BlockError(block.Line, FormatUsedTwice(key)));
         }
 
+        existingChildren.TryGetValue(key, out var existing);
+        var (subject, error) = await CreateBlockSubjectAsync(
+            type, $"The type '{head.Name}'", segment, existing, state, cancellationToken);
+
+        return (subject is null ? null : key, subject, error);
+    }
+
+    private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
+
+    /// <summary>
+    /// Creates the subject of a widget block or of a slot block with a concrete type, or updates
+    /// <paramref name="existing"/> in place, and fills its slots from the content of the block.
+    /// <paramref name="typeDescription"/> is how an error message names the type, for example "The type 'X'".
+    /// </summary>
+    private async Task<(IInterceptorSubject? Subject, BlockError? Error)> CreateBlockSubjectAsync(
+        Type type,
+        string typeDescription,
+        BlockMarkdownSegment segment,
+        IInterceptorSubject? existing,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var block = segment.Block;
+        var registrationCount = state.RegistrationCount;
+
+        BlockError? error;
         try
         {
             if (!TryBuildConfiguration(type, block, out var configuration, out var configurationError))
             {
-                return (null, null, configurationError);
+                return (null, new BlockError(block.Line, configurationError!));
             }
 
-            existingChildren.TryGetValue(key, out var existing);
             var subject = await CreateOrUpdateAsync(type, existing, configuration, cancellationToken);
             if (subject is null)
             {
-                return (null, null, $"The type '{head.Name}' could not be created.");
+                return (null, new BlockError(
+                    block.Line, $"{typeDescription} could not be created. It must be a registered configurable subject type."));
             }
 
-            var contentError = await ApplyContentAsync(subject, type, segment.Content, state, cancellationToken);
-            if (contentError is not null)
+            error = await ApplyContentAsync(subject, type, segment, state, cancellationToken);
+            if (error is null)
             {
-                return (null, null, contentError);
+                state.Register(block, block.Head!.Id, subject);
+                return (subject, null);
             }
-
-            state.Register(block, head.Id, subject);
-            return (key, subject, null);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            // Constructors and ApplyConfigurationAsync run foreign code. One failing block must not take the page down.
-            // A cancellation that the caller did not request is such a failure too, for example a timeout inside the subject.
-            return (null, null, $"The type '{head.Name}' could not be created or updated: {exception.Message}");
+            // Constructors, ApplyConfigurationAsync and property setters run foreign code. One failing block must not
+            // take the page down. A cancellation that the caller did not request is such a failure too, for example a
+            // timeout inside the subject.
+            error = new BlockError(block.Line, $"{typeDescription} could not be created or updated: {exception.Message}");
         }
-    }
 
-    private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
+        // The block ends as an error box, so the subjects that blocks nested in it registered are not on the page.
+        state.RemoveRegistrationsSince(registrationCount);
+        return (null, error);
+    }
 
     private async Task<IInterceptorSubject?> CreateOrUpdateAsync(
         Type type, IInterceptorSubject? existing, BlockConfiguration configuration, CancellationToken cancellationToken)
@@ -388,16 +420,188 @@ public sealed partial class MarkdownContentParser
             || Array.TrueForAll(previousKeys, previousKey => Array.IndexOf(keys, previousKey) >= 0);
     }
 
-    // Replaced in the slots task. Until then a widget block cannot have content.
-    private Task<string?> ApplyContentAsync(
+    /// <summary>
+    /// Fills the slots of <paramref name="subject"/> from the content of its block: slot blocks fill the slot
+    /// they name, everything else goes to the default slot, and a slot without content is cleared.
+    /// </summary>
+    private async Task<BlockError?> ApplyContentAsync(
         IInterceptorSubject subject,
         Type type,
+        BlockMarkdownSegment owner,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var ownerLine = owner.Block.Line;
+
+        var slots = SlotMap.For(type);
+        if (slots.Error is not null)
+        {
+            return new BlockError(ownerLine, slots.Error);
+        }
+
+        if (owner.Content.Count == 0 && slots.Named.Count == 0)
+        {
+            return null;
+        }
+
+        var defaultContent = new List<MarkdownSegment>();
+        var slotBlocks = new List<BlockMarkdownSegment>();
+        foreach (var segment in owner.Content)
+        {
+            if (segment is BlockMarkdownSegment { Block.Kind: MarkdownBlockKind.Slot } slotBlock)
+            {
+                slotBlocks.Add(slotBlock);
+            }
+            else
+            {
+                defaultContent.Add(segment);
+            }
+        }
+
+        var filled = new HashSet<SlotDefinition>();
+        foreach (var group in slotBlocks.GroupBy(block => block.Block.Head!.Name))
+        {
+            var blocks = group.ToList();
+            if (!slots.Named.TryGetValue(group.Key, out var slot))
+            {
+                return new BlockError(blocks[0].Block.Line, slots.Named.Count == 0
+                    ? $"{type.Name} has no slots, so '{group.Key}' cannot be used inside it."
+                    : $"{type.Name} has no slot '{group.Key}'. Available: {string.Join(", ", slots.Named.Keys.Order())}.");
+            }
+
+            if (!slot.IsList && blocks.Count > 1)
+            {
+                return new BlockError(
+                    blocks[1].Block.Line, $"The slot '{slot.Name}' takes one block, but there are {blocks.Count}.");
+            }
+
+            // A value is reused by its position in the slot, like a widget without a name by its position in the content.
+            var existingValues = GetSlotValues(subject, slot);
+            var values = new List<IInterceptorSubject>(blocks.Count);
+            for (var index = 0; index < blocks.Count; index++)
+            {
+                var existing = index < existingValues.Count ? existingValues[index] : null;
+                var (value, error) = await CreateSlotValueAsync(slot, blocks[index], existing, state, cancellationToken);
+                if (value is null)
+                {
+                    return error;
+                }
+
+                values.Add(value);
+            }
+
+            SetSlotValues(subject, slot, values);
+            filled.Add(slot);
+        }
+
+        var hasDefaultContent = defaultContent.Exists(
+            segment => segment is not HtmlMarkdownSegment html || !string.IsNullOrWhiteSpace(html.Html));
+
+        if (hasDefaultContent)
+        {
+            if (slots.Default is null)
+            {
+                return new BlockError(ownerLine, $"{type.Name} has no default slot, so it cannot have content.");
+            }
+
+            if (filled.Contains(slots.Default))
+            {
+                return new BlockError(
+                    ownerLine, $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
+            }
+
+            var existing = slots.Default.Property.GetValue(subject) as IInterceptorSubject;
+            var fragment = await CreateFragmentAsync(existing, defaultContent, state, cancellationToken);
+            SetSlotValues(subject, slots.Default, [fragment]);
+            filled.Add(slots.Default);
+        }
+
+        foreach (var slot in slots.Named.Values)
+        {
+            if (!filled.Contains(slot))
+            {
+                SetSlotValues(subject, slot, []);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<(IInterceptorSubject? Value, BlockError? Error)> CreateSlotValueAsync(
+        SlotDefinition slot,
+        BlockMarkdownSegment segment,
+        IInterceptorSubject? existing,
+        ParseState state,
+        CancellationToken cancellationToken)
+    {
+        var block = segment.Block;
+        var head = block.Head!;
+
+        // Claimed before every other check, like the name of a widget block.
+        if (head.Id is not null && !state.ClaimedIds.Add(head.Id))
+        {
+            return (null, new BlockError(block.Line, FormatUsedTwice(head.Id)));
+        }
+
+        if (!slot.IsOpen)
+        {
+            return await CreateBlockSubjectAsync(
+                slot.ValueType,
+                $"The type '{slot.ValueType.FullName}' of the slot '{slot.Name}'",
+                segment,
+                existing,
+                state,
+                cancellationToken);
+        }
+
+        if (head.Arguments.Count > 0 || head.Id is not null || block.ConfigurationJson is not null)
+        {
+            return (null, new BlockError(
+                block.Line, $"The slot '{slot.Name}' holds content only and takes no arguments, name or json block."));
+        }
+
+        return (await CreateFragmentAsync(existing, segment.Content, state, cancellationToken), null);
+    }
+
+    // The fragment of a slot is kept across parses, so that the subjects in it are found again by their key.
+    private async Task<MarkdownFragment> CreateFragmentAsync(
+        IInterceptorSubject? existing,
         IReadOnlyList<MarkdownSegment> content,
         ParseState state,
         CancellationToken cancellationToken)
     {
-        var hasContent = content.Any(segment => segment is not HtmlMarkdownSegment html || !string.IsNullOrWhiteSpace(html.Html));
-        return Task.FromResult(hasContent ? $"{type.Name} cannot have content." : null);
+        var fragment = existing as MarkdownFragment ?? new MarkdownFragment();
+        fragment.Children = await BuildChildrenAsync(content, fragment.Children, state, cancellationToken);
+        return fragment;
+    }
+
+    private static IReadOnlyList<IInterceptorSubject?> GetSlotValues(IInterceptorSubject subject, SlotDefinition slot)
+    {
+        var value = slot.Property.GetValue(subject);
+        if (slot.IsList)
+        {
+            return value is IInterceptorSubject?[] array ? array : [];
+        }
+
+        return [value as IInterceptorSubject];
+    }
+
+    private static void SetSlotValues(IInterceptorSubject subject, SlotDefinition slot, IReadOnlyList<IInterceptorSubject> values)
+    {
+        if (slot.IsList)
+        {
+            var array = Array.CreateInstanceFromArrayType(slot.Property.PropertyType, values.Count);
+            for (var index = 0; index < values.Count; index++)
+            {
+                array.SetValue(values[index], index);
+            }
+
+            slot.Property.SetValue(subject, array);
+        }
+        else
+        {
+            slot.Property.SetValue(subject, values.Count > 0 ? values[0] : null);
+        }
     }
 
     private static string ComputeHash(string content)
@@ -543,8 +747,13 @@ public sealed partial class MarkdownContentParser
     /// <summary>The merged configuration of one block and its top-level keys without the type discriminator.</summary>
     private readonly record struct BlockConfiguration(string Json, string[] Keys);
 
+    /// <summary>What an error box shows: the line of the block to fix and the message.</summary>
+    private sealed record BlockError(int Line, string Message);
+
     private sealed class ParseState(MarkdownFile page)
     {
+        private readonly List<(int BlockIndex, string? Id)> _registrations = [];
+
         public MarkdownFile Page { get; } = page;
 
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
@@ -553,6 +762,8 @@ public sealed partial class MarkdownContentParser
 
         public HashSet<string> ClaimedIds { get; } = [];
 
+        public int RegistrationCount => _registrations.Count;
+
         public void Register(MarkdownBlock block, string? id, IInterceptorSubject subject)
         {
             BlockSubjects[block.Index] = subject;
@@ -560,6 +771,27 @@ public sealed partial class MarkdownContentParser
             {
                 NamedSubjects[id] = subject;
             }
+
+            _registrations.Add((block.Index, id));
+        }
+
+        /// <summary>
+        /// Removes the subjects registered after <see cref="RegistrationCount"/> had the given value.
+        /// Their names stay claimed.
+        /// </summary>
+        public void RemoveRegistrationsSince(int registrationCount)
+        {
+            for (var index = _registrations.Count - 1; index >= registrationCount; index--)
+            {
+                var (blockIndex, id) = _registrations[index];
+                BlockSubjects.Remove(blockIndex);
+                if (id is not null)
+                {
+                    NamedSubjects.Remove(id);
+                }
+            }
+
+            _registrations.RemoveRange(registrationCount, _registrations.Count - registrationCount);
         }
     }
 }

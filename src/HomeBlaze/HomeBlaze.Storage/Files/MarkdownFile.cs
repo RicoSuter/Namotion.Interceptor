@@ -127,9 +127,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     }
 
     /// <summary>
-    /// Gets the subject that the block with this index created, or null when the block created none.
+    /// Gets the subject that the block with this index configures, or null when it configures none.
     /// The index is <see cref="MarkdownBlock.Index"/> of the page as last parsed.
     /// </summary>
+    /// <remarks>
+    /// A slot block that only holds content has no subject here, and neither has a block inside a
+    /// block that is shown as an error.
+    /// </remarks>
     public IInterceptorSubject? GetBlockSubject(int blockIndex) =>
         _blockSubjects.GetValueOrDefault(blockIndex);
 
