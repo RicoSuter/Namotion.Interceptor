@@ -90,6 +90,7 @@ public partial class MqttClientOfflineWriteTests
                 () => serverRoot.Name == "Written offline",
                 timeout: TimeSpan.FromSeconds(15),
                 message: "A write made while the broker was unreachable should be published once the client connects.");
+            Assert.Equal("Written offline", clientRoot.Name);
         }
         finally
         {
