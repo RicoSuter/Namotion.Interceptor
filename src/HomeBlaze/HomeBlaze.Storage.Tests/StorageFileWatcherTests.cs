@@ -1,12 +1,14 @@
-using System.Collections.Concurrent;
 using HomeBlaze.Storage.Internal;
-using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
 
 public class StorageFileWatcherTests
 {
     private static readonly string BasePath = Path.Combine(Path.GetTempPath(), "homeblaze-watcher");
+    private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(500);
+
+    private readonly ManualTimeProvider _timeProvider = new();
+    private readonly List<FileSystemEventArgs> _processedEvents = [];
 
     [Fact]
     public void WhenFileIsRenamedFromTempFile_ThenEventIsCreatedWithOriginalCasing()
@@ -152,41 +154,120 @@ public class StorageFileWatcherTests
     }
 
     [Fact]
-    public async Task WhenWatcherRestarts_ThenEachEventIsStillHandledOnce()
+    public void WhenWatcherRestarts_ThenEachEventIsStillHandledOnce()
     {
         // Arrange
         var directory = Directory.CreateTempSubdirectory("homeblaze-watcher-");
         try
         {
-            var handled = new ConcurrentQueue<string>();
             using var watcher = new StorageFileWatcher(
                 directory.FullName,
                 e =>
                 {
-                    handled.Enqueue(e.Name!);
+                    _processedEvents.Add(e);
                     return Task.CompletedTask;
                 },
-                () => Task.CompletedTask);
+                () => Task.CompletedTask,
+                timeProvider: _timeProvider);
 
             watcher.Start();
             watcher.Restart();
             watcher.Restart();
 
-            // Act: the second event is handled a full coalesce window after the first,
-            // so by then every handler of the first one has run.
-            watcher.OnFileSystemEvent(null, new FileSystemEventArgs(WatcherChangeTypes.Changed, directory.FullName, "First.md"));
-            await AsyncTestHelpers.WaitUntilAsync(() => handled.Contains("First.md"));
-            watcher.OnFileSystemEvent(null, new FileSystemEventArgs(WatcherChangeTypes.Changed, directory.FullName, "Second.md"));
-            await AsyncTestHelpers.WaitUntilAsync(() => handled.Contains("Second.md"));
+            // Act
+            watcher.SimulateFileEvent(new FileSystemEventArgs(WatcherChangeTypes.Changed, directory.FullName, "Home.md"));
+            _timeProvider.Advance(CoalesceWindow);
 
             // Assert
-            Assert.Single(handled, name => name == "First.md");
+            Assert.Single(_processedEvents);
         }
         finally
         {
             directory.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void WhenFileIsDeletedAndCreatedWithinWindow_ThenSingleCreatedEventIsProcessed()
+    {
+        // Arrange
+        using var watcher = CreateWatcher();
+
+        // Act
+        watcher.SimulateFileEvent(Event(WatcherChangeTypes.Deleted, "Home.md"));
+        watcher.SimulateFileEvent(Event(WatcherChangeTypes.Created, "HOME.md"));
+        _timeProvider.Advance(CoalesceWindow);
+
+        // Assert
+        var processedEvent = Assert.Single(_processedEvents);
+        Assert.Equal(WatcherChangeTypes.Created, processedEvent.ChangeType);
+        Assert.Equal(Path.Combine(BasePath, "HOME.md"), processedEvent.FullPath);
+    }
+
+    [Fact]
+    public void WhenDifferentFilesChangeWithinWindow_ThenEachEventIsProcessed()
+    {
+        // Arrange
+        using var watcher = CreateWatcher();
+        var first = Event(WatcherChangeTypes.Changed, "First.md");
+        var second = Event(WatcherChangeTypes.Deleted, "Second.md");
+
+        // Act
+        watcher.SimulateFileEvent(first);
+        watcher.SimulateFileEvent(second);
+        _timeProvider.Advance(CoalesceWindow);
+
+        // Assert
+        Assert.Equal([first, second], _processedEvents);
+    }
+
+    [Fact]
+    public void WhenManyPathsGoIdle_ThenNoTimerStaysArmed()
+    {
+        // Arrange
+        const int pathCount = 500;
+        using var watcher = CreateWatcher();
+
+        // Act
+        for (var index = 0; index < pathCount; index++)
+        {
+            watcher.SimulateFileEvent(Event(WatcherChangeTypes.Changed, $"File{index}.md"));
+        }
+
+        _timeProvider.Advance(CoalesceWindow);
+
+        // Assert
+        Assert.Equal(pathCount, _processedEvents.Count);
+        Assert.Equal(0, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public void WhenDisposedThenFileEventArrives_ThenItIsIgnored()
+    {
+        // Arrange
+        var watcher = CreateWatcher();
+        watcher.Dispose();
+
+        // Act
+        var exception = Record.Exception(() => watcher.SimulateFileEvent(Event(WatcherChangeTypes.Changed, "Home.md")));
+        _timeProvider.Advance(CoalesceWindow);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Empty(_processedEvents);
+    }
+
+    // Not started: the events are simulated, so no file system watcher is needed.
+    private StorageFileWatcher CreateWatcher()
+        => new(
+            BasePath,
+            e =>
+            {
+                _processedEvents.Add(e);
+                return Task.CompletedTask;
+            },
+            () => Task.CompletedTask,
+            timeProvider: _timeProvider);
 
     private static FileSystemEventArgs Event(WatcherChangeTypes changeType, string name)
         => new(changeType, BasePath, name);

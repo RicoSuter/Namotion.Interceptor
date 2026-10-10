@@ -1,12 +1,10 @@
 using System.Collections.Concurrent;
-using System.Reactive.Linq;
-using System.Reactive.Subjects;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Manages FileSystemWatcher with Rx-based debouncing, event coalescing, and self-write tracking.
+/// Manages FileSystemWatcher with per-path debouncing, event coalescing, and self-write tracking.
 /// Coalesces the events of one path (e.g. from editors saving through temp files) into its final state.
 /// </summary>
 internal sealed class StorageFileWatcher : IDisposable
@@ -20,21 +18,24 @@ internal sealed class StorageFileWatcher : IDisposable
     private readonly ILogger? _logger;
 
     private readonly ConcurrentDictionary<string, DateTimeOffset> _pendingWrites = new();
-    private readonly Subject<FileSystemEventArgs> _fileEvents = new();
+    private readonly FileEventCoalescer _coalescer;
 
     private FileSystemWatcher? _watcher;
-    private IDisposable? _fileEventSubscription;
 
     public StorageFileWatcher(
         string basePath,
         Func<FileSystemEventArgs, Task> onFileEvent,
         Func<Task> onRescanRequired,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        TimeProvider? timeProvider = null)
     {
         _basePath = Path.GetFullPath(basePath);
         _onFileEvent = onFileEvent;
         _onRescanRequired = onRescanRequired;
         _logger = logger;
+
+        // Note: We don't filter temp files before coalescing, a rename from or to one says what happened to the real file
+        _coalescer = new FileEventCoalescer(CoalesceWindow, ProcessBatch, timeProvider);
     }
 
     public void Start()
@@ -48,28 +49,41 @@ internal sealed class StorageFileWatcher : IDisposable
             EnableRaisingEvents = true
         };
 
-        // Route all events to the Rx subject
-        _watcher.Created += OnFileSystemEvent;
-        _watcher.Changed += OnFileSystemEvent;
-        _watcher.Deleted += OnFileSystemEvent;
-        _watcher.Renamed += OnFileSystemEvent;
+        // Route all events to the coalescer: it groups by path and collects events in a time window
+        _watcher.Created += OnWatcherEvent;
+        _watcher.Changed += OnWatcherEvent;
+        _watcher.Deleted += OnWatcherEvent;
+        _watcher.Renamed += OnWatcherEvent;
         _watcher.Error += OnWatcherError;
 
-        // Process events with coalescing: group by path, collect events in time window, then coalesce
-        // Note: We don't filter temp files here, a rename from or to one says what happened to the real file
-        _fileEventSubscription = _fileEvents
-            .Where(e => !IsOwnWrite(e.FullPath))
-            .GroupBy(e => GetCanonicalPath(e.FullPath))
-            .SelectMany(group => group
-                .Buffer(CoalesceWindow)
-                .Where(batch => batch.Count > 0)
-                .Select(CoalesceEvents))
-            .Where(e => e != null)
-            .Subscribe(
-                onNext: async e => await ProcessEventSafeAsync(e!),
-                onError: ex => _logger?.LogError(ex, "Error in file event stream"));
-
         _logger?.LogInformation("File watching enabled for: {Path}", _basePath);
+    }
+
+    private void OnWatcherEvent(object sender, FileSystemEventArgs e)
+    {
+        if (!IsOwnWrite(e.FullPath))
+        {
+            _coalescer.Add(e);
+        }
+    }
+
+    private void ProcessBatch(List<FileSystemEventArgs> events)
+    {
+        FileSystemEventArgs? coalescedEvent;
+        try
+        {
+            coalescedEvent = CoalesceEvents(events);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error in file event stream");
+            return;
+        }
+
+        if (coalescedEvent != null)
+        {
+            _ = ProcessEventSafeAsync(coalescedEvent);
+        }
     }
 
     /// <summary>
@@ -106,13 +120,6 @@ internal sealed class StorageFileWatcher : IDisposable
         => new(changeType, Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath));
 
     /// <summary>
-    /// Gets canonical path for grouping (handles case-insensitivity on Windows).
-    /// Never a path to act on: lowercased, it does not exist on a case-sensitive file system.
-    /// </summary>
-    private static string GetCanonicalPath(string fullPath)
-        => fullPath.ToLowerInvariant();
-
-    /// <summary>
     /// Marks a path as being written by us (prevents feedback loop).
     /// </summary>
     public void MarkAsOwnWrite(string fullPath)
@@ -126,6 +133,11 @@ internal sealed class StorageFileWatcher : IDisposable
             _pendingWrites.TryRemove(fullPath, out _);
         });
     }
+
+    /// <summary>
+    /// Pushes a file system event into the processing pipeline as if the watcher had raised it.
+    /// </summary>
+    internal void SimulateFileEvent(FileSystemEventArgs e) => OnWatcherEvent(this, e);
 
     private bool IsOwnWrite(string fullPath)
     {
@@ -149,9 +161,6 @@ internal sealed class StorageFileWatcher : IDisposable
         }
     }
 
-    internal void OnFileSystemEvent(object? sender, FileSystemEventArgs e)
-        => _fileEvents.OnNext(e);
-
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
         _logger?.LogError(e.GetException(), "FileSystemWatcher error (buffer overflow?), triggering rescan");
@@ -160,8 +169,6 @@ internal sealed class StorageFileWatcher : IDisposable
 
     internal void Restart()
     {
-        // Start subscribes again, a subscription left behind would handle every event once more.
-        _fileEventSubscription?.Dispose();
         _watcher?.Dispose();
         Start();
 
@@ -181,9 +188,8 @@ internal sealed class StorageFileWatcher : IDisposable
 
     public void Dispose()
     {
-        _fileEventSubscription?.Dispose();
-        _fileEvents.Dispose();
         _watcher?.Dispose();
         _watcher = null;
+        _coalescer.Dispose();
     }
 }
