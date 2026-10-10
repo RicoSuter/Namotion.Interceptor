@@ -7,6 +7,7 @@ namespace HomeBlaze.AI.Agents;
 public sealed class AgentTriggerPolicy
 {
     private static readonly TimeSpan MaximumBackoff = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan MaximumInterval = TimeSpan.FromDays(365);
 
     private TimeSpan? _pollInterval;
     private TimeSpan _minRunInterval;
@@ -32,6 +33,16 @@ public sealed class AgentTriggerPolicy
     /// </summary>
     public void Reconfigure(TimeSpan? pollInterval, TimeSpan minRunInterval, DateTimeOffset now)
     {
+        if (pollInterval > MaximumInterval)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pollInterval), pollInterval, $"Poll interval must not exceed {MaximumInterval}.");
+        }
+
+        if (minRunInterval > MaximumInterval)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minRunInterval), minRunInterval, $"Minimum run interval must not exceed {MaximumInterval}.");
+        }
+
         _pollInterval = pollInterval > TimeSpan.Zero ? pollInterval : null;
         _minRunInterval = minRunInterval > TimeSpan.Zero ? minRunInterval : TimeSpan.Zero;
         _nextPoll = now + _pollInterval;
@@ -57,6 +68,8 @@ public sealed class AgentTriggerPolicy
     /// </summary>
     public bool TryTakeDueRun(DateTimeOffset now, out string reason)
     {
+        ExpireUsageLimitPauseIfDue(now);
+
         if (_nextPoll is { } nextPoll && now >= nextPoll)
         {
             _pendingReason ??= "poll";
@@ -86,6 +99,8 @@ public sealed class AgentTriggerPolicy
     /// </summary>
     public DateTimeOffset? GetNextWakeTime(DateTimeOffset now)
     {
+        ExpireUsageLimitPauseIfDue(now);
+
         DateTimeOffset? pendingDue = _pendingReason is null
             ? null
             : _pendingIsManual ? now : GetEarliestAutomaticStart(now);
@@ -121,7 +136,11 @@ public sealed class AgentTriggerPolicy
                 break;
             case AgentFailureKind.UsageLimit:
                 _pausedUntil = retryAfter ?? now + backoff;
-                PauseReason = message;
+                if (!_isPausedUntilReconfigured)
+                {
+                    PauseReason = message;
+                }
+
                 break;
             default:
                 _backoffUntil = now + backoff;
@@ -136,15 +155,22 @@ public sealed class AgentTriggerPolicy
             return null;
         }
 
-        var earliest = now;
-        foreach (var candidate in new[] { _lastRunStart + _minRunInterval, _backoffUntil, _pausedUntil })
-        {
-            if (candidate is { } value && value > earliest)
-            {
-                earliest = value;
-            }
-        }
-
+        var earliest = Max(now, _lastRunStart + _minRunInterval);
+        earliest = Max(earliest, _backoffUntil);
+        earliest = Max(earliest, _pausedUntil);
         return earliest;
     }
+
+    /// <summary>Clears an expired usage-limit pause; a configuration pause always takes precedence.</summary>
+    private void ExpireUsageLimitPauseIfDue(DateTimeOffset now)
+    {
+        if (!_isPausedUntilReconfigured && _pausedUntil is { } pausedUntil && now >= pausedUntil)
+        {
+            _pausedUntil = null;
+            PauseReason = null;
+        }
+    }
+
+    private static DateTimeOffset Max(DateTimeOffset value, DateTimeOffset? candidate)
+        => candidate is { } other && other > value ? other : value;
 }

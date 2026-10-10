@@ -157,4 +157,120 @@ public class AgentTriggerPolicyTests
         // Assert
         Assert.True(policy.TryTakeDueRun(Start, out _));
     }
+
+    [Fact]
+    public void WhenSeveralPollTicksOccurDuringAUsageLimitPause_ThenOnlyOneRunIsDueAfterIt()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(TimeSpan.FromMinutes(10), OneMinute, Start);
+        var resetsAt = Start.AddMinutes(35);
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, resetsAt, "Usage limit reached");
+
+        // Act
+        var dueAtTick1 = policy.TryTakeDueRun(Start.AddMinutes(10), out _);
+        var dueAtTick2 = policy.TryTakeDueRun(Start.AddMinutes(20), out _);
+        var dueAtTick3 = policy.TryTakeDueRun(Start.AddMinutes(30), out _);
+        var dueAfterReset = policy.TryTakeDueRun(resetsAt, out var reason);
+
+        // Assert
+        Assert.False(dueAtTick1);
+        Assert.False(dueAtTick2);
+        Assert.False(dueAtTick3);
+        Assert.True(dueAfterReset);
+        Assert.Equal("poll", reason);
+    }
+
+    [Fact]
+    public void WhenAUsageLimitHasNoResetTime_ThenItFallsBackToBackoff()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, retryAfter: null, "Usage limit reached");
+        policy.RequestRun("change");
+
+        // Act
+        var wakeTime = policy.GetNextWakeTime(Start);
+
+        // Assert
+        Assert.Equal(Start.AddMinutes(1), wakeTime);
+    }
+
+    [Fact]
+    public void WhenARunSucceeds_ThenAConfigurationPauseIsLifted()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        policy.OnRunFailed(Start, AgentFailureKind.Configuration, retryAfter: null, "Claude CLI not logged in");
+
+        // Act
+        policy.OnRunSucceeded();
+        policy.RequestRun("change");
+
+        // Assert
+        Assert.Null(policy.PauseReason);
+        Assert.True(policy.TryTakeDueRun(Start, out _));
+    }
+
+    [Fact]
+    public void WhenAConfigurationPauseBlocksAPendingAutomaticRunAndNoPollIsConfigured_ThenGetNextWakeTimeIsNull()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        policy.RequestRun("change");
+        policy.OnRunFailed(Start, AgentFailureKind.Configuration, retryAfter: null, "Claude CLI not logged in");
+
+        // Act
+        var wakeTime = policy.GetNextWakeTime(Start.AddHours(1));
+
+        // Assert
+        Assert.Null(wakeTime);
+    }
+
+    [Fact]
+    public void WhenAUsageLimitPauseExpires_ThenPauseReasonIsNull()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        var resetsAt = Start.AddHours(2);
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, resetsAt, "Usage limit reached");
+
+        // Act
+        policy.GetNextWakeTime(resetsAt);
+
+        // Assert
+        Assert.Null(policy.PauseReason);
+    }
+
+    [Fact]
+    public void WhenAUsageLimitFailureOccursWhileAConfigurationPauseIsActive_ThenThePauseReasonStaysTheConfigurationMessage()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+        policy.OnRunFailed(Start, AgentFailureKind.Configuration, retryAfter: null, "Claude CLI not logged in");
+
+        // Act
+        policy.OnRunFailed(Start, AgentFailureKind.UsageLimit, Start.AddHours(2), "Usage limit reached");
+
+        // Assert
+        Assert.Equal("Claude CLI not logged in", policy.PauseReason);
+    }
+
+    [Fact]
+    public void WhenThePollIntervalExceedsTheSaneUpperBound_ThenConstructingThrows()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new AgentTriggerPolicy(TimeSpan.FromDays(366), OneMinute, Start));
+    }
+
+    [Fact]
+    public void WhenTheMinimumRunIntervalExceedsTheSaneUpperBound_ThenReconfiguringThrows()
+    {
+        // Arrange
+        var policy = new AgentTriggerPolicy(pollInterval: null, OneMinute, Start);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            policy.Reconfigure(null, TimeSpan.FromDays(366), Start));
+    }
 }
