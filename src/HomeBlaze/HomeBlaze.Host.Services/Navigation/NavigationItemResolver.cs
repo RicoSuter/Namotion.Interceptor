@@ -50,6 +50,11 @@ public class NavigationItemResolver
                 if (path == null)
                     continue;
 
+                // A subject referenced more than once has a single canonical path, so further entries
+                // would be the same link again, and the menu keys its items by path.
+                if (ContainsPath(items, path))
+                    continue;
+
                 var isPage = _componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page);
                 var isFolder = HasPageDescendants(child);
 
@@ -73,6 +78,17 @@ public class NavigationItemResolver
         }
 
         return items.OrderBy(i => i.Order).ThenBy(i => i.Title);
+    }
+
+    private static bool ContainsPath(List<NavigationItem> items, string path)
+    {
+        foreach (var item in items)
+        {
+            if (item.Path == path)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
