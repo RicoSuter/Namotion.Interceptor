@@ -33,13 +33,21 @@ app.MapGet("/status", (CoffeeMachine machine) => new
 
 app.MapPost("/brew/{recipe}", (CoffeeMachine machine, string recipe) =>
 {
-    if (!machine.IsReady || !machine.Recipes.ContainsKey(recipe))
+    if (!machine.Recipes.ContainsKey(recipe))
     {
-        return Results.Conflict();
+        return Results.NotFound();
     }
 
-    machine.Brew(recipe);
-    return Results.Accepted();
+    try
+    {
+        machine.Brew(recipe);
+        return Results.Accepted();
+    }
+    catch (InvalidOperationException)
+    {
+        // Brew checks its own preconditions and throws while the machine is not ready.
+        return Results.Conflict();
+    }
 });
 
 var machine = app.Services.GetRequiredService<CoffeeMachine>();

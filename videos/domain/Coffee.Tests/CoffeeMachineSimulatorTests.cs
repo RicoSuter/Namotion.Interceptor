@@ -85,8 +85,8 @@ public class CoffeeMachineSimulatorTests
     {
         // Arrange
         var machine = CreateMachine();
-        machine.State = CoffeeMachineState.Brewing;
-        machine.Pump.IsRunning = true;
+        machine.SetFromSource(nameof(CoffeeMachine.State), CoffeeMachineState.Brewing);
+        machine.Pump.SetFromSource(nameof(Pump.IsRunning), true);
         var simulator = new CoffeeMachineSimulator(machine);
 
         // Act
@@ -104,18 +104,18 @@ public class CoffeeMachineSimulatorTests
         var applied = 0;
         var events = new[]
         {
-            new SimulatorEvent(TimeSpan.FromSeconds(1), target => { applied++; target.WaterTank.Level = 5; })
+            new SimulatorEvent(TimeSpan.FromSeconds(1), target => { applied++; target.Boiler.TargetTemperature = 88; })
         };
         var simulator = new CoffeeMachineSimulator(machine, events: events);
 
         // Act
         Run(simulator, TimeSpan.FromSeconds(0.9));
-        var levelBefore = machine.WaterTank.Level;
+        var targetBefore = machine.Boiler.TargetTemperature;
         Run(simulator, TimeSpan.FromSeconds(1));
 
         // Assert
-        Assert.Equal(100, levelBefore);
-        Assert.Equal(5, machine.WaterTank.Level);
+        Assert.Equal(93, targetBefore);
+        Assert.Equal(88, machine.Boiler.TargetTemperature);
         Assert.Equal(1, applied);
     }
 }

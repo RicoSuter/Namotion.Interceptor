@@ -92,7 +92,7 @@ Output goes to `output/`: the MP4 with the narration at -16 LUFS (one gain for t
 
 - `episodes/<episode>/`: `script.yaml` (narration and storyboard), `scenes/`, `demos/`, `capture.ts`, `sample/`
 - `theme/`: shared scene runtime, style tokens (`palette.ts`, `style.ts`, `fonts.ts`) and components in `theme/components/`
-- `domain/`: the coffee machine model and simulator used by all samples
+- `domain/`: the coffee machine model and simulator used by all samples, following the subject modeling recommendations in [subject guidelines](../docs/subject-guidelines.md)
 - `tools/`: validate, TTS, capture and render commands
 - `tools/tts/lexicon.yaml`: spoken forms for terms the voice mispronounces
 

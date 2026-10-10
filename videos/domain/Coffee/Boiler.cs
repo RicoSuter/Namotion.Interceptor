@@ -7,12 +7,12 @@ namespace Coffee;
 [InterceptorSubject]
 public partial class Boiler
 {
-    public partial double Temperature { get; set; }
+    public partial double Temperature { get; internal set; }
 
     [Range(85.0, 96.0)]
     public partial double TargetTemperature { get; set; }
 
-    public partial bool HeaterOn { get; set; }
+    public partial bool HeaterOn { get; internal set; }
 
     #region IsHot
     [Derived]

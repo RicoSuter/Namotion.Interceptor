@@ -53,7 +53,7 @@ For a revision of an earlier stage (changed docs, new chapter), edit that stage'
 ## Stage 1: Analyze
 
 - [ ] Read each doc in full and list its sections; every section ends up in the outline as a chapter or under "Left out".
-- [ ] Read the shared domain `videos/domain/Coffee/*.cs`, its simulator constants and existing regions (`grep -rn '#region' videos/domain`). Defaults: boiler 20 °C rising to a 93 °C target; Espresso 40 ml at 93 °C, Lungo 110 ml at 92 °C; `Brew(recipeName)` throws unless `IsReady`.
+- [ ] Read the shared domain `videos/domain/Coffee/*.cs`, its simulator constants and existing regions (`grep -rn '#region' videos/domain`). Defaults: boiler 20 °C rising to a 93 °C target; Espresso 40 ml at 93 °C, Lungo 110 ml at 92 °C; `Brew(recipeName)` throws unless `IsReady`. The domain follows the subject modeling recommendations in `docs/subject-guidelines.md`: owned and measured state has an `internal set`, so outside the domain only its methods and connectors change it, configuration keeps public setters with validation, and commands are methods (`Brew`, `BrewAsync`, `Refill`).
 - [ ] Reuse the concept colors and node labels of `episodes/smoke/diagrams/flow.ts` (simulator orange, boiler pink, water tank cyan, machine purple, status page green); read other episodes for consistency only.
 - [ ] Read the real public API behind the docs: `src/Namotion.Interceptor.<Feature>/`, its `VerifyChecksTests.PublicApi.verified.txt` where it exists, and the samples `src/Namotion.Interceptor.*Sample*/`.
 - [ ] List every mismatch between doc and code under "Doc mismatches" in the outline; follow the code.
@@ -129,7 +129,7 @@ A YAML value that starts with a double quote must be quoted as a whole, so start
 - [ ] Size regions for the card: at the default 30 px a 1240 by 780 card shows 14 lines of about 60 characters; at 26 px (the smallest) a 1500 wide card fits about 90. Lines are clipped, not wrapped, so break long calls in the sample itself; longer regions need `focus` scrolling.
 - [ ] Keep console output short so terminal captures read well (`SuppressStatusMessages` and `AddSimpleConsole(options => options.SingleLine = true)`, as in smoke).
 - [ ] Several instances of one hosted service (a simulator per machine) are registered with `AddSingleton<IHostedService>(serviceProvider => ...)`, since `AddHostedService` registers a type once. A before and after comparison is simpler as two machines in one app, each in its own context, routed with `MapGroup("/{machine}")`.
-- [ ] Scripted events (a fault, a temperature drop) come from a hosted service running `new CoffeeMachineSimulator(machine, seed, events)` with `SimulatorEvent(TimeSpan At, Action<CoffeeMachine> Apply)`.
+- [ ] Scripted events (a fault, a temperature drop) come from a hosted service running `new CoffeeMachineSimulator(machine, seed, events)` with `SimulatorEvent(TimeSpan At, Action<CoffeeMachine> Apply)`. An event declared in the sample reaches only public members, so one that changes measured state is a static factory on `SimulatorEvent` in the domain.
 - [ ] Extend the shared domain only when the episode needs it: add, never rename, regions and members, and keep `videos/domain/Coffee.Tests` passing.
 
 **Sample code is teaching code.** Viewers copy what the video shows, so review every sample against the contracts the docs state, including the failure and shutdown paths:

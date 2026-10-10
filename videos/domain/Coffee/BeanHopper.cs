@@ -7,7 +7,7 @@ namespace Coffee;
 [InterceptorSubject]
 public partial class BeanHopper
 {
-    public partial double Level { get; set; }
+    public partial double Level { get; internal set; }
 
     [Range(1, 10)]
     public partial int GrindSize { get; set; }
@@ -17,5 +17,7 @@ public partial class BeanHopper
         Level = 100;
         GrindSize = 5;
     }
+
+    public void Refill() => Level = 100;
 }
 #endregion

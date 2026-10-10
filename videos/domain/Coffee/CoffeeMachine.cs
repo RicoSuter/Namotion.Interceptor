@@ -10,11 +10,11 @@ public partial class CoffeeMachine
 {
     public partial string Name { get; set; }
 
-    public partial CoffeeMachineState State { get; set; }
+    public partial CoffeeMachineState State { get; internal set; }
 
-    public partial string? ActiveRecipeName { get; set; }
+    public partial string? ActiveRecipeName { get; internal set; }
 
-    public partial int CupsBrewed { get; set; }
+    public partial int CupsBrewed { get; internal set; }
 
     public partial Boiler Boiler { get; set; }
 

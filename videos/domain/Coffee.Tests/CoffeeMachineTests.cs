@@ -47,7 +47,7 @@ public class CoffeeMachineTests
         var machine = CreateMachine(out _);
 
         // Act
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
 
         // Assert
         Assert.True(machine.IsReady);
@@ -61,7 +61,7 @@ public class CoffeeMachineTests
         var machine = CreateMachine(out _);
 
         // Act
-        machine.Boiler.Temperature = 78.4;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 78.4);
 
         // Assert
         Assert.False(machine.IsReady);
@@ -73,10 +73,10 @@ public class CoffeeMachineTests
     {
         // Arrange
         var machine = CreateMachine(out _);
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
 
         // Act
-        machine.WaterTank.Level = 5;
+        machine.WaterTank.SetFromSource(nameof(WaterTank.Level), 5.0);
 
         // Assert
         Assert.False(machine.IsReady);
@@ -84,11 +84,42 @@ public class CoffeeMachineTests
     }
 
     [Fact]
+    public void WhenLowWaterTankIsRefilled_ThenMachineIsReady()
+    {
+        // Arrange
+        var machine = CreateMachine(out _);
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
+        machine.WaterTank.SetFromSource(nameof(WaterTank.Level), 5.0);
+
+        // Act
+        machine.WaterTank.Refill();
+
+        // Assert
+        Assert.Equal(100, machine.WaterTank.Level);
+        Assert.True(machine.IsReady);
+        Assert.Equal("Ready", machine.Status);
+    }
+
+    [Fact]
+    public void WhenBeanHopperIsRefilled_ThenLevelIsFull()
+    {
+        // Arrange
+        var machine = CreateMachine(out _);
+        machine.BeanHopper.SetFromSource(nameof(BeanHopper.Level), 20.0);
+
+        // Act
+        machine.BeanHopper.Refill();
+
+        // Assert
+        Assert.Equal(100, machine.BeanHopper.Level);
+    }
+
+    [Fact]
     public void WhenBrewingEspresso_ThenStatePumpAndTargetAreSet()
     {
         // Arrange
         var machine = CreateMachine(out _);
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
 
         // Act
         machine.Brew("Espresso");
@@ -106,7 +137,7 @@ public class CoffeeMachineTests
     {
         // Arrange
         var machine = CreateMachine(out _);
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
         AddRecipeAboveBoilerRange(machine);
 
         // Act & Assert
@@ -122,7 +153,7 @@ public class CoffeeMachineTests
     {
         // Arrange
         var machine = CreateMachineWithTransactions();
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
 
         // Act
         await machine.BrewAsync("Lungo");
@@ -140,7 +171,7 @@ public class CoffeeMachineTests
     {
         // Arrange
         var machine = CreateMachineWithTransactions();
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
         AddRecipeAboveBoilerRange(machine);
         var changes = new List<string>();
         using var subscription = ((IInterceptorSubject)machine).Context
@@ -199,7 +230,7 @@ public class CoffeeMachineTests
             .Subscribe(change => changes.Add(change.Property.Name));
 
         // Act
-        machine.Boiler.Temperature = 93;
+        machine.Boiler.SetFromSource(nameof(Boiler.Temperature), 93.0);
 
         // Assert
         Assert.Contains(nameof(CoffeeMachine.IsReady), changes);
