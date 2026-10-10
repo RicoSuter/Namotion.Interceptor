@@ -1,6 +1,7 @@
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Events;
 
-namespace Namotion.Devices.Sonos.Client;
+namespace Namotion.Devices.Sonos;
 
 /// <summary>
 /// What one connection attempt owns: its HttpClient, which the connections and the event listener borrow, the event

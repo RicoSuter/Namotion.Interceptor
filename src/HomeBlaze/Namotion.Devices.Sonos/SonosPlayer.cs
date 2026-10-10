@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Media;
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Interceptor.Attributes;
 

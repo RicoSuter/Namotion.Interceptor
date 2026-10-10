@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions.Media;
+using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;

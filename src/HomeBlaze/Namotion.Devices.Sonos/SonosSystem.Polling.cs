@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Client;
-using Namotion.Devices.Sonos.Parsing;
 
 namespace Namotion.Devices.Sonos;
 

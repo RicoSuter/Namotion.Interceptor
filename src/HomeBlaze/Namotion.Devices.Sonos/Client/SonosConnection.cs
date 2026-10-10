@@ -9,8 +9,6 @@ using SonosBaseDevice = Sonos.Base.SonosDevice;
 
 namespace Namotion.Devices.Sonos.Client;
 
-internal sealed record SonosZoneInfo(string? SerialNumber, string? MacAddress, string? HardwareVersion, string? DisplayVersion);
-
 /// <summary>
 /// The SOAP connection to one Sonos unit. Reads return our records; commands throw on a SOAP fault.
 /// </summary>
