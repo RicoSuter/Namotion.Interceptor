@@ -66,6 +66,9 @@ Marks a method as an executable action from the UI. Options: `Title`, `Descripti
 ### `[Query]`
 Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically non-mutating.
 
+### `[Slot]`
+Marks a property of a widget type that a markdown page fills with the content of a block. A slot is not configuration and is not saved.
+
 ### `[PropertyAttribute]`
 Associates metadata with another property (e.g., minimum/maximum values).
 
@@ -106,7 +109,7 @@ A Blazor component associated with a specific subject type, registered via `[Sub
 
 ### Widget
 
-A compact inline visualization of a subject. See [Subjects — Widgets](administration/subjects.md#widgets) and [Markdown Pages — Embedded Subjects](administration/pages.md#embedded-subjects).
+A compact inline visualization of a subject. See [Subjects: Widgets](administration/subjects.md#widgets) and [Markdown Pages: Blocks](administration/pages.md#blocks).
 
 ### Page
 
@@ -147,7 +150,7 @@ The configuration file at the top of the data folder that defines the storage lo
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
 | `.json` | Configured type | Subject defined by `$type` property |
-| `.md` | `MarkdownFile` | Interactive page with expressions |
+| `.md` | `MarkdownFile` | Interactive page with expressions and blocks |
 | Other | `GenericFile` | Basic file representation |
 
 See [Subjects — File Types](administration/subjects.md#file-types).
@@ -162,11 +165,23 @@ YAML metadata at the top of markdown files controlling navigation and display. S
 
 ### Live Expression
 
-Dynamic value binding in markdown using `{{ path }}` syntax — updates automatically when the source property changes. See [Markdown Pages — Live Expressions](administration/pages.md#live-expressions).
+A path in double curly braces in the text of a markdown page. The page shows the value of the property at that path and updates it when the value changes. See [Markdown Pages: Live Expressions](administration/pages.md#live-expressions).
+
+### Block
+
+A part of a markdown page between a head line that starts with at least three colons and a closing line of colons. A widget block has a full type name on its head line. It creates a subject of that type and shows its widget. A slot block has a name without a dot and fills the slot of that name on the widget around it. See [Markdown Pages: Blocks](administration/pages.md#blocks).
+
+### Slot
+
+A property of a widget type that a markdown page fills with the content of a block, declared with `[Slot]`. A type has at most one default slot, which takes everything in its block that is not a slot block, and any number of named slots. See [Markdown Pages: Blocks](administration/pages.md#blocks) for the page side and [Building Subjects](development/building-subjects.md) for the declaration.
+
+### Fragment
+
+The subject that holds the content of one slot: text, expressions and the subjects of nested blocks. A widget renders a fragment like any other subject and does not need to know what is inside. The type is `MarkdownFragment`.
 
 ### Embedded Subject
 
-A subject defined inline within a markdown page using fenced `subject(name)` code blocks. See [Markdown Pages — Embedded Subjects](administration/pages.md#embedded-subjects).
+A subject that a markdown page creates with a widget block, as opposed to a subject with a JSON file of its own. It belongs to the page and is removed with its block. See [Markdown Pages: Blocks](administration/pages.md#blocks).
 
 ---
 

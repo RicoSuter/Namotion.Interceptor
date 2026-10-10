@@ -694,6 +694,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[Slot]` | Content that a markdown page fills in | No | Rendered by the widget |
 
 | Interface | Purpose |
 |-----------|---------|
@@ -718,7 +719,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[Slot]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -745,7 +746,7 @@ See [Project Structure](../architecture/project-structure.md) for the full depen
 
 ### Constructor Injection
 
-Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container.
+Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container. This also holds for a subject that is nested in the configuration of another subject, for example the child of a grid cell, and for a subject that a block on a markdown page creates.
 
 **Basic pattern** (HomeBlaze services only):
 
@@ -798,7 +799,7 @@ Use paths to reference subjects in the object graph. See [Paths](../administrati
 | `../` (parent) | `../Sibling/Property` |
 | Brackets | `/Devices[0]` (for non-inlined collection indices) |
 
-Use `SubjectPathResolver.ResolveSubject()` to resolve paths in code:
+Use `SubjectPathResolver` to resolve paths in code. A subject that takes a path from its configuration calls `ResolveScopedSubject` and passes itself:
 
 ```csharp
 [Derived]
@@ -809,10 +810,12 @@ private IInterceptorSubject? ResolveSubject()
     if (string.IsNullOrEmpty(Path))
         return null;
 
-    // ResolveSubject handles /, ./, ../, and relative paths
-    return _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
+    // Handles /, ./, ../, relative paths and the names of blocks on a markdown page
+    return _pathResolver.ResolveScopedSubject(Path, PathStyle.Canonical, this);
 }
 ```
+
+`ResolveScopedSubject` and `ResolveScopedValue` are extension methods in `HomeBlaze.Services`. When the subject is on a markdown page, a relative path starts at the page and its first segment can be the name of a block on that page, as [Paths](../administration/paths.md) describes for page authors. When the subject is not on a page, they resolve relative to the subject, like `ResolveSubject` and `ResolveValue` with the subject as the third argument.
 
 ### SubjectPathField Component
 
@@ -961,6 +964,89 @@ When a widget has a corresponding Edit component, the host automatically renders
 - The button appears in the top-right corner of the widget
 - Clicking opens the `SubjectEditDialog` with the Edit component
 - No boilerplate needed in widget components
+
+### Content Slots
+
+A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`. [Markdown Pages](../administration/pages.md) describes the page side.
+
+The `Card` subject has a body and a footer:
+
+```csharp
+[InterceptorSubject]
+public partial class Card : IConfigurable, ITitleProvider
+{
+    [Configuration]
+    public partial string? Title { get; set; }
+
+    [Configuration]
+    public partial string? Icon { get; set; }
+
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Footer { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+```
+
+Its widget component renders each slot with `SubjectComponent` and does not need to know what the content is (shortened):
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4" Elevation="2">
+    <MudText Typo="Typo.h6">@CardSubject?.Title</MudText>
+
+    <SubjectComponent Subject="@CardSubject?.Content" Type="SubjectComponentType.Widget" />
+
+    @if (CardSubject?.Footer is not null)
+    {
+        <MudDivider Class="my-2" />
+        <SubjectComponent Subject="@CardSubject.Footer" Type="SubjectComponentType.Widget" />
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Card? CardSubject => Subject as Card;
+}
+```
+
+**Declaring slots:**
+
+| Declaration | Block on the page | Value of the property |
+|-------------|-------------------|-----------------------|
+| `[Slot(IsDefault = true)] IInterceptorSubject? Content` | Everything in the widget block that is not a slot block | The content, or `null` when there is none |
+| `[Slot] IInterceptorSubject? Footer` | One `Footer` block | The content of that block, or `null` without a block |
+| `[Slot("Item")] IInterceptorSubject[] Items` | Any number of `Item` blocks | One content value per block, in page order |
+| `[Slot("Tab")] Tab[] Tabs` | Any number of `Tab` blocks | One `Tab` per block, in page order |
+
+- **Name**: The slot name is what one block is called on the page. It defaults to the property name. For a list, set the singular explicitly, like `[Slot("Item")]` on `Items`. A slot name is case-sensitive and contains no dot, because a name with a dot is a type name on a page.
+- **Property type `IInterceptorSubject`**: The slot holds content. The page assigns a subject that stands for the content of the block. Treat it as opaque and render it. A block for such a slot takes no arguments, no `#name` and no `json` fence.
+- **Property type is a concrete subject type**: The page creates one instance of that type per block. The arguments of the block set its `[Configuration]` properties, and the content of the block goes into the default slot of that type. The type must implement `IConfigurable` and must be a class that can be created, so not an interface and not an abstract class. This is how `TabLayout` gets one `Tab` with a `Title` per `Tab` block.
+- **Arrays**: An array of either kind takes one value per block. The page assigns a new array on every change. Initialize the property with an empty array in the constructor. All values of one slot have the same type. Mixed types in one list slot are not supported.
+- **Default slot**: A type has at most one default slot. Its type is `IInterceptorSubject` and it is not an array. It is filled by the loose content of the block or by a block with its name, not by both. A type without a default slot cannot have content on a page.
+- **Partial property with a setter**: A slot property must be a `partial` property with a setter on an `[InterceptorSubject]` class. The page writes through the intercepted property, which is what attaches the content to the object graph.
+- **Not configuration**: A slot property is not configuration and is not saved. The content lives in the text of the page.
+
+A declaration that breaks one of these rules cannot be used. Every block of that type then shows an error box that names the problem, and no instance is created.
+
+**Rendering slots:**
+
+- Render a slot with `<SubjectComponent Subject="..." Type="SubjectComponentType.Widget" />`. A slot that is `null` renders nothing.
+- Read slot properties inside the render and do not keep their values in fields. The page renders again when a property changes that was read while it rendered, and a change of the page text assigns new values and new arrays.
+- Content inside a child component that renders on its own later is not tracked that way, for example a tab panel that is only created when it is first opened. `TabLayout` keeps all its panels alive for this reason.
+
+**Rules for a subject that is used on a page:**
+
+- A page updates the subject of a block in place while the block stays, and calls `ApplyConfigurationAsync` again each time. When an argument is removed from the block, the page creates a new instance.
+- A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
+- A subject that resolves a path from its configuration should call `ResolveScopedSubject` or `ResolveScopedValue`, so that the path starts at the page. See "Referencing Other Subjects" above.
 
 ### Edit Components
 

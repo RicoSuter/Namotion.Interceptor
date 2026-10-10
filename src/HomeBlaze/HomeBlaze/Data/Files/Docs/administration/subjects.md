@@ -132,7 +132,7 @@ Use the `Widget` subject to embed another subject's widget by path:
 
 The widget looks up the subject at the specified path and renders its registered component.
 
-For embedding widgets inline within markdown pages, see [Markdown Pages: Embedded Subjects](pages.md#embedded-subjects).
+For putting widgets on markdown pages with blocks, see [Markdown Pages: Blocks](pages.md#blocks).
 
 ---
 

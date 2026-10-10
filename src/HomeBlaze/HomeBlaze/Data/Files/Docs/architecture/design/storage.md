@@ -85,11 +85,46 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 
 | Type | Extension | Description |
 |------|-----------|-------------|
-| `MarkdownFile` | `.md` | Markdown with YAML frontmatter, embedded subjects (```` ```subject(name) ````), and live expressions (`{{ path }}`) |
+| `MarkdownFile` | `.md` | Markdown with YAML frontmatter, widget blocks (`:::Full.Type.Name`) and live expressions (a path in double curly braces) |
 | `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
 | `GenericFile` | Other | Fallback for unknown extensions — metadata only |
 
 Plugin authors can register additional file types via `[FileExtension]`.
+
+### Markdown Pages [Implemented]
+
+A `MarkdownFile` turns its text into child subjects when the file is loaded and again each time it changes. [Markdown Pages](../../administration/pages.md) describes the syntax. The code is in `HomeBlaze.Storage`, and the rendering is in `HomeBlaze.Storage.Blazor`.
+
+| Unit | Location | Responsibility |
+|------|----------|----------------|
+| `MarkdownPageParser` | `HomeBlaze.Storage/Pages` | Page text to a tree of blocks with their positions in the source. Owns the grammar of the head line (`MarkdownBlockHead`) and reports the errors that are visible from the syntax alone. Knows nothing about subjects |
+| `MarkdownSegmentBuilder` | `HomeBlaze.Storage/Pages` | Renders the parsed page to HTML once and cuts the HTML into segments that follow the nesting of the blocks: HTML, expressions and blocks with their content. Writes the error boxes for syntax errors and for the old `subject(name)` fence |
+| `MarkdownContentParser` | `HomeBlaze.Storage/Internal` | Segments to subjects. Creates the subject of a block or updates the existing one in place, fills its slots, and reports the errors that need the types. `SlotMap` reads the `[Slot]` declarations of a type |
+| `MarkdownFragment` | `HomeBlaze.Storage/Pages` | The subject that holds the content of one slot. Its `Children` have the same shape as the `Children` of the page |
+| `MarkdownBlockWriter` | `HomeBlaze.Storage/Pages` | Writes the configuration of one block back into the page text. Replaces the head line and the `json` fence and never touches the content of the block. Also creates the text of a new block for the editor |
+| `MarkdownContentView` | `HomeBlaze.Storage.Blazor/Files` | Renders the children of a page or of a fragment. HTML and expression values are joined into one markup string, every other child is rendered through `SubjectComponent` |
+| `MarkdownDecorationParser`, `MarkdownBlockMatcher` | `HomeBlaze.Storage.Blazor/Models` | The regions that the editor marks, and the check that a block of the editor text is the same block as in the saved page |
+
+The subjects of a page with a card and a named motor:
+
+```
+Page.md                     MarkdownFile
+  Children
+    Html_0_...              HtmlSegment
+    Card_1                  Card
+      Content               MarkdownFragment
+        Children
+          Html_0_...        HtmlSegment
+          Expression_1_...  RenderExpression
+      Footer                MarkdownFragment
+    mymotor                 Motor
+```
+
+- **Keys.** The key of a block subject is its `#name`, or its type name and its position when it has no name. A reload finds an existing subject by its key in the same `Children` dictionary. Values of a typed list slot are matched by their name, and without a name by their position.
+- **Snapshot.** `MarkdownFile` keeps the result of a parse as one immutable `MarkdownParseResult`: the children, the parsed page, the map from block index to the subject that the block created, and the map from name to subject. The snapshot is replaced as a whole, because reloads and write-backs run on different threads and must never pair the page of one parse with the subjects of another.
+- **Write-back.** `MarkdownFile` is the `IConfigurationWriter` of the subjects on it. `WriteConfigurationAsync` finds the block of the edited subject through the map from block to subject. It walks up the parents for that, so a subject that is nested in the configuration of a block subject, like the child of a grid cell, is written with its block. The subject is serialized with `ConfigurableSubjectSerializer`, and the block writer puts single values on the head line and everything else into the `json` fence.
+- **Reload lock.** The reloads of one page run one after the other, because a parse changes the subjects it reuses in place. A write-back does not take the lock: the storage reloads the file from inside the write, on the same call chain. A subject on a page must therefore never wait for a write or a reload of its own page while it is created or configured.
+- **Page scope.** `MarkdownFile` implements `IPathScope`. `SubjectPathResolverScopeExtensions` in `HomeBlaze.Services` resolves relative paths and names from the nearest scope above a subject. See [Paths](../../administration/paths.md).
 
 ### Subject Files vs Documents [Implemented]
 

@@ -19,6 +19,8 @@ Paths reference subjects and properties anywhere in the object graph.
 | `../` | Navigate up to parent | `../Sibling/Temperature` |
 | *(none)* | Relative to current context | `Demo/Conveyor/Speed` |
 
+On a markdown page the current subject is the page, and a path without a prefix can start with the name of a block. See "Paths on Markdown Pages" below.
+
 ---
 
 ## Canonical Syntax and `[InlinePaths]` {#canonical}
@@ -59,17 +61,49 @@ With `[InlinePaths]` dictionaries (like folder children), keys become direct seg
 | `/Demo/Setup.md` | File in an `[InlinePaths]` folder |
 | `./Child/Name` | Property on current subject's child |
 | `../Temperature` | Go up one level, access Temperature |
-| `motor/Speed` | Inline subject named "motor" (in markdown) |
+| `motor/CurrentSpeed` | Property of the block named `motor` on a markdown page |
 
 ---
 
-## Resolution Order
+## Paths on Markdown Pages
 
-When resolving paths in markdown pages:
+Every relative path on a markdown page starts at the page. This holds for the path of an expression and for the `path` of a `Widget` block, however deeply the block is nested. Moving a block into a card or into a tab does not change where its paths lead.
 
-1. **Inline subjects first**: Subjects defined in the same page with `` ```subject(name) ``
-2. **Relative path**: From current subject context
-3. **Global path**: Using `/` prefix
+A block gets a name with `#name` on its head line. The name is known anywhere on the page, also inside other blocks and above the block that declares it. See [Markdown Pages](pages.md) for the block syntax.
+
+~~~~markdown
+::::HomeBlaze.Components.Card title="Motor Card" icon=Settings
+:::HomeBlaze.Samples.Motor#cardmotor name=CardMotor targetSpeed=1200 simulationInterval=00:00:01
+:::
+::::
+
+::::HomeBlaze.Components.Card title="Reference Card" icon=Link
+:::HomeBlaze.Components.Widget path=cardmotor
+:::
+
+:::HomeBlaze.Components.Widget path=../Conveyor
+:::
+
+The named motor has a temperature of {{ cardmotor/Temperature }} °C.
+::::
+~~~~
+
+### Resolution Order
+
+1. **Absolute path**: A path that starts with `/` starts at the root.
+2. **Explicit relative path**: A path that starts with `./` or `../` starts at the page. `./` is the page itself and `../` is the folder that contains the page. Such a path never uses names.
+3. **Name first**: Any other path is split at its first `/`. When the first segment is the name of a block on the page, the path starts at the subject of that block. Otherwise it starts at the page, like a path with `./`.
+
+For the page `/Demo/Blocks.md` this gives:
+
+| Path | Resolves to |
+|------|-------------|
+| `cardmotor/Temperature` | `Temperature` of the block named `cardmotor` on the page |
+| `../Conveyor/CurrentSpeed` | `/Demo/Conveyor/CurrentSpeed` |
+| `/Demo/Conveyor/CurrentSpeed` | `/Demo/Conveyor/CurrentSpeed` |
+| `Title` | The title of the page |
+
+A `Widget` that is not on a page, for example one in a JSON file of its own, resolves a relative path from itself.
 
 ---
 
@@ -77,6 +111,7 @@ When resolving paths in markdown pages:
 
 - **Parent navigation with multiple parents**: If a subject has multiple parents (rare), `../` returns null (ambiguous path).
 - **Detached subjects**: Subjects not attached to the graph have no path.
+- **Names are local to their page**: A name declared with `#name` is known on its own page only. Another page reaches a block that is directly on a page through that page, for example `/Demo/Inline.md/mymotor`.
 
 ---
 
