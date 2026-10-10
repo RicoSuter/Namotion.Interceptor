@@ -22,7 +22,7 @@
             }
             else if (item.IsFolder)
             {
-                <NavFolder Item="item" NavigationResolver="NavigationResolver" CurrentPath="@_currentPath" />
+                <NavFolder @key="item.Path" Item="item" NavigationResolver="NavigationResolver" CurrentPath="@_currentPath" />
             }
         }
     }

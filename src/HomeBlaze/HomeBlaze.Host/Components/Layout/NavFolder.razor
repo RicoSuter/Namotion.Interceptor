@@ -15,7 +15,7 @@
             }
             else if (child.IsFolder)
             {
-                <NavFolder Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
+                <NavFolder @key="child.Path" Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
             }
         }
     }
@@ -44,8 +44,14 @@
             if (!string.IsNullOrEmpty(CurrentPath) && IsCurrentPageInFolder())
             {
                 _expanded = true;
-                _children ??= NavigationResolver.GetChildItems(Item.Subject).ToList();
             }
+        }
+
+        // Nothing observes the folder's children, so they are re-read on every parent render:
+        // NavMenu's refresh timer is what makes pages added or removed later show up here.
+        if (_expanded)
+        {
+            _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
         }
     }
 
@@ -62,7 +68,7 @@
     private void OnExpandedChanged(bool expanded)
     {
         _expanded = expanded;
-        if (_expanded && _children == null)
+        if (_expanded)
         {
             _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
         }

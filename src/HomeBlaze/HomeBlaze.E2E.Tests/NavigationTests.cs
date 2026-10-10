@@ -1,5 +1,10 @@
 using HomeBlaze.E2E.Tests.Infrastructure;
+using HomeBlaze.Services;
+using HomeBlaze.Storage;
+using HomeBlaze.Storage.Files;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -82,5 +87,46 @@ public class NavigationTests
 
         // Assert
         Assert.Contains("/browser", page.Url);
+    }
+
+    [Fact]
+    public async Task WhenPageIsAddedToExpandedFolder_ThenNavMenuShowsIt()
+    {
+        // Arrange
+        var services = _fixture.ServerServices;
+        var root = (FluentStorageContainer)services.GetRequiredService<RootManager>().Root!;
+        var folder = (VirtualFolder)root.Children["Demo"];
+        var originalChildren = folder.Children;
+
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync(_fixture.ServerAddress);
+        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+        var navigation = page.Locator(".mud-navmenu");
+        var folderHeader = navigation.GetByRole(AriaRole.Button, new() { Name = "Demo" });
+        await Assertions.Expect(folderHeader).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await folderHeader.ClickAsync();
+        await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "Grid Demo" }))
+            .ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        try
+        {
+            // Act
+            var addedPage = (MarkdownFile)ActivatorUtilities.CreateInstance(
+                services, typeof(MarkdownFile), root, "Demo/AddedLater.md");
+
+            folder.Children = new Dictionary<string, IInterceptorSubject>(originalChildren)
+            {
+                ["AddedLater.md"] = addedPage
+            };
+
+            // Assert
+            await Assertions.Expect(navigation.GetByRole(AriaRole.Link, new() { Name = "AddedLater" }))
+                .ToBeVisibleAsync(new() { Timeout = 30000 });
+        }
+        finally
+        {
+            folder.Children = originalChildren;
+        }
     }
 }
