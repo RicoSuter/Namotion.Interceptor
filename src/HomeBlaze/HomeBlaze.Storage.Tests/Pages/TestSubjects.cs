@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -66,3 +67,72 @@ public abstract class TestAbstractConfigurable : IConfigurable
 }
 
 public interface ITestConfigurable : IConfigurable;
+
+[InterceptorSubject]
+public partial class TestPanel : IConfigurable
+{
+    public TestPanel()
+    {
+        Rows = [];
+        Items = [];
+    }
+
+    [Configuration]
+    public partial string? Title { get; set; }
+
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    [Slot]
+    public partial IInterceptorSubject? Footer { get; set; }
+
+    [Slot("Row")]
+    public partial TestRow[] Rows { get; set; }
+
+    [Slot("Item")]
+    public partial IInterceptorSubject[] Items { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class TestRow : IConfigurable
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Content { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+public class TwoDefaults
+{
+    [Slot(IsDefault = true)]
+    public IInterceptorSubject? First { get; set; }
+
+    [Slot(IsDefault = true)]
+    public IInterceptorSubject? Second { get; set; }
+}
+
+public class TypedDefault
+{
+    [Slot(IsDefault = true)]
+    public TestRow? Content { get; set; }
+}
+
+public class DottedName
+{
+    [Slot("A.B")]
+    public IInterceptorSubject? Content { get; set; }
+}
+
+public class DuplicateNames
+{
+    [Slot("Item")]
+    public IInterceptorSubject? First { get; set; }
+
+    [Slot("Item")]
+    public IInterceptorSubject? Second { get; set; }
+}
