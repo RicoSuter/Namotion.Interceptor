@@ -88,7 +88,7 @@ A satellite carries its player's room name and is titled with model, room and ro
 
 Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is therefore not exposed. Its path therefore stops resolving when another room becomes coordinator.
 
-Transport and track state of a group are the coordinator's; volume and mute are the group's own (GroupRenderingControl). Source, shuffle, repeat, sleep timer and media title are per group in Sonos, so a member player reports its coordinator's values, and the operations that set them go to the coordinator.
+Transport and track state of a group are the coordinator's; volume and mute are the group's own (GroupRenderingControl). Source, shuffle, repeat, sleep timer and source title are per group in Sonos, so a member player reports its coordinator's values, and the operations that set them go to the coordinator.
 
 ### Offline Handling
 
@@ -99,7 +99,7 @@ Transport and track state of a group are the coordinator's; volume and mute are 
 
 ## Widgets
 
-`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `MediaTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
+`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
 
 <!-- The backticks are HTML entities so that this page shows the block instead of instantiating it: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
 <pre><code>&#96;&#96;&#96;subject(livingRoom)
@@ -146,7 +146,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `CurrentTrackDuration` | TimeSpan | Empty for streams, TV and line-in |
 | `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it |
 | `Source` | | `None`, `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, from the coordinator's transport URI |
-| `MediaTitle` | | The station, playlist or album the group plays |
+| `SourceTitle` | | The station, playlist or album the group plays, not the track. For a queue it is the playlist or album enqueued last, which the current track need not come from |
 | `Shuffle`, `Repeat` | | Group play mode; `Repeat` is `Off`, `All` or `One` |
 | `SleepTimerRemaining` | TimeSpan | Group sleep timer as of the last poll; empty when none runs |
 | `Bass`, `Treble` | -10..10 | Equalizer of this room |
@@ -165,7 +165,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 
 ### SonosGroup
 
-`Coordinator` and `Members` (references to players), group `Volume` and `IsMuted`, and the coordinator's playback, track and `MediaTitle`. The title joins the room names, for example "Kitchen + Living Room".
+`Coordinator` and `Members` (references to players), group `Volume` and `IsMuted`, and the coordinator's playback, track and `SourceTitle`. The title joins the room names, for example "Kitchen + Living Room".
 
 ## Operations
 
@@ -233,10 +233,10 @@ Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the
 
 A title that only repeats the URL is left empty:
 
-- `CurrentTrackTitle` and `MediaTitle` when they are the radio or http(s) URL itself, with or without its scheme, as other controllers write for a stream without a title.
-- `CurrentTrackTitle` when it is the end of the stream URL's path, with or without the query (`96` for `.../aac/96`), which Sonos reports when the station sends no song. This applies to a track with a radio scheme and to an http(s) track that plays while the media is a station, such as an ad before the stream. `MediaTitle` still names the station.
+- `CurrentTrackTitle` and `SourceTitle` when they are the radio or http(s) URL itself, with or without its scheme, as other controllers write for a stream without a title.
+- `CurrentTrackTitle` when it is the end of the stream URL's path, with or without the query (`96` for `.../aac/96`), which Sonos reports when the station sends no song. This applies to a track with a radio scheme and to an http(s) track that plays while the media is a station, such as an ad before the stream. `SourceTitle` still names the station.
 
-Everything else is kept. A `MediaTitle` that equals the end of the URL stays, since it may be the title given to `PlayStream`, and an http(s) file started with `PlayUri` shows its file name, the only title an untagged file has.
+Everything else is kept. A `SourceTitle` that equals the end of the URL stays, since it may be the title given to `PlayStream`, and an http(s) file started with `PlayUri` shows its file name, the only title an untagged file has.
 
 ## How It Works
 

@@ -39,8 +39,8 @@
                 </div>
             }
             <MudStack Spacing="0">
-                <MudText Typo="Typo.body1">@SonosTrackText.GetTitleOrState(Player?.CurrentTrackTitle, Player?.MediaTitle, Player?.IsPlaying)</MudText>
-                <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Player?.CurrentTrackArtist, Player?.CurrentTrackTitle, Player?.MediaTitle)</MudText>
+                <MudText Typo="Typo.body1">@SonosTrackText.GetTitleOrState(Player?.CurrentTrackTitle, Player?.SourceTitle, Player?.IsPlaying)</MudText>
+                <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Player?.CurrentTrackArtist, Player?.CurrentTrackTitle, Player?.SourceTitle)</MudText>
             </MudStack>
         </MudStack>
 

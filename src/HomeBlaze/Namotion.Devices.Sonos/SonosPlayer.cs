@@ -78,7 +78,7 @@ public partial class SonosPlayer : SonosDevice,
 
     internal partial TimeSpan? ReportedSleepTimerRemaining { get; set; }
 
-    internal partial string? ReportedMediaTitle { get; set; }
+    internal partial string? ReportedSourceTitle { get; set; }
 
     [Derived]
     [State(Position = 11)]
@@ -108,7 +108,7 @@ public partial class SonosPlayer : SonosDevice,
     /// </summary>
     [Derived]
     [State(Position = 15)]
-    public string? MediaTitle => GetCoordinator().ReportedMediaTitle;
+    public string? SourceTitle => GetCoordinator().ReportedSourceTitle;
 
     [State(Position = 20)]
     public partial int? Bass { get; internal set; }
@@ -296,7 +296,7 @@ public partial class SonosPlayer : SonosDevice,
             CurrentTrackPosition = null;
         }
 
-        ApplyMediaTitle(change.MediaMetaData, isMediaChange);
+        ApplySourceTitle(change.MediaMetaData, isMediaChange);
 
         if (SonosValues.IsKnown(change.TrackDuration))
         {

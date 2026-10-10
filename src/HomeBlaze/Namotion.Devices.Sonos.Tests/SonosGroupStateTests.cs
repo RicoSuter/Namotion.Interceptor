@@ -39,8 +39,8 @@ public class SonosGroupStateTests
             T0);
 
         // Assert
-        Assert.Equal("Spotify", member.MediaTitle);
-        Assert.Equal("Spotify", system.Groups[TestFixtures.OfficeUuid].MediaTitle);
+        Assert.Equal("Spotify", member.SourceTitle);
+        Assert.Equal("Spotify", system.Groups[TestFixtures.OfficeUuid].SourceTitle);
         Assert.Equal(SonosSource.SpotifyConnect, member.Source);
         Assert.True(member.Shuffle);
         Assert.Equal(SonosRepeatMode.All, member.Repeat);

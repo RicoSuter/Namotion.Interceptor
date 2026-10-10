@@ -140,7 +140,7 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenStationMetadataArrives_ThenTheMediaTitleIsTheStation()
+    public void WhenStationMetadataArrives_ThenTheSourceTitleIsTheStation()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
@@ -149,11 +149,11 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
 
         // Assert
-        Assert.Equal("SRF 3", player.MediaTitle);
+        Assert.Equal("SRF 3", player.SourceTitle);
     }
 
     [Fact]
-    public void WhenPollReportsTheSameMediaWithoutMetadata_ThenTheMediaTitleIsKept()
+    public void WhenPollReportsTheSameMediaWithoutMetadata_ThenTheSourceTitleIsKept()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
@@ -163,11 +163,11 @@ public class SonosPlayerStateTests
         player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s1", ""), null, null, EmptyRenderingControl), T0 + 1);
 
         // Assert
-        Assert.Equal("SRF 3", player.MediaTitle);
+        Assert.Equal("SRF 3", player.SourceTitle);
     }
 
     [Fact]
-    public void WhenTheTrackChangesWithinTheSameMedia_ThenTheMediaTitleIsKept()
+    public void WhenTheTrackChangesWithinTheSameMedia_ThenTheSourceTitleIsKept()
     {
         // Arrange
         const string queueUri = "x-rincon-queue:RINCON_A0000000000601400#0";
@@ -181,11 +181,11 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Equal("x-file-cifs://nas/b.mp3", player.CurrentTrackUri);
-        Assert.Equal("Playlist", player.MediaTitle);
+        Assert.Equal("Playlist", player.SourceTitle);
     }
 
     [Fact]
-    public void WhenOtherMediaArrivesWithoutMetadata_ThenTheMediaTitleIsCleared()
+    public void WhenOtherMediaArrivesWithoutMetadata_ThenTheSourceTitleIsCleared()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
@@ -195,7 +195,7 @@ public class SonosPlayerStateTests
         player.ApplyPoll(new SonosPlayerReading(RadioPlaying("x-sonosapi-stream:s2", "NOT_IMPLEMENTED"), null, null, EmptyRenderingControl), T0 + 1);
 
         // Assert
-        Assert.Null(player.MediaTitle);
+        Assert.Null(player.SourceTitle);
     }
 
     [Theory]
@@ -215,7 +215,7 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenTheMediaTitleIsAPlaceholder_ThenTheMediaTitleIsKept()
+    public void WhenTheSourceTitleIsAPlaceholder_ThenTheSourceTitleIsKept()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
@@ -225,7 +225,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("ZPSTR_CONNECTING")), T0 + 1);
 
         // Assert
-        Assert.Equal("SRF 3", player.MediaTitle);
+        Assert.Equal("SRF 3", player.SourceTitle);
     }
 
     [Fact]
@@ -295,7 +295,7 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenTheMediaTitleOfAStreamEqualsTheEndOfItsUri_ThenTheMediaTitleIsKept()
+    public void WhenTheSourceTitleOfAStreamEqualsTheEndOfItsUri_ThenTheSourceTitleIsKept()
     {
         // Arrange
         const string streamUri = "x-rincon-mp3radio://radio.example/station/96";
@@ -307,7 +307,7 @@ public class SonosPlayerStateTests
             T0);
 
         // Assert
-        Assert.Equal("96", player.MediaTitle);
+        Assert.Equal("96", player.SourceTitle);
         Assert.Null(player.CurrentTrackTitle);
     }
 
@@ -315,7 +315,7 @@ public class SonosPlayerStateTests
     [InlineData("https://cdn.example.com/audio/scream.mp3?filename=scream.mp3")]
     [InlineData("cdn.example.com/audio/scream.mp3?filename=scream.mp3")]
     [InlineData("x-rincon-mp3radio://cdn.example.com/audio/scream.mp3?filename=scream.mp3")]
-    public void WhenAStreamIsTitledWithItsUri_ThenTheTitleAndTheMediaTitleAreEmpty(string title)
+    public void WhenAStreamIsTitledWithItsUri_ThenTheTitleAndTheSourceTitleAreEmpty(string title)
     {
         // Arrange
         const string streamUri = "x-rincon-mp3radio://cdn.example.com/audio/scream.mp3?filename=scream.mp3";
@@ -328,7 +328,7 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Null(player.CurrentTrackTitle);
-        Assert.Null(player.MediaTitle);
+        Assert.Null(player.SourceTitle);
     }
 
     [Fact]
@@ -345,7 +345,7 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Equal("radio.example.com", player.CurrentTrackTitle);
-        Assert.Equal("radio.example.com", player.MediaTitle);
+        Assert.Equal("radio.example.com", player.SourceTitle);
     }
 
     [Theory]

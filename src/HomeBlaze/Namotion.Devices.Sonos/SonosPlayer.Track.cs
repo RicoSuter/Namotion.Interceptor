@@ -9,7 +9,7 @@ public partial class SonosPlayer
     private string? _lastTrackMetaData;
     private DidlTrack? _lastTrack;
     private string? _lastMediaMetaData;
-    private string? _lastMediaTitle;
+    private string? _lastSourceTitle;
     private DidlTrack? _imageUriTrack;
     private Uri? _imageUriBaseUri;
     private string? _imageUri;
@@ -20,23 +20,23 @@ public partial class SonosPlayer
 
     // Caller holds _stateLock. Polls often report the media metadata empty that events delivered, so only a parsable
     // title replaces it. The next track of the same queue or station keeps it.
-    private void ApplyMediaTitle(string? mediaMetaData, bool isMediaChange)
+    private void ApplySourceTitle(string? mediaMetaData, bool isMediaChange)
     {
         if (mediaMetaData != _lastMediaMetaData || isMediaChange)
         {
             var title = DidlParser.ParseTitle(mediaMetaData);
             // Only the URL itself is dropped. A title that equals the end of the URL may be the caller's.
-            _lastMediaTitle = title is not null && IsStreamUri(title, MediaUri) ? null : title;
+            _lastSourceTitle = title is not null && IsStreamUri(title, MediaUri) ? null : title;
             _lastMediaMetaData = mediaMetaData;
         }
 
-        if (_lastMediaTitle is { } mediaTitle)
+        if (_lastSourceTitle is { } sourceTitle)
         {
-            ReportedMediaTitle = mediaTitle;
+            ReportedSourceTitle = sourceTitle;
         }
         else if (isMediaChange)
         {
-            ReportedMediaTitle = null;
+            ReportedSourceTitle = null;
         }
     }
 

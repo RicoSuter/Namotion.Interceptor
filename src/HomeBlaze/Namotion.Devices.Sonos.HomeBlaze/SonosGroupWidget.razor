@@ -17,8 +17,8 @@
         </MudStack>
 
         <MudStack Spacing="0">
-            <MudText Typo="Typo.body1">@SonosTrackText.GetTitleOrState(Group?.CurrentTrackTitle, Group?.MediaTitle, Group?.IsPlaying)</MudText>
-            <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Group?.CurrentTrackArtist, Group?.CurrentTrackTitle, Group?.MediaTitle)</MudText>
+            <MudText Typo="Typo.body1">@SonosTrackText.GetTitleOrState(Group?.CurrentTrackTitle, Group?.SourceTitle, Group?.IsPlaying)</MudText>
+            <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Group?.CurrentTrackArtist, Group?.CurrentTrackTitle, Group?.SourceTitle)</MudText>
         </MudStack>
 
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">

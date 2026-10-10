@@ -33,7 +33,7 @@ public class DidlParserTests
     }
 
     [Fact]
-    public void WhenReadingTheMediaTitle_ThenTheTitleIsReadWithoutTheStreamContent()
+    public void WhenReadingTheSourceTitle_ThenTheTitleIsReadWithoutTheStreamContent()
     {
         // Arrange
         var metadata = SonosEventBodies.Didl("SRF 3", streamContent: "Artist - Live Song");
@@ -50,7 +50,7 @@ public class DidlParserTests
     [InlineData("")]
     [InlineData("NOT_IMPLEMENTED")]
     [InlineData("<not-xml")]
-    public void WhenMediaMetadataIsMissingOrInvalid_ThenTheMediaTitleIsNull(string? metadata)
+    public void WhenMediaMetadataIsMissingOrInvalid_ThenTheSourceTitleIsNull(string? metadata)
     {
         // Act
         var title = DidlParser.ParseTitle(metadata);
