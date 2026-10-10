@@ -82,6 +82,15 @@ internal sealed class FileSubjectFactory
         CancellationToken cancellationToken)
     {
         var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
+        return CreateFromJson(storage, blob.FullPath, json);
+    }
+
+    /// <summary>
+    /// Creates the subject of a JSON file from its text: the configurable subject it describes,
+    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON.
+    /// </summary>
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
+    {
         try
         {
             var subject = _serializer.Deserialize(json);
@@ -93,11 +102,10 @@ internal sealed class FileSubjectFactory
         }
         catch (Exception exception)
         {
-            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", blob.FullPath);
+            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", path);
         }
 
-        // Create JsonFile for plain JSON
-        return new JsonFile(storage, blob.FullPath);
+        return new JsonFile(storage, path);
     }
 
     /// <summary>

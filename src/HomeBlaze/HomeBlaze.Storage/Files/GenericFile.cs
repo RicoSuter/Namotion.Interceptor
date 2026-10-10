@@ -54,20 +54,13 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
-    public Task OnFileChangedAsync(CancellationToken cancellationToken)
+    public async Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
-        // Update metadata
-        try
+        var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
+        if (metadata != null)
         {
-            if (Storage is FluentStorageContainer container)
-            {
-                var fileInfo = new FileInfo(container.GetFileSystemPath(FullPath));
-                FileSize = fileInfo.Length;
-                LastModified = fileInfo.LastWriteTimeUtc;
-            }
+            FileSize = metadata.Size;
+            LastModified = metadata.LastModifiedUtc ?? LastModified;
         }
-        catch { /* Ignore metadata errors */ }
-
-        return Task.CompletedTask;
     }
 }
