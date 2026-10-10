@@ -799,7 +799,6 @@ public partial class SonosPlayer : SonosDevice,
 
     // A placeholder title (connecting, buffering) keeps the current one while the track stays the same, like
     // NOT_IMPLEMENTED.
-
     private void ApplyTrackTitle(DidlTrack? track, bool isTrackChange)
     {
         var trackUri = CurrentTrackUri;
@@ -823,8 +822,9 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
-    // Only a poll keeps the current art when it reports none for the same track: polls omit the art that events
-    // delivered. An event without art clears it, since a stream keeps its track URI from song to song.
+    // A poll keeps the current art when it reports none for the same track, since polls omit the art that events
+    // delivered, and so does an event with a placeholder title, which a rebuffering stream sends without art. Any
+    // other event without art clears it: a stream keeps its track URI from song to song.
     private void ApplyTrackImage(DidlTrack? track, bool isTrackChange, bool isPoll)
     {
         var baseUri = BaseUri;
@@ -835,7 +835,8 @@ public partial class SonosPlayer : SonosDevice,
             _imageUriBaseUri = baseUri;
         }
 
-        if (_imageUri is not null || isTrackChange || !isPoll)
+        var keepsMissingArt = isPoll || (track?.Title is { } title && !SonosValues.IsKnown(title));
+        if (_imageUri is not null || isTrackChange || !keepsMissingArt)
         {
             CurrentTrackImageUri = _imageUri;
         }

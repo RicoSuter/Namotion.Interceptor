@@ -229,7 +229,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 
 When the source or track changes (a new transport or track URI), track values that Sonos does not report for the new one are cleared rather than kept from the previous one, and the position is cleared until the next poll. While the track stays the same, unknown values keep the current ones: Spotify Connect polls answer `NOT_IMPLEMENTED` for details its events delivered, and radio polls omit the album art its events delivered. An event that reports the same track without album art clears it, because a stream keeps its track URI from song to song.
 
-Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the song the station reports (often "ARTIST - TITLE"), otherwise the title Sonos reports for the stream. A `ZPSTR_` placeholder such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title on the same stream and clears it when the stream starts or the station changes.
+Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the song the station reports (often "ARTIST - TITLE"), otherwise the title Sonos reports for the stream. A `ZPSTR_` placeholder such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title and album art on the same stream and clears them when the stream starts or the station changes.
 
 A title that only repeats the URL is left empty:
 

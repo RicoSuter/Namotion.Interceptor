@@ -408,6 +408,21 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
+    public void WhenEventReportsAPlaceholderForTheSameTrackWithoutAlbumArt_ThenTheTitleAndTheAlbumArtAreKept()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", albumArtUri: "/getaa?s=1&u=station", streamContent: "Artist - Song")), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "ZPSTR_BUFFERING")), T0 + 1);
+
+        // Assert
+        Assert.Equal("Artist - Song", player.CurrentTrackTitle);
+        Assert.Equal("http://10.0.0.121:1400/getaa?s=1&u=station", player.CurrentTrackImageUri);
+    }
+
+    [Fact]
     public void WhenPollFollowsAnEventThatClearedTheAlbumArt_ThenTheAlbumArtStaysEmpty()
     {
         // Arrange
