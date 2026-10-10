@@ -40,7 +40,7 @@ Defects:
 
 ### Page 1: "Create subject"
 
-- A search field sits at the top and is focused when the dialog opens. It matches display name, class name, description and group, case-insensitively, and always searches across all groups.
+- A search field sits at the top and is focused when the dialog opens. It matches display name, class name, description and group, case-insensitively. Typing a search selects "All", so a match is never hidden behind a previously selected group. Selecting a group while a search is active narrows the matches to that group.
 - A sidebar lists "All" (the default) followed by the groups in alphabetical order, with "Other" last. Exactly one entry is selected. Each entry shows a count that follows the current search.
 - The list shows one row per type with icon, display name and the full description in the normal secondary text color. Rows are sorted by display name. Under "All", rows are grouped under small group headers.
 - Clicking a row goes straight to page 2. There are no tabs and no "Next" button.
@@ -67,7 +67,7 @@ Defects:
 | Caller | Name field |
 |--------|-----------|
 | Storage folder "Create" | "File name" with `.json` suffix, existing names are the folder's children |
-| Markdown editor embed | "Name" without suffix, becomes the `subject(Name)` block name, existing names are the page's other subject blocks |
+| Markdown editor embed | "Block name" without suffix, becomes the `subject(Name)` block name, existing names are the page's other subject blocks. The label differs from "Name" because many types have a "Name" setting of their own in the form below |
 | Grid and canvas "add" | not shown |
 
 ## Type Metadata
@@ -133,7 +133,9 @@ Hosts the picker and the configure page, and owns the name field, the back navig
 
 - A name collision is caught by the field validation, before "Create" is enabled.
 - When applying the edits reports invalid input, the dialog stays open on page 2.
-- When `BeforeSave` or persisting throws, the existing error snackbar is shown and the dialog stays open. For the storage callers a failing `AddSubjectAsync` happens after the dialog has closed and is reported as it is today.
+- When creating the subject for the form or `BeforeSave` throws, the error snackbar is shown and the dialog stays open. For the storage callers a failing `AddSubjectAsync` happens after the dialog has closed and is reported as it is today.
+- A failed persist is unchanged: the edit panel reports it with its own snackbar and the dialog still closes with the subject attached. Keeping the dialog open would let a retry attach the subject twice, so this needs its own design.
+- "Create" is disabled while a create is running, so a double click cannot attach the subject twice.
 - A file that another process creates between validation and create is not detected by the dialog. The storage reports it.
 
 ## Testing
