@@ -78,11 +78,11 @@ public static class MarkdownBlockWriter
 
             switch (value.GetValueKind())
             {
-                case JsonValueKind.String:
+                case JsonValueKind.String when IsValidHeadKey(key) && !HasLineBreak(value.GetValue<string>()):
                     arguments.Add(new MarkdownBlockArgument(key, value.GetValue<string>(), false));
                     break;
 
-                case JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False:
+                case JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False when IsValidHeadKey(key):
                     arguments.Add(new MarkdownBlockArgument(key, value.ToJsonString(), false));
                     break;
 
@@ -95,6 +95,27 @@ public static class MarkdownBlockWriter
 
         return (arguments, remainder);
     }
+
+    // Mirrors the key rule of MarkdownBlockHead.TryParse: letters, digits and underscore.
+    private static bool IsValidHeadKey(string key)
+    {
+        if (key.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var character in key)
+        {
+            if (!char.IsLetterOrDigit(character) && character != '_')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasLineBreak(string value) => value.AsSpan().IndexOfAny('\r', '\n') >= 0;
 
     private static string FormatFence(JsonObject remainder) =>
         $"```json\n{remainder.ToJsonString(IndentedOptions)}\n```";

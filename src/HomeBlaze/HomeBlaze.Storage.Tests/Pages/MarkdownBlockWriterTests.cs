@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using HomeBlaze.Storage.Pages;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -87,5 +88,57 @@ public class MarkdownBlockWriterTests
 
         // Assert
         Assert.Equal(":::Demo.Grid rows=1\n```json\n{\n  \"cells\": []\n}\n```\n:::", block);
+    }
+
+    [Fact]
+    public void WhenStringContainsLineBreak_ThenItGoesIntoTheJsonFence()
+    {
+        // Arrange
+        var motorBlock = Motor;
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(
+            Source, motorBlock, """{ "speed": 5, "description": "first\nsecond" }""");
+
+        // Assert
+        var motor = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
+        Assert.Null(motor.Error);
+        Assert.Equal(":::Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
+        var configuration = JsonNode.Parse(motor.ConfigurationJson!)!.AsObject();
+        Assert.Equal("first\nsecond", (string?)configuration["description"]);
+    }
+
+    [Fact]
+    public void WhenKeyIsNotAValidHeadKey_ThenTheScalarGoesIntoTheJsonFence()
+    {
+        // Arrange
+        var motorBlock = Motor;
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(Source, motorBlock, """{ "speed": 5, "my-key": 7 }""");
+
+        // Assert
+        var motor = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
+        Assert.Null(motor.Error);
+        Assert.Equal(":::Demo.Motor speed=5", result.Substring(motor.HeadSpan.Start, motor.HeadSpan.Length));
+        var configuration = JsonNode.Parse(motor.ConfigurationJson!)!.AsObject();
+        Assert.Equal(7, (int?)configuration["my-key"]);
+    }
+
+    [Fact]
+    public void WhenStringContainsQuoteAndBackslash_ThenItRoundTripsThroughTheHeadLine()
+    {
+        // Arrange
+        var motorBlock = Motor;
+        const string value = "say \"hi\" \\ bye";
+        var configurationJson = new JsonObject { ["speed"] = 5, ["label"] = value }.ToJsonString();
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(Source, motorBlock, configurationJson);
+
+        // Assert
+        var motor = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
+        Assert.Null(motor.Error);
+        Assert.Equal(value, motor.Head!.Arguments.Single(argument => argument.Key == "label").Value);
     }
 }
