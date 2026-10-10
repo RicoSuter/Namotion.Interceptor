@@ -47,6 +47,12 @@ internal static class SonosUris
         return IsRadioUri(uri) ? SonosSource.Radio : SonosSource.Other;
     }
 
+    /// <summary>
+    /// Whether the URI is the transport of a grouped member, <c>x-rincon:RINCON_...</c>, which points at its coordinator.
+    /// </summary>
+    internal static bool IsMemberTransportUri(string? uri) =>
+        uri is not null && uri.StartsWith("x-rincon:", StringComparison.Ordinal);
+
     internal static bool IsRadioUri(string uri)
     {
         foreach (var prefix in RadioUriPrefixes)

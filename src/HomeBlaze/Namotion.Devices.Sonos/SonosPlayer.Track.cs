@@ -40,6 +40,17 @@ public partial class SonosPlayer
         }
     }
 
+    // Caller holds _stateLock, and has cleared the media and track URIs the title and art are resolved against.
+    private void ClearTrackDetails()
+    {
+        _lastMediaMetaData = null;
+        _lastSourceTitle = null;
+        ReportedSourceTitle = null;
+        _lastTrack = null;
+        _lastTrackMetaData = null;
+        ApplyTrack(null, isTrackChange: true, isPoll: false);
+    }
+
     // Caller holds _stateLock.
     private void ApplyTrackMetaData(string? trackMetaData, bool isTrackChange, bool isPoll)
     {

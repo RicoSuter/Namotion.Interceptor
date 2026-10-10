@@ -93,7 +93,7 @@ Settings that only a home theater player has live on its `HomeTheater` child, so
 
 Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is not exposed. Its path therefore stops resolving when another room becomes coordinator.
 
-Playback state, track details, position, source, source title, shuffle, repeat and sleep timer are per group in Sonos, and a grouped member itself only reports a transport that points at its coordinator. Every member player therefore reports its coordinator's values, and the operations that set them go to the coordinator. A room shows what it plays on its own path, whatever it is grouped with, and shows its own state again when it leaves the group. Volume, mute and equalizer stay per room.
+Playback state, track details, position, source, source title, shuffle, repeat and sleep timer are per group in Sonos, and a grouped member itself only reports a transport that points at its coordinator. Every member player therefore reports its coordinator's values, and the operations that set them go to the coordinator. A room shows what it plays on its own path, whatever it is grouped with. When it leaves the group or becomes its coordinator, the pointer it reported as a member is forgotten, so its playback state, track and source are empty until an event or the next poll delivers its own. Volume, mute and equalizer stay per room.
 
 A group reports its coordinator's playback, track, source, play mode and sleep timer, and its own volume and mute (GroupRenderingControl).
 

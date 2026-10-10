@@ -32,6 +32,22 @@ public class SonosUrisTests
         Assert.Equal(expected, source);
     }
 
+    [Theory]
+    [InlineData("x-rincon:RINCON_A0000000000701400", true)]
+    [InlineData("x-rincon-queue:RINCON_A0000000000601400#0", false)]
+    [InlineData("x-rincon-stream:RINCON_A0000000000601400", false)]
+    [InlineData("x-rincon-mp3radio://stream.example.com/live.mp3", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void WhenUriPointsAtACoordinator_ThenItIsAMemberTransport(string? uri, bool expected)
+    {
+        // Act
+        var isMemberTransport = SonosUris.IsMemberTransportUri(uri);
+
+        // Assert
+        Assert.Equal(expected, isMemberTransport);
+    }
+
     [Fact]
     public void WhenUriIsRelative_ThenItIsResolvedAgainstTheSpeaker()
     {

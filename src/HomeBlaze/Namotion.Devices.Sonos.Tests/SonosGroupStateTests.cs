@@ -75,8 +75,25 @@ public class SonosGroupStateTests
         Assert.True(member.Seek_IsEnabled);
     }
 
+    private static string StandaloneTopology() => SonosEventBodies.CreateStandaloneTopology(
+        (OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/")),
+        (KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/")));
+
+    // The kitchen plays its own queue again after leaving a group.
+    private static SonosPlayerReading KitchenPausedOnItsOwnTrack() => new(
+        new AvTransportChange(
+            "PAUSED_PLAYBACK",
+            "NORMAL",
+            "x-rincon-queue:" + KitchenUuid + "#0",
+            "x-file-cifs://nas/music/own.mp3",
+            "0:02:00",
+            SonosEventBodies.Didl("Own Song", "Own Artist")),
+        TimeSpan.FromSeconds(5),
+        null,
+        EmptyRenderingControl);
+
     [Fact]
-    public void WhenMemberLeavesTheGroup_ThenItReportsItsOwnStateAgain()
+    public void WhenMemberLeavesTheGroup_ThenItForgetsWhatItReportedAsAMember()
     {
         // Arrange
         var system = CreateGroupedSystem();
@@ -87,22 +104,144 @@ public class SonosGroupStateTests
         Assert.Equal("Song", member.CurrentTrackTitle);
 
         // Act
-        system.ApplyTopology(ZoneGroupStateParser.Parse(SonosEventBodies.CreateStandaloneTopology(
-            (OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/")),
-            (KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/")))));
+        system.ApplyTopology(ZoneGroupStateParser.Parse(StandaloneTopology()));
 
         // Assert
-        Assert.Equal(MediaPlaybackState.Stopped, member.PlaybackState);
-        Assert.False(member.IsPlaying);
+        Assert.Null(member.PlaybackState);
+        Assert.Null(member.IsPlaying);
+        Assert.Null(member.CurrentTrackUri);
         Assert.Null(member.CurrentTrackTitle);
         Assert.Null(member.CurrentTrackArtist);
+        Assert.Null(member.CurrentTrackAlbum);
         Assert.Null(member.CurrentTrackImageUri);
+        Assert.Null(member.CurrentTrackPosition);
         Assert.Null(member.CurrentTrackDuration);
-        Assert.Equal(MemberTransportUri, member.CurrentTrackUri);
+        Assert.Null(member.Source);
         Assert.Null(member.SourceTitle);
         Assert.Equal("Song", coordinator.CurrentTrackTitle);
         Assert.Equal(MediaPlaybackState.Playing, coordinator.PlaybackState);
     }
+
+    [Fact]
+    public void WhenAStandalonePlayerIsReadAfterLeavingAGroup_ThenItReportsItsOwnStateAgain()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var coordinator = system.Players[OfficeUuid];
+        var member = system.Players[KitchenUuid];
+        coordinator.ApplyPoll(CoordinatorPlaying(), T0);
+        member.ApplyPoll(MemberFollowing("PLAYING"), T0);
+        system.ApplyTopology(ZoneGroupStateParser.Parse(StandaloneTopology()));
+
+        // Act
+        member.ApplyPoll(KitchenPausedOnItsOwnTrack(), T0 + 1);
+
+        // Assert
+        Assert.Equal(MediaPlaybackState.Paused, member.PlaybackState);
+        Assert.Equal("Own Song", member.CurrentTrackTitle);
+        Assert.Equal("Own Artist", member.CurrentTrackArtist);
+        Assert.Equal("x-file-cifs://nas/music/own.mp3", member.CurrentTrackUri);
+        Assert.Equal(TimeSpan.FromSeconds(5), member.CurrentTrackPosition);
+        Assert.Equal(SonosSource.Queue, member.Source);
+        Assert.Equal("Song", coordinator.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenAMemberReportedItsOwnTransportBeforeTheTopologyShowsItLeft_ThenThatStateIsKept()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var member = system.Players[KitchenUuid];
+        system.Players[OfficeUuid].ApplyPoll(CoordinatorPlaying(), T0);
+        member.ApplyPoll(MemberFollowing("PLAYING"), T0);
+        member.ApplyAvTransportEvent(KitchenPausedOnItsOwnTrack().AvTransport, T0 + 1);
+        Assert.Equal("Song", member.CurrentTrackTitle);
+
+        // Act
+        system.ApplyTopology(ZoneGroupStateParser.Parse(StandaloneTopology()));
+
+        // Assert
+        Assert.Equal(MediaPlaybackState.Paused, member.PlaybackState);
+        Assert.Equal("Own Song", member.CurrentTrackTitle);
+        Assert.Equal("x-file-cifs://nas/music/own.mp3", member.CurrentTrackUri);
+        Assert.Equal(SonosSource.Queue, member.Source);
+    }
+
+    [Fact]
+    public void WhenAPollThatReadTheMemberStateCompletesAfterTheRegroup_ThenTheMemberStateDoesNotComeBack()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var member = system.Players[KitchenUuid];
+        system.Players[OfficeUuid].ApplyPoll(CoordinatorPlaying(), system.NextOrder());
+        var pollStartedAt = system.NextOrder();
+        system.ApplyTopology(ZoneGroupStateParser.Parse(StandaloneTopology()));
+
+        // Act
+        member.ApplyPoll(MemberFollowing("PLAYING"), pollStartedAt);
+
+        // Assert
+        Assert.Null(member.CurrentTrackUri);
+        Assert.Null(member.PlaybackState);
+        Assert.Null(member.Source);
+    }
+
+    [Fact]
+    public void WhenTheCoordinatorHandsOverToAMember_ThenTheNewCoordinatorForgetsItsMemberState()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var office = system.Players[OfficeUuid];
+        var kitchen = system.Players[KitchenUuid];
+        office.ApplyPoll(CoordinatorPlaying(), T0);
+        kitchen.ApplyPoll(MemberFollowing("PLAYING"), T0);
+
+        // Act
+        system.ApplyTopology(ZoneGroupStateParser.Parse(SonosEventBodies.CreateGroupTopology(
+            (KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/")),
+            (OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/")))));
+
+        // Assert
+        Assert.True(kitchen.IsGroupCoordinator);
+        Assert.Null(kitchen.CurrentTrackUri);
+        Assert.Null(kitchen.PlaybackState);
+        Assert.Null(office.CurrentTrackUri);
+        Assert.Null(office.CurrentTrackTitle);
+        Assert.Null(office.PlaybackState);
+        Assert.Null(system.Groups[KitchenUuid].CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenAMembersCoordinatorChangesToAnotherPlayer_ThenTheMemberReportsTheNewCoordinatorsTrack()
+    {
+        // Arrange
+        var system = CreateSystem();
+        system.ApplyTopology(new SonosTopology([TopologyGroup(OfficeUuid, KitchenUuid), TopologyGroup(LivingRoomUuid)]));
+        ReportAllReachable(system);
+        var member = system.Players[KitchenUuid];
+        system.Players[OfficeUuid].ApplyPoll(CoordinatorPlaying(), T0);
+        system.Players[LivingRoomUuid].ApplyAvTransportEvent(
+            new AvTransportChange("PAUSED_PLAYBACK", "NORMAL", "x-sonosapi-stream:s1?sid=303", "x-sonosapi-stream:s1?sid=303", null, SonosEventBodies.Didl("Other Song", "Other Artist")),
+            T0);
+        Assert.Equal("Song", member.CurrentTrackTitle);
+
+        // Act
+        system.ApplyTopology(new SonosTopology([TopologyGroup(LivingRoomUuid, KitchenUuid), TopologyGroup(OfficeUuid)]));
+
+        // Assert
+        Assert.Equal(LivingRoomUuid, member.GroupCoordinatorUuid);
+        Assert.Equal("Other Song", member.CurrentTrackTitle);
+        Assert.Equal("Other Artist", member.CurrentTrackArtist);
+        Assert.Equal(MediaPlaybackState.Paused, member.PlaybackState);
+        Assert.Equal(SonosSource.Radio, member.Source);
+        Assert.Equal("Song", system.Players[OfficeUuid].CurrentTrackTitle);
+    }
+
+    // A group of the given players, coordinated by the first.
+    private static SonosTopologyGroup TopologyGroup(params string[] uuids) => new(
+        uuids[0] + ":1",
+        uuids[0],
+        uuids.Select(uuid => new SonosTopologyPlayer(uuid, uuid, new Uri("http://10.0.0.1:1400/"), null, null, null, [])).ToArray());
 
     [Fact]
     public void WhenGroupIsInspected_ThenItsSonosGroupIdIsNotPublic()

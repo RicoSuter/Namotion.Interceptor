@@ -232,6 +232,14 @@ public partial class SonosPlayer : SonosDevice,
     internal void ApplyPlayerTopology(SonosTopologyPlayer topology, string coordinatorUuid)
     {
         ApplyTopology(topology.RoomName, topology.BaseUri, topology.SoftwareVersion, topology.IsWireless);
+
+        // Before the coordinator changes, while the public properties still read the old one, so no observer sees
+        // the member values as the player's own.
+        if (GroupCoordinatorUuid is { } previousCoordinatorUuid && previousCoordinatorUuid != Uuid && coordinatorUuid == Uuid)
+        {
+            ForgetMemberPlayback();
+        }
+
         GroupCoordinatorUuid = coordinatorUuid;
 
         var (batteryLevel, isCharging) = SonosValues.ParseBattery(topology.MoreInfo);
@@ -267,6 +275,31 @@ public partial class SonosPlayer : SonosDevice,
         if (updatedSatellites is not null)
         {
             Satellites = updatedSatellites;
+        }
+    }
+
+    // What a member reported describes the group it left: an x-rincon: transport that points at its old coordinator
+    // and that group's playback state. Play mode and sleep timer are the player's own and stay.
+    private void ForgetMemberPlayback()
+    {
+        lock (_stateLock)
+        {
+            // Like an event: a poll that started before the regroup read the member's transport.
+            _avTransportOrder.RecordEvent(_system.NextOrder());
+
+            // An event often delivers the player's own transport before the topology shows that it left.
+            if (!SonosUris.IsMemberTransportUri(MediaUri) && !SonosUris.IsMemberTransportUri(ReportedTrackUri))
+            {
+                return;
+            }
+
+            ReportedPlaybackState = null;
+            MediaUri = null;
+            ReportedTrackUri = null;
+            ReportedTrackPosition = null;
+            ReportedTrackDuration = null;
+            ReportedSource = null;
+            ClearTrackDetails();
         }
     }
 
