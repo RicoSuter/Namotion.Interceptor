@@ -17,7 +17,7 @@
         </MudStack>
 
         <MudStack Spacing="0">
-            <MudText Typo="Typo.body1">@(SonosTrackText.GetTitle(Group?.CurrentTrackTitle, Group?.MediaTitle) ?? "Nothing playing")</MudText>
+            <MudText Typo="Typo.body1">@SonosTrackText.GetTitleOrState(Group?.CurrentTrackTitle, Group?.MediaTitle, Group?.IsPlaying)</MudText>
             <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Group?.CurrentTrackArtist, Group?.CurrentTrackTitle, Group?.MediaTitle)</MudText>
         </MudStack>
 

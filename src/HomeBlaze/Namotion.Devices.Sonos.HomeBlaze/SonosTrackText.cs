@@ -9,6 +9,13 @@ internal static class SonosTrackText
         trackTitle ?? mediaTitle;
 
     /// <summary>
+    /// The title, or without one a text that follows the playback state: TV, line-in and untitled streams play
+    /// without a title.
+    /// </summary>
+    internal static string GetTitleOrState(string? trackTitle, string? mediaTitle, bool? isPlaying) =>
+        GetTitle(trackTitle, mediaTitle) ?? (isPlaying == true ? "Playing" : "Nothing playing");
+
+    /// <summary>
     /// The artist and, below a track title, the station or playlist it plays from, skipping what is unknown or
     /// already shown as the title.
     /// </summary>
