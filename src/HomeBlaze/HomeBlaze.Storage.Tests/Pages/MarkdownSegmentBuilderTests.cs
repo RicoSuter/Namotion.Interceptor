@@ -142,6 +142,61 @@ public class MarkdownSegmentBuilderTests
     }
 
     [Fact]
+    public void WhenPageTextContainsLiteralBlockMarkers_ThenTheyStayAsHtmlAndNoBlockIsCreated()
+    {
+        // Act
+        var segments = Build("""
+            Intro
+
+            <!--BLOCK:7-->
+
+            Middle
+
+            <!--/BLOCK:7-->
+            """);
+
+        // Assert
+        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
+        var html = AllHtml(segments);
+        Assert.Contains("<!--BLOCK:7-->", html);
+        Assert.Contains("<!--/BLOCK:7-->", html);
+        Assert.Contains("Middle", html);
+    }
+
+    [Fact]
+    public void WhenLiteralBlockMarkerPrecedesRealBlock_ThenOnlyTheRealBlockIsCreated()
+    {
+        // Act
+        var segments = Build("""
+            <!--BLOCK:0-->
+
+            :::Demo.Widget path=/x
+            :::
+            """);
+
+        // Assert
+        var widget = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Equal("Demo.Widget", widget.Block.Head!.Name);
+        Assert.Contains("<!--BLOCK:0-->", AllHtml(segments));
+    }
+
+    [Fact]
+    public void WhenOldSubjectFenceIsNotOnFirstLine_ThenErrorBoxReportsTheFenceLine()
+    {
+        // Act
+        var segments = Build("""
+            first
+
+            ```subject(old)
+            { "$type": "X" }
+            ```
+            """);
+
+        // Assert
+        Assert.Contains("role=\"alert\">Line 3: ", AllHtml(segments));
+    }
+
+    [Fact]
     public void WhenLinkRewriterIsGiven_ThenLinksInsideBlocksAreRewritten()
     {
         // Act

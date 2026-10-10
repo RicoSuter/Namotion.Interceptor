@@ -26,15 +26,17 @@ public static partial class MarkdownSegmentBuilder
 {
     public const string ExpressionPattern = @"\{\{\s*([^}]+?)\s*\}\}";
 
-    [GeneratedRegex(@"<!--(/?)BLOCK:(\d+)-->|" + ExpressionPattern)]
+    [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
     private static partial Regex MarkerRegex();
 
     public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null)
     {
+        // Page text may contain marker-shaped comments, so only markers carrying this token count.
+        var token = Guid.NewGuid().ToString("N");
         using var writer = new StringWriter();
         var renderer = new HtmlRenderer(writer) { LinkRewriter = linkRewriter };
         MarkdownPageParser.Pipeline.Setup(renderer);
-        renderer.ObjectRenderers.Replace<HtmlCustomContainerRenderer>(new BlockMarkerRenderer(page));
+        renderer.ObjectRenderers.Replace<HtmlCustomContainerRenderer>(new BlockMarkerRenderer(page, token));
 
         // Extensions configure the code block renderer by exact type during Setup, so the
         // replacement is put in afterwards and takes over what they configured.
@@ -57,10 +59,10 @@ public static partial class MarkdownSegmentBuilder
         renderer.Render(page.Document);
         writer.Flush();
 
-        return Split(writer.ToString(), page);
+        return Split(writer.ToString(), page, token);
     }
 
-    private static List<MarkdownSegment> Split(string html, MarkdownPage page)
+    private static List<MarkdownSegment> Split(string html, MarkdownPage page, string token)
     {
         var root = new List<MarkdownSegment>();
         var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
@@ -69,6 +71,12 @@ public static partial class MarkdownSegmentBuilder
 
         foreach (Match match in MarkerRegex().Matches(html))
         {
+            var isForgedMarker = match.Groups[2].Success && match.Groups[2].Value != token;
+            if (isForgedMarker)
+            {
+                continue;
+            }
+
             if (match.Index > lastIndex)
             {
                 current.Add(new HtmlMarkdownSegment(html[lastIndex..match.Index]));
@@ -76,13 +84,13 @@ public static partial class MarkdownSegmentBuilder
 
             lastIndex = match.Index + match.Length;
 
-            if (match.Groups[3].Success)
+            if (match.Groups[4].Success)
             {
-                current.Add(new ExpressionMarkdownSegment(match.Groups[3].Value));
+                current.Add(new ExpressionMarkdownSegment(match.Groups[4].Value));
             }
             else if (match.Groups[1].Length == 0)
             {
-                stack.Push((page.AllBlocks[int.Parse(match.Groups[2].Value)], current));
+                stack.Push((page.AllBlocks[int.Parse(match.Groups[3].Value)], current));
                 current = [];
             }
             else if (stack.Count > 0)
@@ -101,7 +109,7 @@ public static partial class MarkdownSegmentBuilder
         return root;
     }
 
-    private sealed class BlockMarkerRenderer(MarkdownPage page) : HtmlObjectRenderer<CustomContainer>
+    private sealed class BlockMarkerRenderer(MarkdownPage page, string token) : HtmlObjectRenderer<CustomContainer>
     {
         private readonly HtmlCustomContainerRenderer _styleRenderer = new();
 
@@ -121,7 +129,7 @@ public static partial class MarkdownSegmentBuilder
 
                 default:
                     renderer.EnsureLine();
-                    renderer.Write($"<!--BLOCK:{block.Index}-->");
+                    renderer.Write($"<!--BLOCK:{token}:{block.Index}-->");
                     for (var i = 0; i < container.Count; i++)
                     {
                         if (i == 0 && block.ConfigurationSpan is not null)
@@ -132,7 +140,7 @@ public static partial class MarkdownSegmentBuilder
                         renderer.Render(container[i]);
                     }
 
-                    renderer.Write($"<!--/BLOCK:{block.Index}-->");
+                    renderer.Write($"<!--/BLOCK:{token}:{block.Index}-->");
                     break;
             }
         }
