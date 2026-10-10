@@ -34,8 +34,7 @@ public partial class SonosGroup :
     /// <summary>
     /// The current Sonos group id. It changes on every regroup, so the group is keyed by its coordinator instead.
     /// </summary>
-    [State(Position = 1)]
-    public partial string GroupId { get; internal set; }
+    internal partial string GroupId { get; set; }
 
     [State(Position = 2)]
     public partial SonosPlayer Coordinator { get; internal set; }

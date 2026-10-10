@@ -1,3 +1,4 @@
+using System.Reflection;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
@@ -8,6 +9,15 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosGroupStateTests
 {
+    [Fact]
+    public void WhenGroupIsInspected_ThenItsSonosGroupIdIsNotPublic()
+    {
+        // Act
+        var property = typeof(SonosGroup).GetProperty("GroupId", BindingFlags.Public | BindingFlags.Instance);
+
+        // Assert
+        Assert.Null(property);
+    }
 
     [Fact]
     public void WhenPlayerIsAGroupMember_ThenSourcePlayModeAndSleepTimerFollowTheCoordinator()

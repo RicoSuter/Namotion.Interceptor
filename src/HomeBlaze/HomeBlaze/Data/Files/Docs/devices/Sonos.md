@@ -86,7 +86,7 @@ A satellite carries its player's room name and is titled with model, room and ro
 
 ### Groups
 
-Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's `GroupId` changes on every regroup. Its path therefore stops resolving when another room becomes coordinator.
+Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is therefore not exposed. Its path therefore stops resolving when another room becomes coordinator.
 
 Transport and track state of a group are the coordinator's; volume and mute are the group's own (GroupRenderingControl). Source, shuffle, repeat, sleep timer and media title are per group in Sonos, so a member player reports its coordinator's values, and the operations that set them go to the coordinator.
 
@@ -165,7 +165,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 
 ### SonosGroup
 
-`GroupId`, `Coordinator` and `Members` (references to players), group `Volume` and `IsMuted`, and the coordinator's playback, track and `MediaTitle`. The title joins the room names, for example "Kitchen + Living Room".
+`Coordinator` and `Members` (references to players), group `Volume` and `IsMuted`, and the coordinator's playback, track and `MediaTitle`. The title joins the room names, for example "Kitchen + Living Room".
 
 ## Operations
 
