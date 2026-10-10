@@ -143,6 +143,33 @@ public class SonosGroupStateTests
     }
 
     [Fact]
+    public void WhenCoordinatorReportsSourcePlayModeAndSleepTimer_ThenTheGroupReportsThem()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var group = system.Groups[OfficeUuid];
+        Assert.Null(group.Source);
+        Assert.Null(group.Shuffle);
+        Assert.Null(group.Repeat);
+        Assert.Null(group.SleepTimerRemaining);
+
+        // Act
+        system.Players[OfficeUuid].ApplyPoll(
+            new SonosPlayerReading(
+                new AvTransportChange("PLAYING", "SHUFFLE_REPEAT_ONE", SpotifyConnectUri, SpotifyConnectUri, null, null),
+                null,
+                TimeSpan.FromMinutes(30),
+                EmptyRenderingControl),
+            T0);
+
+        // Assert
+        Assert.Equal(SonosSource.SpotifyConnect, group.Source);
+        Assert.True(group.Shuffle);
+        Assert.Equal(SonosRepeatMode.One, group.Repeat);
+        Assert.Equal(TimeSpan.FromMinutes(30), group.SleepTimerRemaining);
+    }
+
+    [Fact]
     public void WhenGroupRenderingControlEventApplied_ThenVolumeIsAFraction()
     {
         // Arrange

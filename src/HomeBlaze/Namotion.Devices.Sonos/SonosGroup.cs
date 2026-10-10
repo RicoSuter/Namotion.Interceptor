@@ -72,9 +72,26 @@ public partial class SonosGroup :
     [Derived]
     public TimeSpan? CurrentTrackDuration => Coordinator.CurrentTrackDuration;
 
+    /// <inheritdoc cref="SonosPlayer.Source"/>
+    [Derived]
+    [State(Position = 11)]
+    public SonosSource? Source => Coordinator.Source;
+
+    [Derived]
+    [State(Position = 12)]
+    public bool? Shuffle => Coordinator.Shuffle;
+
+    [Derived]
+    [State(Position = 13)]
+    public SonosRepeatMode? Repeat => Coordinator.Repeat;
+
+    [Derived]
+    [State(Position = 14)]
+    public TimeSpan? SleepTimerRemaining => Coordinator.SleepTimerRemaining;
+
     /// <inheritdoc cref="SonosPlayer.SourceTitle"/>
     [Derived]
-    [State(Position = 4)]
+    [State(Position = 15)]
     public string? SourceTitle => Coordinator.SourceTitle;
 
     [Derived]

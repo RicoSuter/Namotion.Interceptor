@@ -87,6 +87,28 @@ public class SonosDerivedTrackingTests
     }
 
     [Fact]
+    public void WhenCoordinatorPlayModeAndSourceChange_ThenGroupStateRaisesPropertyChanged()
+    {
+        // Arrange
+        var system = Track(CreateGroupedSystem());
+        var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
+        var group = Track(system.Groups[TestFixtures.OfficeUuid]);
+        Assert.Null(group.Shuffle);
+        Assert.Null(group.Source);
+        var firedEvents = TrackPropertyChanged(group);
+
+        // Act
+        coordinator.ApplyAvTransportEvent(
+            new AvTransportChange(null, "SHUFFLE", TestFixtures.SpotifyConnectUri, TestFixtures.SpotifyConnectUri, null, null), T0);
+
+        // Assert
+        Assert.True(group.Shuffle);
+        Assert.Contains(nameof(SonosGroup.Shuffle), firedEvents);
+        Assert.Contains(nameof(SonosGroup.Repeat), firedEvents);
+        Assert.Contains(nameof(SonosGroup.Source), firedEvents);
+    }
+
+    [Fact]
     public void WhenPlayingPlayerGoesOffline_ThenPlaybackStateAndIsPlayingRaisePropertyChanged()
     {
         // Arrange

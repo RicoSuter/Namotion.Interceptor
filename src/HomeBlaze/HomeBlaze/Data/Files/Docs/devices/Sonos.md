@@ -95,7 +95,7 @@ Every player belongs to exactly one group; an ungrouped room is a group of one. 
 
 Playback state, track details, position, source, source title, shuffle, repeat and sleep timer are per group in Sonos, and a grouped member itself only reports a transport that points at its coordinator. Every member player therefore reports its coordinator's values, and the operations that set them go to the coordinator. A room shows what it plays on its own path, whatever it is grouped with, and shows its own state again when it leaves the group. Volume, mute and equalizer stay per room.
 
-A group reports its coordinator's playback and track, and its own volume and mute (GroupRenderingControl).
+A group reports its coordinator's playback, track, source, play mode and sleep timer, and its own volume and mute (GroupRenderingControl).
 
 ### Offline Handling
 
@@ -185,7 +185,7 @@ Both are empty until first read and keep their last value while the player is of
 
 ### SonosGroup
 
-`Coordinator` and `Members` (references to players), group `Volume` and `IsMuted`, and the coordinator's playback, track and `SourceTitle`. The title joins the room names, for example "Kitchen + Living Room".
+`Coordinator` and `Members` (references to players), group `Volume` and `IsMuted`, and the coordinator's `PlaybackState`, `IsPlaying`, track properties, `Source`, `SourceTitle`, `Shuffle`, `Repeat` and `SleepTimerRemaining`, so everything a group operation sets can be read back on the group. The title joins the room names, for example "Kitchen + Living Room".
 
 ## Operations
 
