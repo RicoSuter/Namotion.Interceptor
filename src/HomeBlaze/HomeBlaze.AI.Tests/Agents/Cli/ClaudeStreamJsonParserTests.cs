@@ -63,6 +63,8 @@ public class ClaudeStreamJsonParserTests
     [InlineData("{not json")]
     [InlineData("{\"type\":\"system\",\"subtype\":\"status\"}")]
     [InlineData("[1,2]")]
+    [InlineData("{\"type\":\"result\",\"result\":\"\\ud800\"}")]
+    [InlineData("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"\\ud800\"}}}")]
     public void WhenALineIsIrrelevantOrMalformed_ThenNoEventIsReturned(string line)
     {
         // Act
@@ -70,5 +72,22 @@ public class ClaudeStreamJsonParserTests
 
         // Assert
         Assert.Null(parsed);
+    }
+
+    [Theory]
+    [InlineData("0.5", 0.5)]
+    [InlineData("1.5", 1.0)]
+    [InlineData("-0.2", 0.0)]
+    [InlineData("1e400", null)]
+    public void WhenParsingUtilization_ThenOutOfRangeIsClampedAndNonFiniteIsDropped(string utilization, double? expected)
+    {
+        // Arrange
+        var line = "{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"unifiedWindows\":{\"five_hour\":{\"utilization\":" + utilization + "}}}}";
+
+        // Act
+        var parsed = ClaudeStreamJsonParser.Parse(line);
+
+        // Assert
+        Assert.Equal(expected, Assert.IsType<ClaudeRateLimitEvent>(parsed).RateLimit.FiveHourUtilization);
     }
 }

@@ -26,11 +26,12 @@ public sealed record ClaudeResultEvent(string? SessionId, string Subtype, bool I
 public static class ClaudeStreamJsonParser
 {
     // DateTimeOffset.FromUnixTimeSeconds throws outside this range.
-    private static readonly long MinimumUnixSeconds = DateTimeOffset.MinValue.ToUnixTimeSeconds();
-    private static readonly long MaximumUnixSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
+    private const long MinimumUnixSeconds = -62_135_596_800;
+    private const long MaximumUnixSeconds = 253_402_300_799;
 
     /// <summary>
-    /// Parses one line; returns null for lines agents do not use and for malformed lines.
+    /// Parses one line; returns null for lines agents do not use and for malformed lines, which are dropped
+    /// (including lines with string values that cannot be decoded, such as unpaired surrogate escapes).
     /// </summary>
     public static ClaudeStreamEvent? Parse(string line)
     {
@@ -48,17 +49,36 @@ public static class ClaudeStreamJsonParser
                 return null;
             }
 
-            return GetString(root, "type") switch
+            if (!root.TryGetProperty("type"u8, out var type) || type.ValueKind != JsonValueKind.String)
             {
-                "system" when GetString(root, "subtype") == "init" && GetString(root, "session_id") is { } sessionId => new ClaudeInitEvent(sessionId),
-                "stream_event" => ParseStreamEvent(root),
-                "rate_limit_event" => ParseRateLimit(root),
-                "assistant" when GetString(root, "error") is { } code => new ClaudeAssistantErrorEvent(code),
-                "result" => ParseResult(root),
-                _ => null
-            };
+                return null;
+            }
+
+            if (type.ValueEquals("stream_event"u8))
+            {
+                return ParseStreamEvent(root);
+            }
+
+            if (type.ValueEquals("system"u8))
+            {
+                return HasString(root, "subtype"u8, "init"u8) && GetString(root, "session_id"u8) is { } sessionId
+                    ? new ClaudeInitEvent(sessionId)
+                    : null;
+            }
+
+            if (type.ValueEquals("rate_limit_event"u8))
+            {
+                return ParseRateLimit(root);
+            }
+
+            if (type.ValueEquals("assistant"u8))
+            {
+                return GetString(root, "error"u8) is { } code ? new ClaudeAssistantErrorEvent(code) : null;
+            }
+
+            return type.ValueEquals("result"u8) ? ParseResult(root) : null;
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
             return null;
         }
@@ -66,13 +86,13 @@ public static class ClaudeStreamJsonParser
 
     private static ClaudeTextDeltaEvent? ParseStreamEvent(JsonElement root)
     {
-        if (root.TryGetProperty("event", out var streamEvent) &&
+        if (root.TryGetProperty("event"u8, out var streamEvent) &&
             streamEvent.ValueKind == JsonValueKind.Object &&
-            GetString(streamEvent, "type") == "content_block_delta" &&
-            streamEvent.TryGetProperty("delta", out var delta) &&
+            HasString(streamEvent, "type"u8, "content_block_delta"u8) &&
+            streamEvent.TryGetProperty("delta"u8, out var delta) &&
             delta.ValueKind == JsonValueKind.Object &&
-            GetString(delta, "type") == "text_delta" &&
-            GetString(delta, "text") is { } text)
+            HasString(delta, "type"u8, "text_delta"u8) &&
+            GetString(delta, "text"u8) is { } text)
         {
             return new ClaudeTextDeltaEvent(text);
         }
@@ -82,23 +102,23 @@ public static class ClaudeStreamJsonParser
 
     private static ClaudeRateLimitEvent? ParseRateLimit(JsonElement root)
     {
-        if (!root.TryGetProperty("rate_limit_info", out var info) || info.ValueKind != JsonValueKind.Object)
+        if (!root.TryGetProperty("rate_limit_info"u8, out var info) || info.ValueKind != JsonValueKind.Object)
         {
             return null;
         }
 
-        info.TryGetProperty("unifiedWindows", out var windows);
-        var (fiveHourUtilization, fiveHourResetsAt) = ParseWindow(windows, "five_hour");
-        var (sevenDayUtilization, sevenDayResetsAt) = ParseWindow(windows, "seven_day");
+        info.TryGetProperty("unifiedWindows"u8, out var windows);
+        var (fiveHourUtilization, fiveHourResetsAt) = ParseWindow(windows, "five_hour"u8);
+        var (sevenDayUtilization, sevenDayResetsAt) = ParseWindow(windows, "seven_day"u8);
         return new ClaudeRateLimitEvent(new AgentRateLimit(
-            GetString(info, "status") ?? "unknown",
+            GetString(info, "status"u8) ?? "unknown",
             fiveHourUtilization,
             fiveHourResetsAt,
             sevenDayUtilization,
             sevenDayResetsAt));
     }
 
-    private static (double? Utilization, DateTimeOffset? ResetsAt) ParseWindow(JsonElement windows, string name)
+    private static (double? Utilization, DateTimeOffset? ResetsAt) ParseWindow(JsonElement windows, ReadOnlySpan<byte> name)
     {
         if (windows.ValueKind != JsonValueKind.Object ||
             !windows.TryGetProperty(name, out var window) ||
@@ -107,10 +127,11 @@ public static class ClaudeStreamJsonParser
             return (null, null);
         }
 
-        double? utilization = window.TryGetProperty("utilization", out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var fraction)
-            ? fraction
+        double? utilization = window.TryGetProperty("utilization"u8, out var value) && value.ValueKind == JsonValueKind.Number &&
+            value.TryGetDouble(out var fraction) && double.IsFinite(fraction)
+            ? Math.Clamp(fraction, 0, 1)
             : null;
-        DateTimeOffset? resetsAt = window.TryGetProperty("resetsAt", out var reset) && reset.ValueKind == JsonValueKind.Number &&
+        DateTimeOffset? resetsAt = window.TryGetProperty("resetsAt"u8, out var reset) && reset.ValueKind == JsonValueKind.Number &&
             reset.TryGetInt64(out var seconds) && seconds >= MinimumUnixSeconds && seconds <= MaximumUnixSeconds
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : null;
@@ -120,26 +141,29 @@ public static class ClaudeStreamJsonParser
     private static ClaudeResultEvent ParseResult(JsonElement root)
     {
         AgentUsage? usage = null;
-        if (root.TryGetProperty("usage", out var usageElement) && usageElement.ValueKind == JsonValueKind.Object)
+        if (root.TryGetProperty("usage"u8, out var usageElement) && usageElement.ValueKind == JsonValueKind.Object)
         {
             usage = new AgentUsage(
-                GetInt64(usageElement, "input_tokens"),
-                GetInt64(usageElement, "output_tokens"),
-                GetInt64(usageElement, "cache_read_input_tokens"),
-                GetInt64(usageElement, "cache_creation_input_tokens"));
+                GetInt64(usageElement, "input_tokens"u8),
+                GetInt64(usageElement, "output_tokens"u8),
+                GetInt64(usageElement, "cache_read_input_tokens"u8),
+                GetInt64(usageElement, "cache_creation_input_tokens"u8));
         }
 
         return new ClaudeResultEvent(
-            GetString(root, "session_id"),
-            GetString(root, "subtype") ?? "unknown",
-            root.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True,
-            GetString(root, "result"),
+            GetString(root, "session_id"u8),
+            GetString(root, "subtype"u8) ?? "unknown",
+            root.TryGetProperty("is_error"u8, out var isError) && isError.ValueKind == JsonValueKind.True,
+            GetString(root, "result"u8),
             usage);
     }
 
-    private static string? GetString(JsonElement element, string name) =>
+    private static bool HasString(JsonElement element, ReadOnlySpan<byte> name, ReadOnlySpan<byte> expected) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.ValueEquals(expected);
+
+    private static string? GetString(JsonElement element, ReadOnlySpan<byte> name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    private static long GetInt64(JsonElement element, string name) =>
+    private static long GetInt64(JsonElement element, ReadOnlySpan<byte> name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) ? number : 0;
 }
