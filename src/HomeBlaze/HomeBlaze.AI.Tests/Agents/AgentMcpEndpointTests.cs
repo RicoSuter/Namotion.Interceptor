@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using HomeBlaze.AI.Agents;
 using Microsoft.AspNetCore.Builder;
@@ -9,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 using Namotion.Interceptor.Mcp;
 using Xunit;
 
@@ -16,6 +18,9 @@ namespace HomeBlaze.AI.Tests.Agents;
 
 public sealed class AgentMcpEndpointTests : IAsyncLifetime
 {
+    private const string ExternalRoute = "/mcp";
+    private const string RemoteAddressTestHeader = "X-Test-Remote-Address";
+
     private WebApplication? _app;
     private string _baseAddress = string.Empty;
     private readonly AgentTurnTokenRegistry _registry = new();
@@ -32,11 +37,30 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
                 options.ConfigureSessionOptions = AgentMcpEndpoint.ConfigureSessionOptions;
             })
             // Production always has global handlers (the external MCP server); mirror that.
-            .WithListToolsHandler((_, _) => ValueTask.FromResult(new ListToolsResult { Tools = [] }))
-            .WithCallToolHandler((_, _) => ValueTask.FromResult(new CallToolResult { IsError = true, Content = [] }));
+            .WithListToolsHandler((_, _) => ValueTask.FromResult(new ListToolsResult
+            {
+                Tools = [new Tool { Name = "global_tool", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
+            }))
+            .WithCallToolHandler((_, _) => ValueTask.FromResult(new CallToolResult { IsError = true, Content = [] }))
+            .WithTools([McpServerTool.Create(() => "registered", new McpServerToolCreateOptions { Name = "registered_tool" })])
+            .WithPrompts([McpServerPrompt.Create(() => "registered", new McpServerPromptCreateOptions { Name = "registered_prompt" })])
+            .WithResources([McpServerResource.Create(() => "registered", new McpServerResourceCreateOptions { Name = "registered_resource", UriTemplate = "test://registered" })]);
 
         _app = builder.Build();
+
+        // Simulates a remote caller; registered before the agent gate so the gate sees the changed address.
+        _app.Use((context, next) =>
+        {
+            if (context.Request.Headers.ContainsKey(RemoteAddressTestHeader))
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.1");
+            }
+
+            return next(context);
+        });
+
         _app.MapHomeBlazeAgentMcp();
+        _app.MapMcp(ExternalRoute);
         await _app.StartAsync();
         _baseAddress = _app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
     }
@@ -62,13 +86,22 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         return AgentToolSet.Create([browse], ["browse"], memory.CreateUpdateTool(), maxToolCalls, progress: null);
     }
 
-    private async Task<McpClient> ConnectAsync(string token)
+    private Task<McpClient> ConnectAsync(string token) =>
+        ConnectAsync(AgentMcpEndpoint.Route, "Bearer " + token);
+
+    private async Task<McpClient> ConnectAsync(string route, string? authorization)
     {
+        var headers = new Dictionary<string, string>();
+        if (authorization is not null)
+        {
+            headers["Authorization"] = authorization;
+        }
+
         var transport = new HttpClientTransport(new HttpClientTransportOptions
         {
-            Endpoint = new Uri(_baseAddress + AgentMcpEndpoint.Route),
+            Endpoint = new Uri(_baseAddress + route),
             TransportMode = HttpTransportMode.StreamableHttp,
-            AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = "Bearer " + token }
+            AdditionalHeaders = headers
         }, NullLoggerFactory.Instance);
         return await McpClient.CreateAsync(transport, cancellationToken: CancellationToken.None);
     }
@@ -98,10 +131,11 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         using var httpClient = new HttpClient();
 
         // Act
-        using var response = await httpClient.PostAsync(_baseAddress + AgentMcpEndpoint.Route, new StringContent("{}"));
+        using var response = await httpClient.PostAsync(_baseAddress + AgentMcpEndpoint.Route, new StringContent("{}", Encoding.UTF8, "application/json"));
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal("Bearer", Assert.Single(response.Headers.WwwAuthenticate).Scheme);
     }
 
     [Fact]
@@ -112,7 +146,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         var token = registration.Token;
         registration.Dispose();
         using var httpClient = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}") };
+        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
         // Act
@@ -120,5 +154,90 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
 
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheRequestIsNotFromLoopback_ThenAValidTokenIsRejected()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+        using var httpClient = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", registration.Token);
+        request.Headers.Add(RemoteAddressTestHeader, "1");
+
+        // Act
+        using var response = await httpClient.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheSchemeIsLowercase_ThenTheTokenIsAccepted()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+        await using var client = await ConnectAsync(AgentMcpEndpoint.Route, "bearer " + registration.Token);
+
+        // Act
+        var tools = await client.ListToolsAsync();
+
+        // Assert
+        Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
+    }
+
+    [Fact]
+    public async Task WhenTheExternalRouteIsAlsoMapped_ThenItKeepsTheGlobalToolsWhileTheAgentRouteServesTheTurn()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+        await using var externalClient = await ConnectAsync(ExternalRoute, authorization: null);
+        await using var agentClient = await ConnectAsync(registration.Token);
+
+        // Act
+        var externalTools = await externalClient.ListToolsAsync();
+        var agentTools = await agentClient.ListToolsAsync();
+
+        // Assert
+        Assert.Equal(["global_tool", "registered_tool"], externalTools.Select(tool => tool.Name).Order());
+        Assert.Equal(["browse", "update_memory"], agentTools.Select(tool => tool.Name).Order());
+    }
+
+    [Fact]
+    public async Task WhenPromptsAndResourcesAreRegistered_ThenTheAgentRouteExposesNone()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+
+        // Act
+        await using var externalClient = await ConnectAsync(ExternalRoute, authorization: null);
+        await using var agentClient = await ConnectAsync(registration.Token);
+
+        // Assert
+        Assert.NotNull(externalClient.ServerCapabilities.Prompts);
+        Assert.NotNull(externalClient.ServerCapabilities.Resources);
+        Assert.Null(agentClient.ServerCapabilities.Prompts);
+        Assert.Null(agentClient.ServerCapabilities.Resources);
+        Assert.Null(agentClient.ServerCapabilities.Completions);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task WhenTheTransportIsNotConfiguredForTheAgentRoute_ThenMappingThrows(bool stateless, bool configureSessionOptions)
+    {
+        // Arrange
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Services.AddSingleton(new AgentTurnTokenRegistry());
+        builder.Services.AddMcpServer().WithHttpTransport(options =>
+        {
+            options.Stateless = stateless;
+            options.ConfigureSessionOptions = configureSessionOptions ? AgentMcpEndpoint.ConfigureSessionOptions : null;
+        });
+        await using var app = builder.Build();
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => app.MapHomeBlazeAgentMcp());
     }
 }

@@ -2,6 +2,8 @@ using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
 using Namotion.Interceptor.Mcp;
 
@@ -16,54 +18,91 @@ public static class AgentMcpEndpoint
     /// <summary>The route of the agent MCP endpoint.</summary>
     public const string Route = "/mcp/agents";
 
-    private const string ToolSetItemKey = "HomeBlaze.AI.AgentToolSet";
-    private const string BearerPrefix = "Bearer ";
+    private const string BearerScheme = "Bearer ";
+
+    private static readonly object ToolSetItemKey = new();
 
     /// <summary>
     /// Maps the agent route and its token check. The MCP server must use the stateless HTTP transport with
     /// <see cref="ConfigureSessionOptions"/>, which <c>AddHomeBlazeAgents</c> configures.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The HTTP transport is not stateless or has no session options callback.</exception>
     public static WebApplication MapHomeBlazeAgentMcp(this WebApplication app)
     {
-        app.UseWhen(
-            context => context.Request.Path.StartsWithSegments(Route),
-            branch => branch.Use(AuthenticateAsync));
-        app.MapMcp(Route);
+        var transportOptions = app.Services.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
+        if (!transportOptions.Stateless || transportOptions.ConfigureSessionOptions is null)
+        {
+            throw new InvalidOperationException(
+                $"The agent MCP route requires the MCP HTTP transport to be stateless and to use {nameof(AgentMcpEndpoint)}.{nameof(ConfigureSessionOptions)} " +
+                "as its ConfigureSessionOptions callback; otherwise requests to the route would see the global tools.");
+        }
+
+        app.Use(AuthenticateAsync);
+        app.MapMcp(Route).WithMetadata(AgentRouteMarker.Instance);
         return app;
     }
 
     /// <summary>
-    /// Replaces the tool handlers of a request to the agent route with ones serving only the turn's tools.
-    /// Stateless transport calls this per request with a fresh options copy, so other routes are unaffected.
+    /// Replaces the tools of a request to the agent route with only the turn's tools and removes all prompts,
+    /// resources and completions. Stateless transport calls this per request with a fresh options copy, so other
+    /// routes are unaffected.
     /// </summary>
     public static Task ConfigureSessionOptions(HttpContext context, McpServerOptions options, CancellationToken cancellationToken)
     {
-        if (!context.Request.Path.StartsWithSegments(Route))
+        if (!IsAgentRoute(context))
         {
             return Task.CompletedTask;
         }
 
+        // A request that bypassed the gate carries no tool set and gets no tools.
         IReadOnlyList<McpToolInfo> tools = context.Items[ToolSetItemKey] is AgentToolSet toolSet ? toolSet.Tools : [];
-        options.Handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
-        options.Handlers.CallToolHandler = (request, token) => McpToolDispatcher.CallToolAsync(tools, request.Params!, logger: null, token);
+        options.ToolCollection = null;
+        options.PromptCollection = null;
+        options.ResourceCollection = null;
+
+        var handlers = options.Handlers;
+        handlers.ListToolsHandler = (_, _) => ValueTask.FromResult(McpToolDispatcher.ListTools(tools));
+        handlers.CallToolHandler = (request, token) => McpToolDispatcher.CallToolAsync(tools, request.Params!, logger: null, token);
+        handlers.ListPromptsHandler = null;
+        handlers.GetPromptHandler = null;
+        handlers.ListResourcesHandler = null;
+        handlers.ListResourceTemplatesHandler = null;
+        handlers.ReadResourceHandler = null;
+        handlers.SubscribeToResourcesHandler = null;
+        handlers.UnsubscribeFromResourcesHandler = null;
+        handlers.CompleteHandler = null;
         return Task.CompletedTask;
     }
 
-    private static async Task AuthenticateAsync(HttpContext context, RequestDelegate next)
+    private static Task AuthenticateAsync(HttpContext context, RequestDelegate next)
     {
+        if (!IsAgentRoute(context))
+        {
+            return next(context);
+        }
+
         var registry = context.RequestServices.GetRequiredService<AgentTurnTokenRegistry>();
         var remoteAddress = context.Connection.RemoteIpAddress;
         var authorization = context.Request.Headers.Authorization.ToString();
         if (remoteAddress is null ||
             !IPAddress.IsLoopback(remoteAddress) ||
-            !authorization.StartsWith(BearerPrefix, StringComparison.Ordinal) ||
-            !registry.TryGetToolSet(authorization[BearerPrefix.Length..], out var toolSet))
+            !authorization.StartsWith(BearerScheme, StringComparison.OrdinalIgnoreCase) ||
+            !registry.TryGetToolSet(authorization[BearerScheme.Length..], out var toolSet))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            return;
+            context.Response.Headers.WWWAuthenticate = "Bearer";
+            return Task.CompletedTask;
         }
 
         context.Items[ToolSetItemKey] = toolSet;
-        await next(context);
+        return next(context);
+    }
+
+    private static bool IsAgentRoute(HttpContext context) =>
+        context.GetEndpoint()?.Metadata.GetMetadata<AgentRouteMarker>() is not null;
+
+    private sealed class AgentRouteMarker
+    {
+        public static readonly AgentRouteMarker Instance = new();
     }
 }
