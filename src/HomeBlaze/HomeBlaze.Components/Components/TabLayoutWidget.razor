@@ -1,0 +1,68 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(TabLayout))]
+@implements ISubjectComponent
+
+@{
+    // Read once per render and never kept: a reload assigns a new array.
+    var tabs = Layout?.Tabs ?? [];
+}
+
+<div class="tab-layout" data-testid="tab-layout" style="margin: 1rem 0;">
+    @* Every panel stays rendered, so that the content of a tab is read in the render of the tracking
+       scope and not only in the render that a click on the tab causes, which the scope does not record. *@
+    <MudTabs @ref="_tabs"
+             Elevation="1"
+             Rounded="true"
+             KeepPanelsAlive="true"
+             ActivePanelIndex="@GetActivePanelIndex(tabs)"
+             ActivePanelIndexChanged="@OnActivePanelIndexChanged">
+        @* Not keyed: MudTabs lists its panels in the order they were created, so a panel that moved with
+           its tab would keep its old place in the tab bar. Each panel shows the tab at its position. *@
+        @foreach (var tab in tabs)
+        {
+            <MudTabPanel Tag="@tab"
+                         Text="@tab.Title"
+                         Icon="@(string.IsNullOrEmpty(tab.Icon) ? null : MudBlazorIcons.Resolve(tab.Icon))">
+                <div class="tab-layout-panel layout-cell pa-4" data-testid="tab-panel">
+                    <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
+                </div>
+            </MudTabPanel>
+        }
+    </MudTabs>
+</div>
+
+@code {
+    private MudTabs? _tabs;
+
+    // Only ever compared with the tabs of the current render, never used on its own.
+    private Tab? _selectedTab;
+
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private TabLayout? Layout => Subject as TabLayout;
+
+    private int GetActivePanelIndex(Tab[] tabs)
+    {
+        for (var index = 0; index < tabs.Length; index++)
+        {
+            if (ReferenceEquals(tabs[index], _selectedTab))
+            {
+                return index;
+            }
+        }
+
+        // Nothing was selected yet, or a reload removed or replaced the selected tab.
+        _selectedTab = null;
+        return 0;
+    }
+
+    private void OnActivePanelIndexChanged(int index)
+    {
+        // Taken from the panel and not from the slot: the index belongs to the panels as they were last
+        // rendered, and the slot can hold a newer array by now.
+        var panels = _tabs?.Panels;
+        _selectedTab = panels is not null && index >= 0 && index < panels.Count
+            ? panels[index].Tag as Tab
+            : null;
+    }
+}

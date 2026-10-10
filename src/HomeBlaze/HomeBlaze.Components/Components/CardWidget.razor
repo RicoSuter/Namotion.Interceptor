@@ -27,6 +27,12 @@
     .card-widget {
         margin-bottom: 0.75rem;
     }
+
+    /* A layout cell spaces its content itself, so the card that ends the cell adds nothing below.
+       The two wrappers are those of SubjectComponent, for the content of the cell and for the card. */
+    .layout-cell > .subject-component-wrapper > .subject-component-wrapper:last-of-type > .card-widget {
+        margin-bottom: 0;
+    }
 </style>
 
 @code {

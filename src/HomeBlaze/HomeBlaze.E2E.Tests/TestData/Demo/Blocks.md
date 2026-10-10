@@ -28,3 +28,32 @@ A motor next to this page, referenced by a relative path:
 
 The named motor has a temperature of {{ cardmotor/Temperature }} °C.
 ::::
+
+## Flow
+
+:::::HomeBlaze.Components.FlowLayout minWidth=240
+::::Item
+:::HomeBlaze.Components.Card title="Flow One"
+First cell
+:::
+::::
+::::Item
+:::HomeBlaze.Components.Card title="Flow Two"
+Second cell
+:::
+::::
+::::Item
+Plain text cell
+::::
+:::::
+
+## Tabs
+
+::::HomeBlaze.Components.TabLayout
+:::Tab title="First Tab" icon=Home
+Content of the first tab
+:::
+:::Tab title="Second Tab"
+Content of the second tab
+:::
+::::
