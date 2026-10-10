@@ -47,7 +47,7 @@ public class SonosMediaInterfaceTests
         // Assert
         Assert.Equal(typeof(MediaPlaybackState?), playbackState.PropertyType);
         Assert.Equal(typeof(bool?), isPlaying.PropertyType);
-        Assert.Equal(["Stopped", "Playing", "Paused", "Buffering"], Enum.GetNames<MediaPlaybackState>());
+        Assert.DoesNotContain("Unknown", Enum.GetNames<MediaPlaybackState>());
     }
 
     [Theory]

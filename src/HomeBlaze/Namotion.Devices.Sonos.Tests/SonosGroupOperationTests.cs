@@ -56,6 +56,16 @@ public class SonosGroupOperationTests
     }
 
     [Fact]
+    public async Task WhenGroupSeeksToNegativePosition_ThenThrows()
+    {
+        // Arrange
+        var group = CreateGroupedSystem().Groups[OfficeUuid];
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => group.SeekAsync(TimeSpan.FromSeconds(-1), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task WhenGroupSystemIsNotConnected_ThenPauseThrows()
     {
         // Arrange

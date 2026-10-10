@@ -86,6 +86,22 @@ public class SonosHomeTheaterTests
     }
 
     [Fact]
+    public void WhenALaterDescriptionNoLongerListsHomeTheaterControl_ThenTheHomeTheaterIsRemoved()
+    {
+        // Arrange
+        var player = CreateSoundbar();
+        Assert.NotNull(player.HomeTheater);
+
+        // Act
+        player.ApplyDescription(PlainSpeaker);
+
+        // Assert
+        Assert.Null(player.HomeTheater);
+        Assert.False(player.IsHomeTheater);
+        Assert.False(player.SwitchToTv_IsEnabled);
+    }
+
+    [Fact]
     public void WhenPlayerIsDescribedAndPolledAgain_ThenTheSameHomeTheaterIsKept()
     {
         // Arrange
