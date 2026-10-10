@@ -29,7 +29,7 @@ public class ConfigurableSubjectSerializer
         _serviceProvider = serviceProvider;
         _options = new JsonSerializerOptions
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider),
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider),
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

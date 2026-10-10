@@ -11,6 +11,7 @@ public class ConfigurableSubjectSerializerTests
 {
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly TypeProvider _typeProvider;
+    private readonly TestConstructorDependency _constructorDependency = new();
 
     public ConfigurableSubjectSerializerTests()
     {
@@ -28,10 +29,13 @@ public class ConfigurableSubjectSerializerTests
             typeof(Level1Subject),
             typeof(Level2Subject),
             typeof(Level3Subject),
-            typeof(SubjectWithMixedProperties)
+            typeof(SubjectWithMixedProperties),
+            typeof(SubjectWithConstructorDependency),
+            typeof(SubjectWithAnyChild)
         ]);
 
         var services = new ServiceCollection();
+        services.AddSingleton(_constructorDependency);
         var serviceProvider = services.BuildServiceProvider();
 
         _serializer = new ConfigurableSubjectSerializer(_typeProvider, serviceProvider);
@@ -415,6 +419,29 @@ public class ConfigurableSubjectSerializerTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public void WhenNestedSubjectHasConstructorDependency_ThenDeserializeCreatesItThroughTheServiceProvider()
+    {
+        // Arrange
+        var json = """
+        {
+            "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithAnyChild",
+            "child": {
+                "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithConstructorDependency",
+                "config": "configured"
+            }
+        }
+        """;
+
+        // Act
+        var result = _serializer.Deserialize(json) as SubjectWithAnyChild;
+
+        // Assert
+        var child = Assert.IsType<SubjectWithConstructorDependency>(result?.Child);
+        Assert.Same(_constructorDependency, child.GetDependency());
+        Assert.Equal("configured", child.Config);
+    }
+
     #endregion
 
     #region UpdateConfiguration Tests
@@ -486,6 +513,36 @@ public class ConfigurableSubjectSerializerTests
         // Assert
         Assert.Equal("updated-one", subject.ConfigOne);
         Assert.Equal(100, subject.ConfigTwo); // Unchanged
+    }
+
+    [Fact]
+    public void WhenNestedSubjectHasConstructorDependency_ThenUpdateConfigurationCreatesItThroughTheServiceProvider()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<IPropertyLifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+        var subject = new SubjectWithAnyChild(context);
+        var json = """
+        {
+            "child": {
+                "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithConstructorDependency",
+                "config": "configured"
+            }
+        }
+        """;
+
+        // Act
+        _serializer.UpdateConfiguration(subject, json);
+
+        // Assert
+        var child = Assert.IsType<SubjectWithConstructorDependency>(subject.Child);
+        Assert.Same(_constructorDependency, child.GetDependency());
+        Assert.Equal("configured", child.Config);
     }
 
     #endregion

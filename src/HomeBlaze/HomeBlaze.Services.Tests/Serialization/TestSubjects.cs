@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Services.Tests.Serialization;
@@ -225,6 +226,42 @@ public partial class SubjectWithMixedProperties : IConfigurable
         StateOne = string.Empty;
         StateTwo = false;
     }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public sealed class TestConstructorDependency;
+
+/// <summary>
+/// Subject that can only be created with a dependency, like a device that needs a logger.
+/// </summary>
+[InterceptorSubject]
+public partial class SubjectWithConstructorDependency : IConfigurable
+{
+    private readonly TestConstructorDependency _dependency;
+
+    public SubjectWithConstructorDependency(TestConstructorDependency dependency)
+    {
+        _dependency = dependency;
+        Config = string.Empty;
+    }
+
+    public TestConstructorDependency GetDependency() => _dependency;
+
+    [Configuration]
+    public partial string Config { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Subject that hosts a child of any configurable type, like a grid cell.
+/// </summary>
+[InterceptorSubject]
+public partial class SubjectWithAnyChild : IConfigurable
+{
+    [Configuration]
+    public partial IInterceptorSubject? Child { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 
@@ -14,14 +15,17 @@ namespace HomeBlaze.Services.Serialization;
 /// - Sets up polymorphism for IConfigurable with $type discriminator
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
+/// - Creates IConfigurable types that have no parameterless constructor through the service provider
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
     private readonly TypeProvider _typeProvider;
+    private readonly IServiceProvider? _serviceProvider;
 
-    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider)
+    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider, IServiceProvider? serviceProvider = null)
     {
         _typeProvider = typeProvider;
+        _serviceProvider = serviceProvider;
     }
 
     public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
@@ -46,6 +50,17 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 typeInfo.PolymorphismOptions.DerivedTypes.Add(
                     new JsonDerivedType(derivedType, derivedType.FullName!));
             }
+        }
+
+        // CreateObject is null for a type without a parameterless constructor. The serializer then binds the
+        // constructor parameters to JSON properties and throws on a parameter that is a dependency, so a
+        // subject nested in the configuration of another one is created the way the root of a configuration is.
+        if (_serviceProvider is { } serviceProvider &&
+            typeInfo is { Kind: JsonTypeInfoKind.Object, CreateObject: null } &&
+            type is { IsAbstract: false, IsInterface: false } &&
+            typeof(IConfigurable).IsAssignableFrom(type))
+        {
+            typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(serviceProvider, type);
         }
 
         // Filter [Configuration] properties for all object types
