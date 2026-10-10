@@ -6,7 +6,7 @@ This guide helps you design POCOs (Plain Old CLR Objects) that work correctly wi
 
 **The golden rule**: Mark all stored properties as `partial` and initialize them in constructors. Most C# patterns work naturally - this guide focuses on **what to watch out for** and **what doesn't work**.
 
-These are rules a subject must follow. [Modeling Recommendations](#modeling-recommendations) adds conventions for deciding which code may change which property; a subject that ignores them still works.
+For conventions on which code may change which property, see [Modeling Recommendations](#modeling-recommendations).
 
 ## Quick Start
 
@@ -440,34 +440,7 @@ Most other C# patterns (nullable, required, init, virtual, override, data annota
 
 ## Modeling Recommendations
 
-The sections above are rules: breaking them loses tracking or fails the build. The recommendations below are not enforced. They separate the values a subject owns from the values its callers may change, so a model stays consistent as more code, user interfaces and connectors write to it. The examples build up one pump subject.
-
-### Non-Public Setters for Owned State
-
-State the subject owns, because its own logic computes it or its device measures it, gets a non-public setter: `{ get; private set; }`, or `{ get; internal set; }` when a helper class in the same assembly, such as a protocol client or a response parser, writes it. Outside code then cannot overwrite a reading or a status it does not own, and the value changes only through the subject's methods or a connector.
-
-```csharp
-[InterceptorSubject]
-public partial class Pump
-{
-    public partial double CurrentSpeed { get; internal set; }
-    public partial PumpStatus Status { get; private set; }
-
-    public Pump()
-    {
-        CurrentSpeed = 0;
-        Status = PumpStatus.Stopped;
-    }
-}
-```
-
-The generator supports every accessor modifier (see [Access Modifiers](generator.md#access-modifiers)), and the modifier only restricts C# callers. The generated property metadata calls the setter from inside the class, so `RegisteredSubjectProperty.SetValue`, `SetValueFromSource` and applied subject updates write the property like any other, with hooks, interceptors and change notifications, and connectors synchronize it in both directions.
-
-For the same reason, a non-public setter does not make the property read-only to remote clients. `RegisteredSubjectProperty.HasSetter` is `true`, so the OPC UA server exposes the node as writable, and the ASP.NET Core update endpoint and an inbound WebSocket update both write it. The MCP `set_property` tool is the exception and refuses properties without a public setter. Marking a property with a setter read-only to remote clients is not configurable yet (see [AccessLevel Configuration](connectors-opcua-mapping.md#accesslevel-configuration) and [#102](https://github.com/RicoSuter/Namotion.Interceptor/issues/102)).
-
-### Public Setters with Validation for Configuration and Desired Values
-
-Values a caller is meant to change get a public setter: configuration such as a name, an address or a polling interval, and desired values such as a target speed or a setpoint. Guard them with validation attributes so an invalid value is rejected at the write rather than discovered later by the logic that consumes it (see [Data Annotations](#data-annotations) and [Validation](validation.md)).
+These recommendations are not enforced, and a subject that ignores them still works. They separate the values a subject owns from the values its callers may change, so a model stays consistent as more code, user interfaces and connectors write to it.
 
 ```csharp
 [InterceptorSubject]
@@ -479,26 +452,20 @@ public partial class Pump
     [Range(0, 3000)]
     public partial double TargetSpeed { get; set; }
 
+    public partial double CurrentSpeed { get; internal set; }
+
+    public partial PumpStatus Status { get; private set; }
+
+    [Derived]
+    public bool CanStart => Status == PumpStatus.Stopped;
+
     public Pump()
     {
         Name = string.Empty;
         TargetSpeed = 0;
+        CurrentSpeed = 0;
+        Status = PumpStatus.Stopped;
     }
-}
-```
-
-Data annotations validate every write, including values a connector applies from a source. To validate only local input, write a validator that checks the write's `Origin` (see [Custom Validators](validation.md#custom-validators)).
-
-### Methods for Commands
-
-An action such as start, stop or reset is a method, not a property the caller sets. The method checks its preconditions and changes all related state together, so the subject never shows a combination its own logic would not produce. A `[Derived]` property can expose the precondition, for example to enable or disable a button.
-
-```csharp
-[InterceptorSubject]
-public partial class Pump
-{
-    [Derived]
-    public bool CanStart => Status == PumpStatus.Stopped;
 
     public void Start(double speed)
     {
@@ -513,39 +480,25 @@ public partial class Pump
 }
 ```
 
-When the related writes must succeed or fail together, run them in a [transaction](tracking-transactions.md). With `TransactionFailureHandling.Rollback`, the commit applies all writes or reverts the ones already applied, on a best-effort basis (see [Failure Flows and Consistency](tracking-transactions.md#failure-flows-and-consistency)). The writes do not become visible at once: the commit applies them one by one, and each notifies observers as it lands, so an observer can see the first write before the second.
+### Non-Public Setters for Owned State
 
-```csharp
-public async Task StartAsync(double speed, CancellationToken cancellationToken)
-{
-    var context = ((IInterceptorSubject)this).Context;
-    using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+State the subject owns, because its own logic computes it or its device measures it, gets `{ get; internal set; }`, so the subject, a parent subject and helpers in the same assembly such as a protocol client or response parser can write it, or `{ get; private set; }` when only the subject itself writes it. Other code then cannot overwrite a reading or a status it does not own, and a local write to a value a connector owns would only be overwritten by the next reading.
 
-    // Start(...) as above: the writes are captured until the commit
-    Start(speed);
+The generator supports every accessor modifier (see [Access Modifiers](generator.md#access-modifiers)), and the modifier only restricts C# callers. The generated property metadata calls the setter from inside the class, so applied subject updates, `SetValueFromSource` and transaction commits write the property normally, with hooks, interceptors and change notifications. A non-public setter also leaves `RegisteredSubjectProperty.HasSetter` `true`, so the property is not read-only to remote clients: the OPC UA server exposes it as writable (see [AccessLevel Configuration](connectors-opcua-mapping.md#accesslevel-configuration)), and the MQTT and WebSocket servers and the ASP.NET Core update endpoint apply client writes to it. Only the MCP [`set_property`](mcp.md#set_property) tool refuses a property without a public setter. Marking such a property read-only to remote clients is not configurable yet ([#102](https://github.com/RicoSuter/Namotion.Interceptor/issues/102)).
 
-    await transaction.CommitAsync(cancellationToken);
-}
-```
+### Public Setters with Validation for Configuration and Desired Values
 
-### Derived Properties for Computed Values
+Values a caller is meant to change get a public setter: configuration such as a name, an address or a polling interval, and desired values such as a target speed or a setpoint. Validation attributes reject an invalid value at the write rather than leaving it for the logic that consumes it (see [Data Annotations](#data-annotations) and [Validation](validation.md)). Data annotations also validate values a connector applies from a source, so a reported value outside the range is rejected too. To validate only local input, replace the attribute with a custom validator that checks the write's `Origin` (see [Custom Validators](validation.md#custom-validators)).
 
-A value that can be computed from other properties is a `[Derived]` property, not a stored copy. A stored copy goes stale when one write path forgets to update it, while a derived property is recalculated and notifies whenever a dependency changes (see [Derived Properties](#derived-properties) and [Derived Property Change Detection](tracking.md#derived-property-change-detection)).
+### Methods for Commands
 
-```csharp
-[Derived]
-public double SpeedDeviation => TargetSpeed - CurrentSpeed;
-```
+An action such as start, stop or reset is a method, not a property the caller sets. The method checks its preconditions and changes all related state together, so the subject never shows a combination its own logic would not produce. For a device-backed subject, the method sends the command and leaves measured state to the next reading. A value computed from other properties, including a command's precondition such as `CanStart`, is a `[Derived]` property rather than a stored copy that goes stale when one write path forgets to update it (see [Derived Properties](#derived-properties)).
+
+When the writes must succeed or fail together, run them in a [transaction](tracking-transactions.md) with `TransactionFailureHandling.Rollback`; the commit still applies and notifies them one at a time, and its rollback is best effort (see [Failure Flows and Consistency](tracking-transactions.md#failure-flows-and-consistency)).
 
 ### Properties, Not Methods, Across Connectors
 
-Connectors synchronize properties, not methods. A remote mirror of a subject observes its state, but calling a method on the mirror runs it against the mirror's local copy: its writes travel as plain property writes, and the owning side's preconditions and logic do not run. To let a remote side request an action, model a desired-value property that the remote side writes and the owning side reacts to, or use an application-level operation mechanism for actions that do not map to state.
-
-```csharp
-// On the owning side: the control loop drives the device toward the desired value
-// that a remote side may have written.
-CurrentSpeed = await _driver.SetSpeedAsync(TargetSpeed, cancellationToken);
-```
+Connectors synchronize properties, not methods. A remote mirror of a subject observes its state, but calling a method on the mirror runs it against the mirror's local copy: its writes travel as plain property writes, and the owning side's preconditions and logic do not run. To let a remote side request an action, model a desired-value property such as `TargetSpeed` that the remote side writes. The owning side reacts to the desired value, for example with a control loop that drives the device toward it, and checks the preconditions there, because a remote write bypasses the command method. For actions that do not map to state, use an application-level operation mechanism.
 
 ## Constructor Dependency Injection
 
@@ -557,6 +510,9 @@ Subjects can receive DI-injected services via constructor parameters alongside `
 [InterceptorSubject]
 public partial class DeviceGateway
 {
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<DeviceGateway> _logger;
+
     public DeviceGateway(
         IHttpClientFactory httpClientFactory,
         ILogger<DeviceGateway> logger)
@@ -572,10 +528,6 @@ public partial class DeviceGateway
 1. **ActivatorUtilities resolution**: When the subject is instantiated via DI (e.g., through `AddHostedSubject`), `ActivatorUtilities.CreateInstance` resolves all constructor parameters from the service provider. Services like `IHttpClientFactory`, `ILogger<T>`, and any other registered services are injected automatically.
 
 2. **Interaction with AddHostedSubject**: The `AddHostedSubject<T>` method detects whether the subject type has a constructor accepting `IInterceptorSubjectContext`. If it does, the context is passed during construction. The `contextResolver` parameter allows overriding which context is provided.
-
-### Examples in the Codebase
-
-- **OpcUaSubjectServer** (`Namotion.Interceptor.OpcUa`): Injects OPC UA server configuration and telemetry services.
 
 ## Implementing Hosted Subjects for DI
 

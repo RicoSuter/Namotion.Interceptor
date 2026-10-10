@@ -202,7 +202,7 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true.
+Write a property value by path. Blocked when `IsReadOnly` is true, and refuses a property without a public setter, such as one declared with `private set` or `internal set`.
 
 ### `list_types`
 
