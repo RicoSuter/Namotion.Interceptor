@@ -1,26 +1,11 @@
-using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
-using HomeBlaze.Storage.Internal;
-using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
 
-public class FluentStorageContainerFileEventTests : IDisposable
+public class FluentStorageContainerFileEventTests : StorageTestBase
 {
-    private static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
-
-    private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-storage-");
-    private readonly List<FluentStorageContainer> _storages = [];
-    private ServiceProvider? _serviceProvider;
-
-    public FluentStorageContainerFileEventTests()
-    {
-        GatedFile.Reset();
-    }
-
     [Theory]
     [InlineData(WatcherChangeTypes.Created)]
     [InlineData(WatcherChangeTypes.Changed)]
@@ -489,7 +474,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
         WriteFile("Motor.json", originalJson);
         var storage = await ConnectAsync();
         var existing = storage.Children["Motor"];
-        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>()) { Name = "Added" };
+        var added = CreateMotor("Added");
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -505,7 +490,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
         // Arrange
         WriteFile("Docs/Readme.md");
         var storage = await ConnectAsync();
-        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>());
+        var added = CreateMotor();
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -523,7 +508,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
     {
         // Arrange
         var storage = await ConnectAsync();
-        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>());
+        var added = CreateMotor();
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(() =>
@@ -538,7 +523,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
     {
         // Arrange
         var storage = await ConnectAsync();
-        var added = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>()) { Name = "Added" };
+        var added = CreateMotor("Added");
 
         // Act
         await storage.AddSubjectAsync("Devices/Motor.json", added, CancellationToken.None);
@@ -760,88 +745,12 @@ public class FluentStorageContainerFileEventTests : IDisposable
             WatcherTimeout);
     }
 
-    private async Task<FluentStorageContainer> ConnectAsync(bool enableFileWatching = false)
-    {
-        var typeProvider = new TypeProvider();
-        typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
-        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
-        typeProvider.AddAssembly(typeof(GatedFile).Assembly);
-        var typeRegistry = new SubjectTypeRegistry(typeProvider);
-
-        // The application's context, so that the Children setters run change tracking, registry and lifecycle code.
-        var services = new ServiceCollection();
-        var context = SubjectContextFactory.Create(services);
-        services.AddSingleton(typeProvider);
-        services.AddSingleton(typeRegistry);
-        services.AddSingleton(context);
-        services.AddSingleton<SubjectFactory>();
-        services.AddSingleton<ConfigurableSubjectSerializer>();
-        services.AddSingleton<RootManager>();
-        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
-        services.AddSingleton<MarkdownContentParser>();
-        var serviceProvider = services.BuildServiceProvider();
-        _serviceProvider = serviceProvider;
-
-        var storage = new FluentStorageContainer(
-            typeRegistry,
-            serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(),
-            serviceProvider)
-        {
-            ConnectionString = _directory.FullName,
-            EnableFileWatching = enableFileWatching
-        };
-
-        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
-        _storages.Add(storage);
-        await storage.ConnectAsync(CancellationToken.None);
-        return storage;
-    }
-
-    private static string SerializeMotor(string name)
-    {
-        // Serialized with services of its own, so the subject is not part of the storage under test.
-        var typeProvider = new TypeProvider();
-        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
-
-        var services = new ServiceCollection();
-        services.AddSingleton(typeProvider);
-        services.AddSingleton(new SubjectTypeRegistry(typeProvider));
-        services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create());
-        services.AddSingleton<SubjectFactory>();
-        services.AddSingleton<ConfigurableSubjectSerializer>();
-
-        using var serviceProvider = services.BuildServiceProvider();
-        var motor = new Samples.Motor(serviceProvider.GetRequiredService<IInterceptorSubjectContext>()) { Name = name };
-        return serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>().Serialize(motor);
-    }
-
-    private string GetFullPath(string relativePath)
-        => Path.Combine(_directory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
-
-    private void WriteFile(string relativePath, string content = "content")
-    {
-        var fullPath = GetFullPath(relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        File.WriteAllText(fullPath, content);
-    }
-
     private RenamedEventArgs Renamed(string oldName, string newName)
-        => new(WatcherChangeTypes.Renamed, _directory.FullName, newName, oldName);
+        => new(WatcherChangeTypes.Renamed, StorageDirectory.FullName, newName, oldName);
 
     private FileSystemEventArgs Event(WatcherChangeTypes changeType, string relativePath)
     {
         var fullPath = GetFullPath(relativePath);
         return new FileSystemEventArgs(changeType, Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath));
-    }
-
-    public void Dispose()
-    {
-        foreach (var storage in _storages)
-        {
-            storage.Dispose();
-        }
-
-        _serviceProvider?.Dispose();
-        _directory.Delete(recursive: true);
     }
 }

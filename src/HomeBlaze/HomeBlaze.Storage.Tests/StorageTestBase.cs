@@ -1,0 +1,114 @@
+using HomeBlaze.Services;
+using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+
+namespace HomeBlaze.Storage.Tests;
+
+/// <summary>
+/// A storage container on a temporary directory, wired with the application's interceptor context.
+/// </summary>
+public abstract class StorageTestBase : IDisposable
+{
+    protected static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
+
+    private readonly List<FluentStorageContainer> _storages = [];
+    private ServiceProvider? _serviceProvider;
+
+    protected StorageTestBase()
+    {
+        GatedFile.Reset();
+    }
+
+    protected DirectoryInfo StorageDirectory { get; } = Directory.CreateTempSubdirectory("homeblaze-storage-");
+
+    /// <summary>The context of the storage connected last.</summary>
+    protected IInterceptorSubjectContext? Context { get; private set; }
+
+    protected async Task<FluentStorageContainer> ConnectAsync(
+        bool enableFileWatching = false,
+        Action<FluentStorageContainer>? configure = null)
+    {
+        var typeProvider = new TypeProvider();
+        typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
+        typeProvider.AddAssembly(typeof(GatedFile).Assembly);
+        var typeRegistry = new SubjectTypeRegistry(typeProvider);
+
+        // The application's context, so that the Children setters run change tracking, registry and lifecycle code.
+        var services = new ServiceCollection();
+        var context = SubjectContextFactory.Create(services);
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(typeRegistry);
+        services.AddSingleton(context);
+        services.AddSingleton<SubjectFactory>();
+        services.AddSingleton<ConfigurableSubjectSerializer>();
+        services.AddSingleton<RootManager>();
+        services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
+        services.AddSingleton<MarkdownContentParser>();
+        var serviceProvider = services.BuildServiceProvider();
+        _serviceProvider = serviceProvider;
+        Context = context;
+
+        var storage = new FluentStorageContainer(
+            typeRegistry,
+            serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(),
+            serviceProvider)
+        {
+            ConnectionString = StorageDirectory.FullName,
+            EnableFileWatching = enableFileWatching
+        };
+
+        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        configure?.Invoke(storage);
+        _storages.Add(storage);
+        await storage.ConnectAsync(CancellationToken.None);
+        return storage;
+    }
+
+    protected Samples.Motor CreateMotor(string name = "Motor")
+        => new(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>()) { Name = name };
+
+    protected static string SerializeMotor(string name)
+    {
+        // Serialized with services of its own, so the subject is not part of the storage under test.
+        var typeProvider = new TypeProvider();
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(new SubjectTypeRegistry(typeProvider));
+        services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create());
+        services.AddSingleton<SubjectFactory>();
+        services.AddSingleton<ConfigurableSubjectSerializer>();
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var motor = new Samples.Motor(serviceProvider.GetRequiredService<IInterceptorSubjectContext>()) { Name = name };
+        return serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>().Serialize(motor);
+    }
+
+    protected string GetFullPath(string relativePath)
+        => Path.Combine(StorageDirectory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    protected void WriteFile(string relativePath, string content = "content")
+    {
+        var fullPath = GetFullPath(relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllText(fullPath, content);
+    }
+
+    protected static IReadOnlySet<string> Named(params string[] relativePaths)
+        => relativePaths.ToHashSet(StringComparer.Ordinal);
+
+    public void Dispose()
+    {
+        foreach (var storage in _storages)
+        {
+            storage.Dispose();
+        }
+
+        _serviceProvider?.Dispose();
+        StorageDirectory.Delete(recursive: true);
+        GC.SuppressFinalize(this);
+    }
+}
