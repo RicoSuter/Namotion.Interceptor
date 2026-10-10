@@ -155,7 +155,7 @@ The demo includes pre-configured motors in the `demo/` folder:
 1. **Organize by function**: Group related subjects in folders
 2. **Use descriptive names**: `conveyor-motor.json` is clearer than `m1.json`
 3. **Keep paths short**: Deep nesting makes paths harder to maintain
-4. **Use inline subjects for page-specific data**: Don't pollute the global graph
+4. **Use blocks for page-specific subjects**: A subject that only one page needs is created by a block on that page. Don't pollute the global graph
 5. **Leverage live updates**: Properties update automatically, no refresh needed
 
 ---

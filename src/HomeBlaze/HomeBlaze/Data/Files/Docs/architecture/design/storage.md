@@ -85,7 +85,7 @@ File subjects are created based on file extension via `FileExtensionAttribute`:
 
 | Type | Extension | Description |
 |------|-----------|-------------|
-| `MarkdownFile` | `.md` | Markdown with YAML frontmatter, widget blocks (`:::Full.Type.Name`) and live expressions (a path in double curly braces) |
+| `MarkdownFile` | `.md` | Markdown with YAML frontmatter, widget blocks (`:::Full.Type.Name`) and live expressions (`{{ path }}`) |
 | `JsonFile` | `.json` | Plain JSON files (non-configurable subjects) |
 | `GenericFile` | Other | Fallback for unknown extensions — metadata only |
 
@@ -98,8 +98,9 @@ A `MarkdownFile` turns its text into child subjects when the file is loaded and 
 | Unit | Location | Responsibility |
 |------|----------|----------------|
 | `MarkdownPageParser` | `HomeBlaze.Storage/Pages` | Page text to a tree of blocks with their positions in the source. Owns the grammar of the head line (`MarkdownBlockHead`) and reports the errors that are visible from the syntax alone. Knows nothing about subjects |
-| `MarkdownSegmentBuilder` | `HomeBlaze.Storage/Pages` | Renders the parsed page to HTML once and cuts the HTML into segments that follow the nesting of the blocks: HTML, expressions and blocks with their content. Writes the error boxes for syntax errors and for the old `subject(name)` fence |
-| `MarkdownContentParser` | `HomeBlaze.Storage/Internal` | Segments to subjects. Creates the subject of a block or updates the existing one in place, fills its slots, and reports the errors that need the types. `SlotMap` reads the `[Slot]` declarations of a type |
+| `MarkdownSegmentBuilder` | `HomeBlaze.Storage/Pages` | Renders the parsed page to HTML once and cuts the HTML into segments that follow the nesting of the blocks: HTML, expressions and blocks with their content. Writes the error boxes for syntax errors and for the old `subject(name)` fence. Writes the braces inside markdown code as character references, so an expression in code is shown as written. `FindExpressions` gives the editor and the "Read Evaluated Content" query the same expressions that the page renders |
+| `MarkdownContentParser` | `HomeBlaze.Storage/Internal` | Segments to subjects. Creates the subject of a block or updates the existing one in place, fills its slots, and reports the errors that need the types |
+| `SlotMap` | `HomeBlaze.Storage/Pages` | Reads the `[Slot]` declarations of a type for the content parser and reports a declaration that cannot be used |
 | `MarkdownFragment` | `HomeBlaze.Storage/Pages` | The subject that holds the content of one slot. Its `Children` have the same shape as the `Children` of the page |
 | `MarkdownBlockWriter` | `HomeBlaze.Storage/Pages` | Writes the configuration of one block back into the page text. Replaces the head line and the `json` fence and never touches the content of the block. Also creates the text of a new block for the editor |
 | `MarkdownContentView` | `HomeBlaze.Storage.Blazor/Files` | Renders the children of a page or of a fragment. HTML and expression values are joined into one markup string, every other child is rendered through `SubjectComponent` |

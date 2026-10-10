@@ -62,7 +62,7 @@ The navigation follows pages that are added, removed or changed while a browser 
 
 ## Live Expressions
 
-An expression is a path in double curly braces, like <code>{<!-- The comment splits the braces, so that this page does not evaluate the expression. -->{ mymotor/CurrentSpeed }}</code>. The page shows the value of the property at that path and updates it when the value changes.
+An expression is a path in double curly braces, like `{{ mymotor/CurrentSpeed }}`. The page shows the value of the property at that path and updates it when the value changes.
 
 ~~~~markdown
 Temperature: {{ mymotor/Temperature }}
@@ -92,7 +92,8 @@ See [Paths](paths.md) for full path documentation including `./`, `../`, bracket
 ### Expression Limitations
 
 - **No formatting**: An expression shows the value as it is. Units, rounding and conditions are not supported.
-- **Evaluated inside code too**: An expression is evaluated wherever it appears in the page text, also inside inline code and inside a code fence. A page cannot show an expression as an example. This documentation is a page as well: when you read it inside HomeBlaze, the expressions in its examples show their current value, or nothing when the path does not exist, where the page source has the expression.
+- **Not evaluated inside markdown code**: An expression inside a fenced code block, an indented code block or inline code is shown as written, with its braces. Use this to show an expression as an example. It also means that a live value cannot stand inside markdown code.
+- **Evaluated inside HTML**: An expression inside HTML that you write yourself is evaluated, also inside a `<code>` or a `<pre>` element. Only markdown code keeps an expression as written.
 
 ---
 
@@ -111,11 +112,11 @@ This block creates a subject of the type `HomeBlaze.Samples.Motor`, configures i
 
 The subject belongs to the page. It is created when the page is loaded, and a subject that is a background service starts then. It is stopped and removed when its block or the page is removed.
 
-The page [Blocks Demo](../../Demo/Blocks.md) of the sample data shows every widget of this section at work.
+The sample data of a development checkout has a page `Demo/Blocks.md` that shows every widget of this section at work. An installed HomeBlaze does not ship it.
 
 ### Block Syntax
 
-- **Fence**: The head line starts with at least three colons. The block ends with a line of the same number of colons. Every block needs its closing line, also an empty one. Without it, the block takes the rest of the page as its content.
+- **Fence**: The head line starts with at least three colons. The block ends with a line of colons only, with at least as many colons as the head line. Write the same number. Every block needs its closing line, also an empty one. Without it, the block takes the rest of the page as its content.
 - **Type**: The full type name with its namespace follows the colons without a space. It is the name that the `$type` property has in the JSON file of a subject.
 - **Name**: An optional `#name` follows the type without a space. It starts with a letter or `_` and continues with letters, digits, `_` or `-`. A name is unique on the page, however deeply the blocks are nested.
 - **Arguments**: Any number of `key=value` pairs follow, separated by spaces. Each one sets a configuration property of the subject. The keys are the property names in camelCase, the same as in the JSON file of a subject.
@@ -254,6 +255,8 @@ Shows the widget of a subject that exists somewhere else: in a file of its own, 
 |------|------|-------------|
 | `path` | Argument | Path to the subject to show. The section "Paths on Markdown Pages" in [Paths](paths.md) explains where it starts |
 
+The example continues the card under "Content and Slots" above, which declares the motor `cardmotor`. On a page without that block, the first widget shows "Cannot resolve path".
+
 ~~~~markdown
 ::::HomeBlaze.Components.Card title="Reference Card" icon=Link
 The motor of the first card, referenced by its name:
@@ -292,6 +295,7 @@ A style block can hold text and expressions. A widget block inside a style block
 A widget block is allowed in three places: directly on the page, directly inside another widget block and directly inside a slot block. A slot block is allowed directly inside the widget block that declares the slot.
 
 - A block inside a list item, a quote or a style block is shown as an error.
+- A block inside a fenced code block is shown as text and creates nothing, which is how this page shows its examples.
 - Do not put a block between an opening HTML tag and its closing tag, for example between `<div>` and `</div>`. The page does not report this, but the widget ends up outside the element and the layout breaks. Without an empty line between the tag and the block, the lines of the block are shown as text. Use a `Card`, a `FlowLayout` or a `TabLayout` to arrange widgets.
 
 ### Errors
@@ -300,7 +304,7 @@ A block that cannot be shown is replaced by a red box with the line number of th
 
 | Situation | Message |
 |-----------|---------|
-| A block without a name. This is what a miscounted fence produces | A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it. |
+| A line of colons without a type name or a slot name. This is what a miscounted fence produces | A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it. |
 | The type does not exist or is misspelled | Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace. |
 | A type name without its namespace at the top level of the page, or a slot block there | 'Card' is not a type name. A slot block is only allowed directly inside a widget block. |
 | The widget has no slot of that name | Card has no slot 'Footr'. Available: Content, Footer. |
@@ -312,6 +316,8 @@ A block that cannot be shown is replaced by a red box with the line number of th
 | A block in a list item, a quote or a style block | A block is only allowed directly on the page or directly inside another block. |
 
 When the subject of a block fails while it is created or configured, the box shows the message of that failure.
+
+An error in a slot block, such as a `Tab`, a `Footer` or an `Item`, replaces the whole widget around it with one box. The box names the line of the slot block. Everything inside that widget is created again once the error is fixed.
 
 ### What a Change of the Page Keeps
 
@@ -376,11 +382,11 @@ The name in parentheses becomes the `#name`, the value of `$type` becomes the ty
 
 Links between markdown pages use relative paths that HomeBlaze converts to proper routes:
 
-```markdown
+~~~~markdown
 See the [Project Structure](../architecture/project-structure.md) for details.
 
 Check the [installation guide](../administration/installation.md) for examples.
-```
+~~~~
 
 ### Link Resolution
 
