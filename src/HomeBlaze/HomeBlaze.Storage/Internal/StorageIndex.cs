@@ -6,7 +6,7 @@ namespace HomeBlaze.Storage.Internal;
 /// <summary>
 /// The entries of a storage by exact path.
 /// </summary>
-/// <remarks>Not thread-safe. Only the <c>StorageWorker</c> reads or writes it.</remarks>
+/// <remarks>Not thread-safe. Only the <see cref="StorageWorker"/> reads or writes it.</remarks>
 internal sealed class StorageIndex
 {
     private readonly Dictionary<string, StorageEntry> _entries = new(StringComparer.Ordinal);
