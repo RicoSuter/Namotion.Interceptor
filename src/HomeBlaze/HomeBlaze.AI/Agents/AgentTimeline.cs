@@ -72,12 +72,12 @@ public sealed class AgentTimeline
     }
 
     /// <summary>
-    /// Appends an entry in memory (dropping the oldest beyond the capacity) and to the file. When a file is
-    /// configured, the in-memory update happens while holding <see cref="_fileLock"/> so that, across concurrent
-    /// callers, the order entries are added in memory matches the order they are written to the file, and so
-    /// this cannot interleave with a concurrent <see cref="LoadAsync"/>. If the file write fails, the exception
-    /// propagates but the entry that was already added to memory is kept rather than rolled back.
+    /// Appends an entry in memory (dropping the oldest beyond the capacity) and to the file.
     /// </summary>
+    /// <remarks>
+    /// If the file write fails, the exception propagates but the entry that was already added to memory is
+    /// kept rather than rolled back.
+    /// </remarks>
     public async Task AppendAsync(AgentTimelineEntry entry, CancellationToken cancellationToken)
     {
         if (_filePath is null)
@@ -93,13 +93,20 @@ public sealed class AgentTimeline
         await _fileLock.WaitAsync(cancellationToken);
         try
         {
+            // Update memory while still holding _fileLock, so across concurrent callers the order entries are
+            // added in memory matches the order they are written below, and neither can interleave with a
+            // concurrent LoadAsync (which takes the same lock).
             lock (_entriesLock)
             {
                 AddEntryLocked(entry);
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
-            await File.AppendAllTextAsync(_filePath, Serialize(entry) + "\n", cancellationToken);
+
+            // The entry is already in memory, so from here on cancellation must not be honored: a cancelled
+            // write could leave an unterminated line in the file, which LoadAsync's line-based parsing would
+            // then merge with the next append and skip as corrupt, silently losing both entries.
+            await File.AppendAllTextAsync(_filePath, Serialize(entry) + "\n", CancellationToken.None);
             _fileLineCount++;
 
             if (_fileLineCount > _capacity * 2)

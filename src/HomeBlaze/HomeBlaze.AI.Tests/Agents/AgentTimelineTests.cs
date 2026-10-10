@@ -119,7 +119,7 @@ public class AgentTimelineTests : IDisposable
 
         // Act
         var tasks = Enumerable.Range(0, 100)
-            .Select(index => timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, index, index.ToString()), CancellationToken.None))
+            .Select(index => Task.Run(() => timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, index, index.ToString()), CancellationToken.None)))
             .ToArray();
         await Task.WhenAll(tasks);
 
