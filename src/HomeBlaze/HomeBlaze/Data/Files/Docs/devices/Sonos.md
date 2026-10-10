@@ -88,7 +88,9 @@ A satellite carries its player's room name and is titled with model, room and ro
 
 Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is therefore not exposed. Its path therefore stops resolving when another room becomes coordinator.
 
-Transport and track state of a group are the coordinator's; volume and mute are the group's own (GroupRenderingControl). Source, shuffle, repeat, sleep timer and source title are per group in Sonos, so a member player reports its coordinator's values, and the operations that set them go to the coordinator.
+Playback state, track details, position, source, source title, shuffle, repeat and sleep timer are per group in Sonos, and a grouped member itself only reports a transport that points at its coordinator. Every member player therefore reports its coordinator's values, and the operations that set them go to the coordinator. A room shows what it plays on its own path, whatever it is grouped with, and shows its own state again when it leaves the group. Volume, mute and equalizer stay per room.
+
+A group reports its coordinator's playback and track, and its own volume and mute (GroupRenderingControl).
 
 ### Offline Handling
 
@@ -143,8 +145,8 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `Uuid`, `RoomName` | | RINCON id and room name |
 | `PlaybackState`, `IsPlaying` | | `Stopped`, `Playing`, `Paused` or `Buffering` (Sonos's transitioning), empty while unknown; `IsPlaying` is true for playing and buffering and false while unknown |
 | `Volume`, `IsMuted` | 0..1 | This room |
-| `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackUri` | | See [Track Details](#track-details) |
-| `CurrentTrackImageUri` | URI | Album art; Sonos's relative `/getaa?...` paths are resolved against the speaker |
+| `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackUri` | | The track of the room's group, see [Track Details](#track-details) |
+| `CurrentTrackImageUri` | URI | Album art; Sonos's relative `/getaa?...` paths are resolved against the coordinator, which serves it |
 | `CurrentTrackDuration` | TimeSpan | Empty for streams, TV and line-in |
 | `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it |
 | `Source` | | `None` (nothing loaded), `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, from the coordinator's transport URI; empty until it was read. `Other` may be refined into new values later |
@@ -178,7 +180,7 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | Operation | Parameters | Target | Notes |
 |-----------|------------|--------|-------|
 | `Play`, `Pause`, `Stop`, `Next`, `Previous`, `TogglePlayback` | | coordinator | |
-| `Seek` | `position` | coordinator | Enabled only while the track has a duration |
+| `Seek` | `position` | coordinator | Enabled only while the group's track has a duration |
 | `SetVolume`, `ChangeVolume`, `RampVolume` | `volume` or `delta` | player | `RampVolume` uses Sonos's sleep timer ramp |
 | `Mute`, `Unmute` | | player | |
 | `PlayFavorite` | `title` | coordinator | See [Favorites](#favorites) |

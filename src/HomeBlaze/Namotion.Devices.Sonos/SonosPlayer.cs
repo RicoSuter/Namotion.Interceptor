@@ -37,32 +37,30 @@ public partial class SonosPlayer : SonosDevice,
     /// </summary>
     internal partial string? MediaUri { get; set; }
 
-    public partial MediaPlaybackState? PlaybackState { get; internal set; }
-
-    [Derived]
-    public bool IsPlaying => PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
-
     public partial bool? IsMuted { get; internal set; }
 
     public partial decimal? Volume { get; internal set; }
 
-    public partial string? CurrentTrackTitle { get; internal set; }
+    // Playback, track, source, play mode and sleep timer are group state. A member reports its own play mode and
+    // sleep timer and an x-rincon: transport that points at the coordinator, without track details, so the public
+    // properties read the coordinator's reported values. They read its raw values rather than its derived ones, so
+    // an inconsistent topology cannot make two players recurse.
 
-    public partial string? CurrentTrackArtist { get; internal set; }
+    internal partial MediaPlaybackState? ReportedPlaybackState { get; set; }
 
-    public partial string? CurrentTrackAlbum { get; internal set; }
+    internal partial string? ReportedTrackTitle { get; set; }
 
-    public partial string? CurrentTrackImageUri { get; internal set; }
+    internal partial string? ReportedTrackArtist { get; set; }
 
-    public partial string? CurrentTrackUri { get; internal set; }
+    internal partial string? ReportedTrackAlbum { get; set; }
 
-    public partial TimeSpan? CurrentTrackPosition { get; internal set; }
+    internal partial string? ReportedTrackImageUri { get; set; }
 
-    public partial TimeSpan? CurrentTrackDuration { get; internal set; }
+    internal partial string? ReportedTrackUri { get; set; }
 
-    // Source, play mode and sleep timer are group state. A member reports its own play mode and sleep timer and an
-    // x-rincon: transport that points at the coordinator, so these read the coordinator's reported values. They read
-    // its raw values rather than its derived ones, so an inconsistent topology cannot make two players recurse.
+    internal partial TimeSpan? ReportedTrackPosition { get; set; }
+
+    internal partial TimeSpan? ReportedTrackDuration { get; set; }
 
     internal partial bool? ReportedShuffle { get; set; }
 
@@ -73,6 +71,36 @@ public partial class SonosPlayer : SonosDevice,
     internal partial string? ReportedSourceTitle { get; set; }
 
     internal partial SonosSource? ReportedSource { get; set; }
+
+    [Derived]
+    public MediaPlaybackState? PlaybackState => GetCoordinator().ReportedPlaybackState;
+
+    [Derived]
+    public bool IsPlaying => PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
+
+    [Derived]
+    public string? CurrentTrackTitle => GetCoordinator().ReportedTrackTitle;
+
+    [Derived]
+    public string? CurrentTrackArtist => GetCoordinator().ReportedTrackArtist;
+
+    [Derived]
+    public string? CurrentTrackAlbum => GetCoordinator().ReportedTrackAlbum;
+
+    /// <summary>
+    /// The album art, resolved against the address of the coordinator, which serves it.
+    /// </summary>
+    [Derived]
+    public string? CurrentTrackImageUri => GetCoordinator().ReportedTrackImageUri;
+
+    [Derived]
+    public string? CurrentTrackUri => GetCoordinator().ReportedTrackUri;
+
+    [Derived]
+    public TimeSpan? CurrentTrackPosition => GetCoordinator().ReportedTrackPosition;
+
+    [Derived]
+    public TimeSpan? CurrentTrackDuration => GetCoordinator().ReportedTrackDuration;
 
     /// <summary>
     /// Where the audio of the group comes from, or null until the transport of its coordinator was read.
@@ -231,7 +259,7 @@ public partial class SonosPlayer : SonosDevice,
                 ApplyAvTransport(reading.AvTransport, isPoll: true);
                 if (reading.HasPosition)
                 {
-                    CurrentTrackPosition = reading.Position;
+                    ReportedTrackPosition = reading.Position;
                 }
             }
 
@@ -251,7 +279,7 @@ public partial class SonosPlayer : SonosDevice,
     {
         if (SonosValues.IsKnown(change.TransportState))
         {
-            PlaybackState = SonosValues.ParsePlaybackState(change.TransportState);
+            ReportedPlaybackState = SonosValues.ParsePlaybackState(change.TransportState);
         }
 
         if (SonosValues.ParsePlayMode(change.PlayMode) is { } playMode)
@@ -264,7 +292,7 @@ public partial class SonosPlayer : SonosDevice,
         if (isTrackChange)
         {
             // Position comes only from polls; the next one reads it for the new track.
-            CurrentTrackPosition = null;
+            ReportedTrackPosition = null;
         }
 
         ApplySourceTitle(change.MediaMetaData, isMediaChange);
@@ -272,11 +300,11 @@ public partial class SonosPlayer : SonosDevice,
         if (SonosValues.IsKnown(change.TrackDuration))
         {
             // Streams report a zero duration.
-            CurrentTrackDuration = SonosValues.ParseDuration(change.TrackDuration) is { Ticks: > 0 } duration ? duration : null;
+            ReportedTrackDuration = SonosValues.ParseDuration(change.TrackDuration) is { Ticks: > 0 } duration ? duration : null;
         }
         else if (isTrackChange)
         {
-            CurrentTrackDuration = null;
+            ReportedTrackDuration = null;
         }
 
         ApplyTrackMetaData(change.TrackMetaData, isTrackChange, isPoll);
@@ -301,13 +329,13 @@ public partial class SonosPlayer : SonosDevice,
         if (isTrackKnown)
         {
             var trackUri = SonosValues.NullIfEmpty(change.TrackUri);
-            isTrackChange |= trackUri != CurrentTrackUri;
-            CurrentTrackUri = trackUri;
+            isTrackChange |= trackUri != ReportedTrackUri;
+            ReportedTrackUri = trackUri;
         }
 
         if (isMediaKnown || isTrackKnown)
         {
-            ReportedSource = SonosUris.DetectSource(MediaUri ?? CurrentTrackUri);
+            ReportedSource = SonosUris.DetectSource(MediaUri ?? ReportedTrackUri);
         }
 
         return (isMediaChange, isTrackChange);

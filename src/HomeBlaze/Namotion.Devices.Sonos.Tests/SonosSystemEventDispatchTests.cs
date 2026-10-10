@@ -10,6 +10,7 @@ namespace Namotion.Devices.Sonos.Tests;
 /// </summary>
 public class SonosSystemEventDispatchTests
 {
+    private const string AvTransportEventPath = "/MediaRenderer/AVTransport/Event";
     private const string RenderingControlEventPath = "/MediaRenderer/RenderingControl/Event";
     private const string GroupRenderingControlEventPath = "/MediaRenderer/GroupRenderingControl/Event";
     private const string TopologyEventPath = "/ZoneGroupTopology/Event";
@@ -34,6 +35,33 @@ public class SonosSystemEventDispatchTests
             ConnectedSystem.WaitTimeout,
             message: "The RenderingControl event should reach the player.");
         Assert.Equal(volumeReads, speaker.Calls.Count(call => call.Action == "GetVolume"));
+    }
+
+    [Fact]
+    public async Task WhenCoordinatorSendsAvTransportEvent_ThenGroupedMemberShowsTheSameTrack()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var member = household.KitchenPlayer;
+        Assert.False(member.IsGroupCoordinator);
+
+        // Act
+        var status = await household.Office.NotifyAsync(AvTransportEventPath, SonosEventBodies.AvTransport(
+            ("TransportState", "PLAYING"),
+            ("AVTransportURI", "x-rincon-queue:" + TestFixtures.OfficeUuid + "#0"),
+            ("CurrentTrackURI", "x-file-cifs://nas/music/song.mp3"),
+            ("CurrentTrackDuration", "0:03:25"),
+            ("CurrentTrackMetaData", SonosEventBodies.Didl("Song", "Artist"))));
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, status);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => member.CurrentTrackTitle == "Song" && member.IsPlaying,
+            ConnectedSystem.WaitTimeout,
+            message: "The member should show the track of its coordinator.");
+        Assert.Equal("Artist", member.CurrentTrackArtist);
+        Assert.Equal(TimeSpan.FromSeconds(205), member.CurrentTrackDuration);
+        Assert.True(member.Seek_IsEnabled);
     }
 
     [Fact]

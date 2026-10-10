@@ -86,6 +86,61 @@ public class SonosDerivedTrackingTests
         Assert.Contains(nameof(SonosPlayer.Shuffle), firedEvents);
     }
 
+    [Fact]
+    public void WhenCoordinatorChangesTrack_ThenMemberTrackAndPlaybackRaisePropertyChanged()
+    {
+        // Arrange
+        var system = Track(CreateGroupedSystem());
+        var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
+        var member = Track(system.Players[TestFixtures.KitchenUuid]);
+        coordinator.ApplyAvTransportEvent(
+            new AvTransportChange("PAUSED_PLAYBACK", null, "x-rincon-queue:q#0", "x-file-cifs://nas/a.mp3", "0:03:00", SonosEventBodies.Didl("Song A", "Artist A")),
+            T0);
+        Assert.Equal("Song A", member.CurrentTrackTitle);
+        var firedEvents = TrackPropertyChanged(member);
+
+        // Act
+        coordinator.ApplyAvTransportEvent(
+            new AvTransportChange("PLAYING", null, "x-rincon-queue:q#0", "x-file-cifs://nas/b.mp3", "0:04:00", SonosEventBodies.Didl("Song B", "Artist B")),
+            T0 + 1);
+
+        // Assert
+        Assert.Equal("Song B", member.CurrentTrackTitle);
+        Assert.Equal("Artist B", member.CurrentTrackArtist);
+        Assert.True(member.IsPlaying);
+        Assert.Contains(nameof(SonosPlayer.CurrentTrackTitle), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.CurrentTrackArtist), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.CurrentTrackUri), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.CurrentTrackDuration), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.PlaybackState), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.IsPlaying), firedEvents);
+    }
+
+    [Fact]
+    public void WhenMemberLeavesTheGroup_ThenMemberTrackRaisesPropertyChanged()
+    {
+        // Arrange
+        var system = Track(CreateGroupedSystem());
+        var coordinator = Track(system.Players[TestFixtures.OfficeUuid]);
+        var member = Track(system.Players[TestFixtures.KitchenUuid]);
+        coordinator.ApplyAvTransportEvent(
+            new AvTransportChange("PLAYING", null, "x-rincon-queue:q#0", "x-file-cifs://nas/a.mp3", "0:03:00", SonosEventBodies.Didl("Song A")),
+            T0);
+        Assert.Equal("Song A", member.CurrentTrackTitle);
+        var firedEvents = TrackPropertyChanged(member);
+
+        // Act
+        system.ApplyTopology(ZoneGroupStateParser.Parse(SonosEventBodies.CreateStandaloneTopology(
+            (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/")),
+            (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/")))));
+
+        // Assert
+        Assert.Null(member.CurrentTrackTitle);
+        Assert.False(member.IsPlaying);
+        Assert.Contains(nameof(SonosPlayer.CurrentTrackTitle), firedEvents);
+        Assert.Contains(nameof(SonosPlayer.IsPlaying), firedEvents);
+    }
+
     private static T Track<T>(T subject) where T : IInterceptorSubject
     {
         subject.Context.AddFallbackContext(InterceptorSubjectContext

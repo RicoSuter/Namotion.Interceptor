@@ -65,8 +65,8 @@ public partial class SonosPlayer
     private void ApplyTrack(DidlTrack? track, bool isTrackChange, bool isPoll)
     {
         ApplyTrackTitle(track, isTrackChange);
-        CurrentTrackArtist = track?.Artist;
-        CurrentTrackAlbum = track?.Album;
+        ReportedTrackArtist = track?.Artist;
+        ReportedTrackAlbum = track?.Album;
         ApplyTrackImage(track, isTrackChange, isPoll);
     }
 
@@ -74,7 +74,7 @@ public partial class SonosPlayer
     // NOT_IMPLEMENTED.
     private void ApplyTrackTitle(DidlTrack? track, bool isTrackChange)
     {
-        var trackUri = CurrentTrackUri;
+        var trackUri = ReportedTrackUri;
         var mediaUri = MediaUri;
         if (!ReferenceEquals(track, _titleTrack) || trackUri != _titleTrackUri || mediaUri != _titleMediaUri)
         {
@@ -87,11 +87,11 @@ public partial class SonosPlayer
 
         if (_title is null || SonosValues.IsKnown(_title))
         {
-            CurrentTrackTitle = _title;
+            ReportedTrackTitle = _title;
         }
         else if (isTrackChange)
         {
-            CurrentTrackTitle = null;
+            ReportedTrackTitle = null;
         }
     }
 
@@ -111,7 +111,7 @@ public partial class SonosPlayer
         var keepsMissingArt = isPoll || (track?.Title is { } title && !SonosValues.IsKnown(title));
         if (_imageUri is not null || isTrackChange || !keepsMissingArt)
         {
-            CurrentTrackImageUri = _imageUri;
+            ReportedTrackImageUri = _imageUri;
         }
     }
 

@@ -10,6 +10,100 @@ namespace Namotion.Devices.Sonos.Tests;
 
 public class SonosGroupStateTests
 {
+    private const string MemberTransportUri = "x-rincon:" + OfficeUuid;
+    private const string CoordinatorTrackUri = "x-file-cifs://nas/music/song.mp3";
+
+    // The office coordinator plays a queue track of a playlist.
+    private static SonosPlayerReading CoordinatorPlaying() => new(
+        new AvTransportChange(
+            "PLAYING",
+            "NORMAL",
+            "x-rincon-queue:" + OfficeUuid + "#0",
+            CoordinatorTrackUri,
+            "0:03:25",
+            SonosEventBodies.Didl("Song", "Artist", "Album", "/getaa?s=1&u=x"),
+            SonosEventBodies.Didl("Playlist")),
+        TimeSpan.FromSeconds(42),
+        null,
+        EmptyRenderingControl);
+
+    // A grouped member reports a transport that points at its coordinator, without track details.
+    private static SonosPlayerReading MemberFollowing(string transportState) => new(
+        new AvTransportChange(transportState, "NORMAL", MemberTransportUri, MemberTransportUri, "0:00:00", ""),
+        TimeSpan.Zero,
+        null,
+        EmptyRenderingControl);
+
+    [Fact]
+    public void WhenCoordinatorPlays_ThenMemberReportsTheCoordinatorsPlaybackAndTrack()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var coordinator = system.Players[OfficeUuid];
+        var member = system.Players[KitchenUuid];
+
+        // Act
+        coordinator.ApplyPoll(CoordinatorPlaying(), T0);
+        member.ApplyPoll(MemberFollowing("STOPPED"), T0);
+
+        // Assert
+        Assert.Equal(MediaPlaybackState.Playing, member.PlaybackState);
+        Assert.True(member.IsPlaying);
+        Assert.Equal("Song", member.CurrentTrackTitle);
+        Assert.Equal("Artist", member.CurrentTrackArtist);
+        Assert.Equal("Album", member.CurrentTrackAlbum);
+        Assert.Equal("http://10.0.0.116:1400/getaa?s=1&u=x", member.CurrentTrackImageUri);
+        Assert.Equal(CoordinatorTrackUri, member.CurrentTrackUri);
+        Assert.Equal(TimeSpan.FromSeconds(42), member.CurrentTrackPosition);
+        Assert.Equal(TimeSpan.FromSeconds(205), member.CurrentTrackDuration);
+        Assert.Equal("Playlist", member.SourceTitle);
+    }
+
+    [Fact]
+    public void WhenCoordinatorTrackHasADuration_ThenSeekIsEnabledOnTheMember()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var member = system.Players[KitchenUuid];
+        member.ApplyPoll(MemberFollowing("PLAYING"), T0);
+        Assert.False(member.Seek_IsEnabled);
+
+        // Act
+        system.Players[OfficeUuid].ApplyPoll(CoordinatorPlaying(), T0);
+
+        // Assert
+        Assert.True(member.Seek_IsEnabled);
+    }
+
+    [Fact]
+    public void WhenMemberLeavesTheGroup_ThenItReportsItsOwnStateAgain()
+    {
+        // Arrange
+        var system = CreateGroupedSystem();
+        var coordinator = system.Players[OfficeUuid];
+        var member = system.Players[KitchenUuid];
+        coordinator.ApplyPoll(CoordinatorPlaying(), T0);
+        member.ApplyPoll(MemberFollowing("STOPPED"), T0);
+        Assert.Equal("Song", member.CurrentTrackTitle);
+
+        // Act
+        system.ApplyTopology(ZoneGroupStateParser.Parse(SonosEventBodies.CreateStandaloneTopology(
+            (OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/")),
+            (KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/")))));
+
+        // Assert
+        Assert.Equal(MediaPlaybackState.Stopped, member.PlaybackState);
+        Assert.False(member.IsPlaying);
+        Assert.Null(member.CurrentTrackTitle);
+        Assert.Null(member.CurrentTrackArtist);
+        Assert.Null(member.CurrentTrackImageUri);
+        Assert.Null(member.CurrentTrackDuration);
+        Assert.Equal(MemberTransportUri, member.CurrentTrackUri);
+        Assert.Null(member.SourceTitle);
+        Assert.Equal("Song", coordinator.CurrentTrackTitle);
+        Assert.Equal(MediaPlaybackState.Playing, coordinator.PlaybackState);
+    }
+
     [Fact]
     public void WhenGroupIsInspected_ThenItsSonosGroupIdIsNotPublic()
     {
