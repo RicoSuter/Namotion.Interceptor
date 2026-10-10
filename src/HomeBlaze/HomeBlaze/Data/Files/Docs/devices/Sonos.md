@@ -91,7 +91,7 @@ Settings that only a home theater player has live on its `HomeTheater` child, so
 
 ### Groups
 
-Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is therefore not exposed. Its path therefore stops resolving when another room becomes coordinator.
+Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is not exposed. Its path therefore stops resolving when another room becomes coordinator.
 
 Playback state, track details, position, source, source title, shuffle, repeat and sleep timer are per group in Sonos, and a grouped member itself only reports a transport that points at its coordinator. Every member player therefore reports its coordinator's values, and the operations that set them go to the coordinator. A room shows what it plays on its own path, whatever it is grouped with, and shows its own state again when it leaves the group. Volume, mute and equalizer stay per room.
 
@@ -107,7 +107,7 @@ A group reports its coordinator's playback and track, and its own volume and mut
 
 ## Widgets
 
-`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
+`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, playback controls, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
 
 <!-- The backticks are HTML entities so that this page shows the block instead of instantiating it: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
 <pre><code>&#96;&#96;&#96;subject(livingRoom)
@@ -118,7 +118,7 @@ A group reports its coordinator's playback and track, and its own volume and mut
 &#96;&#96;&#96;
 </code></pre>
 
-Prefer player or system widgets over group widgets: a group widget shows "Cannot resolve path" once its coordinator changes.
+Prefer player or system widgets over group widgets: a group widget shows "Cannot resolve path" once its coordinator changes, while a player shows what its group plays on a path that stays.
 
 ## Interfaces
 
@@ -218,7 +218,7 @@ Both are empty until first read and keep their last value while the player is of
 
 ### SonosGroup
 
-Transport, `PlayFavorite`, `PlayUri`, `PlayStream`, `SetShuffle`, `SetRepeat` and `SetSleepTimer` as on a player, sent to the coordinator. `SetVolume` and `ChangeVolume` set the group volume and send `SnapshotGroupVolume` first, so the rooms keep their current ratio and a room changed in the Sonos app does not jump back. `Mute` and `Unmute` affect every room. Per-room settings exist on players only.
+`Play`, `Pause`, `Stop`, `Next`, `Previous`, `TogglePlayback`, `Seek`, `PlayFavorite`, `PlayUri`, `PlayStream`, `SetShuffle`, `SetRepeat` and `SetSleepTimer` as on a player, sent to the coordinator. `SetVolume` and `ChangeVolume` set the group volume and send `SnapshotGroupVolume` first, so the rooms keep their current ratio and a room changed in the Sonos app does not jump back. `Mute` and `Unmute` affect every room. Per-room settings exist on players only.
 
 ### SonosSystem
 
@@ -278,7 +278,7 @@ Each reconciliation reads the topology, polls every player in parallel (about te
 
 | Service | Subscribed on | Delivers |
 |---------|---------------|----------|
-| AVTransport | every player | transport state, play mode, media and track metadata |
+| AVTransport | every player | playback state, play mode, media and track metadata |
 | RenderingControl | every player | volume, mute, equalizer, night mode, dialog level |
 | GroupRenderingControl | every coordinator | group volume and mute |
 | ZoneGroupTopology | the seed | the whole topology on every change |
@@ -337,12 +337,12 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Home theater levels on `HomeTheater` (`SubGain`, `SubEnabled`, `SurroundEnable`, `SurroundLevel`, `MusicSurroundLevel`, `SurroundMode`, `HeightChannelLevel`, `AudioDelay`) and the Arc Ultra speech enhancement levels.
 - Trueplay (`Get/SetRoomCalibrationStatus`).
 - Fixed output (`OutputFixed`) to disable volume operations on Port, Connect and Amp.
-- Household identity (`GetHouseholdID` or `MuseHouseholdId`) to tell households apart.
+- A `HouseholdId` setting that pins the system to one household (`GetHouseholdID` or `MuseHouseholdId`), so discovery cannot attach to another one.
 - Spotify tracks by id, as v1's `PlaySpotifyTrack` did; today Spotify content plays through favorites.
 - An own audio clip client that reports rejected clips.
 - Album art served through HomeBlaze for HTTPS pages, or the favorite's HTTPS `ImageUri` for radio.
 - A Windows event listener that needs no URL reservation.
-- An AOT-clean SOAP client replacing `Sonos.Base`.
+- An own, AOT-clean SOAP client replacing `Sonos.Base`.
 - `AvailableSoftwareUpdate` from the topology event or `CheckForUpdate`.
 - LED state, button lock, and home theater TV power state.
 - A widget for `SonosSatellite`.
@@ -351,6 +351,17 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Satellite reads overlapped with the player polls, and known seed speakers probed concurrently instead of one after another.
 - NOTIFY bodies parsed with an `XmlReader` without the intermediate string copies.
 - Opt-in read-only live integration tests (`Category=Integration`).
+- The track position as a pair of position and the time it was read, so a consumer can count it up.
+- `AddRoom` and `RemoveRoom` on a group, to group from the target's side.
+- `PauseAll` on the system.
+- `VolumeUp` and `VolumeDown` without parameters, as safe volume steps.
+- Confirmation before `GroupAll` and `UngroupAll`.
+- A setting that turns the event listener off, for networks where the speakers cannot reach HomeBlaze.
+- Excluded rooms: a setting for rooms that are not shown and that `GroupAll` skips.
+- A volume cap: a setting for the highest volume any operation sets.
+- Offline players for the topology's `VanishedDevices`, so a sleeping portable has its subject after a restart, and a `Forget` operation that removes a missing player or satellite.
+- Serialized play mode writes, so parallel `SetShuffle` and `SetRepeat` calls cannot undo each other.
+- A pure track presentation resolver that holds the track title, album art and source title rules outside `SonosPlayer`.
 - Upstream contributions to `Sonos.Base` (satellites in the topology model, `resMD` in DIDL).
 
 ## References

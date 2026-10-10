@@ -41,7 +41,7 @@ public interface IMediaTrackState
     string? CurrentTrackUri { get; }
 
     /// <summary>
-    /// The playback position within the current track.
+    /// The playback position within the current track when it was last read. It is sampled, not live.
     /// </summary>
     [State(Position = 151)]
     TimeSpan? CurrentTrackPosition { get; }
