@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
@@ -17,6 +18,10 @@ namespace HomeBlaze.Storage;
 /// Storage root using FluentStorage. Implements IStorageContainer and IConfigurationWriter.
 /// Supports FileSystemWatcher for reactive file monitoring on disk storage.
 /// </summary>
+[Category("Storage")]
+[DisplayName("Storage")]
+[Description("Mounts a storage location and loads the files in it as subjects")]
+[SubjectIcon("Storage")]
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,

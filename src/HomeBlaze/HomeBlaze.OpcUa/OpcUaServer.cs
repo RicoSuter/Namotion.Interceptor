@@ -19,6 +19,8 @@ namespace HomeBlaze.OpcUa;
 /// </summary>
 [Category("Servers")]
 [Description("Exposes subjects via OPC UA protocol")]
+[DisplayName("OPC UA server")]
+[SubjectIcon("Dns")]
 [InterceptorSubject]
 public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IServerSubject
 {

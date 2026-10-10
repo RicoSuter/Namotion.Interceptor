@@ -23,6 +23,8 @@ namespace Namotion.Devices.SunSpec;
 /// </summary>
 [Category("Devices")]
 [Description("SunSpec device (inverter, meter, storage) via Modbus TCP, read only")]
+[DisplayName("SunSpec device")]
+[SubjectIcon("SolarPower")]
 [InterceptorSubject]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class SunSpecDevice :

@@ -23,6 +23,8 @@ namespace Namotion.Devices.Philips.Hue;
 /// </summary>
 [Category("Devices")]
 [Description("Philips Hue Bridge for controlling lights, sensors, and buttons")]
+[DisplayName("Philips Hue bridge")]
+[SubjectIcon("Hub")]
 [InterceptorSubject]
 public partial class HueBridge : BackgroundService,
     IConfigurable,

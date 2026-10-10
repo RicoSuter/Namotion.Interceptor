@@ -16,6 +16,8 @@ namespace Namotion.Devices.Shelly;
 
 [Category("Devices")]
 [Description("Shelly Gen2 device with dynamic component discovery (switches, covers, energy meters, inputs, temperature sensors, phase netted energy counters)")]
+[DisplayName("Shelly device")]
+[SubjectIcon("Hub")]
 [InterceptorSubject]
 public partial class ShellyDevice : BackgroundService,
     IConfigurable,

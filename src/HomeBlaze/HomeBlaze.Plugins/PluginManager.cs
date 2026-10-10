@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Plugins.Models;
@@ -6,6 +7,10 @@ using Namotion.NuGet.Plugins;
 
 namespace HomeBlaze.Plugins;
 
+[DisplayName("Plugin manager")]
+[Description("Loads plugins from NuGet feeds")]
+[SubjectIcon("Extension")]
+[SingleInstance]
 [InterceptorSubject]
 public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvider
 {

@@ -10,6 +10,8 @@ namespace MyCompany.SamplePlugin2;
 [InterceptorSubject]
 [Category("Devices")]
 [Description("A sample light sensor plugin that simulates ambient light and UV index readings.")]
+[DisplayName("Sample device 2")]
+[SubjectIcon("LightMode")]
 public partial class SampleDevice2 : BackgroundService, IConfigurable, ITitleProvider, IMyDevice
 {
     private readonly Random _random = new();

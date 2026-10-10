@@ -16,6 +16,8 @@ namespace Namotion.Devices.MyStrom;
 
 [Category("Devices")]
 [Description("myStrom WiFi Switch with power metering, temperature sensing, and relay control")]
+[DisplayName("myStrom switch")]
+[SubjectIcon("Power")]
 [InterceptorSubject]
 public partial class MyStromSwitch : BackgroundService,
     IConfigurable,

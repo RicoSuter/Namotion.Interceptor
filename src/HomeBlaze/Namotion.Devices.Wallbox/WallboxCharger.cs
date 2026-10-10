@@ -16,6 +16,8 @@ namespace Namotion.Devices.Wallbox;
 
 [Category("Devices")]
 [Description("Wallbox EV charger (Pulsar, Commander, Quasar) via cloud API")]
+[DisplayName("Wallbox charger")]
+[SubjectIcon("EvStation")]
 [InterceptorSubject]
 public partial class WallboxCharger : BackgroundService,
     IVehicleCharger,

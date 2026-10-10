@@ -21,6 +21,8 @@ namespace Namotion.Devices.Gpio;
 /// </summary>
 [Category("Devices")]
 [Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
+[DisplayName("GPIO")]
+[SubjectIcon("Memory")]
 [InterceptorSubject]
 public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
 {

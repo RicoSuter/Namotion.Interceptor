@@ -20,6 +20,8 @@ namespace HomeBlaze.OpcUa;
 /// </summary>
 [Category("Clients")]
 [Description("Connects to an OPC UA server and discovers properties dynamically")]
+[DisplayName("OPC UA client")]
+[SubjectIcon("Cable")]
 [InterceptorSubject]
 public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
