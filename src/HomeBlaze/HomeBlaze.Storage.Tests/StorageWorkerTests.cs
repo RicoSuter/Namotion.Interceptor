@@ -288,6 +288,54 @@ public class StorageWorkerTests
     }
 
     [Fact]
+    public async Task WhenWorkerIsStopped_ThenStopCompletesAfterRunningItemHasFinished()
+    {
+        // Arrange
+        var worker = new StorageWorker();
+        var runningStarted = NewSignal();
+        var runningRelease = NewSignal();
+        var running = worker.RunAsync(async _ =>
+        {
+            runningStarted.SetResult();
+            await runningRelease.Task;
+            return "finished";
+        }, CancellationToken.None);
+        var queued = worker.RunAsync(_ => Task.CompletedTask, CancellationToken.None);
+        await runningStarted.Task.WaitAsync(Timeout);
+
+        // Act
+        var stop = worker.StopAsync();
+        var stopWasWaiting = !stop.IsCompleted;
+        runningRelease.SetResult();
+        await stop.WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(stopWasWaiting);
+        Assert.True(running.IsCompletedSuccessfully);
+        Assert.Equal("finished", await running);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(Timeout));
+    }
+
+    [Fact]
+    public async Task WhenWorkerIsStoppedFromWithinItsRunningItem_ThenStopDoesNotWaitForThatItem()
+    {
+        // Arrange
+        var worker = new StorageWorker();
+
+        // Act
+        var result = await worker.RunAsync(async _ =>
+        {
+            await worker.StopAsync();
+            return "finished";
+        }, CancellationToken.None).WaitAsync(Timeout);
+        var afterStop = worker.RunAsync(_ => Task.CompletedTask, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("finished", result);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => afterStop.WaitAsync(Timeout));
+    }
+
+    [Fact]
     public async Task WhenCallerTokenIsCancelledBeforeItemStarts_ThenItemIsNotRun()
     {
         // Arrange

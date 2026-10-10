@@ -9,4 +9,11 @@ internal static class StorageHash
     /// </summary>
     public static string Compute(ReadOnlySpan<byte> content)
         => Convert.ToHexString(SHA256.HashData(content));
+
+    /// <summary>
+    /// Hashes the rest of a stream without holding its content in memory. Equal to <see cref="Compute"/> of the
+    /// same bytes.
+    /// </summary>
+    public static async Task<string> ComputeAsync(Stream content, CancellationToken cancellationToken)
+        => Convert.ToHexString(await SHA256.HashDataAsync(content, cancellationToken));
 }

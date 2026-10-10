@@ -15,6 +15,7 @@ internal sealed class StorageWorker : IDisposable
     private readonly CancellationTokenSource _disposalSource = new();
     private readonly AsyncLocal<WorkItem?> _itemOfFlow = new();
     private readonly ILogger? _logger;
+    private readonly Task _loop;
 
     public StorageWorker(ILogger? logger = null)
     {
@@ -24,7 +25,7 @@ internal sealed class StorageWorker : IDisposable
         // everything it runs.
         using (ExecutionContext.SuppressFlow())
         {
-            _ = Task.Run(ProcessQueueAsync);
+            _loop = Task.Run(ProcessQueueAsync);
         }
     }
 
@@ -110,6 +111,18 @@ internal sealed class StorageWorker : IDisposable
         _queue.Writer.TryComplete();
     }
 
+    /// <summary>
+    /// Does what <see cref="Dispose"/> does and completes when the loop has ended: the running item and its
+    /// inline calls have finished. Called from within a running item of this worker, it completes at once.
+    /// </summary>
+    public Task StopAsync()
+    {
+        Dispose();
+
+        // The loop ends after the item of this flow, which would wait for itself.
+        return _itemOfFlow.Value is { IsClosed: false } ? Task.CompletedTask : _loop;
+    }
+
     private abstract class WorkItem
     {
         private readonly Lock _lock = new();
@@ -117,6 +130,18 @@ internal sealed class StorageWorker : IDisposable
         private int _pendingInlineCalls;
         private bool _isClosed;
         private TaskCompletionSource? _inlineCallsFinished;
+
+        /// <summary>True once the loop has moved on from the item and its inline calls.</summary>
+        public bool IsClosed
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _isClosed;
+                }
+            }
+        }
 
         public abstract Task ExecuteAsync(CancellationToken disposalToken);
 

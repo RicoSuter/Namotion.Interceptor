@@ -95,4 +95,18 @@ public class StorageIndexTests
         Assert.Equal(first, second);
         Assert.NotEqual(first, other);
     }
+
+    [Fact]
+    public async Task WhenStreamIsHashed_ThenHashEqualsTheHashOfItsBytes()
+    {
+        // Arrange
+        var content = "content"u8.ToArray();
+        using var stream = new MemoryStream(content);
+
+        // Act
+        var fromStream = await StorageHash.ComputeAsync(stream, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(StorageHash.Compute(content), fromStream);
+    }
 }
