@@ -220,7 +220,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 | Operation | Sonos mechanism | Use for |
 |-----------|-----------------|---------|
 | `PlayUri` | `SetAVTransportURI` with the URI unchanged, then `Play` | A finite file such as an mp3, or a native Sonos URI (`x-sonos-...`, `x-rincon...`, `x-file-cifs:`). Plays once as a track with duration and seek bar. |
-| `PlayStream` | `SetAVTransportURI` with `x-rincon-mp3radio:` and a radio DIDL item, then `Play` | Internet radio and live streams. Accepts `http://`, `https://` and `x-rincon-mp3radio:`, rewrites http(s) to `x-rincon-mp3radio` so Sonos shows it as radio, and uses the URI as title when none is given. Sonos reconnects the stream when it ends. |
+| `PlayStream` | `SetAVTransportURI` with `x-rincon-mp3radio:` and a radio DIDL item, then `Play` | Internet radio and live streams. Accepts `http://`, `https://` and `x-rincon-mp3radio:`, rewrites http(s) to `x-rincon-mp3radio` so Sonos shows it as radio, and sends an empty title when none is given. Sonos reconnects the stream when it ends. |
 | `PlayNotification` | Audio clip API of the speaker's websocket (`wss://<speaker>:1443/websocket/api`) | Doorbells and announcements over the current playback, which then resumes. The speaker downloads the sound itself, so use an absolute http(s) URL it can reach, not `localhost`. The volume is at least 1 % and the call times out after 10 seconds. |
 
 `Source` reports `Radio` for every http(s) URI, so a file started with `PlayUri` shows as radio too.
@@ -229,7 +229,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 
 When the source or track changes (a new transport or track URI), track values that Sonos does not report for the new one are cleared rather than kept from the previous one, and the position is cleared until the next poll. While the track stays the same, unknown values keep the current ones: Spotify Connect polls answer `NOT_IMPLEMENTED` for details its events delivered, and radio polls omit the album art its events delivered.
 
-Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the song the station reports (often "ARTIST - TITLE"), otherwise the station. A `ZPSTR_` placeholder such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title on the same stream and clears it when the stream starts or the station changes. A title that is only the end of the stream URL (`96` for `.../aac/96`), which Sonos reports when the station sends no song, is left empty while `MediaTitle` still names the station.
+Radio keeps one track URI from song to song. On radio `CurrentTrackTitle` is the song the station reports (often "ARTIST - TITLE"), otherwise the station. A `ZPSTR_` placeholder such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title on the same stream and clears it when the stream starts or the station changes. A title that is only the end of the stream URL (`96` for `.../aac/96`), which Sonos reports when the station sends no song, is left empty while `MediaTitle` still names the station. A title or `MediaTitle` that is the stream URL itself, with or without its scheme, as other controllers write for a stream without a title, is left empty too.
 
 ## How It Works
 

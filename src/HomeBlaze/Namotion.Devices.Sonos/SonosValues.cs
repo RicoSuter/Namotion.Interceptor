@@ -182,19 +182,34 @@ internal static class SonosValues
     }
 
     /// <summary>
-    /// Whether the title is the last path segment of a radio track URI, such as <c>96</c> for
-    /// <c>aac://http://host/aac/96</c>, which Sonos reports as the title of a stream without one.
+    /// Whether the title only repeats a radio URI, which Sonos and other controllers report as the title of a stream
+    /// without one: its last path segment, such as <c>96</c> for <c>aac://http://host/aac/96</c>, or the whole URI
+    /// with any schemes, such as <c>https://host/live.mp3</c> or <c>host/live.mp3</c> for
+    /// <c>x-rincon-mp3radio://host/live.mp3</c>.
     /// </summary>
-    internal static bool IsTitleOfStreamUri(string title, string? trackUri)
+    internal static bool IsTitleOfStreamUri(string title, string? uri)
     {
-        if (trackUri is null || !IsRadioUri(trackUri))
+        if (uri is null || !IsRadioUri(uri))
         {
             return false;
         }
 
-        var segment = trackUri.AsSpan(trackUri.LastIndexOf('/') + 1);
+        var segment = uri.AsSpan(uri.LastIndexOf('/') + 1);
         return segment.SequenceEqual(title) ||
-            (segment.Contains('%') && Uri.UnescapeDataString(segment) == title);
+            (segment.Contains('%') && Uri.UnescapeDataString(segment) == title) ||
+            WithoutSchemes(title).SequenceEqual(WithoutSchemes(uri));
+    }
+
+    // Returns the URI without its leading schemes: host/live for x-rincon-mp3radio://host/live or aac://https://host/live.
+    private static ReadOnlySpan<char> WithoutSchemes(ReadOnlySpan<char> uri)
+    {
+        int separator;
+        while ((separator = uri.IndexOf("://", StringComparison.Ordinal)) > 0 && !uri[..separator].Contains('/'))
+        {
+            uri = uri[(separator + 3)..];
+        }
+
+        return uri;
     }
 
     private static bool IsRadioUri(string uri)
@@ -266,7 +281,11 @@ internal static class SonosValues
         // Sonos renders a plain http(s) stream as radio, with its title and without a seek bar, only behind this scheme.
         "x-rincon-mp3radio" + uri[uri.IndexOf(':')..];
 
-    internal static string CreateStreamMetadata(string title) =>
+    /// <summary>
+    /// Returns the radio DIDL item for a stream, with an empty title when there is none, so the URI is never shown as
+    /// the title.
+    /// </summary>
+    internal static string CreateStreamMetadata(string? title) =>
         StreamMetadataPrefix + SecurityElement.Escape(title) + StreamMetadataSuffix;
 
     private static readonly string StreamMetadataPrefix =

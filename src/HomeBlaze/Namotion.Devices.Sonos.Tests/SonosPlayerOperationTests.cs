@@ -347,6 +347,26 @@ public class SonosPlayerOperationTests
     }
 
     [Theory]
+    [InlineData("https://cdn.example.com/audio/scream.mp3?filename=scream.mp3")]
+    [InlineData("x-rincon-mp3radio://cdn.example.com/audio/scream.mp3")]
+    public async Task WhenPlayingStreamWithoutTitle_ThenTheTitleIsEmptyRatherThanTheUri(string uri)
+    {
+        // Arrange
+        await using var speaker = new FakeSonosSpeaker();
+        await using var connected = await ConnectedSystem.StartAsync(speaker);
+
+        // Act
+        await connected.Player.PlayStreamAsync(uri, null, CancellationToken.None);
+
+        // Assert
+        var setUri = Assert.Single(speaker.Calls, call => call.Action == "SetAVTransportURI");
+        var (_, metadata) = ReadTransportUri(setUri);
+        Assert.Contains("<dc:title></dc:title>", metadata);
+        Assert.DoesNotContain("cdn.example.com", metadata);
+        Assert.Contains("<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>", metadata);
+    }
+
+    [Theory]
     [InlineData("ftp://stream.example.com/live.mp3")]
     [InlineData("x-sonos-spotify:spotify%3atrack%3a1?sid=9")]
     [InlineData("not a uri")]

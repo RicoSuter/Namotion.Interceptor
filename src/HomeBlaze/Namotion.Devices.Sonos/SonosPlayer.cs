@@ -397,7 +397,8 @@ public partial class SonosPlayer : SonosDevice,
 
     /// <summary>
     /// Plays a radio or live stream, which Sonos reconnects when it ends. http(s) URIs are played through the
-    /// x-rincon-mp3radio scheme; x-rincon-mp3radio URIs are used as they are. Both get the title as metadata.
+    /// x-rincon-mp3radio scheme; x-rincon-mp3radio URIs are used as they are. Both get the title as metadata, an empty
+    /// one when it is null.
     /// </summary>
     /// <exception cref="ArgumentException">The URI uses another scheme.</exception>
     [Operation(Title = "Play Stream", Position = 22, Description = "Plays an http(s) or x-rincon-mp3radio stream on the player's group as radio, which Sonos reconnects when it ends.")]
@@ -412,7 +413,7 @@ public partial class SonosPlayer : SonosDevice,
         }
 
         var transportUri = isHttp ? SonosValues.ToStreamUri(uri) : uri;
-        var metadata = SonosValues.CreateStreamMetadata(title ?? uri);
+        var metadata = SonosValues.CreateStreamMetadata(title);
 
         return RunOnCoordinatorAsync(async (connection, token) =>
         {
@@ -742,9 +743,10 @@ public partial class SonosPlayer : SonosDevice,
     // title replaces it. The next track of the same queue or station keeps it.
     private void ApplyMediaTitle(string? mediaMetaData, bool isMediaChange)
     {
-        if (mediaMetaData != _lastMediaMetaData)
+        if (mediaMetaData != _lastMediaMetaData || isMediaChange)
         {
-            _lastMediaTitle = DidlParser.ParseTitle(mediaMetaData);
+            var title = DidlParser.ParseTitle(mediaMetaData);
+            _lastMediaTitle = title is not null && SonosValues.IsTitleOfStreamUri(title, MediaUri) ? null : title;
             _lastMediaMetaData = mediaMetaData;
         }
 

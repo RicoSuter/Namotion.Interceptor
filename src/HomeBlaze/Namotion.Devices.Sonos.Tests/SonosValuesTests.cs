@@ -264,4 +264,32 @@ public class SonosValuesTests
         Assert.Contains("<dc:title>Rock &amp; &lt;Roll&gt;</dc:title>", metadata);
         Assert.Contains("object.item.audioItem.audioBroadcast", metadata);
     }
+
+    [Fact]
+    public void WhenCreatingStreamMetadataWithoutTitle_ThenTitleIsEmpty()
+    {
+        // Act
+        var metadata = SonosValues.CreateStreamMetadata(null);
+
+        // Assert
+        Assert.Contains("<dc:title></dc:title>", metadata);
+    }
+
+    [Theory]
+    [InlineData("https://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
+    [InlineData("host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
+    [InlineData("x-rincon-mp3radio://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
+    [InlineData("http://host.example/live", "aac://https://host.example/live", true)]
+    [InlineData("96", "aac://http://host.example/aac/96", true)]
+    [InlineData("https://host.example/live.mp3", "x-rincon-mp3radio://other.example/live.mp3", false)]
+    [InlineData("host.example", "x-rincon-mp3radio://host.example/live.mp3", false)]
+    [InlineData("https://host.example/song.mp3", "x-file-cifs://host.example/song.mp3", false)]
+    public void WhenTitleRepeatsTheStreamUri_ThenItIsNotATitle(string title, string uri, bool expected)
+    {
+        // Act
+        var isUri = SonosValues.IsTitleOfStreamUri(title, uri);
+
+        // Assert
+        Assert.Equal(expected, isUri);
+    }
 }
