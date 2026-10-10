@@ -8,6 +8,13 @@ position: 6
 
 This page demonstrates blocks that take page content: a card with a footer, a flow layout and tabs.
 
+Each area has a page of its own to try things out:
+
+- [Layouts](Layouts.md): flows, tabs and cards, alone and inside each other
+- [References](References.md): names, relative and absolute paths, and what a reference cannot show
+- [Configuration](Configuration.md): values on the head line, the `json` fence, style blocks and the page editor
+- [Errors](Errors.md): every error box with the block that causes it and how to fix it
+
 ::::HomeBlaze.Components.Card title="Motor Card" icon=Settings
 Card body with a live value: speed is {{ cardmotor/CurrentSpeed }} RPM.
 

@@ -1,0 +1,144 @@
+using System.Net;
+using System.Text.RegularExpressions;
+using HomeBlaze.Components;
+using HomeBlaze.Samples;
+using HomeBlaze.Services;
+using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
+using HomeBlaze.Storage.Pages;
+using Namotion.Interceptor;
+
+namespace HomeBlaze.Storage.Tests.Pages;
+
+/// <summary>
+/// Loads the demo pages of the sample data with the widget types they use, so that a page which
+/// stops working is found here and not by the person who opens it.
+/// </summary>
+[Collection(MarkdownPageFixture.StorageCollection)]
+public partial class DemoPagesTests
+{
+    private const string DemoFolder = "src/HomeBlaze/HomeBlaze/Data/Files/Demo/";
+
+    // The reader of the JSON adds its own text after this, which is not ours to pin.
+    private const string BrokenJsonError = "The json block must contain a valid JSON object without duplicate keys.";
+
+    [GeneratedRegex("""<div class="markdown-block-error" role="alert">Line \d+: (.*?)</div>""", RegexOptions.Singleline)]
+    private static partial Regex ErrorBoxRegex();
+
+    // References.md is here as well: what a Widget block says about its path is shown by the widget when it
+    // renders and is no block error, and the sample motors next to the pages are not part of the fixture.
+    [Theory]
+    [InlineData("Blocks.md")]
+    [InlineData("Layouts.md")]
+    [InlineData("References.md")]
+    [InlineData("Configuration.md")]
+    public async Task WhenDemoPageIsLoaded_ThenNoBlockIsShownAsError(string fileName)
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, fileName);
+
+        // Assert
+        Assert.Empty(FindErrorMessages(page));
+    }
+
+    [Fact]
+    public async Task WhenErrorsPageIsLoaded_ThenEverySectionShowsItsOwnError()
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Errors.md");
+
+        // Assert
+        string[] expectedMessages =
+        [
+            "Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace.",
+            "The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable.",
+            "'Card' is not a type name. A slot block is only allowed directly inside a widget block.",
+            "Card has no configuration property 'titel'. Available: icon, title.",
+            "'fast' is not a valid value for 'targetSpeed'. Expected a value of type Int32.",
+            "Card has no slot 'Footr'. Available: Content, Footer.",
+            "Motor has no default slot, so it cannot have content.",
+            "The slot 'Footer' takes one block, but there are 2.",
+            "The name 'twin' is used twice on this page.",
+            "A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it.",
+            "A block is only allowed directly on the page or directly inside another block.",
+            BrokenJsonError,
+            "The subject(name) fence is no longer supported. Write the subject as a block: a line with :::Full.Type.Name#name key=value, then a closing ::: line."
+        ];
+
+        var messages = FindErrorMessages(page)
+            .Select(message => message.StartsWith(BrokenJsonError, StringComparison.Ordinal) ? BrokenJsonError : message);
+
+        Assert.Equal(expectedMessages, messages);
+    }
+
+    [Fact]
+    public async Task WhenErrorsPageIsLoaded_ThenTheBlocksWithoutAnErrorAreCreated()
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        var page = await AddDemoPageAsync(fixture, "Errors.md");
+
+        // Assert
+        var healthy = Assert.IsType<Motor>(page.Children["healthy"]);
+        Assert.Equal("Healthy Motor", healthy.Name);
+        Assert.Same(healthy, page.Children.Last().Value);
+
+        // The first of two blocks with the same name keeps the name.
+        Assert.Equal("First Twin", Assert.IsType<Motor>(page.Children["twin"]).Name);
+    }
+
+    private static Task<MarkdownPageFixture> CreateFixtureAsync() =>
+        MarkdownPageFixture.CreateAsync(services =>
+        {
+            // The type registry reads the provider on first use, so the assemblies are added before anything is created.
+            var typeProvider = (TypeProvider)services
+                .Single(service => service.ServiceType == typeof(TypeProvider))
+                .ImplementationInstance!;
+
+            typeProvider
+                .AddAssembly(typeof(Card).Assembly)
+                .AddAssembly(typeof(Motor).Assembly);
+        });
+
+    private static Task<MarkdownFile> AddDemoPageAsync(MarkdownPageFixture fixture, string fileName) =>
+        fixture.AddPageAsync(fileName, RepositoryPagesTests.ReadPage(DemoFolder + fileName));
+
+    /// <summary>Gets the messages of all error boxes of the page, in the order of the page, without the line numbers.</summary>
+    private static List<string> FindErrorMessages(MarkdownFile page) =>
+        Flatten(page.Children.Values)
+            .OfType<HtmlSegment>()
+            .SelectMany(segment => ErrorBoxRegex().Matches(segment.Html))
+            .Select(match => WebUtility.HtmlDecode(match.Groups[1].Value))
+            .ToList();
+
+    private static IEnumerable<IInterceptorSubject> Flatten(IEnumerable<IInterceptorSubject?> subjects)
+    {
+        foreach (var subject in subjects.OfType<IInterceptorSubject>())
+        {
+            yield return subject;
+
+            IInterceptorSubject?[] nested = subject switch
+            {
+                MarkdownFragment fragment => [.. fragment.Children.Values],
+                Card card => [card.Content, card.Footer],
+                FlowLayout flow => [.. flow.Items],
+                TabLayout tabs => [.. tabs.Tabs],
+                Tab tab => [tab.Content],
+                _ => []
+            };
+
+            foreach (var child in Flatten(nested))
+            {
+                yield return child;
+            }
+        }
+    }
+}

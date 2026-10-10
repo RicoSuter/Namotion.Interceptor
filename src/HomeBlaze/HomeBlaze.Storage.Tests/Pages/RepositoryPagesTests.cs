@@ -11,6 +11,9 @@ public class RepositoryPagesTests
         "src/HomeBlaze/HomeBlaze.E2E.Tests/TestData"
     ];
 
+    // Left out of the guard: this page shows every block error on purpose, so that a reader sees the red boxes.
+    private const string ErrorsDemoPage = "src/HomeBlaze/HomeBlaze/Data/Files/Demo/Errors.md";
+
     public static TheoryData<string> PagePaths()
     {
         var root = FindRepositoryRoot();
@@ -19,7 +22,11 @@ public class RepositoryPagesTests
         {
             foreach (var file in Directory.EnumerateFiles(Path.Combine(root, folder), "*.md", SearchOption.AllDirectories))
             {
-                data.Add(Path.GetRelativePath(root, file));
+                var relativePath = Path.GetRelativePath(root, file).Replace('\\', '/');
+                if (relativePath != ErrorsDemoPage)
+                {
+                    data.Add(relativePath);
+                }
             }
         }
 
@@ -31,8 +38,7 @@ public class RepositoryPagesTests
     public void WhenRepositoryPageIsParsed_ThenItHasNoBlockSyntaxErrorAndNoOldFence(string relativePath)
     {
         // Arrange
-        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), relativePath)).Replace("\r\n", "\n");
-        var page = MarkdownPageParser.Parse(source);
+        var page = MarkdownPageParser.Parse(ReadPage(relativePath));
 
         // Act
         var html = Flatten(MarkdownSegmentBuilder.Build(page));
@@ -40,6 +46,23 @@ public class RepositoryPagesTests
         // Assert
         Assert.DoesNotContain("markdown-block-error", html);
     }
+
+    [Fact]
+    public void WhenErrorsDemoPageIsParsed_ThenItHasBlockSyntaxErrorsAndAnOldFence()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(ReadPage(ErrorsDemoPage));
+
+        // Act
+        var html = Flatten(MarkdownSegmentBuilder.Build(page));
+
+        // Assert
+        Assert.Contains("A block needs a name.", html);
+        Assert.Contains("The subject(name) fence is no longer supported.", html);
+    }
+
+    internal static string ReadPage(string relativePath) =>
+        File.ReadAllText(Path.Combine(FindRepositoryRoot(), relativePath)).Replace("\r\n", "\n");
 
     private static string Flatten(IEnumerable<MarkdownSegment> segments) =>
         string.Concat(segments.Select(segment => segment switch

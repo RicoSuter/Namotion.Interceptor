@@ -112,7 +112,7 @@ This block creates a subject of the type `HomeBlaze.Samples.Motor`, configures i
 
 The subject belongs to the page. It is created when the page is loaded, and a subject that is a background service starts then. It is stopped and removed when its block or the page is removed.
 
-The sample data of a development checkout has a page `Demo/Blocks.md` that shows every widget of this section at work. An installed HomeBlaze does not ship it.
+The sample data of a development checkout has a page `Demo/Blocks.md` that shows every widget of this section at work. The same folder has one page per area to try things out: layouts, references, configuration and errors. An installed HomeBlaze does not ship these pages.
 
 ### Block Syntax
 

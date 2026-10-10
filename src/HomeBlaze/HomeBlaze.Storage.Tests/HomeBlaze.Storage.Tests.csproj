@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\HomeBlaze.Components\HomeBlaze.Components.csproj" />
     <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
     <ProjectReference Include="..\HomeBlaze.Storage\HomeBlaze.Storage.csproj" />
     <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
