@@ -115,11 +115,13 @@ public class StorageHierarchyManagerTests
         var secondSubject = CreateNonConfigurableSubject();
 
         // Act - first subject claims key "motor"
-        manager.PlaceInHierarchy("motor.json", firstSubject, children, storage);
+        var firstPlaced = manager.PlaceInHierarchy("motor.json", firstSubject, children, storage);
         // Act - second subject tries to claim same key "motor" (file without extension)
-        manager.PlaceInHierarchy("motor", secondSubject, children, storage);
+        var secondPlaced = manager.PlaceInHierarchy("motor", secondSubject, children, storage);
 
         // Assert - first subject wins, second is skipped
+        Assert.True(firstPlaced);
+        Assert.False(secondPlaced);
         Assert.Single(children);
         Assert.Same(firstSubject, children["motor"]);
     }
@@ -236,5 +238,42 @@ public class StorageHierarchyManagerTests
         var folder = children["Demo"] as VirtualFolder;
         Assert.NotNull(folder);
         Assert.True(folder.Children.ContainsKey("motor"), "Existing child should be preserved");
+    }
+
+    [Fact]
+    public void WhenPathHoldsNestedFolder_ThenFindFolderReturnsIt()
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var children = new Dictionary<string, IInterceptorSubject>();
+        manager.PlaceInHierarchy("Parent/Child/", null, children, storage);
+
+        // Act
+        var folder = StorageHierarchyManager.FindFolder("/Parent/Child/", children);
+
+        // Assert
+        Assert.NotNull(folder);
+        Assert.Equal("Parent/Child/", folder.RelativePath);
+    }
+
+    [Theory]
+    [InlineData("Missing")]
+    [InlineData("Parent/Missing")]
+    [InlineData("Parent/motor.json")]
+    [InlineData("Parent/motor")]
+    public void WhenPathHoldsNoFolder_ThenFindFolderReturnsNull(string path)
+    {
+        // Arrange
+        var (storage, _) = CreateStorage();
+        var manager = new StorageHierarchyManager();
+        var children = new Dictionary<string, IInterceptorSubject>();
+        manager.PlaceInHierarchy("Parent/motor.json", CreateConfigurableSubject(), children, storage);
+
+        // Act
+        var folder = StorageHierarchyManager.FindFolder(path, children);
+
+        // Assert
+        Assert.Null(folder);
     }
 }

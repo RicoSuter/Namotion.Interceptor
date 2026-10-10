@@ -39,7 +39,8 @@ internal sealed class StorageHierarchyManager
     /// Places a subject in the hierarchy, creating intermediate VirtualFolders as needed.
     /// When subject is null, ensures the folder path exists without placing a leaf subject.
     /// </summary>
-    public void PlaceInHierarchy(
+    /// <returns>False when the key or a folder on the path is already claimed by another subject.</returns>
+    public bool PlaceInHierarchy(
         string path,
         IInterceptorSubject? subject,
         Dictionary<string, IInterceptorSubject> children,
@@ -56,9 +57,10 @@ internal sealed class StorageHierarchyManager
             if (!children.TryAdd(key, subject!))
             {
                 _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, key);
+                return false;
             }
 
-            return;
+            return true;
         }
 
         // Track folders and their new Children dicts as we traverse
@@ -90,7 +92,7 @@ internal sealed class StorageHierarchyManager
             else
             {
                 _logger?.LogWarning("Path conflict at {Segment} for {Path}", folderName, path);
-                return;
+                return false;
             }
         }
 
@@ -101,7 +103,7 @@ internal sealed class StorageHierarchyManager
             if (!current.TryAdd(childKey, subject))
             {
                 _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, childKey);
-                return;
+                return false;
             }
         }
 
@@ -112,6 +114,26 @@ internal sealed class StorageHierarchyManager
             var (folder, newChildren) = foldersToUpdate[i];
             folder.Children = newChildren;
         }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Finds the VirtualFolder at the path, or null when the path does not hold one.
+    /// </summary>
+    public static VirtualFolder? FindFolder(string path, IReadOnlyDictionary<string, IInterceptorSubject> children)
+    {
+        VirtualFolder? folder = null;
+        foreach (var segment in NormalizePath(path).TrimEnd('/').Split('/'))
+        {
+            if (!children.TryGetValue(segment, out var child) || child is not VirtualFolder childFolder)
+                return null;
+
+            folder = childFolder;
+            children = childFolder.Children;
+        }
+
+        return folder;
     }
 
     public void RemoveFromHierarchy(string path, IInterceptorSubject subject, Dictionary<string, IInterceptorSubject> children)

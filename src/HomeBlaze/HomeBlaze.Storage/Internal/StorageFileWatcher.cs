@@ -49,10 +49,10 @@ internal sealed class StorageFileWatcher : IDisposable
         };
 
         // Route all events to the Rx subject
-        _watcher.Created += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Changed += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Deleted += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Renamed += (_, e) => _fileEvents.OnNext(e);
+        _watcher.Created += OnFileSystemEvent;
+        _watcher.Changed += OnFileSystemEvent;
+        _watcher.Deleted += OnFileSystemEvent;
+        _watcher.Renamed += OnFileSystemEvent;
         _watcher.Error += OnWatcherError;
 
         // Process events with coalescing: group by path, collect events in time window, then coalesce
@@ -102,13 +102,12 @@ internal sealed class StorageFileWatcher : IDisposable
         return isNew ? CreateEvent(WatcherChangeTypes.Created, last.FullPath) : last;
     }
 
-    // Built from the event path rather than the group key, which is lowercased and
-    // does not exist on a case-sensitive file system.
     private static FileSystemEventArgs CreateEvent(WatcherChangeTypes changeType, string fullPath)
         => new(changeType, Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath));
 
     /// <summary>
     /// Gets canonical path for grouping (handles case-insensitivity on Windows).
+    /// Never a path to act on: lowercased, it does not exist on a case-sensitive file system.
     /// </summary>
     private static string GetCanonicalPath(string fullPath)
         => fullPath.ToLowerInvariant();
@@ -150,14 +149,19 @@ internal sealed class StorageFileWatcher : IDisposable
         }
     }
 
+    internal void OnFileSystemEvent(object? sender, FileSystemEventArgs e)
+        => _fileEvents.OnNext(e);
+
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
         _logger?.LogError(e.GetException(), "FileSystemWatcher error (buffer overflow?), triggering rescan");
         Restart();
     }
 
-    private void Restart()
+    internal void Restart()
     {
+        // Start subscribes again, a subscription left behind would handle every event once more.
+        _fileEventSubscription?.Dispose();
         _watcher?.Dispose();
         Start();
 

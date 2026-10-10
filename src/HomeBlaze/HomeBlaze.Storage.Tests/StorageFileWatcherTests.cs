@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using HomeBlaze.Storage.Internal;
+using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
 
@@ -25,9 +27,9 @@ public class StorageFileWatcherTests
     public void WhenFileIsCreatedThenDeleted_ThenEventIsDeleted()
     {
         // Arrange
-        var created = Event(WatcherChangeTypes.Created, "._Home.md");
-        var changed = Event(WatcherChangeTypes.Changed, "._Home.md");
-        var deleted = Event(WatcherChangeTypes.Deleted, "._Home.md");
+        var created = Event(WatcherChangeTypes.Created, "Home.md");
+        var changed = Event(WatcherChangeTypes.Changed, "Home.md");
+        var deleted = Event(WatcherChangeTypes.Deleted, "Home.md");
 
         // Act
         var result = Coalesce(created, changed, deleted);
@@ -35,7 +37,7 @@ public class StorageFileWatcherTests
         // Assert
         Assert.NotNull(result);
         Assert.Equal(WatcherChangeTypes.Deleted, result.ChangeType);
-        Assert.Equal(Path.Combine(BasePath, "._Home.md"), result.FullPath);
+        Assert.Equal(Path.Combine(BasePath, "Home.md"), result.FullPath);
     }
 
     [Fact]
@@ -147,6 +149,43 @@ public class StorageFileWatcherTests
         Assert.NotNull(result);
         Assert.Equal(WatcherChangeTypes.Deleted, result.ChangeType);
         Assert.Equal(Path.Combine(BasePath, "Home.md"), result.FullPath);
+    }
+
+    [Fact]
+    public async Task WhenWatcherRestarts_ThenEachEventIsStillHandledOnce()
+    {
+        // Arrange
+        var directory = Directory.CreateTempSubdirectory("homeblaze-watcher-");
+        try
+        {
+            var handled = new ConcurrentQueue<string>();
+            using var watcher = new StorageFileWatcher(
+                directory.FullName,
+                e =>
+                {
+                    handled.Enqueue(e.Name!);
+                    return Task.CompletedTask;
+                },
+                () => Task.CompletedTask);
+
+            watcher.Start();
+            watcher.Restart();
+            watcher.Restart();
+
+            // Act: the second event is handled a full coalesce window after the first,
+            // so by then every handler of the first one has run.
+            watcher.OnFileSystemEvent(null, new FileSystemEventArgs(WatcherChangeTypes.Changed, directory.FullName, "First.md"));
+            await AsyncTestHelpers.WaitUntilAsync(() => handled.Contains("First.md"));
+            watcher.OnFileSystemEvent(null, new FileSystemEventArgs(WatcherChangeTypes.Changed, directory.FullName, "Second.md"));
+            await AsyncTestHelpers.WaitUntilAsync(() => handled.Contains("Second.md"));
+
+            // Assert
+            Assert.Single(handled, name => name == "First.md");
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 
     private static FileSystemEventArgs Event(WatcherChangeTypes changeType, string name)

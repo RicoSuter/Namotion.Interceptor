@@ -1,7 +1,7 @@
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Decides which storage paths never become subjects, shared by the startup scan and the file watcher.
+/// Decides which storage paths never become subjects, for the startup scan and the file watcher alike.
 /// </summary>
 internal static class StoragePathFilter
 {
@@ -24,7 +24,7 @@ internal static class StoragePathFilter
     /// <summary>
     /// Checks whether the path is a temporary file that editors write before renaming it to the real name.
     /// </summary>
-    public static bool IsTemporaryFile(string path)
+    public static bool IsTemporaryFile(ReadOnlySpan<char> path)
     {
         var fileName = Path.GetFileName(path);
         return fileName.StartsWith('~') ||

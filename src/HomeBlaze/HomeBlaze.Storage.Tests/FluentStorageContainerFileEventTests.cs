@@ -3,6 +3,7 @@ using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
@@ -12,24 +13,31 @@ public class FluentStorageContainerFileEventTests : IDisposable
     private static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
 
     private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("homeblaze-storage-");
-    private readonly List<FluentStorageContainer> _storages = [];
+    private FluentStorageContainer? _storage;
+    private ServiceProvider? _serviceProvider;
 
-    [Fact]
-    public async Task WhenChangedEventArrivesForUnregisteredFile_ThenFileIsAdded()
+    [Theory]
+    [InlineData(WatcherChangeTypes.Created)]
+    [InlineData(WatcherChangeTypes.Changed)]
+    [InlineData(WatcherChangeTypes.Deleted)]
+    public async Task WhenEventArrivesForUnregisteredFileOnDisk_ThenFileIsAdded(WatcherChangeTypes changeType)
     {
         // Arrange
         var storage = await ConnectAsync();
         WriteFile("Notes.md");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Changed, "Notes.md"));
+        await storage.ProcessFileEventAsync(Event(changeType, "Notes.md"));
 
         // Assert
-        Assert.True(storage.Children.ContainsKey("Notes.md"));
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
     }
 
-    [Fact]
-    public async Task WhenChangedEventArrivesForDeletedFile_ThenSubjectIsRemoved()
+    [Theory]
+    [InlineData(WatcherChangeTypes.Created)]
+    [InlineData(WatcherChangeTypes.Changed)]
+    [InlineData(WatcherChangeTypes.Deleted)]
+    public async Task WhenEventArrivesForRegisteredFileMissingOnDisk_ThenSubjectIsRemoved(WatcherChangeTypes changeType)
     {
         // Arrange
         WriteFile("Home.md");
@@ -37,14 +45,14 @@ public class FluentStorageContainerFileEventTests : IDisposable
         File.Delete(GetFullPath("Home.md"));
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Changed, "Home.md"));
+        await storage.ProcessFileEventAsync(Event(changeType, "Home.md"));
 
         // Assert
         Assert.Empty(storage.Children);
     }
 
     [Fact]
-    public async Task WhenCreatedEventArrivesForDeletedFile_ThenNoSubjectIsAdded()
+    public async Task WhenCreatedEventArrivesForMissingFile_ThenNoSubjectIsAdded()
     {
         // Arrange
         var storage = await ConnectAsync();
@@ -54,6 +62,55 @@ public class FluentStorageContainerFileEventTests : IDisposable
 
         // Assert
         Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenFileIsRenamed_ThenSubjectMovesToNewName()
+    {
+        // Arrange
+        WriteFile("Old.md");
+        var storage = await ConnectAsync();
+        File.Move(GetFullPath("Old.md"), GetFullPath("New.md"));
+
+        // Act
+        await storage.ProcessFileEventAsync(Renamed("Old.md", "New.md"));
+
+        // Assert
+        Assert.Equal(["New.md"], storage.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenOnlyCasingOfFileNameChanges_ThenSubjectMovesToNewCasing()
+    {
+        // Arrange
+        WriteFile("notes.md");
+        var storage = await ConnectAsync();
+        File.Move(GetFullPath("notes.md"), GetFullPath("Notes.md"));
+
+        // Act
+        await storage.ProcessFileEventAsync(Renamed("notes.md", "Notes.md"));
+
+        // Assert
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal("Notes.md", Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]).Name);
+    }
+
+    [Fact]
+    public async Task WhenOnlyCasingOfDirectoryNameChanges_ThenFolderMovesToNewCasing()
+    {
+        // Arrange
+        WriteFile("docs/Readme.md");
+        var storage = await ConnectAsync();
+        Directory.Move(GetFullPath("docs"), GetFullPath("docs-renaming"));
+        Directory.Move(GetFullPath("docs-renaming"), GetFullPath("Docs"));
+
+        // Act
+        await storage.ProcessFileEventAsync(Renamed("docs", "Docs"));
+
+        // Assert
+        Assert.Equal(["Docs"], storage.Children.Keys);
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Readme.md"], docs.Children.Keys);
     }
 
     [Fact]
@@ -201,13 +258,53 @@ public class FluentStorageContainerFileEventTests : IDisposable
         Directory.Move(GetFullPath("Docs"), GetFullPath("Archive"));
 
         // Act
-        await storage.ProcessFileEventAsync(
-            new RenamedEventArgs(WatcherChangeTypes.Renamed, _directory.FullName, "Archive", "Docs"));
+        await storage.ProcessFileEventAsync(Renamed("Docs", "Archive"));
 
         // Assert
         Assert.Equal(["Archive"], storage.Children.Keys);
         var archive = Assert.IsType<VirtualFolder>(storage.Children["Archive"]);
         Assert.Equal(["Readme.md"], archive.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenDirectoryIsReplacedByAnotherOfSameName_ThenFolderMatchesNewDirectory()
+    {
+        // Arrange
+        WriteFile("Docs/OnlyOld.md", "old");
+        WriteFile("Docs/Both.md", "old");
+        WriteFile("Docs/OldGuides/Setup.md", "old");
+        var storage = await ConnectAsync();
+        var both = Assert.IsType<MarkdownFile>(((VirtualFolder)storage.Children["Docs"]).Children["Both.md"]);
+
+        Directory.Delete(GetFullPath("Docs"), recursive: true);
+        WriteFile("Docs/Both.md", "new");
+        WriteFile("Docs/OnlyNew.md", "new");
+
+        // Act
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+
+        // Assert
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Both.md", "OnlyNew.md"], docs.Children.Keys.Order());
+        Assert.Same(both, docs.Children["Both.md"]);
+        Assert.Equal("new", both.Content);
+    }
+
+    [Fact]
+    public async Task WhenCreatedEventArrivesForTrackedDirectory_ThenFolderAndSubjectsAreKept()
+    {
+        // Arrange
+        WriteFile("Docs/Readme.md");
+        var storage = await ConnectAsync();
+        var docs = storage.Children["Docs"];
+        var readme = ((VirtualFolder)docs).Children["Readme.md"];
+
+        // Act
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+
+        // Assert
+        Assert.Same(docs, storage.Children["Docs"]);
+        Assert.Same(readme, ((VirtualFolder)docs).Children["Readme.md"]);
     }
 
     [Fact]
@@ -225,6 +322,55 @@ public class FluentStorageContainerFileEventTests : IDisposable
         // Assert
         Assert.Equal(["Docs"], storage.Children.Keys);
         Assert.IsNotType<VirtualFolder>(storage.Children["Docs"]);
+    }
+
+    [Fact]
+    public async Task WhenAddedFileClashesWithFolderKey_ThenDeletingItKeepsTheFolder()
+    {
+        // Arrange
+        WriteFile("Docs/Readme.md");
+        var storage = await ConnectAsync();
+
+        var motor = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>());
+        WriteFile("Docs.json", _serviceProvider!.GetRequiredService<ConfigurableSubjectSerializer>().Serialize(motor));
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs.json"));
+        File.Delete(GetFullPath("Docs.json"));
+
+        // Act
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Docs.json"));
+
+        // Assert
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Readme.md"], docs.Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsResynchronized_ThenTreeMatchesDiskAndExistingSubjectsAreKept()
+    {
+        // Arrange
+        WriteFile("Kept.md", "first");
+        WriteFile("Docs/Deleted.md");
+        WriteFile("Gone/Old.md");
+        var storage = await ConnectAsync();
+        var kept = Assert.IsType<MarkdownFile>(storage.Children["Kept.md"]);
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+
+        WriteFile("Kept.md", "second");
+        File.Delete(GetFullPath("Docs/Deleted.md"));
+        Directory.Delete(GetFullPath("Gone"), recursive: true);
+        WriteFile("Docs/Added.md");
+        WriteFile("New/Added.md");
+
+        // Act
+        await storage.ResyncAsync();
+
+        // Assert
+        Assert.Equal(["Docs", "Kept.md", "New"], storage.Children.Keys.Order());
+        Assert.Same(kept, storage.Children["Kept.md"]);
+        Assert.Equal("second", kept.Content);
+        Assert.Same(docs, storage.Children["Docs"]);
+        Assert.Equal(["Added.md"], docs.Children.Keys);
+        Assert.Equal(["Added.md"], Assert.IsType<VirtualFolder>(storage.Children["New"]).Children.Keys);
     }
 
     [Fact]
@@ -250,6 +396,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
         Assert.Equal(fileCount / 2, docs.Children.Count);
         Assert.Equal(fileCount / 2 + 1, storage.Children.Count);
+        Assert.All(docs.Children.Values, child => Assert.NotNull(child.TryGetRegisteredSubject()));
     }
 
     [Fact]
@@ -269,6 +416,25 @@ public class FluentStorageContainerFileEventTests : IDisposable
         // Assert
         var file = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
         Assert.Equal("second", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsScanned_ThenTemporaryFilesAreSkipped()
+    {
+        // Arrange
+        WriteFile("Home.md");
+        WriteFile("Home.md~");
+        WriteFile("~Draft.md");
+        WriteFile("Docs/Notes.md.tmp");
+        WriteFile("Docs/Notes.md");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        Assert.Equal(["Docs", "Home.md"], storage.Children.Keys.Order());
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Notes.md"], docs.Children.Keys);
     }
 
     [Fact]
@@ -342,18 +508,22 @@ public class FluentStorageContainerFileEventTests : IDisposable
     {
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
+        // The application's context, so that the Children setters run change tracking, registry and lifecycle code.
         var services = new ServiceCollection();
+        var context = SubjectContextFactory.Create(services);
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
-        services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create());
+        services.AddSingleton(context);
         services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         services.AddSingleton(sp => new SubjectPathResolver(() => sp.GetRequiredService<RootManager>().Root));
         services.AddSingleton<MarkdownContentParser>();
         var serviceProvider = services.BuildServiceProvider();
+        _serviceProvider = serviceProvider;
 
         var storage = new FluentStorageContainer(
             typeRegistry,
@@ -364,7 +534,8 @@ public class FluentStorageContainerFileEventTests : IDisposable
             EnableFileWatching = enableFileWatching
         };
 
-        _storages.Add(storage);
+        ((IInterceptorSubject)storage).Context.AddFallbackContext(context);
+        _storage = storage;
         await storage.ConnectAsync(CancellationToken.None);
         return storage;
     }
@@ -379,6 +550,9 @@ public class FluentStorageContainerFileEventTests : IDisposable
         File.WriteAllText(fullPath, content);
     }
 
+    private RenamedEventArgs Renamed(string oldName, string newName)
+        => new(WatcherChangeTypes.Renamed, _directory.FullName, newName, oldName);
+
     private FileSystemEventArgs Event(WatcherChangeTypes changeType, string relativePath)
     {
         var fullPath = GetFullPath(relativePath);
@@ -387,11 +561,8 @@ public class FluentStorageContainerFileEventTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var storage in _storages)
-        {
-            storage.Dispose();
-        }
-
+        _storage?.Dispose();
+        _serviceProvider?.Dispose();
         _directory.Delete(recursive: true);
     }
 }
