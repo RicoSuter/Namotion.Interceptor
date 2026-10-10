@@ -22,6 +22,13 @@ internal static class StoragePathFilter
     }
 
     /// <summary>
+    /// Checks whether the path never becomes a subject: it is hidden or has a temporary segment.
+    /// </summary>
+    /// <remarks>Only for paths within the storage, see <see cref="HasTemporarySegment"/>.</remarks>
+    public static bool IsIgnored(ReadOnlySpan<char> path)
+        => IsHidden(path) || HasTemporarySegment(path);
+
+    /// <summary>
     /// Checks whether the last segment of the path has a temporary name, as editors use for the file they write
     /// before renaming it to the real name.
     /// </summary>

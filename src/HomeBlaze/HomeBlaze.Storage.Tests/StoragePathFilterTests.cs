@@ -77,4 +77,18 @@ public class StoragePathFilterTests
         // Assert
         Assert.False(isTemporaryFile);
     }
+
+    [Theory]
+    [InlineData(".idea/workspace.xml", true)]
+    [InlineData("Docs/Notes.md.tmp", true)]
+    [InlineData("Build.tmp/Output.md", true)]
+    [InlineData("Docs/Readme.md", false)]
+    public void WhenPathIsHiddenOrTemporary_ThenItIsIgnored(string path, bool expected)
+    {
+        // Act
+        var isIgnored = StoragePathFilter.IsIgnored(path);
+
+        // Assert
+        Assert.Equal(expected, isIgnored);
+    }
 }
