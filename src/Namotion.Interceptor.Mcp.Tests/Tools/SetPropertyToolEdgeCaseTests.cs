@@ -66,6 +66,62 @@ public class SetPropertyToolEdgeCaseTests
         Assert.True(room.Device.IsOn);
     }
 
+    public static TheoryData<string, string, object> StringFormattedValues() => new()
+    {
+        { "Interval", "00:00:30", TimeSpan.FromSeconds(30) },
+        { "CreatedAt", "2026-10-09T12:30:00", new DateTime(2026, 10, 9, 12, 30, 0) },
+        { "StartsAt", "2026-10-09T12:30:00+02:00", new DateTimeOffset(2026, 10, 9, 12, 30, 0, TimeSpan.FromHours(2)) },
+        { "Id", "6f9619ff-8b86-d011-b42d-00c04fc964ff", new Guid("6f9619ff-8b86-d011-b42d-00c04fc964ff") },
+        { "Day", "Tuesday", DayOfWeek.Tuesday },
+        { "OptionalDay", "friday", DayOfWeek.Friday }
+    };
+
+    [Theory]
+    [MemberData(nameof(StringFormattedValues))]
+    public async Task WhenStringValueIsInTheListedFormat_ThenPropertyIsSet(string path, string value, object expected)
+    {
+        // Arrange
+        var (schedule, tool) = CreateSchedule();
+
+        // Act
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { path, value }), CancellationToken.None);
+
+        // Assert
+        Assert.True(JsonSerializer.SerializeToElement(result).GetProperty("success").GetBoolean());
+        Assert.Equal(expected, schedule.TryGetRegisteredSubject()!.TryGetProperty(path)!.GetValue());
+    }
+
+    [Fact]
+    public async Task WhenEnumValueIsUndefined_ThenReturnsErrorAndKeepsTheValue()
+    {
+        // Arrange
+        var (schedule, tool) = CreateSchedule();
+
+        // Act
+        var result = await tool.Handler(JsonSerializer.SerializeToElement(new { path = "Day", value = 42 }), CancellationToken.None);
+
+        // Assert
+        var error = JsonSerializer.SerializeToElement(result).GetProperty("error").GetString();
+        Assert.Contains("Monday", error);
+        Assert.Equal(DayOfWeek.Sunday, schedule.Day);
+    }
+
+    private static (TestSchedule Schedule, McpToolInfo Tool) CreateSchedule()
+    {
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var schedule = new TestSchedule(context);
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false
+        };
+        var tool = new McpToolFactory(schedule, config).CreateTools().First(t => t.Name == "set_property");
+        return (schedule, tool);
+    }
+
     [Fact]
     public async Task WhenSettingProperty_ThenPreviousValueIsCorrect()
     {

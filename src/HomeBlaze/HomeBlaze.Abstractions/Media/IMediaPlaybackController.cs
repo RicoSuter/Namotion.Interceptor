@@ -4,11 +4,11 @@ using HomeBlaze.Abstractions.Attributes;
 namespace HomeBlaze.Abstractions.Media;
 
 /// <summary>
-/// Controller interface for audio players.
+/// Controller interface for subjects that play media.
 /// </summary>
 [SubjectAbstraction]
-[Description("Controls audio playback with play, pause, stop, skip, seek, and mute.")]
-public interface IAudioPlayerController : IVolumeController
+[Description("Controls media playback with play, pause, stop, skip and seek.")]
+public interface IMediaPlaybackController
 {
     /// <summary>
     /// Starts or resumes playback.
@@ -45,16 +45,4 @@ public interface IAudioPlayerController : IVolumeController
     /// </summary>
     [Operation]
     Task SeekAsync(TimeSpan position, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Mutes the audio.
-    /// </summary>
-    [Operation]
-    Task MuteAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Unmutes the audio.
-    /// </summary>
-    [Operation]
-    Task UnmuteAsync(CancellationToken cancellationToken);
 }

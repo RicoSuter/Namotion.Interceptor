@@ -1,0 +1,104 @@
+using Namotion.Devices.Sonos.Parsing;
+using Namotion.Devices.Sonos.Tests.Testing;
+using Xunit;
+
+namespace Namotion.Devices.Sonos.Tests;
+
+public class DidlParserTests
+{
+    [Fact]
+    public void WhenMetadataHasTrack_ThenTitleArtistAlbumAndArtAreRead()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl("Song", "Artist", "Album", "/getaa?s=1&u=x");
+
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+
+        // Assert
+        Assert.Equal(new DidlTrack("Song", "Artist", "Album", "/getaa?s=1&u=x"), track);
+    }
+
+    [Fact]
+    public void WhenMetadataHasStreamContent_ThenStreamContentIsTheTitle()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl("x-sonosapi-stream:tunein", streamContent: "Artist - Live Song");
+
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+
+        // Assert
+        Assert.Equal("Artist - Live Song", track?.Title);
+    }
+
+    [Fact]
+    public void WhenTextsArePadded_ThenTheyAreTrimmed()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl(" Station ", " Artist ", " Album ", streamContent: "ARTIST - LIVE SONG  ");
+
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+        var title = DidlParser.ParseTitle(metadata);
+
+        // Assert
+        Assert.Equal(new DidlTrack("ARTIST - LIVE SONG", "Artist", "Album", null), track);
+        Assert.Equal("Station", title);
+    }
+
+    [Fact]
+    public void WhenStreamContentIsOnlySpaces_ThenTheTitleIsUsed()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl("Station", streamContent: "  ");
+
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+
+        // Assert
+        Assert.Equal("Station", track?.Title);
+    }
+
+    [Fact]
+    public void WhenReadingTheSourceTitle_ThenTheTitleIsReadWithoutTheStreamContent()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl("SRF 3", streamContent: "Artist - Live Song");
+
+        // Act
+        var title = DidlParser.ParseTitle(metadata);
+
+        // Assert
+        Assert.Equal("SRF 3", title);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("NOT_IMPLEMENTED")]
+    [InlineData("<not-xml")]
+    public void WhenMediaMetadataIsMissingOrInvalid_ThenTheSourceTitleIsNull(string? metadata)
+    {
+        // Act
+        var title = DidlParser.ParseTitle(metadata);
+
+        // Assert
+        Assert.Null(title);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("NOT_IMPLEMENTED")]
+    [InlineData("<not-xml")]
+    [InlineData("<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" />")]
+    public void WhenMetadataIsMissingOrInvalid_ThenReturnsNull(string? metadata)
+    {
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+
+        // Assert
+        Assert.Null(track);
+    }
+}

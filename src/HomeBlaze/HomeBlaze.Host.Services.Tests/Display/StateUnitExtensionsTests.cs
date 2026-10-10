@@ -142,6 +142,119 @@ public class StateUnitExtensionsTests
     }
 
     [Fact]
+    public void WhenDisplayValueIsRecordArray_ThenRendersOneLinePerElement()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+        var value = new[] { new DisplayTestItem("First"), new DisplayTestItem("Second") };
+
+        // Act
+        var result = property.GetPropertyDisplayValue(value);
+
+        // Assert
+        Assert.Equal("DisplayTestItem { Name = First }\nDisplayTestItem { Name = Second }", result);
+    }
+
+    [Fact]
+    public void WhenDisplayValueIsIntArray_ThenRendersOneLinePerElement()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(new[] { 1, 2, 3 });
+
+        // Assert
+        Assert.Equal("1\n2\n3", result);
+    }
+
+    [Fact]
+    public void WhenFirstElementRendersEmpty_ThenLinesStaySeparated()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(new object[] { new System.Text.StringBuilder(), 2 });
+
+        // Assert
+        Assert.Equal("\n2", result);
+    }
+
+    [Fact]
+    public void WhenDisplayValueIsByteArray_ThenRendersItsLength()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(new byte[] { 1, 2, 3 });
+
+        // Assert
+        Assert.Equal("3 bytes", result);
+    }
+
+    [Fact]
+    public void WhenDisplayValueIsEmptyArray_ThenRendersEmptyString()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(Array.Empty<int>());
+
+        // Assert
+        Assert.Equal("", result);
+    }
+
+    [Fact]
+    public void WhenDisplayValueHasNullElement_ThenRendersNullForThatElement()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue(new object?[] { 1, null });
+
+        // Assert
+        Assert.Equal("1\nnull", result);
+    }
+
+    [Fact]
+    public void WhenDisplayValueIsString_ThenRendersTheStringItself()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DisplayTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty(nameof(DisplayTestSubject.Rate))!;
+
+        // Act
+        var result = property.GetPropertyDisplayValue("Living Room");
+
+        // Assert
+        Assert.Equal("Living Room", result);
+    }
+
+    [Fact]
     public void WhenDateTimeOffsetAndTimeZoneResolved_ThenFormatsInThatZone()
     {
         // Arrange
@@ -190,3 +303,5 @@ public partial class DisplayTestSubject
     [State]
     public partial double Rate { get; set; }
 }
+
+public sealed record DisplayTestItem(string Name);
