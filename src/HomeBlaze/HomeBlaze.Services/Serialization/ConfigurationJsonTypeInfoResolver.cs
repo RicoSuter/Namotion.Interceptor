@@ -20,9 +20,9 @@ namespace HomeBlaze.Services.Serialization;
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
     private readonly TypeProvider _typeProvider;
-    private readonly IServiceProvider? _serviceProvider;
+    private readonly IServiceProvider _serviceProvider;
 
-    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider, IServiceProvider? serviceProvider = null)
+    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
@@ -55,12 +55,11 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         // CreateObject is null for a type without a parameterless constructor. The serializer then binds the
         // constructor parameters to JSON properties and throws on a parameter that is a dependency, so a
         // subject nested in the configuration of another one is created the way the root of a configuration is.
-        if (_serviceProvider is { } serviceProvider &&
-            typeInfo is { Kind: JsonTypeInfoKind.Object, CreateObject: null } &&
+        if (typeInfo is { Kind: JsonTypeInfoKind.Object, CreateObject: null } &&
             type is { IsAbstract: false, IsInterface: false } &&
             typeof(IConfigurable).IsAssignableFrom(type))
         {
-            typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(serviceProvider, type);
+            typeInfo.CreateObject = () => ActivatorUtilities.CreateInstance(_serviceProvider, type);
         }
 
         // Filter [Configuration] properties for all object types

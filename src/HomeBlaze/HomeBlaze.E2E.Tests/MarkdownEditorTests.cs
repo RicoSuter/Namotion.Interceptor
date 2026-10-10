@@ -50,7 +50,7 @@ public class MarkdownEditorTests
     }
 
     [Fact]
-    public async Task WhenSplitModeIsOpened_ThenEditorAcceptsAClick()
+    public async Task WhenCursorIsInsideExpression_ThenEditExpressionButtonIsVisible()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -69,10 +69,22 @@ public class MarkdownEditorTests
         var monacoEditor = page.Locator(".monaco-editor");
         await Assertions.Expect(monacoEditor).ToBeVisibleAsync(new() { Timeout = 30000 });
 
-        // Act & Assert
-        // Click on the editor to set cursor
-        var editorContent = page.Locator(".monaco-editor .view-lines");
-        await editorContent.ClickAsync();
+        // The editor only knows its expression regions once the decorations are applied, a round trip
+        // after .monaco-editor appears. A cursor that is placed earlier is not matched against them.
+        await Assertions.Expect(page.Locator(".expression-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act
+        // The line ends with the expression, so one step left from the end of the line is inside it
+        var expressionLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "mymotor/Temperature" });
+        await Assertions.Expect(expressionLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await expressionLine.ClickAsync();
+        await page.Keyboard.PressAsync("End");
+        await page.Keyboard.PressAsync("ArrowLeft");
+
+        // Assert
+        var editButton = page.Locator("[data-testid='edit-expression-button']");
+        await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = 10000 });
+        await Assertions.Expect(editButton).ToHaveTextAsync("Edit Expression");
     }
 
     [Fact]
@@ -124,34 +136,5 @@ public class MarkdownEditorTests
         // counting once.
         var decorations = page.Locator(".subject-block-decoration");
         await Assertions.Expect(decorations.First).ToBeVisibleAsync(new() { Timeout = 30000 });
-    }
-
-    [Fact]
-    public async Task WhenSplitModeIsOpened_ThenEditorIsVisible()
-    {
-        // This test verifies the ExpressionEditDialog contains SubjectPathPickerComponent
-        // Since opening the dialog requires cursor positioning, we just verify the component builds
-
-        // Arrange
-        var page = await _fixture.CreatePageAsync();
-
-        // Navigate to Inline.md
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
-        await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
-
-        // Act
-        // Open Split mode via dropdown menu
-        var editMenu = page.Locator("[data-testid='edit-mode-menu']");
-        await Assertions.Expect(editMenu).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await editMenu.ClickAsync();
-        await page.GetByText("Split").ClickAsync();
-
-        // Assert
-        // Wait for Monaco editor to be fully loaded
-        var monacoEditor = page.Locator(".monaco-editor");
-        await Assertions.Expect(monacoEditor).ToBeVisibleAsync(new() { Timeout = 30000 });
-
-        // This test confirms the edit flow is accessible
-        // Full expression editing tests would require precise cursor positioning
     }
 }

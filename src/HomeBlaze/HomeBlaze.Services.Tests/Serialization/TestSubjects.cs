@@ -246,6 +246,8 @@ public partial class SubjectWithConstructorDependency : IConfigurable
         Config = string.Empty;
     }
 
+    // A method, because System.Text.Json would bind the constructor parameter to a public property of
+    // that name and pass null instead of failing the way a subject with a private dependency does.
     public TestConstructorDependency GetDependency() => _dependency;
 
     [Configuration]

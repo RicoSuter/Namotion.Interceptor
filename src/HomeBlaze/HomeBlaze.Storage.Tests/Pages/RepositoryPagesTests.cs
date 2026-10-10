@@ -4,11 +4,18 @@ namespace HomeBlaze.Storage.Tests.Pages;
 
 public class RepositoryPagesTests
 {
+    private static readonly string[] PageFolders =
+    [
+        "src/HomeBlaze/HomeBlaze/Data/Files",
+        "src/HomeBlaze/HomeBlaze/Seed/Files",
+        "src/HomeBlaze/HomeBlaze.E2E.Tests/TestData"
+    ];
+
     public static TheoryData<string> PagePaths()
     {
         var root = FindRepositoryRoot();
         var data = new TheoryData<string>();
-        foreach (var folder in new[] { "src/HomeBlaze/HomeBlaze/Data/Files", "src/HomeBlaze/HomeBlaze.E2E.Tests/TestData" })
+        foreach (var folder in PageFolders)
         {
             foreach (var file in Directory.EnumerateFiles(Path.Combine(root, folder), "*.md", SearchOption.AllDirectories))
             {
@@ -21,7 +28,7 @@ public class RepositoryPagesTests
 
     [Theory]
     [MemberData(nameof(PagePaths))]
-    public void WhenRepositoryPageIsParsed_ThenItHasNoBlockErrors(string relativePath)
+    public void WhenRepositoryPageIsParsed_ThenItHasNoBlockSyntaxErrorAndNoOldFence(string relativePath)
     {
         // Arrange
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), relativePath)).Replace("\r\n", "\n");
