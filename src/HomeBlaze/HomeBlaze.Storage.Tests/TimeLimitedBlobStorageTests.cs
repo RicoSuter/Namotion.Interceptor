@@ -7,6 +7,8 @@ using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
 
+// Writes to an in-memory storage, see the remarks of StorageTestBase.
+[Collection(nameof(StorageTestBase))]
 public sealed class TimeLimitedBlobStorageTests : IDisposable
 {
     private readonly ManualTimeProvider _timeProvider = new();

@@ -7,6 +7,8 @@ using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
+// Writes to an in-memory storage, see the remarks of StorageTestBase.
+[Collection(nameof(StorageTestBase))]
 public class MarkdownFileTests
 {
     [Fact]

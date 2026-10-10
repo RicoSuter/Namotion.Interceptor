@@ -326,6 +326,25 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenDirectoryReplacesFileOfSameName_ThenFolderWithItsFilesIsAdded()
+    {
+        // Arrange
+        WriteFile("Docs");
+        var storage = await ConnectAsync();
+        var childBefore = storage.Children["Docs"];
+        File.Delete(GetFullPath("Docs"));
+        WriteFile("Docs/Readme.md");
+
+        // Act
+        await storage.ReconcileAsync(Named("Docs"));
+
+        // Assert
+        Assert.IsType<GenericFile>(childBefore);
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Readme.md"], docs.Children.Keys);
+    }
+
+    [Fact]
     public async Task WhenAddedFileClashesWithFolderKey_ThenDeletingItKeepsTheFolder()
     {
         // Arrange
@@ -532,6 +551,24 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
         Assert.Same(added, devices.Children["Motor"]);
         Assert.Contains("Added", File.ReadAllText(GetFullPath("Devices/Motor.json")));
+    }
+
+    [Fact]
+    public async Task WhenSubjectIsAdded_ThenNamedPassDoesNotReloadIt()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        var added = CreateMotor("Added");
+        await storage.AddSubjectAsync("Devices/Motor.json", added, CancellationToken.None);
+        added.Name = "Only in memory";
+
+        // Act
+        await storage.ReconcileAsync(Named("Devices/Motor.json"));
+
+        // Assert
+        var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
+        Assert.Same(added, devices.Children["Motor"]);
+        Assert.Equal("Only in memory", added.Name);
     }
 
     [Theory]

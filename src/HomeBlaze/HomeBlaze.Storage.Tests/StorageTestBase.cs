@@ -12,6 +12,9 @@ namespace HomeBlaze.Storage.Tests;
 /// <remarks>
 /// One collection for all derived classes: the gates and counters of <see cref="GatedFile"/> and the callback
 /// of <see cref="CallbackSubject"/> are static, so tests that use them must not run next to each other.
+/// Every other class that writes to an in-memory storage is in this collection as well: FluentStorage hashes
+/// the content of such a write with one hash object that all its in-memory storages share, and that object
+/// fails when two threads use it at once.
 /// </remarks>
 [Collection(nameof(StorageTestBase))]
 public abstract class StorageTestBase : IDisposable

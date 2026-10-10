@@ -370,11 +370,49 @@ public class StorageTimeoutTests : StorageTestBase
         Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
     }
 
-    private async Task<FluentStorageContainer> ConnectPausableAsync()
+    [Fact]
+    public async Task WhenFileEventsArriveWhilePassStallsOnTheStorage_ThenLaterPassLoadsEverything()
     {
-        var storage = await ConnectAsync(configure: container =>
+        // Arrange: without a periodic pass, so that only file events start one.
+        var storage = await ConnectPausableAsync(enableFileWatching: true, reconcileIntervalSeconds: 0);
+        var listingReached = _client!.PauseNext(nameof(IBlobStorage.ListAsync));
+        WriteFile("First.md");
+        await AsyncTestHelpers.WaitUntilAsync(() => _timeProvider.ArmedTimerCount == 1, WatcherTimeout);
+        _timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+        await listingReached;
+        var expectedChildren = Enumerable.Range(0, 10).Select(index => $"Later{index}.md").Append("First.md").Order().ToList();
+
+        // Act
+        foreach (var path in expectedChildren)
+        {
+            WriteFile(path);
+        }
+
+        await LetHangingCallTimeOutAsync();
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Status == StorageStatus.Error);
+        var childrenAfterStalledPass = storage.Children.Keys.ToList();
+        await ReleaseHangingCallAsync(storage);
+
+        // Assert: every step of the clock runs the pass that the events of the stalled time asked for, if there is one.
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                _timeProvider.Advance(ReconcileTrigger.MaximumDelay);
+                return storage.Status == StorageStatus.Connected && storage.Children.Count == expectedChildren.Count;
+            },
+            WatcherTimeout);
+
+        Assert.Empty(childrenAfterStalledPass);
+        Assert.Equal(expectedChildren, storage.Children.Keys.Order());
+    }
+
+    private async Task<FluentStorageContainer> ConnectPausableAsync(
+        bool enableFileWatching = false, int reconcileIntervalSeconds = 300)
+    {
+        var storage = await ConnectAsync(enableFileWatching, container =>
         {
             container.TimeProvider = _timeProvider;
+            container.ReconcileIntervalSeconds = reconcileIntervalSeconds;
             container.ClientDecorator = client => _client = new PausableBlobStorage(client);
         });
 

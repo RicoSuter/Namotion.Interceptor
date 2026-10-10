@@ -7,7 +7,8 @@ namespace HomeBlaze.Storage.Tests;
 
 /// <summary>
 /// A file subject whose load a test can pause after the content was read and before it is applied,
-/// to put other work between the load of a subject and its placement in the hierarchy.
+/// to put other work between the load of a subject and its placement in the hierarchy. A test can also make
+/// a load fail, or run code of its own on the storage worker.
 /// </summary>
 [InterceptorSubject]
 [FileExtension(".gated")]
@@ -16,6 +17,7 @@ public partial class GatedFile : IStorageFile
     private static readonly ConcurrentQueue<Gate> Gates = new();
     private static int _loadCount;
     private static Exception? _nextLoadFailure;
+    private static Func<GatedFile, CancellationToken, Task>? _nextLoadCallback;
 
     public IStorageContainer Storage { get; }
 
@@ -55,11 +57,18 @@ public partial class GatedFile : IStorageFile
     public static void FailNextLoad(Exception? exception = null)
         => Volatile.Write(ref _nextLoadFailure, exception ?? new InvalidOperationException("The load was made to fail."));
 
+    /// <summary>
+    /// Makes the next load run the callback after it has read its content, as part of the load.
+    /// </summary>
+    public static void RunOnNextLoad(Func<GatedFile, CancellationToken, Task> callback)
+        => Volatile.Write(ref _nextLoadCallback, callback);
+
     public static void Reset()
     {
         Gates.Clear();
         Volatile.Write(ref _loadCount, 0);
         Volatile.Write(ref _nextLoadFailure, null);
+        Volatile.Write(ref _nextLoadCallback, null);
     }
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
@@ -79,6 +88,11 @@ public partial class GatedFile : IStorageFile
         await using var stream = await ReadAsync(cancellationToken);
         using var reader = new StreamReader(stream);
         var content = await reader.ReadToEndAsync(cancellationToken);
+
+        if (Interlocked.Exchange(ref _nextLoadCallback, null) is { } callback)
+        {
+            await callback(this, cancellationToken);
+        }
 
         if (Gates.TryDequeue(out var gate))
         {
