@@ -550,7 +550,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     /// <summary>
     /// Claims every mapped property and returns the subscription for the claimed topics, or
-    /// <c>null</c> when there is nothing to subscribe. Idempotent: a re-claim of an owned property succeeds.
+    /// <c>null</c> when no topic was claimed, since MQTT forbids a subscribe without topic filters.
+    /// Idempotent: a re-claim of a property this source owns succeeds.
     /// </summary>
     private MqttClientSubscribeOptions? ClaimProperties(CancellationToken cancellationToken)
     {
@@ -573,6 +574,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
+        var topicCount = 0;
 
         foreach (var property in properties)
         {
@@ -598,9 +600,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             subscribeOptionsBuilder.WithTopicFilter(f => f
                 .WithTopic(topic)
                 .WithQualityOfServiceLevel(qos));
+            topicCount++;
         }
 
-        return subscribeOptionsBuilder.Build();
+        return topicCount > 0 ? subscribeOptionsBuilder.Build() : null;
     }
 
     private async Task SubscribeAsync(MqttClientSubscribeOptions? subscribeOptions, CancellationToken cancellationToken)

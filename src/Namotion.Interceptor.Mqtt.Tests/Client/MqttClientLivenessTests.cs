@@ -73,6 +73,46 @@ public partial class MqttClientLivenessTests
     }
 
     [Fact]
+    public async Task WhenEveryMappedPropertyIsOwnedByAnotherSource_ThenTheClientStillSynchronizes()
+    {
+        // Arrange - the other source holds the only mapped property, so this client has no topic to subscribe.
+        var brokerPort = GetFreeTcpPort();
+        await using var broker = CreateBroker(brokerPort);
+        await using var source = CreateClientSource(brokerPort);
+        await using var otherSource = new MqttSubjectClientSource(
+            source.RootSubject,
+            new MqttClientConfiguration
+            {
+                BrokerHost = "127.0.0.1",
+                BrokerPort = brokerPort,
+                Mapper = CreateMapper()
+            },
+            NullLogger<MqttSubjectClientSource>.Instance);
+        Assert.True(otherSource.Ownership.ClaimSource(
+            source.RootSubject.GetPropertyReference(nameof(LivenessTestRoot.Name))));
+        using var stateRecorder = SourceStateRecorder.SubscribeTo(source);
+
+        await broker.StartAsync(CancellationToken.None);
+        try
+        {
+            // Act
+            await source.StartAsync(CancellationToken.None);
+
+            // Assert
+            await stateRecorder.WaitForStatesAsync(
+                TimeSpan.FromSeconds(30),
+                "A client with no topic to subscribe should still complete its connect.",
+                SourceState.Synchronized);
+            Assert.Null(source.Diagnostics.LastError);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await broker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task WhenTheConnectionDrops_ThenLivenessFallsAndRisesAgainOnReconnect()
     {
         // Arrange - a reconnect delay far longer than the poll interval below, so the client cannot
