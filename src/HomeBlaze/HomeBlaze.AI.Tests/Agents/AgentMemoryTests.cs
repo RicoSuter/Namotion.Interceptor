@@ -75,4 +75,34 @@ public class AgentMemoryTests : IDisposable
         Assert.True(result.GetProperty("success").GetBoolean());
         Assert.Equal("- trend: rising", memory.Content);
     }
+
+    [Fact]
+    public async Task WhenLoadingAMissingFile_ThenMemoryStaysEmpty()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "missing.memory.md");
+        var memory = new AgentMemory(path, TimeProvider.System);
+
+        // Act
+        await memory.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(string.Empty, memory.Content);
+        Assert.Null(memory.LastUpdated);
+    }
+
+    [Fact]
+    public async Task WhenMemoryIsWritten_ThenGetSnapshotReflectsTheWrite()
+    {
+        // Arrange
+        var memory = new AgentMemory(filePath: null, TimeProvider.System);
+
+        // Act
+        await memory.TryWriteAsync("- note", CancellationToken.None);
+        var snapshot = memory.GetSnapshot();
+
+        // Assert
+        Assert.Equal("- note", snapshot.Content);
+        Assert.NotNull(snapshot.LastUpdated);
+    }
 }

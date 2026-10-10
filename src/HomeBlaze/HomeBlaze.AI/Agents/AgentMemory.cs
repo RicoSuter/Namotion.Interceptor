@@ -25,7 +25,7 @@ public sealed class AgentMemory
     private readonly string? _filePath;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private volatile Snapshot _snapshot = new(string.Empty, null);
+    private volatile AgentMemorySnapshot _snapshot = new(string.Empty, null);
 
     /// <param name="filePath">The markdown file, or null to keep memory in-process only.</param>
     /// <param name="timeProvider">The clock for the last update time.</param>
@@ -42,17 +42,44 @@ public sealed class AgentMemory
     public DateTimeOffset? LastUpdated => _snapshot.LastUpdated;
 
     /// <summary>
-    /// Loads the memory file if it exists.
+    /// Returns the content and last update time of the same write, so callers never pair content from one
+    /// write with the timestamp of another.
+    /// </summary>
+    public AgentMemorySnapshot GetSnapshot() => _snapshot;
+
+    /// <summary>
+    /// Loads the memory file if it exists. Serialized with <see cref="TryWriteAsync"/> so a load started
+    /// before a concurrent write cannot overwrite that write's snapshot with the older file content.
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
-        if (_filePath is null || !File.Exists(_filePath))
+        if (_filePath is null)
         {
             return;
         }
 
-        var content = await File.ReadAllTextAsync(_filePath, cancellationToken);
-        _snapshot = new Snapshot(content, File.GetLastWriteTimeUtc(_filePath));
+        await _writeLock.WaitAsync(cancellationToken);
+        try
+        {
+            string content;
+            DateTime lastWriteTimeUtc;
+            try
+            {
+                content = await File.ReadAllTextAsync(_filePath, cancellationToken);
+                lastWriteTimeUtc = File.GetLastWriteTimeUtc(_filePath);
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // The file was deleted between a prior existence check and this read; treat it as never written.
+                return;
+            }
+
+            _snapshot = new AgentMemorySnapshot(content, lastWriteTimeUtc);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 
     /// <summary>
@@ -73,7 +100,7 @@ public sealed class AgentMemory
                 await AtomicFile.WriteAllTextAsync(_filePath, content, cancellationToken);
             }
 
-            _snapshot = new Snapshot(content, _timeProvider.GetUtcNow());
+            _snapshot = new AgentMemorySnapshot(content, _timeProvider.GetUtcNow());
             return true;
         }
         finally
@@ -103,6 +130,10 @@ public sealed class AgentMemory
                 : (object)new { error = $"The memory exceeds {MaxBytes} bytes. Please condense it and call update_memory again." };
         }
     };
-
-    private sealed record Snapshot(string Content, DateTimeOffset? LastUpdated);
 }
+
+/// <summary>
+/// The memory content and the time it was last written, read together from a single write so they never
+/// mix content from one write with the timestamp of another.
+/// </summary>
+public sealed record AgentMemorySnapshot(string Content, DateTimeOffset? LastUpdated);
