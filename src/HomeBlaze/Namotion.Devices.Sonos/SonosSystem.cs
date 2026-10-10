@@ -215,14 +215,6 @@ public partial class SonosSystem : BackgroundService,
     [PropertyAttribute("Refresh", KnownAttributes.IsEnabled)]
     public bool Refresh_IsEnabled => IsConnected;
 
-    [Derived]
-    [PropertyAttribute("GroupAll", KnownAttributes.IsEnabled)]
-    public bool GroupAll_IsEnabled => IsConnected;
-
-    [Derived]
-    [PropertyAttribute("UngroupAll", KnownAttributes.IsEnabled)]
-    public bool UngroupAll_IsEnabled => IsConnected;
-
     /// <summary>
     /// Reads topology, state and favorites now instead of at the next poll.
     /// </summary>
@@ -232,6 +224,10 @@ public partial class SonosSystem : BackgroundService,
         EnsureConnected();
         await ReconcileAsync(cancellationToken);
     }
+
+    [Derived]
+    [PropertyAttribute("GroupAll", KnownAttributes.IsEnabled)]
+    public bool GroupAll_IsEnabled => IsConnected;
 
     /// <summary>
     /// Groups every connected room with the given room (party mode).
@@ -266,6 +262,10 @@ public partial class SonosSystem : BackgroundService,
             }
         }, () => Players.Values.All(player => !player.IsConnected || player.GroupKey == coordinator.Uuid), cancellationToken);
     }
+
+    [Derived]
+    [PropertyAttribute("UngroupAll", KnownAttributes.IsEnabled)]
+    public bool UngroupAll_IsEnabled => IsConnected;
 
     /// <summary>
     /// Makes every room standalone.

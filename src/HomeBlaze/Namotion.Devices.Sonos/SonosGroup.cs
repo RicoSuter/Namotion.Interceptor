@@ -84,104 +84,68 @@ public partial class SonosGroup :
 
     private bool CanControl => Coordinator.IsConnected && _system.IsConnected;
 
+    // Playback, content, play mode and sleep timer are group state, so the coordinator's operations already target
+    // the group. Only volume and mute have group commands of their own.
+
     [Derived]
     [PropertyAttribute("Play", KnownAttributes.IsEnabled)]
     public bool Play_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Pause", KnownAttributes.IsEnabled)]
-    public bool Pause_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Next", KnownAttributes.IsEnabled)]
-    public bool Next_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Previous", KnownAttributes.IsEnabled)]
-    public bool Previous_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("TogglePlayback", KnownAttributes.IsEnabled)]
-    public bool TogglePlayback_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Seek", KnownAttributes.IsEnabled)]
-    public bool Seek_IsEnabled => CanControl && CurrentTrackDuration > TimeSpan.Zero;
-
-    [Derived]
-    [PropertyAttribute("SetVolume", KnownAttributes.IsEnabled)]
-    public bool SetVolume_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("ChangeVolume", KnownAttributes.IsEnabled)]
-    public bool ChangeVolume_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Mute", KnownAttributes.IsEnabled)]
-    public bool Mute_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("Unmute", KnownAttributes.IsEnabled)]
-    public bool Unmute_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("PlayFavorite", KnownAttributes.IsEnabled)]
-    public bool PlayFavorite_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("PlayUri", KnownAttributes.IsEnabled)]
-    public bool PlayUri_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("PlayStream", KnownAttributes.IsEnabled)]
-    public bool PlayStream_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("SetShuffle", KnownAttributes.IsEnabled)]
-    public bool SetShuffle_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("SetRepeat", KnownAttributes.IsEnabled)]
-    public bool SetRepeat_IsEnabled => CanControl;
-
-    [Derived]
-    [PropertyAttribute("SetSleepTimer", KnownAttributes.IsEnabled)]
-    public bool SetSleepTimer_IsEnabled => CanControl;
-
-    // Playback, content, play mode and sleep timer are group state, so the coordinator's operations already target
-    // the group. Only volume and mute have group commands of their own.
 
     [Operation(Title = "Play", Icon = "PlayArrow", Position = 1, Description = "Starts or resumes playback of the group.")]
     public Task PlayAsync(CancellationToken cancellationToken) =>
         Coordinator.PlayAsync(cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("Pause", KnownAttributes.IsEnabled)]
+    public bool Pause_IsEnabled => CanControl;
+
     [Operation(Title = "Pause", Icon = "Pause", Position = 2, Description = "Pauses playback of the group.")]
     public Task PauseAsync(CancellationToken cancellationToken) =>
         Coordinator.PauseAsync(cancellationToken);
+
+    [Derived]
+    [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
+    public bool Stop_IsEnabled => CanControl;
 
     [Operation(Title = "Stop", Icon = "Stop", Position = 3, Description = "Stops playback of the group.")]
     public Task StopAsync(CancellationToken cancellationToken) =>
         Coordinator.StopAsync(cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("Next", KnownAttributes.IsEnabled)]
+    public bool Next_IsEnabled => CanControl;
+
     [Operation(Title = "Next", Icon = "SkipNext", Position = 4, Description = "Skips to the next track of the group.")]
     public Task NextAsync(CancellationToken cancellationToken) =>
         Coordinator.NextAsync(cancellationToken);
+
+    [Derived]
+    [PropertyAttribute("Previous", KnownAttributes.IsEnabled)]
+    public bool Previous_IsEnabled => CanControl;
 
     [Operation(Title = "Previous", Icon = "SkipPrevious", Position = 5, Description = "Goes back to the previous track of the group.")]
     public Task PreviousAsync(CancellationToken cancellationToken) =>
         Coordinator.PreviousAsync(cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("TogglePlayback", KnownAttributes.IsEnabled)]
+    public bool TogglePlayback_IsEnabled => CanControl;
+
     [Operation(Title = "Play or Pause", Position = 6, Description = "Pauses the group when it plays, otherwise starts playback.")]
     public Task TogglePlaybackAsync(CancellationToken cancellationToken) =>
         Coordinator.TogglePlaybackAsync(cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("Seek", KnownAttributes.IsEnabled)]
+    public bool Seek_IsEnabled => CanControl && CurrentTrackDuration > TimeSpan.Zero;
+
     [Operation(Title = "Seek", Position = 7, Description = "Seeks the current track of the group to the given position.")]
     public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken) =>
         Coordinator.SeekAsync(position, cancellationToken);
+
+    [Derived]
+    [PropertyAttribute("SetVolume", KnownAttributes.IsEnabled)]
+    public bool SetVolume_IsEnabled => CanControl;
 
     [Operation(Title = "Set Volume", Position = 10, Description = "Sets the group volume.")]
     public Task SetVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal volume, CancellationToken cancellationToken)
@@ -190,6 +154,10 @@ public partial class SonosGroup :
         return RunAsync((connection, token) => connection.SetGroupVolumeAsync(SonosValues.ToSonosPercent(volume, 0m), token), cancellationToken);
     }
 
+    [Derived]
+    [PropertyAttribute("ChangeVolume", KnownAttributes.IsEnabled)]
+    public bool ChangeVolume_IsEnabled => CanControl;
+
     [Operation(Title = "Change Volume", Position = 11, Description = "Changes the group volume by a relative amount.")]
     public Task ChangeVolumeAsync([OperationParameter(Unit = StateUnit.Percent)] decimal delta, CancellationToken cancellationToken)
     {
@@ -197,35 +165,67 @@ public partial class SonosGroup :
         return RunAsync((connection, token) => connection.ChangeGroupVolumeAsync(SonosValues.ToSonosPercent(delta, -1m), token), cancellationToken);
     }
 
+    [Derived]
+    [PropertyAttribute("Mute", KnownAttributes.IsEnabled)]
+    public bool Mute_IsEnabled => CanControl;
+
     [Operation(Title = "Mute", Icon = "VolumeOff", Position = 12, Description = "Mutes every player in the group.")]
     public Task MuteAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.SetGroupMuteAsync(true, token), cancellationToken);
+
+    [Derived]
+    [PropertyAttribute("Unmute", KnownAttributes.IsEnabled)]
+    public bool Unmute_IsEnabled => CanControl;
 
     [Operation(Title = "Unmute", Icon = "VolumeUp", Position = 13, Description = "Unmutes every player in the group.")]
     public Task UnmuteAsync(CancellationToken cancellationToken) =>
         RunAsync((connection, token) => connection.SetGroupMuteAsync(false, token), cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("PlayFavorite", KnownAttributes.IsEnabled)]
+    public bool PlayFavorite_IsEnabled => CanControl;
+
     [Operation(Title = "Play Favorite", Position = 20, Description = "Plays the Sonos favorite with the given title on the group.")]
     public Task PlayFavoriteAsync(string title, CancellationToken cancellationToken) =>
         Coordinator.PlayFavoriteAsync(title, cancellationToken);
+
+    [Derived]
+    [PropertyAttribute("PlayUri", KnownAttributes.IsEnabled)]
+    public bool PlayUri_IsEnabled => CanControl;
 
     /// <inheritdoc cref="SonosPlayer.PlayUriAsync"/>
     [Operation(Title = "Play URI", Position = 21, Description = "Plays a URI once as a normal track on the group, which ends and can be sought.")]
     public Task PlayUriAsync(string uri, CancellationToken cancellationToken) =>
         Coordinator.PlayUriAsync(uri, cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("PlayStream", KnownAttributes.IsEnabled)]
+    public bool PlayStream_IsEnabled => CanControl;
+
     /// <inheritdoc cref="SonosPlayer.PlayStreamAsync"/>
     [Operation(Title = "Play Stream", Position = 22, Description = "Plays an http(s) or x-rincon-mp3radio stream on the group as radio, which Sonos reconnects when it ends.")]
     public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken) =>
         Coordinator.PlayStreamAsync(uri, title, cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("SetShuffle", KnownAttributes.IsEnabled)]
+    public bool SetShuffle_IsEnabled => CanControl;
+
     [Operation(Title = "Set Shuffle", Position = 30, Description = "Turns shuffle on or off for the group.")]
     public Task SetShuffleAsync(bool shuffle, CancellationToken cancellationToken) =>
         Coordinator.SetShuffleAsync(shuffle, cancellationToken);
 
+    [Derived]
+    [PropertyAttribute("SetRepeat", KnownAttributes.IsEnabled)]
+    public bool SetRepeat_IsEnabled => CanControl;
+
     [Operation(Title = "Set Repeat", Position = 31, Description = "Sets the repeat mode of the group.")]
     public Task SetRepeatAsync(SonosRepeatMode repeat, CancellationToken cancellationToken) =>
         Coordinator.SetRepeatAsync(repeat, cancellationToken);
+
+    [Derived]
+    [PropertyAttribute("SetSleepTimer", KnownAttributes.IsEnabled)]
+    public bool SetSleepTimer_IsEnabled => CanControl;
 
     /// <inheritdoc cref="SonosPlayer.SetSleepTimerAsync"/>
     [Operation(Title = "Set Sleep Timer", Position = 32, Description = "Sets the sleep timer of the group, at most 23:59:59; zero cancels it.")]
