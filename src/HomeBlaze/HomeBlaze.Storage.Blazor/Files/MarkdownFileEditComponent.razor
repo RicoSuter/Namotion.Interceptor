@@ -300,9 +300,17 @@ else
         if (File == null || _editor == null)
             return;
 
-        // Open the SubjectSetupDialog
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
-        if (result == null)
+        // The block name is the subject's key in the page, so the names of the other blocks are taken.
+        var existingNames = Regex.Matches(_currentContent, @"```subject\(([^)]+)\)")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+
+        var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
+        {
+            Name = new SubjectNameOptions("Name", "", existingNames)
+        });
+
+        if (result?.Name is null)
             return;
 
         // Serialize the new subject

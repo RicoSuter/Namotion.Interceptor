@@ -1,88 +1,66 @@
-@using System.ComponentModel
-@using System.Reflection
+@using System.Buffers
 @using HomeBlaze.Components.Editors
 
-@inject SubjectTypeRegistry TypeRegistry
+@inject SubjectTypeCatalog TypeCatalog
 @inject SubjectFactory SubjectFactory
+@inject RootManager RootManager
 @inject ISnackbar Snackbar
 
-<MudDialog data-testid="create-subject-wizard" Style="height: calc(100vh - 200px);">
+<MudDialog data-testid="create-subject-wizard"
+           Style="height: calc(100vh - 200px);"
+           DefaultFocus="DefaultFocus.FirstChild">
     <TitleContent>
-        <MudText Typo="Typo.h6">@GetTitle()</MudText>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            @if (_selectedType is not null)
+            {
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
+                               Size="Size.Small"
+                               OnClick="GoBack"
+                               aria-label="Back to type selection"
+                               data-testid="back-button" />
+            }
+            <MudText Typo="Typo.h6" data-testid="create-dialog-title">@GetTitle()</MudText>
+        </div>
     </TitleContent>
     <DialogContent>
-        <MudTabs @bind-ActivePanelIndex="_activeStep"
-                 Elevation="0"
-                 Rounded="true"
-                 ApplyEffectsToContainer="true">
-            <MudTabPanel Text="Select Type">
-                <MudStack Spacing="3">
-                    <MudTextField @bind-Value="_subjectName"
-                                  Label="Name"
-                                  Required="true"
-                                  RequiredError="Name is required"
-                                  Validation="@((Func<string?, string?>)(name => IsValidFileName(name) ? null : "Name contains invalid characters"))"
-                                  HelperText="Name for the subject (will be saved as {name}.json)"
-                                  Immediate="true"
-                                  data-testid="create-name-input" />
-
-                    <div style="max-height: calc(100vh - 500px); overflow-y: auto;">
-                        @foreach (var category in GetGroupedTypes())
-                        {
-                            <div class="mb-3" data-testid="@($"category-panel-{category.Key.ToLowerInvariant()}")">
-                                <MudText Typo="Typo.h6" Class="mb-2">@category.Key</MudText>
-                                <MudGrid Spacing="2">
-                                    @foreach (var type in category.Value)
-                                    {
-                                        <MudItem xs="12" sm="6" md="4">
-                                            <MudButton OnClick="@(() => SelectType(type))"
-                                                       Variant="Variant.Outlined"
-                                                       FullWidth="true"
-                                                       Class="@(_selectedType == type ? "mud-border-primary" : "")"
-                                                       Style="height: 100%; padding: 16px; text-align: left; text-transform: none; justify-content: flex-start;"
-                                                       data-testid="@($"type-card-{type.Name.ToLowerInvariant()}")">
-                                                <div style="width: 100%;">
-                                                    <MudText Typo="Typo.subtitle1">@type.Name</MudText>
-                                                    <MudText Typo="Typo.body2" Color="Color.Secondary">
-                                                        @(type.GetCustomAttribute<DescriptionAttribute>()?.Description ?? "No description")
-                                                    </MudText>
-                                                </div>
-                                            </MudButton>
-                                        </MudItem>
-                                    }
-                                </MudGrid>
-                            </div>
-                        }
-                    </div>
-                </MudStack>
-            </MudTabPanel>
-            <MudTabPanel Text="Configure">
-                @if (_selectedType != null && _createdSubject != null)
+        @* The picker stays in the tree while the configure page is shown, so its search and group survive "Back". *@
+        <div hidden="@(_selectedType is not null)">
+            <SubjectTypePicker Types="_types" OnTypeSelected="SelectType" />
+        </div>
+        @if (_selectedType is not null && _createdSubject is not null)
+        {
+            <MudStack Spacing="3">
+                @if (Options.Name is { } nameOptions)
                 {
-                    <SubjectEditPanel @ref="_editPanel"
-                                      Subject="_createdSubject"
-                                      IsCreating="true" />
+                    @* The field validates itself after every change and overwrites Error and ErrorText with its own
+                       result, so the check must also be its Validation. Error and ErrorText still show the error of
+                       a name that was kept from the previous type, which the new field has not validated yet. *@
+                    <MudTextField T="string"
+                                  Value="_subjectName"
+                                  ValueChanged="OnNameChanged"
+                                  Label="@nameOptions.Label"
+                                  Required="true"
+                                  Immediate="true"
+                                  Adornment="@(nameOptions.Suffix.Length > 0 ? Adornment.End : Adornment.None)"
+                                  AdornmentText="@nameOptions.Suffix"
+                                  Validation="@((Func<string?, string?>)ValidateName)"
+                                  Error="@(_nameError is not null)"
+                                  ErrorText="@_nameError"
+                                  HelperText="Part of the subject's path, which is its ID. Avoid renaming it later."
+                                  data-testid="create-name-input" />
                 }
-            </MudTabPanel>
-        </MudTabs>
+                <SubjectEditPanel @key="_createdSubject"
+                                  @ref="_editPanel"
+                                  Subject="_createdSubject"
+                                  IsCreating="true"
+                                  IsValidChanged="OnEditPanelIsValidChanged" />
+            </MudStack>
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel"
                    data-testid="cancel-button">Cancel</MudButton>
-        @if (_activeStep > StepSelectType)
-        {
-            <MudButton OnClick="GoBack"
-                       data-testid="back-button">Back</MudButton>
-        }
-        @if (_activeStep == StepSelectType && _selectedType != null)
-        {
-            <MudButton Color="Color.Primary"
-                       Variant="Variant.Filled"
-                       Disabled="@(!IsNameValid)"
-                       OnClick="AdvanceToStep2"
-                       data-testid="next-button">Next</MudButton>
-        }
-        @if (_activeStep == StepConfigure)
+        @if (_selectedType is not null)
         {
             <MudButton Color="Color.Primary"
                        Variant="Variant.Filled"
@@ -94,89 +72,112 @@
 </MudDialog>
 
 @code {
-    private const int StepSelectType = 0;
-    private const int StepConfigure = 1;
+    private static readonly SearchValues<char> InvalidFileNameCharacters =
+        SearchValues.Create(Path.GetInvalidFileNameChars());
 
     [CascadingParameter]
     private IMudDialogInstance? MudDialog { get; set; }
 
-    private int _activeStep = StepSelectType;
-
-    private Type? _selectedType;
-    private IInterceptorSubject? _createdSubject;
-    private SubjectEditPanel? _editPanel;
-    private string _subjectName = "";
-
     /// <summary>
-    /// Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.
+    /// The options of the dialog.
     /// </summary>
     [Parameter]
-    public Action<IInterceptorSubject>? BeforeSave { get; set; }
+    public SubjectSetupOptions Options { get; set; } = new();
 
-    // TODO: Invalidate cache when types can be dynamically loaded
-    private Dictionary<string, List<Type>>? _groupedTypes;
+    private IReadOnlyList<SubjectTypeDescriptor> _types = [];
+    private SubjectTypeDescriptor? _selectedType;
+    private IInterceptorSubject? _createdSubject;
+    private SubjectEditPanel? _editPanel;
+    private bool _isEditPanelValid;
+    private string _subjectName = "";
+    private string? _nameError;
+    private bool _isNameEdited;
 
-    private bool IsNameValid => !string.IsNullOrWhiteSpace(_subjectName) && IsValidFileName(_subjectName);
+    private bool CanCreate => _createdSubject is not null && _nameError is null && _isEditPanelValid;
 
-    private bool CanCreate => _activeStep == StepConfigure
-        && IsNameValid
-        && _createdSubject != null
-        && (_editPanel?.IsValid ?? true);
+    protected override void OnInitialized()
+    {
+        IEnumerable<IInterceptorSubject> existingSubjects =
+            RootManager.Root?.Context.TryGetService<ISubjectRegistry>()?.KnownSubjects.Keys
+            ?? Enumerable.Empty<IInterceptorSubject>();
+
+        _types = TypeCatalog.GetCreatableTypes(existingSubjects);
+    }
 
     private string GetTitle()
     {
-        return _activeStep == StepSelectType
-            ? "Step 1: Select Type"
-            : $"Step 2: Create {_selectedType?.Name ?? "Subject"}";
+        return _selectedType is null ? "Create subject" : $"Create {_selectedType.DisplayName}";
     }
 
-    // TODO: Cache Path.GetInvalidFileNameChars() in static HashSet<char> to avoid allocation per keystroke
-    private static bool IsValidFileName(string? name)
+    private void SelectType(SubjectTypeDescriptor descriptor)
     {
-        if (string.IsNullOrWhiteSpace(name))
-            return true; // Required attribute handles empty
+        // The subject only backs the form. It is attached to nothing until Create, so a subject that is
+        // replaced here or left behind by Cancel is simply dropped.
+        _createdSubject = SubjectFactory.CreateSubject(descriptor.Type);
+        _selectedType = descriptor;
+        _isEditPanelValid = false;
 
-        return !name.Any(c => Path.GetInvalidFileNameChars().Contains(c));
-    }
-
-    private Dictionary<string, List<Type>> GetGroupedTypes()
-    {
-        return _groupedTypes ??= TypeRegistry.RegisteredTypes
-            .Where(t => typeof(IConfigurable).IsAssignableFrom(t))
-            .GroupBy(t => t.GetCustomAttribute<System.ComponentModel.CategoryAttribute>()?.Category ?? "Uncategorized")
-            .ToDictionary(g => g.Key, g => g.ToList());
-    }
-
-    private void SelectType(Type type)
-    {
-        _selectedType = type;
-
-        // Only auto-advance if name is valid
-        if (IsNameValid)
+        if (Options.Name is { } nameOptions && !_isNameEdited)
         {
-            AdvanceToStep2();
+            _subjectName = SubjectTypeCatalog.SuggestName(descriptor.Type, nameOptions.ExistingNames, nameOptions.Suffix);
         }
-    }
 
-    private void AdvanceToStep2()
-    {
-        if (_selectedType != null && IsNameValid)
-        {
-            // TODO: Consider deferring subject creation until "Create" click to avoid orphaned subjects on cancel
-            _createdSubject ??= SubjectFactory.CreateSubject(_selectedType);
-            _activeStep = StepConfigure;
-            RefreshDialog();
-        }
+        _nameError = ValidateName(_subjectName);
+        RefreshDialog();
     }
 
     private void GoBack()
     {
-        _activeStep = StepSelectType;
+        _selectedType = null;
+        _createdSubject = null;
+        _editPanel = null;
+        _isEditPanelValid = false;
         RefreshDialog();
+    }
+
+    private void OnNameChanged(string? name)
+    {
+        _subjectName = name ?? "";
+        _isNameEdited = true;
+        _nameError = ValidateName(_subjectName);
+        RefreshDialog();
+    }
+
+    private void OnEditPanelIsValidChanged(bool isValid)
+    {
+        _isEditPanelValid = isValid;
+        RefreshDialog();
+    }
+
+    private string? ValidateName(string? name)
+    {
+        if (Options.Name is not { } nameOptions)
+        {
+            return null;
+        }
+
+        var trimmedName = (name ?? "").Trim();
+        if (trimmedName.Length == 0)
+        {
+            return "Name is required";
+        }
+
+        if (trimmedName.AsSpan().ContainsAny(InvalidFileNameCharacters))
+        {
+            return "Name contains invalid characters";
+        }
+
+        if (SubjectTypeCatalog.IsNameTaken(trimmedName, nameOptions.ExistingNames, nameOptions.Suffix))
+        {
+            return "A subject with this name already exists";
+        }
+
+        return null;
     }
 
     private void RefreshDialog()
     {
+        // The title is rendered by the dialog container, which only follows an explicit refresh.
         StateHasChanged();
         MudDialog?.StateHasChanged();
     }
@@ -188,44 +189,45 @@
 
     private async Task Create()
     {
-        if (_createdSubject != null && !string.IsNullOrWhiteSpace(_subjectName))
+        if (_createdSubject is null || _editPanel is null || !CanCreate)
         {
-            try
+            return;
+        }
+
+        try
+        {
+            // Attaching can start a hosted subject right away, and it reads its configuration once it
+            // starts, so the edits must be applied before BeforeSave attaches it.
+            if (!await _editPanel.ApplyChangesAsync(CancellationToken.None))
             {
-                // Attaching can start a hosted subject right away, and it reads its configuration once it
-                // starts, so the edits must be applied before BeforeSave attaches it.
-                if (_editPanel != null && !await _editPanel.ApplyChangesAsync(CancellationToken.None))
-                {
-                    return;
-                }
-
-                // Persisting finds its writer through the parents BeforeSave establishes.
-                BeforeSave?.Invoke(_createdSubject);
-
-                if (_editPanel != null)
-                {
-                    await _editPanel.PersistAsync(CancellationToken.None);
-                }
-
-                MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, _subjectName)));
+                return;
             }
-            catch (Exception exception)
-            {
-                Snackbar.Add($"Failed to create subject: {exception.Message}", Severity.Error);
-            }
+
+            // Persisting finds its writer through the parents BeforeSave establishes.
+            Options.BeforeSave?.Invoke(_createdSubject);
+
+            await _editPanel.PersistAsync(CancellationToken.None);
+
+            var name = Options.Name is null ? null : _subjectName.Trim();
+            MudDialog?.Close(DialogResult.Ok(new CreateSubjectResult(_createdSubject, name)));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Failed to create subject: {exception.Message}", Severity.Error);
         }
     }
 
     /// <summary>
-    /// Shows the create subject wizard and returns the result.
+    /// Shows the create subject dialog and returns the result.
     /// </summary>
     /// <param name="dialogService">The dialog service.</param>
-    /// <param name="beforeSave">Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.</param>
+    /// <param name="options">The options, or null for a dialog that asks for no name.</param>
+    /// <returns>The created subject and its name, or null if cancelled.</returns>
     public static async Task<CreateSubjectResult?> ShowAsync(
         IDialogService dialogService,
-        Action<IInterceptorSubject>? beforeSave = null)
+        SubjectSetupOptions? options = null)
     {
-        var options = new DialogOptions
+        var dialogOptions = new DialogOptions
         {
             MaxWidth = MaxWidth.Medium,
             FullWidth = true,
@@ -234,10 +236,10 @@
 
         var parameters = new DialogParameters<SubjectSetupDialog>
         {
-            { x => x.BeforeSave, beforeSave }
+            { setupDialog => setupDialog.Options, options ?? new SubjectSetupOptions() }
         };
 
-        var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create Subject", parameters, options);
+        var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create subject", parameters, dialogOptions);
         var result = await dialog.Result;
 
         if (result?.Canceled != false)

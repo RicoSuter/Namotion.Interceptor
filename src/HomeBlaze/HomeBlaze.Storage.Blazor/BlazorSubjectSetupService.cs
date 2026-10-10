@@ -18,6 +18,9 @@ public class BlazorSubjectSetupService : ISubjectSetupService
 
     public Task<CreateSubjectResult?> CreateSubjectAsync(SubjectSetupRequest request, CancellationToken cancellationToken)
     {
-        return SubjectSetupDialog.ShowAsync(_dialogService);
+        return SubjectSetupDialog.ShowAsync(_dialogService, new SubjectSetupOptions
+        {
+            Name = new SubjectNameOptions("File name", FileExtensions.Json, request.ExistingNames)
+        });
     }
 }

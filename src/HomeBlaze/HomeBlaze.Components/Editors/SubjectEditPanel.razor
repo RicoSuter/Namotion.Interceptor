@@ -27,7 +27,9 @@
         }
         else
         {
-            <ConfigurationPropertiesEditor @ref="_propertiesEditor" Subject="@Subject" />
+            <ConfigurationPropertiesEditor @ref="_propertiesEditor"
+                                           Subject="@Subject"
+                                           IsValidChanged="OnPropertiesEditorIsValidChanged" />
         }
     }
 </TrackingScope>
@@ -37,9 +39,19 @@
 
     [Parameter] public bool IsCreating { get; set; }
 
+    /// <summary>
+    /// Raised with the current validity once the hosted editor is ready, and again whenever the validity changes.
+    /// </summary>
+    [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
+
     private ISubjectComponent? _subjectComponent;
     private ISubjectEditComponent? _editComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
+    private bool? _reportedIsValid;
+
+    private bool UsesSubjectComponent => Subject is not null &&
+        ((IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup)) ||
+         ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit));
 
     public bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
 
@@ -57,9 +69,9 @@
         }
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        base.OnAfterRender(firstRender);
+        await base.OnAfterRenderAsync(firstRender);
 
         // Subscribe to new edit component if available
         if (_subjectComponent is ISubjectEditComponent editComponent && _editComponent != editComponent)
@@ -75,9 +87,34 @@
             _editComponent.IsDirtyChanged += OnIsDirtyChanged;
             StateHasChanged();
         }
+
+        await ReportIsValidAsync();
     }
 
-    private void OnIsValidChanged(bool isValid) => InvokeAsync(StateHasChanged);
+    private void OnIsValidChanged(bool isValid) => InvokeAsync(async () =>
+    {
+        StateHasChanged();
+        await ReportIsValidAsync();
+    });
+
+    private Task OnPropertiesEditorIsValidChanged(bool isValid) => ReportIsValidAsync();
+
+    private async Task ReportIsValidAsync()
+    {
+        // The hosted component is bound one render after this panel, and until then IsValid falls back
+        // to true. Reporting that would briefly enable the parent's confirm button for an invalid form.
+        if (UsesSubjectComponent && _subjectComponent is null)
+        {
+            return;
+        }
+
+        var isValid = IsValid;
+        if (_reportedIsValid != isValid)
+        {
+            _reportedIsValid = isValid;
+            await IsValidChanged.InvokeAsync(isValid);
+        }
+    }
 
     private void OnIsDirtyChanged(bool isDirty) => InvokeAsync(StateHasChanged);
 
