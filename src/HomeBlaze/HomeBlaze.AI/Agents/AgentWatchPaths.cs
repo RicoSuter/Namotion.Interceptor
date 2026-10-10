@@ -28,9 +28,52 @@ public static class AgentWatchPaths
         foreach (var watchPath in normalizedWatchPaths)
         {
             if (watchPath == "/" ||
-                propertyPath == watchPath ||
-                propertyPath.StartsWith(watchPath + "/", StringComparison.Ordinal) ||
-                propertyPath.StartsWith(watchPath + "[", StringComparison.Ordinal))
+                (propertyPath.StartsWith(watchPath, StringComparison.Ordinal) &&
+                 (propertyPath.Length == watchPath.Length || IsSegmentBoundary(propertyPath[watchPath.Length]))))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the property <paramref name="propertyName"/> of the subject at the canonical
+    /// <paramref name="subjectPath"/> lies in one of the normalized watch paths, without joining the two.
+    /// </summary>
+    public static bool Matches(string subjectPath, string propertyName, IReadOnlyList<string> normalizedWatchPaths)
+    {
+        // The property path is subjectPart + "/" + propertyName; the root's subject part is empty.
+        var subjectPart = subjectPath == "/" ? ReadOnlySpan<char>.Empty : subjectPath.AsSpan();
+        foreach (var watchPath in normalizedWatchPaths)
+        {
+            if (watchPath == "/")
+            {
+                return true;
+            }
+
+            var watch = watchPath.AsSpan();
+            if (watch.Length <= subjectPart.Length)
+            {
+                // The subject part continues with "/" when it is used up exactly.
+                if (subjectPart.StartsWith(watch, StringComparison.Ordinal) &&
+                    (watch.Length == subjectPart.Length || IsSegmentBoundary(subjectPart[watch.Length])))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (!watch.StartsWith(subjectPart, StringComparison.Ordinal) || watch[subjectPart.Length] != '/')
+            {
+                continue;
+            }
+
+            var propertyPart = watch[(subjectPart.Length + 1)..];
+            if (propertyName.AsSpan().StartsWith(propertyPart, StringComparison.Ordinal) &&
+                (propertyName.Length == propertyPart.Length || IsSegmentBoundary(propertyName[propertyPart.Length])))
             {
                 return true;
             }
@@ -61,4 +104,6 @@ public static class AgentWatchPaths
 
         return new string(characters);
     }
+
+    private static bool IsSegmentBoundary(char character) => character is '/' or '[';
 }
