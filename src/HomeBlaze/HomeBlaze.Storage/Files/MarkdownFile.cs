@@ -11,6 +11,8 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
@@ -22,7 +24,7 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter
+public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope, ILifecycleHandler
 {
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
@@ -124,6 +126,53 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             FileSize = metadata.Size;
             LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
         }
+
+        RecalculateDerivedPropertiesOfContent();
+    }
+
+    void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
+    {
+        // The storage parses a new page before it puts it into the graph.
+        if (change.IsContextAttach)
+        {
+            RecalculateDerivedPropertiesOfContent();
+        }
+    }
+
+    // A derived value that resolves a path in page scope depends on two things that are not tracked properties:
+    // the page its subject is on and the names of that page. A subject can be attached to the context before it
+    // is connected to the page, for example the content of a slot whose owner was created with the context, and
+    // its value is then computed without the page. So the values are computed again once the page has them.
+    private void RecalculateDerivedPropertiesOfContent()
+    {
+        // The page is in the set so that a reference back to it ends the walk.
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { this };
+        foreach (var child in Children.Values)
+        {
+            RecalculateDerivedProperties(child, visited);
+        }
+    }
+
+    private static void RecalculateDerivedProperties(IInterceptorSubject subject, HashSet<IInterceptorSubject> visited)
+    {
+        if (!visited.Add(subject) || subject.TryGetRegisteredSubject() is not { } registeredSubject)
+        {
+            return;
+        }
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (property.Reference.Metadata.IsDerived)
+            {
+                property.Reference.RecalculateDerivedProperty();
+                continue;
+            }
+
+            foreach (var child in property.Children)
+            {
+                RecalculateDerivedProperties(child.Subject, visited);
+            }
+        }
     }
 
     /// <summary>
@@ -136,6 +185,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// </remarks>
     public IInterceptorSubject? GetBlockSubject(int blockIndex) =>
         _blockSubjects.GetValueOrDefault(blockIndex);
+
+    IInterceptorSubject? IPathScope.TryGetNamedSubject(string name) =>
+        _namedSubjects.GetValueOrDefault(name);
 
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
     public string? ReadRawContent() => Content;

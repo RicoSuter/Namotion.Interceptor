@@ -25,7 +25,7 @@ Speed: {{ mymotor/CurrentSpeed }}
 
 Reference an existing subject's widget by path instead of embedding it inline:
 
-:::HomeBlaze.Components.Widget#conveyorRef path=../../Conveyor
+:::HomeBlaze.Components.Widget#conveyorRef path=../Conveyor
 :::
 
 For more information on creating pages with embedded subjects, see [Pages Documentation](../Docs/administration/pages.md).

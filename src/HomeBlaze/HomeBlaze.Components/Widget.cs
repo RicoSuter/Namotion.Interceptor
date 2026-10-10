@@ -21,6 +21,8 @@ public partial class Widget : ITitleProvider, IConfigurable
     /// <summary>
     /// Path to the subject to render.
     /// Supports "/folder/file.json" (with [InlinePaths] attribute) for absolute paths from root.
+    /// A relative path resolves from the page that contains the widget, where its first segment can be
+    /// the name of a block on that page, or from the widget itself when it is not on a page.
     /// </summary>
     [Configuration]
     public partial string Path { get; set; }
@@ -51,7 +53,7 @@ public partial class Widget : ITitleProvider, IConfigurable
 
         try
         {
-            return _pathResolver.ResolveSubject(Path, PathStyle.Canonical, relativeTo: this);
+            return _pathResolver.ResolveScopedSubject(Path, PathStyle.Canonical, this);
         }
         catch
         {

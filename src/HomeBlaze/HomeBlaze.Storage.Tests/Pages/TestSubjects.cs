@@ -1,5 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
@@ -235,4 +236,25 @@ public class TestSlotBase
 public class TestSlotDerived : TestSlotBase
 {
     public override IInterceptorSubject? Content { get; set; }
+}
+
+/// <summary>Resolves a path in page scope from a derived property, like a widget that shows another subject.</summary>
+[InterceptorSubject]
+public partial class TestReference : IConfigurable
+{
+    private readonly SubjectPathResolver _pathResolver;
+
+    public TestReference(SubjectPathResolver pathResolver)
+    {
+        _pathResolver = pathResolver;
+        Path = string.Empty;
+    }
+
+    [Configuration]
+    public partial string Path { get; set; }
+
+    [Derived]
+    public IInterceptorSubject? Resolved => _pathResolver.ResolveScopedSubject(Path, PathStyle.Canonical, this);
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

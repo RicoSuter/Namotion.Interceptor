@@ -155,7 +155,7 @@ public sealed partial class MarkdownContentParser
     /// <summary>
     /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
     /// Embedded subject blocks are kept as-is. Frontmatter is preserved.
-    /// Uses the same resolution semantics as <see cref="RenderExpression"/> (relative to the markdown file).
+    /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     public string? RenderContent(string? content, MarkdownFile parent)
     {
@@ -167,7 +167,7 @@ public sealed partial class MarkdownContentParser
             var path = match.Groups[1].Value;
             try
             {
-                var value = _pathResolver.ResolveValue(path, PathStyle.Canonical, relativeTo: parent);
+                var value = _pathResolver.ResolveScopedValue(path, PathStyle.Canonical, parent);
                 return value?.ToString() ?? string.Empty;
             }
             catch

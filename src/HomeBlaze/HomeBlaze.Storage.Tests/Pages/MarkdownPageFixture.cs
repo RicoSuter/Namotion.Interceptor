@@ -64,16 +64,32 @@ public sealed class MarkdownPageFixture
     public async Task<MarkdownFile> AddPageAsync(string name, string content)
     {
         await WriteAsync(name, content);
-        var file = new MarkdownFile(
-            Storage,
-            name,
-            Services.GetRequiredService<MarkdownContentParser>(),
-            Services.GetRequiredService<ConfigurableSubjectSerializer>());
+        var file = CreatePage(name);
 
         Storage.Children = new Dictionary<string, IInterceptorSubject>(Storage.Children) { [name] = file };
         await file.OnFileChangedAsync(CancellationToken.None);
         return file;
     }
+
+    /// <summary>
+    /// Adds a page the way the storage adds a new file: the page is parsed first and put into the graph afterwards.
+    /// </summary>
+    public async Task<MarkdownFile> AddPageParsedBeforeAttachAsync(string name, string content)
+    {
+        await WriteAsync(name, content);
+        var file = CreatePage(name);
+
+        await file.OnFileChangedAsync(CancellationToken.None);
+        Storage.Children = new Dictionary<string, IInterceptorSubject>(Storage.Children) { [name] = file };
+        return file;
+    }
+
+    private MarkdownFile CreatePage(string name) =>
+        new(
+            Storage,
+            name,
+            Services.GetRequiredService<MarkdownContentParser>(),
+            Services.GetRequiredService<ConfigurableSubjectSerializer>());
 
     public async Task UpdatePageAsync(MarkdownFile file, string content, CancellationToken cancellationToken = default)
     {
