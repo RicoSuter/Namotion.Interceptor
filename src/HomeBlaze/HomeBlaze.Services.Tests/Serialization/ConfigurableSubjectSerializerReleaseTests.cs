@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Validation;
 
 namespace HomeBlaze.Services.Tests.Serialization;
 
@@ -27,12 +28,14 @@ public class ConfigurableSubjectSerializerReleaseTests
         typeProvider.AddTypes(
         [
             typeof(ParentWithChildSubject),
-            typeof(ChildSubject)
+            typeof(ChildSubject),
+            typeof(SubjectWithValidatedProperty)
         ]);
 
         var context = InterceptorSubjectContext
             .Create()
-            .WithLifecycle();
+            .WithLifecycle()
+            .WithDataAnnotationValidation();
 
         var lifecycle = context.TryGetLifecycleInterceptor()!;
         lifecycle.SubjectAttached += change => _attached.Add(change.Subject);
@@ -91,5 +94,65 @@ public class ConfigurableSubjectSerializerReleaseTests
         // Assert
         Assert.Null(exception);
         Assert.Empty(_attached);
+    }
+
+    [Fact]
+    public void WhenCallbackIsGiven_ThenItGetsTheInstanceBeforeItsConfigurationIsSet()
+    {
+        // Arrange
+        ParentWithChildSubject? created = null;
+        string? nameInCallback = null;
+        ChildSubject? childInCallback = null;
+
+        // Act
+        var parent = _serializer.Deserialize(ParentJson, subject =>
+        {
+            created = Assert.IsType<ParentWithChildSubject>(subject);
+            nameInCallback = created.Name;
+            childInCallback = created.Child;
+        });
+
+        // Assert
+        Assert.Same(parent, created);
+        Assert.Equal(string.Empty, nameInCallback);
+        Assert.Null(childInCallback);
+        Assert.Equal("parent", created!.Name);
+    }
+
+    [Fact]
+    public void WhenConfigurationPropertyThrows_ThenTheCallbackGotTheInstanceAndItCanBeReleased()
+    {
+        // Arrange
+        const string json = """
+            {
+                "$type": "HomeBlaze.Services.Tests.Serialization.SubjectWithValidatedProperty",
+                "level": 99
+            }
+            """;
+        IInterceptorSubject? created = null;
+
+        // Act
+        var exception = Record.Exception(() => _serializer.Deserialize(json, subject => created = subject));
+        var attachedAfterFailure = _attached.ToArray();
+        _serializer.Release(created!);
+
+        // Assert
+        Assert.NotNull(exception);
+        Assert.Same(Assert.IsType<SubjectWithValidatedProperty>(created), Assert.Single(attachedAfterFailure));
+        Assert.Empty(_attached);
+    }
+
+    [Fact]
+    public void WhenJsonNamesNoKnownType_ThenTheCallbackIsNotCalled()
+    {
+        // Arrange
+        var isCalled = false;
+
+        // Act
+        var result = _serializer.Deserialize("""{ "$type": "Unknown.Type" }""", _ => isCalled = true);
+
+        // Assert
+        Assert.Null(result);
+        Assert.False(isCalled);
     }
 }

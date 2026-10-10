@@ -1,5 +1,8 @@
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -13,11 +16,13 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     private const string Namespace = "HomeBlaze.Storage.Tests.Pages";
     private const string HostedType = $"{Namespace}.TestHosted";
 
+    private readonly RecordingLogger<MarkdownContentParser> _logger = new();
     private MarkdownPageFixture _fixture = null!;
 
     public async Task InitializeAsync()
     {
-        _fixture = await MarkdownPageFixture.CreateAsync();
+        _fixture = await MarkdownPageFixture.CreateAsync(
+            services => services.AddSingleton<ILogger<MarkdownContentParser>>(_logger));
         await _fixture.StartHostedServicesAsync();
     }
 
@@ -111,6 +116,68 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         Assert.Contains("apply failed", MarkdownPageFixture.Html(page.Children));
         Assert.Empty(Log.Running);
         Assert.Equal(1, Log.StartCount);
+    }
+
+    [Fact]
+    public async Task WhenConfigurationValueOfNewBlockIsRejectedByItsSetter_ThenNoInstanceKeepsRunning()
+    {
+        // Arrange
+        var content = $":::{HostedType}#hosted level=99\n:::";
+
+        // Act
+        var page = await _fixture.AddPageAsync("page.md", content);
+        await ReloadAsync(page, content, times: 3);
+        await _fixture.SettleHostedServicesAsync();
+
+        // Assert
+        Assert.Contains("could not be created or updated", MarkdownPageFixture.Html(page.Children));
+        Assert.False(page.Children.ContainsKey("hosted"));
+        Assert.Empty(Log.Running);
+    }
+
+    [Fact]
+    public async Task WhenReleasingSubjectOfFailedBlockFails_ThenThePageStillRendersAndTheFailureIsLogged()
+    {
+        // Arrange
+        var content =
+            $":::{Namespace}.TestFailingDetach#failing level=99\n:::\n\n:::{HostedType}#hosted name=A\n:::";
+
+        // Act
+        var page = await _fixture.AddPageAsync("page.md", content);
+        await _fixture.SettleHostedServicesAsync();
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains("TestFailingDetach&#39; could not be created or updated", html);
+        Assert.DoesNotContain("detach failed", html);
+        Assert.Same(page.Children["hosted"], Assert.Single(Log.Running));
+
+        var warning = Assert.Single(_logger.Entries, entry => entry.Exception?.Message == "detach failed");
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Contains("TestFailingDetach", warning.Message);
+        Assert.Contains("page.md", warning.Message);
+    }
+
+    [Fact]
+    public async Task WhenReleasingSubjectOfCancelledReloadFails_ThenTheCancellationIsReportedAndTheOthersAreReleased()
+    {
+        // Arrange
+        var page = await _fixture.AddPageAsync("page.md", $":::{Namespace}.TestFaulty#faulty mode=ok\n:::");
+        using var cancellationSource = new CancellationTokenSource();
+        Assert.IsType<TestFaulty>(page.Children["faulty"]).CancellationSource = cancellationSource;
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => _fixture.UpdatePageAsync(
+            page,
+            $":::{Namespace}.TestFailingDetach#failing level=1\n:::\n\n:::{HostedType}#added name=B\n:::\n\n" +
+            $":::{Namespace}.TestFaulty#faulty mode={TestFaulty.CancelMode}\n:::",
+            cancellationSource.Token));
+        await _fixture.SettleHostedServicesAsync();
+
+        // Assert
+        Assert.IsAssignableFrom<OperationCanceledException>(exception);
+        Assert.Empty(Log.Running);
+        Assert.Single(_logger.Entries, entry => entry.Exception?.Message == "detach failed");
     }
 
     [Fact]

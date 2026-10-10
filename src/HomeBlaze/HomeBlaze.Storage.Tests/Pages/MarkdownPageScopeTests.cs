@@ -433,6 +433,20 @@ public class MarkdownPageScopeTests
         Assert.True(expressionChanges.Count > expressionChangeCountAfterReload, "The value does not follow the new subject.");
     }
 
+    [Fact]
+    public async Task WhenFileNameContainsBraces_ThenAnExpressionReachesItWithPercentEncodedSegments()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        await fixture.AddPageAsync("a{b}.md", "---\ntitle: Braces\n---\n\ntext");
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", "Title: {{ ../a%7Bb%7D.md/Title }}");
+
+        // Assert
+        Assert.Equal("Braces", FindExpression(page.Children.Values, "../a%7Bb%7D.md/Title").Value);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

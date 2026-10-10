@@ -403,6 +403,17 @@ public class MarkdownSegmentBuilderTests
         Assert.Equal(new ExpressionMarkdownSegment(expectedPath), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
     }
 
+    [Fact]
+    public void WhenBracesEncloseALiteralLessThanSign_ThenTheyAreShownAsWrittenAndAreNoSegment()
+    {
+        // Act
+        var segments = Build("Value {{ a < b }} now and {{ c/D }}");
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment("c/D"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Contains("Value {{ a < b }} now and ", VisibleText(segments));
+    }
+
     [Theory]
     [InlineData("Speed {{ a/B }} RPM and {{ c/D }} bar")]
     [InlineData("Write `{{ a/B }}` to show {{ c/D }} here")]
@@ -418,6 +429,8 @@ public class MarkdownSegmentBuilderTests
     [InlineData("Before\n\n:::Demo.Card\nUse {{ to start an expression.\n:::\n\nSpeed: {{ a/B }}")]
     [InlineData("Use {{ to start an expression.\n\n:::Demo.Card\nSpeed: {{ a/B }}\n:::")]
     [InlineData("""Value {{ Items["a"]/B }} and {{ A&B/C }} now""")]
+    [InlineData("Value {{ a < b }} now and {{ c/D }}")]
+    [InlineData("Value {{ a&b/C }} now")]
     [InlineData("Nothing to see here")]
     public void WhenPageIsRendered_ThenItsExpressionsAreTheOnesFoundInItsText(string source)
     {

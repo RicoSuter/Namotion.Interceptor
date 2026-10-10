@@ -407,7 +407,21 @@ public sealed partial class MarkdownContentParser
         // a subject that this parse reused. That one is on the page, so the release leaves its content alone.
         foreach (var subject in state.TakeCreatedSince(createdCount))
         {
-            _serializer.Release(subject);
+            try
+            {
+                _serializer.Release(subject);
+            }
+            catch (Exception exception)
+            {
+                // Detaching runs the lifecycle handlers of the context and of the subject. A failure there must
+                // not keep the other subjects from being released, turn a failed block into a failed page, or
+                // replace the exception that ended the parse.
+                _logger?.LogWarning(
+                    exception,
+                    "A subject of the type {Type} that the page {Path} created and did not use could not be released.",
+                    subject.GetType().FullName,
+                    state.Page.FullPath);
+            }
         }
     }
 

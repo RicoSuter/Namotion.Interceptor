@@ -44,11 +44,9 @@ public sealed partial class MarkdownContentParser
         }
         else
         {
-            subject = _serializer.Deserialize(configuration.Json) as IInterceptorSubject;
-            if (subject is not null)
-            {
-                state.AddCreated(subject);
-            }
+            // Recorded before the configuration is set: when a setter throws, the instance is already attached
+            // and this parse is the only one that knows it.
+            subject = _serializer.Deserialize(configuration.Json, state.AddCreated) as IInterceptorSubject;
         }
 
         if (subject is not null)

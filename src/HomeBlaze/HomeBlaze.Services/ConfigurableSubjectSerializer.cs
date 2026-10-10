@@ -57,7 +57,18 @@ public class ConfigurableSubjectSerializer
     /// Deserializes JSON to an IConfigurable using $type discriminator.
     /// Uses ActivatorUtilities for DI-aware construction.
     /// </summary>
-    public IConfigurable? Deserialize(string json)
+    public IConfigurable? Deserialize(string json) => Deserialize(json, created: null);
+
+    /// <summary>
+    /// Deserializes like <see cref="Deserialize(string)"/> and hands a new subject to
+    /// <paramref name="created"/> before its configuration properties are set.
+    /// </summary>
+    /// <remarks>
+    /// The subject is attached to the context from its constructor on. When setting a configuration property
+    /// throws, this method throws and the callback is the only way to get the subject, which
+    /// <see cref="Release"/> then detaches. Call <see cref="Release"/> only after this method has returned or thrown.
+    /// </remarks>
+    public IConfigurable? Deserialize(string json, Action<IInterceptorSubject>? created)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -89,13 +100,19 @@ public class ConfigurableSubjectSerializer
             return null;
         }
 
+        if (created is not null && subject is IInterceptorSubject interceptorSubject)
+        {
+            created(interceptorSubject);
+        }
+
         PopulateConfigurationProperties(subject, type, root);
         return subject;
     }
 
     /// <summary>
-    /// Releases a subject that <see cref="Deserialize"/> created and that is not used after all: detaches it
-    /// and the subjects in its properties from the context, which stops their hosted services.
+    /// Releases a subject that <see cref="Deserialize(string)"/> created and that is not used after all: detaches it
+    /// and the subjects in its properties from the context, which stops their hosted services. A hosted service
+    /// that was not started yet is stopped without having been started.
     /// </summary>
     /// <remarks>
     /// Does nothing for a subject that a property references. Such a subject is in the graph and leaves the
@@ -175,7 +192,7 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Checks whether a JSON value converts to the given property type with the options that
-    /// <see cref="Deserialize"/> and <see cref="UpdateConfiguration"/> use.
+    /// <see cref="Deserialize(string)"/> and <see cref="UpdateConfiguration"/> use.
     /// </summary>
     /// <remarks>
     /// Both methods skip a property whose value does not convert without reporting it.

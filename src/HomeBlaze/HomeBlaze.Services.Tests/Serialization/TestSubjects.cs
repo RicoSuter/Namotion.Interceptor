@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
@@ -264,6 +265,19 @@ public partial class SubjectWithAnyChild : IConfigurable
 {
     [Configuration]
     public partial IInterceptorSubject? Child { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Subject whose configuration property rejects a value outside its range in the setter, after the constructor ran.
+/// </summary>
+[InterceptorSubject]
+public partial class SubjectWithValidatedProperty : IConfigurable
+{
+    [Configuration]
+    [Range(0, 10)]
+    public partial int Level { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

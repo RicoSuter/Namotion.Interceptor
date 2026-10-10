@@ -5,6 +5,7 @@ using HomeBlaze.Services;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -407,6 +408,11 @@ public partial class TestHosted : IHostedService, IConfigurable
     [Configuration]
     public partial string? Mode { get; set; }
 
+    /// <summary>A value outside the range fails in the setter, after the constructor ran.</summary>
+    [Configuration]
+    [Range(0, 10)]
+    public partial int Level { get; set; }
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _log = ((IInterceptorSubject)this).Context.TryGetService<TestHostedLog>();
@@ -422,4 +428,26 @@ public partial class TestHosted : IHostedService, IConfigurable
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) =>
         Mode == ThrowMode ? throw new InvalidOperationException("apply failed") : Task.CompletedTask;
+}
+
+/// <summary>
+/// A subject whose own lifecycle handler fails when the subject leaves the context, which a handler must
+/// not do. A value outside the range of <see cref="Level"/> fails in the setter, after the constructor ran.
+/// </summary>
+[InterceptorSubject]
+public partial class TestFailingDetach : IConfigurable, ILifecycleHandler
+{
+    [Configuration]
+    [Range(0, 10)]
+    public partial int Level { get; set; }
+
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
+    {
+        if (change.IsContextDetach)
+        {
+            throw new InvalidOperationException("detach failed");
+        }
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

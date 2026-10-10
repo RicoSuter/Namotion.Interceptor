@@ -42,6 +42,9 @@ public static partial class MarkdownSegmentBuilder
 
     private static readonly char[] Braces = ['{', '}'];
 
+    // The characters that the path part of the expression pattern excludes.
+    private static readonly char[] ExcludedFromPath = ['{', '}', '<'];
+
     /// <summary>
     /// Gets the expressions in the text of the page in document order. An expression is a path between two
     /// pairs of braces that contains no brace and no '&lt;'. A brace inside markdown code neither opens nor
@@ -51,6 +54,8 @@ public static partial class MarkdownSegmentBuilder
     /// The search reads the text and not the rendered page, so it also returns an expression that
     /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
     /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
+    /// A path with a character reference in it, such as <c>&amp;amp;</c>, is returned as written, while the
+    /// segment has the character.
     /// </remarks>
     public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
     {
@@ -138,6 +143,16 @@ public static partial class MarkdownSegmentBuilder
                 continue;
             }
 
+            // The path is HTML here, so a quote or an ampersand in it is a character reference.
+            var path = match.Groups[4].Success ? WebUtility.HtmlDecode(match.Groups[4].Value) : null;
+
+            // The pattern cannot see a '<' or a brace that the page text has literally, because the HTML has
+            // a character reference for it. In the text such braces enclose no expression, so they stay text here.
+            if (path is not null && path.AsSpan().IndexOfAny(ExcludedFromPath) >= 0)
+            {
+                continue;
+            }
+
             if (match.Index > lastIndex)
             {
                 current.Add(new HtmlMarkdownSegment(html[lastIndex..match.Index]));
@@ -145,10 +160,9 @@ public static partial class MarkdownSegmentBuilder
 
             lastIndex = match.Index + match.Length;
 
-            if (match.Groups[4].Success)
+            if (path is not null)
             {
-                // The path is HTML here, so a quote or an ampersand in it is a character reference.
-                current.Add(new ExpressionMarkdownSegment(WebUtility.HtmlDecode(match.Groups[4].Value)));
+                current.Add(new ExpressionMarkdownSegment(path));
             }
             else if (match.Groups[1].Length == 0)
             {
