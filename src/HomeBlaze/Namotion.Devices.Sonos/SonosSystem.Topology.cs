@@ -192,7 +192,7 @@ public partial class SonosSystem
                 group = new SonosGroup(this, coordinator);
             }
 
-            group.Update(topologyGroup.Id, topologyGroup.Players.Select(member => players[member.Uuid]).ToArray());
+            group.Update(topologyGroup.Players.Select(member => players[member.Uuid]).ToArray());
             updatedGroups[topologyGroup.CoordinatorUuid] = group;
         }
 

@@ -377,7 +377,6 @@ public class SonosSystemTopologyTests
         var group = system.Groups[TestFixtures.LivingRoomUuid];
         Assert.Same(system.Players[TestFixtures.LivingRoomUuid], group.Coordinator);
         Assert.Equal("Wohnzimmer", group.Title);
-        Assert.Equal("RINCON_A0000000000101400:1010349259", group.GroupId);
     }
 
     [Fact]

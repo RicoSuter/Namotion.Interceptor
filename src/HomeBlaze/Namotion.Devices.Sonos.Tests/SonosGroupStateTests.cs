@@ -244,10 +244,10 @@ public class SonosGroupStateTests
         uuids.Select(uuid => new SonosTopologyPlayer(uuid, uuid, new Uri("http://10.0.0.1:1400/"), null, null, null, [])).ToArray());
 
     [Fact]
-    public void WhenGroupIsInspected_ThenItsSonosGroupIdIsNotPublic()
+    public void WhenGroupIsInspected_ThenItDoesNotKeepTheSonosGroupId()
     {
         // Act
-        var property = typeof(SonosGroup).GetProperty("GroupId", BindingFlags.Public | BindingFlags.Instance);
+        var property = typeof(SonosGroup).GetProperty("GroupId", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
         // Assert
         Assert.Null(property);

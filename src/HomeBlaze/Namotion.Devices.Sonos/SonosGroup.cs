@@ -25,15 +25,9 @@ public partial class SonosGroup :
     internal SonosGroup(SonosSystem system, SonosPlayer coordinator)
     {
         _system = system;
-        GroupId = string.Empty;
         Coordinator = coordinator;
         Members = [coordinator];
     }
-
-    /// <summary>
-    /// The current Sonos group id. It changes on every regroup, so the group is keyed by its coordinator instead.
-    /// </summary>
-    internal partial string GroupId { get; set; }
 
     [State(Position = 2)]
     public partial SonosPlayer Coordinator { get; internal set; }
@@ -254,9 +248,8 @@ public partial class SonosGroup :
     private Task RunAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
         Coordinator.RunOnPlayerAsync(command, cancellationToken);
 
-    internal void Update(string groupId, SonosPlayer[] members)
+    internal void Update(SonosPlayer[] members)
     {
-        GroupId = groupId;
         if (!members.SequenceEqual(Members))
         {
             Members = members;
