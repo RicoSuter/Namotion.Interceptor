@@ -85,8 +85,8 @@ public class SonosOperationRoutingTests
         "SetBass" => player.SetBassAsync(3, CancellationToken.None),
         "SetTreble" => player.SetTrebleAsync(-2, CancellationToken.None),
         "SetLoudness" => player.SetLoudnessAsync(false, CancellationToken.None),
-        "SetNightMode" => player.SetNightModeAsync(true, CancellationToken.None),
-        "SetSpeechEnhancement" => player.SetSpeechEnhancementAsync(true, CancellationToken.None),
+        "SetNightMode" => player.HomeTheater!.SetNightModeAsync(true, CancellationToken.None),
+        "SetSpeechEnhancement" => player.HomeTheater!.SetSpeechEnhancementAsync(true, CancellationToken.None),
         "LeaveGroup" => player.LeaveGroupAsync(CancellationToken.None),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };

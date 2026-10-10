@@ -10,7 +10,7 @@ public partial class SonosPlayer
 {
     // Operation availability. The attribute names match the operation method names without "Async".
 
-    private bool CanControl => IsConnected && _system.IsConnected;
+    internal bool CanControl => IsConnected && _system.IsConnected;
 
     // Commands for group playback go to the coordinator, so it must be reachable as well.
     private bool CanControlCoordinator => CanControl && GetCoordinator().IsConnected;
@@ -323,28 +323,6 @@ public partial class SonosPlayer
     [Operation(Title = "Set Loudness", Position = 42, Description = "Turns loudness compensation on or off for this player.")]
     public Task SetLoudnessAsync(bool loudness, CancellationToken cancellationToken) =>
         RunOnPlayerAsync((connection, token) => connection.SetLoudnessAsync(loudness, token), cancellationToken);
-
-    [Derived]
-    [PropertyAttribute("SetNightMode", KnownAttributes.IsEnabled)]
-    public bool SetNightMode_IsEnabled => CanControl && IsHomeTheater;
-
-    [Operation(Title = "Set Night Mode", Position = 43, Description = "Turns night mode on or off for this home theater player.")]
-    public Task SetNightModeAsync(bool nightMode, CancellationToken cancellationToken)
-    {
-        EnsureHomeTheater();
-        return RunOnPlayerAsync((connection, token) => connection.SetEqualizerAsync("NightMode", nightMode, token), cancellationToken);
-    }
-
-    [Derived]
-    [PropertyAttribute("SetSpeechEnhancement", KnownAttributes.IsEnabled)]
-    public bool SetSpeechEnhancement_IsEnabled => CanControl && IsHomeTheater;
-
-    [Operation(Title = "Set Speech Enhancement", Position = 44, Description = "Turns speech enhancement on or off for this home theater player.")]
-    public Task SetSpeechEnhancementAsync(bool speechEnhancement, CancellationToken cancellationToken)
-    {
-        EnsureHomeTheater();
-        return RunOnPlayerAsync((connection, token) => connection.SetEqualizerAsync("DialogLevel", speechEnhancement, token), cancellationToken);
-    }
 
     [Derived]
     [PropertyAttribute("JoinGroup", KnownAttributes.IsEnabled)]

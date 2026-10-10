@@ -681,7 +681,6 @@ public class SonosPlayerStateTests
         Assert.Equal(-2, player.Bass);
         Assert.Equal(3, player.Treble);
         Assert.False(player.Loudness);
-        Assert.Null(player.NightMode);
     }
 
     [Fact]

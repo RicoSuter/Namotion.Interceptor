@@ -116,7 +116,7 @@ public abstract partial class SonosDevice :
     /// <summary>
     /// Applies the device description alone, when the zone info could not be read; it is read again next time.
     /// </summary>
-    internal void ApplyDescription(SonosDeviceDescription description)
+    internal virtual void ApplyDescription(SonosDeviceDescription description)
     {
         Model = description.ModelName;
         ProductCode = description.ModelNumber;

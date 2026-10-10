@@ -335,13 +335,13 @@ public class SonosPlayerOperationTests
     }
 
     [Fact]
-    public async Task WhenNightModeOnPlayerWithoutHomeTheater_ThenThrows()
+    public async Task WhenSwitchingToTvOnPlayerWithoutHomeTheater_ThenThrows()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => player.SetNightModeAsync(true, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => player.SwitchToTvAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -353,7 +353,7 @@ public class SonosPlayerOperationTests
         // Assert
         Assert.False(player.LeaveGroup_IsEnabled);
         Assert.False(player.Seek_IsEnabled);
-        Assert.False(player.SetNightMode_IsEnabled);
+        Assert.False(player.SwitchToTv_IsEnabled);
         Assert.False(player.Play_IsEnabled);
     }
 
@@ -402,8 +402,8 @@ public class SonosPlayerOperationTests
         Assert.True(member.LeaveGroup_IsEnabled);
     }
 
-    // Commands sent to the player itself. SwitchToTv, SwitchToLineIn, SetNightMode and SetSpeechEnhancement also
-    // need a capability the fixture players lack, and Seek needs a track duration, so they are covered elsewhere.
+    // Commands sent to the player itself. SwitchToTv and SwitchToLineIn also need a capability the fixture players
+    // lack, and Seek needs a track duration, so they are covered elsewhere.
     private static (string Name, bool IsEnabled)[] GetPlayerOperationStates(SonosPlayer player) =>
     [
         (nameof(SonosPlayer.SetVolume_IsEnabled), player.SetVolume_IsEnabled),

@@ -60,6 +60,20 @@
                        Value="@((int)((Player?.Volume ?? 0m) * 100m))"
                        ValueChanged="@(value => RunAsync(player => player.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
         </MudStack>
+
+        @if (Player?.HomeTheater is { } homeTheater)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap">
+                <MudSwitch T="bool" Label="Night mode" Color="Color.Primary" Size="Size.Small"
+                           Disabled="@(!homeTheater.SetNightMode_IsEnabled)"
+                           Value="@(homeTheater.NightMode == true)"
+                           ValueChanged="@(value => RunAsync(_ => homeTheater.SetNightModeAsync(value, CancellationToken.None)))" />
+                <MudSwitch T="bool" Label="Speech enhancement" Color="Color.Primary" Size="Size.Small"
+                           Disabled="@(!homeTheater.SetSpeechEnhancement_IsEnabled)"
+                           Value="@(homeTheater.SpeechEnhancement == true)"
+                           ValueChanged="@(value => RunAsync(_ => homeTheater.SetSpeechEnhancementAsync(value, CancellationToken.None)))" />
+            </MudStack>
+        }
     </MudStack>
 </MudPaper>
 

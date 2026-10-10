@@ -15,7 +15,7 @@ public class SonosOperationMetadataTests
     public static TheoryData<string> Operations()
     {
         var data = new TheoryData<string>();
-        foreach (var type in new[] { typeof(SonosPlayer), typeof(SonosGroup), typeof(SonosSystem) })
+        foreach (var type in new[] { typeof(SonosPlayer), typeof(SonosHomeTheater), typeof(SonosGroup), typeof(SonosSystem) })
         {
             foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
             {

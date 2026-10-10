@@ -5,14 +5,14 @@ icon: LibraryMusic
 
 # Sonos
 
-Controls a Sonos household over the speakers' local UPnP API on port 1400, without a Sonos account or cloud connection. One `SonosSystem` finds the speakers, shows every room as a `SonosPlayer` with its bonded units as `SonosSatellite` children, and the current groups as `SonosGroup` subjects. UPnP events keep the state live, and a poll every 30 seconds reconciles anything the events missed.
+Controls a Sonos household over the speakers' local UPnP API on port 1400, without a Sonos account or cloud connection. One `SonosSystem` finds the speakers, shows every room as a `SonosPlayer` with its bonded units as `SonosSatellite` children and, for a soundbar, its home theater settings as a `SonosHomeTheater` child, and the current groups as `SonosGroup` subjects. UPnP events keep the state live, and a poll every 30 seconds reconciles anything the events missed.
 
 ## Supported Systems
 
 - **S2** is the target platform; every feature works on it.
 - **S1** serves the same UPnP services (AVTransport, RenderingControl, GroupRenderingControl, ZoneGroupTopology, ContentDirectory), so it should work too, except `PlayNotification`, which needs S2.
 - S1 and S2 systems in one home are separate households that Sonos cannot group ([Sonos support](https://support.sonos.com/en-us/article/known-limitations-with-separate-s1-and-s2-sonos-systems)). Add one `SonosSystem` per household, see [When to Set SeedHost](#when-to-set-seedhost).
-- Speakers, soundbars, Port, Amp and portables are shown as rooms. TV input, night mode and speech enhancement are offered on players whose device description lists `HTControl`, line-in on players that list `AudioIn`. Portables (Move, Roam) report their battery.
+- Speakers, soundbars, Port, Amp and portables are shown as rooms. Players whose device description lists `HTControl`, such as Arc, Beam and Ray, offer the TV input and get a `HomeTheater` child with night mode and speech enhancement. Players that list `AudioIn` offer line-in. Portables (Move, Roam) report their battery.
 - Boost and Bridge units (`IsZoneBridge`) have nothing to play and are not shown.
 
 ## Configuration
@@ -64,6 +64,7 @@ The speakers send events to `http://<EventCallbackHost>:<EventPort>/event/...`, 
 ```
 SonosSystem                                 the household
 ├── Players[RINCON_…]                       SonosPlayer, one per room
+│     ├── HomeTheater                       SonosHomeTheater, only on home theater players
 │     └── Satellites[RINCON_…]              SonosSatellite: subwoofer, surround or stereo partner
 ├── Groups[RINCON_<coordinator>]            SonosGroup, references into Players
 └── Favorites[]                             SonosFavorite: Title, Uri, IsContainer, ImageUri
@@ -84,6 +85,10 @@ A player is a room as the Sonos app shows it, titled with model and room, for ex
 
 A satellite carries its player's room name and is titled with model, room and role, for example "Sonos Sub (Living Room, subwoofer)". Invisible members that are no stereo partner are skipped.
 
+### Home Theater
+
+Settings that only a home theater player has live on its `HomeTheater` child, so a plain room neither shows them nor offers their operations. The child exists when the device description lists `HTControl` and is empty (null) otherwise, which `IsHomeTheater` also tells. It is created once, when the description is first read, and kept across polls and reconnects. Its path is `Players[RINCON_…]/HomeTheater`, for example `Players[RINCON_…]/HomeTheater/NightMode`.
+
 ### Groups
 
 Every player belongs to exactly one group; an ungrouped room is a group of one. A group is keyed by the RINCON id of its coordinator, because Sonos's own group id changes on every regroup and is therefore not exposed. Its path therefore stops resolving when another room becomes coordinator.
@@ -102,7 +107,7 @@ A group reports its coordinator's playback and track, and its own volume and mut
 
 ## Widgets
 
-`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
+`SonosSystem` lists its rooms with what they play, `SonosPlayer` shows track, album art, transport, mute and volume, with night mode and speech enhancement switches on a home theater player, and `SonosGroup` shows its rooms, track and group volume. The player and group widgets show the track title, without one the `SourceTitle`, and without either "Playing" or "Nothing playing", since sources such as TV and line-in play without a title. Embed them as described in [Markdown Pages](../administration/pages.md#widget-rendering), for example a room of a system stored as `Devices/Sonos.json`:
 
 <!-- The backticks are HTML entities so that this page shows the block instead of instantiating it: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
 <pre><code>&#96;&#96;&#96;subject(livingRoom)
@@ -121,6 +126,7 @@ Prefer player or system widgets over group widgets: a group widget shows "Cannot
 |---------|------------|
 | `SonosSystem` | `IHubDevice`, `IConfigurable`, `IMonitoredService`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider`, `IIconProvider` |
 | `SonosPlayer` | `IAudioPlayer`, `IBatteryState`, `IDeviceInfo`, `INetworkAdapter`, `ISoftwareState`, `IConnectionState`, `ITitleProvider`, `IIconProvider` |
+| `SonosHomeTheater` | `ITitleProvider`, `IIconProvider` |
 | `SonosSatellite` | `IDeviceInfo`, `INetworkAdapter`, `ISoftwareState`, `IConnectionState`, `ITitleProvider`, `IIconProvider` |
 | `SonosGroup` | `IAudioPlayer`, `IVirtualSubject`, `ITitleProvider`, `IIconProvider` |
 
@@ -156,13 +162,22 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `SleepTimerRemaining` | TimeSpan | Group sleep timer as of the last poll; empty when none runs |
 | `Bass`, `Treble` | -10..10 | Equalizer of this room |
 | `Loudness` | | Loudness compensation of this room |
-| `NightMode`, `SpeechEnhancement` | | Home theater only; any dialog level above zero counts as on |
+| `HomeTheater` | | The [home theater](#home-theater) settings; empty on other players |
 | `GroupCoordinatorUuid`, `IsGroupCoordinator` | | Group membership |
-| `IsHomeTheater`, `HasLineIn` | | Device description lists `HTControl` or `AudioIn` |
+| `IsHomeTheater`, `HasLineIn` | | Device description lists `HTControl` (the `HomeTheater` child exists) or `AudioIn` |
 | `BatteryLevel` | 0..1 | Portables only, from the topology |
 | `IsCharging` | | Portables only |
 | `Model`, `ProductCode`, `SerialNumber`, `MacAddress`, `HardwareRevision`, `SoftwareVersion` | | From the device description and `GetZoneInfo`; `SoftwareVersion` is the version the Sonos app shows |
 | `IpAddress`, `IsWireless` | | From the topology |
+
+### SonosHomeTheater
+
+| Property | Description |
+|----------|-------------|
+| `NightMode` | Whether night mode is on |
+| `SpeechEnhancement` | Whether speech enhancement is on; any dialog level above zero counts as on |
+
+Both are empty until first read and keep their last value while the player is offline.
 
 ### SonosSatellite
 
@@ -187,13 +202,19 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | `PlayFavorite` | `title` | coordinator | See [Favorites](#favorites) |
 | `PlayUri`, `PlayStream` | `uri`, `title` (stream, optional) | coordinator | See [Playing URIs](#playing-uris-streams-and-notifications) |
 | `PlayNotification` | `soundUri`, `volume` | player | S2 only |
-| `SwitchToTv`, `SwitchToLineIn` | | player | Home theater or line-in players only |
+| `SwitchToTv`, `SwitchToLineIn` | | player | Home theater or line-in players only; disabled and failing on others |
 | `SetShuffle`, `SetRepeat` | `shuffle`, `repeat` | coordinator | Each keeps the other half of the play mode |
 | `SetSleepTimer` | `duration` (0 to 23:59:59) | coordinator | Zero cancels it |
 | `SetBass`, `SetTreble`, `SetLoudness` | -10 to 10, bool | player | |
-| `SetNightMode`, `SetSpeechEnhancement` | bool | player | Home theater only; speech enhancement writes `DialogLevel` 1 or 0 |
 | `JoinGroup` | `room` | player | Joins the group of the given room |
 | `LeaveGroup` | | player | Enabled in groups of two or more rooms, also on the coordinator |
+
+### SonosHomeTheater
+
+| Operation | Parameters | Target | Notes |
+|-----------|------------|--------|-------|
+| `SetNightMode` | bool | player | |
+| `SetSpeechEnhancement` | bool | player | Writes `DialogLevel` 1 or 0 |
 
 ### SonosGroup
 
@@ -207,7 +228,7 @@ Transport, `PlayFavorite`, `PlayUri`, `PlayStream`, `SetShuffle`, `SetRepeat` an
 | `GroupAll` | `room` | Groups every connected room with the given room, which becomes coordinator |
 | `UngroupAll` | | Makes every connected room standalone |
 
-Operations are disabled while the system, the target or, for coordinator operations, the coordinator is not connected. An unknown room or favorite fails with the list of known names. After each command the players of the commanded group are read back, also when it failed, so the result shows without waiting for events; grouping commands run a full reconciliation instead. Sonos regroups after it has answered the command, so a successful grouping command first re-reads the topology, for about 2 seconds at most, until it shows the new groups.
+Operations are disabled while the system, the target or, for coordinator operations, the coordinator is not connected; the home theater operations follow their player. An unknown room or favorite fails with the list of known names. After each command the players of the commanded group are read back, also when it failed, so the result shows without waiting for events; grouping commands run a full reconciliation instead. Sonos regroups after it has answered the command, so a successful grouping command first re-reads the topology, for about 2 seconds at most, until it shows the new groups.
 
 ## Behavior
 
@@ -313,7 +334,7 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - Crossfade (`Get/SetCrossfadeMode`, already evented).
 - Disabling `Next`, `Previous`, `Seek`, `Pause`, `SetShuffle` and `SetRepeat` from `CurrentTransportActions` and `CurrentValidPlayModes`.
 - Line-in level (`Get/SetLineInLevel`).
-- Home theater levels (`SubGain`, `SubEnabled`, `SurroundEnable`, `SurroundLevel`, `MusicSurroundLevel`, `SurroundMode`, `HeightChannelLevel`, `AudioDelay`) and the Arc Ultra speech enhancement levels.
+- Home theater levels on `HomeTheater` (`SubGain`, `SubEnabled`, `SurroundEnable`, `SurroundLevel`, `MusicSurroundLevel`, `SurroundMode`, `HeightChannelLevel`, `AudioDelay`) and the Arc Ultra speech enhancement levels.
 - Trueplay (`Get/SetRoomCalibrationStatus`).
 - Fixed output (`OutputFixed`) to disable volume operations on Port, Connect and Amp.
 - Household identity (`GetHouseholdID` or `MuseHouseholdId`) to tell households apart.

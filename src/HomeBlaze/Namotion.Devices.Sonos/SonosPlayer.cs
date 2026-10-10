@@ -29,6 +29,7 @@ public partial class SonosPlayer : SonosDevice,
         : base(uuid)
     {
         _system = system;
+        HomeTheater = null;
         Satellites = new Dictionary<string, SonosSatellite>(StringComparer.Ordinal);
     }
 
@@ -152,11 +153,12 @@ public partial class SonosPlayer : SonosDevice,
     [State(Position = 22)]
     public partial bool? Loudness { get; internal set; }
 
+    /// <summary>
+    /// The home theater settings, or null when the device description does not list <c>HTControl</c>. Created when
+    /// the description is first read and then kept, so a poll never replaces it.
+    /// </summary>
     [State(Position = 23)]
-    public partial bool? NightMode { get; internal set; }
-
-    [State(Position = 24)]
-    public partial bool? SpeechEnhancement { get; internal set; }
+    public partial SonosHomeTheater? HomeTheater { get; internal set; }
 
     [State(Position = 30)]
     public partial string? GroupCoordinatorUuid { get; internal set; }
@@ -172,7 +174,7 @@ public partial class SonosPlayer : SonosDevice,
 
     [Derived]
     [State(Position = 32)]
-    public bool IsHomeTheater => ServiceIds.Contains("HTControl");
+    public bool IsHomeTheater => HomeTheater is not null;
 
     [Derived]
     [State(Position = 33)]
@@ -192,6 +194,22 @@ public partial class SonosPlayer : SonosDevice,
     // The coordinator of the player's group, or the player itself when it coordinates or the coordinator is unknown.
     private SonosPlayer GetCoordinator() =>
         _system.Players.GetValueOrDefault(GroupKey) ?? this;
+
+    internal override void ApplyDescription(SonosDeviceDescription description)
+    {
+        base.ApplyDescription(description);
+
+        // Under the state lock, which the events and polls that update the child hold: concurrent polls of one
+        // player must not create two.
+        lock (_stateLock)
+        {
+            var isHomeTheater = ServiceIds.Contains("HTControl");
+            if (isHomeTheater != (HomeTheater is not null))
+            {
+                HomeTheater = isHomeTheater ? new SonosHomeTheater(this) : null;
+            }
+        }
+    }
 
     internal void ApplyPlayerTopology(SonosTopologyPlayer topology, string coordinatorUuid)
     {
@@ -383,14 +401,6 @@ public partial class SonosPlayer : SonosDevice,
             Loudness = loudness;
         }
 
-        if (change.NightMode is { } nightMode)
-        {
-            NightMode = nightMode;
-        }
-
-        if (change.SpeechEnhancement is { } speechEnhancement)
-        {
-            SpeechEnhancement = speechEnhancement;
-        }
+        HomeTheater?.Apply(change);
     }
 }
