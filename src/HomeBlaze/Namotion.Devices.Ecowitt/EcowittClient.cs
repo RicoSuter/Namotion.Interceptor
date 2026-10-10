@@ -308,20 +308,26 @@ public class EcowittClient
                 case "0x0E":
                     rain.RainRate = EcowittValueParser.ParseRainRate(val);
                     break;
-                case "0x10":
+                case "0x7D":
                     rain.HourlyRain = EcowittValueParser.ParseRain(val);
                     break;
-                case "0x11":
+                case "0x7C":
+                    rain.Last24HoursRain = EcowittValueParser.ParseRain(val);
+                    break;
+                case "0x10":
                     rain.DailyRain = EcowittValueParser.ParseRain(val);
                     break;
-                case "0x12":
+                case "0x11":
                     rain.WeeklyRain = EcowittValueParser.ParseRain(val);
                     break;
-                case "0x13":
+                case "0x12":
                     rain.MonthlyRain = EcowittValueParser.ParseRain(val);
                     break;
-                case "0x14":
+                case "0x13":
                     rain.YearlyRain = EcowittValueParser.ParseRain(val);
+                    break;
+                case "0x14":
+                    rain.TotalRain = EcowittValueParser.ParseRain(val);
                     break;
             }
         }
