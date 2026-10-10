@@ -11,13 +11,13 @@ internal static class TestFixtures
     internal const string OfficeUuid = "RINCON_A0000000000701400";
 
     /// <summary>
-    /// The transport URI of a Spotify Connect session on the kitchen player, with a placeholder session id.
-    /// </summary>
-    /// <summary>
     /// A poll or event order, as <see cref="SonosSystem.NextOrder"/> hands out, for tests that order them by hand.
     /// </summary>
     internal const long T0 = 1000;
 
+    /// <summary>
+    /// The transport URI of a Spotify Connect session on the kitchen player, with a placeholder session id.
+    /// </summary>
     internal const string SpotifyConnectUri = "x-sonos-vli:RINCON_A0000000000601400:2,spotify:0000000000000000";
 
     /// <summary>
@@ -50,7 +50,7 @@ internal static class TestFixtures
     internal static SonosSystem CreateGroupedSystem()
     {
         var system = CreateSystem();
-        system.ApplyTopology(ZoneGroupStateParser.Parse(FakeSonosSpeaker.CreateGroupTopology(
+        system.ApplyTopology(ZoneGroupStateParser.Parse(SonosEventBodies.CreateGroupTopology(
             (OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/")),
             (KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/")))));
         ReportAllReachable(system);
