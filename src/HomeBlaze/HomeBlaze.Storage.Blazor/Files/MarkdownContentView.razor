@@ -13,7 +13,8 @@
     }
     else if (segment.Widget != null)
     {
-        <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+        @* Keyed, so that the state of a component stays with its subject when a reload inserts or removes a block. *@
+        <SubjectComponent @key="segment.Widget" Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
     }
 }
 

@@ -53,6 +53,10 @@ public partial class Widget : ITitleProvider, IConfigurable
     /// Whether a subject is this widget or contains it at any depth. Showing such a subject inside the
     /// widget would show the widget again without end.
     /// </summary>
+    /// <remarks>
+    /// Only containment counts. A widget is not a parent of the subject it shows, so widgets that show
+    /// the container of each other are not found here and need a check where they are rendered.
+    /// </remarks>
     public bool IsSelfOrAncestor(IInterceptorSubject subject)
     {
         // The usual chain has one parent per subject and is walked without an allocation. The search over

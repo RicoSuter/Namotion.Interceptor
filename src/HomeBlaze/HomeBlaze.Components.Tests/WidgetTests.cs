@@ -2,6 +2,7 @@ using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Parent;
 using Xunit;
 
 namespace HomeBlaze.Components.Tests;
@@ -108,6 +109,41 @@ public class WidgetTests
         // Assert
         Assert.False(result);
         Assert.True(widget.IsSelfOrAncestor(second));
+    }
+
+    [Fact]
+    public void WhenTwoWidgetsShowTheCardOfEachOther_ThenNeitherCardContainsTheOtherWidget()
+    {
+        // Arrange
+        var first = new Card(_context);
+        var second = new Card(_context);
+        var root = new Card(_context) { Content = first, Footer = second };
+        var resolver = new SubjectPathResolver(() => root);
+        var firstWidget = new Widget(resolver);
+        var secondWidget = new Widget(resolver);
+        first.Content = firstWidget;
+        second.Content = secondWidget;
+
+        // Set inside the graph, so that both references are calculated again and published as changes.
+        firstWidget.Path = "/Footer";
+        secondWidget.Path = "/Content";
+
+        // Act
+        var otherCardResult = firstWidget.IsSelfOrAncestor(second);
+        var otherWidgetResult = firstWidget.IsSelfOrAncestor(secondWidget);
+        var ownCardResult = firstWidget.IsSelfOrAncestor(first);
+        var rootResult = firstWidget.IsSelfOrAncestor(root);
+
+        // Assert: showing a subject does not make a widget its parent, so the cycle of the two references
+        // is not in the parents and is left to the component that renders them.
+        Assert.Same(second, firstWidget.ResolvedSubject);
+        Assert.Same(first, secondWidget.ResolvedSubject);
+        Assert.DoesNotContain(first.GetParents(), parent => parent.Property.Subject is Widget);
+        Assert.DoesNotContain(second.GetParents(), parent => parent.Property.Subject is Widget);
+        Assert.False(otherCardResult);
+        Assert.False(otherWidgetResult);
+        Assert.True(ownCardResult);
+        Assert.True(rootResult);
     }
 
     [Fact]

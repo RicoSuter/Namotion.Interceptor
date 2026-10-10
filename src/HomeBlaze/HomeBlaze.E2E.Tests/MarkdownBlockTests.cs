@@ -114,8 +114,31 @@ public class MarkdownBlockTests
         await Assertions.Expect(selfCard).ToHaveCountAsync(1);
         await Assertions.Expect(selfCard.GetByTestId("widget-cycle")).ToHaveCountAsync(1);
 
-        // Whether the first reference or the nested one notices the cycle is not fixed, only that one of them does.
+        // Each of the two cards shows the other, which shows the first again, and there the reference
+        // finds itself further out and stops: three titles of each card and one message per chain.
+        await Assertions.Expect(page.GetByText("First Card", new() { Exact = true })).ToHaveCountAsync(3);
+        await Assertions.Expect(page.GetByText("Second Card", new() { Exact = true })).ToHaveCountAsync(3);
+        await Assertions.Expect(page.GetByTestId("widget-cycle")).ToHaveCountAsync(3);
+
         var firstCard = GetCard(page, "First Card").First;
-        await Assertions.Expect(firstCard.GetByTestId("widget-cycle").First).ToBeVisibleAsync();
+        await Assertions.Expect(firstCard.GetByTestId("widget-cycle")).ToHaveCountAsync(1);
+    }
+
+    [Fact]
+    public async Task WhenTwoCardsFollowEachOther_ThenTheyAreSeparatedLikeParagraphs()
+    {
+        // Arrange
+        var page = await OpenPageAsync("Blocks.md");
+        var firstCard = GetCard(page, "Motor Card");
+        var secondCard = GetCard(page, "Reference Card");
+        await Assertions.Expect(secondCard).ToBeVisibleAsync(new() { Timeout = 30000 });
+
+        // Act: both cards are measured in one call, because the live motor in the first one changes its height.
+        var gap = await secondCard.EvaluateAsync<double>(
+            "(second, first) => second.getBoundingClientRect().top - first.getBoundingClientRect().bottom",
+            await firstCard.ElementHandleAsync());
+
+        // Assert: 0.75rem, the margin of a paragraph of the page.
+        Assert.Equal(12.0, gap, 1.0);
     }
 }

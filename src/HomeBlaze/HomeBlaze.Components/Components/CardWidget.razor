@@ -1,7 +1,7 @@
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
 @implements ISubjectComponent
 
-<MudPaper Class="pa-4" Elevation="2" data-testid="card">
+<MudPaper Class="pa-4 card-widget" Elevation="2" data-testid="card">
     @if (!string.IsNullOrEmpty(CardSubject?.Title) || !string.IsNullOrEmpty(CardSubject?.Icon))
     {
         <div class="d-flex align-center mb-2">
@@ -21,6 +21,13 @@
         <SubjectComponent Subject="@CardSubject.Footer" Type="SubjectComponentType.Widget" />
     }
 </MudPaper>
+
+<style>
+    /* The distance between two paragraphs of a page, so that cards below each other do not touch. */
+    .card-widget {
+        margin-bottom: 0.75rem;
+    }
+</style>
 
 @code {
     [Parameter]

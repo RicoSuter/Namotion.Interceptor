@@ -36,8 +36,8 @@ else
     [CascadingParameter]
     private WidgetComponent? OuterReference { get; set; }
 
-    // Two references that show each other's container are not ancestors of each other in the object graph,
-    // so that cycle only shows in the components: the same widget is then already being shown further out.
+    // Widget.IsSelfOrAncestor only sees containment. References that show the container of each other form
+    // a cycle that exists in the components alone: the same widget is then already being shown further out.
     private bool IsShownByOuterReference(Widget widget)
     {
         for (var outer = OuterReference; outer is not null; outer = outer.OuterReference)
