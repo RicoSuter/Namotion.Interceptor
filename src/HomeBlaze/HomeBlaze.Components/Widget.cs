@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Components;
 
@@ -16,6 +17,8 @@ namespace HomeBlaze.Components;
 [InterceptorSubject]
 public partial class Widget : ITitleProvider, IConfigurable
 {
+    private const int MaximumSingleParentDepth = 64;
+
     private readonly SubjectPathResolver _pathResolver;
 
     /// <summary>
@@ -44,6 +47,66 @@ public partial class Widget : ITitleProvider, IConfigurable
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Whether a subject is this widget or contains it at any depth. Showing such a subject inside the
+    /// widget would show the widget again without end.
+    /// </summary>
+    public bool IsSelfOrAncestor(IInterceptorSubject subject)
+    {
+        // The usual chain has one parent per subject and is walked without an allocation. The search over
+        // all parents allocates, so it only runs when the chain branches or is longer than any real nesting.
+        IInterceptorSubject current = this;
+        for (var depth = 0; depth < MaximumSingleParentDepth; depth++)
+        {
+            if (ReferenceEquals(current, subject))
+            {
+                return true;
+            }
+
+            var parents = current.GetParents();
+            if (parents.Length == 0)
+            {
+                return false;
+            }
+
+            if (parents.Length > 1)
+            {
+                break;
+            }
+
+            current = parents[0].Property.Subject;
+        }
+
+        return IsSelfOrAncestorInAnyBranch(current, subject);
+    }
+
+    private static bool IsSelfOrAncestorInAnyBranch(IInterceptorSubject start, IInterceptorSubject subject)
+    {
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance);
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(start);
+
+        while (queue.TryDequeue(out var current))
+        {
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(current, subject))
+            {
+                return true;
+            }
+
+            foreach (var parent in current.GetParents())
+            {
+                queue.Enqueue(parent.Property.Subject);
+            }
+        }
+
+        return false;
     }
 
     private IInterceptorSubject? ResolveSubject()

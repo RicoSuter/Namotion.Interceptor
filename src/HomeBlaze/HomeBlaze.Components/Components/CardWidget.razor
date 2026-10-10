@@ -1,0 +1,30 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(Card))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4" Elevation="2" data-testid="card">
+    @if (!string.IsNullOrEmpty(CardSubject?.Title) || !string.IsNullOrEmpty(CardSubject?.Icon))
+    {
+        <div class="d-flex align-center mb-2">
+            @if (!string.IsNullOrEmpty(CardSubject?.Icon))
+            {
+                <MudIcon Icon="@MudBlazorIcons.Resolve(CardSubject.Icon)" Class="mr-2" />
+            }
+            <MudText Typo="Typo.h6">@CardSubject?.Title</MudText>
+        </div>
+    }
+
+    <SubjectComponent Subject="@CardSubject?.Content" Type="SubjectComponentType.Widget" />
+
+    @if (CardSubject?.Footer is not null)
+    {
+        <MudDivider Class="my-2" />
+        <SubjectComponent Subject="@CardSubject.Footer" Type="SubjectComponentType.Widget" />
+    }
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private Card? CardSubject => Subject as Card;
+}

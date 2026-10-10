@@ -1,7 +1,6 @@
-using System.Collections.Concurrent;
-using System.Reflection;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Networking;
+using HomeBlaze.Components;
 using MudBlazor;
 using Namotion.Interceptor;
 
@@ -12,8 +11,6 @@ namespace HomeBlaze.Host.Display;
 /// </summary>
 public static class SubjectIconExtensions
 {
-    private static readonly ConcurrentDictionary<string, string> IconCache = new();
-
     private const string DefaultIconName = "Article";
 
     /// <summary>
@@ -49,19 +46,7 @@ public static class SubjectIconExtensions
     /// <summary>
     /// Resolves an icon name to a MudBlazor icon string via reflection.
     /// </summary>
-    public static string ResolveMudBlazorIcon(string iconName)
-    {
-        if (string.IsNullOrEmpty(iconName))
-            return Icons.Material.Filled.Article;
-
-        return IconCache.GetOrAdd(iconName, name =>
-        {
-            var field = typeof(Icons.Material.Filled).GetField(name,
-                BindingFlags.Public | BindingFlags.Static);
-
-            return field?.GetValue(null) as string ?? Icons.Material.Filled.Article;
-        });
-    }
+    public static string ResolveMudBlazorIcon(string iconName) => MudBlazorIcons.Resolve(iconName);
 
     /// <summary>
     /// Resolves a color name to a MudBlazor Color enum value.

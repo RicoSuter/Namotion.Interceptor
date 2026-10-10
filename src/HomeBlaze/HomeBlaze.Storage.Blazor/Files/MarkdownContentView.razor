@@ -1,0 +1,72 @@
+@using System.Text
+@using System.Web
+@using HomeBlaze.Components
+@using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Storage.Internal
+@using Namotion.Interceptor
+
+@foreach (var segment in GetRenderSegments())
+{
+    @if (segment.Html != null)
+    {
+        @((MarkupString)segment.Html)
+    }
+    else if (segment.Widget != null)
+    {
+        <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
+    }
+}
+
+@code {
+    /// <summary>
+    /// The segments of a page or of a fragment, in order.
+    /// </summary>
+    [Parameter]
+    public IDictionary<string, IInterceptorSubject>? Children { get; set; }
+
+    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
+
+    // Runs on every render and keeps nothing: the values of expressions are read here so that the
+    // surrounding tracking scope records them, and a reload replaces the dictionary and its subjects.
+    private List<RenderSegment> GetRenderSegments()
+    {
+        var result = new List<RenderSegment>();
+        if (Children is null)
+            return result;
+
+        StringBuilder? builder = null;
+
+        foreach (var child in Children.Values)
+        {
+            if (child is HtmlSegment html)
+            {
+                builder ??= new StringBuilder();
+                builder.Append(html.Html);
+            }
+            else if (child is RenderExpression expression)
+            {
+                builder ??= new StringBuilder();
+                builder.Append(HttpUtility.HtmlEncode(expression.Value?.ToString() ?? string.Empty));
+            }
+            else
+            {
+                // HTML and expressions are joined into one markup string so that an
+                // expression can sit inside an HTML attribute.
+                if (builder is { Length: > 0 })
+                {
+                    result.Add(new RenderSegment(builder.ToString(), null));
+                    builder.Clear();
+                }
+
+                result.Add(new RenderSegment(null, child));
+            }
+        }
+
+        if (builder is { Length: > 0 })
+        {
+            result.Add(new RenderSegment(builder.ToString(), null));
+        }
+
+        return result;
+    }
+}

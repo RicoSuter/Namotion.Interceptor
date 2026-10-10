@@ -1,10 +1,6 @@
-@using System.Text
-@using System.Web
-@using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
 @using HomeBlaze.Storage.Files
-@using HomeBlaze.Storage.Internal
 @using MudBlazor
 @using Namotion.Interceptor
 @using HomeBlaze.Services
@@ -29,17 +25,7 @@
                     @(File is { } file ? TimeZone.ToZoned(new DateTimeOffset(file.LastModified, TimeSpan.Zero)).ToString("yyyy-MM-dd HH:mm:ss") : "")
                 </span>
             </div>
-            @foreach (var segment in GetRenderSegments())
-            {
-                @if (segment.Html != null)
-                {
-                    @((MarkupString)segment.Html)
-                }
-                else if (segment.Widget != null)
-                {
-                    <SubjectComponent Subject="@segment.Widget" Type="SubjectComponentType.Widget" />
-                }
-            }
+            <MarkdownContentView Children="@File?.Children" />
         }
     </div>
 </CascadingValue>
@@ -85,48 +71,5 @@
     public void Dispose()
     {
         TimeZone.Changed -= OnTimeZoneChanged;
-    }
-
-    private record RenderSegment(string? Html, IInterceptorSubject? Widget);
-
-    private List<RenderSegment> GetRenderSegments()
-    {
-        var result = new List<RenderSegment>();
-        if (File?.Children is null)
-            return result;
-
-        StringBuilder? sb = null;
-
-        foreach (var child in File.Children.Values)
-        {
-            if (child is HtmlSegment html)
-            {
-                sb ??= new StringBuilder();
-                sb.Append(html.Html);
-            }
-            else if (child is RenderExpression expr)
-            {
-                sb ??= new StringBuilder();
-                sb.Append(HttpUtility.HtmlEncode(expr.Value?.ToString() ?? string.Empty));
-            }
-            else
-            {
-                // Flush accumulated HTML before widget
-                if (sb is { Length: > 0 })
-                {
-                    result.Add(new RenderSegment(sb.ToString(), null));
-                    sb.Clear();
-                }
-                result.Add(new RenderSegment(null, child));
-            }
-        }
-
-        // Flush remaining HTML
-        if (sb is { Length: > 0 })
-        {
-            result.Add(new RenderSegment(sb.ToString(), null));
-        }
-
-        return result;
     }
 }
