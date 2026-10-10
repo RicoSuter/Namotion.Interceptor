@@ -555,11 +555,11 @@ Subjects can receive DI-injected services via constructor parameters alongside `
 
 ```csharp
 [InterceptorSubject]
-public partial class HueBridge
+public partial class DeviceGateway
 {
-    public HueBridge(
+    public DeviceGateway(
         IHttpClientFactory httpClientFactory,
-        ILogger<HueBridge> logger)
+        ILogger<DeviceGateway> logger)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
@@ -569,13 +569,12 @@ public partial class HueBridge
 
 ### How It Works
 
-2. **ActivatorUtilities resolution**: When the subject is instantiated via DI (e.g., through `AddHostedSubject`), `ActivatorUtilities.CreateInstance` resolves all constructor parameters from the service provider. Services like `IHttpClientFactory`, `ILogger<T>`, and any other registered services are injected automatically.
+1. **ActivatorUtilities resolution**: When the subject is instantiated via DI (e.g., through `AddHostedSubject`), `ActivatorUtilities.CreateInstance` resolves all constructor parameters from the service provider. Services like `IHttpClientFactory`, `ILogger<T>`, and any other registered services are injected automatically.
 
-3. **Interaction with AddHostedSubject**: The `AddHostedSubject<T>` method detects whether the subject type has a constructor accepting `IInterceptorSubjectContext`. If it does, the context is passed during construction. The `contextResolver` parameter allows overriding which context is provided.
+2. **Interaction with AddHostedSubject**: The `AddHostedSubject<T>` method detects whether the subject type has a constructor accepting `IInterceptorSubjectContext`. If it does, the context is passed during construction. The `contextResolver` parameter allows overriding which context is provided.
 
 ### Examples in the Codebase
 
-- **HueBridge** (`Namotion.Devices.Philips.Hue`): Injects `IHttpClientFactory` and `ILogger<HueBridge>` alongside the interceptor context for HTTP communication with the Hue Bridge API.
 - **OpcUaSubjectServer** (`Namotion.Interceptor.OpcUa`): Injects OPC UA server configuration and telemetry services.
 
 ## Implementing Hosted Subjects for DI
