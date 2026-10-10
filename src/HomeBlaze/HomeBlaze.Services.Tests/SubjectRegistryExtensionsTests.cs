@@ -283,6 +283,37 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
+    public void WhenOwnerPredicateSkipsNearestConfigurableParent_ThenConfigurationOwnerIsTheMatchingParent()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestParent(context);
+        var intermediate = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [subject] };
+        var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [intermediate] };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, parent));
+
+        // Assert
+        Assert.Same(parent, owner);
+    }
+
+    [Fact]
+    public void WhenOwnerPredicateMatchesOnlyBeyondStateProperty_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestParent(context);
+        var parent = new ConfigurationOwnerTestParent(context) { StateChild = subject };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner(candidate => ReferenceEquals(candidate, parent));
+
+        // Assert
+        Assert.Null(owner);
+    }
+
+    [Fact]
     public void DynamicSubject_WithProgrammaticAttributes_WorksIdentically()
     {
         // Arrange

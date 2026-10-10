@@ -437,21 +437,21 @@ public partial class FluentStorageContainer :
         }
     }
 
-    /// <summary>
-    /// IConfigurationWriter - called by ConfigurationManager background thread.
-    /// </summary>
+    /// <inheritdoc />
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         if (_client == null)
             return false;
 
-        if (!_pathRegistry.TryGetPath(subject, out var path))
+        // Only the subject of a file is registered. A subject nested in its configuration is written with it.
+        var fileSubject = subject.TryGetConfigurationOwner(candidate => _pathRegistry.TryGetPath(candidate, out _));
+        if (fileSubject == null || !_pathRegistry.TryGetPath(fileSubject, out var path))
             return false;
 
         var fullPath = GetFileSystemPath(path);
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        var json = _subjectFactory.Serialize(subject);
+        var json = _subjectFactory.Serialize(fileSubject);
         _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
         await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
