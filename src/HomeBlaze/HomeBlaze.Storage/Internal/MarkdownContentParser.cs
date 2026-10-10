@@ -90,9 +90,9 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Computes the base path used to resolve relative links in markdown.
-    /// During initial scan, markdown files are parsed BEFORE being placed in their parent's Children,
-    /// so their own graph path isn't available yet. Use the storage container's graph path (which IS
-    /// attached by the time ScanAsync runs) combined with the file's storage-local directory.
+    /// A markdown file is parsed before it is placed in the tree, so its own graph path is not available yet.
+    /// The graph path of its storage container is, and is combined with the directory of the file within the
+    /// storage.
     /// </summary>
     private string GetLinkBasePath(MarkdownFile parent)
     {

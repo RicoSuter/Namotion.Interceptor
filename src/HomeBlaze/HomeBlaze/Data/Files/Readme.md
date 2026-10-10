@@ -18,7 +18,7 @@ HomeBlaze v2 is a complete rewrite that treats your file system as the source of
 |---------|-------------|
 | **Live Tracking** | Property changes propagate instantly to the UI |
 | **Auto-Persistence** | `[Configuration]` properties save automatically |
-| **File Watching** | External file edits sync in real-time |
+| **File Watching** | External file edits show up within seconds |
 | **Protocol Exposure** | *Planned:* OPC UA and MQTT integration |
 | **Markdown Docs** | Write docs in markdown, view them beautifully |
 
@@ -145,7 +145,7 @@ Paths use familiar C# syntax:
 
 ## Blockquote Examples
 
-> **Note:** Files are watched in real-time. Edit a file externally and see changes instantly!
+> **Note:** Files are watched. Edit a file externally and see the change in the UI within a few seconds.
 
 > **Tip:** Use frontmatter in markdown files to control navigation order:
 > ```yaml
@@ -165,7 +165,7 @@ HomeBlaze supports multiple storage backends via FluentStorage:
 
 | Backend | Status | Change Detection |
 |---------|--------|------------------|
-| Local Disk | Supported | FileSystemWatcher |
+| Local Disk | Supported | FileSystemWatcher and a periodic check |
 | Azure Blob | Planned | Polling |
 | FTP/SFTP | Planned | Polling |
 | SMB Share | Planned | FileSystemWatcher |

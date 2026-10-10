@@ -1,7 +1,7 @@
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Decides which storage paths never become subjects, shared by the startup scan and the file watcher.
+/// Decides which storage paths never become subjects, for the listing of a pass and the file watcher alike.
 /// </summary>
 internal static class StoragePathFilter
 {
@@ -22,14 +22,36 @@ internal static class StoragePathFilter
     }
 
     /// <summary>
-    /// Checks whether the path is a temporary file that editors write before renaming it to the real name.
+    /// Checks whether the path never becomes a subject: it is hidden or has a temporary segment.
     /// </summary>
-    public static bool IsTemporaryFile(string path)
+    /// <remarks>Only for paths within the storage, see <see cref="HasTemporarySegment"/>.</remarks>
+    public static bool IsIgnored(ReadOnlySpan<char> path)
+        => IsHidden(path) || HasTemporarySegment(path);
+
+    /// <summary>
+    /// Checks whether the path or one of its parent folders has a temporary name.
+    /// </summary>
+    /// <remarks>Only for paths within the storage: an absolute path can have such a folder above the storage.</remarks>
+    public static bool HasTemporarySegment(ReadOnlySpan<char> path)
     {
-        var fileName = Path.GetFileName(path);
-        return fileName.StartsWith('~') ||
-               fileName.EndsWith('~') ||
-               fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-               fileName.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
+        while (!path.IsEmpty)
+        {
+            var separatorIndex = path.IndexOfAny('/', '\\');
+            var segment = separatorIndex < 0 ? path : path[..separatorIndex];
+            if (IsTemporaryName(segment))
+            {
+                return true;
+            }
+
+            path = separatorIndex < 0 ? [] : path[(separatorIndex + 1)..];
+        }
+
+        return false;
     }
+
+    private static bool IsTemporaryName(ReadOnlySpan<char> name)
+        => name.StartsWith('~') ||
+           name.EndsWith('~') ||
+           name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+           name.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
 }

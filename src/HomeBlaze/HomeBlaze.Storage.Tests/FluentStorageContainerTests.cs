@@ -6,6 +6,8 @@ using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests;
 
+// Writes to an in-memory storage, see the remarks of StorageTestBase.
+[Collection(nameof(StorageTestBase))]
 public class FluentStorageContainerTests
 {
     private static (TypeProvider typeProvider, SubjectTypeRegistry typeRegistry, ConfigurableSubjectSerializer serializer, IServiceProvider serviceProvider, RootManager rootManager) CreateDependencies()
@@ -48,6 +50,32 @@ public class FluentStorageContainerTests
         Assert.NotNull(storage.Children);
         Assert.Empty(storage.Children);
         Assert.Equal(StorageStatus.Disconnected, storage.Status);
+    }
+
+    [Fact]
+    public void WhenConfigurationWasSavedBeforeReconcileIntervalExisted_ThenIntervalIsItsDefault()
+    {
+        // Arrange
+        var (typeProvider, _, serializer, _, _) = CreateDependencies();
+        typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+
+        const string json = """
+            {
+              "$type": "HomeBlaze.Storage.FluentStorageContainer",
+              "storageType": "disk",
+              "connectionString": "./Data",
+              "containerName": null,
+              "enableFileWatching": false
+            }
+            """;
+
+        // Act
+        using var storage = Assert.IsType<FluentStorageContainer>(serializer.Deserialize(json));
+
+        // Assert
+        Assert.Equal("./Data", storage.ConnectionString);
+        Assert.False(storage.EnableFileWatching);
+        Assert.Equal(300, storage.ReconcileIntervalSeconds);
     }
 
     [Fact]

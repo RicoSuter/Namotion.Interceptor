@@ -70,7 +70,7 @@ Satellite                              Central
 When a JSON file is loaded from storage:
 
 ```
-FluentStorageContainer.ScanAsync()
+FluentStorageContainer reconcile pass
   -> Finds demo/motor.json
   -> ConfigurableSubjectSerializer.DeserializeAsync()
      -> Reads $type discriminator

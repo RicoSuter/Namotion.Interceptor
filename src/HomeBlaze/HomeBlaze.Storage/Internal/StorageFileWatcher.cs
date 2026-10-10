@@ -1,185 +1,132 @@
-using System.Collections.Concurrent;
-using System.Reactive.Linq;
-using System.Reactive.Subjects;
 using Microsoft.Extensions.Logging;
 
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Manages FileSystemWatcher with Rx-based debouncing, event coalescing, and self-write tracking.
-/// Coalesces the events of one path (e.g. from editors saving through temp files) into its final state.
+/// Reports which paths of a directory the file system changed. It does not interpret the events:
+/// what happened to a path is decided by looking at the storage.
 /// </summary>
 internal sealed class StorageFileWatcher : IDisposable
 {
-    private static readonly TimeSpan WriteGracePeriod = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan CoalesceWindow = TimeSpan.FromMilliseconds(500);
-
     private readonly string _basePath;
-    private readonly Func<FileSystemEventArgs, Task> _onFileEvent;
-    private readonly Func<Task> _onRescanRequired;
+    private readonly Action<string, string?> _onChanged;
+    private readonly Action _onEventsLost;
     private readonly ILogger? _logger;
 
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _pendingWrites = new();
-    private readonly Subject<FileSystemEventArgs> _fileEvents = new();
-
     private FileSystemWatcher? _watcher;
-    private IDisposable? _fileEventSubscription;
+    private volatile bool _isDisposed;
 
+    /// <param name="basePath">The watched directory.</param>
+    /// <param name="onChanged">Receives the path within the directory, and for a rename the old path as well.</param>
+    /// <param name="onEventsLost">Called when the watcher failed and events may be missing.</param>
+    /// <param name="logger">The logger.</param>
     public StorageFileWatcher(
         string basePath,
-        Func<FileSystemEventArgs, Task> onFileEvent,
-        Func<Task> onRescanRequired,
+        Action<string, string?> onChanged,
+        Action onEventsLost,
         ILogger? logger = null)
     {
         _basePath = Path.GetFullPath(basePath);
-        _onFileEvent = onFileEvent;
-        _onRescanRequired = onRescanRequired;
+        _onChanged = onChanged;
+        _onEventsLost = onEventsLost;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Starts watching, or starts over when it already does. Does nothing once disposed.
+    /// </summary>
     public void Start()
     {
-        _watcher = new FileSystemWatcher(_basePath)
+        if (_isDisposed)
+            return;
+
+        Interlocked.Exchange(ref _watcher, null)?.Dispose();
+
+        var watcher = new FileSystemWatcher(_basePath)
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
                            NotifyFilters.LastWrite | NotifyFilters.Size,
             IncludeSubdirectories = true,
-            InternalBufferSize = 64 * 1024, // 64KB buffer to reduce overflow risk
-            EnableRaisingEvents = true
+            InternalBufferSize = 64 * 1024 // 64KB buffer to reduce overflow risk
         };
 
-        // Route all events to the Rx subject
-        _watcher.Created += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Changed += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Deleted += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Renamed += (_, e) => _fileEvents.OnNext(e);
-        _watcher.Error += OnWatcherError;
+        watcher.Created += OnWatcherEvent;
+        watcher.Changed += OnWatcherEvent;
+        watcher.Deleted += OnWatcherEvent;
+        watcher.Renamed += OnWatcherEvent;
+        watcher.Error += OnWatcherError;
 
-        // Process events with coalescing: group by path, collect events in time window, then coalesce
-        // Note: We don't filter temp files here, a rename from or to one says what happened to the real file
-        _fileEventSubscription = _fileEvents
-            .Where(e => !IsOwnWrite(e.FullPath))
-            .GroupBy(e => GetCanonicalPath(e.FullPath))
-            .SelectMany(group => group
-                .Buffer(CoalesceWindow)
-                .Where(batch => batch.Count > 0)
-                .Select(CoalesceEvents))
-            .Where(e => e != null)
-            .Subscribe(
-                onNext: async e => await ProcessEventSafeAsync(e!),
-                onError: ex => _logger?.LogError(ex, "Error in file event stream"));
+        try
+        {
+            // Started within a work item of another storage, the watcher would otherwise carry the flow of that item into every event it raises.
+            using (ExecutionContext.SuppressFlow())
+            {
+                watcher.EnableRaisingEvents = true;
+            }
+        }
+        catch
+        {
+            watcher.Dispose();
+            throw;
+        }
+
+        Interlocked.Exchange(ref _watcher, watcher)?.Dispose();
+
+        // A failed watcher starts over on its own thread. A Dispose since the check above did not see this one.
+        if (_isDisposed)
+        {
+            Interlocked.Exchange(ref _watcher, null)?.Dispose();
+            return;
+        }
 
         _logger?.LogInformation("File watching enabled for: {Path}", _basePath);
     }
 
     /// <summary>
-    /// Coalesces the events one path received within a window into the single event describing its final state.
-    /// Returns null for temp files, which are never tracked.
+    /// Handles a file system event as if the watcher had raised it.
     /// </summary>
-    internal static FileSystemEventArgs? CoalesceEvents(IList<FileSystemEventArgs> events)
-    {
-        var last = events[^1];
-        var rename = events
-            .OfType<RenamedEventArgs>()
-            .LastOrDefault(e => !StoragePathFilter.IsTemporaryFile(e.OldFullPath));
-
-        if (StoragePathFilter.IsTemporaryFile(last.FullPath))
-        {
-            // A tracked file renamed to a temp name has left the tree under its old path.
-            return rename is not null ? CreateEvent(WatcherChangeTypes.Deleted, rename.OldFullPath) : null;
-        }
-
-        // Kept even when later events follow: the handler looks both paths up on disk.
-        if (rename is not null)
-            return rename;
-
-        if (last.ChangeType == WatcherChangeTypes.Deleted)
-            return last;
-
-        // Created must win over a trailing Changed, only a creation makes the handler scan a new directory.
-        // A rename from a temp file counts as one, that is how editors save a new file atomically.
-        var isNew = events.Any(e => e.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed);
-        return isNew ? CreateEvent(WatcherChangeTypes.Created, last.FullPath) : last;
-    }
-
-    // Built from the event path rather than the group key, which is lowercased and
-    // does not exist on a case-sensitive file system.
-    private static FileSystemEventArgs CreateEvent(WatcherChangeTypes changeType, string fullPath)
-        => new(changeType, Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath));
+    internal void SimulateFileEvent(FileSystemEventArgs fileEvent) => OnWatcherEvent(this, fileEvent);
 
     /// <summary>
-    /// Gets canonical path for grouping (handles case-insensitivity on Windows).
+    /// Handles a failure as if the watcher had raised it.
     /// </summary>
-    private static string GetCanonicalPath(string fullPath)
-        => fullPath.ToLowerInvariant();
+    internal void SimulateError(Exception exception) => OnWatcherError(this, new ErrorEventArgs(exception));
 
-    /// <summary>
-    /// Marks a path as being written by us (prevents feedback loop).
-    /// </summary>
-    public void MarkAsOwnWrite(string fullPath)
+    private void OnWatcherEvent(object sender, FileSystemEventArgs fileEvent)
     {
-        _pendingWrites[fullPath] = DateTimeOffset.UtcNow;
+        var path = GetRelativePath(fileEvent.FullPath);
+        var oldPath = fileEvent is RenamedEventArgs { OldFullPath: { } oldFullPath } ? GetRelativePath(oldFullPath) : null;
 
-        // Schedule cleanup after grace period
-        _ = Task.Run(async () =>
-        {
-            await Task.Delay(WriteGracePeriod);
-            _pendingWrites.TryRemove(fullPath, out _);
-        });
+        // A rename between a tracked name and an ignored one changes the tree, so it counts when either side is tracked.
+        if (StoragePathFilter.IsIgnored(path) && (oldPath == null || StoragePathFilter.IsIgnored(oldPath)))
+            return;
+
+        _onChanged(path, oldPath);
     }
 
-    private bool IsOwnWrite(string fullPath)
-    {
-        if (_pendingWrites.TryGetValue(fullPath, out var writeTime))
-        {
-            return DateTimeOffset.UtcNow - writeTime < WriteGracePeriod;
-        }
-        return false;
-    }
+    private string GetRelativePath(string fullPath)
+        => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
 
-    private async Task ProcessEventSafeAsync(FileSystemEventArgs e)
+    private void OnWatcherError(object sender, ErrorEventArgs error)
     {
+        _logger?.LogError(error.GetException(), "FileSystemWatcher error (buffer overflow?), events may be lost");
+
         try
         {
-            await _onFileEvent(e);
+            Start();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger?.LogWarning(ex, "Error processing file event: {Path} ({Type})",
-                e.FullPath, e.ChangeType);
+            // Without a watcher only the periodic pass follows the storage, and nothing does when that is switched off.
+            _logger?.LogError(exception, "Failed to restart the file watcher for: {Path}", _basePath);
         }
-    }
 
-    private void OnWatcherError(object sender, ErrorEventArgs e)
-    {
-        _logger?.LogError(e.GetException(), "FileSystemWatcher error (buffer overflow?), triggering rescan");
-        Restart();
-    }
-
-    private void Restart()
-    {
-        _watcher?.Dispose();
-        Start();
-
-        // Trigger rescan to catch any missed events
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _onRescanRequired();
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to rescan after watcher error");
-            }
-        });
+        _onEventsLost();
     }
 
     public void Dispose()
     {
-        _fileEventSubscription?.Dispose();
-        _fileEvents.Dispose();
-        _watcher?.Dispose();
-        _watcher = null;
+        _isDisposed = true;
+        Interlocked.Exchange(ref _watcher, null)?.Dispose();
     }
 }

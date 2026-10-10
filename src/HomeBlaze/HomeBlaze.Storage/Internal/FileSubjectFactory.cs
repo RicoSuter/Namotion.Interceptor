@@ -1,4 +1,4 @@
-using FluentStorage.Blobs;
+using System.Text.Json;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -9,8 +9,7 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Factory for creating IInterceptorSubject instances from storage blobs
-/// and updating existing subjects from JSON.
+/// Creates the subjects of the files of a storage.
 /// </summary>
 internal sealed class FileSubjectFactory
 {
@@ -32,41 +31,19 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
-    /// Creates a subject from a storage blob based on file type.
+    /// Creates the subject of a file from the type that is registered for its extension, or a
+    /// <see cref="GenericFile"/> when none is. The subject is not loaded. A JSON file is created from its text
+    /// with <see cref="CreateFromJson"/> instead.
     /// </summary>
-    public async Task<IInterceptorSubject?> CreateFromBlobAsync(
-        IBlobStorage client,
-        IStorageContainer storage,
-        Blob blob,
-        CancellationToken cancellationToken)
+    /// <remarks>
+    /// The constructor of a registered type takes the storage and the path, and after them services.
+    /// </remarks>
+    public IInterceptorSubject CreateFile(IStorageContainer storage, string path)
     {
-        var extension = Path.GetExtension(blob.FullPath).ToLowerInvariant();
-        if (extension == FileExtensions.Json)
-        {
-            return await CreateFromJsonBlobAsync(client, storage, blob, cancellationToken);
-        }
-
-        // Check for registered extension mapping
-        var mappedType = _typeRegistry.ResolveTypeForExtension(extension);
-        if (mappedType != null)
-        {
-            var subject = CreateFileSubject(mappedType, storage, blob.FullPath);
-            UpdateFileMetadata(subject, blob);
-
-            // Eager load content for storage files
-            if (subject is IStorageFile storageFile)
-            {
-                await storageFile.OnFileChangedAsync(cancellationToken);
-            }
-
-            return subject;
-        }
-
-        // Default to GenericFile
-        var genericFile = new GenericFile(storage, blob.FullPath);
-        UpdateFileMetadata(genericFile, blob);
-        await genericFile.OnFileChangedAsync(cancellationToken);
-        return genericFile;
+        var mappedType = _typeRegistry.ResolveTypeForExtension(Path.GetExtension(path));
+        return mappedType != null
+            ? (IInterceptorSubject)ActivatorUtilities.CreateInstance(_serviceProvider, mappedType, storage, path)
+            : new GenericFile(storage, path);
     }
 
     /// <summary>
@@ -75,63 +52,39 @@ internal sealed class FileSubjectFactory
     public string Serialize(IInterceptorSubject subject)
         => _serializer.Serialize(subject);
 
-    private async Task<IInterceptorSubject?> CreateFromJsonBlobAsync(
-        IBlobStorage client,
-        IStorageContainer storage,
-        Blob blob,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Creates the subject of a JSON file from its text: the configurable subject it describes,
+    /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON.
+    /// </summary>
+    public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
     {
-        var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
         try
         {
-            var subject = _serializer.Deserialize(json);
-            if (subject != null)
+            // Every configurable type is a subject as well.
+            if (_serializer.Deserialize(json) is IInterceptorSubject subject)
             {
-                // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-                return (IInterceptorSubject)subject;
+                return subject;
             }
         }
         catch (Exception exception)
         {
-            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", blob.FullPath);
+            _logger?.LogError(exception, "Failed to deserialize JSON subject from: {Path}", path);
         }
 
-        // Create JsonFile for plain JSON
-        return new JsonFile(storage, blob.FullPath);
+        return new JsonFile(storage, path);
     }
 
     /// <summary>
-    /// Creates a file subject using ActivatorUtilities for DI-aware construction.
-    /// Convention: File constructors should be (IStorageContainer storage, string fullPath, /* DI services... */)
+    /// Checks whether the JSON text describes a subject of the type of the given one, which can then take the
+    /// text as its configuration instead of being replaced.
     /// </summary>
-    private IInterceptorSubject? CreateFileSubject(Type type, IStorageContainer storage, string blobPath)
+    /// <exception cref="JsonException">The text is not valid JSON.</exception>
+    public static bool DescribesTypeOf(IInterceptorSubject subject, string json)
     {
-        try
-        {
-            // ActivatorUtilities resolves DI services + passes explicit args
-            return (IInterceptorSubject)ActivatorUtilities.CreateInstance(
-                _serviceProvider,
-                type,
-                storage,   // explicit arg
-                blobPath); // explicit arg
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to create file subject for: {Path}", blobPath);
-        }
-
-        return null;
-    }
-
-    private static void UpdateFileMetadata(IInterceptorSubject? subject, Blob blob)
-    {
-        if (subject is IStorageFile file)
-        {
-            file.FileSize = blob.Size ?? 0L;
-            if (blob.LastModificationTime.HasValue)
-            {
-                file.LastModified = blob.LastModificationTime.Value.DateTime;
-            }
-        }
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.ValueKind == JsonValueKind.Object &&
+               document.RootElement.TryGetProperty(ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName, out var typeName) &&
+               typeName.ValueKind == JsonValueKind.String &&
+               typeName.ValueEquals(subject.GetType().FullName);
     }
 }

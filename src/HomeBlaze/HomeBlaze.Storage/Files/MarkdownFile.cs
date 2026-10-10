@@ -104,7 +104,12 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
         await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
         using var reader = new StreamReader(stream);
-        Content = await reader.ReadToEndAsync(cancellationToken);
+
+        // Limited like a call on the storage: the load runs on the storage worker, which a source that stalls
+        // in the middle of the file would otherwise hold.
+        var timeProvider = (Storage as FluentStorageContainer)?.ConnectionTimeProvider ?? TimeProvider.System;
+        Content = await reader.ReadToEndAsync(cancellationToken)
+            .WithStorageTimeoutAsync("reading", FullPath, timeProvider, cancellationToken);
         Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
         Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
