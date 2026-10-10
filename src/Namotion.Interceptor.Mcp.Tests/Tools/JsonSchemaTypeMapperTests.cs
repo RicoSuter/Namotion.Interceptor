@@ -27,6 +27,7 @@ public class JsonSchemaTypeMapperTests
     [InlineData(typeof(TimeOnly), "string")]
     [InlineData(typeof(Uri), "string")]
     [InlineData(typeof(char), "string")]
+    [InlineData(typeof(byte[]), "string")]
     [InlineData(typeof(object), "object")]
     public void WhenMappingClrType_ThenReturnsCorrectJsonSchemaType(Type clrType, string expected)
     {
@@ -61,6 +62,7 @@ public class JsonSchemaTypeMapperTests
     [InlineData(typeof(TimeSpan), "hh:mm:ss")]
     [InlineData(typeof(TimeSpan?), "hh:mm:ss")]
     [InlineData(typeof(TimeOnly), "HH:mm:ss")]
+    [InlineData(typeof(byte[]), "base64")]
     public void WhenTypeHasFormat_ThenReturnsFormatLabel(Type clrType, string expected)
     {
         // Act

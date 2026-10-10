@@ -46,8 +46,8 @@ public static class JsonSchemaTypeMapper
     /// <summary>
     /// Gets the format label of the string a value of <paramref name="type"/> is written and read as by System.Text.Json:
     /// the standard JSON Schema format name where one matches (<c>date-time</c>, <c>date</c>, <c>uuid</c>, <c>uri</c>),
-    /// otherwise a short .NET-style template (<c>hh:mm:ss</c> for <see cref="TimeSpan"/>, <c>HH:mm:ss</c> for
-    /// <see cref="TimeOnly"/>). Null when the type has no format.
+    /// otherwise a short label (<c>hh:mm:ss</c> for <see cref="TimeSpan"/>, <c>HH:mm:ss</c> for
+    /// <see cref="TimeOnly"/>, <c>base64</c> for a byte array). Null when the type has no format.
     /// </summary>
     internal static string? GetFormat(Type? type)
     {
@@ -58,6 +58,7 @@ public static class JsonSchemaTypeMapper
             : type == typeof(Uri) ? "uri"
             : type == typeof(TimeSpan) ? "hh:mm:ss"
             : type == typeof(TimeOnly) ? "HH:mm:ss"
+            : type == typeof(byte[]) ? "base64"
             : null;
     }
 

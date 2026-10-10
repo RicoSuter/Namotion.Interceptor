@@ -15,6 +15,7 @@ public class McpValueConverterTests
         { "\"07:30:00\"", typeof(TimeOnly), new TimeOnly(7, 30) },
         { "\"6f9619ff-8b86-d011-b42d-00c04fc964ff\"", typeof(Guid), new Guid("6f9619ff-8b86-d011-b42d-00c04fc964ff") },
         { "\"http://example.com/a\"", typeof(Uri), new Uri("http://example.com/a") },
+        { "\"AQID\"", typeof(byte[]), new byte[] { 1, 2, 3 } },
         { "\"Tuesday\"", typeof(DayOfWeek), DayOfWeek.Tuesday },
         { "\"tuesday\"", typeof(DayOfWeek?), DayOfWeek.Tuesday },
         { "2", typeof(DayOfWeek), DayOfWeek.Tuesday },
