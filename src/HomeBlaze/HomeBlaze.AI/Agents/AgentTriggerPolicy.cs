@@ -2,7 +2,7 @@ namespace HomeBlaze.AI.Agents;
 
 /// <summary>
 /// Decides when background runs are due: poll interval, change requests coalesced by the minimum run interval,
-/// manual runs, failure backoff and pauses. Not thread-safe; <c>AgentTriggerScheduler</c> serializes access.
+/// manual runs, failure backoff and pauses. Not thread-safe; <see cref="AgentTriggerScheduler"/> serializes access.
 /// </summary>
 public sealed class AgentTriggerPolicy
 {
