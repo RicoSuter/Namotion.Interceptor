@@ -25,7 +25,11 @@ public sealed partial class MarkdownContentParser
     private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();
 
     private async Task<IInterceptorSubject?> CreateOrUpdateAsync(
-        Type type, IInterceptorSubject? existing, BlockConfiguration configuration, CancellationToken cancellationToken)
+        Type type,
+        IInterceptorSubject? existing,
+        BlockConfiguration configuration,
+        ParseState state,
+        CancellationToken cancellationToken)
     {
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
@@ -41,6 +45,10 @@ public sealed partial class MarkdownContentParser
         else
         {
             subject = _serializer.Deserialize(configuration.Json) as IInterceptorSubject;
+            if (subject is not null)
+            {
+                state.AddCreated(subject);
+            }
         }
 
         if (subject is not null)

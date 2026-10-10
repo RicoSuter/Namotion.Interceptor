@@ -3,7 +3,11 @@ using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -26,6 +30,9 @@ public sealed class MarkdownPageFixture
 
     public IServiceProvider Services { get; }
 
+    /// <summary>The hosted subjects of this fixture that run. Filled once <see cref="StartHostedServicesAsync"/> ran.</summary>
+    public TestHostedLog HostedLog { get; } = new();
+
     public static async Task<MarkdownPageFixture> CreateAsync()
     {
         var typeProvider = new TypeProvider();
@@ -37,6 +44,7 @@ public sealed class MarkdownPageFixture
         var context = SubjectContextFactory.Create(services);
         FluentStorageContainer? storage = null;
 
+        services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton(context);
@@ -59,6 +67,47 @@ public sealed class MarkdownPageFixture
         await storage.ConnectAsync(CancellationToken.None);
 
         return new MarkdownPageFixture(storage, serviceProvider);
+    }
+
+    /// <summary>
+    /// Starts the hosted services of the context, so that the hosted subjects on a page are started and stopped.
+    /// Without it they never start. Call <see cref="StopHostedServicesAsync"/> at the end of the test.
+    /// </summary>
+    public async Task StartHostedServicesAsync()
+    {
+        Services.GetRequiredService<IInterceptorSubjectContext>().AddService(HostedLog);
+        foreach (var hostedService in Services.GetServices<IHostedService>())
+        {
+            await hostedService.StartAsync(CancellationToken.None);
+        }
+
+        // The storage is a hosted subject as well, and its start connects again, which replaces the in-memory
+        // blobs with an empty store. That must be over before a test writes its first page.
+        await SettleHostedServicesAsync();
+        if (Storage.ExecuteTask is { } connect)
+        {
+            await connect;
+        }
+    }
+
+    public async Task StopHostedServicesAsync()
+    {
+        foreach (var hostedService in Services.GetServices<IHostedService>())
+        {
+            await hostedService.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Completes when every start and stop that was requested before this call has run.
+    /// Starts and stops run one after the other in the order they were requested, so a service
+    /// that is attached now starts after all of them.
+    /// </summary>
+    public async Task SettleHostedServicesAsync()
+    {
+        var marker = new MarkerHostedService();
+        await Storage.AttachHostedServiceAsync(marker, CancellationToken.None);
+        await Storage.DetachHostedServiceAsync(marker, CancellationToken.None);
     }
 
     public async Task<MarkdownFile> AddPageAsync(string name, string content)
@@ -112,5 +161,12 @@ public sealed class MarkdownPageFixture
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content.Replace("\r\n", "\n")));
         await Storage.WriteBlobAsync(name, stream, CancellationToken.None);
+    }
+
+    private sealed class MarkerHostedService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

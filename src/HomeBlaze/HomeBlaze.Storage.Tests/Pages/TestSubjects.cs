@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
+using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 
@@ -336,4 +337,89 @@ public partial class TestReference : IConfigurable
     public IInterceptorSubject? Resolved => _pathResolver.ResolveScopedSubject(Path, PathStyle.Canonical, this);
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>
+/// Records the <see cref="TestHosted"/> subjects of one context that were started and which of them still run.
+/// A subject finds it as a service of its context.
+/// </summary>
+public sealed class TestHostedLog
+{
+    private readonly Lock _lock = new();
+    private readonly List<TestHosted> _running = [];
+    private int _startCount;
+
+    /// <summary>How many times a subject was started.</summary>
+    public int StartCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _startCount;
+            }
+        }
+    }
+
+    /// <summary>The subjects that were started and not stopped since.</summary>
+    public IReadOnlyList<TestHosted> Running
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _running.ToArray();
+            }
+        }
+    }
+
+    public void Started(TestHosted subject)
+    {
+        lock (_lock)
+        {
+            _startCount++;
+            _running.Add(subject);
+        }
+    }
+
+    public void Stopped(TestHosted subject)
+    {
+        lock (_lock)
+        {
+            _running.Remove(subject);
+        }
+    }
+}
+
+/// <summary>A subject with a hosted service, like a device that polls while it is on a page.</summary>
+[InterceptorSubject]
+public partial class TestHosted : IHostedService, IConfigurable
+{
+    public const string ThrowMode = "throw";
+
+    // Taken when the service starts, because a released subject has left the context when it is stopped.
+    private TestHostedLog? _log;
+
+    [Configuration]
+    public partial string? Name { get; set; }
+
+    /// <summary>With <see cref="ThrowMode"/> applying the configuration fails.</summary>
+    [Configuration]
+    public partial string? Mode { get; set; }
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _log = ((IInterceptorSubject)this).Context.TryGetService<TestHostedLog>();
+        _log?.Started(this);
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        _log?.Stopped(this);
+        return Task.CompletedTask;
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) =>
+        Mode == ThrowMode ? throw new InvalidOperationException("apply failed") : Task.CompletedTask;
 }

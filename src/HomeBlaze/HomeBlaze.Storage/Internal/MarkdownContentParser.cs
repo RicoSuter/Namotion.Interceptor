@@ -183,8 +183,17 @@ public sealed partial class MarkdownContentParser
         var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath));
 
         var state = new ParseState(parent, page.AllBlocks);
-        var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
-        return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
+        try
+        {
+            var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
+            return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
+        }
+        catch
+        {
+            // Nothing of this parse is published, so nothing would ever detach the subjects it created.
+            ReleaseCreatedSince(state, 0);
+            throw;
+        }
     }
 
     private async Task<IDictionary<string, IInterceptorSubject>> BuildChildrenAsync(
@@ -310,11 +319,13 @@ public sealed partial class MarkdownContentParser
     {
         var block = segment.Block;
         var registrationCount = state.RegistrationCount;
+        var createdCount = state.CreatedCount;
 
         BlockError? error;
         try
         {
-            // Before anything is created, so that a type that can never be filled runs no constructor.
+            // Everything that can be checked without an instance is checked before one is created or updated,
+            // so that a block which can never be filled runs no constructor and changes no subject on the page.
             var slots = SlotMap.For(type);
             if (slots.Error is not null)
             {
@@ -326,14 +337,19 @@ public sealed partial class MarkdownContentParser
                 return (null, new BlockError(block.Line, configurationError!));
             }
 
-            var subject = await CreateOrUpdateAsync(type, existing, configuration, cancellationToken);
+            if (!TryArrangeContent(type, slots, segment, state, out var content, out var contentError))
+            {
+                return (null, contentError);
+            }
+
+            var subject = await CreateOrUpdateAsync(type, existing, configuration, state, cancellationToken);
             if (subject is null)
             {
                 return (null, new BlockError(
                     block.Line, $"{typeDescription} could not be created. It must be a registered configurable subject type."));
             }
 
-            error = await ApplyContentAsync(subject, type, slots, segment, state, cancellationToken);
+            error = await ApplyContentAsync(subject, slots, content, state, cancellationToken);
             if (error is null)
             {
                 state.Register(block, block.Head!.Id, subject);
@@ -350,7 +366,23 @@ public sealed partial class MarkdownContentParser
 
         // The block ends as an error box, so the subjects that blocks nested in it registered are not on the page.
         state.RemoveRegistrationsSince(registrationCount);
+        ReleaseCreatedSince(state, createdCount);
         return (null, error);
+    }
+
+    /// <summary>
+    /// Releases the subjects that were created after <see cref="ParseState.CreatedCount"/> had the given value,
+    /// because they do not get onto the page.
+    /// </summary>
+    private void ReleaseCreatedSince(ParseState state, int createdCount)
+    {
+        // In the order of creation: a block subject is created before the subjects in its content, and
+        // releasing it detaches those with it. A subject that still has a reference afterwards was put into
+        // a subject that this parse reused. That one is on the page, so the release leaves its content alone.
+        foreach (var subject in state.TakeCreatedSince(createdCount))
+        {
+            _serializer.Release(subject);
+        }
     }
 
     private static string ComputeHash(string content)
@@ -376,6 +408,7 @@ public sealed partial class MarkdownContentParser
     private sealed class ParseState
     {
         private readonly List<(int BlockIndex, string? Id)> _registrations = [];
+        private readonly List<IInterceptorSubject> _created = [];
         private readonly Dictionary<string, int> _nameOwners = new();
 
         public ParseState(MarkdownFile page, IReadOnlyList<MarkdownBlock> blocksInDocumentOrder)
@@ -400,6 +433,31 @@ public sealed partial class MarkdownContentParser
         public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
 
         public int RegistrationCount => _registrations.Count;
+
+        /// <summary>How many subjects this parse created so far and did not release.</summary>
+        public int CreatedCount => _created.Count;
+
+        /// <summary>
+        /// Records a subject that this parse created with the context. Until it is in the published result,
+        /// it is detached only when it is released.
+        /// </summary>
+        public void AddCreated(IInterceptorSubject subject) => _created.Add(subject);
+
+        /// <summary>
+        /// Removes and returns the subjects created after <see cref="CreatedCount"/> had the given value,
+        /// in the order they were created.
+        /// </summary>
+        public IReadOnlyList<IInterceptorSubject> TakeCreatedSince(int createdCount)
+        {
+            if (createdCount == _created.Count)
+            {
+                return [];
+            }
+
+            var created = _created.GetRange(createdCount, _created.Count - createdCount);
+            _created.RemoveRange(createdCount, created.Count);
+            return created;
+        }
 
         /// <summary>
         /// Whether the block is the first one in the document with its name. Every other block

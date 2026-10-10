@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
 
@@ -90,6 +91,29 @@ public class ConfigurableSubjectSerializer
 
         PopulateConfigurationProperties(subject, type, root);
         return subject;
+    }
+
+    /// <summary>
+    /// Releases a subject that <see cref="Deserialize"/> created and that is not used after all: detaches it
+    /// and the subjects in its properties from the context, which stops their hosted services.
+    /// </summary>
+    /// <remarks>
+    /// Does nothing for a subject that a property references. Such a subject is in the graph and leaves the
+    /// context when the reference is removed.
+    /// </remarks>
+    public void Release(IInterceptorSubject subject)
+    {
+        if (subject.GetReferenceCount() > 0)
+        {
+            return;
+        }
+
+        // The context the constructor got from the service provider is a fallback context of the subject.
+        // Removing it is what detaches a subject that no property holds.
+        if (_serviceProvider.GetService<IInterceptorSubjectContext>() is { } context)
+        {
+            subject.Context.RemoveFallbackContext(context);
+        }
     }
 
     /// <summary>
