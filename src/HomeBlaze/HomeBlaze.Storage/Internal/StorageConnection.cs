@@ -11,10 +11,11 @@ namespace HomeBlaze.Storage.Internal;
 internal sealed class StorageConnection : IDisposable
 {
     private readonly CancellationTokenSource _endedSource = new();
-    private readonly Lock _fileWatcherLock = new();
+    private readonly Lock _triggerLock = new();
     private readonly TimeLimitedBlobStorage _client;
     private readonly ILogger? _logger;
 
+    private ReconcileTrigger? _trigger;
     private StorageFileWatcher? _fileWatcher;
 
     public StorageConnection(
@@ -60,35 +61,46 @@ internal sealed class StorageConnection : IDisposable
     public bool IsEnded => _endedSource.IsCancellationRequested;
 
     /// <summary>
-    /// Starts watching <see cref="StorageDirectory"/>, unless the connection has ended.
+    /// Starts requesting passes, unless the connection has ended: after changes that the file watcher reports,
+    /// and periodically.
     /// </summary>
-    public void StartFileWatching(Func<FileSystemEventArgs, Task> onFileEvent, Func<Task> onRescanRequired)
+    /// <param name="runPass">Runs a pass of this connection, see <see cref="ReconcileTrigger"/>.</param>
+    /// <param name="periodicInterval">How often a pass runs without any change. Zero switches it off.</param>
+    /// <param name="watchFiles">Whether <see cref="StorageDirectory"/> is watched.</param>
+    public void StartTrigger(Func<IReadOnlySet<string>, bool, Task> runPass, TimeSpan periodicInterval, bool watchFiles)
     {
-        // Checked under the lock that ending takes, so no watcher starts after the connection ended.
-        lock (_fileWatcherLock)
+        // Checked under the lock that ending takes, so nothing starts after the connection ended.
+        lock (_triggerLock)
         {
             if (IsEnded)
             {
                 return;
             }
 
-            _fileWatcher = new StorageFileWatcher(StorageDirectory!, onFileEvent, onRescanRequired, _logger);
-            _fileWatcher.Start();
+            _trigger = new ReconcileTrigger(runPass, periodicInterval, TimeProvider, _logger);
+
+            if (watchFiles)
+            {
+                _fileWatcher = new StorageFileWatcher(StorageDirectory!, _trigger.NotifyChanged, _trigger.NotifyEventsLost, _logger);
+                _fileWatcher.Start();
+            }
         }
     }
 
     /// <summary>
-    /// Ends the connection: cancels <see cref="Token"/>, stops the watcher and lets the worker take no more
-    /// items. The item that is running ends at its next storage call or check.
+    /// Ends the connection: cancels <see cref="Token"/>, stops the watcher and the trigger and lets the worker
+    /// take no more items. The item that is running ends at its next storage call or check.
     /// </summary>
     public void End()
     {
         _endedSource.Cancel();
 
-        lock (_fileWatcherLock)
+        lock (_triggerLock)
         {
             _fileWatcher?.Dispose();
             _fileWatcher = null;
+            _trigger?.Dispose();
+            _trigger = null;
         }
 
         Worker.Dispose();

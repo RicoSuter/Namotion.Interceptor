@@ -29,13 +29,6 @@ internal static class StoragePathFilter
         => IsHidden(path) || HasTemporarySegment(path);
 
     /// <summary>
-    /// Checks whether the last segment of the path has a temporary name, as editors use for the file they write
-    /// before renaming it to the real name.
-    /// </summary>
-    public static bool IsTemporaryFile(ReadOnlySpan<char> path)
-        => IsTemporaryName(Path.GetFileName(path));
-
-    /// <summary>
     /// Checks whether the path or one of its parent folders has a temporary name.
     /// </summary>
     /// <remarks>Only for paths within the storage: an absolute path can have such a folder above the storage.</remarks>

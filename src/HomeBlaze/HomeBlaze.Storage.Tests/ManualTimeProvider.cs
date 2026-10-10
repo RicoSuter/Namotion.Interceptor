@@ -25,11 +25,6 @@ internal sealed class ManualTimeProvider : TimeProvider
         }
     }
 
-    /// <summary>
-    /// The number of timer callbacks that have run.
-    /// </summary>
-    public int TimerCallbackCount { get; private set; }
-
     public override long GetTimestamp()
     {
         lock (_lock)
@@ -75,7 +70,6 @@ internal sealed class ManualTimeProvider : TimeProvider
 
                 _timestamp = Math.Max(_timestamp, dueTimer.DueTimestamp!.Value);
                 dueTimer.DueTimestamp = dueTimer.Period is { } period ? _timestamp + period.Ticks : null;
-                TimerCallbackCount++;
             }
 
             dueTimer.Invoke();

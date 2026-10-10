@@ -4,30 +4,24 @@ using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
 
-public class FluentStorageContainerFileEventTests : StorageTestBase
+public class FluentStorageContainerReconcileTests : StorageTestBase
 {
-    [Theory]
-    [InlineData(WatcherChangeTypes.Created)]
-    [InlineData(WatcherChangeTypes.Changed)]
-    [InlineData(WatcherChangeTypes.Deleted)]
-    public async Task WhenEventArrivesForUnregisteredFileOnDisk_ThenFileIsAdded(WatcherChangeTypes changeType)
+    [Fact]
+    public async Task WhenFileAppears_ThenPassAddsIt()
     {
         // Arrange
         var storage = await ConnectAsync();
         WriteFile("Notes.md");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(changeType, "Notes.md"));
+        await storage.ReconcileAsync(Named("Notes.md"));
 
         // Assert
         Assert.Equal(["Notes.md"], storage.Children.Keys);
     }
 
-    [Theory]
-    [InlineData(WatcherChangeTypes.Created)]
-    [InlineData(WatcherChangeTypes.Changed)]
-    [InlineData(WatcherChangeTypes.Deleted)]
-    public async Task WhenEventArrivesForRegisteredFileMissingOnDisk_ThenSubjectIsRemoved(WatcherChangeTypes changeType)
+    [Fact]
+    public async Task WhenFileIsGone_ThenPassRemovesItsSubject()
     {
         // Arrange
         WriteFile("Home.md");
@@ -35,20 +29,20 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         File.Delete(GetFullPath("Home.md"));
 
         // Act
-        await storage.ProcessFileEventAsync(Event(changeType, "Home.md"));
+        await storage.ReconcileAsync(Named("Home.md"));
 
         // Assert
         Assert.Empty(storage.Children);
     }
 
     [Fact]
-    public async Task WhenCreatedEventArrivesForMissingFile_ThenNoSubjectIsAdded()
+    public async Task WhenNamedPathDoesNotExist_ThenNoSubjectIsAdded()
     {
         // Arrange
         var storage = await ConnectAsync();
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Home.md"));
+        await storage.ReconcileAsync(Named("Home.md"));
 
         // Assert
         Assert.Empty(storage.Children);
@@ -63,7 +57,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         File.Move(GetFullPath("Old.md"), GetFullPath("New.md"));
 
         // Act
-        await storage.ProcessFileEventAsync(Renamed("Old.md", "New.md"));
+        await storage.ReconcileAsync(Named("Old.md", "New.md"));
 
         // Assert
         Assert.Equal(["New.md"], storage.Children.Keys);
@@ -78,7 +72,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         File.Move(GetFullPath("notes.md"), GetFullPath("Notes.md"));
 
         // Act
-        await storage.ProcessFileEventAsync(Renamed("notes.md", "Notes.md"));
+        await storage.ReconcileAsync(Named("notes.md", "Notes.md"));
 
         // Assert
         Assert.Equal(["Notes.md"], storage.Children.Keys);
@@ -95,7 +89,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         Directory.Move(GetFullPath("docs-renaming"), GetFullPath("Docs"));
 
         // Act
-        await storage.ProcessFileEventAsync(Renamed("docs", "Docs"));
+        await storage.ReconcileAsync(Named("docs", "Docs"));
 
         // Assert
         Assert.Equal(["Docs"], storage.Children.Keys);
@@ -112,9 +106,9 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         var file = Assert.IsType<MarkdownFile>(storage.Children["Home.md"]);
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Home.md"));
+        await storage.ReconcileAsync(Named("Home.md"));
         WriteFile("Home.md", "second");
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Changed, "Home.md"));
+        await storage.ReconcileAsync(Named("Home.md"));
 
         // Assert
         Assert.Same(file, storage.Children["Home.md"]);
@@ -132,7 +126,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile(relativePath);
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, relativePath));
+        await storage.ReconcileAsync(Named(relativePath));
 
         // Assert
         Assert.Empty(storage.Children);
@@ -148,7 +142,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile(relativePath);
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, relativePath));
+        await storage.ReconcileAsync(Named(relativePath));
 
         // Assert
         Assert.Equal(["Docs"], storage.Children.Keys);
@@ -163,7 +157,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile(".idea/workspace.xml");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, ".idea"));
+        await storage.ReconcileAsync(Named(".idea"));
 
         // Assert
         Assert.Empty(storage.Children);
@@ -177,7 +171,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         Directory.CreateDirectory(GetFullPath("Docs"));
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         var folder = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -190,11 +184,11 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         // Arrange
         var storage = await ConnectAsync();
         Directory.CreateDirectory(GetFullPath("Docs"));
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
         WriteFile("Docs/Notes.md");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs/Notes.md"));
+        await storage.ReconcileAsync(Named("Docs/Notes.md"));
 
         // Assert
         var folder = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -211,7 +205,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile("Docs/.hidden.md");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -231,7 +225,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         Directory.Delete(GetFullPath("Docs"), recursive: true);
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         Assert.Equal(["Home.md"], storage.Children.Keys);
@@ -244,11 +238,11 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile("Docs/Readme.md");
         var storage = await ConnectAsync();
         Directory.Delete(GetFullPath("Docs"), recursive: true);
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
         WriteFile("Docs/Readme.md");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs/Readme.md"));
+        await storage.ReconcileAsync(Named("Docs/Readme.md"));
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -264,7 +258,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         Directory.Move(GetFullPath("Docs"), GetFullPath("Archive"));
 
         // Act
-        await storage.ProcessFileEventAsync(Renamed("Docs", "Archive"));
+        await storage.ReconcileAsync(Named("Docs", "Archive"));
 
         // Assert
         Assert.Equal(["Archive"], storage.Children.Keys);
@@ -287,7 +281,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile("Docs/OnlyNew.md", "new");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -306,7 +300,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         var readme = ((VirtualFolder)docs).Children["Readme.md"];
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         Assert.Same(docs, storage.Children["Docs"]);
@@ -323,7 +317,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile("Docs");
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         Assert.Equal(["Docs"], storage.Children.Keys);
@@ -338,12 +332,12 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         var storage = await ConnectAsync();
 
         WriteFile("Docs.json", SerializeMotor("Motor"));
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs.json"));
+        await storage.ReconcileAsync(Named("Docs.json"));
         Assert.Equal(["Docs"], storage.Children.Keys);
         File.Delete(GetFullPath("Docs.json"));
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Docs.json"));
+        await storage.ReconcileAsync(Named("Docs.json"));
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -388,7 +382,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         File.Delete(GetFullPath("notes.md"));
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Notes.md"));
+        await storage.ReconcileAsync(Named("Notes.md"));
 
         // Assert
         Assert.Empty(storage.Children);
@@ -419,11 +413,11 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile("Data.gated");
 
         var gate = GatedFile.PauseNextLoad();
-        var add = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Data.gated"));
+        var add = storage.ReconcileAsync(Named("Data.gated"));
         await gate.WhenReachedAsync();
 
         File.Delete(GetFullPath("Data.gated"));
-        var delete = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Data.gated"));
+        var delete = storage.ReconcileAsync(Named("Data.gated"));
 
         // Act
         gate.Release();
@@ -445,7 +439,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         await gate.WhenReachedAsync();
 
         WriteFile("Added.md");
-        var added = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Added.md"));
+        var added = storage.ReconcileAsync(Named("Added.md"));
 
         // Act
         gate.Release();
@@ -533,7 +527,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         WriteFile(relativePath);
 
         // Act
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, relativePath));
+        await storage.ReconcileAsync(Named(relativePath));
 
         // Assert
         Assert.Empty(storage.Children);
@@ -545,11 +539,11 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         // Arrange
         var storage = await ConnectAsync();
         WriteFile("Docs.tmp/Readme.md");
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs.tmp/Readme.md"));
+        await storage.ReconcileAsync(Named("Docs.tmp/Readme.md"));
         Directory.Move(GetFullPath("Docs.tmp"), GetFullPath("Docs"));
 
         // Act: the watcher reports a rename from a temp name as a creation of the new path.
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs"));
+        await storage.ReconcileAsync(Named("Docs"));
 
         // Assert
         Assert.Equal(["Docs"], storage.Children.Keys);
@@ -567,7 +561,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
 
         var watching = await ConnectAsync(enableFileWatching: true);
 
-        // Act: the second file is handled a full coalesce window after the first,
+        // Act: the second file is handled a full quiet period after the first,
         // so by then every watcher that is still running has handled the first one.
         WriteFile("First.md");
         await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("First.md"), WatcherTimeout);
@@ -576,6 +570,82 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
 
         // Assert
         Assert.Empty(reconfigured.Children);
+    }
+
+    [Fact]
+    public async Task WhenNoEventArrives_ThenPeriodicPassPicksUpTheChange()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        WriteFile("Added.md");
+
+        // Act
+        timeProvider.Advance(TimeSpan.FromSeconds(60));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Added.md"), WatcherTimeout);
+    }
+
+    [Fact]
+    public async Task WhenReconcileIntervalIsZero_ThenNoPeriodicPassIsScheduled()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+
+        // Act
+        await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 0;
+        });
+
+        // Assert
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenStorageReconnects_ThenTriggerOfPreviousConnectionIsStopped()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        var armedTimerCountOfOneConnection = timeProvider.ArmedTimerCount;
+
+        // Act
+        await storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, armedTimerCountOfOneConnection);
+        Assert.Equal(1, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsDisposed_ThenItsTriggerIsStopped()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        var armedTimerCountWhileConnected = timeProvider.ArmedTimerCount;
+
+        // Act
+        storage.Dispose();
+
+        // Assert
+        Assert.Equal(1, armedTimerCountWhileConnected);
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
     }
 
     [Theory]
@@ -639,7 +709,7 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
 
         // Act
         await Task.WhenAll(paths.Select(path => Task.Run(() =>
-            storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, path)))));
+            storage.ReconcileAsync(Named(path)))));
 
         // Assert
         var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
@@ -657,10 +727,10 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
 
         // Act
         await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() =>
-            storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Notes.md")))));
+            storage.ReconcileAsync(Named("Notes.md")))));
 
         WriteFile("Notes.md", "second");
-        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Changed, "Notes.md"));
+        await storage.ReconcileAsync(Named("Notes.md"));
 
         // Assert
         var file = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
@@ -752,14 +822,5 @@ public class FluentStorageContainerFileEventTests : StorageTestBase
         await AsyncTestHelpers.WaitUntilAsync(
             () => storage.Children.GetValueOrDefault("Docs") is VirtualFolder folder && folder.Children.ContainsKey("Notes.md"),
             WatcherTimeout);
-    }
-
-    private RenamedEventArgs Renamed(string oldName, string newName)
-        => new(WatcherChangeTypes.Renamed, StorageDirectory.FullName, newName, oldName);
-
-    private FileSystemEventArgs Event(WatcherChangeTypes changeType, string relativePath)
-    {
-        var fullPath = GetFullPath(relativePath);
-        return new FileSystemEventArgs(changeType, Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath));
     }
 }

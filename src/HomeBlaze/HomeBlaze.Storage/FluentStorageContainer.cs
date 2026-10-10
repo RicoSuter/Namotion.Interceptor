@@ -86,6 +86,13 @@ public partial class FluentStorageContainer :
     public partial bool EnableFileWatching { get; set; }
 
     /// <summary>
+    /// How often the storage is compared with the subject tree without any file event, in seconds.
+    /// Covers changes the file watcher never reports. Default is 300, and 0 switches it off.
+    /// </summary>
+    [Configuration]
+    public partial int ReconcileIntervalSeconds { get; set; }
+
+    /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
     [InlinePaths]
@@ -125,6 +132,7 @@ public partial class FluentStorageContainer :
         StorageType = "disk";
         ConnectionString = string.Empty;
         EnableFileWatching = true;
+        ReconcileIntervalSeconds = 300;
         Children = new Dictionary<string, IInterceptorSubject>();
         Status = StorageStatus.Disconnected;
     }
@@ -243,12 +251,10 @@ public partial class FluentStorageContainer :
                 isInMemory ? "(in-memory)" : storageDirectory);
 
             // Started before the first pass, so a change during startup leads to another pass.
-            if (EnableFileWatching && !isInMemory)
-            {
-                connection.StartFileWatching(
-                    fileEvent => ProcessFileEventAsync(connection, fileEvent),
-                    () => ReconcileAsync(connection, NoPaths, allNamed: true));
-            }
+            connection.StartTrigger(
+                (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
+                TimeSpan.FromSeconds(ReconcileIntervalSeconds),
+                watchFiles: EnableFileWatching && !isInMemory);
 
             using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
             await connection.Worker.RunAsync(async token =>
@@ -307,23 +313,6 @@ public partial class FluentStorageContainer :
             }
         }
     }
-
-    internal Task ProcessFileEventAsync(FileSystemEventArgs fileEvent)
-        => _connection is { } connection ? ProcessFileEventAsync(connection, fileEvent) : Task.CompletedTask;
-
-    private Task ProcessFileEventAsync(StorageConnection connection, FileSystemEventArgs fileEvent)
-    {
-        var namedPaths = new HashSet<string>(StringComparer.Ordinal) { GetRelativePath(connection, fileEvent.FullPath) };
-        if (fileEvent is RenamedEventArgs renamed)
-        {
-            namedPaths.Add(GetRelativePath(connection, renamed.OldFullPath));
-        }
-
-        return ReconcileAsync(connection, namedPaths, allNamed: false);
-    }
-
-    private static string GetRelativePath(StorageConnection connection, string fileSystemPath)
-        => Path.GetRelativePath(connection.StorageDirectory!, fileSystemPath).Replace('\\', '/');
 
     /// <summary>
     /// Runs one pass on the worker. A pass that fails is logged and sets <see cref="Status"/> to

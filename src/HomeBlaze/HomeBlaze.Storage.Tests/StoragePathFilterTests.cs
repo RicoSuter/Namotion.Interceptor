@@ -68,16 +68,6 @@ public class StoragePathFilterTests
         Assert.False(hasTemporarySegment);
     }
 
-    [Fact]
-    public void WhenOnlyParentFolderHasTemporaryName_ThenItIsNotTemporaryFile()
-    {
-        // Act
-        var isTemporaryFile = StoragePathFilter.IsTemporaryFile("/data/Build.tmp/Output.md");
-
-        // Assert
-        Assert.False(isTemporaryFile);
-    }
-
     [Theory]
     [InlineData(".idea/workspace.xml", true)]
     [InlineData("Docs/Notes.md.tmp", true)]
