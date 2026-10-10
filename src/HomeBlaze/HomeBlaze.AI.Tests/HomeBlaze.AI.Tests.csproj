@@ -18,12 +18,18 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
+        <PackageReference Include="Verify.Xunit" />
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Update="Agents\Cli\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+        <None Update="Agents\Cli\fake-claude.sh" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
 </Project>
