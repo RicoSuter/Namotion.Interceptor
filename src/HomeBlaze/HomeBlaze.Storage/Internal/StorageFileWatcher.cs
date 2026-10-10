@@ -78,17 +78,17 @@ internal sealed class StorageFileWatcher : IDisposable
     /// <summary>
     /// Handles a file system event as if the watcher had raised it.
     /// </summary>
-    internal void SimulateFileEvent(FileSystemEventArgs e) => OnWatcherEvent(this, e);
+    internal void SimulateFileEvent(FileSystemEventArgs fileEvent) => OnWatcherEvent(this, fileEvent);
 
     /// <summary>
     /// Handles a failure as if the watcher had raised it.
     /// </summary>
     internal void SimulateError(Exception exception) => OnWatcherError(this, new ErrorEventArgs(exception));
 
-    private void OnWatcherEvent(object sender, FileSystemEventArgs e)
+    private void OnWatcherEvent(object sender, FileSystemEventArgs fileEvent)
     {
-        var path = GetRelativePath(e.FullPath);
-        var oldPath = e is RenamedEventArgs { OldFullPath: { } oldFullPath } ? GetRelativePath(oldFullPath) : null;
+        var path = GetRelativePath(fileEvent.FullPath);
+        var oldPath = fileEvent is RenamedEventArgs { OldFullPath: { } oldFullPath } ? GetRelativePath(oldFullPath) : null;
 
         // A rename between a tracked name and an ignored one changes the tree, so it counts when either side is tracked.
         if (StoragePathFilter.IsIgnored(path) && (oldPath == null || StoragePathFilter.IsIgnored(oldPath)))
@@ -100,9 +100,9 @@ internal sealed class StorageFileWatcher : IDisposable
     private string GetRelativePath(string fullPath)
         => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
 
-    private void OnWatcherError(object sender, ErrorEventArgs e)
+    private void OnWatcherError(object sender, ErrorEventArgs error)
     {
-        _logger?.LogError(e.GetException(), "FileSystemWatcher error (buffer overflow?), events may be lost");
+        _logger?.LogError(error.GetException(), "FileSystemWatcher error (buffer overflow?), events may be lost");
 
         try
         {
@@ -110,7 +110,7 @@ internal sealed class StorageFileWatcher : IDisposable
         }
         catch (Exception exception)
         {
-            // The periodic pass still follows the storage without a watcher.
+            // Without a watcher only the periodic pass follows the storage, and nothing does when that is switched off.
             _logger?.LogError(exception, "Failed to restart the file watcher for: {Path}", _basePath);
         }
 

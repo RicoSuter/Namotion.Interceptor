@@ -17,6 +17,7 @@ internal sealed class StorageConnection : IDisposable
 
     private ReconcileTrigger? _trigger;
     private StorageFileWatcher? _fileWatcher;
+    private bool _isTriggerStopped;
 
     public StorageConnection(
         IBlobStorage client,
@@ -61,29 +62,58 @@ internal sealed class StorageConnection : IDisposable
     public bool IsEnded => _endedSource.IsCancellationRequested;
 
     /// <summary>
-    /// Starts requesting passes, unless the connection has ended: after changes that the file watcher reports,
-    /// and periodically.
+    /// Starts requesting passes: after changes that the file watcher reports, and periodically. Does nothing
+    /// once <see cref="StopTrigger"/> was called or the connection has ended.
     /// </summary>
     /// <param name="runPass">Runs a pass of this connection, see <see cref="ReconcileTrigger"/>.</param>
-    /// <param name="periodicInterval">How often a pass runs without any change. Zero switches it off.</param>
+    /// <param name="periodicInterval">How often a pass runs without any change. Zero or less switches it off.</param>
     /// <param name="watchFiles">Whether <see cref="StorageDirectory"/> is watched.</param>
     public void StartTrigger(Func<IReadOnlySet<string>, bool, Task> runPass, TimeSpan periodicInterval, bool watchFiles)
     {
-        // Checked under the lock that ending takes, so nothing starts after the connection ended.
+        // Checked under the lock that stopping takes, so nothing starts after the trigger was stopped.
         lock (_triggerLock)
         {
-            if (IsEnded)
+            if (_isTriggerStopped)
             {
                 return;
             }
 
-            _trigger = new ReconcileTrigger(runPass, periodicInterval, TimeProvider, _logger);
+            var trigger = new ReconcileTrigger(runPass, periodicInterval, TimeProvider, _logger);
 
             if (watchFiles)
             {
-                _fileWatcher = new StorageFileWatcher(StorageDirectory!, _trigger.NotifyChanged, _trigger.NotifyEventsLost, _logger);
-                _fileWatcher.Start();
+                var fileWatcher = new StorageFileWatcher(StorageDirectory!, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
+                try
+                {
+                    fileWatcher.Start();
+                }
+                catch
+                {
+                    trigger.Dispose();
+                    throw;
+                }
+
+                _fileWatcher = fileWatcher;
             }
+
+            _trigger = trigger;
+        }
+    }
+
+    /// <summary>
+    /// Stops the watcher and the trigger for good, so that nothing requests a pass of this connection any
+    /// more. Everything else of the connection stays as it is.
+    /// </summary>
+    public void StopTrigger()
+    {
+        lock (_triggerLock)
+        {
+            _isTriggerStopped = true;
+
+            _fileWatcher?.Dispose();
+            _fileWatcher = null;
+            _trigger?.Dispose();
+            _trigger = null;
         }
     }
 
@@ -94,15 +124,7 @@ internal sealed class StorageConnection : IDisposable
     public void End()
     {
         _endedSource.Cancel();
-
-        lock (_triggerLock)
-        {
-            _fileWatcher?.Dispose();
-            _fileWatcher = null;
-            _trigger?.Dispose();
-            _trigger = null;
-        }
-
+        StopTrigger();
         Worker.Dispose();
     }
 

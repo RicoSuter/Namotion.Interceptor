@@ -115,6 +115,61 @@ public class ReconcileTriggerTests
     }
 
     [Fact]
+    public void WhenPeriodicIntervalExceedsWhatTimerAccepts_ThenPeriodicPassIsStillScheduled()
+    {
+        // Act
+        using var trigger = CreateTrigger(periodicInterval: TimeSpan.FromSeconds(int.MaxValue));
+
+        // Assert
+        Assert.Equal(1, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public void WhenPeriodicIntervalElapsesDuringPass_ThenExactlyOnePassFollows()
+    {
+        // Arrange
+        using var trigger = CreateTrigger(periodicInterval: TimeSpan.FromMinutes(5));
+        _runningPass = new TaskCompletionSource();
+        trigger.NotifyChanged("First.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+
+        // Act
+        _timeProvider.Advance(TimeSpan.FromMinutes(10));
+        var passesWhileFirstRuns = _passes.Count;
+
+        var firstPass = _runningPass;
+        _runningPass = null;
+        firstPass.SetResult();
+        _timeProvider.Advance(TimeSpan.FromMinutes(1));
+
+        // Assert
+        Assert.Equal(1, passesWhileFirstRuns);
+        Assert.Equal(2, _passes.Count);
+        Assert.Empty(_passes[1].NamedPaths);
+        Assert.False(_passes[1].AllNamed);
+    }
+
+    [Fact]
+    public void WhenTriggerIsDisposedDuringPass_ThenNoPassFollows()
+    {
+        // Arrange
+        var trigger = CreateTrigger(periodicInterval: TimeSpan.FromMinutes(5));
+        _runningPass = new TaskCompletionSource();
+        trigger.NotifyChanged("First.md");
+        _timeProvider.Advance(ReconcileTrigger.QuietPeriod);
+        trigger.NotifyChanged("Second.md");
+
+        // Act
+        trigger.Dispose();
+        _runningPass.SetResult();
+        _timeProvider.Advance(TimeSpan.FromMinutes(10));
+
+        // Assert
+        Assert.Single(_passes);
+        Assert.Equal(0, _timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
     public void WhenPathsChangeDuringPass_ThenExactlyOnePassFollows()
     {
         // Arrange

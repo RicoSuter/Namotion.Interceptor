@@ -38,6 +38,10 @@ public partial class FluentStorageContainer :
     private readonly Lock _connectionLock = new();
     private int _disposeCount;
 
+    // True from StopAsync until the next StartAsync. Read in the same step that publishes a connection, so a
+    // stop either keeps that connection from following its storage or finds it and stops it.
+    private bool _isStopped;
+
     // Replaced as a whole by a reconnect and kept after it ended. An operation reads the field once and uses
     // only what it read, so its item never touches the index or the client of a later connection.
     private volatile StorageConnection? _connection;
@@ -87,7 +91,7 @@ public partial class FluentStorageContainer :
 
     /// <summary>
     /// How often the storage is compared with the subject tree without any file event, in seconds.
-    /// Covers changes the file watcher never reports. Default is 300, and 0 switches it off.
+    /// Covers changes the file watcher never reports. Default is 300. Zero or a negative value switches it off.
     /// </summary>
     [Configuration]
     public partial int ReconcileIntervalSeconds { get; set; }
@@ -137,9 +141,41 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Disconnected;
     }
         
+    /// <summary>
+    /// Connects to the storage and follows it from then on.
+    /// </summary>
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        lock (_connectionLock)
+        {
+            _isStopped = false;
+        }
+
+        return base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await ConnectAsync(stoppingToken);
+    }
+
+    /// <summary>
+    /// Stops following the storage: neither a file event nor the periodic timer starts a pass any more, so
+    /// the subject tree stays as it is. The connection stays open, so subjects can still be read and saved.
+    /// <see cref="StartAsync"/> connects again and follows the storage as before.
+    /// </summary>
+    /// <remarks>A pass that is running or was already requested still completes.</remarks>
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        StorageConnection? connection;
+        lock (_connectionLock)
+        {
+            _isStopped = true;
+            connection = _connection;
+        }
+
+        connection?.StopTrigger();
+        return base.StopAsync(cancellationToken);
     }
 
     /// <summary>
@@ -244,17 +280,20 @@ public partial class FluentStorageContainer :
 
             var connection = new StorageConnection(
                 client, storageDirectory, this, _subjectFactory, _serializer, TimeProvider, _logger);
-            Publish(connection, disposeCount);
+            var followsStorage = Publish(connection, disposeCount);
             published = connection;
 
             _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
                 isInMemory ? "(in-memory)" : storageDirectory);
 
             // Started before the first pass, so a change during startup leads to another pass.
-            connection.StartTrigger(
-                (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
-                TimeSpan.FromSeconds(ReconcileIntervalSeconds),
-                watchFiles: EnableFileWatching && !isInMemory);
+            if (followsStorage)
+            {
+                connection.StartTrigger(
+                    (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
+                    TimeSpan.FromSeconds(ReconcileIntervalSeconds),
+                    watchFiles: EnableFileWatching && !isInMemory);
+            }
 
             using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
             await connection.Worker.RunAsync(async token =>
@@ -287,14 +326,15 @@ public partial class FluentStorageContainer :
         }
     }
 
-    private void Publish(StorageConnection connection, int disposeCount)
+    /// <returns>Whether the connection follows its storage: false while the container is stopped.</returns>
+    private bool Publish(StorageConnection connection, int disposeCount)
     {
         lock (_connectionLock)
         {
             if (_disposeCount == disposeCount)
             {
                 _connection = connection;
-                return;
+                return !_isStopped;
             }
         }
 

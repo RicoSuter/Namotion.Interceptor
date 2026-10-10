@@ -5,6 +5,8 @@ namespace HomeBlaze.Storage.Tests;
 /// </summary>
 internal sealed class ManualTimeProvider : TimeProvider
 {
+    private static readonly TimeSpan MaximumTimerTime = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     private readonly Lock _lock = new();
     private readonly List<ManualTimer> _timers = [];
     private long _timestamp;
@@ -97,6 +99,10 @@ internal sealed class ManualTimeProvider : TimeProvider
 
         public bool Change(TimeSpan dueTime, TimeSpan period)
         {
+            // A timer of the system clock rejects these as well.
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(dueTime, MaximumTimerTime);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(period, MaximumTimerTime);
+
             lock (_timeProvider._lock)
             {
                 DueTimestamp = dueTime == Timeout.InfiniteTimeSpan ? null : _timeProvider._timestamp + dueTime.Ticks;

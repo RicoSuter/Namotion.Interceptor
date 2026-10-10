@@ -1,3 +1,4 @@
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Testing;
@@ -98,7 +99,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenCreatedEventArrivesForRegisteredFile_ThenSubjectInTreeKeepsReceivingChanges()
+    public async Task WhenUnchangedFileIsNamed_ThenSubjectInTreeKeepsReceivingChanges()
     {
         // Arrange
         WriteFile("Home.md", "first");
@@ -291,7 +292,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenCreatedEventArrivesForTrackedDirectory_ThenFolderAndSubjectsAreKept()
+    public async Task WhenTrackedDirectoryIsNamed_ThenFolderAndSubjectsAreKept()
     {
         // Arrange
         WriteFile("Docs/Readme.md");
@@ -374,7 +375,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenDeletedEventCasingDiffersFromTreeKey_ThenSubjectIsRemoved()
+    public async Task WhenFileIsGoneAndNamedInAnotherCasing_ThenSubjectIsRemoved()
     {
         // Arrange
         WriteFile("notes.md");
@@ -542,8 +543,8 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await storage.ReconcileAsync(Named("Docs.tmp/Readme.md"));
         Directory.Move(GetFullPath("Docs.tmp"), GetFullPath("Docs"));
 
-        // Act: the watcher reports a rename from a temp name as a creation of the new path.
-        await storage.ReconcileAsync(Named("Docs"));
+        // Act
+        await storage.ReconcileAsync(Named("Docs.tmp", "Docs"));
 
         // Assert
         Assert.Equal(["Docs"], storage.Children.Keys);
@@ -591,21 +592,181 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Added.md"), WatcherTimeout);
     }
 
-    [Fact]
-    public async Task WhenReconcileIntervalIsZero_ThenNoPeriodicPassIsScheduled()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task WhenReconcileIntervalIsZeroOrNegative_ThenNoPeriodicPassIsScheduled(int reconcileIntervalSeconds)
     {
         // Arrange
         var timeProvider = new ManualTimeProvider();
 
         // Act
-        await ConnectAsync(configure: container =>
+        var storage = await ConnectAsync(configure: container =>
         {
             container.TimeProvider = timeProvider;
-            container.ReconcileIntervalSeconds = 0;
+            container.ReconcileIntervalSeconds = reconcileIntervalSeconds;
         });
 
         // Assert
+        Assert.Equal(StorageStatus.Connected, storage.Status);
         Assert.Equal(0, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenReconcileIntervalExceedsWhatTimerAccepts_ThenStorageConnectsAndPeriodicPassIsScheduled()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+
+        // Act
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = int.MaxValue;
+        });
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(1, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenFileWatcherCannotStart_ThenConnectFailsAndNothingKeepsRunning()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var missingDirectory = Path.Combine(StorageDirectory.FullName, "Missing");
+
+        // Act
+        var exception = await Record.ExceptionAsync(() => ConnectAsync(enableFileWatching: true, configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ConnectionString = missingDirectory;
+        }));
+
+        // Assert
+        Assert.NotNull(exception);
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStopped_ThenItNoLongerFollowsItsStorage()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+
+        // Act
+        await storage.StopAsync(CancellationToken.None);
+        var armedTimerCount = timeProvider.ArmedTimerCount;
+        WriteFile("Added.md");
+        timeProvider.Advance(TimeSpan.FromSeconds(60));
+
+        // A pass that the clock started would be queued by now, and the worker runs it before this write.
+        using var content = new MemoryStream([1, 2, 3]);
+        await storage.WriteBlobAsync("Other.bin", content, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(0, armedTimerCount);
+        Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStoppedWhileItReconnects_ThenNewConnectionDoesNotFollowItsStorage()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+
+        // Waits for the pass of the connection it replaces, and publishes the new connection only after that.
+        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Act
+        await storage.StopAsync(CancellationToken.None);
+        gate.Release();
+        await pass;
+        await reconnect;
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(0, timeProvider.ArmedTimerCount);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStopped_ThenItsFileWatcherStops()
+    {
+        // Arrange
+        var stopped = await ConnectAsync(enableFileWatching: true);
+        await stopped.StopAsync(CancellationToken.None);
+
+        var watching = await ConnectAsync(enableFileWatching: true);
+
+        // Act: the second file is handled a full quiet period after the first,
+        // so by then every watcher that is still running has handled the first one.
+        WriteFile("First.md");
+        await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("First.md"), WatcherTimeout);
+        WriteFile("Second.md");
+        await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("Second.md"), WatcherTimeout);
+
+        // Assert
+        Assert.Empty(stopped.Children);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStopped_ThenSubjectsCanStillBeWritten()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("From file"));
+        WriteFile("Notes.md", "first");
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var notes = Assert.IsType<MarkdownFile>(storage.Children["Notes.md"]);
+        await storage.StopAsync(CancellationToken.None);
+
+        // Act
+        motor.Name = "Changed after stop";
+        var isConfigurationWritten = await storage.WriteConfigurationAsync(motor, CancellationToken.None);
+        using var content = new MemoryStream("second"u8.ToArray());
+        await storage.WriteBlobAsync("Notes.md", content, CancellationToken.None);
+
+        // Assert
+        Assert.True(isConfigurationWritten);
+        Assert.Contains("Changed after stop", File.ReadAllText(GetFullPath("Motor.json")));
+        Assert.Equal("second", notes.Content);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsStartedAfterItWasStopped_ThenItFollowsItsStorageAgain()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        var storage = await ConnectAsync(configure: container =>
+        {
+            container.TimeProvider = timeProvider;
+            container.ReconcileIntervalSeconds = 60;
+        });
+        await storage.StopAsync(CancellationToken.None);
+
+        // Act
+        await storage.StartAsync(CancellationToken.None);
+        await storage.ExecuteTask!;
+        WriteFile("Added.md");
+        timeProvider.Advance(TimeSpan.FromSeconds(60));
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() => storage.Children.ContainsKey("Added.md"), WatcherTimeout);
     }
 
     [Fact]

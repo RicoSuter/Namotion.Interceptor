@@ -14,6 +14,9 @@ internal sealed class ReconcileTrigger : IDisposable
     // Without it a folder that is written to more often than once per quiet period would never get a pass.
     internal static readonly TimeSpan MaximumDelay = TimeSpan.FromSeconds(5);
 
+    // The longest period a timer accepts.
+    private static readonly TimeSpan MaximumPeriodicInterval = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     private readonly Func<IReadOnlySet<string>, bool, Task> _runPass;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
@@ -32,7 +35,10 @@ internal sealed class ReconcileTrigger : IDisposable
     /// Runs a pass with the named paths and whether every file counts as named. It is called on the thread of
     /// a timer and must return its task without waiting for the pass. Must not throw.
     /// </param>
-    /// <param name="periodicInterval">How often a pass runs without any change. Zero switches it off.</param>
+    /// <param name="periodicInterval">
+    /// How often a pass runs without any change. Zero or less switches it off, and an interval longer than a
+    /// timer accepts (about 49 days) is shortened to that.
+    /// </param>
     /// <param name="timeProvider">The clock and timer source, the system one by default.</param>
     /// <param name="logger">Receives a pass that threw despite the contract.</param>
     public ReconcileTrigger(
@@ -54,6 +60,11 @@ internal sealed class ReconcileTrigger : IDisposable
 
             if (periodicInterval > TimeSpan.Zero)
             {
+                if (periodicInterval > MaximumPeriodicInterval)
+                {
+                    periodicInterval = MaximumPeriodicInterval;
+                }
+
                 _periodicTimer = _timeProvider.CreateTimer(
                     static state => ((ReconcileTrigger)state!).Request(null, null, allNamed: false, atOnce: true),
                     this, periodicInterval, periodicInterval);

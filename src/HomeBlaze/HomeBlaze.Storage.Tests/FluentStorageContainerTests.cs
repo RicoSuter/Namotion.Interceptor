@@ -51,6 +51,32 @@ public class FluentStorageContainerTests
     }
 
     [Fact]
+    public void WhenConfigurationWasSavedBeforeReconcileIntervalExisted_ThenIntervalIsItsDefault()
+    {
+        // Arrange
+        var (typeProvider, _, serializer, _, _) = CreateDependencies();
+        typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
+
+        const string json = """
+            {
+              "$type": "HomeBlaze.Storage.FluentStorageContainer",
+              "storageType": "disk",
+              "connectionString": "./Data",
+              "containerName": null,
+              "enableFileWatching": false
+            }
+            """;
+
+        // Act
+        using var storage = Assert.IsType<FluentStorageContainer>(serializer.Deserialize(json));
+
+        // Assert
+        Assert.Equal("./Data", storage.ConnectionString);
+        Assert.False(storage.EnableFileWatching);
+        Assert.Equal(300, storage.ReconcileIntervalSeconds);
+    }
+
+    [Fact]
     public void Title_ReturnsConnectionStringFileName_WhenNotEmpty()
     {
         // Arrange

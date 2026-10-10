@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using HomeBlaze.Storage.Internal;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Testing;
 
 namespace HomeBlaze.Storage.Tests;
@@ -90,10 +91,12 @@ public class StorageFileWatcherTests
         {
             var changedPaths = new ConcurrentQueue<string>();
             var eventsLostCount = 0;
+            var logger = new StartCountingLogger();
             using var watcher = new StorageFileWatcher(
                 directory.FullName,
                 (path, _) => changedPaths.Enqueue(path),
-                () => Interlocked.Increment(ref eventsLostCount));
+                () => Interlocked.Increment(ref eventsLostCount),
+                logger);
 
             watcher.Start();
 
@@ -103,6 +106,7 @@ public class StorageFileWatcherTests
 
             // Assert
             Assert.Equal(1, Volatile.Read(ref eventsLostCount));
+            Assert.Equal(2, logger.StartCount);
             await AsyncTestHelpers.WaitUntilAsync(() => changedPaths.Contains("Home.md"), WatcherTimeout);
         }
         finally
@@ -143,4 +147,25 @@ public class StorageFileWatcherTests
     // Not started: the events are simulated, so no file system watcher is needed.
     private StorageFileWatcher CreateWatcher()
         => new(BasePath, (path, otherPath) => _changes.Add((path, otherPath)), () => { });
+
+    // The watcher shows no other sign of a start: it logs one information each time it has started.
+    private sealed class StartCountingLogger : ILogger
+    {
+        private int _startCount;
+
+        public int StartCount => Volatile.Read(ref _startCount);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Information)
+            {
+                Interlocked.Increment(ref _startCount);
+            }
+        }
+    }
 }
