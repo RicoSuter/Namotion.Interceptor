@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -70,6 +73,30 @@ public class SonosOperationMetadataTests
         // Assert
         // The unit carries the scale: the dialog shows percent, agents get a fraction hint.
         Assert.True(!takesPercent || !NumericRange.IsMatch(description), $"{operation} states a numeric range: {description}");
+    }
+
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public void WhenOperationIsListed_ThenItHasAnEnabledFlag(string operation)
+    {
+        // Arrange
+        var method = GetMethod(operation);
+
+        // The name an operation is registered under, which the flag's attribute must name to be found.
+        var operationName = method.Name.EndsWith("Async", StringComparison.Ordinal) ? method.Name[..^5] : method.Name;
+
+        // Act
+        var flag = method.DeclaringType!.GetProperty($"{operationName}_IsEnabled", BindingFlags.Public | BindingFlags.Instance);
+
+        // Assert
+        Assert.True(flag is not null, $"{operation} has no {operationName}_IsEnabled property.");
+        Assert.Equal(typeof(bool), flag.PropertyType);
+        Assert.NotNull(flag.GetCustomAttribute<DerivedAttribute>());
+
+        var attribute = flag.GetCustomAttribute<PropertyAttributeAttribute>();
+        Assert.NotNull(attribute);
+        Assert.Equal(operationName, attribute.PropertyName);
+        Assert.Equal(KnownAttributes.IsEnabled, attribute.AttributeName);
     }
 
     [Fact]
