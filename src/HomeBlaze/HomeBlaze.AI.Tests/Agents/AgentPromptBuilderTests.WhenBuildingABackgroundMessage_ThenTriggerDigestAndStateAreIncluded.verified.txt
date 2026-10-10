@@ -1,0 +1,9 @@
+﻿Trigger: change at 2026-10-10 14:30 UTC
+
+# Recent results
+- 2026-10-10 14:00 UTC: Freezer at -12 C, rising.
+Last quiet run: 2026-10-10 14:15 UTC
+
+# Watched state
+## /Kitchen/Freezer
+Temperature: -11.5
