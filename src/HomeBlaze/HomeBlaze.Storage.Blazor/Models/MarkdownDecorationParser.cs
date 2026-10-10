@@ -12,6 +12,10 @@ public static partial class MarkdownDecorationParser
     [GeneratedRegex(MarkdownSegmentBuilder.ExpressionPattern)]
     private static partial Regex ExpressionRegex();
 
+    /// <summary>
+    /// Gets one region per widget block, per slot block that created a subject, and per expression.
+    /// The region of a block covers its head line and its json fence, not its content.
+    /// </summary>
     /// <param name="content">The page text.</param>
     /// <param name="getBlockSubject">Returns the subject a block created, by block index.</param>
     public static List<DecorationRegion> Parse(

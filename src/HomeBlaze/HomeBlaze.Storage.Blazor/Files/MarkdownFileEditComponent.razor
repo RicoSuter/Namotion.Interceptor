@@ -17,6 +17,7 @@
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
+@inject ISnackbar Snackbar
 @inject ConfigurableSubjectSerializer Serializer
 @inject SubjectComponentRegistry ComponentRegistry
 
@@ -175,10 +176,24 @@ else
         if (File == null || _editor == null || region.BlockIndex is not { } blockIndex)
             return;
 
+        // _currentContent follows the editor with a delay, and the comparison below must see what was typed last.
+        _currentContent = await _editor.GetValue();
+
+        // The subject belongs to the block of the saved page. Opening the dialog on editor text that
+        // differs would show the saved values and then replace what was typed, or write into another block.
+        if (MarkdownBlockMatcher.FindSavedBlock(_currentContent, File.Content, blockIndex) is null)
+        {
+            Snackbar.Add($"Save the page before editing {region.Name}. The text up to the end of this block has changes that are not saved.", Severity.Warning);
+            return;
+        }
+
         // The region is from the last content change and the page can have been parsed again since,
         // so the subject is looked up now.
-        if (FindPageBlock(blockIndex) is null || File.GetBlockSubject(blockIndex) is not { } subject)
+        if (File.GetBlockSubject(blockIndex) is not { } subject)
+        {
+            Snackbar.Add($"{region.Name} cannot be edited because the block did not create a subject.", Severity.Warning);
             return;
+        }
 
         var dialog = await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, $"Edit {region.Name}");
         var result = await dialog.Result;
@@ -186,18 +201,19 @@ else
         if (result?.Canceled != false)
             return;
 
-        // Saving in the dialog wrote the page and parsed it again, so the block is looked up again.
-        if (FindPageBlock(blockIndex) is not { } block)
+        // Saving in the dialog wrote the configuration into the saved page, so its head line and json
+        // fence no longer equal the editor text and only the text before the block is compared.
+        if (MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(_currentContent, File.Content, blockIndex) is not { } block)
+        {
+            Snackbar.Add($"The page changed while {region.Name} was edited, so the editor text was not updated. Reload the page before saving it.", Severity.Warning);
             return;
+        }
 
         _currentContent = MarkdownBlockWriter.WriteConfiguration(_currentContent, block, Serializer.Serialize(subject));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
-
-        // Refresh decorations
-        await RefreshDecorationsAsync();
 
         // Save the file
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
@@ -206,8 +222,11 @@ else
         // Reload the file to update Children dictionary with new parsed content
         await File.OnFileChangedAsync(CancellationToken.None);
 
-        // Apply configuration if needed
-        if (subject is IConfigurable configurable)
+        // After the reload, so that the regions carry the subjects of the reloaded page.
+        await RefreshDecorationsAsync();
+
+        // A reload replaces the instance when a configuration key was removed, so it is looked up again.
+        if (File.GetBlockSubject(blockIndex) is IConfigurable configurable)
         {
             await configurable.ApplyConfigurationAsync(CancellationToken.None);
         }
@@ -215,38 +234,6 @@ else
         // Update dirty state
         _originalContent = _currentContent;
         IsDirtyChanged?.Invoke(false);
-    }
-
-    /// <summary>
-    /// Gets the block of the editor content with this index, or null when it is not the block
-    /// that has this index on the page as last parsed.
-    /// </summary>
-    private MarkdownBlock? FindPageBlock(int blockIndex)
-    {
-        if (File?.Content is not { } pageContent)
-            return null;
-
-        var editorBlocks = MarkdownPageParser.Parse(_currentContent).AllBlocks;
-        var pageBlocks = MarkdownPageParser.Parse(pageContent).AllBlocks;
-        if (blockIndex >= editorBlocks.Count || blockIndex >= pageBlocks.Count || editorBlocks[blockIndex].Head is null)
-            return null;
-
-        // A block index is a position. Text that is not saved yet can add or remove a block and so shift
-        // the positions after it, and the subject of one block must never be written into another. The
-        // index therefore only counts while every block up to it has the kind, name and id it has on the page.
-        for (var index = 0; index <= blockIndex; index++)
-        {
-            var editorBlock = editorBlocks[index];
-            var pageBlock = pageBlocks[index];
-            if (editorBlock.Kind != pageBlock.Kind ||
-                editorBlock.Head?.Name != pageBlock.Head?.Name ||
-                editorBlock.Head?.Id != pageBlock.Head?.Id)
-            {
-                return null;
-            }
-        }
-
-        return editorBlocks[blockIndex];
     }
 
     private async Task OnEditExpressionClick(DecorationRegion region)
@@ -315,15 +302,15 @@ else
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
         // Save the file
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
 
         // Reload the file to update Children dictionary with new parsed content
         await File.OnFileChangedAsync(CancellationToken.None);
+
+        // After the reload, so that the regions carry the subjects of the reloaded page.
+        await RefreshDecorationsAsync();
 
         // Update dirty state
         _originalContent = _currentContent;
@@ -340,12 +327,24 @@ else
         if (result == null)
             return;
 
+        // The name becomes the #id of the block. A second block with the same id renders as an error.
+        if (!MarkdownBlockHead.IsValidId(result.Name))
+        {
+            Snackbar.Add($"'{result.Name}' cannot be used as a name on a page. A name starts with a letter or '_' and contains only letters, digits, '_' and '-'.", Severity.Warning);
+            return;
+        }
+
+        if (MarkdownPageParser.Parse(_currentContent).AllBlocks.Any(block => block.Head?.Id == result.Name))
+        {
+            Snackbar.Add($"The name '{result.Name}' is already used on this page.", Severity.Warning);
+            return;
+        }
+
         // Serialize the new subject
         var json = Serializer.Serialize(result.Subject);
 
         var typeName = result.Subject.GetType().FullName!;
-        var id = MarkdownBlockHead.IsValidId(result.Name) ? result.Name : null;
-        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, id, json).Split('\n');
+        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json).Split('\n');
 
         // Insert at cursor line (or end if no cursor)
         var position = await _editor.GetPosition();
@@ -373,15 +372,15 @@ else
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
-        // Refresh decorations
-        await RefreshDecorationsAsync();
-
         // Save the file
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
 
         // Reload the file to update Children dictionary with new parsed content
         await File.OnFileChangedAsync(CancellationToken.None);
+
+        // After the reload, so that the regions carry the subjects of the reloaded page.
+        await RefreshDecorationsAsync();
 
         // Update dirty state
         _originalContent = _currentContent;
@@ -463,6 +462,9 @@ else
 
         _originalContent = content;
         _currentContent = content;
+
+        // The storage reloads the file as part of the write, so the regions get the subjects of the saved page.
+        await RefreshDecorationsAsync();
 
         IsDirtyChanged?.Invoke(false);
     }

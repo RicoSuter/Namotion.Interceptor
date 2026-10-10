@@ -1,4 +1,5 @@
 using HomeBlaze.Storage.Blazor.Models;
+using HomeBlaze.Storage.Internal;
 
 namespace HomeBlaze.Storage.Blazor.Tests;
 
@@ -199,6 +200,39 @@ public class MarkdownDecorationParserTests
 
         // Assert
         Assert.Equal("Card", Assert.Single(regions).Name);
+    }
+
+    [Fact]
+    public void WhenBlockCreatedASubject_ThenItsRegionCarriesTheSubject()
+    {
+        // Arrange
+        var subject = new HtmlSegment("subject of the second block");
+        const string content = ":::Demo.Motor#first\n:::\n\n:::Demo.Motor#second\n:::\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, blockIndex => blockIndex == 1 ? subject : null);
+
+        // Assert
+        Assert.Equal(2, regions.Count);
+        Assert.Null(regions[0].Subject);
+        Assert.Same(subject, regions[1].Subject);
+    }
+
+    [Fact]
+    public void WhenSlotBlockHasSubject_ThenItGetsARegionWithTheSubject()
+    {
+        // Arrange
+        var subject = new HtmlSegment("subject of the slot");
+        const string content = "::::Demo.Card\n:::Footer\ntext\n:::\n::::\n";
+
+        // Act
+        var regions = MarkdownDecorationParser.Parse(content, blockIndex => blockIndex == 1 ? subject : null);
+
+        // Assert
+        Assert.Equal(2, regions.Count);
+        Assert.Equal("Footer", regions[1].Name);
+        Assert.Same(subject, regions[1].Subject);
+        Assert.Equal(1, regions[1].BlockIndex);
     }
 
     [Fact]
