@@ -316,6 +316,205 @@ public class StorageReconcilerTests : StorageTestBase
         Assert.IsType<JsonFile>(storage.Children["Data.json"]);
     }
 
+    [Theory]
+    [InlineData("{")]
+    [InlineData("")]
+    [InlineData("""{ "name": "Pump" }""")]
+    [InlineData("""{ "$type": "Unknown.Type", "name": "Pump" }""")]
+    public async Task WhenJsonFileBecomesValidSubject_ThenSubjectReplacesTheJsonFile(string contentBefore)
+    {
+        // Arrange
+        WriteFile("Motor.json", contentBefore);
+        var storage = await ConnectAsync();
+        var childrenBefore = storage.Children.ToDictionary();
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.IsType<JsonFile>(Assert.Single(childrenBefore, child => child.Key == "Motor.json").Value);
+        Assert.Equal(["Motor"], storage.Children.Keys);
+        Assert.Equal("Pump", Assert.IsType<Samples.Motor>(storage.Children["Motor"]).Name);
+    }
+
+    [Fact]
+    public async Task WhenTypeOfJsonSubjectChanges_ThenSubjectOfTheNewTypeReplacesIt()
+    {
+        // Arrange
+        WriteFile("Device.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Device"]);
+        var detaches = CountDetachesOf(motor);
+        WriteFile("Device.json", CallbackSubject.Serialize("Valve"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Device"], storage.Children.Keys);
+        Assert.Equal("Valve", Assert.IsType<CallbackSubject>(storage.Children["Device"]).Name);
+        Assert.Equal(1, detaches.Count);
+        Assert.Equal("Pump", motor.Name);
+    }
+
+    [Fact]
+    public async Task WhenJsonSubjectFileLosesItsType_ThenJsonFileReplacesTheSubject()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var detaches = CountDetachesOf(motor);
+        WriteFile("Motor.json", """{ "name": "Pump" }""");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Motor.json"], storage.Children.Keys);
+        Assert.IsType<JsonFile>(storage.Children["Motor.json"]);
+        Assert.Equal(1, detaches.Count);
+    }
+
+    [Fact]
+    public async Task WhenJsonSubjectFileIsInvalidForAWhile_ThenSubjectKeepsItsInstance()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var detaches = CountDetachesOf(motor);
+        WriteFile("Motor.json", "{");
+
+        // Act
+        await storage.ReconcileAsync();
+        var childrenWhileInvalid = storage.Children.ToDictionary();
+        var nameWhileInvalid = motor.Name;
+        WriteFile("Motor.json", SerializeMotor("Pump, changed"));
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(motor, Assert.Single(childrenWhileInvalid, child => child.Key == "Motor").Value);
+        Assert.Equal("Pump", nameWhileInvalid);
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal("Pump, changed", motor.Name);
+        Assert.Equal(0, detaches.Count);
+    }
+
+    [Fact]
+    public async Task WhenPlainJsonFileChanges_ThenItsInstanceIsKeptWithTheNewSize()
+    {
+        // Arrange
+        WriteFile("Values.json", """{ "value": 1 }""");
+        var storage = await ConnectAsync();
+        var file = Assert.IsType<JsonFile>(storage.Children["Values.json"]);
+        WriteFile("Values.json", """{ "value": 22 }""");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(file, storage.Children["Values.json"]);
+        Assert.Equal("""{ "value": 22 }""".Length, file.FileSize);
+    }
+
+    [Fact]
+    public async Task WhenPlainJsonFileIsGivenATypeThroughBlobWrite_ThenSubjectReplacesTheJsonFile()
+    {
+        // Arrange
+        WriteFile("Motor.json", """{ "name": "Pump" }""");
+        var storage = await ConnectAsync();
+        var childrenBefore = storage.Children.Keys.ToList();
+
+        // Act
+        await WriteBlobAsync(storage, "Motor.json", SerializeMotor("Pump"));
+
+        // Assert
+        Assert.Equal(["Motor.json"], childrenBefore);
+        Assert.Equal(["Motor"], storage.Children.Keys);
+        Assert.Equal("Pump", Assert.IsType<Samples.Motor>(storage.Children["Motor"]).Name);
+    }
+
+    [Fact]
+    public async Task WhenKeyOfBlockedFolderBecomesFree_ThenItsFilesAreLoadedInTheSamePass()
+    {
+        // Arrange
+        WriteFile("Docs.json", SerializeMotor("Blocker"));
+        var storage = await ConnectAsync();
+        WriteFile("Docs/Readme.md");
+        WriteFile("Docs/Guides/Setup.md");
+        await storage.ReconcileAsync();
+        var childWhileBlocked = storage.Children["Docs"];
+        File.Delete(GetFullPath("Docs.json"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.IsType<Samples.Motor>(childWhileBlocked);
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        Assert.Equal(["Guides", "Readme.md"], docs.Children.Keys.Order());
+        Assert.Equal(["Setup.md"], Assert.IsType<VirtualFolder>(docs.Children["Guides"]).Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenFolderStaysBlocked_ThenItsFilesAreNotLoadedAgain()
+    {
+        // Arrange
+        WriteFile("Docs.json", SerializeMotor("Blocker"));
+        var storage = await ConnectAsync();
+        WriteFile("Docs/Data.gated");
+        await storage.ReconcileAsync();
+        var loadCountAfterFirstPass = GatedFile.LoadCount;
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(1, loadCountAfterFirstPass);
+        Assert.Equal(1, GatedFile.LoadCount);
+        Assert.IsType<Samples.Motor>(storage.Children["Docs"]);
+    }
+
+    [Fact]
+    public async Task WhenFileFailsToLoadWithIOException_ThenNextPassTriesAgain()
+    {
+        // Arrange
+        WriteFile("Data.gated", "first");
+        GatedFile.FailNextLoad(new IOException("The file is in use."));
+        var storage = await ConnectAsync();
+        var childrenAfterFailure = storage.Children.Keys.ToList();
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Empty(childrenAfterFailure);
+        Assert.Equal(2, GatedFile.LoadCount);
+        Assert.Equal("first", Assert.IsType<GatedFile>(storage.Children["Data.gated"]).Content);
+    }
+
+    [Fact]
+    public async Task WhenChangedFileFailsToReloadWithIOException_ThenNextPassTriesAgain()
+    {
+        // Arrange
+        WriteFile("Data.gated", "first");
+        var storage = await ConnectAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
+        WriteFile("Data.gated", "second version");
+        GatedFile.FailNextLoad(new IOException("The file is in use."));
+
+        // Act
+        await storage.ReconcileAsync();
+        var contentAfterFailure = file.Content;
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("first", contentAfterFailure);
+        Assert.Equal("second version", file.Content);
+    }
+
     [Fact]
     public async Task WhenSubjectThrowsCancellationOnLoad_ThenFileIsRecordedAsFailedAndPassCompletes()
     {

@@ -484,6 +484,22 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         Assert.False(File.Exists(GetFullPath("Docs.json")));
     }
 
+    [Fact]
+    public async Task WhenSubjectIsAddedBelowTakenKey_ThenItThrowsAndNoFolderIsCreated()
+    {
+        // Arrange
+        WriteFile("Devices.json", SerializeMotor("Existing"));
+        var storage = await ConnectAsync();
+        var added = CreateMotor();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            storage.AddSubjectAsync("Devices/Motor.json", added, CancellationToken.None));
+
+        Assert.Equal(["Devices"], storage.Children.Keys);
+        Assert.False(Directory.Exists(GetFullPath("Devices")));
+    }
+
     [Theory]
     [InlineData(".Motor.json")]
     [InlineData(".idea/Motor.json")]

@@ -428,11 +428,15 @@ public partial class FluentStorageContainer :
         var connection = Connection;
         await connection.Worker.RunAsync(async token =>
         {
-            if (connection.Index.TryGet(relativePath, out _) || await connection.Client.ExistsAsync(relativePath, token))
+            if (connection.Index.TryGet(relativePath, out _))
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
 
+            // Before the storage is asked: on disk, asking about a path creates the folder of that path.
             if (!connection.Reconciler.IsKeyFree(relativePath, subject))
                 throw new InvalidOperationException($"A subject already exists at '{path}'.");
+
+            if (await connection.Client.ExistsAsync(relativePath, token))
+                throw new InvalidOperationException($"A file already exists at '{path}'.");
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
             await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);

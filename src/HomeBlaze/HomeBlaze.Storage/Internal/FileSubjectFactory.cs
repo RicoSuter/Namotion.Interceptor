@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -12,6 +13,9 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 internal sealed class FileSubjectFactory
 {
+    // What the serializer writes into a configurable subject's JSON: the full name of its type.
+    private const string TypeDiscriminator = "$type";
+
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IServiceProvider _serviceProvider;
@@ -71,5 +75,19 @@ internal sealed class FileSubjectFactory
         }
 
         return new JsonFile(storage, path);
+    }
+
+    /// <summary>
+    /// Checks whether the JSON text describes a subject of the type of the given one, which can then take the
+    /// text as its configuration instead of being replaced.
+    /// </summary>
+    /// <exception cref="JsonException">The text is not valid JSON.</exception>
+    public static bool DescribesTypeOf(IInterceptorSubject subject, string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.ValueKind == JsonValueKind.Object &&
+               document.RootElement.TryGetProperty(TypeDiscriminator, out var typeName) &&
+               typeName.ValueKind == JsonValueKind.String &&
+               typeName.ValueEquals(subject.GetType().FullName);
     }
 }

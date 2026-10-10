@@ -104,7 +104,7 @@ internal sealed class StorageReconciler
             catch (Exception exception) when (exception is not StorageUnresponsiveException && !cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
-                RecordFailure(listed);
+                RecordFailure(listed, exception);
             }
         }
 
@@ -196,23 +196,11 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Checks whether a new subject at the path could be placed: its folder is placed or can be created, and
-    /// its key in that folder is free.
+    /// Checks whether a new subject at the path could be placed: its key is free in its folder, or, when that
+    /// folder is not in the tree, the name of the folder is free where it would be placed.
     /// </summary>
     public bool IsKeyFree(string path, IInterceptorSubject subject)
-    {
-        var key = GetChildKey(path, subject);
-        var parent = StoragePath.GetParent(path);
-
-        // A folder that does not exist yet is created with the file, so its own name has to be free where it starts.
-        while (parent.Length > 0 && !_index.TryGet(parent, out _))
-        {
-            key = StoragePath.GetName(parent);
-            parent = StoragePath.GetParent(parent);
-        }
-
-        return IsKeyFree(parent, key);
-    }
+        => IsKeyFree(StoragePath.GetParent(path), GetChildKey(path, subject));
 
     public async Task<StorageVersion> GetVersionAsync(string path, CancellationToken cancellationToken)
     {
@@ -223,13 +211,16 @@ internal sealed class StorageReconciler
 
     /// <summary>
     /// Brings the subject of a file in line with content that was just written to the file, and records the
-    /// version and the hash of the file.
+    /// version and the hash of the file. A subject that the content replaces is placed in the tree.
     /// </summary>
     public async Task RefreshWrittenAsync(StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
         // Taken before the subject reads the file: taken after, it could be of a later content than the subject has.
         var version = await GetVersionAsync(entry.Path, cancellationToken);
-        await RefreshAsync(entry, version, content, cancellationToken);
+        if (await RefreshAsync(entry, version, content, cancellationToken))
+        {
+            Apply();
+        }
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
@@ -242,10 +233,25 @@ internal sealed class StorageReconciler
 
     private bool IsKeyFree(string parent, string key)
     {
-        if (parent.Length > 0 &&
-            !(_index.TryGet(parent, out var folder) && folder is { IsFolder: true, State: StorageEntryState.Placed }))
+        // A folder that is not in the tree is placed together with what is inside it. What has to be free then
+        // is the name of that folder, in the first folder above it that is in the tree.
+        while (parent.Length > 0)
         {
-            return false;
+            if (_index.TryGet(parent, out var folder))
+            {
+                if (!folder.IsFolder)
+                {
+                    return false;
+                }
+
+                if (folder.State == StorageEntryState.Placed)
+                {
+                    break;
+                }
+            }
+
+            key = StoragePath.GetName(parent);
+            parent = StoragePath.GetParent(parent);
         }
 
         foreach (var entry in _index.Entries)
@@ -363,7 +369,7 @@ internal sealed class StorageReconciler
             }
             else
             {
-                entry.Subject = CreateFromJson(listed.Path, content, listed.Version);
+                entry.Subject = CreateFromJson(listed.Path, DecodeText(content), listed.Version);
             }
         }
         else
@@ -396,7 +402,7 @@ internal sealed class StorageReconciler
         return isMoved;
     }
 
-    private IInterceptorSubject CreateFromJson(string path, byte[] content, StorageVersion version)
+    private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
     {
         IInterceptorSubject subject;
 
@@ -404,7 +410,7 @@ internal sealed class StorageReconciler
         // assignment in Apply does.
         using (ExecutionContext.SuppressFlow())
         {
-            subject = _subjectFactory.CreateFromJson(_storage, path, DecodeText(content));
+            subject = _subjectFactory.CreateFromJson(_storage, path, json);
         }
 
         if (subject is JsonFile file)
@@ -422,7 +428,11 @@ internal sealed class StorageReconciler
     /// <param name="version">The version of the file as the storage reports it.</param>
     /// <param name="content">The content of the file when the caller has it. Otherwise it is read from the storage.</param>
     /// <param name="cancellationToken">Cancels the refresh.</param>
-    private async Task RefreshAsync(
+    /// <returns>
+    /// True when the content made the file something else, so that a new entry with another subject replaced
+    /// the given one. <see cref="Apply"/> then exchanges the subjects in the tree.
+    /// </returns>
+    private async Task<bool> RefreshAsync(
         StorageEntry entry, StorageVersion version, byte[]? content, CancellationToken cancellationToken)
     {
         if (entry.Subject is GenericFile genericFile)
@@ -430,18 +440,16 @@ internal sealed class StorageReconciler
             // Holds nothing but size and time, so there is no content to compare.
             SetMetadata(genericFile, version);
             entry.Version = version;
-            return;
+            return false;
         }
 
         string hash;
-        if (entry.Subject is IStorageFile file)
+        if (entry.Subject is IStorageFile file and not JsonFile)
         {
             // The subject reads the file itself, so its bytes are only hashed here.
             hash = content != null ? StorageHash.Compute(content) : await ComputeHashAsync(entry.Path, cancellationToken);
             SetMetadata(file, version);
-
-            // A plain JSON file holds nothing of its content.
-            if (hash != entry.Hash && file is not JsonFile)
+            if (hash != entry.Hash)
             {
                 await file.OnFileChangedAsync(cancellationToken);
                 _logger?.LogInformation("Reloaded: {Path}", entry.Path);
@@ -451,21 +459,62 @@ internal sealed class StorageReconciler
         {
             content ??= await ReadAsync(entry.Path, cancellationToken);
             hash = StorageHash.Compute(content);
-            if (hash != entry.Hash && entry.Subject is IConfigurable configurable)
+            if (hash != entry.Hash && await ApplyContentAsync(entry, version, hash, content, cancellationToken))
             {
-                // Can attach nested subjects, see the creation in AddAsync.
-                using (ExecutionContext.SuppressFlow())
-                {
-                    _serializer.UpdateConfiguration(entry.Subject, DecodeText(content));
-                }
+                return true;
+            }
 
-                await configurable.ApplyConfigurationAsync(cancellationToken);
-                _logger?.LogInformation("Reloaded: {Path}", entry.Path);
+            if (entry.Subject is JsonFile jsonFile)
+            {
+                SetMetadata(jsonFile, version);
             }
         }
 
         entry.Hash = hash;
         entry.Version = version;
+        return false;
+    }
+
+    /// <summary>
+    /// Applies changed content to the subject of a file whose subject is made from its text.
+    /// </summary>
+    /// <returns>True when a new entry with another subject replaced the given one.</returns>
+    private async Task<bool> ApplyContentAsync(
+        StorageEntry entry, StorageVersion version, string hash, byte[] content, CancellationToken cancellationToken)
+    {
+        var json = DecodeText(content);
+
+        // Text that is not valid JSON fails here for a configurable subject, which then keeps what it has:
+        // a file that is being written is no reason to stop a device.
+        if (entry.Subject is IConfigurable configurable && (!IsJson(entry.Path) || FileSubjectFactory.DescribesTypeOf(entry.Subject, json)))
+        {
+            // Can attach nested subjects, see the creation of a subject from JSON.
+            using (ExecutionContext.SuppressFlow())
+            {
+                _serializer.UpdateConfiguration(entry.Subject, json);
+            }
+
+            await configurable.ApplyConfigurationAsync(cancellationToken);
+            _logger?.LogInformation("Reloaded: {Path}", entry.Path);
+            return false;
+        }
+
+        if (!IsJson(entry.Path))
+        {
+            return false;
+        }
+
+        // The file is something else now: a plain file that became a subject, a subject of another type, or a
+        // subject that became a plain file. Only a plain file that stays one keeps its instance.
+        var subject = CreateFromJson(entry.Path, json, version);
+        if (subject is JsonFile && entry.Subject is JsonFile)
+        {
+            return false;
+        }
+
+        _index.Set(new StorageEntry { Path = entry.Path, IsFolder = false, Version = version, Hash = hash, Subject = subject });
+        _logger?.LogInformation("Replaced the subject of: {Path}", entry.Path);
+        return true;
     }
 
     private static void SetMetadata(IStorageFile file, StorageVersion version)
@@ -474,13 +523,16 @@ internal sealed class StorageReconciler
         file.LastModified = version.Modified?.UtcDateTime ?? file.LastModified;
     }
 
-    private void RecordFailure(StorageListing listed)
+    private void RecordFailure(StorageListing listed, Exception exception)
     {
-        // A subject that is in the tree stays there with what it has. Recording the version makes the next
-        // pass wait for another change instead of failing again on every pass.
+        // Recording the version makes the next pass wait for another change instead of failing again on every
+        // pass. Not after an IO error: that is often over by the next pass, such as a file its writer still holds.
+        var version = exception is IOException ? default : listed.Version;
+
+        // A subject that is in the tree stays there with what it has.
         if (_index.TryGet(listed.Path, out var entry) && entry.Subject != null)
         {
-            entry.Version = listed.Version;
+            entry.Version = version;
             return;
         }
 
@@ -488,7 +540,7 @@ internal sealed class StorageReconciler
         {
             Path = listed.Path,
             IsFolder = false,
-            Version = listed.Version,
+            Version = version,
             State = StorageEntryState.Failed
         });
     }

@@ -10,8 +10,8 @@ namespace HomeBlaze.Storage.Tests;
 /// A storage container on a temporary directory, wired with the application's interceptor context.
 /// </summary>
 /// <remarks>
-/// One collection for all derived classes: the gates and counters of <see cref="GatedFile"/> are static, so
-/// tests that use them must not run next to each other.
+/// One collection for all derived classes: the gates and counters of <see cref="GatedFile"/> and the callback
+/// of <see cref="CallbackSubject"/> are static, so tests that use them must not run next to each other.
 /// </remarks>
 [Collection(nameof(StorageTestBase))]
 public abstract class StorageTestBase : IDisposable
@@ -25,6 +25,7 @@ public abstract class StorageTestBase : IDisposable
     protected StorageTestBase()
     {
         GatedFile.Reset();
+        CallbackSubject.Reset();
     }
 
     protected DirectoryInfo StorageDirectory { get; } = Directory.CreateTempSubdirectory("homeblaze-storage-");
