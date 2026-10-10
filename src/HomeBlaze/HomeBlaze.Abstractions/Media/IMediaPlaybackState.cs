@@ -4,14 +4,14 @@ using HomeBlaze.Abstractions.Attributes;
 namespace HomeBlaze.Abstractions.Media;
 
 /// <summary>
-/// State interface for audio players.
+/// State interface for subjects that play media.
 /// </summary>
 [SubjectAbstraction]
-[Description("Reports audio player playback state.")]
-public interface IAudioPlayerState : IVolumeState
+[Description("Reports whether media is playing.")]
+public interface IMediaPlaybackState
 {
     /// <summary>
-    /// Whether audio is currently playing.
+    /// Whether media is currently playing.
     /// </summary>
     [State(Position = 140)]
     bool? IsPlaying { get; }

@@ -740,6 +740,8 @@ Core platform interfaces and attributes:
 
 Subjects implement these interfaces to declare their capabilities. For example, a Zigbee temperature sensor plugin would implement `ITemperatureSensor`, and a Philips Hue light plugin would implement `ILightbulb` (which composes `ISwitchDevice`, `IBrightnessController`, `IColorController`).
 
+Device interfaces compose small capability interfaces, split into state and controller. A speaker implements `IAudioPlayer`, which composes playback (`IMediaPlaybackState`, `IMediaPlaybackController`), volume (`IVolumeState`, `IVolumeController`) and the current track (`IMediaTrackState`). A device with only some of these, such as a receiver with volume but no playback, implements just the capability interfaces it has.
+
 ### HomeBlaze.Storage.Abstractions
 
 Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `StorageStatus`, `[FileExtension]`.

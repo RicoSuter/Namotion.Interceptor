@@ -14,7 +14,6 @@ namespace Namotion.Devices.Sonos;
 [InterceptorSubject]
 public partial class SonosGroup :
     IAudioPlayer,
-    IMediaTrackState,
     IVirtualSubject,
     ITitleProvider,
     IIconProvider

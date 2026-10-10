@@ -117,9 +117,11 @@ Prefer player or system widgets over group widgets: a group widget shows "Cannot
 | Subject | Interfaces |
 |---------|------------|
 | `SonosSystem` | `IHubDevice`, `IConfigurable`, `IMonitoredService`, `IConnectionState`, `ILastUpdatedProvider`, `ITitleProvider`, `IIconProvider` |
-| `SonosPlayer` | `IAudioPlayer`, `IMediaTrackState`, `IBatteryState`, `IDeviceInfo`, `INetworkAdapter`, `ISoftwareState`, `IConnectionState`, `ITitleProvider`, `IIconProvider` |
+| `SonosPlayer` | `IAudioPlayer`, `IBatteryState`, `IDeviceInfo`, `INetworkAdapter`, `ISoftwareState`, `IConnectionState`, `ITitleProvider`, `IIconProvider` |
 | `SonosSatellite` | `IDeviceInfo`, `INetworkAdapter`, `ISoftwareState`, `IConnectionState`, `ITitleProvider`, `IIconProvider` |
-| `SonosGroup` | `IAudioPlayer`, `IMediaTrackState`, `IVirtualSubject`, `ITitleProvider`, `IIconProvider` |
+| `SonosGroup` | `IAudioPlayer`, `IVirtualSubject`, `ITitleProvider`, `IIconProvider` |
+
+`IAudioPlayer` composes the capability interfaces `IMediaPlaybackState`, `IMediaPlaybackController`, `IVolumeState`, `IVolumeController` and `IMediaTrackState`, so a search for any of them finds players and groups.
 
 The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `AvailableSoftwareUpdate`, so these stay empty.
 

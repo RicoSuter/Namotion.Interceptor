@@ -4,11 +4,11 @@ using HomeBlaze.Abstractions.Attributes;
 namespace HomeBlaze.Abstractions.Media;
 
 /// <summary>
-/// Controller interface for audio players.
+/// Controller interface for subjects that play media.
 /// </summary>
 [SubjectAbstraction]
-[Description("Controls audio playback with play, pause, stop, skip and seek.")]
-public interface IAudioPlayerController : IVolumeController
+[Description("Controls media playback with play, pause, stop, skip and seek.")]
+public interface IMediaPlaybackController
 {
     /// <summary>
     /// Starts or resumes playback.

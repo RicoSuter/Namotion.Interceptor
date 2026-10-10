@@ -14,7 +14,6 @@ namespace Namotion.Devices.Sonos;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class SonosPlayer : SonosDevice,
     IAudioPlayer,
-    IMediaTrackState,
     IBatteryState
 {
     private readonly SonosSystem _system;
