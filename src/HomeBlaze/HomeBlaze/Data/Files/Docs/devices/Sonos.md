@@ -313,6 +313,10 @@ netsh http add urlacl url=http://+:6329/ user=<account running HomeBlaze>
 - `AvailableSoftwareUpdate` from the topology event or `CheckForUpdate`.
 - LED state, button lock, and home theater TV power state.
 - A widget for `SonosSatellite`.
+- Live track progress in the widgets, counted up from the last polled position while playing, since the position is empty for up to one polling interval after a track starts.
+- A lean poll while events are live that reads only position and sleep timer, and a read-back after a command limited to the affected player instead of its whole group.
+- Satellite reads overlapped with the player polls, and known seed speakers probed concurrently instead of one after another.
+- NOTIFY bodies parsed with an `XmlReader` without the intermediate string copies.
 - Opt-in read-only live integration tests (`Category=Integration`).
 - Upstream contributions to `Sonos.Base` (satellites in the topology model, `resMD` in DIDL).
 
