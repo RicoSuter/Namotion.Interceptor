@@ -9,6 +9,7 @@ namespace HomeBlaze.Storage.Tests;
 public class FluentStorageContainerPathTests : IDisposable
 {
     private readonly DirectoryInfo _dataDirectory = Directory.CreateTempSubdirectory("homeblaze-data-");
+    private readonly DirectoryInfo _otherDirectory = Directory.CreateTempSubdirectory("homeblaze-other-");
 
     [Fact]
     public async Task WhenConnectionStringIsRelative_ThenStorageResolvesAgainstDataDirectory()
@@ -19,43 +20,54 @@ public class FluentStorageContainerPathTests : IDisposable
 
         using var storage = CreateStorage(withDataDirectory: true);
         storage.ConnectionString = "Files";
-        storage.EnableFileWatching = false;
 
         // Act
         await storage.ConnectAsync(CancellationToken.None);
 
         // Assert
-        Assert.Single(storage.Children);
-        Assert.Equal(Path.Combine(filesDirectory.FullName, "notes.txt"), storage.GetFileSystemPath("notes.txt"));
+        Assert.Equal(["notes.txt"], storage.Children.Keys);
     }
 
     [Fact]
-    public void WhenConnectionStringIsAbsolute_ThenDataDirectoryIsIgnored()
+    public async Task WhenConnectionStringIsAbsolute_ThenDataDirectoryIsIgnored()
     {
         // Arrange
-        var absoluteDirectory = Path.Combine(Path.GetTempPath(), "homeblaze-absolute");
-        var storage = CreateStorage(withDataDirectory: true);
-        storage.ConnectionString = absoluteDirectory;
+        File.WriteAllText(Path.Combine(_dataDirectory.FullName, "in-data-directory.txt"), "hello");
+        File.WriteAllText(Path.Combine(_otherDirectory.FullName, "in-absolute-directory.txt"), "hello");
+
+        using var storage = CreateStorage(withDataDirectory: true);
+        storage.ConnectionString = _otherDirectory.FullName;
 
         // Act
-        var path = storage.GetFileSystemPath("/Devices/a.json");
+        await storage.ConnectAsync(CancellationToken.None);
 
         // Assert
-        Assert.Equal(Path.Combine(absoluteDirectory, "Devices", "a.json"), path);
+        Assert.Equal(["in-absolute-directory.txt"], storage.Children.Keys);
     }
 
     [Fact]
-    public void WhenNoDataDirectoryIsProvided_ThenRelativeConnectionStringResolvesAgainstWorkingDirectory()
+    public async Task WhenNoDataDirectoryIsProvided_ThenRelativeConnectionStringResolvesAgainstWorkingDirectory()
     {
         // Arrange
-        var storage = CreateStorage(withDataDirectory: false);
-        storage.ConnectionString = "Files";
+        var relativeDirectory = "homeblaze-relative-" + Guid.NewGuid().ToString("N");
+        var workingDirectory = Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), relativeDirectory));
+        try
+        {
+            File.WriteAllText(Path.Combine(workingDirectory.FullName, "notes.txt"), "hello");
 
-        // Act
-        var path = storage.GetFileSystemPath("a.json");
+            using var storage = CreateStorage(withDataDirectory: false);
+            storage.ConnectionString = relativeDirectory;
 
-        // Assert
-        Assert.Equal(Path.GetFullPath(Path.Combine("Files", "a.json")), path);
+            // Act
+            await storage.ConnectAsync(CancellationToken.None);
+
+            // Assert
+            Assert.Equal(["notes.txt"], storage.Children.Keys);
+        }
+        finally
+        {
+            workingDirectory.Delete(recursive: true);
+        }
     }
 
     private FluentStorageContainer CreateStorage(bool withDataDirectory)
@@ -77,7 +89,10 @@ public class FluentStorageContainerPathTests : IDisposable
         var storage = new FluentStorageContainer(
             typeRegistry,
             serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>(),
-            serviceProvider);
+            serviceProvider)
+        {
+            EnableFileWatching = false
+        };
 
         if (withDataDirectory)
         {
@@ -92,6 +107,7 @@ public class FluentStorageContainerPathTests : IDisposable
     public void Dispose()
     {
         _dataDirectory.Delete(recursive: true);
+        _otherDirectory.Delete(recursive: true);
     }
 
     private sealed class TestDataDirectoryProvider(string dataDirectory) : IDataDirectoryProvider

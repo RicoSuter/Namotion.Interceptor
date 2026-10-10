@@ -42,26 +42,33 @@ internal sealed class StorageFileWatcher : IDisposable
 
         Interlocked.Exchange(ref _watcher, null)?.Dispose();
 
-        FileSystemWatcher watcher;
-
-        // Started within a work item of another storage, the watcher would otherwise carry the flow of that item into every event it raises.
-        using (ExecutionContext.SuppressFlow())
+        var watcher = new FileSystemWatcher(_basePath)
         {
-            watcher = new FileSystemWatcher(_basePath)
-            {
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
-                               NotifyFilters.LastWrite | NotifyFilters.Size,
-                IncludeSubdirectories = true,
-                InternalBufferSize = 64 * 1024, // 64KB buffer to reduce overflow risk
-                EnableRaisingEvents = true
-            };
-        }
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
+                           NotifyFilters.LastWrite | NotifyFilters.Size,
+            IncludeSubdirectories = true,
+            InternalBufferSize = 64 * 1024 // 64KB buffer to reduce overflow risk
+        };
 
         watcher.Created += OnWatcherEvent;
         watcher.Changed += OnWatcherEvent;
         watcher.Deleted += OnWatcherEvent;
         watcher.Renamed += OnWatcherEvent;
         watcher.Error += OnWatcherError;
+
+        try
+        {
+            // Started within a work item of another storage, the watcher would otherwise carry the flow of that item into every event it raises.
+            using (ExecutionContext.SuppressFlow())
+            {
+                watcher.EnableRaisingEvents = true;
+            }
+        }
+        catch
+        {
+            watcher.Dispose();
+            throw;
+        }
 
         Interlocked.Exchange(ref _watcher, watcher)?.Dispose();
 

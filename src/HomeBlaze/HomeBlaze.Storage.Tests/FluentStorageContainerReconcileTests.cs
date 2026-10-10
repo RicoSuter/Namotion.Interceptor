@@ -754,7 +754,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         }));
 
         // Assert
-        Assert.NotNull(exception);
+        Assert.IsType<ArgumentException>(exception);
         Assert.Equal(0, timeProvider.ArmedTimerCount);
     }
 
@@ -816,21 +816,22 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     [Fact]
     public async Task WhenStorageIsStopped_ThenItsFileWatcherStops()
     {
-        // Arrange
+        // Arrange: the file shows that the watcher of the storage worked until it was stopped.
         var stopped = await ConnectAsync(enableFileWatching: true);
-        await stopped.StopAsync(CancellationToken.None);
-
         var watching = await ConnectAsync(enableFileWatching: true);
+        WriteFile("Before.md");
+        await AsyncTestHelpers.WaitUntilAsync(() => stopped.Children.ContainsKey("Before.md"), WatcherTimeout);
 
         // Act: the second file is handled a full quiet period after the first,
         // so by then every watcher that is still running has handled the first one.
+        await stopped.StopAsync(CancellationToken.None);
         WriteFile("First.md");
         await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("First.md"), WatcherTimeout);
         WriteFile("Second.md");
         await AsyncTestHelpers.WaitUntilAsync(() => watching.Children.ContainsKey("Second.md"), WatcherTimeout);
 
         // Assert
-        Assert.Empty(stopped.Children);
+        Assert.Equal(["Before.md"], stopped.Children.Keys);
     }
 
     [Fact]

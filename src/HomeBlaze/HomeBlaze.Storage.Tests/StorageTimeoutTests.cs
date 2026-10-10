@@ -89,6 +89,31 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenPassFailsAndNextPassFindsNothingNew_ThenFilesLoadedByTheFailedPassArePlaced()
+    {
+        // Arrange
+        var storage = await ConnectPausableAsync();
+        WriteFile("First.gated");
+        WriteFile("Second.md");
+        var metadataReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var pass = storage.ReconcileAsync();
+        await metadataReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        File.Delete(GetFullPath("Second.md"));
+        await ReleaseHangingCallAsync(storage);
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Empty(childrenAfterFailedPass);
+        Assert.Equal(["First.gated"], storage.Children.Keys);
+        Assert.Equal(1, GatedFile.LoadCount);
+    }
+
+    [Fact]
     public async Task WhenNamedPassFails_ThenNextPassComparesEveryFileByContent()
     {
         // Arrange

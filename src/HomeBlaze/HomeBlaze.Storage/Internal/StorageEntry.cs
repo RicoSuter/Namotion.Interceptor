@@ -30,6 +30,9 @@ internal sealed class StorageEntry
 {
     public required string Path { get; init; }
 
+    /// <summary>The path of the folder that holds the entry.</summary>
+    public string Parent => field ??= StoragePath.GetParent(Path);
+
     public required bool IsFolder { get; init; }
 
     public StorageVersion Version { get; set; }

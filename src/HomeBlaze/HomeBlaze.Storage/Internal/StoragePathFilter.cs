@@ -1,7 +1,7 @@
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Decides which storage paths never become subjects, for the startup scan and the file watcher alike.
+/// Decides which storage paths never become subjects, for the listing of a pass and the file watcher alike.
 /// </summary>
 internal static class StoragePathFilter
 {

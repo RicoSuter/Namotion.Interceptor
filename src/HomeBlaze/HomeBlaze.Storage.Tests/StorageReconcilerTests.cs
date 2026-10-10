@@ -570,6 +570,26 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenStorageReconnectsToEmptyDirectory_ThenSubjectsOfPreviousConnectionAreRemoved()
+    {
+        // Arrange
+        var emptyDirectory = CreateTemporaryDirectory();
+        WriteFile("Old.md");
+        WriteFile("Docs/Readme.md");
+        var storage = await ConnectAsync();
+        var childrenOfPreviousConnection = storage.Children.Keys.Order().ToList();
+        storage.ConnectionString = emptyDirectory.FullName;
+
+        // Act
+        await storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Docs", "Old.md"], childrenOfPreviousConnection);
+        Assert.Empty(storage.Children);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
     public async Task WhenStorageIsDisposedWhilePassRuns_ThenPassChangesNeitherTreeNorStatus()
     {
         // Arrange

@@ -29,6 +29,9 @@ internal static class StorageCallTimeout
             return true;
         }
 
+        // Sources of its own and not Task.WaitAsync with a time limit: that one releases its timer only after
+        // the code that waited has gone on, so the timer of a wait that is over could still be armed when the
+        // next wait starts. Released here, the armed timers of the clock are exactly those of the waits that run.
         using var limit = new CancellationTokenSource(Limit, timeProvider);
         using var waitEnded = CancellationTokenSource.CreateLinkedTokenSource(limit.Token, cancellationToken);
 

@@ -201,12 +201,9 @@ else
         // Refresh decorations
         await RefreshDecorationsAsync();
 
-        // Save the file
+        // Save the file, which also reloads it on the worker of its storage
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
-
-        // Reload the file to update Children dictionary with new parsed content
-        await File.OnFileChangedAsync(CancellationToken.None);
 
         // Apply configuration if needed
         if (subject is IConfigurable configurable)
@@ -288,12 +285,9 @@ else
         // Refresh decorations
         await RefreshDecorationsAsync();
 
-        // Save the file
+        // Save the file, which also reloads it on the worker of its storage
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
-
-        // Reload the file to update Children dictionary with new parsed content
-        await File.OnFileChangedAsync(CancellationToken.None);
 
         // Update dirty state
         _originalContent = _currentContent;
@@ -348,12 +342,9 @@ else
         // Refresh decorations
         await RefreshDecorationsAsync();
 
-        // Save the file
+        // Save the file, which also reloads it on the worker of its storage
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
-
-        // Reload the file to update Children dictionary with new parsed content
-        await File.OnFileChangedAsync(CancellationToken.None);
 
         // Update dirty state
         _originalContent = _currentContent;

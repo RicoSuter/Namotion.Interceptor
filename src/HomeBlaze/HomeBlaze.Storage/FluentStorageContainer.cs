@@ -16,8 +16,8 @@ using StoragePath = HomeBlaze.Storage.Internal.StoragePath;
 namespace HomeBlaze.Storage;
 
 /// <summary>
-/// Storage root using FluentStorage. Implements IStorageContainer and IConfigurationWriter.
-/// Supports FileSystemWatcher for reactive file monitoring on disk storage.
+/// The root of a storage on a FluentStorage backend. Its subject tree follows the storage through reconcile
+/// passes, and every change of the storage or the tree runs on one worker per connection.
 /// </summary>
 [InterceptorSubject]
 public partial class FluentStorageContainer :
@@ -163,7 +163,7 @@ public partial class FluentStorageContainer :
     /// the subject tree stays as it is. The connection stays open, so subjects can still be read and saved.
     /// <see cref="StartAsync"/> connects again and follows the storage as before.
     /// </summary>
-    /// <remarks>A pass that is running or was already requested still completes.</remarks>
+    /// <remarks>A pass that is running or already queued on the worker still completes.</remarks>
     public override Task StopAsync(CancellationToken cancellationToken)
     {
         StorageConnection? connection;
@@ -193,16 +193,7 @@ public partial class FluentStorageContainer :
     private StorageConnectionSettings Settings
         => new(StorageType, ConnectionString, ContainerName, EnableFileWatching, ReconcileIntervalSeconds);
 
-    /// <summary>
-    /// Returns the file system path of a storage-relative path, resolving a relative
-    /// <see cref="ConnectionString"/> against the instance data directory.
-    /// </summary>
-    internal string GetFileSystemPath(string relativePath)
-        => GetFileSystemPath(_connection?.StorageDirectory ?? ResolveStorageDirectory(ConnectionString), relativePath);
-
-    private static string GetFileSystemPath(string storageDirectory, string relativePath)
-        => Path.GetFullPath(Path.Combine(storageDirectory, relativePath.TrimStart('/', '\\')));
-
+    // A relative connection string is resolved against the data directory of the instance.
     private string ResolveStorageDirectory(string connectionString)
     {
         var baseDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory
@@ -396,8 +387,9 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IConfigurationWriter - called by ConfigurationManager background thread.
+    /// IConfigurationWriter - Saves the subject to its file.
     /// </summary>
+    /// <returns>False when the subject is not the subject of a file in this storage, or the storage is not connected.</returns>
     public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
         var connection = _connection;

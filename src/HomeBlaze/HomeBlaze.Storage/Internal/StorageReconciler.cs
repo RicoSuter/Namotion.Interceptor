@@ -72,10 +72,17 @@ internal sealed class StorageReconciler
         var listing = await ListAsync(cancellationToken);
         var movableEntries = RemoveMissingEntries(listing);
 
+        // In the order of the paths, so that files are loaded in the same order in every pass.
+        var paths = new string[listing.Count];
+        listing.Keys.CopyTo(paths, 0);
+        Array.Sort(paths, StringComparer.Ordinal);
+
         var hasMovedSubjects = followsUnfinishedPass;
-        foreach (var listed in listing.Values.OrderBy(entry => entry.Path, StringComparer.Ordinal))
+        foreach (var path in paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            var listed = listing[path];
 
             if (listed.IsFolder)
             {
@@ -113,7 +120,8 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Builds the children of every folder from the index and assigns those that changed.
+    /// Builds the children of every folder from the index and assigns those that changed. Does nothing when no
+    /// entry was added, replaced or removed since the last time it completed.
     /// </summary>
     /// <param name="keepRemovedUntilAdded">
     /// Assigns in two steps: first everything that is added, then everything that is removed. Needed when a
@@ -121,6 +129,11 @@ internal sealed class StorageReconciler
     /// </param>
     public void Apply(bool keepRemovedUntilAdded = false)
     {
+        if (!_index.HasUnappliedChanges)
+        {
+            return;
+        }
+
         var childrenByFolder = new Dictionary<string, Dictionary<string, IInterceptorSubject>>(StringComparer.Ordinal)
         {
             [StoragePath.Root] = new()
@@ -138,8 +151,9 @@ internal sealed class StorageReconciler
 
         foreach (var entry in candidates)
         {
-            var key = entry.IsFolder ? StoragePath.GetName(entry.Path) : GetChildKey(entry.Path, entry.Subject!);
-            if (!childrenByFolder.TryGetValue(StoragePath.GetParent(entry.Path), out var siblings) || siblings.ContainsKey(key))
+            // An entry never gets another subject, so the key it holds or asked for is still its key.
+            var key = entry.Key ?? (entry.IsFolder ? StoragePath.GetName(entry.Path) : GetChildKey(entry.Path, entry.Subject!));
+            if (!childrenByFolder.TryGetValue(entry.Parent, out var siblings) || siblings.ContainsKey(key))
             {
                 if (entry.State != StorageEntryState.KeyTaken)
                 {
@@ -193,6 +207,9 @@ internal sealed class StorageReconciler
                 AssignChildren(folder, childrenByFolder[folder]);
             }
         }
+
+        // Only here: an assignment that throws leaves the rest of the tree to the next call.
+        _index.MarkApplied();
     }
 
     /// <summary>
@@ -256,7 +273,7 @@ internal sealed class StorageReconciler
 
         foreach (var entry in _index.Entries)
         {
-            if (entry.State == StorageEntryState.Placed && entry.Key == key && StoragePath.GetParent(entry.Path) == parent)
+            if (entry.State == StorageEntryState.Placed && entry.Key == key && entry.Parent == parent)
             {
                 return false;
             }
@@ -269,10 +286,10 @@ internal sealed class StorageReconciler
     {
         var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
-        var listing = new Dictionary<string, StorageListing>(StringComparer.Ordinal);
+        var listing = new Dictionary<string, StorageListing>(blobs.Count, StringComparer.Ordinal);
         foreach (var blob in blobs)
         {
-            var path = StoragePath.Normalize(blob.FullPath);
+            var path = StoragePath.FromBlob(blob);
             if (path.Length == 0 || StoragePathFilter.IsIgnored(path))
             {
                 continue;
@@ -283,13 +300,24 @@ internal sealed class StorageReconciler
         }
 
         // Not every backend lists the folders of its files.
-        foreach (var path in listing.Keys.ToList())
+        HashSet<string>? missingFolders = null;
+        var listedPaths = listing.GetAlternateLookup<ReadOnlySpan<char>>();
+        foreach (var path in listing.Keys)
         {
-            for (var parent = StoragePath.GetParent(path);
-                 parent.Length > 0 && !listing.ContainsKey(parent);
+            for (var parent = StoragePath.GetParent(path.AsSpan());
+                 parent.Length > 0 && !listedPaths.ContainsKey(parent);
                  parent = StoragePath.GetParent(parent))
             {
-                listing[parent] = new StorageListing(parent, true, default);
+                missingFolders ??= new HashSet<string>(StringComparer.Ordinal);
+                missingFolders.GetAlternateLookup<ReadOnlySpan<char>>().Add(parent);
+            }
+        }
+
+        if (missingFolders != null)
+        {
+            foreach (var folder in missingFolders)
+            {
+                listing[folder] = new StorageListing(folder, true, default);
             }
         }
 
@@ -303,13 +331,23 @@ internal sealed class StorageReconciler
     private Dictionary<string, List<StorageEntry>> RemoveMissingEntries(Dictionary<string, StorageListing> listing)
     {
         var movableEntries = new Dictionary<string, List<StorageEntry>>(StringComparer.Ordinal);
-        foreach (var entry in _index.Entries.ToList())
-        {
-            if (listing.TryGetValue(entry.Path, out var listed) && listed.IsFolder == entry.IsFolder)
-            {
-                continue;
-            }
 
+        List<StorageEntry>? missingEntries = null;
+        foreach (var entry in _index.Entries)
+        {
+            if (!listing.TryGetValue(entry.Path, out var listed) || listed.IsFolder != entry.IsFolder)
+            {
+                (missingEntries ??= []).Add(entry);
+            }
+        }
+
+        if (missingEntries == null)
+        {
+            return movableEntries;
+        }
+
+        foreach (var entry in missingEntries)
+        {
             _index.Remove(entry.Path);
 
             if (entry is { IsFolder: false, Subject: IConfigurable, Hash: not null })
@@ -342,7 +380,7 @@ internal sealed class StorageReconciler
         }
 
         return entry is { State: StorageEntryState.KeyTaken, Key: not null } &&
-               IsKeyFree(StoragePath.GetParent(entry.Path), entry.Key);
+               IsKeyFree(entry.Parent, entry.Key);
     }
 
     /// <returns>True when an existing subject was moved to the path instead of creating one.</returns>
@@ -362,7 +400,7 @@ internal sealed class StorageReconciler
             // More than one candidate cannot be told apart, so none of them is moved.
             // Only into another folder: the registry keeps the old key of a subject that is re-keyed within one dictionary.
             if (movableEntries.Remove(entry.Hash, out var candidates) && candidates.Count == 1 &&
-                StoragePath.GetParent(candidates[0].Path) != StoragePath.GetParent(listed.Path))
+                candidates[0].Parent != entry.Parent)
             {
                 entry.Subject = candidates[0].Subject;
                 isMoved = true;

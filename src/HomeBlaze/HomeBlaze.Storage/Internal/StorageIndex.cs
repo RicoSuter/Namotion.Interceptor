@@ -13,6 +13,12 @@ internal sealed class StorageIndex
 
     public int Count => _entries.Count;
 
+    /// <summary>
+    /// True when an entry was added, replaced or removed since <see cref="MarkApplied"/>, and for a new index:
+    /// the tree can still hold the subjects of an earlier connection.
+    /// </summary>
+    public bool HasUnappliedChanges { get; private set; } = true;
+
     public IReadOnlyCollection<StorageEntry> Entries => _entries.Values;
 
     public bool TryGet(string path, [MaybeNullWhen(false)] out StorageEntry entry)
@@ -35,10 +41,22 @@ internal sealed class StorageIndex
     }
 
     public void Set(StorageEntry entry)
-        => _entries[entry.Path] = entry;
+    {
+        _entries[entry.Path] = entry;
+        HasUnappliedChanges = true;
+    }
 
     public bool Remove(string path)
-        => _entries.Remove(path);
+    {
+        HasUnappliedChanges = true;
+        return _entries.Remove(path);
+    }
+
+    /// <summary>
+    /// Records that the tree was assigned from the entries as they are now.
+    /// </summary>
+    public void MarkApplied()
+        => HasUnappliedChanges = false;
 
     /// <summary>
     /// Adds a folder entry for every ancestor of the path that has none.
