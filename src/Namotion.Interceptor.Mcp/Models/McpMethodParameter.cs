@@ -21,18 +21,11 @@ public sealed record McpMethodParameter
     public required string Type { get; init; }
 
     /// <summary>
-    /// The standard JSON Schema format of a string argument, see <see cref="JsonSchemaTypeMapper.GetFormat"/>.
+    /// The format label of a string argument, see <see cref="JsonSchemaTypeMapper.GetFormat"/>.
     /// </summary>
     [JsonPropertyName("format")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Format { get; init; }
-
-    /// <summary>
-    /// The regular expression a string argument must match, see <see cref="JsonSchemaTypeMapper.GetPattern"/>.
-    /// </summary>
-    [JsonPropertyName("pattern")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Pattern { get; init; }
 
     /// <summary>
     /// The allowed names of an enum argument.
@@ -71,7 +64,6 @@ public sealed record McpMethodParameter
             Name = name,
             Type = JsonSchemaTypeMapper.ToJsonSchemaType(valueType) ?? "object",
             Format = JsonSchemaTypeMapper.GetFormat(valueType),
-            Pattern = JsonSchemaTypeMapper.GetPattern(valueType),
             EnumValues = valueType.IsEnum ? Enum.GetNames(valueType) : null,
             IsNullable = isNullable || underlyingType is not null,
             Description = description

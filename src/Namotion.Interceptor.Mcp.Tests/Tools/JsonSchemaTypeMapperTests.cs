@@ -58,7 +58,10 @@ public class JsonSchemaTypeMapperTests
     [InlineData(typeof(DateOnly), "date")]
     [InlineData(typeof(Guid), "uuid")]
     [InlineData(typeof(Uri), "uri")]
-    public void WhenTypeHasStandardFormat_ThenReturnsFormatName(Type clrType, string expected)
+    [InlineData(typeof(TimeSpan), "hh:mm:ss")]
+    [InlineData(typeof(TimeSpan?), "hh:mm:ss")]
+    [InlineData(typeof(TimeOnly), "HH:mm:ss")]
+    public void WhenTypeHasFormat_ThenReturnsFormatLabel(Type clrType, string expected)
     {
         // Act
         var format = JsonSchemaTypeMapper.GetFormat(clrType);
@@ -71,10 +74,8 @@ public class JsonSchemaTypeMapperTests
     [InlineData(typeof(string))]
     [InlineData(typeof(int))]
     [InlineData(typeof(DayOfWeek))]
-    [InlineData(typeof(TimeSpan))]
-    [InlineData(typeof(TimeOnly))]
     [InlineData(null)]
-    public void WhenTypeHasNoStandardFormat_ThenReturnsNull(Type? clrType)
+    public void WhenTypeHasNoFormat_ThenReturnsNull(Type? clrType)
     {
         // Act
         var format = JsonSchemaTypeMapper.GetFormat(clrType);
@@ -84,63 +85,35 @@ public class JsonSchemaTypeMapperTests
     }
 
     [Theory]
-    [InlineData(typeof(string))]
-    [InlineData(typeof(DateTime))]
-    [InlineData(typeof(Guid))]
-    [InlineData(null)]
-    public void WhenTypeHasNoPattern_ThenReturnsNull(Type? clrType)
-    {
-        // Act
-        var pattern = JsonSchemaTypeMapper.GetPattern(clrType);
-
-        // Assert
-        Assert.Null(pattern);
-    }
-
-    [Theory]
     [InlineData("00:01:30", 90)]
     [InlineData("1.00:00:30", 86430)]
     [InlineData("00:00:01.5", 1.5)]
     [InlineData("-00:00:10", -10)]
-    public void WhenTimeSpanArgumentMatchesPattern_ThenJsonSerializerAcceptsIt(string argument, double expectedSeconds)
+    public void WhenTimeSpanArgumentIsInDocumentedShape_ThenJsonSerializerAcceptsIt(string argument, double expectedSeconds)
     {
-        // Arrange
-        var pattern = JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan?))!;
-
         // Act
         var value = JsonSerializer.Deserialize<TimeSpan>(JsonSerializer.Serialize(argument));
 
         // Assert
-        Assert.Matches(pattern, argument);
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), value);
     }
 
     [Theory]
     [InlineData("07:30:00", 7, 30, 0)]
     [InlineData("23:59:59.25", 23, 59, 59)]
-    public void WhenTimeOnlyArgumentMatchesPattern_ThenJsonSerializerAcceptsIt(string argument, int hour, int minute, int second)
+    public void WhenTimeOnlyArgumentIsInDocumentedShape_ThenJsonSerializerAcceptsIt(string argument, int hour, int minute, int second)
     {
-        // Arrange
-        var pattern = JsonSchemaTypeMapper.GetPattern(typeof(TimeOnly))!;
-
         // Act
         var value = JsonSerializer.Deserialize<TimeOnly>(JsonSerializer.Serialize(argument));
 
         // Assert
-        Assert.Matches(pattern, argument);
         Assert.Equal((hour, minute, second), (value.Hour, value.Minute, value.Second));
     }
 
-    [Theory]
-    [InlineData("1:30")]
-    [InlineData("90 seconds")]
-    [InlineData("PT1M30S")]
-    public void WhenTimeSpanArgumentDoesNotMatchPattern_ThenPatternRejectsIt(string argument)
+    [Fact]
+    public void WhenTimeSpanArgumentIsIso8601Duration_ThenJsonSerializerRejectsIt()
     {
-        // Arrange
-        var pattern = JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan))!;
-
         // Act & Assert
-        Assert.DoesNotMatch(pattern, argument);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<TimeSpan>(JsonSerializer.Serialize("PT1M30S")));
     }
 }

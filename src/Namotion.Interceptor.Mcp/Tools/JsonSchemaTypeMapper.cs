@@ -44,9 +44,10 @@ public static class JsonSchemaTypeMapper
     }
 
     /// <summary>
-    /// Gets the standard JSON Schema format name of the string a value of <paramref name="type"/> is written as by
-    /// System.Text.Json: <c>date-time</c>, <c>date</c>, <c>uuid</c> or <c>uri</c>. Null when no standard format
-    /// matches; <see cref="GetPattern"/> covers <see cref="TimeSpan"/> and <see cref="TimeOnly"/>.
+    /// Gets the format label of the string a value of <paramref name="type"/> is written and read as by System.Text.Json:
+    /// the standard JSON Schema format name where one matches (<c>date-time</c>, <c>date</c>, <c>uuid</c>, <c>uri</c>),
+    /// otherwise a short .NET-style template (<c>hh:mm:ss</c> for <see cref="TimeSpan"/>, <c>HH:mm:ss</c> for
+    /// <see cref="TimeOnly"/>). Null when the type has no format.
     /// </summary>
     public static string? GetFormat(Type? type)
     {
@@ -55,19 +56,8 @@ public static class JsonSchemaTypeMapper
             : type == typeof(DateOnly) ? "date"
             : type == typeof(Guid) ? "uuid"
             : type == typeof(Uri) ? "uri"
-            : null;
-    }
-
-    /// <summary>
-    /// Gets a JSON Schema <c>pattern</c> (a regular expression) for the string a value of <paramref name="type"/> is
-    /// written and read as by System.Text.Json, for types without a standard format: <see cref="TimeSpan"/>
-    /// (<c>[-][d.]hh:mm:ss[.fffffff]</c>) and <see cref="TimeOnly"/> (<c>HH:mm:ss[.fffffff]</c>). Null otherwise.
-    /// </summary>
-    public static string? GetPattern(Type? type)
-    {
-        type = UnwrapNullable(type);
-        return type == typeof(TimeSpan) ? @"^-?(\d+\.)?\d{2}:\d{2}:\d{2}(\.\d{1,7})?$"
-            : type == typeof(TimeOnly) ? @"^\d{2}:\d{2}:\d{2}(\.\d{1,7})?$"
+            : type == typeof(TimeSpan) ? "hh:mm:ss"
+            : type == typeof(TimeOnly) ? "HH:mm:ss"
             : null;
     }
 

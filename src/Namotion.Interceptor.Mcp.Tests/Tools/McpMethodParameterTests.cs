@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools;
 public class McpMethodParameterTests
 {
     [Fact]
-    public void WhenParameterIsTimeSpan_ThenTypeIsStringWithPattern()
+    public void WhenParameterIsTimeSpan_ThenTypeIsStringWithFormatLabel()
     {
         // Act
         var parameter = McpMethodParameter.Create("position", typeof(TimeSpan));
@@ -15,8 +15,7 @@ public class McpMethodParameterTests
         // Assert
         Assert.Equal("position", parameter.Name);
         Assert.Equal("string", parameter.Type);
-        Assert.Null(parameter.Format);
-        Assert.Equal(JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan)), parameter.Pattern);
+        Assert.Equal("hh:mm:ss", parameter.Format);
         Assert.Null(parameter.EnumValues);
         Assert.False(parameter.IsNullable);
     }
@@ -70,7 +69,7 @@ public class McpMethodParameterTests
     }
 
     [Fact]
-    public void WhenParameterHasFormatPatternAndEnum_ThenSerializesThem()
+    public void WhenParameterHasFormatAndEnum_ThenSerializesThem()
     {
         // Act
         var dateJson = JsonSerializer.Serialize(McpMethodParameter.Create("start", typeof(DateTimeOffset)));
@@ -79,9 +78,7 @@ public class McpMethodParameterTests
 
         // Assert
         Assert.Equal("""{"name":"start","type":"string","format":"date-time"}""", dateJson);
-        var timeSpan = JsonDocument.Parse(timeSpanJson).RootElement;
-        Assert.Equal(["name", "type", "pattern"], timeSpan.EnumerateObject().Select(property => property.Name));
-        Assert.Equal(JsonSchemaTypeMapper.GetPattern(typeof(TimeSpan)), timeSpan.GetProperty("pattern").GetString());
+        Assert.Equal("""{"name":"position","type":"string","format":"hh:mm:ss"}""", timeSpanJson);
         Assert.Equal("""{"name":"mode","type":"string","enum":["Off","On"]}""", enumJson);
     }
 
