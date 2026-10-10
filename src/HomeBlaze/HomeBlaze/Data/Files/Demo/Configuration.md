@@ -112,7 +112,7 @@ The page editor writes the configuration of a block for you. Try it on this moto
 5. Look at the text of the page again. Only the head line of this block changed, and the page is saved already.
 6. Put the cursor on an empty line and click "Create". The dialog "Step 1: Select Type" opens.
 7. Type a name for the block into the field "Name", for example `trymotor`. It starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on this page yet. Then click the type "Motor" in the group "Samples". The dialog goes on to "Step 2: Create Motor" by itself. If you click the type before the name is valid, the dialog stays where it is, and you go on with "Next" once the name is valid.
-8. Fill in the field "Name" of this second step. It is the name that the motor shows, it is required, and it may contain spaces. Then click "Create", which is disabled as long as that field is empty. The new block stands at the line of the cursor with three colons, the name from step 7 is its `#name`, and the page is saved already.
+8. Fill in the field "Name" of this second step before you click "Create". It is the name that the motor shows, it is required, and it may contain spaces. A click on "Create" while the field is empty creates nothing. Then click "Create". The new block stands at the line of the cursor with three colons, the name from step 7 is its `#name`, and the page is saved already.
 
 Steps 4 and 8 change the file `Demo/Configuration.md` of your checkout. The same menu, which is now in the toolbar of the editor, has "View" to leave the editor.
 
