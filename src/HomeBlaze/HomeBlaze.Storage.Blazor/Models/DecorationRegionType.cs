@@ -11,7 +11,7 @@ public enum DecorationRegionType
     Expression,
 
     /// <summary>
-    /// A subject block like ```subject(name) ... ```.
+    /// A widget block such as :::Full.Type.Name key=value.
     /// </summary>
     SubjectBlock
 }

@@ -1,77 +1,64 @@
 using System.Text.RegularExpressions;
+using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Blazor.Models;
 
 /// <summary>
-/// Parses markdown content to find decoration regions for subject blocks and expressions.
+/// Finds the regions of a page that the editor decorates: widget blocks and expressions.
 /// </summary>
 public static partial class MarkdownDecorationParser
 {
-    /// <summary>
-    /// Matches subject blocks: ```subject(name) ... ```
-    /// </summary>
-    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n([\s\S]*?)```", RegexOptions.Singleline)]
-    private static partial Regex SubjectBlockRegex();
-
-    /// <summary>
-    /// Matches expressions: {{ path }}
-    /// </summary>
-    [GeneratedRegex(@"\{\{\s*([^}]+)\s*\}\}")]
+    [GeneratedRegex(MarkdownSegmentBuilder.ExpressionPattern)]
     private static partial Regex ExpressionRegex();
 
-    /// <summary>
-    /// Parses markdown content and returns decoration regions.
-    /// </summary>
-    /// <param name="content">The markdown content to parse.</param>
-    /// <param name="children">Dictionary of child subjects (for resolving subject blocks).</param>
-    /// <returns>List of decoration regions found in the content.</returns>
+    /// <param name="content">The page text.</param>
+    /// <param name="getBlockSubject">Returns the subject a block created, by block index.</param>
     public static List<DecorationRegion> Parse(
         string? content,
-        IDictionary<string, IInterceptorSubject>? children = null)
+        Func<int, IInterceptorSubject?>? getBlockSubject = null)
     {
         var regions = new List<DecorationRegion>();
-
         if (string.IsNullOrEmpty(content))
         {
             return regions;
         }
 
-        // Parse subject blocks
-        foreach (Match match in SubjectBlockRegex().Matches(content))
+        foreach (var block in MarkdownPageParser.Parse(content).AllBlocks)
         {
-            var name = match.Groups[1].Value;
-            var (startLine, startColumn) = GetLineAndColumn(content, match.Index);
-            var (endLine, endColumn) = GetLineAndColumn(content, match.Index + match.Length);
+            if (block.Head is null || block.Kind is not (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot))
+            {
+                continue;
+            }
 
-            IInterceptorSubject? subject = null;
-            children?.TryGetValue(name, out subject);
+            var subject = getBlockSubject?.Invoke(block.Index);
+            if (block.Kind == MarkdownBlockKind.Slot && subject is null)
+            {
+                continue;
+            }
+
+            var end = block.ConfigurationSpan?.End ?? block.HeadSpan.End;
+            var (startLine, startColumn) = GetLineAndColumn(content, block.HeadSpan.Start);
+            var (endLine, endColumn) = GetLineAndColumn(content, end);
 
             regions.Add(new DecorationRegion(
-                StartLine: startLine,
-                StartColumn: startColumn,
-                EndLine: endLine,
-                EndColumn: endColumn,
-                Type: DecorationRegionType.SubjectBlock,
-                Name: name,
-                Subject: subject));
+                startLine,
+                startColumn,
+                endLine,
+                endColumn,
+                DecorationRegionType.SubjectBlock,
+                block.Head.Id ?? block.Head.Name[(block.Head.Name.LastIndexOf('.') + 1)..],
+                subject,
+                block.Index));
         }
 
-        // Parse expressions
         foreach (Match match in ExpressionRegex().Matches(content))
         {
-            var path = match.Groups[1].Value.Trim();
             var (startLine, startColumn) = GetLineAndColumn(content, match.Index);
             var (endLine, endColumn) = GetLineAndColumn(content, match.Index + match.Length);
 
             regions.Add(new DecorationRegion(
-                StartLine: startLine,
-                StartColumn: startColumn,
-                EndLine: endLine,
-                EndColumn: endColumn,
-                Type: DecorationRegionType.Expression,
-                Name: path,
-                Subject: null));
+                startLine, startColumn, endLine, endColumn, DecorationRegionType.Expression, match.Groups[1].Value));
         }
 
         return regions;
