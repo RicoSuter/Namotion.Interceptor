@@ -1,4 +1,5 @@
 using HomeBlaze.AI;
+using HomeBlaze.AI.Mcp;
 using HomeBlaze.Components;
 using HomeBlaze.History.InMemory.Blazor;
 using HomeBlaze.History.Mcp;
@@ -48,20 +49,19 @@ var pluginConfigPath = HomeBlazePaths.GetPluginConfigurationPath(builder.Configu
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
-// Optionally add the MCP subject server (default: false, enabled in Development)
+// The history package contributes its own tool; the AI package knows nothing about it. Registered once so
+// both the external MCP server and the built-in agents get it.
+builder.Services.AddHomeBlazeMcpToolProvider(context => new HistoryMcpToolProvider(
+    context.RootSubjectProvider,
+    context.PathProvider,
+    context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
+
+// The MCP server is always registered because the built-in agents use it; McpServer:Enabled only decides
+// whether the external /mcp route is mapped (default: false, enabled in Development).
 var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
-if (mcpEnabled)
-{
-    builder.Services.AddMcpServer()
-        .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(
-            isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true),
-            // The history package contributes its own tool; the AI package knows nothing about it.
-            context => new HistoryMcpToolProvider(
-                context.RootSubjectProvider,
-                context.PathProvider,
-                context.Services.GetRequiredService<ILoggerFactory>().CreateLogger<HistoryMcpToolProvider>()));
-}
+builder.Services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
 
 // Add services to the container.
 builder.Services

@@ -36,7 +36,9 @@ public static class McpBuilderExtensions
     /// Tools contributed by satellite packages, for example the history package's
     /// get_property_history. They are built inside the configuration factory because that is where the
     /// path provider and root subject exist, and taking them as a parameter is what lets this package
-    /// stay independent of whatever happens to be installed.
+    /// stay independent of whatever happens to be installed. Providers can also be registered once with
+    /// <see cref="McpToolProviderServiceCollectionExtensions.AddHomeBlazeMcpToolProvider"/> so the built-in
+    /// agents get them too.
     /// </param>
     public static IMcpServerBuilder WithHomeBlazeMcpTools(
         this IMcpServerBuilder builder,
@@ -44,63 +46,11 @@ public static class McpBuilderExtensions
         params Func<McpToolProviderContext, IMcpToolProvider>[] additionalToolProviders)
     {
         return builder.WithSubjectRegistryTools(
-            GetLoadedRoot,
-            sp =>
-            {
-                var typeRegistry = sp.GetRequiredService<SubjectTypeRegistry>();
-                var pathProvider = new StateAttributePathProvider();
-                var typeProviders = new IMcpTypeProvider[]
-                {
-                    new SubjectAbstractionTypeProvider(),
-                    new SubjectTypeRegistryTypeProvider(typeRegistry)
-                };
-
-                var excludeTypes = typeRegistry.RegisteredTypes
-                    .Where(type => type.GetCustomAttributes(typeof(ExcludeFromBrowsingAttribute), true).Length > 0)
-                    .ToArray();
-
-                var rootSubjectProvider = () => GetLoadedRoot(sp);
-                var configuration = new McpServerConfiguration
-                {
-                    PathProvider = pathProvider,
-                    PathPrefix = "/",
-                    ExcludeTypes = excludeTypes,
-                    SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly) },
-                    TypeProviders = typeProviders,
-                    ToolProviders =
-                    {
-                        new HomeBlazeMcpToolProvider(
-                            rootSubjectProvider,
-                            pathProvider, sp,
-                            sp.GetRequiredService<ILoggerFactory>().CreateLogger<HomeBlazeMcpToolProvider>(),
-                            isReadOnly)
-                    },
-                    IsReadOnly = isReadOnly
-                };
-
-                var context = new McpToolProviderContext(sp, rootSubjectProvider, pathProvider, isReadOnly);
-                foreach (var create in additionalToolProviders)
-                {
-                    configuration.ToolProviders.Add(create(context));
-                }
-
-                return configuration;
-            });
-    }
-
-    /// <summary>
-    /// Resolves the root subject for a request. The root is loaded by a background service, so a
-    /// request arriving before it exists gets a diagnosable error rather than a null reference,
-    /// and a failed load surfaces its own exception.
-    /// </summary>
-    private static IInterceptorSubject GetLoadedRoot(IServiceProvider serviceProvider)
-    {
-        var rootLoaded = serviceProvider.GetRequiredService<RootManager>().RootLoaded;
-        if (!rootLoaded.IsCompleted)
-        {
-            throw new InvalidOperationException("The root subject is still loading, try again shortly.");
-        }
-
-        return rootLoaded.GetAwaiter().GetResult();
+            HomeBlazeMcpConfigurationFactory.GetLoadedRoot,
+            serviceProvider => HomeBlazeMcpConfigurationFactory.Create(
+                serviceProvider,
+                () => HomeBlazeMcpConfigurationFactory.GetLoadedRoot(serviceProvider),
+                isReadOnly,
+                additionalToolProviders));
     }
 }
