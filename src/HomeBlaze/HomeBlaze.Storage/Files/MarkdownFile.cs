@@ -11,8 +11,6 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
@@ -24,7 +22,7 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope, ILifecycleHandler
+public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter, IPathScope
 {
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
@@ -126,6 +124,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
             // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
             // its top-level children and the snapshot as they were. Subjects that the parse reused were already
             // updated in place, with their slots and the children of their fragments.
+            //
+            // The snapshot must be assigned before Children: the write to Children makes the library compute
+            // the derived values again that looked a name up (see TryGetNamedSubject), and they must find
+            // the new names then.
             _parseResult = result;
             Content = content;
             Frontmatter = frontmatter;
@@ -136,57 +138,10 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
                 FileSize = metadata.Size;
                 LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
             }
-
-            RecalculateDerivedPropertiesOfContent();
         }
         finally
         {
             _reloadLock.Release();
-        }
-    }
-
-    void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
-    {
-        // The storage parses a new page before it puts it into the graph.
-        if (change.IsContextAttach)
-        {
-            RecalculateDerivedPropertiesOfContent();
-        }
-    }
-
-    // A derived value that resolves a path in page scope depends on two things that are not tracked properties:
-    // the page its subject is on and the names of that page. A subject can be attached to the context before it
-    // is connected to the page, for example the content of a slot whose owner was created with the context, and
-    // its value is then computed without the page. So the values are computed again once the page has them.
-    private void RecalculateDerivedPropertiesOfContent()
-    {
-        // The page is in the set so that a reference back to it ends the walk.
-        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { this };
-        foreach (var child in Children.Values)
-        {
-            RecalculateDerivedProperties(child, visited);
-        }
-    }
-
-    private static void RecalculateDerivedProperties(IInterceptorSubject subject, HashSet<IInterceptorSubject> visited)
-    {
-        if (!visited.Add(subject) || subject.TryGetRegisteredSubject() is not { } registeredSubject)
-        {
-            return;
-        }
-
-        foreach (var property in registeredSubject.Properties)
-        {
-            if (property.Reference.Metadata.IsDerived)
-            {
-                property.Reference.RecalculateDerivedProperty();
-                continue;
-            }
-
-            foreach (var child in property.Children)
-            {
-                RecalculateDerivedProperties(child.Subject, visited);
-            }
         }
     }
 
@@ -201,8 +156,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public IInterceptorSubject? GetBlockSubject(int blockIndex) =>
         _blockSubjects.GetValueOrDefault(blockIndex);
 
-    IInterceptorSubject? IPathScope.TryGetNamedSubject(string name) =>
-        _namedSubjects.GetValueOrDefault(name);
+    IInterceptorSubject? IPathScope.TryGetNamedSubject(string name)
+    {
+        // The name table is not a tracked property, so a derived value that looks a name up would never be
+        // computed again when a reload replaces the subject behind the name. Children is tracked and is a
+        // new dictionary after every parse, so this read makes such a value depend on the parse. Do not
+        // remove it, although its result is not used.
+        _ = Children;
+
+        return _namedSubjects.GetValueOrDefault(name);
+    }
 
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]
     public string? ReadRawContent() => Content;
