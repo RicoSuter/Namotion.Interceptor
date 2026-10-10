@@ -603,7 +603,7 @@ public partial class Machine { ... }
 
 `AccessLevel` and `UserAccessLevel` are auto-detected from C# property definitions:
 - Read-only properties (`get` only) → `CurrentRead`
-- Read-write properties (`get`/`set`) → `CurrentReadOrWrite`
+- Read-write properties (`get`/`set`) → `CurrentReadOrWrite`, also when the setter is non-public such as `private set` or `internal set`
 
 Explicit AccessLevel configuration (e.g., making a writable C# property read-only in OPC UA, or adding `HistoryRead` flag) is not yet supported.
 
