@@ -22,6 +22,7 @@ internal sealed class StorageReconciler
     private readonly FileSubjectFactory _subjectFactory;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly StorageIndex _index;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
 
     // Cancelled when the connection ends. Nothing is assigned to the tree after that.
@@ -33,6 +34,7 @@ internal sealed class StorageReconciler
         FileSubjectFactory subjectFactory,
         ConfigurableSubjectSerializer serializer,
         StorageIndex index,
+        TimeProvider timeProvider,
         ILogger? logger,
         CancellationToken connectionToken)
     {
@@ -41,6 +43,7 @@ internal sealed class StorageReconciler
         _subjectFactory = subjectFactory;
         _serializer = serializer;
         _index = index;
+        _timeProvider = timeProvider;
         _logger = logger;
         _connectionToken = connectionToken;
     }
@@ -199,7 +202,8 @@ internal sealed class StorageReconciler
 
     public async Task<StorageVersion> GetVersionAsync(string path, CancellationToken cancellationToken)
     {
-        var blobs = await _client.GetBlobsAsync([path], cancellationToken);
+        var blobs = await _client.GetBlobsAsync([path], cancellationToken)
+            .WithStorageTimeoutAsync(_timeProvider, cancellationToken);
         var blob = blobs.FirstOrDefault();
         return blob == null ? default : new StorageVersion(blob.Size ?? 0, blob.LastModificationTime);
     }
@@ -210,7 +214,8 @@ internal sealed class StorageReconciler
     public async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
     {
         await using var stream = await OpenReadAsync(path, cancellationToken);
-        return await StorageHash.ComputeAsync(stream, cancellationToken);
+        return await StorageHash.ComputeAsync(stream, cancellationToken)
+            .WithStorageTimeoutAsync(_timeProvider, cancellationToken);
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
@@ -242,7 +247,8 @@ internal sealed class StorageReconciler
 
     private async Task<Dictionary<string, StorageListing>> ListAsync(CancellationToken cancellationToken)
     {
-        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken);
+        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken)
+            .WithStorageTimeoutAsync(_timeProvider, cancellationToken);
 
         var listing = new Dictionary<string, StorageListing>(StringComparer.Ordinal);
         foreach (var blob in blobs)
@@ -360,7 +366,7 @@ internal sealed class StorageReconciler
         }
         else
         {
-            entry.Subject = await _subjectFactory.CreateFromBlobAsync(_client, _storage, blob, cancellationToken)
+            entry.Subject = await _subjectFactory.CreateFromBlobAsync(_storage, blob, cancellationToken)
                 ?? throw new InvalidOperationException($"No subject could be created for '{listed.Path}'.");
 
             if (entry.Subject is not GenericFile)
@@ -482,7 +488,7 @@ internal sealed class StorageReconciler
             : throw new InvalidOperationException($"No entry for '{path}'.");
 
     private async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)
-        => await _client.OpenReadAsync(path, cancellationToken)
+        => await _client.OpenReadAsync(path, cancellationToken).WithStorageTimeoutAsync(_timeProvider, cancellationToken)
            ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
 
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
@@ -490,7 +496,7 @@ internal sealed class StorageReconciler
         await using var stream = await OpenReadAsync(path, cancellationToken);
 
         using var buffer = new MemoryStream();
-        await stream.CopyToAsync(buffer, cancellationToken);
+        await stream.CopyToAsync(buffer, cancellationToken).WithStorageTimeoutAsync(_timeProvider, cancellationToken);
         return buffer.ToArray();
     }
 

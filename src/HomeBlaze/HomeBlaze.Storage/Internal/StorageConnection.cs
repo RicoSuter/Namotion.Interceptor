@@ -22,12 +22,14 @@ internal sealed class StorageConnection : IDisposable
         FluentStorageContainer storage,
         FileSubjectFactory subjectFactory,
         ConfigurableSubjectSerializer serializer,
+        TimeProvider timeProvider,
         ILogger? logger)
     {
         Client = client;
         StorageDirectory = storageDirectory;
+        TimeProvider = timeProvider;
         Index = new StorageIndex();
-        Reconciler = new StorageReconciler(client, storage, subjectFactory, serializer, Index, logger, _endedSource.Token);
+        Reconciler = new StorageReconciler(client, storage, subjectFactory, serializer, Index, timeProvider, logger, _endedSource.Token);
         Worker = new StorageWorker(logger);
         _logger = logger;
     }
@@ -36,6 +38,9 @@ internal sealed class StorageConnection : IDisposable
 
     /// <summary>The directory of a storage on disk, null for any other storage.</summary>
     public string? StorageDirectory { get; }
+
+    /// <summary>The clock for the timeouts and timers of the connection.</summary>
+    public TimeProvider TimeProvider { get; }
 
     /// <remarks>Only read and written on <see cref="Worker"/>, as is the tree that <see cref="Reconciler"/> assigns.</remarks>
     public StorageIndex Index { get; }

@@ -32,19 +32,15 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
-    /// Creates a subject from a storage blob based on file type.
+    /// Creates the subject of a file from the type that is registered for its extension. A JSON file is
+    /// created from its text with <see cref="CreateFromJson"/> instead.
     /// </summary>
     public async Task<IInterceptorSubject?> CreateFromBlobAsync(
-        IBlobStorage client,
         IStorageContainer storage,
         Blob blob,
         CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(blob.FullPath).ToLowerInvariant();
-        if (extension == FileExtensions.Json)
-        {
-            return await CreateFromJsonBlobAsync(client, storage, blob, cancellationToken);
-        }
 
         // Check for registered extension mapping
         var mappedType = _typeRegistry.ResolveTypeForExtension(extension);
@@ -74,16 +70,6 @@ internal sealed class FileSubjectFactory
     /// </summary>
     public string Serialize(IInterceptorSubject subject)
         => _serializer.Serialize(subject);
-
-    private async Task<IInterceptorSubject?> CreateFromJsonBlobAsync(
-        IBlobStorage client,
-        IStorageContainer storage,
-        Blob blob,
-        CancellationToken cancellationToken)
-    {
-        var json = await client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-        return CreateFromJson(storage, blob.FullPath, json);
-    }
 
     /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
