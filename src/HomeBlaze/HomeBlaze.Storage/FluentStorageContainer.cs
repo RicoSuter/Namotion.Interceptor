@@ -25,27 +25,26 @@ public partial class FluentStorageContainer :
     BackgroundService,
     IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable
 {
-    private IBlobStorage? _client;
-
-    private IBlobStorage Client => _client
-        ?? throw new InvalidOperationException("Storage not connected");
-
     private static readonly IReadOnlySet<string> NoPaths = new HashSet<string>();
 
     private readonly FileSubjectFactory _subjectFactory;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly ILogger<FluentStorageContainer>? _logger;
 
-    // The index, the reconciler and the tree below Children are only touched on the worker.
-    private StorageIndex _index = new();
-    private StorageReconciler? _reconciler;
-    private StorageWorker? _worker;
+    private readonly SemaphoreSlim _connectGate = new(1, 1);
 
-    private StorageFileWatcher? _fileWatcher;
-    private string? _storageDirectory;
+    // Guards the status together with which connection is the current one, so that neither a pass of an ended
+    // connection nor a connect that a Dispose overtook writes the status. Never held across an await.
+    private readonly Lock _connectionLock = new();
+    private int _disposeCount;
 
-    private StorageWorker Worker => _worker
-        ?? throw new InvalidOperationException("Storage not connected");
+    // Replaced as a whole by a reconnect and kept after it ended. An operation reads the field once and uses
+    // only what it read, so its item never touches the index or the client of a later connection.
+    private volatile StorageConnection? _connection;
+
+    private StorageConnection Connection => _connection is { IsEnded: false } connection
+        ? connection
+        : throw new InvalidOperationException("Storage not connected");
 
     /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
@@ -134,9 +133,10 @@ public partial class FluentStorageContainer :
     /// <see cref="ConnectionString"/> against the instance data directory.
     /// </summary>
     internal string GetFileSystemPath(string relativePath)
-    {
-        return Path.GetFullPath(Path.Combine(_storageDirectory ?? ResolveStorageDirectory(), relativePath.TrimStart('/', '\\')));
-    }
+        => GetFileSystemPath(_connection?.StorageDirectory ?? ResolveStorageDirectory(), relativePath);
+
+    private static string GetFileSystemPath(string storageDirectory, string relativePath)
+        => Path.GetFullPath(Path.Combine(storageDirectory, relativePath.TrimStart('/', '\\')));
 
     private string ResolveStorageDirectory()
     {
@@ -149,7 +149,8 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// Initializes the storage client based on configuration and loads the subject tree.
+    /// Initializes the storage client based on configuration and loads the subject tree. A connection that
+    /// exists is ended first, and its running work has finished before the new one starts.
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
@@ -157,126 +158,197 @@ public partial class FluentStorageContainer :
         if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
-        Status = StorageStatus.Initializing;
+        // One connect at a time: two of them would each end the same connection and both start a new one.
+        await _connectGate.WaitAsync(cancellationToken);
         try
         {
-            // A reconnect starts from scratch. A watcher or worker left running would keep changing the tree.
-            _fileWatcher?.Dispose();
-            _fileWatcher = null;
-            _worker?.Dispose();
-            var previousClient = _client;
+            await ReplaceConnectionAsync(isInMemory, cancellationToken);
+        }
+        finally
+        {
+            _connectGate.Release();
+        }
+    }
 
-            _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
-            _client = StorageType switch
+    private async Task ReplaceConnectionAsync(bool isInMemory, CancellationToken cancellationToken)
+    {
+        var previous = _connection;
+        previous?.End();
+
+        int disposeCount;
+        lock (_connectionLock)
+        {
+            disposeCount = _disposeCount;
+            Status = StorageStatus.Initializing;
+        }
+
+        StorageConnection? published = null;
+        try
+        {
+            // A reconnect starts from scratch. The item that the previous worker is running still assigns to
+            // the tree, so it has to finish before the first pass of the new connection starts.
+            if (previous != null)
             {
-                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(_storageDirectory!),
+                await previous.EndAsync();
+            }
+
+            var storageDirectory = isInMemory ? null : ResolveStorageDirectory();
+            var client = StorageType switch
+            {
+                "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(storageDirectory!),
                 "inmemory" => StorageFactory.Blobs.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
             };
-            previousClient?.Dispose();
 
-            _index = new StorageIndex();
-            var reconciler = new StorageReconciler(_client, this, _subjectFactory, _serializer, _index, _logger);
-            _reconciler = reconciler;
-            _worker = new StorageWorker(_logger);
+            var connection = new StorageConnection(client, storageDirectory, this, _subjectFactory, _serializer, _logger);
+            Publish(connection, disposeCount);
+            published = connection;
 
             _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
-                isInMemory ? "(in-memory)" : _storageDirectory);
+                isInMemory ? "(in-memory)" : storageDirectory);
 
             // Started before the first pass, so a change during startup leads to another pass.
             if (EnableFileWatching && !isInMemory)
             {
-                StartFileWatching();
+                connection.StartFileWatching(
+                    fileEvent => ProcessFileEventAsync(connection, fileEvent),
+                    () => ReconcileAsync(connection, NoPaths, allNamed: true));
             }
 
-            await _worker.RunAsync(token => reconciler.ReconcileAsync(NoPaths, allNamed: false, token), cancellationToken);
+            using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);
+            await connection.Worker.RunAsync(async token =>
+            {
+                await connection.Reconciler.ReconcileAsync(NoPaths, allNamed: false, token);
+                _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Count);
+            }, passCancellation.Token);
 
-            Status = StorageStatus.Connected;
-            _logger?.LogInformation("Storage loaded: {Count} entries.", _index.Count);
+            SetStatus(connection, StorageStatus.Connected);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            Status = StorageStatus.Error;
-            _logger?.LogError(ex, "Failed to connect to storage");
+            if (published != null)
+            {
+                SetStatus(published, StorageStatus.Error);
+            }
+            else
+            {
+                lock (_connectionLock)
+                {
+                    if (_disposeCount == disposeCount)
+                    {
+                        Status = StorageStatus.Error;
+                    }
+                }
+            }
+
+            _logger?.LogError(exception, "Failed to connect to storage");
             throw;
         }
     }
 
-    private void StartFileWatching()
+    private void Publish(StorageConnection connection, int disposeCount)
     {
-        _fileWatcher = new StorageFileWatcher(
-            _storageDirectory!,
-            ProcessFileEventAsync,
-            () => ReconcileAsync(allNamed: true),
-            _logger);
+        lock (_connectionLock)
+        {
+            if (_disposeCount == disposeCount)
+            {
+                _connection = connection;
+                return;
+            }
+        }
 
-        _fileWatcher.Start();
+        // Dispose ran since this connect started and could not end a connection that did not exist yet.
+        connection.Dispose();
+        throw new ObjectDisposedException(nameof(FluentStorageContainer));
+    }
+
+    private void SetStatus(StorageConnection connection, StorageStatus status)
+    {
+        lock (_connectionLock)
+        {
+            if (ReferenceEquals(_connection, connection) && !connection.IsEnded && Status != status)
+            {
+                Status = status;
+            }
+        }
     }
 
     internal Task ProcessFileEventAsync(FileSystemEventArgs e)
+        => _connection is { } connection ? ProcessFileEventAsync(connection, e) : Task.CompletedTask;
+
+    private Task ProcessFileEventAsync(StorageConnection connection, FileSystemEventArgs e)
     {
-        var namedPaths = new HashSet<string>(StringComparer.Ordinal) { GetRelativePath(e.FullPath) };
+        var namedPaths = new HashSet<string>(StringComparer.Ordinal) { GetRelativePath(connection, e.FullPath) };
         if (e is RenamedEventArgs renamed)
         {
-            namedPaths.Add(GetRelativePath(renamed.OldFullPath));
+            namedPaths.Add(GetRelativePath(connection, renamed.OldFullPath));
         }
 
-        return ReconcileAsync(namedPaths);
+        return ReconcileAsync(connection, namedPaths, allNamed: false);
     }
 
-    private string GetRelativePath(string fileSystemPath)
-        => Path.GetRelativePath(_storageDirectory!, fileSystemPath).Replace('\\', '/');
+    private static string GetRelativePath(StorageConnection connection, string fileSystemPath)
+        => Path.GetRelativePath(connection.StorageDirectory!, fileSystemPath).Replace('\\', '/');
 
     /// <summary>
     /// Runs one pass on the worker. A pass that fails is logged and sets <see cref="Status"/> to
-    /// <see cref="StorageStatus.Error"/>, and the next pass tries again.
+    /// <see cref="StorageStatus.Error"/>, and the next pass tries again. A pass of a connection that has ended
+    /// changes nothing.
     /// </summary>
     internal Task ReconcileAsync(IReadOnlySet<string>? namedPaths = null, bool allNamed = false)
-    {
-        var worker = _worker;
-        var reconciler = _reconciler;
-        if (worker == null || reconciler == null)
-        {
-            return Task.CompletedTask;
-        }
+        => _connection is { } connection ? ReconcileAsync(connection, namedPaths ?? NoPaths, allNamed) : Task.CompletedTask;
 
-        return worker.RunAsync(async token =>
+    private async Task ReconcileAsync(StorageConnection connection, IReadOnlySet<string> namedPaths, bool allNamed)
+    {
+        try
         {
-            try
+            await connection.Worker.RunAsync(async token =>
             {
-                await reconciler.ReconcileAsync(namedPaths ?? NoPaths, allNamed, token);
-                if (Status != StorageStatus.Connected)
+                try
                 {
-                    Status = StorageStatus.Connected;
+                    await connection.Reconciler.ReconcileAsync(namedPaths, allNamed, token);
+                    SetStatus(connection, StorageStatus.Connected);
                 }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                Status = StorageStatus.Error;
-                _logger?.LogError(exception, "Failed to reconcile the storage, the next pass tries again");
-            }
-        }, CancellationToken.None);
+                catch (Exception exception) when (!token.IsCancellationRequested)
+                {
+                    SetStatus(connection, StorageStatus.Error);
+                    _logger?.LogError(exception, "Failed to reconcile the storage, the next pass tries again");
+                }
+            }, connection.Token);
+        }
+        catch (Exception exception) when (connection.IsEnded)
+        {
+            _logger?.LogDebug(exception, "A pass ended with its connection");
+        }
     }
 
     /// <summary>
     /// IConfigurationWriter - called by ConfigurationManager background thread.
     /// </summary>
-    public Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    public async Task<bool> WriteConfigurationAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        var worker = _worker;
-        if (worker == null)
-            return Task.FromResult(false);
+        var connection = _connection;
+        if (connection is null or { IsEnded: true })
+            return false;
 
-        return worker.RunAsync(async token =>
+        try
         {
-            if (!_index.TryGetPath(subject, out var path) || !_index.TryGet(path, out var entry))
-                return false;
+            return await connection.Worker.RunAsync(async token =>
+            {
+                if (!connection.Index.TryGetPath(subject, out var path) || !connection.Index.TryGet(path, out var entry))
+                    return false;
 
-            await WriteAndRecordAsync(entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);
+                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);
 
-            _logger?.LogDebug("Saved subject to storage: {Path}", path);
-            return true;
-        }, cancellationToken);
+                _logger?.LogDebug("Saved subject to storage: {Path}", path);
+                return true;
+            }, cancellationToken);
+        }
+        catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
+        {
+            // The connection ended before the item ran, which is the same as no connection.
+            return false;
+        }
     }
 
     /// <summary>
@@ -290,33 +362,35 @@ public partial class FluentStorageContainer :
         if (StoragePathFilter.IsIgnored(relativePath))
             throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
 
-        await Worker.RunAsync(async token =>
+        var connection = Connection;
+        await connection.Worker.RunAsync(async token =>
         {
-            if (_index.TryGet(relativePath, out _) || await Client.ExistsAsync(relativePath, token))
+            if (connection.Index.TryGet(relativePath, out _) || await connection.Client.ExistsAsync(relativePath, token))
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
 
-            if (!_reconciler!.IsKeyFree(relativePath, subject))
+            if (!connection.Reconciler.IsKeyFree(relativePath, subject))
                 throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
-            await WriteAndRecordAsync(entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);
+            await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);
 
-            _index.EnsureFolders(relativePath);
-            _index.Set(entry);
-            _reconciler.Apply();
+            connection.Index.EnsureFolders(relativePath);
+            connection.Index.Set(entry);
+            connection.Reconciler.Apply();
 
             _logger?.LogInformation("Added subject to storage: {Path}", relativePath);
         }, cancellationToken);
     }
 
     // Recording version and hash is what keeps the event that this write raises from reloading the subject.
-    private async Task WriteAndRecordAsync(StorageEntry entry, byte[] content, CancellationToken cancellationToken)
+    private static async Task WriteAndRecordAsync(
+        StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(content);
-        await Client.WriteAsync(entry.Path, stream, append: false, cancellationToken: cancellationToken);
+        await connection.Client.WriteAsync(entry.Path, stream, append: false, cancellationToken: cancellationToken);
 
         entry.Hash = StorageHash.Compute(content);
-        entry.Version = await _reconciler!.GetVersionAsync(entry.Path, cancellationToken);
+        entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
     }
 
     /// <summary>
@@ -324,14 +398,14 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
-        if (_storageDirectory != null)
+        if (_connection?.StorageDirectory is { } storageDirectory)
         {
             // Asked for every markdown file that loads, so the directory is not listed to find one entry.
-            var file = new FileInfo(GetFileSystemPath(path));
+            var file = new FileInfo(GetFileSystemPath(storageDirectory, path));
             return file.Exists ? new BlobMetadata(file.Length, file.LastWriteTimeUtc) : null;
         }
 
-        var blobs = await Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
+        var blobs = await Connection.Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
             recurse: false, cancellationToken: cancellationToken);
         var blob = blobs.FirstOrDefault(b =>
             b.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) ||
@@ -348,27 +422,29 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
     {
-        return await Client.OpenReadAsync(path, cancellationToken: cancellationToken);
+        return await Connection.Client.OpenReadAsync(path, cancellationToken: cancellationToken);
     }
 
     /// <summary>
     /// IStorageContainer - Writes a blob to storage.
     /// </summary>
-    public Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
-        => Worker.RunAsync(async token =>
+    public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await connection.Worker.RunAsync(async token =>
         {
             var relativePath = StoragePath.Normalize(path);
-            await Client.WriteAsync(relativePath, content, append: false, cancellationToken: token);
+            await connection.Client.WriteAsync(relativePath, content, append: false, cancellationToken: token);
             _logger?.LogDebug("Wrote blob to storage: {Path}", relativePath);
 
             // A file without a subject is picked up by the pass that its event triggers.
-            if (!_index.TryGet(relativePath, out var entry) || entry.Subject == null)
+            if (!connection.Index.TryGet(relativePath, out var entry) || entry.Subject == null)
                 return;
 
-            // Recorded before the subject is refreshed: the write succeeded whether or not the refresh does, and
-            // a hash taken after the subject read the file could be of a later content than the subject has.
-            entry.Version = await _reconciler!.GetVersionAsync(relativePath, token);
-            entry.Hash = entry.Subject is GenericFile ? null : await _reconciler.ComputeHashAsync(relativePath, token);
+            // Recorded before the subject is refreshed: a hash taken after the subject read the file could be
+            // of a later content than the subject has.
+            entry.Version = await connection.Reconciler.GetVersionAsync(relativePath, token);
+            entry.Hash = entry.Subject is GenericFile ? null : await connection.Reconciler.ComputeHashAsync(relativePath, token);
 
             if (entry.Subject is IStorageFile file)
             {
@@ -376,18 +452,26 @@ public partial class FluentStorageContainer :
                 {
                     await file.OnFileChangedAsync(token);
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+                catch (Exception exception) when (!token.IsCancellationRequested)
                 {
+                    // The bytes are written, so the caller gets no failure. Without a hash, the pass that the
+                    // event of this write names loads the subject again.
+                    entry.Hash = null;
                     _logger?.LogWarning(exception, "Failed to refresh the subject after writing: {Path}", relativePath);
                 }
             }
         }, cancellationToken);
+    }
 
     /// <summary>
     /// IStorageContainer - Deletes a blob from storage and removes from Children.
     /// </summary>
-    public Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
-        => Worker.RunAsync(token => DeleteEntryAsync(StoragePath.Normalize(path), token), cancellationToken);
+    public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
+    {
+        var connection = Connection;
+        await connection.Worker.RunAsync(
+            token => DeleteEntryAsync(connection, StoragePath.Normalize(path), token), cancellationToken);
+    }
 
     /// <summary>
     /// Opens the create subject wizard to add a new subject to this storage.
@@ -399,33 +483,59 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the index.
     /// </summary>
-    public Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
-        => Worker.RunAsync(token => _index.TryGetPath(subject, out var path)
-            ? DeleteEntryAsync(path, token)
-            : throw new InvalidOperationException("Subject not found in storage registry"), cancellationToken);
-
-    private async Task DeleteEntryAsync(string relativePath, CancellationToken cancellationToken)
+    /// <exception cref="InvalidOperationException">The subject is not the subject of a file in this storage.</exception>
+    public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        if (!_index.TryGet(relativePath, out var entry) || entry.IsFolder || entry.Subject == null)
+        var connection = Connection;
+        await connection.Worker.RunAsync(token =>
+        {
+            // A folder has an entry too, but no file that could be deleted.
+            if (!connection.Index.TryGetPath(subject, out var path) ||
+                !connection.Index.TryGet(path, out var entry) ||
+                entry.IsFolder)
+            {
+                throw new InvalidOperationException("Subject not found in storage registry");
+            }
+
+            return DeleteEntryAsync(connection, path, token);
+        }, cancellationToken);
+    }
+
+    private async Task DeleteEntryAsync(StorageConnection connection, string relativePath, CancellationToken cancellationToken)
+    {
+        if (!connection.Index.TryGet(relativePath, out var entry) || entry.IsFolder || entry.Subject == null)
         {
             _logger?.LogWarning("Cannot delete blob - no subject at: {Path}", relativePath);
             return;
         }
 
-        await Client.DeleteAsync(relativePath, cancellationToken: cancellationToken);
-        _index.Remove(relativePath);
-        _reconciler!.Apply();
+        await connection.Client.DeleteAsync(relativePath, cancellationToken: cancellationToken);
+        connection.Index.Remove(relativePath);
+        connection.Reconciler.Apply();
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", relativePath);
     }
 
     public override void Dispose()
     {
-        _fileWatcher?.Dispose();
-        _worker?.Dispose();
-        _client?.Dispose();
-        _client = null;
-        Status = StorageStatus.Disconnected;
+        // The connection is ended outside the lock, because cancelling it runs code of the work it cancels.
+        // A connect can publish another one meanwhile, hence the loop.
+        while (true)
+        {
+            var connection = _connection;
+            connection?.Dispose();
+
+            lock (_connectionLock)
+            {
+                if (ReferenceEquals(_connection, connection))
+                {
+                    _disposeCount++;
+                    Status = StorageStatus.Disconnected;
+                    break;
+                }
+            }
+        }
+
         base.Dispose();
     }
 }

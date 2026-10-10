@@ -1,5 +1,8 @@
+using System.Text;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Storage.Tests;
@@ -42,7 +45,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
-        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        var file = (GatedFile)storage.Children["Data.gated"];
         WriteFile("Data.gated", "second version");
 
         // Act
@@ -59,7 +62,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
-        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        var file = (GatedFile)storage.Children["Data.gated"];
         var originalTime = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
         WriteFile("Data.gated", "other");
         File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), originalTime);
@@ -80,7 +83,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
-        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        var file = (GatedFile)storage.Children["Data.gated"];
         var originalTime = File.GetLastWriteTimeUtc(GetFullPath("Data.gated"));
         WriteFile("Data.gated", "other");
         File.SetLastWriteTimeUtc(GetFullPath("Data.gated"), originalTime);
@@ -93,13 +96,12 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenJsonSubjectFileIsRenamed_ThenInstanceIsKeptAndNeverDetached()
+    public async Task WhenJsonSubjectFileIsRenamedWithinItsFolder_ThenNewInstanceIsRegisteredUnderTheNewKey()
     {
         // Arrange
         WriteFile("Motor.json", SerializeMotor("Pump"));
         var storage = await ConnectAsync();
-        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
-        var detaches = CountDetachesOf(motor);
+        var motor = storage.Children["Motor"];
         File.Move(GetFullPath("Motor.json"), GetFullPath("Engine.json"));
 
         // Act
@@ -107,8 +109,39 @@ public class StorageReconcilerTests : StorageTestBase
 
         // Assert
         Assert.Equal(["Engine"], storage.Children.Keys);
-        Assert.Same(motor, storage.Children["Engine"]);
+        var engine = Assert.IsType<Samples.Motor>(storage.Children["Engine"]);
+        Assert.NotSame(motor, engine);
+
+        var parent = Assert.Single(engine.TryGetRegisteredSubject()!.Parents);
+        Assert.Same(storage, parent.Property.Subject);
+        Assert.Equal(nameof(FluentStorageContainer.Children), parent.Property.Name);
+        Assert.Equal("Engine", parent.Index);
+    }
+
+    [Fact]
+    public async Task WhenJsonSubjectFileIsMovedToAnotherFolder_ThenInstanceIsKeptAndNeverDetached()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = (Samples.Motor)storage.Children["Motor"];
+        var detaches = CountDetachesOf(motor);
+        Directory.CreateDirectory(GetFullPath("Devices"));
+        File.Move(GetFullPath("Motor.json"), GetFullPath("Devices/Engine.json"));
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Devices"], storage.Children.Keys);
+        var devices = Assert.IsType<VirtualFolder>(storage.Children["Devices"]);
+        Assert.Same(motor, devices.Children["Engine"]);
         Assert.Equal(0, detaches.Count);
+
+        var parent = Assert.Single(motor.TryGetRegisteredSubject()!.Parents);
+        Assert.Same(devices, parent.Property.Subject);
+        Assert.Equal(nameof(VirtualFolder.Children), parent.Property.Name);
+        Assert.Equal("Engine", parent.Index);
     }
 
     [Fact]
@@ -117,7 +150,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Devices/Motor.json", SerializeMotor("Pump"));
         var storage = await ConnectAsync();
-        var motor = Assert.IsType<Samples.Motor>(((VirtualFolder)storage.Children["Devices"]).Children["Motor"]);
+        var motor = (Samples.Motor)((VirtualFolder)storage.Children["Devices"]).Children["Motor"];
         var detaches = CountDetachesOf(motor);
         Directory.Move(GetFullPath("Devices"), GetFullPath("Machines"));
 
@@ -126,8 +159,14 @@ public class StorageReconcilerTests : StorageTestBase
 
         // Assert
         Assert.Equal(["Machines"], storage.Children.Keys);
-        Assert.Same(motor, ((VirtualFolder)storage.Children["Machines"]).Children["Motor"]);
+        var machines = Assert.IsType<VirtualFolder>(storage.Children["Machines"]);
+        Assert.Same(motor, machines.Children["Motor"]);
         Assert.Equal(0, detaches.Count);
+
+        var parent = Assert.Single(motor.TryGetRegisteredSubject()!.Parents);
+        Assert.Same(machines, parent.Property.Subject);
+        Assert.Equal(nameof(VirtualFolder.Children), parent.Property.Name);
+        Assert.Equal("Motor", parent.Index);
     }
 
     [Fact]
@@ -247,20 +286,165 @@ public class StorageReconcilerTests : StorageTestBase
     public async Task WhenFilesDifferOnlyInCasing_ThenBothArePlaced()
     {
         // Arrange
-        WriteFile("readme.md", "lower");
-        if (File.Exists(GetFullPath("README.md")))
-        {
-            // The volume ignores case, so the second file cannot exist next to the first one.
-            return;
-        }
+        // In memory, because not every volume can hold both files.
+        var storage = await ConnectAsync(configure: container => container.StorageType = "inmemory");
+        await WriteBlobAsync(storage, "readme.md", "lower");
+        await WriteBlobAsync(storage, "README.md", "upper");
 
-        WriteFile("README.md", "upper");
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["README.md", "readme.md"], storage.Children.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("lower", Assert.IsType<MarkdownFile>(storage.Children["readme.md"]).Content);
+        Assert.Equal("upper", Assert.IsType<MarkdownFile>(storage.Children["README.md"]).Content);
+    }
+
+    [Fact]
+    public async Task WhenJsonFileDescribesNoSubject_ThenItIsPlacedAsJsonFileUnderItsFullName()
+    {
+        // Arrange
+        WriteFile("Data.json", """{ "value": 1 }""");
 
         // Act
         var storage = await ConnectAsync();
 
         // Assert
-        Assert.Equal(["README.md", "readme.md"], storage.Children.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["Data.json"], storage.Children.Keys);
+        Assert.IsType<JsonFile>(storage.Children["Data.json"]);
+    }
+
+    [Fact]
+    public async Task WhenSubjectThrowsCancellationOnLoad_ThenFileIsRecordedAsFailedAndPassCompletes()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile("Data.gated");
+        WriteFile("Notes.md");
+        GatedFile.FailNextLoad(new OperationCanceledException());
+
+        // Act
+        await storage.ReconcileAsync();
+        var childrenAfterFailure = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(["Notes.md"], childrenAfterFailure);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal(1, GatedFile.LoadCount);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenStorageReconnectsWhilePassRuns_ThenOnlyTheNewConnectionChangesTheTree()
+    {
+        // Arrange
+        var otherDirectory = CreateTemporaryDirectory();
+        File.WriteAllText(Path.Combine(otherDirectory.FullName, "New.gated"), "content");
+
+        WriteFile("Old.md");
+        var storage = await ConnectAsync();
+        WriteFile("Slow.gated");
+        var gateOfOldPass = GatedFile.PauseNextLoad();
+        var gateOfNewPass = GatedFile.PauseNextLoad();
+        var oldPass = storage.ReconcileAsync();
+        await gateOfOldPass.WhenReachedAsync();
+        storage.ConnectionString = otherDirectory.FullName;
+
+        // Act
+        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+        var reconnectWasWaiting = !reconnect.IsCompleted;
+        gateOfOldPass.Release();
+        await oldPass;
+        await gateOfNewPass.WhenReachedAsync();
+        var childrenAfterOldPass = storage.Children.Keys.ToList();
+        gateOfNewPass.Release();
+        await reconnect;
+
+        // Assert
+        Assert.True(reconnectWasWaiting);
+        Assert.Equal(["Old.md"], childrenAfterOldPass);
+        Assert.Equal(["New.gated"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsDisposedWhilePassRuns_ThenPassChangesNeitherTreeNorStatus()
+    {
+        // Arrange
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+
+        // Act
+        storage.Dispose();
+        gate.Release();
+        await pass;
+
+        // Assert
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Disconnected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsDisposedWhileItReconnects_ThenReconnectFailsAndNothingIsLoaded()
+    {
+        // Arrange
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Act
+        storage.Dispose();
+        gate.Release();
+        await pass;
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => reconnect);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Disconnected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsDisposed_ThenConfigurationIsNotWritten()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        var storage = await ConnectAsync();
+        var motor = (Samples.Motor)storage.Children["Motor"];
+        var contentBeforeDispose = File.ReadAllText(GetFullPath("Motor.json"));
+        motor.Name = "Changed";
+        storage.Dispose();
+
+        // Act
+        var isWritten = await storage.WriteConfigurationAsync(motor, CancellationToken.None);
+
+        // Assert
+        Assert.False(isWritten);
+        Assert.Equal(contentBeforeDispose, File.ReadAllText(GetFullPath("Motor.json")));
+    }
+
+    [Fact]
+    public async Task WhenFolderIsDeletedAsSubject_ThenItThrowsAndFolderIsKept()
+    {
+        // Arrange
+        WriteFile("Docs/Readme.md");
+        var storage = await ConnectAsync();
+        var docs = storage.Children["Docs"];
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            storage.DeleteSubjectAsync(docs, CancellationToken.None));
+
+        Assert.Same(docs, storage.Children["Docs"]);
+        Assert.True(File.Exists(GetFullPath("Docs/Readme.md")));
     }
 
     [Fact]
@@ -290,7 +474,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Motor.json", SerializeMotor("From file"));
         var storage = await ConnectAsync();
-        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        var motor = (Samples.Motor)storage.Children["Motor"];
         motor.Name = "Saved";
         await storage.WriteConfigurationAsync(motor, CancellationToken.None);
         motor.Name = "Only in memory";
@@ -309,14 +493,10 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
-        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        var file = (GatedFile)storage.Children["Data.gated"];
 
         // Act
-        using (var content = new MemoryStream("second version"u8.ToArray()))
-        {
-            await storage.WriteBlobAsync("Data.gated", content, CancellationToken.None);
-        }
-
+        await WriteBlobAsync(storage, "Data.gated", "second version");
         var loadCountAfterWrite = GatedFile.LoadCount;
         await storage.ReconcileAsync(Named("Data.gated"));
 
@@ -332,7 +512,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Arrange
         WriteFile("Docs/Motor.json", SerializeMotor("Pump"));
         var storage = await ConnectAsync();
-        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var docs = (VirtualFolder)storage.Children["Docs"];
 
         // Act
         await storage.DeleteSubjectAsync(docs.Children["Motor"], CancellationToken.None);
@@ -355,7 +535,7 @@ public class StorageReconcilerTests : StorageTestBase
         // Act
         await storage.ReconcileAsync();
 
-        // Assert: a JSON subject enters the context when it is created, a file subject when it is assigned.
+        // Assert
         var changes = recorder.Changes;
         Assert.Contains(changes, change => change is { Subject: Samples.Motor, IsContextAttach: true });
         Assert.Contains(changes, change => change is { Subject: Samples.Motor, IsContextAttach: false });
@@ -364,26 +544,25 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndIsRecorded()
+    public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNamedPassLoadsItAgain()
     {
         // Arrange
         WriteFile("Data.gated", "first");
         var storage = await ConnectAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
         GatedFile.FailNextLoad();
 
         // Act
-        using (var content = new MemoryStream("second version"u8.ToArray()))
-        {
-            await storage.WriteBlobAsync("Data.gated", content, CancellationToken.None);
-        }
-
-        var loadCountAfterWrite = GatedFile.LoadCount;
+        await WriteBlobAsync(storage, "Data.gated", "second version");
+        await storage.ReconcileAsync();
+        var loadCountAfterUnnamedPass = GatedFile.LoadCount;
         await storage.ReconcileAsync(Named("Data.gated"));
 
         // Assert
         Assert.Equal("second version", File.ReadAllText(GetFullPath("Data.gated")));
-        Assert.Equal(2, loadCountAfterWrite);
-        Assert.Equal(2, GatedFile.LoadCount);
+        Assert.Equal(2, loadCountAfterUnnamedPass);
+        Assert.Equal(3, GatedFile.LoadCount);
+        Assert.Equal("second version", file.Content);
     }
 
     [Fact]
@@ -398,7 +577,7 @@ public class StorageReconcilerTests : StorageTestBase
         WriteFile("Data.gated", "second version");
         gate.Release();
         await pass;
-        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        var file = (GatedFile)storage.Children["Data.gated"];
         var contentAfterFirstPass = file.Content;
 
         // Act
@@ -407,6 +586,12 @@ public class StorageReconcilerTests : StorageTestBase
         // Assert
         Assert.Equal("first", contentAfterFirstPass);
         Assert.Equal("second version", file.Content);
+    }
+
+    private static async Task WriteBlobAsync(FluentStorageContainer storage, string path, string content)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        await storage.WriteBlobAsync(path, stream, CancellationToken.None);
     }
 
     private DetachCounter CountDetachesOf(IInterceptorSubject subject)

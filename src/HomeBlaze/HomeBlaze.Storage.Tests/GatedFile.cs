@@ -15,7 +15,7 @@ public partial class GatedFile : IStorageFile
 {
     private static readonly ConcurrentQueue<Gate> Gates = new();
     private static int _loadCount;
-    private static int _failNextLoad;
+    private static Exception? _nextLoadFailure;
 
     public IStorageContainer Storage { get; }
 
@@ -50,15 +50,16 @@ public partial class GatedFile : IStorageFile
     }
 
     /// <summary>
-    /// Makes the next load throw.
+    /// Makes the next load throw the exception, or an <see cref="InvalidOperationException"/> when none is given.
     /// </summary>
-    public static void FailNextLoad() => Volatile.Write(ref _failNextLoad, 1);
+    public static void FailNextLoad(Exception? exception = null)
+        => Volatile.Write(ref _nextLoadFailure, exception ?? new InvalidOperationException("The load was made to fail."));
 
     public static void Reset()
     {
         Gates.Clear();
         Volatile.Write(ref _loadCount, 0);
-        Volatile.Write(ref _failNextLoad, 0);
+        Volatile.Write(ref _nextLoadFailure, null);
     }
 
     public Task<Stream> ReadAsync(CancellationToken cancellationToken)
@@ -70,9 +71,9 @@ public partial class GatedFile : IStorageFile
     public async Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _loadCount);
-        if (Interlocked.Exchange(ref _failNextLoad, 0) == 1)
+        if (Interlocked.Exchange(ref _nextLoadFailure, null) is { } failure)
         {
-            throw new InvalidOperationException("The load was made to fail.");
+            throw failure;
         }
 
         await using var stream = await ReadAsync(cancellationToken);

@@ -24,13 +24,17 @@ internal sealed class StorageReconciler
     private readonly StorageIndex _index;
     private readonly ILogger? _logger;
 
+    // Cancelled when the connection ends. Nothing is assigned to the tree after that.
+    private readonly CancellationToken _connectionToken;
+
     public StorageReconciler(
         IBlobStorage client,
         FluentStorageContainer storage,
         FileSubjectFactory subjectFactory,
         ConfigurableSubjectSerializer serializer,
         StorageIndex index,
-        ILogger? logger)
+        ILogger? logger,
+        CancellationToken connectionToken)
     {
         _client = client;
         _storage = storage;
@@ -38,6 +42,7 @@ internal sealed class StorageReconciler
         _serializer = serializer;
         _index = index;
         _logger = logger;
+        _connectionToken = connectionToken;
     }
 
     /// <summary>
@@ -45,11 +50,11 @@ internal sealed class StorageReconciler
     /// </summary>
     /// <param name="namedPaths">Paths an event named. They are compared by content even when their version is unchanged.</param>
     /// <param name="allNamed">Treats every file as named, for when events were lost.</param>
-    /// <param name="cancellationToken">Cancels the pass between two files.</param>
+    /// <param name="cancellationToken">Cancels the pass. It ends at its next storage call or between two files.</param>
     public async Task ReconcileAsync(IReadOnlySet<string> namedPaths, bool allNamed, CancellationToken cancellationToken)
     {
         var listing = await ListAsync(cancellationToken);
-        var movableSubjects = RemoveMissingEntries(listing);
+        var movableEntries = RemoveMissingEntries(listing);
 
         var hasMovedSubjects = false;
         foreach (var listed in listing.Values.OrderBy(entry => entry.Path, StringComparer.Ordinal))
@@ -71,14 +76,16 @@ internal sealed class StorageReconciler
                 var isNamed = allNamed || namedPaths.Contains(listed.Path);
                 if (!_index.TryGet(listed.Path, out var entry) || NeedsLoad(entry, listed, isNamed))
                 {
-                    hasMovedSubjects |= await AddAsync(listed, movableSubjects, cancellationToken);
+                    hasMovedSubjects |= await AddAsync(listed, movableEntries, cancellationToken);
                 }
                 else if (entry.Subject != null && (entry.Version != listed.Version || isNamed))
                 {
                     await RefreshAsync(entry, listed, cancellationToken);
                 }
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            // Filtered by the token of the pass, not by the kind of exception: subject code that times out throws
+            // an OperationCanceledException of its own, which is a failed load like any other.
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
                 RecordFailure(listed);
@@ -144,6 +151,9 @@ internal sealed class StorageReconciler
             .OrderByDescending(path => path.Length == 0 ? -1 : StoragePath.GetDepth(path))
             .ToList();
 
+        // The connection that follows an ended one owns the tree.
+        _connectionToken.ThrowIfCancellationRequested();
+
         // Without the flow of this item, work that a lifecycle handler starts here queues its calls into the storage instead of running them inline.
         using (ExecutionContext.SuppressFlow())
         {
@@ -194,8 +204,14 @@ internal sealed class StorageReconciler
         return blob == null ? default : new StorageVersion(blob.Size ?? 0, blob.LastModificationTime);
     }
 
+    /// <summary>
+    /// Hashes the file without holding its content in memory.
+    /// </summary>
     public async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
-        => StorageHash.Compute(await ReadAsync(path, cancellationToken));
+    {
+        await using var stream = await OpenReadAsync(path, cancellationToken);
+        return await StorageHash.ComputeAsync(stream, cancellationToken);
+    }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
         => subject is IConfigurable && IsJson(path)
@@ -256,12 +272,12 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Removes the entries that are gone or changed kind, and returns the configurable subjects among them
-    /// by content hash: a new file with the same content is the same subject under a new path.
+    /// Removes the entries that are gone or changed kind, and returns those of them that hold a configurable
+    /// subject by content hash: a new file with the same content can be the same subject under a new path.
     /// </summary>
-    private Dictionary<string, List<IInterceptorSubject>> RemoveMissingEntries(Dictionary<string, StorageListing> listing)
+    private Dictionary<string, List<StorageEntry>> RemoveMissingEntries(Dictionary<string, StorageListing> listing)
     {
-        var movableSubjects = new Dictionary<string, List<IInterceptorSubject>>(StringComparer.Ordinal);
+        var movableEntries = new Dictionary<string, List<StorageEntry>>(StringComparer.Ordinal);
         foreach (var entry in _index.Entries.ToList())
         {
             if (listing.TryGetValue(entry.Path, out var listed) && listed.IsFolder == entry.IsFolder)
@@ -273,16 +289,16 @@ internal sealed class StorageReconciler
 
             if (entry is { IsFolder: false, Subject: IConfigurable, Hash: not null })
             {
-                if (!movableSubjects.TryGetValue(entry.Hash, out var subjects))
+                if (!movableEntries.TryGetValue(entry.Hash, out var entries))
                 {
-                    movableSubjects[entry.Hash] = subjects = [];
+                    movableEntries[entry.Hash] = entries = [];
                 }
 
-                subjects.Add(entry.Subject);
+                entries.Add(entry);
             }
         }
 
-        return movableSubjects;
+        return movableEntries;
     }
 
     /// <summary>
@@ -307,7 +323,7 @@ internal sealed class StorageReconciler
     /// <returns>True when an existing subject was moved to the path instead of creating one.</returns>
     private async Task<bool> AddAsync(
         StorageListing listed,
-        Dictionary<string, List<IInterceptorSubject>> movableSubjects,
+        Dictionary<string, List<StorageEntry>> movableEntries,
         CancellationToken cancellationToken)
     {
         var blob = new Blob(listed.Path) { Size = listed.Version.Size, LastModificationTime = listed.Version.Modified };
@@ -320,9 +336,11 @@ internal sealed class StorageReconciler
             entry.Hash = StorageHash.Compute(content);
 
             // More than one candidate cannot be told apart, so none of them is moved.
-            if (movableSubjects.Remove(entry.Hash, out var candidates) && candidates.Count == 1)
+            // Only into another folder: the registry keeps the old key of a subject that is re-keyed within one dictionary.
+            if (movableEntries.Remove(entry.Hash, out var candidates) && candidates.Count == 1 &&
+                StoragePath.GetParent(candidates[0].Path) != StoragePath.GetParent(listed.Path))
             {
-                entry.Subject = candidates[0];
+                entry.Subject = candidates[0].Subject;
                 isMoved = true;
             }
             else
@@ -347,7 +365,7 @@ internal sealed class StorageReconciler
 
             if (entry.Subject is not GenericFile)
             {
-                var hash = StorageHash.Compute(await ReadAsync(listed.Path, cancellationToken));
+                var hash = await ComputeHashAsync(listed.Path, cancellationToken);
 
                 // The subject read the file before this did. The hash of a later content would make the next pass
                 // take the subject for current, so it is only recorded when the file did not change meanwhile.
@@ -376,26 +394,37 @@ internal sealed class StorageReconciler
             return;
         }
 
-        var content = await ReadAsync(listed.Path, cancellationToken);
-        var hash = StorageHash.Compute(content);
-        if (hash != entry.Hash)
+        string hash;
+        if (entry.Subject is IStorageFile file)
         {
-            if (entry.Subject is IStorageFile file)
+            // The subject reads the file itself, so its bytes are only hashed here.
+            hash = await ComputeHashAsync(listed.Path, cancellationToken);
+            if (hash != entry.Hash)
             {
                 await file.OnFileChangedAsync(cancellationToken);
+                _logger?.LogInformation("Reloaded: {Path}", listed.Path);
             }
-            else if (entry.Subject is IConfigurable configurable)
+            else
             {
-                _serializer.UpdateConfiguration(entry.Subject, DecodeText(content));
-                await configurable.ApplyConfigurationAsync(cancellationToken);
+                file.FileSize = listed.Version.Size;
+                file.LastModified = listed.Version.Modified?.UtcDateTime ?? file.LastModified;
             }
-
-            _logger?.LogInformation("Reloaded: {Path}", listed.Path);
         }
-        else if (entry.Subject is IStorageFile unchangedFile)
+        else
         {
-            unchangedFile.FileSize = listed.Version.Size;
-            unchangedFile.LastModified = listed.Version.Modified?.UtcDateTime ?? unchangedFile.LastModified;
+            var content = await ReadAsync(listed.Path, cancellationToken);
+            hash = StorageHash.Compute(content);
+            if (hash != entry.Hash && entry.Subject is IConfigurable configurable)
+            {
+                // Can attach nested subjects, see the creation in AddAsync.
+                using (ExecutionContext.SuppressFlow())
+                {
+                    _serializer.UpdateConfiguration(entry.Subject, DecodeText(content));
+                }
+
+                await configurable.ApplyConfigurationAsync(cancellationToken);
+                _logger?.LogInformation("Reloaded: {Path}", listed.Path);
+            }
         }
 
         entry.Hash = hash;
@@ -452,10 +481,13 @@ internal sealed class StorageReconciler
             ? entry
             : throw new InvalidOperationException($"No entry for '{path}'.");
 
+    private async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)
+        => await _client.OpenReadAsync(path, cancellationToken)
+           ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
+
     private async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = await _client.OpenReadAsync(path, cancellationToken)
-            ?? throw new FileNotFoundException($"'{path}' is not in the storage.", path);
+        await using var stream = await OpenReadAsync(path, cancellationToken);
 
         using var buffer = new MemoryStream();
         await stream.CopyToAsync(buffer, cancellationToken);

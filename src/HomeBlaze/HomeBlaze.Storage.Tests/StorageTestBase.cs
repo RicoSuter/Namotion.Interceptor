@@ -18,6 +18,7 @@ public abstract class StorageTestBase : IDisposable
     protected static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
 
     private readonly List<FluentStorageContainer> _storages = [];
+    private readonly List<DirectoryInfo> _temporaryDirectories = [];
     private ServiceProvider? _serviceProvider;
 
     protected StorageTestBase()
@@ -102,6 +103,14 @@ public abstract class StorageTestBase : IDisposable
         File.WriteAllText(fullPath, content);
     }
 
+    /// <summary>A directory next to <see cref="StorageDirectory"/>, deleted with the test.</summary>
+    protected DirectoryInfo CreateTemporaryDirectory()
+    {
+        var directory = Directory.CreateTempSubdirectory("homeblaze-storage-");
+        _temporaryDirectories.Add(directory);
+        return directory;
+    }
+
     protected static IReadOnlySet<string> Named(params string[] relativePaths)
         => relativePaths.ToHashSet(StringComparer.Ordinal);
 
@@ -114,6 +123,11 @@ public abstract class StorageTestBase : IDisposable
 
         _serviceProvider?.Dispose();
         StorageDirectory.Delete(recursive: true);
+        foreach (var directory in _temporaryDirectories)
+        {
+            directory.Delete(recursive: true);
+        }
+
         GC.SuppressFinalize(this);
     }
 }
