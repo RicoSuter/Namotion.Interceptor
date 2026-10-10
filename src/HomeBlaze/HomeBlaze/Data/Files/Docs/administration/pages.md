@@ -114,7 +114,8 @@ Create subjects inline within your markdown using fenced code blocks:
 - Subjects are created when the page loads
 - If the subject type is a `BackgroundService`, it starts automatically
 - Subjects are stopped and disposed when the page is removed
-- Configuration changes in the JSON are applied reactively
+- A subject is kept when the page is reloaded, as long as its block keeps the same name and `$type`. Changed properties in the JSON are applied to the running subject, which keeps its runtime state
+- Changing the name or the `$type` of a block replaces the subject with a new one
 
 ### Widget Rendering
 

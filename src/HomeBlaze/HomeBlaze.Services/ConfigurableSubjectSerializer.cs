@@ -19,6 +19,11 @@ namespace HomeBlaze.Services;
 /// </summary>
 public class ConfigurableSubjectSerializer
 {
+    /// <summary>
+    /// Name of the JSON property that holds the full type name of a serialized subject.
+    /// </summary>
+    public const string TypeDiscriminatorPropertyName = "$type";
+
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
     private readonly JsonSerializerOptions _options;
@@ -62,7 +67,7 @@ public class ConfigurableSubjectSerializer
         var root = document.RootElement;
 
         // Extract $type discriminator
-        if (!root.TryGetProperty("$type", out var typeElement))
+        if (!root.TryGetProperty(TypeDiscriminatorPropertyName, out var typeElement))
         {
             return null;
         }
