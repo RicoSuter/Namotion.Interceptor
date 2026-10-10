@@ -19,9 +19,9 @@ Each episode covers the docs of one row and lives in `episodes/<folder>/`. Statu
 | 08 | `08-websocket` | `docs/connectors-websocket.md`, `docs/connectors-subject-updates.md` | open |
 | 09 | `09-modbus` | `docs/connectors-modbus.md` | open |
 | 10 | `10-aspnetcore` | `docs/aspnetcore.md` (mention subject updates from `docs/connectors-subject-updates.md` briefly) | open |
-| 11 | `11-graphql` | `docs/graphql.md` | open |
-| 12 | `12-blazor` | `docs/blazor.md` | open |
-| 13 | `13-mcp` | `docs/mcp.md` | open |
+| 11 | `11-blazor` | `docs/blazor.md` | open |
+| 12 | `12-mcp` | `docs/mcp.md` | open |
+| 13 | `13-graphql` | `docs/graphql.md` | open |
 
 `episodes/smoke/` is not part of the series: a short episode that uses every shared component and helper, rendered to check changes to `theme/` and `tools/`.
 
