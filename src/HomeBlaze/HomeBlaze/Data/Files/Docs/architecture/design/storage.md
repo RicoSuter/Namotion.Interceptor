@@ -69,15 +69,51 @@ Beyond the FluentStorage blob providers, two additional backend strategies are w
 
 ### File Watching and Change Detection
 
-For filesystem backends, `StorageFileWatcher` provides:
-- Reactive file monitoring with debouncing (500ms coalesce window)
-- Self-write protection (2-second grace period to prevent feedback loops)
-- SHA256 content hashing for change detection
-- Automatic rescan on filesystem watcher buffer overflow
+For filesystem backends, `StorageFileWatcher` and `FluentStorageContainer` keep the subject tree in line with the disk while the server runs:
+
+- **Coalescing.** The events one path raises within 500 ms are passed on as one event (`FileEventCoalescer`). A path holds no state once its batch has been handed over.
+- **Disk state decides.** The handler looks the path up on disk and makes the tree match. The event only says where to look, so the result does not depend on the type or order of the events. A new file becomes a subject, a changed file refreshes its subject, and a path that is gone removes its subject or folder. A file saved through a temp file and a rename is handled like any other new file.
+- **Directories.** A created or renamed directory becomes a `VirtualFolder` and is reconciled with the disk: entries that are gone are removed, existing files are refreshed, and new ones are added. A directory that is moved or copied in raises no events for what it already contains, which is why its contents are listed.
+- **Ignored paths.** A path with a segment that starts with a dot (`.DS_Store`, `.idea`, `._*`) and temp files (`~` prefix or suffix, `.tmp` suffix, `.tmp.` in the name) never become subjects, at startup or at runtime.
+- **Self-write protection.** A 2-second grace period after a write of the storage itself prevents feedback loops.
+- **Change detection.** A configurable JSON subject is only reloaded when the SHA256 hash of its file changed.
+- **Lost events.** After a watcher error such as a buffer overflow, the watcher restarts and the tree is resynchronized in place. Subjects of paths that are still on disk are kept, so devices do not restart.
+- **Concurrency.** Events for different paths are handled concurrently. Every update of the hierarchy and the path registry runs under one lock, and a subject loads outside of it.
+
+#### Known Limitations and Follow-ups
+
+Found in review of the file watching rework and not fixed yet.
+
+Next:
+
+- **Name clash in `AddSubjectAsync`.** Creating a subject with a name that is already taken overwrites the file of the existing subject, and the new subject is then dropped with only a warning. It needs a check before the write and an error the UI can show.
+- **Second watcher on reconnect.** A reconnect through `ApplyConfigurationAsync` starts a new watcher and client without disposing the previous ones.
+- **Samba.** The watcher tests run on macOS and on Linux in CI. A data folder edited over an SMB share is the setup the rework was made for, and it has only been observed, not tested.
+
+Casing:
+
+- macOS raises no rename event when only the casing of a name changes. A file keeps its old key until restart, and a directory ends up as two folders, the old one with the files and an empty new one.
+- The path registry and the coalescer compare paths case-insensitively on every platform. On a case-sensitive file system `README.md` and `readme.md` share one slot, and `Docs` and `docs` are unregistered together.
+
+Events and races:
+
+- Two renames onto the same target within one coalesce window (`mv A.md X.md; mv -f B.md X.md`) leave the first old path in the tree.
+- A directory with a temp name that is renamed to its real name (`Docs.tmp` to `Docs`) leaves a `Docs.tmp` folder behind, because the files inside a temp-named directory are tracked while the events of the directory itself are dropped.
+- One JSON subject can be refreshed by two events at the same time, which applies its configuration twice.
+- The self-write mark of a path is removed by the cleanup of an older write to the same path. The events of the newer write are then handled as external, which costs one redundant reload.
+- A file that lost a key clash (`Docs.json` next to a `Docs` folder) is not retried when the key becomes free, and each resynchronization deserializes it again.
+- `AddSubjectAsync` writes the file before it registers the subject, so a directory reconcile that runs in between can add a second instance. It also does not apply the hidden name filter, so a subject created with a dot name is gone after the next restart.
+
+Cost:
+
+- The disk is checked while the hierarchy lock is held. That is what prevents phantom subjects, and it means a stalled storage directory blocks adds and deletes from the UI for as long.
+- Adding N files to one folder is quadratic, because the `Children` dictionary of the folder is copied for every add.
+- A markdown file lists its parent directory when it reloads, so reconciling a folder of markdown files is quadratic as well.
+- The coalescer lowercases the path of every event, which allocates for each path with an uppercase character.
 
 ### File Hierarchy
 
-`StorageHierarchyManager` organizes files into a `VirtualFolder` tree structure. Each folder delegates storage operations to its parent `IStorageContainer`. Path normalization handles platform differences (forward slashes, case-insensitive lookup on Windows).
+`StorageHierarchyManager` organizes files into a `VirtualFolder` tree structure. Each folder delegates storage operations to its parent `IStorageContainer`. Path normalization handles platform differences (forward slashes, case-insensitive path lookup). A subject is registered under its path if and only if it is placed in the tree: a file whose key is already taken is skipped with a warning.
 
 ### File Types
 
