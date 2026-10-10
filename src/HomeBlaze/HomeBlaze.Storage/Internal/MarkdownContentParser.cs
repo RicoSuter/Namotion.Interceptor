@@ -297,13 +297,13 @@ public sealed partial class MarkdownContentParser
 
         try
         {
-            if (!TryBuildConfiguration(type, block, out var json, out var configurationError))
+            if (!TryBuildConfiguration(type, block, out var configuration, out var configurationError))
             {
                 return (null, null, configurationError);
             }
 
             existingChildren.TryGetValue(key, out var existing);
-            var subject = await CreateOrUpdateAsync(type, existing, json, cancellationToken);
+            var subject = await CreateOrUpdateAsync(type, existing, configuration, cancellationToken);
             if (subject is null)
             {
                 return (null, null, $"The type '{head.Name}' could not be created.");
@@ -318,24 +318,23 @@ public sealed partial class MarkdownContentParser
             state.Register(block, head.Id, subject);
             return (key, subject, null);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // Constructors and ApplyConfigurationAsync run foreign code. One failing block must not take the page down.
-            return (null, null, $"The type '{head.Name}' could not be created: {exception.Message}");
+            // A cancellation that the caller did not request is such a failure too, for example a timeout inside the subject.
+            return (null, null, $"The type '{head.Name}' could not be created or updated: {exception.Message}");
         }
     }
 
     private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
 
     private async Task<IInterceptorSubject?> CreateOrUpdateAsync(
-        Type type, IInterceptorSubject? existing, string json, CancellationToken cancellationToken)
+        Type type, IInterceptorSubject? existing, BlockConfiguration configuration, CancellationToken cancellationToken)
     {
-        var keys = GetConfigurationKeys(json);
-
         IInterceptorSubject? subject;
-        if (CanUpdateInPlace(existing, type, keys))
+        if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
-            _serializer.UpdateConfiguration(existing, json);
+            _serializer.UpdateConfiguration(existing, configuration.Json);
             if (existing is IConfigurable configurable)
             {
                 await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -345,12 +344,12 @@ public sealed partial class MarkdownContentParser
         }
         else
         {
-            subject = _serializer.Deserialize(json) as IInterceptorSubject;
+            subject = _serializer.Deserialize(configuration.Json) as IInterceptorSubject;
         }
 
         if (subject is not null)
         {
-            _appliedConfigurationKeys.AddOrUpdate(subject, keys);
+            _appliedConfigurationKeys.AddOrUpdate(subject, configuration.Keys);
         }
 
         return subject;
@@ -360,8 +359,21 @@ public sealed partial class MarkdownContentParser
     /// Records the configuration that was written to the page for a subject, so that the reload
     /// which follows the write updates the subject in place.
     /// </summary>
-    public void RememberConfiguration(IInterceptorSubject subject, string configurationJson) =>
-        _appliedConfigurationKeys.AddOrUpdate(subject, GetConfigurationKeys(configurationJson));
+    internal void RememberConfiguration(IInterceptorSubject subject, string configurationJson)
+    {
+        using var document = JsonDocument.Parse(configurationJson);
+
+        var keys = new List<string>();
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.Name != TypeDiscriminator)
+            {
+                keys.Add(property.Name);
+            }
+        }
+
+        _appliedConfigurationKeys.AddOrUpdate(subject, keys.ToArray());
+    }
 
     // Updating in place only sets the keys that are present. A key that was removed from the page
     // would keep its old value on the instance, unlike after a restart, so the subject is recreated then.
@@ -374,22 +386,6 @@ public sealed partial class MarkdownContentParser
 
         return !_appliedConfigurationKeys.TryGetValue(existing, out var previousKeys)
             || Array.TrueForAll(previousKeys, previousKey => Array.IndexOf(keys, previousKey) >= 0);
-    }
-
-    private static string[] GetConfigurationKeys(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-
-        var keys = new List<string>();
-        foreach (var property in document.RootElement.EnumerateObject())
-        {
-            if (property.Name != TypeDiscriminator)
-            {
-                keys.Add(property.Name);
-            }
-        }
-
-        return keys.ToArray();
     }
 
     // Replaced in the slots task. Until then a widget block cannot have content.
@@ -421,9 +417,10 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private bool TryBuildConfiguration(Type type, MarkdownBlock block, out string json, out string? error)
+    private bool TryBuildConfiguration(
+        Type type, MarkdownBlock block, out BlockConfiguration blockConfiguration, out string? error)
     {
-        json = string.Empty;
+        blockConfiguration = default;
 
         var properties = GetConfigurationProperties(type);
         var configuration = ParseConfigurationFence(type, block.ConfigurationJson, properties, out error);
@@ -451,8 +448,20 @@ public sealed partial class MarkdownContentParser
             configuration[argument.Key] = node;
         }
 
+        // The fence may carry a discriminator of its own, so it is set before the keys are counted.
         configuration[TypeDiscriminator] = type.FullName;
-        json = configuration.ToJsonString();
+
+        var keys = new string[configuration.Count - 1];
+        var keyCount = 0;
+        foreach (var (key, _) in configuration)
+        {
+            if (key != TypeDiscriminator)
+            {
+                keys[keyCount++] = key;
+            }
+        }
+
+        blockConfiguration = new BlockConfiguration(configuration.ToJsonString(), keys);
         return true;
     }
 
@@ -530,6 +539,9 @@ public sealed partial class MarkdownContentParser
             return null;
         }
     }
+
+    /// <summary>The merged configuration of one block and its top-level keys without the type discriminator.</summary>
+    private readonly record struct BlockConfiguration(string Json, string[] Keys);
 
     private sealed class ParseState(MarkdownFile page)
     {

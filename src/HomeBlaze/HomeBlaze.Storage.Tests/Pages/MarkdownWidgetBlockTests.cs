@@ -172,8 +172,32 @@ public class MarkdownWidgetBlockTests
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
-        Assert.Contains("could not be created", html);
+        Assert.Contains("could not be created or updated", html);
         Assert.Contains("apply failed", html);
+        Assert.False(page.Children.ContainsKey("faulty"));
+        Assert.Same(leaf, page.Children["leaf"]);
+        Assert.Equal(2, ((TestLeaf)leaf).Count);
+    }
+
+    [Fact]
+    public async Task WhenSubjectCancelsOnItsOwn_ThenAnErrorBoxReplacesItAndLaterBlocksStillWork()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md",
+            $":::{FaultyType}#faulty mode=ok\n:::\n\n:::{LeafType}#leaf count=1\n:::");
+        var leaf = page.Children["leaf"];
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page,
+            $":::{FaultyType}#faulty mode={TestFaulty.CancelMode}\n:::\n\n:::{LeafType}#leaf count=2\n:::");
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains("could not be created or updated", html);
+        Assert.Contains("apply cancelled", html);
         Assert.False(page.Children.ContainsKey("faulty"));
         Assert.Same(leaf, page.Children["leaf"]);
         Assert.Equal(2, ((TestLeaf)leaf).Count);
@@ -187,15 +211,18 @@ public class MarkdownWidgetBlockTests
         var content = $"---\ntitle: Before\n---\n\n:::{FaultyType}#faulty mode=ok\n:::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var children = page.Children;
-        var faulty = page.GetBlockSubject(0);
+        var faulty = Assert.IsType<TestFaulty>(page.GetBlockSubject(0));
+        using var cancellationSource = new CancellationTokenSource();
+        faulty.CancellationSource = cancellationSource;
 
         // Act
         var exception = await Record.ExceptionAsync(() => fixture.UpdatePageAsync(
             page,
-            $"---\ntitle: After\n---\n\nnew text\n\n:::{FaultyType}#faulty mode={TestFaulty.CancelMode}\n:::\n"));
+            $"---\ntitle: After\n---\n\nnew text\n\n:::{FaultyType}#faulty mode={TestFaulty.CancelMode}\n:::\n",
+            cancellationSource.Token));
 
         // Assert
-        Assert.IsType<OperationCanceledException>(exception);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception);
         Assert.Equal(content, page.Content);
         Assert.Equal("Before", page.Title);
         Assert.Same(children, page.Children);

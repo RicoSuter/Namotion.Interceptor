@@ -42,12 +42,27 @@ public partial class TestFaulty : IConfigurable
     [Configuration]
     public partial string? Mode { get; set; }
 
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Mode switch
+    /// <summary>
+    /// Cancelled before <see cref="CancelMode"/> throws. With it the cancellation is the caller's,
+    /// without it the subject cancels on its own.
+    /// </summary>
+    public CancellationTokenSource? CancellationSource { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
     {
-        ThrowMode => throw new InvalidOperationException("apply failed"),
-        CancelMode => throw new OperationCanceledException(),
-        _ => Task.CompletedTask
-    };
+        switch (Mode)
+        {
+            case ThrowMode:
+                throw new InvalidOperationException("apply failed");
+
+            case CancelMode:
+                CancellationSource?.Cancel();
+                throw new TaskCanceledException("apply cancelled");
+
+            default:
+                return Task.CompletedTask;
+        }
+    }
 }
 
 [InterceptorSubject]

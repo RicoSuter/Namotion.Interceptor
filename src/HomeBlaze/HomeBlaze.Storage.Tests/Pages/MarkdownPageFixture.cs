@@ -68,10 +68,10 @@ public sealed class MarkdownPageFixture
         return file;
     }
 
-    public async Task UpdatePageAsync(MarkdownFile file, string content)
+    public async Task UpdatePageAsync(MarkdownFile file, string content, CancellationToken cancellationToken = default)
     {
         await WriteAsync(file.Name, content);
-        await file.OnFileChangedAsync(CancellationToken.None);
+        await file.OnFileChangedAsync(cancellationToken);
     }
 
     public async Task<string> ReadAsync(string name)
