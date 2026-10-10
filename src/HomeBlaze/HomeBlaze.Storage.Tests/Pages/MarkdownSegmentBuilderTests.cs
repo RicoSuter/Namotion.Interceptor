@@ -311,6 +311,143 @@ public class MarkdownSegmentBuilderTests
         Assert.Contains(":::Demo.Widget path=/x", AllHtml(segments));
     }
 
+    [Fact]
+    public void WhenUnclosedExpressionIsInsideBlock_ThenTheRestOfThePageAndTheLaterExpressionAreKept()
+    {
+        // Act
+        var segments = Build("""
+            Before
+
+            :::Demo.Card
+            Use {{ to start an expression.
+            :::
+
+            After the card
+
+            Speed: {{ motor/Speed }}
+            """);
+
+        // Assert
+        var block = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Equal("Demo.Card", block.Block.Head!.Name);
+        Assert.Contains("Use {{ to start an expression.", AllHtml(block.Content));
+        Assert.Contains("After the card", AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment)));
+        Assert.Equal(new ExpressionMarkdownSegment("motor/Speed"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+    }
+
+    [Fact]
+    public void WhenUnclosedExpressionIsBeforeBlock_ThenTheBlockAndTheExpressionInItAreKept()
+    {
+        // Act
+        var segments = Build("""
+            Use {{ to start an expression.
+
+            :::Demo.Card
+            Speed: {{ motor/Speed }}
+            :::
+
+            After the card
+            """);
+
+        // Assert
+        var block = Assert.Single(segments.OfType<BlockMarkdownSegment>());
+        Assert.Equal("Demo.Card", block.Block.Head!.Name);
+        Assert.Equal(
+            new ExpressionMarkdownSegment("motor/Speed"), Assert.Single(block.Content.OfType<ExpressionMarkdownSegment>()));
+        Assert.Empty(segments.OfType<ExpressionMarkdownSegment>());
+        var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
+        Assert.Contains("Use {{ to start an expression.", outside);
+        Assert.Contains("After the card", outside);
+    }
+
+    [Fact]
+    public void WhenUnclosedExpressionPrecedesCompleteOneInTheSameParagraph_ThenOnlyTheCompleteOneIsASegment()
+    {
+        // Act
+        var segments = Build("Use {{ to start one, like {{ a/B }} here");
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment("a/B"), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+        Assert.Contains("Use {{ to start one, like ", AllHtml(segments));
+    }
+
+    [Fact]
+    public void WhenClosingMarkerOfBlockIsMissing_ThenItsContentIsStillInTheResult()
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(":::Demo.Card\n:::");
+        const string token = "0123456789abcdef0123456789abcdef";
+
+        // Act
+        var segments = MarkdownSegmentBuilder.Split(
+            $"<p>Before</p><!--BLOCK:{token}:0--><p>Inside</p>", page, token);
+
+        // Assert
+        Assert.Equal(2, segments.Count);
+        Assert.Equal(new HtmlMarkdownSegment("<p>Before</p>"), segments[0]);
+        var block = Assert.IsType<BlockMarkdownSegment>(segments[1]);
+        Assert.Same(page.AllBlocks[0], block.Block);
+        Assert.Equal(new HtmlMarkdownSegment("<p>Inside</p>"), Assert.Single(block.Content));
+    }
+
+    [Theory]
+    [InlineData("""Value {{ Items["a"]/B }} now""", """Items["a"]/B""")]
+    [InlineData("Value {{ A&B/C }} now", "A&B/C")]
+    [InlineData("Value {{ Items['a']/B }} now", "Items['a']/B")]
+    public void WhenPathHasCharactersThatHtmlEncodes_ThenTheSegmentHasThePathAsWritten(string source, string expectedPath)
+    {
+        // Act
+        var segments = Build(source);
+
+        // Assert
+        Assert.Equal(new ExpressionMarkdownSegment(expectedPath), Assert.Single(segments.OfType<ExpressionMarkdownSegment>()));
+    }
+
+    [Theory]
+    [InlineData("Speed {{ a/B }} RPM and {{ c/D }} bar")]
+    [InlineData("Write `{{ a/B }}` to show {{ c/D }} here")]
+    [InlineData("```\nSpeed {{ a/B }} RPM\n```\n\nSpeed {{ c/D }} RPM")]
+    [InlineData("~~~~markdown\n:::Demo.Card\n{{ a/B }}\n:::\n~~~~")]
+    [InlineData(":::Demo.Card\nSpeed {{ a/B }} RPM\n:::\n\nAfter {{ c/D }}")]
+    [InlineData("::::Demo.Card\n:::Footer\nSpeed {{ a/B }} RPM\n:::\n::::")]
+    [InlineData("<div title=\"{{ a/B }}\">{{ c/D }}</div>")]
+    [InlineData("Value <code>{{ a/B }}</code> now")]
+    [InlineData("An expression starts with `{{` like {{ a/B }} here")]
+    [InlineData("Open with {{ and close with `}}` here")]
+    [InlineData("Use {{ to start one, like {{ a/B }} here")]
+    [InlineData("Before\n\n:::Demo.Card\nUse {{ to start an expression.\n:::\n\nSpeed: {{ a/B }}")]
+    [InlineData("Use {{ to start an expression.\n\n:::Demo.Card\nSpeed: {{ a/B }}\n:::")]
+    [InlineData("""Value {{ Items["a"]/B }} and {{ A&B/C }} now""")]
+    [InlineData("Nothing to see here")]
+    public void WhenPageIsRendered_ThenItsExpressionsAreTheOnesFoundInItsText(string source)
+    {
+        // Arrange
+        var page = MarkdownPageParser.Parse(source);
+
+        // Act
+        var rendered = Flatten(MarkdownSegmentBuilder.Build(page))
+            .OfType<ExpressionMarkdownSegment>()
+            .Select(expression => expression.Path);
+        var found = MarkdownSegmentBuilder.FindExpressions(page).Select(expression => expression.Path);
+
+        // Assert
+        Assert.Equal(found, rendered);
+    }
+
+    [Fact]
+    public void WhenExpressionIsFoundInText_ThenItsSpanCoversTheBraces()
+    {
+        // Arrange
+        const string source = "Use {{ to start one, like {{ a/B }} here";
+
+        // Act
+        var expression = Assert.Single(MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse(source)));
+
+        // Assert
+        Assert.Equal("{{ a/B }}", source.Substring(expression.Span.Start, expression.Span.Length));
+        Assert.Equal("a/B", expression.Path);
+    }
+
     private static IEnumerable<MarkdownSegment> Flatten(IEnumerable<MarkdownSegment> segments) =>
         segments.SelectMany(segment => segment is BlockMarkdownSegment block
             ? Flatten(block.Content).Prepend(segment)

@@ -132,7 +132,7 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
-    /// Embedded subject blocks are kept as-is. Frontmatter is preserved. An expression inside markdown code is kept as written.
+    /// Everything else stays as written, including the lines of the blocks and the front matter. An expression inside markdown code is kept as written.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     public string? RenderContent(string? content, MarkdownFile parent)

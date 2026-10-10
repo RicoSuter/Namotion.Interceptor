@@ -29,7 +29,10 @@ public static class MarkdownErrorBox
 /// <summary>Renders a parsed page to HTML and cuts it into segments per block.</summary>
 public static partial class MarkdownSegmentBuilder
 {
-    private const string ExpressionPattern = @"\{\{\s*([^}]+?)\s*\}\}";
+    // The path takes no brace and no '<'. Without that, an opening pair of braces that is never closed would
+    // take everything up to the closing pair of a later expression, and in the rendered HTML also the
+    // markers of the blocks in between.
+    private const string ExpressionPattern = @"\{\{\s*([^{}<]+?)\s*\}\}";
 
     [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
     private static partial Regex MarkerRegex();
@@ -40,9 +43,15 @@ public static partial class MarkdownSegmentBuilder
     private static readonly char[] Braces = ['{', '}'];
 
     /// <summary>
-    /// Gets the expressions in the text of the page in document order. These are the expressions that
-    /// <see cref="Build"/> turns into segments: a brace inside markdown code neither opens nor closes one.
+    /// Gets the expressions in the text of the page in document order. An expression is a path between two
+    /// pairs of braces that contains no brace and no '&lt;'. A brace inside markdown code neither opens nor
+    /// closes one.
     /// </summary>
+    /// <remarks>
+    /// The search reads the text and not the rendered page, so it also returns an expression that
+    /// <see cref="Build"/> does not turn into a segment: one in the front matter, in the content of an invalid
+    /// block or on the head line of a block, and one whose braces enclose markdown markup or the border of a block.
+    /// </remarks>
     public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
     {
         var source = page.Source;
@@ -114,7 +123,7 @@ public static partial class MarkdownSegmentBuilder
         return Split(writer.ToString(), page, token);
     }
 
-    private static List<MarkdownSegment> Split(string html, MarkdownPage page, string token)
+    internal static List<MarkdownSegment> Split(string html, MarkdownPage page, string token)
     {
         var root = new List<MarkdownSegment>();
         var stack = new Stack<(MarkdownBlock Block, List<MarkdownSegment> Outer)>();
@@ -138,7 +147,8 @@ public static partial class MarkdownSegmentBuilder
 
             if (match.Groups[4].Success)
             {
-                current.Add(new ExpressionMarkdownSegment(match.Groups[4].Value));
+                // The path is HTML here, so a quote or an ampersand in it is a character reference.
+                current.Add(new ExpressionMarkdownSegment(WebUtility.HtmlDecode(match.Groups[4].Value)));
             }
             else if (match.Groups[1].Length == 0)
             {
@@ -156,6 +166,14 @@ public static partial class MarkdownSegmentBuilder
         if (lastIndex < html.Length)
         {
             current.Add(new HtmlMarkdownSegment(html[lastIndex..]));
+        }
+
+        // A closing marker that was not found must not take the content of its block out of the result.
+        while (stack.Count > 0)
+        {
+            var (block, outer) = stack.Pop();
+            outer.Add(new BlockMarkdownSegment(block, current));
+            current = outer;
         }
 
         return root;
