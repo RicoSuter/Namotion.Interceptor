@@ -29,7 +29,7 @@ public class SonosOfflineStateTests
         Assert.True(player.IsPlaying);
 
         // Act
-        player.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(player);
 
         // Assert
         Assert.Null(player.PlaybackState);
@@ -40,6 +40,92 @@ public class SonosOfflineStateTests
         Assert.Equal(SpotifyConnectUri, player.CurrentTrackUri);
         Assert.Equal(TimeSpan.FromSeconds(205), player.CurrentTrackDuration);
         Assert.Equal(SonosSource.SpotifyConnect, player.Source);
+    }
+
+    [Fact]
+    public void WhenOnePollFails_ThenThePlayerStaysConnectedAndKeepsItsPlaybackState()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(Playing(), T0);
+
+        // Act
+        var isReported = player.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.False(isReported);
+        Assert.True(player.IsConnected);
+        Assert.Null(player.StatusMessage);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+    }
+
+    [Fact]
+    public void WhenTwoPollsFailInARow_ThenThePlayerIsOfflineAndTheSecondFailureIsReportedOnce()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(Playing(), T0);
+        player.ReportPollFailed("The speaker does not answer.");
+
+        // Act
+        var isSecondReported = player.ReportPollFailed("The speaker does not answer.");
+        var isThirdReported = player.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.True(isSecondReported);
+        Assert.False(isThirdReported);
+        Assert.False(player.IsConnected);
+        Assert.Equal("The speaker does not answer.", player.StatusMessage);
+        Assert.Null(player.PlaybackState);
+    }
+
+    [Fact]
+    public void WhenAPollSucceedsBetweenTwoFailures_ThenThePlayerStaysConnected()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(Playing(), T0);
+        player.ReportPollFailed("The speaker does not answer.");
+        player.ReportPollSucceeded();
+
+        // Act
+        var isReported = player.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.False(isReported);
+        Assert.True(player.IsConnected);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+    }
+
+    [Fact]
+    public void WhenAPlayerThatNeverAnsweredFailsItsFirstPoll_ThenTheFailureIsReportedAtOnce()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        var isReported = player.ReportPollFailed("The speaker does not answer.");
+
+        // Assert
+        Assert.True(isReported);
+        Assert.False(player.IsConnected);
+        Assert.Equal("The speaker does not answer.", player.StatusMessage);
+    }
+
+    [Fact]
+    public void WhenTheConnectionIsReleased_ThenAReachablePlayerIsOfflineAtOnce()
+    {
+        // Arrange
+        var player = CreateReachableHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(Playing(), T0);
+
+        // Act
+        player.MarkUnreachable("The Sonos system is disconnected.");
+
+        // Assert
+        Assert.False(player.IsConnected);
+        Assert.Equal("The Sonos system is disconnected.", player.StatusMessage);
+        Assert.Null(player.PlaybackState);
     }
 
     [Fact]
@@ -63,7 +149,7 @@ public class SonosOfflineStateTests
         // Arrange
         var player = CreateReachableHousehold().Players[KitchenUuid];
         player.ApplyAvTransportEvent(Playing(), T0);
-        player.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(player);
 
         // Act
         player.ReportPollSucceeded();
@@ -101,7 +187,7 @@ public class SonosOfflineStateTests
         Assert.True(member.IsPlaying);
 
         // Act
-        coordinator.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(coordinator);
 
         // Assert
         Assert.Null(group.PlaybackState);
@@ -122,7 +208,7 @@ public class SonosOfflineStateTests
         coordinator.ApplyAvTransportEvent(Playing(), T0);
 
         // Act
-        member.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(member);
 
         // Assert
         Assert.Null(member.PlaybackState);

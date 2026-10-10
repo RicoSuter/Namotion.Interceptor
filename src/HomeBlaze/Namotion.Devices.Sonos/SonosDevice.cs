@@ -20,8 +20,14 @@ public abstract partial class SonosDevice :
     ITitleProvider,
     IIconProvider
 {
+    private const int PollFailuresUntilUnreachable = 2;
+
     private bool _hasStaticData;
     private string? _staticDataFirmwareBuild;
+
+    // The failed polls since the last successful one. Polls report under the system's connection lock, but a
+    // released connection does not, so it is only read and written atomically.
+    private int _consecutivePollFailures;
 
     private protected SonosDevice(string uuid)
     {
@@ -145,14 +151,27 @@ public abstract partial class SonosDevice :
 
     internal void ReportPollSucceeded()
     {
+        Volatile.Write(ref _consecutivePollFailures, 0);
         IsReachable = true;
         StatusMessage = null;
     }
 
     /// <summary>
-    /// Records a failed poll and returns whether the failure is new, so the caller logs it once.
+    /// Records a failed poll. A reachable device stays reachable after one failed poll and becomes unreachable with
+    /// the second in a row, since a single lost request says little about the speaker.
     /// </summary>
+    /// <returns>Whether the device became unreachable or its message changed, so the caller logs it at Warning once.</returns>
     internal bool ReportPollFailed(string message)
+    {
+        var failures = Interlocked.Increment(ref _consecutivePollFailures);
+        return (!IsReachable || failures >= PollFailuresUntilUnreachable) && MarkUnreachable(message);
+    }
+
+    /// <summary>
+    /// Makes the device unreachable at once, for a released connection rather than a failed poll.
+    /// </summary>
+    /// <returns>Whether the device became unreachable or its message changed.</returns>
+    internal bool MarkUnreachable(string message)
     {
         var isNew = IsReachable || StatusMessage != message;
         IsReachable = false;

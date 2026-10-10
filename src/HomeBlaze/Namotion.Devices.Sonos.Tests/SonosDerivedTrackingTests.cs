@@ -60,7 +60,7 @@ public class SonosDerivedTrackingTests
         var firedEvents = TrackPropertyChanged(member);
 
         // Act
-        coordinator.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(coordinator);
 
         // Assert
         Assert.False(member.Play_IsEnabled);
@@ -100,7 +100,7 @@ public class SonosDerivedTrackingTests
         var firedGroupEvents = TrackPropertyChanged(group);
 
         // Act
-        player.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(player);
 
         // Assert
         Assert.False(player.IsPlaying);

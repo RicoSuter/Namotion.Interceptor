@@ -102,7 +102,7 @@ A group reports its coordinator's playback and track, and its own volume and mut
 - A player that leaves the topology keeps its subject and last state with `IsConnected = false` until it returns; only a restart removes it. A topology that misses players is applied only when the next one misses them too, since a rebooting seed can report part of the household. The topology reads a grouping command waits with are skipped while they miss players and do not count toward the two.
 - While a player is not connected, its `PlaybackState` is empty and `IsPlaying` is false, so an unplugged speaker never keeps reporting that it plays. The same holds for a grouped member while its coordinator is not connected, and a group follows its coordinator. Everything else keeps its last value, including the track, source, volume and settings, and `IsConnected` tells that it may be stale. The playback state returns with the next successful poll.
 - A new player is offline until its first poll succeeds. One found through a topology event is polled at the next reconciliation.
-- A transport failure (timeout, connection refused) takes a unit offline with the error in `StatusMessage`. A UPnP fault answer does not; the values of that read keep their last state.
+- A transport failure (timeout, connection refused) of two polls in a row takes a unit offline with the error in `StatusMessage`. A single failed poll changes nothing and is logged at Debug, so a lost request neither blanks the playback state nor disables operations. A UPnP fault answer counts as answered; the values of that read keep their last state.
 - When the connection is torn down, every unit reports "The Sonos system is disconnected."
 
 ## Widgets

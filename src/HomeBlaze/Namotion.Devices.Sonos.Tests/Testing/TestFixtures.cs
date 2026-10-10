@@ -69,6 +69,15 @@ internal static class TestFixtures
     }
 
     /// <summary>
+    /// Takes a device offline as two failed polls in a row do.
+    /// </summary>
+    internal static void TakeOffline(SonosDevice device)
+    {
+        device.ReportPollFailed("The speaker does not answer.");
+        device.ReportPollFailed("The speaker does not answer.");
+    }
+
+    /// <summary>
     /// Reports every player and satellite reachable, as their first successful poll does.
     /// </summary>
     internal static void ReportAllReachable(SonosSystem system)

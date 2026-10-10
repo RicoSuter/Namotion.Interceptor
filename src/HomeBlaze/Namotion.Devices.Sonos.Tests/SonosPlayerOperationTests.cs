@@ -394,7 +394,7 @@ public class SonosPlayerOperationTests
         Assert.All(GetCoordinatorOperationStates(member), state => Assert.True(state.IsEnabled, state.Name));
 
         // Act
-        coordinator.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(coordinator);
 
         // Assert
         Assert.All(GetCoordinatorOperationStates(member), state => Assert.False(state.IsEnabled, state.Name));

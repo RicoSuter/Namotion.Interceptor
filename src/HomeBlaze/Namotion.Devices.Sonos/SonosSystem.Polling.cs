@@ -209,7 +209,10 @@ public partial class SonosSystem
     /// <summary>
     /// Records a failed poll unless teardown released the connection while the poll was in flight.
     /// </summary>
-    /// <returns>Whether the failure is new, so the caller logs it at Warning once; false for a repeated or stale one.</returns>
+    /// <returns>
+    /// Whether the failure made the device unreachable or changed its message, so the caller logs it at Warning once;
+    /// false for the first failure in a row, a repeated or a stale one.
+    /// </returns>
     private bool ReportPollFailedIfCurrent(SonosDevice device, SonosConnection? connection, string message)
     {
         // A poll without a connection failed before sending anything, so it cannot be stale.
@@ -258,9 +261,9 @@ public partial class SonosSystem
             cancellationToken);
 
     /// <summary>
-    /// Reads a device through its connection and reports it reachable, or unreachable when the read throws. A read the
-    /// speaker answers with a UPnP fault keeps its previous values; only a transport failure, which throws, makes the
-    /// device unreachable.
+    /// Reads a device through its connection and reports it reachable, or records a failed poll when the read throws,
+    /// the second of which in a row makes it unreachable. A read the speaker answers with a UPnP fault keeps its
+    /// previous values and counts as answered; only a transport failure throws.
     /// </summary>
     private async Task PollDeviceAsync(
         SonosDevice device,
@@ -287,7 +290,8 @@ public partial class SonosSystem
         }
         catch (Exception exception)
         {
-            // Logged at Warning once per failure transition, so an offline device does not flood the log every poll.
+            // Logged at Warning once, when the device becomes unreachable, and at Debug otherwise, so neither a single
+            // lost poll nor an offline device floods the log.
             LogFailure(ReportPollFailedIfCurrent(device, connection, exception.Message), exception, failureMessage, failureArgument);
         }
     }

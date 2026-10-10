@@ -109,7 +109,39 @@ public class SonosSystemResilienceTests
     }
 
     [Fact]
-    public async Task WhenAPlayingPlayerStopsAnswering_ThenItNoLongerReportsPlayingUntilItAnswers()
+    public async Task WhenAPlayingPlayerMissesOnePoll_ThenItStaysConnectedAndKeepsReportingPlaying()
+    {
+        // Arrange
+        var logger = new RecordingLogger<SonosSystem>();
+        await using var household = await ConnectedHousehold.StartAsync(logger: logger, configure: system =>
+            system.PollingInterval = TimeSpan.FromHours(1));
+        household.Office.Respond("GetTransportInfo", ("CurrentTransportState", "PLAYING"), ("CurrentTransportStatus", "OK"), ("CurrentSpeed", "1"));
+        await household.System.RefreshAsync(CancellationToken.None);
+        var player = household.OfficePlayer;
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+
+        // Act
+        household.Office.RespondWithServerError("GetTransportInfo");
+        await household.System.RefreshAsync(CancellationToken.None);
+        var isConnectedAfterTheFailure = player.IsConnected;
+        var playbackStateAfterTheFailure = player.PlaybackState;
+        var isPlayEnabledAfterTheFailure = player.Play_IsEnabled;
+        household.Office.ClearServerError("GetTransportInfo");
+        await household.System.RefreshAsync(CancellationToken.None);
+        household.Office.RespondWithServerError("GetTransportInfo");
+        await household.System.RefreshAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(isConnectedAfterTheFailure);
+        Assert.Equal(MediaPlaybackState.Playing, playbackStateAfterTheFailure);
+        Assert.True(isPlayEnabledAfterTheFailure);
+        Assert.True(player.IsConnected);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+        Assert.DoesNotContain(logger.Warnings, message => message.Contains("Polling the Sonos player in Büro failed"));
+    }
+
+    [Fact]
+    public async Task WhenAPlayingPlayerMissesTwoPollsInARow_ThenItsPlaybackIsUnknownUntilItAnswers()
     {
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync(configure: system =>
@@ -118,27 +150,25 @@ public class SonosSystemResilienceTests
         await household.System.RefreshAsync(CancellationToken.None);
         var player = household.OfficePlayer;
         var group = household.System.Groups[TestFixtures.OfficeUuid];
-        Assert.True(player.IsPlaying);
-        Assert.True(group.IsPlaying);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+        Assert.Equal(MediaPlaybackState.Playing, group.PlaybackState);
 
         // Act
         household.Office.RespondWithServerError("GetTransportInfo");
         await household.System.RefreshAsync(CancellationToken.None);
+        await household.System.RefreshAsync(CancellationToken.None);
         var playbackStateWhileFailing = player.PlaybackState;
-        var isPlayingWhileFailing = player.IsPlaying;
-        var isGroupPlayingWhileFailing = group.IsPlaying;
+        var groupPlaybackStateWhileFailing = group.PlaybackState;
         var sourceWhileFailing = player.Source;
         household.Office.ClearServerError("GetTransportInfo");
         await household.System.RefreshAsync(CancellationToken.None);
 
         // Assert
         Assert.Null(playbackStateWhileFailing);
-        Assert.False(isPlayingWhileFailing);
-        Assert.False(isGroupPlayingWhileFailing);
+        Assert.Null(groupPlaybackStateWhileFailing);
         Assert.Equal(SonosSource.SpotifyConnect, sourceWhileFailing);
         Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
-        Assert.True(player.IsPlaying);
-        Assert.True(group.IsPlaying);
+        Assert.Equal(MediaPlaybackState.Playing, group.PlaybackState);
     }
 
     [Fact]

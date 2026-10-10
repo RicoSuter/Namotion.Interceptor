@@ -652,7 +652,7 @@ public class SonosSystemRuntimeTests
     }
 
     [Fact]
-    public async Task WhenAPlayerMissesAPoll_ThenItsSubscriptionsAreKept()
+    public async Task WhenAPlayerIsOfflineAfterMissedPolls_ThenItsSubscriptionsAreKept()
     {
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync();
@@ -662,12 +662,13 @@ public class SonosSystemRuntimeTests
 
         // Act
         await household.System.RefreshAsync(CancellationToken.None);
-        var isOfficeConnectedAfterTheMiss = household.OfficePlayer.IsConnected;
+        await household.System.RefreshAsync(CancellationToken.None);
+        var isOfficeConnectedAfterTheMisses = household.OfficePlayer.IsConnected;
         household.Office.ClearServerError("GetTransportInfo");
         await household.System.RefreshAsync(CancellationToken.None);
 
         // Assert
-        Assert.False(isOfficeConnectedAfterTheMiss);
+        Assert.False(isOfficeConnectedAfterTheMisses);
         Assert.True(household.OfficePlayer.IsConnected);
         Assert.Empty(household.Office.Unsubscribed);
         Assert.Equal(officeSubscribes, household.Office.Subscribed.Count);

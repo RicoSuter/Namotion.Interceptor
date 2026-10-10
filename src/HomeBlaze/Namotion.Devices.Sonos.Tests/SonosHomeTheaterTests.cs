@@ -206,7 +206,7 @@ public class SonosHomeTheaterTests
         ((INotifyPropertyChanged)homeTheater).PropertyChanged += (_, arguments) => firedEvents.Add(arguments.PropertyName!);
 
         // Act
-        player.ReportPollFailed("The speaker does not answer.");
+        TakeOffline(player);
 
         // Assert
         Assert.False(homeTheater.SetNightMode_IsEnabled);

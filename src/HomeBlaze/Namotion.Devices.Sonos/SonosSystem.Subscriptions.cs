@@ -168,7 +168,7 @@ public partial class SonosSystem
     }
 
     /// <summary>
-    /// Returns the subscriptions to hold. One missed poll does not drop a player's subscriptions: they are kept while
+    /// Returns the subscriptions to hold. Missed polls do not drop a player's subscriptions: they are kept while
     /// it stays in the topology, and a renewal finds out whether the speaker still holds them. New ones are only made
     /// to connected players.
     /// </summary>
