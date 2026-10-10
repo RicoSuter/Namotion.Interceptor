@@ -54,8 +54,6 @@ internal sealed class JsonSubjectSynchronizer
             return false;
         }
 
-        var sizeChanged = _pathRegistry.HasSizeChanged(relativePath, newSize);
-
         // Hash check with retry
         string? newHash = null;
         for (var retry = 0; retry < 3; retry++)
@@ -78,8 +76,11 @@ internal sealed class JsonSubjectSynchronizer
             return false;
         }
 
-        if (!sizeChanged && !_pathRegistry.HasHashChanged(relativePath, newHash))
+        // The hash alone decides: the size is not recorded by a scan or a write, and a missing or stale
+        // size must not reload a subject whose file is unchanged.
+        if (!_pathRegistry.HasHashChanged(relativePath, newHash))
         {
+            _pathRegistry.UpdateSize(relativePath, newSize);
             _logger?.LogDebug("File unchanged (same hash), skipping reload: {Path}", relativePath);
             return true;
         }

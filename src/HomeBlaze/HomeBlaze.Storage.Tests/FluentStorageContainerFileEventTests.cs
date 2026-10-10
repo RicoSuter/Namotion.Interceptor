@@ -16,6 +16,11 @@ public class FluentStorageContainerFileEventTests : IDisposable
     private FluentStorageContainer? _storage;
     private ServiceProvider? _serviceProvider;
 
+    public FluentStorageContainerFileEventTests()
+    {
+        GatedFile.Reset();
+    }
+
     [Theory]
     [InlineData(WatcherChangeTypes.Created)]
     [InlineData(WatcherChangeTypes.Changed)]
@@ -331,9 +336,9 @@ public class FluentStorageContainerFileEventTests : IDisposable
         WriteFile("Docs/Readme.md");
         var storage = await ConnectAsync();
 
-        var motor = new Samples.Motor(_serviceProvider!.GetRequiredService<IInterceptorSubjectContext>());
-        WriteFile("Docs.json", _serviceProvider!.GetRequiredService<ConfigurableSubjectSerializer>().Serialize(motor));
+        WriteFile("Docs.json", SerializeMotor("Motor"));
         await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Docs.json"));
+        Assert.Equal(["Docs"], storage.Children.Keys);
         File.Delete(GetFullPath("Docs.json"));
 
         // Act
@@ -371,6 +376,109 @@ public class FluentStorageContainerFileEventTests : IDisposable
         Assert.Same(docs, storage.Children["Docs"]);
         Assert.Equal(["Added.md"], docs.Children.Keys);
         Assert.Equal(["Added.md"], Assert.IsType<VirtualFolder>(storage.Children["New"]).Children.Keys);
+    }
+
+    [Fact]
+    public async Task WhenDeletedEventCasingDiffersFromTreeKey_ThenSubjectIsRemoved()
+    {
+        // Arrange
+        WriteFile("notes.md");
+        var storage = await ConnectAsync();
+        File.Delete(GetFullPath("notes.md"));
+
+        // Act
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Notes.md"));
+
+        // Assert
+        Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenStorageIsResynchronized_ThenUnchangedConfigurableSubjectIsNotReloaded()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("From file"));
+        var storage = await ConnectAsync();
+        var motor = Assert.IsType<Samples.Motor>(storage.Children["Motor"]);
+        motor.Name = "Changed in memory";
+
+        // Act
+        await storage.ResyncAsync();
+
+        // Assert
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal("Changed in memory", motor.Name);
+    }
+
+    [Fact]
+    public async Task WhenTwoEventsLoadSameNewFile_ThenSubjectHasContentOfLaterLoad()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile("Data.gated", "first");
+
+        var firstGate = GatedFile.PauseNextLoad();
+        var firstAdd = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Data.gated"));
+        await firstGate.WhenReachedAsync();
+
+        WriteFile("Data.gated", "second");
+        var secondGate = GatedFile.PauseNextLoad();
+        var secondAdd = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Changed, "Data.gated"));
+        await secondGate.WhenReachedAsync();
+
+        // Act
+        firstGate.Release();
+        await firstAdd;
+        secondGate.Release();
+        await secondAdd;
+
+        // Assert
+        var file = Assert.IsType<GatedFile>(storage.Children["Data.gated"]);
+        Assert.Equal("second", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenFileIsDeletedWhileItsSubjectLoads_ThenNoSubjectIsAdded()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile("Data.gated");
+
+        var gate = GatedFile.PauseNextLoad();
+        var add = storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Data.gated"));
+        await gate.WhenReachedAsync();
+
+        File.Delete(GetFullPath("Data.gated"));
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Deleted, "Data.gated"));
+
+        // Act
+        gate.Release();
+        await add;
+
+        // Assert
+        Assert.Empty(storage.Children);
+    }
+
+    [Fact]
+    public async Task WhenFileIsAddedWhileStorageIsResynchronized_ThenFileIsKept()
+    {
+        // Arrange
+        var storage = await ConnectAsync();
+        WriteFile("Slow.gated");
+
+        var gate = GatedFile.PauseNextLoad();
+        var resync = storage.ResyncAsync();
+        await gate.WhenReachedAsync();
+
+        WriteFile("Added.md");
+        await storage.ProcessFileEventAsync(Event(WatcherChangeTypes.Created, "Added.md"));
+
+        // Act
+        gate.Release();
+        await resync;
+
+        // Assert
+        Assert.Equal(["Added.md", "Slow.gated"], storage.Children.Keys.Order());
     }
 
     [Fact]
@@ -509,6 +617,7 @@ public class FluentStorageContainerFileEventTests : IDisposable
         var typeProvider = new TypeProvider();
         typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
+        typeProvider.AddAssembly(typeof(GatedFile).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
 
         // The application's context, so that the Children setters run change tracking, registry and lifecycle code.
@@ -538,6 +647,24 @@ public class FluentStorageContainerFileEventTests : IDisposable
         _storage = storage;
         await storage.ConnectAsync(CancellationToken.None);
         return storage;
+    }
+
+    private static string SerializeMotor(string name)
+    {
+        // Serialized with services of its own, so the subject is not part of the storage under test.
+        var typeProvider = new TypeProvider();
+        typeProvider.AddAssembly(typeof(Samples.Motor).Assembly);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(typeProvider);
+        services.AddSingleton(new SubjectTypeRegistry(typeProvider));
+        services.AddSingleton<IInterceptorSubjectContext>(InterceptorSubjectContext.Create());
+        services.AddSingleton<SubjectFactory>();
+        services.AddSingleton<ConfigurableSubjectSerializer>();
+
+        using var serviceProvider = services.BuildServiceProvider();
+        var motor = new Samples.Motor(serviceProvider.GetRequiredService<IInterceptorSubjectContext>()) { Name = name };
+        return serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>().Serialize(motor);
     }
 
     private string GetFullPath(string relativePath)

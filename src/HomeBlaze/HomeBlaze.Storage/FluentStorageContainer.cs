@@ -430,23 +430,34 @@ public partial class FluentStorageContainer :
 
         var hash = await TryComputeJsonHashAsync(relativePath, CancellationToken.None);
 
+        IInterceptorSubject? addedMeanwhile;
         lock (_hierarchyLock)
         {
-            // A concurrent event may have added the file while the subject loaded. If the file was deleted
-            // meanwhile, its delete event may already have run and found nothing to remove.
-            if (_pathRegistry.TryGetSubject(relativePath, out _) || !File.Exists(fileSystemPath))
+            // If the file was deleted while the subject loaded, its delete event may already have run
+            // and found nothing to remove.
+            if (!File.Exists(fileSystemPath))
                 return;
 
-            // A directory of the same name was replaced by the file.
-            RemoveFolder(relativePath);
-
-            if (!AddToHierarchy(relativePath, subject))
-                return;
-
-            if (hash != null)
+            if (!_pathRegistry.TryGetSubject(relativePath, out addedMeanwhile))
             {
-                _pathRegistry.UpdateHash(relativePath, hash);
+                // A directory of the same name was replaced by the file.
+                RemoveFolder(relativePath);
+
+                if (!AddToHierarchy(relativePath, subject))
+                    return;
+
+                if (hash != null)
+                {
+                    _pathRegistry.UpdateHash(relativePath, hash);
+                }
             }
+        }
+
+        if (addedMeanwhile != null)
+        {
+            // A concurrent event added the file first and may have read it before the content this one saw.
+            await NotifyFileChangedAsync(addedMeanwhile, relativePath, fileSystemPath);
+            return;
         }
 
         _logger?.LogInformation("Added file from external: {Path}", relativePath);
@@ -587,6 +598,12 @@ public partial class FluentStorageContainer :
     {
         lock (_hierarchyLock)
         {
+            // The registry finds a path whatever its casing, but the key in Children has the casing it was registered with.
+            if (_pathRegistry.TryGetPath(subject, out var registeredPath))
+            {
+                path = registeredPath;
+            }
+
             _pathRegistry.Unregister(path);
 
             var children = new Dictionary<string, IInterceptorSubject>(Children);
