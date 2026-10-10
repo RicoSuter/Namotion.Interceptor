@@ -37,6 +37,11 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private readonly SourceOwnershipManager _ownership;
 
+    // Properties whose conflict with another source has been logged; claims repeat on every
+    // connection attempt, so without this a broker outage repeats the same error each retry.
+    private readonly HashSet<PropertyReference> _reportedOwnershipConflicts = [];
+    private readonly Lock _reportedOwnershipConflictsLock = new();
+
     // Publishes and retires the client/ownership pair atomically. Never held across an await or a
     // property commit, so user interceptors cannot participate in this lock order.
     private readonly Lock _transportPublicationLock = new();
@@ -95,7 +100,19 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 _topicToProperty.TryRemove(kvp.Key, out _);
             }
         }
+
+        lock (_reportedOwnershipConflictsLock)
+        {
+            if (_reportedOwnershipConflicts.Count > 0)
+            {
+                ForgetOwnershipConflictsOf(subject);
+            }
+        }
     }
+
+    // Separate from the caller so the lambda's closure is only allocated when a conflict is recorded.
+    private void ForgetOwnershipConflictsOf(IInterceptorSubject subject) =>
+        _reportedOwnershipConflicts.RemoveWhere(property => property.Subject == subject);
 
     /// <inheritdoc />
     public override IInterceptorSubject RootSubject => _subject;
@@ -116,12 +133,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         {
             // Claimed before connecting: the base class parks only writes to properties this source
             // owns, so claiming after a connect that keeps failing drops every write made meanwhile.
-            ClaimProperties(cancellationToken);
+            var subscribeOptions = ClaimProperties(cancellationToken);
 
             (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
                 await CreateMqttConnectionAsync(cancellationToken).ConfigureAwait(false);
             Metrics.MarkOperational();
-            await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
+            await SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
 
             var clientForLifetime = client;
             var monitorForLifetime = connectionMonitor;
@@ -276,9 +293,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 try
                 {
                     await Task.Delay(_configuration.ReconnectDelay, stoppingToken).ConfigureAwait(false);
+                    var subscribeOptions = ClaimProperties(stoppingToken);
                     (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
                         await CreateMqttConnectionAsync(stoppingToken).ConfigureAwait(false);
-                    await SubscribeToPropertiesAsync(stoppingToken).ConfigureAwait(false);
+                    await SubscribeAsync(subscribeOptions, stoppingToken).ConfigureAwait(false);
 
                     if (_propertyWriter is not null)
                     {
@@ -543,9 +561,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
     }
 
-    private async Task SubscribeToPropertiesAsync(CancellationToken cancellationToken)
+    private async Task SubscribeAsync(MqttClientSubscribeOptions? subscribeOptions, CancellationToken cancellationToken)
     {
-        var subscribeOptions = ClaimProperties(cancellationToken);
         if (subscribeOptions is null)
         {
             return;
@@ -559,7 +576,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     /// <summary>
     /// Claims every mapped property and returns the subscription for the claimed topics, or
     /// <c>null</c> when no topic was claimed, since MQTT forbids a subscribe without topic filters.
-    /// Idempotent: a re-claim of a property this source owns succeeds.
+    /// Idempotent: a re-claim of a property this source owns succeeds. A property owned by another
+    /// source is logged once, until a later claim of it succeeds.
     /// </summary>
     private MqttClientSubscribeOptions? ClaimProperties(CancellationToken cancellationToken)
     {
@@ -597,10 +615,25 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                     continue;
                 }
 
-                _logger.LogError(
-                    "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
-                    property.Subject.GetType().Name, property.Name);
+                bool isFirstReport;
+                lock (_reportedOwnershipConflictsLock)
+                {
+                    isFirstReport = _reportedOwnershipConflicts.Add(property.Reference);
+                }
+
+                if (isFirstReport)
+                {
+                    _logger.LogError(
+                        "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
+                        property.Subject.GetType().Name, property.Name);
+                }
+
                 continue;
+            }
+
+            lock (_reportedOwnershipConflictsLock)
+            {
+                _reportedOwnershipConflicts.Remove(property.Reference);
             }
 
             _topicToProperty[topic] = property.Reference;
@@ -777,7 +810,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
     private async Task OnReconnectedAsync(CancellationToken cancellationToken)
     {
-        await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
+        await SubscribeAsync(ClaimProperties(cancellationToken), cancellationToken).ConfigureAwait(false);
         if (_propertyWriter is not null)
         {
             await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
@@ -855,6 +888,10 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         _ownership.Dispose();
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
+        lock (_reportedOwnershipConflictsLock)
+        {
+            _reportedOwnershipConflicts.Clear();
+        }
 
         Dispose();
     }

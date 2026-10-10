@@ -394,7 +394,7 @@ The MQTT integration hooks into the interceptor lifecycle system (see [Subject L
 
 ## Known Limitations
 
-- **Client structural changes**: The client claims the properties of the subject graph at the start of each connection attempt and subscribes to their topics once connected, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach).
+- **Client structural changes**: The client claims the properties of the subject graph at the start of each connection attempt and subscribes to their topics once connected, and does not follow [structural changes](connectors.md#structural-changes) after that. A subject attached later gets no subscription, so its values are not received and its local writes are not published until the next reconnect binds the current graph. Detached subjects are released immediately, see [Automatic Cleanup on Subject Detach](#automatic-cleanup-on-subject-detach). A property already owned by another source is neither subscribed nor published; the conflict is logged as an error once, not on every retry, and logged again only if the client owned the property in between.
 
 ## Performance
 
