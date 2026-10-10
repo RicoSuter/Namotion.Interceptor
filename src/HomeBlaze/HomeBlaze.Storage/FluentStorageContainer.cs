@@ -52,6 +52,12 @@ public partial class FluentStorageContainer :
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
 
+    /// <summary>
+    /// The clock of the current connection, for file subjects of this library that limit their own reading of
+    /// a stream of the storage.
+    /// </summary>
+    internal TimeProvider ConnectionTimeProvider => _connection?.TimeProvider ?? TimeProvider;
+
     /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
     internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
 

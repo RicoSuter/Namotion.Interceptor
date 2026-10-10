@@ -105,12 +105,12 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
             return await call;
         }
 
-        var description = Describe(operation, target);
-        Abandon(description, call);
+        // Counted before the text of the failure is built: that enumerates paths of the caller and can fail.
+        Abandon(operation, target, call);
 
         cancellationToken.ThrowIfCancellationRequested();
         throw new StorageUnresponsiveException(
-            $"The storage did not complete {description} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.");
+            $"The storage did not complete {Describe(operation, target)} within {StorageCallTimeout.Limit.TotalSeconds:0} seconds.");
     }
 
     private static string Describe(string operation, object? target)
@@ -121,7 +121,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
             _ => operation
         };
 
-    private void Abandon<TResult>(string description, Task<TResult> call)
+    private void Abandon<TResult>(string operation, object? target, Task<TResult> call)
     {
         Interlocked.Increment(ref _abandonedCallCount);
 
@@ -133,7 +133,7 @@ internal sealed class TimeLimitedBlobStorage : IBlobStorage
                     // Reading the exception marks it as observed.
                     if (completed.Exception is { } exception)
                     {
-                        _logger?.LogDebug(exception.GetBaseException(), "A storage call that was given up failed later: {Call}", description);
+                        _logger?.LogDebug(exception.GetBaseException(), "A storage call that was given up failed later: {Call}", Describe(operation, target));
                     }
                     else if (completed is { IsCompletedSuccessfully: true, Result: IDisposable result })
                     {

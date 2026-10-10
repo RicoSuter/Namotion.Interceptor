@@ -189,6 +189,30 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenReadingMarkdownFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
+    {
+        // Arrange
+        var storage = await ConnectPausableAsync();
+        WriteFile("Notes.md");
+        var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
+        var pass = storage.ReconcileAsync();
+        await readReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        var statusAfterFailedPass = storage.Status;
+        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
+        Assert.Empty(childrenAfterFailedPass);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+    }
+
+    [Fact]
     public async Task WhenReadingContentOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
     {
         // Arrange

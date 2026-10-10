@@ -7,8 +7,10 @@ namespace HomeBlaze.Storage.Internal;
 /// <remarks>
 /// Only the wait ends: the call is not cancelled and finishes or fails on its own. Calls on the storage client
 /// are limited by <see cref="TimeLimitedBlobStorage"/>, and the methods here limit the reading of a stream to
-/// its end. Both report the limit as <see cref="StorageUnresponsiveException"/>. Not limited is subject code
-/// that reads a stream it got from the storage.
+/// its end, for the reads that run on the storage worker. Both report the limit as
+/// <see cref="StorageUnresponsiveException"/>. Not limited is a stream that other code reads after
+/// <see cref="FluentStorageContainer.ReadBlobAsync"/>, for example a download in the UI. That does not run on
+/// the worker.
 /// </remarks>
 internal static class StorageCallTimeout
 {

@@ -133,6 +133,23 @@ public sealed class TimeLimitedBlobStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task WhenTextOfTheFailureCannotBeBuilt_ThenCallIsStillCountedAsAbandoned()
+    {
+        // Arrange
+        var reached = _client.PauseNext(nameof(IBlobStorage.ExistsAsync));
+        var call = _storage.ExistsAsync(PathsThatFailWhenListed());
+        await reached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        var exception = await Record.ExceptionAsync(() => call);
+
+        // Assert
+        Assert.NotNull(exception);
+        Assert.True(_storage.IsUnresponsive);
+    }
+
+    [Fact]
     public async Task WhenCallerCancels_ThenCallIsCancelledWithTheCallersToken()
     {
         // Arrange
@@ -151,6 +168,12 @@ public sealed class TimeLimitedBlobStorageTests : IDisposable
     }
 
     public void Dispose() => _storage.Dispose();
+
+    private static IEnumerable<string> PathsThatFailWhenListed()
+    {
+        yield return "Notes.md";
+        throw new InvalidOperationException("The paths cannot be listed.");
+    }
 
     private async Task LetHangingCallTimeOutAsync()
     {
