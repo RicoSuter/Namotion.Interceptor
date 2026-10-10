@@ -1,4 +1,3 @@
-using FluentStorage.Blobs;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
@@ -9,8 +8,7 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Factory for creating IInterceptorSubject instances from storage blobs
-/// and updating existing subjects from JSON.
+/// Creates the subjects of the files of a storage.
 /// </summary>
 internal sealed class FileSubjectFactory
 {
@@ -32,37 +30,19 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
-    /// Creates the subject of a file from the type that is registered for its extension. A JSON file is
-    /// created from its text with <see cref="CreateFromJson"/> instead.
+    /// Creates the subject of a file from the type that is registered for its extension, or a
+    /// <see cref="GenericFile"/> when none is. The subject is not loaded. A JSON file is created from its text
+    /// with <see cref="CreateFromJson"/> instead.
     /// </summary>
-    public async Task<IInterceptorSubject?> CreateFromBlobAsync(
-        IStorageContainer storage,
-        Blob blob,
-        CancellationToken cancellationToken)
+    /// <remarks>
+    /// The constructor of a registered type takes the storage and the path, and after them services.
+    /// </remarks>
+    public IInterceptorSubject CreateFile(IStorageContainer storage, string path)
     {
-        var extension = Path.GetExtension(blob.FullPath).ToLowerInvariant();
-
-        // Check for registered extension mapping
-        var mappedType = _typeRegistry.ResolveTypeForExtension(extension);
-        if (mappedType != null)
-        {
-            var subject = CreateFileSubject(mappedType, storage, blob.FullPath);
-            UpdateFileMetadata(subject, blob);
-
-            // Eager load content for storage files
-            if (subject is IStorageFile storageFile)
-            {
-                await storageFile.OnFileChangedAsync(cancellationToken);
-            }
-
-            return subject;
-        }
-
-        // Default to GenericFile
-        var genericFile = new GenericFile(storage, blob.FullPath);
-        UpdateFileMetadata(genericFile, blob);
-        await genericFile.OnFileChangedAsync(cancellationToken);
-        return genericFile;
+        var mappedType = _typeRegistry.ResolveTypeForExtension(Path.GetExtension(path));
+        return mappedType != null
+            ? (IInterceptorSubject)ActivatorUtilities.CreateInstance(_serviceProvider, mappedType, storage, path)
+            : new GenericFile(storage, path);
     }
 
     /// <summary>
@@ -79,11 +59,10 @@ internal sealed class FileSubjectFactory
     {
         try
         {
-            var subject = _serializer.Deserialize(json);
-            if (subject != null)
+            // Every configurable type is a subject as well.
+            if (_serializer.Deserialize(json) is IInterceptorSubject subject)
             {
-                // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
-                return (IInterceptorSubject)subject;
+                return subject;
             }
         }
         catch (Exception exception)
@@ -92,40 +71,5 @@ internal sealed class FileSubjectFactory
         }
 
         return new JsonFile(storage, path);
-    }
-
-    /// <summary>
-    /// Creates a file subject using ActivatorUtilities for DI-aware construction.
-    /// Convention: File constructors should be (IStorageContainer storage, string fullPath, /* DI services... */)
-    /// </summary>
-    private IInterceptorSubject? CreateFileSubject(Type type, IStorageContainer storage, string blobPath)
-    {
-        try
-        {
-            // ActivatorUtilities resolves DI services + passes explicit args
-            return (IInterceptorSubject)ActivatorUtilities.CreateInstance(
-                _serviceProvider,
-                type,
-                storage,   // explicit arg
-                blobPath); // explicit arg
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to create file subject for: {Path}", blobPath);
-        }
-
-        return null;
-    }
-
-    private static void UpdateFileMetadata(IInterceptorSubject? subject, Blob blob)
-    {
-        if (subject is IStorageFile file)
-        {
-            file.FileSize = blob.Size ?? 0L;
-            if (blob.LastModificationTime.HasValue)
-            {
-                file.LastModified = blob.LastModificationTime.Value.DateTime;
-            }
-        }
     }
 }

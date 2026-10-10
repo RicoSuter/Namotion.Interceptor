@@ -68,14 +68,11 @@ public class StorageTimeoutTests : StorageTestBase
         var storage = await ConnectPausableAsync();
         WriteFile("First.gated");
         WriteFile("Second.gated");
-        var firstGate = GatedFile.PauseNextLoad();
-        var secondGate = GatedFile.PauseNextLoad();
+        var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
-        await firstGate.WhenReachedAsync();
-        firstGate.Release();
-        await secondGate.WhenReachedAsync();
+        await gate.WhenReachedAsync();
         var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
-        secondGate.Release();
+        gate.Release();
         await readReached;
 
         // Act
@@ -88,7 +85,7 @@ public class StorageTimeoutTests : StorageTestBase
         // Assert
         Assert.Empty(childrenAfterFailedPass);
         Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
-        Assert.Equal(3, GatedFile.LoadCount);
+        Assert.Equal(2, GatedFile.LoadCount);
     }
 
     [Fact]
@@ -152,8 +149,8 @@ public class StorageTimeoutTests : StorageTestBase
         await ReleaseHangingCallAsync(storage);
         await storage.ReconcileAsync();
 
-        // Assert
-        Assert.Equal(0, streamsOpenedBeforeMetadata);
+        // Assert: the only stream before the metadata call is the one that hashed the file, not one of the subject.
+        Assert.Equal(1, streamsOpenedBeforeMetadata);
         Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
         Assert.Equal(StorageStatus.Connected, storage.Status);
         Assert.Equal(["Notes.md"], storage.Children.Keys);
@@ -169,7 +166,7 @@ public class StorageTimeoutTests : StorageTestBase
         var detaches = CountDetachesOf(motor);
         Directory.CreateDirectory(GetFullPath("Other"));
         File.Move(GetFullPath("Old/Motor.json"), GetFullPath("Other/Motor.json"));
-        WriteFile("Zeta.bin");
+        WriteFile("Zeta.md");
         var metadataReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
         var pass = storage.ReconcileAsync();
         await metadataReached;
@@ -189,31 +186,36 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenReadingMarkdownFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
+    public async Task WhenReadingMarkdownFileHangs_ThenOnlyThatFileIsLeftOutUntilAnEventNamesIt()
     {
         // Arrange
         var storage = await ConnectPausableAsync();
-        WriteFile("Notes.md");
-        var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
+        WriteFile("First.md");
+        WriteFile("Second.md");
+
+        // The first stream of a file is hashed, the second one is read by its subject.
+        var readReached = _client!.PauseReadOfStream(2);
         var pass = storage.ReconcileAsync();
         await readReached;
 
         // Act
         await LetHangingCallTimeOutAsync();
         await pass;
-        var statusAfterFailedPass = storage.Status;
-        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        var statusAfterPass = storage.Status;
+        var childrenAfterPass = storage.Children.Keys.ToList();
         await storage.ReconcileAsync();
+        var childrenAfterIdlePass = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync(Named("First.md"));
 
         // Assert
-        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
-        Assert.Empty(childrenAfterFailedPass);
-        Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Connected, statusAfterPass);
+        Assert.Equal(["Second.md"], childrenAfterPass);
+        Assert.Equal(["Second.md"], childrenAfterIdlePass);
+        Assert.Equal(["First.md", "Second.md"], storage.Children.Keys.Order());
     }
 
     [Fact]
-    public async Task WhenReadingContentOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
+    public async Task WhenReadingContentOfOneFileHangs_ThenOnlyThatFileIsLeftOutUntilItChanges()
     {
         // Arrange
         var storage = await ConnectPausableAsync();
@@ -226,43 +228,98 @@ public class StorageTimeoutTests : StorageTestBase
         // Act
         await LetHangingCallTimeOutAsync();
         await pass;
-        var statusAfterFailedPass = storage.Status;
-        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        var statusAfterPass = storage.Status;
+        var childrenAfterPass = storage.Children.Keys.ToList();
+        await storage.ReconcileAsync();
+        var childrenAfterIdlePass = storage.Children.Keys.ToList();
+        WriteFile("First.json", SerializeMotor("First, changed"));
         await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
-        Assert.Empty(childrenAfterFailedPass);
-        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(StorageStatus.Connected, statusAfterPass);
+        Assert.Equal(["Second"], childrenAfterPass);
+        Assert.Equal(["Second"], childrenAfterIdlePass);
         Assert.Equal(["First", "Second"], storage.Children.Keys.Order());
     }
 
     [Fact]
-    public async Task WhenHashingContentOfOneFileHangs_ThenPassFailsAndLaterPassLoadsTheFile()
+    public async Task WhenHashingContentOfOneFileHangs_ThenOnlyThatFileIsLeftOutUntilAnEventNamesIt()
     {
         // Arrange
         var storage = await ConnectPausableAsync();
         WriteFile("First.gated");
         WriteFile("Second.gated");
-        var gate = GatedFile.PauseNextLoad();
-        var pass = storage.ReconcileAsync();
-        await gate.WhenReachedAsync();
         var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
-        gate.Release();
+        var pass = storage.ReconcileAsync();
         await readReached;
 
         // Act
         await LetHangingCallTimeOutAsync();
         await pass;
-        var statusAfterFailedPass = storage.Status;
-        var childrenAfterFailedPass = storage.Children.Keys.ToList();
+        var statusAfterPass = storage.Status;
+        var childrenAfterPass = storage.Children.Keys.ToList();
+        var loadCountAfterPass = GatedFile.LoadCount;
+        await storage.ReconcileAsync(Named("First.gated"));
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, statusAfterPass);
+        Assert.Equal(["Second.gated"], childrenAfterPass);
+        Assert.Equal(1, loadCountAfterPass);
+        Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
+    }
+
+    [Fact]
+    public async Task WhenHashingChangedFileHangs_ThenItKeepsItsContentUntilAnEventNamesIt()
+    {
+        // Arrange
+        WriteFile("Data.gated", "first");
+        var storage = await ConnectPausableAsync();
+        var file = (GatedFile)storage.Children["Data.gated"];
+        WriteFile("Data.gated", "second version");
+        WriteFile("Other.md");
+        var readReached = _client!.PauseNext(PausableBlobStorage.ReadOperation);
+        var pass = storage.ReconcileAsync();
+        await readReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        await pass;
+        var statusAfterPass = storage.Status;
+        var contentAfterPass = file.Content;
+        await storage.ReconcileAsync();
+        var contentAfterIdlePass = file.Content;
+        await storage.ReconcileAsync(Named("Data.gated"));
+
+        // Assert
+        Assert.Equal(StorageStatus.Connected, statusAfterPass);
+        Assert.Equal("first", contentAfterPass);
+        Assert.Equal("first", contentAfterIdlePass);
+        Assert.Equal(["Data.gated", "Other.md"], storage.Children.Keys.Order());
+        Assert.Equal("second version", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenBlobWriteHitsTheLimitAndCallerDisposesItsStream_ThenFileStillGetsTheWholeContent()
+    {
+        // Arrange
+        WriteFile("Notes.md", "first");
+        var storage = await ConnectPausableAsync();
+        var content = new MemoryStream("second version"u8.ToArray());
+        var writeReached = _client!.PauseNext(nameof(IBlobStorage.WriteAsync));
+        var write = storage.WriteBlobAsync("Notes.md", content, CancellationToken.None);
+        await writeReached;
+
+        // Act
+        await LetHangingCallTimeOutAsync();
+        var exception = await Record.ExceptionAsync(() => write);
+        await content.DisposeAsync();
+        await ReleaseHangingCallAsync(storage);
         await storage.ReconcileAsync();
 
         // Assert
-        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
-        Assert.Empty(childrenAfterFailedPass);
-        Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.Equal(["First.gated", "Second.gated"], storage.Children.Keys.Order());
+        Assert.IsType<StorageUnresponsiveException>(exception);
+        Assert.Equal("second version", File.ReadAllText(GetFullPath("Notes.md")));
+        Assert.Equal("second version", Assert.IsType<Files.MarkdownFile>(storage.Children["Notes.md"]).Content);
     }
 
     [Fact]

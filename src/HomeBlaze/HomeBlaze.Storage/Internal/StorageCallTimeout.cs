@@ -6,11 +6,12 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 /// <remarks>
 /// Only the wait ends: the call is not cancelled and finishes or fails on its own. Calls on the storage client
-/// are limited by <see cref="TimeLimitedBlobStorage"/>, and the methods here limit the reading of a stream to
-/// its end, for the reads that run on the storage worker. Both report the limit as
-/// <see cref="StorageUnresponsiveException"/>. Not limited is a stream that other code reads after
-/// <see cref="FluentStorageContainer.ReadBlobAsync"/>, for example a download in the UI. That does not run on
-/// the worker.
+/// are limited by <see cref="TimeLimitedBlobStorage"/>, which reports the limit as
+/// <see cref="StorageUnresponsiveException"/>. The methods here limit the reading of a stream to its end, for
+/// the reads that run on the storage worker, and report the limit as a plain <see cref="TimeoutException"/>:
+/// one file that is not read in time says nothing about the other files. Not limited is a stream that other
+/// code reads after <see cref="FluentStorageContainer.ReadBlobAsync"/>, for example a download in the UI. That
+/// does not run on the worker.
 /// </remarks>
 internal static class StorageCallTimeout
 {
@@ -43,7 +44,9 @@ internal static class StorageCallTimeout
     /// <param name="path">The file that is read.</param>
     /// <param name="timeProvider">The clock of the limit.</param>
     /// <param name="cancellationToken">Ends the wait with the caller's cancellation.</param>
-    /// <exception cref="StorageUnresponsiveException">The read did not complete within <see cref="Limit"/>.</exception>
+    /// <exception cref="TimeoutException">
+    /// The read did not complete within <see cref="Limit"/>. Never a <see cref="StorageUnresponsiveException"/>.
+    /// </exception>
     public static Task<TResult> WithStorageTimeoutAsync<TResult>(
         this Task<TResult> call, string operation, string path, TimeProvider timeProvider, CancellationToken cancellationToken)
         => call.IsCompleted ? call : LimitAsync(call, operation, path, timeProvider, cancellationToken);
@@ -79,7 +82,7 @@ internal static class StorageCallTimeout
             call.ObserveFault();
 
             cancellationToken.ThrowIfCancellationRequested();
-            throw new StorageUnresponsiveException(
+            throw new TimeoutException(
                 $"The storage did not complete {operation} '{path}' within {Limit.TotalSeconds:0} seconds.");
         }
 

@@ -1,4 +1,5 @@
 using System.Text;
+using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
@@ -603,7 +604,7 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNamedPassLoadsItAgain()
+    public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNextPassLoadsItAgain()
     {
         // Arrange
         WriteFile("Data.gated", "first");
@@ -613,15 +614,58 @@ public class StorageReconcilerTests : StorageTestBase
 
         // Act
         await WriteBlobAsync(storage, "Data.gated", "second version");
+        var contentAfterWrite = file.Content;
+        var loadCountAfterWrite = GatedFile.LoadCount;
         await storage.ReconcileAsync();
-        var loadCountAfterUnnamedPass = GatedFile.LoadCount;
-        await storage.ReconcileAsync(Named("Data.gated"));
 
         // Assert
         Assert.Equal("second version", File.ReadAllText(GetFullPath("Data.gated")));
-        Assert.Equal(2, loadCountAfterUnnamedPass);
+        Assert.Equal("first", contentAfterWrite);
+        Assert.Equal(2, loadCountAfterWrite);
         Assert.Equal(3, GatedFile.LoadCount);
         Assert.Equal("second version", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenMarkdownFileFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNextPassLoadsItAgain()
+    {
+        // Arrange
+        WriteFile("Notes.md", "first");
+        var storage = await ConnectAsync();
+        var file = (MarkdownFile)storage.Children["Notes.md"];
+        var failingWrite = new FailingWrite(nameof(MarkdownFile.Content));
+        Context!.AddService<IWriteInterceptor>(failingWrite);
+        failingWrite.FailNext();
+
+        // Act
+        await WriteBlobAsync(storage, "Notes.md", "second version");
+        var contentAfterWrite = file.Content;
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("second version", File.ReadAllText(GetFullPath("Notes.md")));
+        Assert.Equal("first", contentAfterWrite);
+        Assert.Equal("second version", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenConfigurationFileIsWrittenAsBlob_ThenItsSubjectTakesTheContentAndNamedPassDoesNotReloadIt()
+    {
+        // Arrange
+        WriteFile("Motor.json", SerializeMotor("From file"));
+        var storage = await ConnectAsync();
+        var motor = (Samples.Motor)storage.Children["Motor"];
+
+        // Act
+        await WriteBlobAsync(storage, "Motor.json", SerializeMotor("Written"));
+        var nameAfterWrite = motor.Name;
+        motor.Name = "Only in memory";
+        await storage.ReconcileAsync(Named("Motor.json"));
+
+        // Assert
+        Assert.Equal("Written", nameAfterWrite);
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Equal("Only in memory", motor.Name);
     }
 
     [Fact]
@@ -666,6 +710,72 @@ public class StorageReconcilerTests : StorageTestBase
         // Assert
         Assert.Equal("first", contentAfterFirstPass);
         Assert.Equal("second version", file.Content);
+    }
+
+    [Fact]
+    public async Task WhenPlainFilesAreLoadedAndRefreshed_ThenNoMetadataCallIsMade()
+    {
+        // Arrange
+        PausableBlobStorage? client = null;
+        WriteFile("Data.bin", "first");
+        WriteFile("Values.json", """{ "value": 1 }""");
+        var storage = await ConnectAsync(configure: container =>
+            container.ClientDecorator = inner => client = new PausableBlobStorage(inner));
+        WriteFile("Data.bin", "second version");
+        WriteFile("Values.json", """{ "value": 22 }""");
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal(0, client!.GetCallCount(nameof(IBlobStorage.GetBlobsAsync)));
+        Assert.Equal("second version".Length, Assert.IsType<GenericFile>(storage.Children["Data.bin"]).FileSize);
+        Assert.Equal("""{ "value": 22 }""".Length, Assert.IsType<JsonFile>(storage.Children["Values.json"]).FileSize);
+    }
+
+    [Theory]
+    [InlineData("Data.bin")]
+    [InlineData("Values.json")]
+    [InlineData("Notes.md")]
+    [InlineData("Data.gated")]
+    public async Task WhenFileIsLoaded_ThenItsSizeAndUtcModificationTimeAreSet(string path)
+    {
+        // Arrange
+        WriteFile(path, "12345");
+
+        // Act
+        var storage = await ConnectAsync();
+
+        // Assert
+        var file = Assert.IsType<IStorageFile>(storage.Children[path], exactMatch: false);
+        Assert.Equal(5, file.FileSize);
+        Assert.Equal(DateTimeKind.Utc, file.LastModified.Kind);
+        Assert.Equal(File.GetLastWriteTimeUtc(GetFullPath(path)), file.LastModified);
+    }
+
+    [Theory]
+    [InlineData("Data.bin")]
+    [InlineData("Values.json")]
+    [InlineData("Notes.md")]
+    [InlineData("Data.gated")]
+    public async Task WhenOnlyModificationTimeChanges_ThenSubjectShowsItWithoutBeingReloaded(string path)
+    {
+        // Arrange
+        var modified = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        WriteFile(path, "12345");
+        var storage = await ConnectAsync();
+        var file = Assert.IsType<IStorageFile>(storage.Children[path], exactMatch: false);
+        var loadCountAfterStartup = GatedFile.LoadCount;
+        File.SetLastWriteTimeUtc(GetFullPath(path), modified);
+
+        // Act
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Same(file, storage.Children[path]);
+        Assert.Equal(modified, file.LastModified);
+        Assert.Equal(DateTimeKind.Utc, file.LastModified.Kind);
+        Assert.Equal(loadCountAfterStartup, GatedFile.LoadCount);
     }
 
     private static async Task WriteBlobAsync(FluentStorageContainer storage, string path, string content)

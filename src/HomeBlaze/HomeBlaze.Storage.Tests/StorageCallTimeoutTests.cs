@@ -5,7 +5,7 @@ namespace HomeBlaze.Storage.Tests;
 public class StorageCallTimeoutTests
 {
     [Fact]
-    public async Task WhenStreamReadExceedsTheLimit_ThenExceptionNamesWhatWasDoneAndThePath()
+    public async Task WhenStreamReadExceedsTheLimit_ThenPlainTimeoutNamesWhatWasDoneAndThePath()
     {
         // Arrange
         var timeProvider = new ManualTimeProvider();
@@ -14,7 +14,7 @@ public class StorageCallTimeoutTests
 
         // Act
         timeProvider.Advance(StorageCallTimeout.Limit);
-        var exception = await Assert.ThrowsAsync<StorageUnresponsiveException>(() => limited);
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() => limited);
 
         // Assert
         Assert.Contains("hashing", exception.Message);

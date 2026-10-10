@@ -96,13 +96,11 @@ internal sealed class StorageReconciler
                 }
                 else if (entry.Subject != null && (entry.Version != listed.Version || isNamed))
                 {
-                    await RefreshAsync(entry, listed, cancellationToken);
+                    await RefreshAsync(entry, listed.Version, content: null, cancellationToken);
                 }
             }
-            // Filtered by the token of the pass, not by the kind of exception: subject code that times out throws
-            // an OperationCanceledException of its own, which is a failed load like any other. An unresponsive
-            // storage ends the pass instead: recorded as failed, the file would not be loaded again until it
-            // changes, and so would every file after it.
+            // By the token and not by the kind of exception: subject code that gives up throws a cancellation of
+            // its own. An unresponsive storage ends the pass, because every file after this one would fail as well.
             catch (Exception exception) when (exception is not StorageUnresponsiveException && !cancellationToken.IsCancellationRequested)
             {
                 _logger?.LogWarning(exception, "Failed to load: {Path}", listed.Path);
@@ -224,13 +222,14 @@ internal sealed class StorageReconciler
     }
 
     /// <summary>
-    /// Hashes the file without holding its content in memory.
+    /// Brings the subject of a file in line with content that was just written to the file, and records the
+    /// version and the hash of the file.
     /// </summary>
-    public async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
+    public async Task RefreshWrittenAsync(StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
-        await using var stream = await OpenReadAsync(path, cancellationToken);
-        return await StorageHash.ComputeAsync(stream, cancellationToken)
-            .WithStorageTimeoutAsync("hashing", path, _timeProvider, cancellationToken);
+        // Taken before the subject reads the file: taken after, it could be of a later content than the subject has.
+        var version = await GetVersionAsync(entry.Path, cancellationToken);
+        await RefreshAsync(entry, version, content, cancellationToken);
     }
 
     private static string GetChildKey(string path, IInterceptorSubject subject)
@@ -346,7 +345,6 @@ internal sealed class StorageReconciler
         Dictionary<string, List<StorageEntry>> movableEntries,
         CancellationToken cancellationToken)
     {
-        var blob = new Blob(listed.Path) { Size = listed.Version.Size, LastModificationTime = listed.Version.Modified };
         var entry = new StorageEntry { Path = listed.Path, IsFolder = false, Version = listed.Version };
         var isMoved = false;
 
@@ -365,52 +363,73 @@ internal sealed class StorageReconciler
             }
             else
             {
-                // A configurable subject enters the context when it is created, which runs lifecycle handlers as
-                // an assignment in Apply does.
-                using (ExecutionContext.SuppressFlow())
-                {
-                    entry.Subject = _subjectFactory.CreateFromJson(_storage, blob.FullPath, DecodeText(content));
-                }
-
-                if (entry.Subject is IStorageFile file)
-                {
-                    await file.OnFileChangedAsync(cancellationToken);
-                }
+                entry.Subject = CreateFromJson(listed.Path, content, listed.Version);
             }
         }
         else
         {
-            entry.Subject = await _subjectFactory.CreateFromBlobAsync(_storage, blob, cancellationToken)
-                ?? throw new InvalidOperationException($"No subject could be created for '{listed.Path}'.");
-
-            if (entry.Subject is not GenericFile)
+            IInterceptorSubject subject;
+            using (ExecutionContext.SuppressFlow())
             {
-                var hash = await ComputeHashAsync(listed.Path, cancellationToken);
+                subject = _subjectFactory.CreateFile(_storage, listed.Path);
+            }
 
-                // The subject read the file before this did. The hash of a later content would make the next pass
-                // take the subject for current, so it is only recorded when the file did not change meanwhile.
-                if (await GetVersionAsync(listed.Path, cancellationToken) == listed.Version)
+            if (subject is GenericFile genericFile)
+            {
+                SetMetadata(genericFile, listed.Version);
+            }
+            else
+            {
+                // Hashed before the subject reads the file, so the hash is never of a later content than the subject has.
+                entry.Hash = await ComputeHashAsync(listed.Path, cancellationToken);
+                if (subject is IStorageFile file)
                 {
-                    entry.Hash = hash;
+                    SetMetadata(file, listed.Version);
+                    await file.OnFileChangedAsync(cancellationToken);
                 }
             }
+
+            entry.Subject = subject;
         }
 
         _index.Set(entry);
         return isMoved;
     }
 
-    private async Task RefreshAsync(StorageEntry entry, StorageListing listed, CancellationToken cancellationToken)
+    private IInterceptorSubject CreateFromJson(string path, byte[] content, StorageVersion version)
+    {
+        IInterceptorSubject subject;
+
+        // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
+        // assignment in Apply does.
+        using (ExecutionContext.SuppressFlow())
+        {
+            subject = _subjectFactory.CreateFromJson(_storage, path, DecodeText(content));
+        }
+
+        if (subject is JsonFile file)
+        {
+            SetMetadata(file, version);
+        }
+
+        return subject;
+    }
+
+    /// <summary>
+    /// Brings the subject of an entry in line with its file, and records the version and the hash of the file.
+    /// </summary>
+    /// <param name="entry">An entry with a subject.</param>
+    /// <param name="version">The version of the file as the storage reports it.</param>
+    /// <param name="content">The content of the file when the caller has it. Otherwise it is read from the storage.</param>
+    /// <param name="cancellationToken">Cancels the refresh.</param>
+    private async Task RefreshAsync(
+        StorageEntry entry, StorageVersion version, byte[]? content, CancellationToken cancellationToken)
     {
         if (entry.Subject is GenericFile genericFile)
         {
             // Holds nothing but size and time, so there is no content to compare.
-            if (entry.Version != listed.Version)
-            {
-                await genericFile.OnFileChangedAsync(cancellationToken);
-                entry.Version = listed.Version;
-            }
-
+            SetMetadata(genericFile, version);
+            entry.Version = version;
             return;
         }
 
@@ -418,21 +437,19 @@ internal sealed class StorageReconciler
         if (entry.Subject is IStorageFile file)
         {
             // The subject reads the file itself, so its bytes are only hashed here.
-            hash = await ComputeHashAsync(listed.Path, cancellationToken);
-            if (hash != entry.Hash)
+            hash = content != null ? StorageHash.Compute(content) : await ComputeHashAsync(entry.Path, cancellationToken);
+            SetMetadata(file, version);
+
+            // A plain JSON file holds nothing of its content.
+            if (hash != entry.Hash && file is not JsonFile)
             {
                 await file.OnFileChangedAsync(cancellationToken);
-                _logger?.LogInformation("Reloaded: {Path}", listed.Path);
-            }
-            else
-            {
-                file.FileSize = listed.Version.Size;
-                file.LastModified = listed.Version.Modified?.UtcDateTime ?? file.LastModified;
+                _logger?.LogInformation("Reloaded: {Path}", entry.Path);
             }
         }
         else
         {
-            var content = await ReadAsync(listed.Path, cancellationToken);
+            content ??= await ReadAsync(entry.Path, cancellationToken);
             hash = StorageHash.Compute(content);
             if (hash != entry.Hash && entry.Subject is IConfigurable configurable)
             {
@@ -443,12 +460,18 @@ internal sealed class StorageReconciler
                 }
 
                 await configurable.ApplyConfigurationAsync(cancellationToken);
-                _logger?.LogInformation("Reloaded: {Path}", listed.Path);
+                _logger?.LogInformation("Reloaded: {Path}", entry.Path);
             }
         }
 
         entry.Hash = hash;
-        entry.Version = listed.Version;
+        entry.Version = version;
+    }
+
+    private static void SetMetadata(IStorageFile file, StorageVersion version)
+    {
+        file.FileSize = version.Size;
+        file.LastModified = version.Modified?.UtcDateTime ?? file.LastModified;
     }
 
     private void RecordFailure(StorageListing listed)
@@ -500,6 +523,16 @@ internal sealed class StorageReconciler
         => _index.TryGet(path, out var entry)
             ? entry
             : throw new InvalidOperationException($"No entry for '{path}'.");
+
+    /// <summary>
+    /// Hashes the file without holding its content in memory.
+    /// </summary>
+    private async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = await OpenReadAsync(path, cancellationToken);
+        return await StorageHash.ComputeAsync(stream, cancellationToken)
+            .WithStorageTimeoutAsync("hashing", path, _timeProvider, cancellationToken);
+    }
 
     private async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)
         => await _client.OpenReadAsync(path, cancellationToken)

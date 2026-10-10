@@ -5,7 +5,6 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -450,14 +449,20 @@ public partial class FluentStorageContainer :
     private static async Task WriteAndRecordAsync(
         StorageConnection connection, StorageEntry entry, byte[] content, CancellationToken cancellationToken)
     {
-        // Not disposed when the write fails: a write that was given up reads from it once the storage goes on,
-        // and would otherwise leave an empty file.
-        var stream = new MemoryStream(content);
-        await connection.Client.WriteAsync(entry.Path, stream, append: false, cancellationToken: cancellationToken);
-        await stream.DisposeAsync();
+        await WriteAsync(connection, entry.Path, content, cancellationToken);
 
         entry.Hash = StorageHash.Compute(content);
         entry.Version = await connection.Reconciler.GetVersionAsync(entry.Path, cancellationToken);
+    }
+
+    private static async Task WriteAsync(
+        StorageConnection connection, string path, byte[] content, CancellationToken cancellationToken)
+    {
+        // Not disposed when the write fails: a write that was given up reads from it once the storage goes on,
+        // and would otherwise leave an empty file.
+        var stream = new MemoryStream(content);
+        await connection.Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
+        await stream.DisposeAsync();
     }
 
     /// <summary>
@@ -489,45 +494,49 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IStorageContainer - Writes a blob to storage.
+    /// IStorageContainer - Writes a blob to storage and refreshes the subject of the file.
     /// </summary>
+    /// <remarks>
+    /// The content is held in memory while it is written. When the subject cannot be refreshed after the write,
+    /// the write still succeeds, and the next pass loads the file again.
+    /// </remarks>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
         var connection = Connection;
+        var relativePath = StoragePath.Normalize(path);
+
+        // A write that was given up still reads its content once the storage goes on. The caller may have
+        // disposed its stream by then, which would cut the file short.
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, cancellationToken);
+        var bytes = buffer.ToArray();
+
         await connection.Worker.RunAsync(async token =>
         {
-            var relativePath = StoragePath.Normalize(path);
-            await connection.Client.WriteAsync(relativePath, content, append: false, cancellationToken: token);
+            var entry = connection.Index.TryGet(relativePath, out var found) && !found.IsFolder ? found : null;
+            if (entry != null)
+            {
+                // Recorded again only once everything below has succeeded: whatever fails or is given up in
+                // between, the next pass then loads the file again.
+                entry.Version = default;
+                entry.Hash = null;
+            }
+
+            await WriteAsync(connection, relativePath, bytes, token);
             _logger?.LogDebug("Wrote blob to storage: {Path}", relativePath);
 
-            // A file without a subject is picked up by the pass that its event triggers.
-            if (!connection.Index.TryGet(relativePath, out var entry) || entry.Subject == null)
+            // A file without a subject is picked up by the next pass.
+            if (entry?.Subject == null)
                 return;
 
-            // Recorded before the subject is refreshed: a hash taken after the subject read the file could be
-            // of a later content than the subject has.
-            entry.Version = await connection.Reconciler.GetVersionAsync(relativePath, token);
-            entry.Hash = entry.Subject is GenericFile ? null : await connection.Reconciler.ComputeHashAsync(relativePath, token);
-
-            if (entry.Subject is IStorageFile file)
+            try
             {
-                try
-                {
-                    await file.OnFileChangedAsync(token);
-                }
-                catch (Exception exception) when (!token.IsCancellationRequested)
-                {
-                    // The bytes are written, so the caller gets no failure. Without a hash, the pass that the
-                    // event of this write names loads the subject again. A plain file never has a hash and is
-                    // refreshed only when its version differs.
-                    entry.Hash = null;
-                    if (entry.Subject is GenericFile)
-                    {
-                        entry.Version = default;
-                    }
-
-                    _logger?.LogWarning(exception, "Failed to refresh the subject after writing: {Path}", relativePath);
-                }
+                await connection.Reconciler.RefreshWrittenAsync(entry, bytes, token);
+            }
+            catch (Exception exception) when (!token.IsCancellationRequested)
+            {
+                // The bytes are written, so the caller gets no failure.
+                _logger?.LogWarning(exception, "Failed to refresh the subject after writing: {Path}", relativePath);
             }
         }, cancellationToken);
     }

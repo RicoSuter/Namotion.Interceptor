@@ -11,8 +11,8 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 /// <remarks>
 /// A call that was given up is not cancelled. It finishes or fails on its own, so a write can still land after
-/// its caller got the failure. It then reads from the stream it was given: a caller that has disposed that
-/// stream meanwhile is left with an empty or partial file.
+/// its caller got the failure. It then still reads from the stream it was given, so that stream must stay
+/// readable after the failure.
 /// </remarks>
 internal sealed class TimeLimitedBlobStorage : IBlobStorage
 {

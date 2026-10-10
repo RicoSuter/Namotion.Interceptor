@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentStorage;
 using FluentStorage.Blobs;
 
@@ -14,15 +15,20 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ConcurrentDictionary<string, int> _callCounts = new();
     private TaskCompletionSource? _reached;
     private string? _pausedOperation;
     private string? _blockedOperation;
+    private int _pausedStreamNumber;
     private int _callCount;
     private int _openedStreamCount;
     private int _disposedStreamCount;
 
     /// <summary>The number of calls that have arrived in the storage.</summary>
     public int CallCount => Volatile.Read(ref _callCount);
+
+    /// <summary>The number of calls of one operation that have arrived in the storage.</summary>
+    public int GetCallCount(string operation) => _callCounts.GetValueOrDefault(operation);
 
     public int OpenedStreamCount => Volatile.Read(ref _openedStreamCount);
 
@@ -36,6 +42,18 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     {
         _reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _pausedOperation = operation;
+        return _reached.Task.WaitAsync(Timeout);
+    }
+
+    /// <summary>
+    /// Makes the first read from one of the streams that <see cref="OpenReadAsync"/> returns from now on hang.
+    /// The returned task completes when that read has arrived.
+    /// </summary>
+    /// <param name="streamNumber">Which of the streams opened from now on, starting at one.</param>
+    public Task PauseReadOfStream(int streamNumber)
+    {
+        _reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pausedStreamNumber = OpenedStreamCount + streamNumber;
         return _reached.Task.WaitAsync(Timeout);
     }
 
@@ -83,8 +101,7 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
             return null!;
         }
 
-        Interlocked.Increment(ref _openedStreamCount);
-        return new PausableStream(stream, this);
+        return new PausableStream(stream, this, Interlocked.Increment(ref _openedStreamCount));
     }
 
     public async Task DeleteAsync(IEnumerable<string> fullPaths, CancellationToken cancellationToken = default)
@@ -129,6 +146,7 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
     private Task ArriveAsync(string operation)
     {
         Interlocked.Increment(ref _callCount);
+        _callCounts.AddOrUpdate(operation, 1, static (_, count) => count + 1);
         if (_blockedOperation == operation)
         {
             _blockedOperation = null;
@@ -149,7 +167,7 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
         }
     }
 
-    private sealed class PausableStream(Stream stream, PausableBlobStorage storage) : Stream
+    private sealed class PausableStream(Stream stream, PausableBlobStorage storage, int number) : Stream
     {
         private int _isDisposed;
 
@@ -169,6 +187,13 @@ internal sealed class PausableBlobStorage(IBlobStorage inner) : IBlobStorage
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (storage._pausedStreamNumber == number)
+            {
+                storage._pausedStreamNumber = 0;
+                storage._reached!.TrySetResult();
+                await storage._released.Task;
+            }
+
             await storage.PauseAsync(ReadOperation);
             return await stream.ReadAsync(buffer, cancellationToken);
         }
