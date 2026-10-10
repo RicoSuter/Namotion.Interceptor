@@ -11,15 +11,15 @@ Each episode covers the docs of one row and lives in `episodes/<folder>/`. Statu
 | 00 | `00-intro` | `README.md`, `docs/interceptor.md`, `docs/generator.md` | open |
 | 01 | `01-tracking` | `docs/tracking.md`, `docs/tracking-transactions.md` | open |
 | 02 | `02-registry` | `docs/registry.md` | open |
-| 03 | `03-connectors` | `docs/connectors.md`, `docs/connectors-subject-updates.md`, `docs/connectors-monitoring.md` | open |
+| 03 | `03-connectors` | `docs/connectors.md`, `docs/connectors-monitoring.md` | open |
 | 04 | `04-opcua` | `docs/connectors-opcua.md`, `docs/connectors-opcua-client.md`, `docs/connectors-opcua-server.md`, `docs/connectors-opcua-mapping.md` | open |
 | 05 | `05-mqtt` | `docs/connectors-mqtt.md` | open |
-| 06 | `06-websocket` | `docs/connectors-websocket.md` | open |
+| 06 | `06-websocket` | `docs/connectors-websocket.md`, `docs/connectors-subject-updates.md` | open |
 | 07 | `07-modbus` | `docs/connectors-modbus.md` | open |
 | 08 | `08-validation` | `docs/validation.md` | open |
 | 09 | `09-hosting` | `docs/hosting.md` | open |
 | 10 | `10-dynamic` | `docs/dynamic.md` | open |
-| 11 | `11-aspnetcore` | `docs/aspnetcore.md` | open |
+| 11 | `11-aspnetcore` | `docs/aspnetcore.md` (mention subject updates from `docs/connectors-subject-updates.md` briefly) | open |
 | 12 | `12-graphql` | `docs/graphql.md` | open |
 | 13 | `13-blazor` | `docs/blazor.md` | open |
 | 14 | `14-mcp` | `docs/mcp.md` | open |
