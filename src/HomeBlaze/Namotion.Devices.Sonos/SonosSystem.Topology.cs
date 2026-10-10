@@ -6,6 +6,8 @@ namespace Namotion.Devices.Sonos;
 public partial class SonosSystem
 {
     // Topology arrives from the poll and from ZoneGroupTopology events, so applying it is serialized.
+    // Lock order: a player's state lock nests inside this lock (a player leaving a group forgets its member
+    // playback), never the other way around, and neither is taken while the connections lock is held.
     private readonly Lock _topologyLock = new();
 
     // Guarded by _topologyLock. The order of the applied topology events orders a polled topology against them, and
