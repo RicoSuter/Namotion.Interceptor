@@ -1,0 +1,14 @@
+# Spoken forms for terms the voice mispronounces. Subtitles keep the original text.
+# `say` is read by every engine; an optional `kokoro` or `chatterbox` form replaces it for that engine only.
+# Kokoro reads its phoneme markup `[text](/phonemes/)`, which the other engines would read aloud.
+- {match: OPC UA, say: O P C U A, kokoro: '[OPC UA](/ˈO pˈi sˈi jˈu ˈeɪ/)'}
+- {match: MQTT, say: M Q T T}
+- {match: GraphQL, say: Graph Q L}
+- {match: DI, say: D I}
+- {match: API, say: A P I}
+- {match: JSON, say: jason}
+- {match: kW, say: kilowatt}
+- {match: °C, say: degrees}
+- {match: ml, say: milliliters}
+- {match: C#, say: C sharp}
+- {match: ASP.NET, say: A S P dot net, kokoro: '[ASP.NET](/ˌAɛspˈi dɑt nˈɛt/)'}

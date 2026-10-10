@@ -1,0 +1,90 @@
+episode: smoke
+title: Pipeline smoke test
+chapters:
+  - id: intro
+    title: Smoke test
+    beats:
+      - id: intro-title
+        narration: This short episode puts every part of the video theme on screen once.
+        visual: A chapter card with a soft gradient wash; the title letters rise in.
+        components: [ChapterCard]
+  - id: code
+    title: Code
+    beats:
+      - id: boiler-class
+        narration: A boiler is a plain class with partial properties.
+        visual: The Boiler class types into a code card.
+        components: [CodeCard, Camera]
+        code: {file: ../../domain/Coffee/Boiler.cs, region: Boiler}
+      - id: boiler-derived
+        narration: Is hot is derived, so it updates on its own whenever the temperature changes.
+        visual: The IsHot lines stay bright while the rest dims, and the camera leans in.
+        components: [CodeCard, Camera]
+        code: {file: ../../domain/Coffee/Boiler.cs, region: Boiler}
+      - id: tank-morph
+        narration: A water tank follows the same pattern, with a level and a derived flag for when it runs low.
+        visual: The camera pulls back while the card morphs from the Boiler into the WaterTank class; the IsLow lines light up, then the whole class is bright again.
+        components: [CodeCard, Camera]
+        code: {file: ../../domain/Coffee/WaterTank.cs, region: WaterTank}
+  - id: flow
+    title: Data flow
+    beats:
+      - id: flow-build
+        narration: The simulator heats the boiler toward its target, and the machine derives whether it is ready.
+        visual: Flow diagram nodes spring in step by step and curved edges draw between them; a pill reading "target 93 °C" springs in above the boiler.
+        components: [FlowDiagram, Card]
+      - id: flow-pulse
+        narration: Every change travels along these edges, and the status page picks it up twice a second.
+        visual: Particles travel along the edges while the camera follows them; the target pill nudges, and the page node's detail changes to "every 500 ms".
+        components: [FlowDiagram, Camera, Card]
+  - id: sequence
+    title: One update
+    beats:
+      - id: sequence-write
+        narration: Step by step, the simulator sets the temperature, and the boiler reports that it is hot.
+        visual: The flow and the pill fade out; sequence diagram lifelines grow, the simulator lights up as the active participant, and two messages arrive with curved arrows.
+        components: [SequenceDiagram]
+      - id: sequence-read
+        narration: The status page asks for the state, the machine answers with ready, and the page shows it.
+        visual: A request and a dashed reply; the highlight moves to the machine, then to the status page.
+        components: [SequenceDiagram]
+  - id: pages
+    title: Two pages
+    beats:
+      - id: pages-arrive
+        narration: One recording can show two pages side by side, the controls and the status of the same machine.
+        visual: Two browser windows spring in, each showing one half of the same split recording.
+        components: [BrowserFrame]
+        demo: two-pages
+      - id: pages-click
+        narration: Clicking brew sends the recipe to the machine, and the status page follows.
+        visual: The button is clicked; an arrow grows from the controls window to the status window and an Espresso pill rides along it; the camera eases toward the status window.
+        components: [BrowserFrame, Camera, Card]
+        demo: two-pages
+      - id: pages-done
+        narration: When the cup is done, both pages agree that the machine is ready again.
+        visual: The brew finishes in both windows; the arrow and the pill fade and the camera returns to the full view.
+        components: [BrowserFrame, Camera]
+        demo: two-pages
+  - id: live
+    title: Live
+    beats:
+      - id: live-terminal
+        narration: Start the sample with dotnet run.
+        hold: 1.2
+        visual: A terminal types the command and streams the startup log.
+        components: [Terminal]
+        terminal: run-sample
+      - id: live-browser
+        narration: In the running app, the boiler heats up until the machine reports ready.
+        visual: The status page recording plays in a browser window, fitted to the beat.
+        components: [BrowserFrame, Camera]
+        demo: status
+  - id: outro
+    title: Outro
+    beats:
+      - id: outro-title
+        narration: That is the whole theme, ready for real episodes.
+        hold: 1
+        visual: A closing chapter card.
+        components: [ChapterCard, Card]

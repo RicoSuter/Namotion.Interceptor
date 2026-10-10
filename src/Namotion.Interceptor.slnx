@@ -143,6 +143,11 @@
     <Project Path="Namotion.Interceptor.WebSocket.Tests/Namotion.Interceptor.WebSocket.Tests.csproj" />
     <Project Path="Namotion.Interceptor.ConnectorTester.Tests/Namotion.Interceptor.ConnectorTester.Tests.csproj" />
   </Folder>
+  <Folder Name="/Videos/">
+    <Project Path="../videos/domain/Coffee/Coffee.csproj" />
+    <Project Path="../videos/domain/Coffee.Tests/Coffee.Tests.csproj" />
+    <Project Path="../videos/episodes/smoke/sample/Smoke.Sample.csproj" />
+  </Folder>
   <Project Path="Namotion.Interceptor.Dynamic/Namotion.Interceptor.Dynamic.csproj" />
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />
   <Project Path="Namotion.Interceptor.Hosting/Namotion.Interceptor.Hosting.csproj" />

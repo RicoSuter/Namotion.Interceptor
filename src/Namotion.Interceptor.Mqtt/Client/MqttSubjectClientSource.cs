@@ -114,10 +114,14 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         ConnectorCommitLease? transportOwnership = null;
         try
         {
+            // Claimed before connecting: the base class parks only writes to properties this source
+            // owns, so claiming after a connect that keeps failing drops every write made meanwhile.
+            var subscribeOptions = ClaimProperties(cancellationToken);
+
             (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
                 await CreateMqttConnectionAsync(cancellationToken).ConfigureAwait(false);
             Metrics.MarkOperational();
-            await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
+            await SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
 
             var clientForLifetime = client;
             var monitorForLifetime = connectionMonitor;
@@ -539,13 +543,22 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
     }
 
-    private async Task SubscribeToPropertiesAsync(CancellationToken cancellationToken)
+    private Task SubscribeToPropertiesAsync(CancellationToken cancellationToken)
+    {
+        return SubscribeAsync(ClaimProperties(cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Claims every mapped property and returns the subscription for the claimed topics, or
+    /// <c>null</c> when there is nothing to subscribe. Idempotent: a re-claim of an owned property succeeds.
+    /// </summary>
+    private MqttClientSubscribeOptions? ClaimProperties(CancellationToken cancellationToken)
     {
         var registeredSubject = _subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
         {
             _logger.LogWarning("Subject is not registered. No MQTT subscriptions will be created.");
-            return;
+            return null;
         }
 
         var properties = registeredSubject
@@ -556,7 +569,7 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         if (properties.Count == 0)
         {
             _logger.LogWarning("No MQTT properties found to subscribe.");
-            return;
+            return null;
         }
 
         var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
@@ -587,9 +600,19 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 .WithQualityOfServiceLevel(qos));
         }
 
-        await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        return subscribeOptionsBuilder.Build();
+    }
 
-        _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
+    private async Task SubscribeAsync(MqttClientSubscribeOptions? subscribeOptions, CancellationToken cancellationToken)
+    {
+        if (subscribeOptions is null)
+        {
+            return;
+        }
+
+        await _client!.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation("Subscribed to {Count} MQTT topics.", subscribeOptions.TopicFilters.Count);
     }
 
     internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
