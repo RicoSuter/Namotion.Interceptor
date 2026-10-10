@@ -223,7 +223,7 @@ Operations are disabled while the system, the target or, for coordinator operati
 | `PlayStream` | `SetAVTransportURI` with `x-rincon-mp3radio:` and a radio DIDL item, then `Play` | Internet radio and live streams. Accepts `http://`, `https://` and `x-rincon-mp3radio:`, rewrites http(s) to `x-rincon-mp3radio` so Sonos shows it as radio, and sends an empty title when none is given. Sonos reconnects the stream when it ends. |
 | `PlayNotification` | Audio clip API of the speaker's websocket (`wss://<speaker>:1443/websocket/api`) | Doorbells and announcements over the current playback, which then resumes. The speaker downloads the sound itself, so use an absolute http(s) URL it can reach, not `localhost`. The volume is at least 1 % and the call times out after 10 seconds. |
 
-`Source` reports `Radio` for every http(s) URI, so a file started with `PlayUri` shows as radio too.
+`Source` reports `Radio` for radio schemes such as `x-rincon-mp3radio:`, `x-sonosapi-stream:`, `aac:` and `hls-radio:`, so a stream started with `PlayStream` shows as radio, and `Other` for a plain http(s) file started with `PlayUri`.
 
 ### Track Details
 

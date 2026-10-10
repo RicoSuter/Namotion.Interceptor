@@ -146,6 +146,10 @@ internal static class SonosValues
     private static readonly string[] RadioUriPrefixes =
         ["x-rincon-mp3radio:", "x-sonosapi-stream:", "x-sonosapi-radio:", "x-sonosapi-hls:", "aac:", "hls-radio:"];
 
+    /// <summary>
+    /// Returns where the audio comes from. A plain http(s) URI is a file played once, which is <see cref="SonosSource.Other"/>;
+    /// Sonos plays an http(s) stream as radio only behind a radio scheme such as <c>x-rincon-mp3radio:</c>.
+    /// </summary>
     internal static SonosSource DetectSource(string? uri)
     {
         if (string.IsNullOrEmpty(uri))
@@ -182,14 +186,15 @@ internal static class SonosValues
     }
 
     /// <summary>
-    /// Whether the title only repeats a radio URI, which Sonos and other controllers report as the title of a stream
-    /// without one: its last path segment, such as <c>96</c> for <c>aac://http://host/aac/96</c>, or the whole URI
+    /// Whether the title only repeats a radio or http(s) URI, which Sonos and other controllers report as the title of a
+    /// stream without one: its last path segment, such as <c>96</c> for <c>aac://http://host/aac/96</c>, or the whole URI
     /// with any schemes, such as <c>https://host/live.mp3</c> or <c>host/live.mp3</c> for
     /// <c>x-rincon-mp3radio://host/live.mp3</c>.
     /// </summary>
     internal static bool IsTitleOfStreamUri(string title, string? uri)
     {
-        if (uri is null || !IsRadioUri(uri))
+        // Plain http(s) too: a station's ad plays as such a track while the media stays the station.
+        if (uri is null || !(IsRadioUri(uri) || IsHttpUri(uri)))
         {
             return false;
         }
@@ -222,9 +227,12 @@ internal static class SonosValues
             }
         }
 
-        return uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        return false;
     }
+
+    internal static bool IsHttpUri(string uri) =>
+        uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+        uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Reads the battery from a topology <c>MoreInfo</c> value such as <c>BattPct:87,BattChg:CHARGING</c>.

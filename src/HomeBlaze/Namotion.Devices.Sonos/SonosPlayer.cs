@@ -405,8 +405,7 @@ public partial class SonosPlayer : SonosDevice,
     public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(uri);
-        var isHttp = uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                     uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        var isHttp = SonosValues.IsHttpUri(uri);
         if (!isHttp && !uri.StartsWith("x-rincon-mp3radio:", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("The stream URI must start with http://, https:// or x-rincon-mp3radio:.", nameof(uri));

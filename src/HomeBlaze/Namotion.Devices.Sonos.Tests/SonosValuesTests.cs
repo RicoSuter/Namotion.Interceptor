@@ -177,7 +177,11 @@ public class SonosValuesTests
     [InlineData("x-rincon-mp3radio://stream.example.com/live.mp3", SonosSource.Radio)]
     [InlineData("x-sonosapi-stream:tunein%3a9557?sid=303&flags=8232&sn=1", SonosSource.Radio)]
     [InlineData("aac://https://stream.example.com/live", SonosSource.Radio)]
-    [InlineData("https://stream.example.com/live.mp3", SonosSource.Radio)]
+    [InlineData("x-sonosapi-radio:radio%3a1?sid=236", SonosSource.Radio)]
+    [InlineData("x-sonosapi-hls:live%3a1?sid=284", SonosSource.Radio)]
+    [InlineData("hls-radio://stream.example.com/live.m3u8", SonosSource.Radio)]
+    [InlineData("https://stream.example.com/live.mp3", SonosSource.Other)]
+    [InlineData("http://files.example.com/chime.mp3", SonosSource.Other)]
     [InlineData("x-rincon-queue:RINCON_A0000000000601400#0", SonosSource.Queue)]
     [InlineData("x-rincon:RINCON_A0000000000101400", SonosSource.Other)]
     public void WhenDetectingSource_ThenMapsUriScheme(string? uri, SonosSource expected)

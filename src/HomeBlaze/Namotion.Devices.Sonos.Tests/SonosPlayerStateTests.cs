@@ -293,6 +293,21 @@ public class SonosPlayerStateTests
         Assert.Equal("radio.example.com", player.MediaTitle);
     }
 
+    [Theory]
+    [InlineData("https://files.example.com/beep.mp3", SonosSource.Other)]
+    [InlineData("x-rincon-mp3radio://files.example.com/beep.mp3", SonosSource.Radio)]
+    public void WhenAPlayerPlaysAnHttpFileOrStream_ThenOnlyTheStreamIsRadio(string uri, SonosSource expected)
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", "NORMAL", uri, uri, "0:00:02", null), T0);
+
+        // Assert
+        Assert.Equal(expected, player.Source);
+    }
+
     [Fact]
     public void WhenAQueueTrackIsTitledWithItsFileName_ThenTheTitleIsKept()
     {
