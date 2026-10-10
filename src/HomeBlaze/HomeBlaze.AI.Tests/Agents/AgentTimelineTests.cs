@@ -109,4 +109,102 @@ public class AgentTimelineTests : IDisposable
         // Assert
         Assert.Equal(["new finding"], findings.Select(entry => entry.Text));
     }
+
+    [Fact]
+    public async Task WhenManyEntriesAreAppendedConcurrently_ThenMemoryAndFileOrderMatch()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        var timeline = new AgentTimeline(path);
+
+        // Act
+        var tasks = Enumerable.Range(0, 100)
+            .Select(index => timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, index, index.ToString()), CancellationToken.None))
+            .ToArray();
+        await Task.WhenAll(tasks);
+
+        var reloaded = new AgentTimeline(path);
+        await reloaded.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(100, timeline.Entries.Count);
+        Assert.Equal(timeline.Entries.Select(entry => entry.Text), reloaded.Entries.Select(entry => entry.Text));
+    }
+
+    [Fact]
+    public async Task WhenAnEntryIsAppended_ThenTheKindIsSerializedAsAString()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        var timeline = new AgentTimeline(path);
+
+        // Act
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.BackgroundRun, 0, "run"), CancellationToken.None);
+
+        // Assert
+        var line = (await File.ReadAllLinesAsync(path)).Single();
+        Assert.Contains("\"kind\":\"BackgroundRun\"", line);
+    }
+
+    [Fact]
+    public async Task WhenTheFileHasAnUnknownKind_ThenTheLineIsSkipped()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        var timeline = new AgentTimeline(path);
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, 0, "first"), CancellationToken.None);
+        await File.AppendAllTextAsync(path, "{\"kind\":\"notAKind\",\"timestamp\":\"2026-10-10T12:01:00+00:00\",\"text\":\"bad\"}\n");
+        await timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, 2, "second"), CancellationToken.None);
+
+        // Act
+        var reloaded = new AgentTimeline(path);
+        await reloaded.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["first", "second"], reloaded.Entries.Select(entry => entry.Text));
+    }
+
+    [Fact]
+    public async Task WhenALineHasExplicitNullToolCalls_ThenTheyAreNormalizedToEmpty()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        await File.WriteAllTextAsync(path, "{\"kind\":\"user\",\"timestamp\":\"2026-10-10T12:00:00+00:00\",\"text\":\"hi\",\"toolCalls\":null}\n");
+        var timeline = new AgentTimeline(path);
+
+        // Act
+        await timeline.LoadAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Empty(timeline.Entries[0].ToolCalls);
+    }
+
+    [Fact]
+    public async Task WhenTheFileGrowsPastTwiceTheCapacity_ThenAppendCompactsIt()
+    {
+        // Arrange
+        var path = Path.Combine(_directory, "agent.timeline.jsonl");
+        var timeline = new AgentTimeline(path, capacity: 10);
+
+        // Act
+        for (var index = 0; index < 25; index++)
+        {
+            await timeline.AppendAsync(Entry(AgentTimelineEntryKind.User, index, index.ToString()), CancellationToken.None);
+        }
+
+        // Assert
+        Assert.True(File.ReadAllLines(path).Length <= 20);
+
+        var reloaded = new AgentTimeline(path, capacity: 10);
+        await reloaded.LoadAsync(CancellationToken.None);
+        Assert.Equal(10, reloaded.Entries.Count);
+        Assert.Equal(timeline.Entries.Select(entry => entry.Text), reloaded.Entries.Select(entry => entry.Text));
+    }
+
+    [Fact]
+    public void WhenCapacityIsNotPositive_ThenConstructionThrows()
+    {
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AgentTimeline(filePath: null, capacity: 0));
+    }
 }

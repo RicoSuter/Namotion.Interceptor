@@ -8,18 +8,24 @@ namespace HomeBlaze.AI.Agents;
 /// </summary>
 public sealed class AgentTimeline
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
     private readonly string? _filePath;
     private readonly int _capacity;
     private readonly SemaphoreSlim _fileLock = new(1, 1);
     private readonly Lock _entriesLock = new();
     private ImmutableList<AgentTimelineEntry> _entries = ImmutableList<AgentTimelineEntry>.Empty;
 
+    /// <summary>
+    /// How many lines the file currently holds. Only read and written while holding <see cref="_fileLock"/>,
+    /// so it never needs its own synchronization.
+    /// </summary>
+    private int _fileLineCount;
+
     /// <param name="filePath">The JSONL file, or null to keep the timeline in-process only.</param>
     /// <param name="capacity">How many entries are kept in memory and in the file after loading.</param>
     public AgentTimeline(string? filePath, int capacity = 500)
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+
         _filePath = filePath;
         _capacity = capacity;
     }
@@ -29,6 +35,8 @@ public sealed class AgentTimeline
 
     /// <summary>
     /// Loads the file, skipping corrupt lines, keeps the newest entries up to the capacity and rewrites the file with them.
+    /// Serialized with <see cref="AppendAsync"/> through <see cref="_fileLock"/> so a concurrent append cannot be lost
+    /// or placed out of order relative to the entries this load keeps.
     /// </summary>
     public async Task LoadAsync(CancellationToken cancellationToken)
     {
@@ -50,8 +58,7 @@ public sealed class AgentTimeline
             }
 
             var kept = entries.Skip(Math.Max(0, entries.Count - _capacity)).ToImmutableList();
-            var lines = kept.Select(entry => JsonSerializer.Serialize(entry, SerializerOptions));
-            await AtomicFile.WriteAllTextAsync(_filePath, string.Join('\n', lines) + (kept.IsEmpty ? "" : "\n"), cancellationToken);
+            await WriteFileLockedAsync(kept, cancellationToken);
 
             lock (_entriesLock)
             {
@@ -65,31 +72,62 @@ public sealed class AgentTimeline
     }
 
     /// <summary>
-    /// Appends an entry in memory (dropping the oldest beyond the capacity) and to the file.
+    /// Appends an entry in memory (dropping the oldest beyond the capacity) and to the file. When a file is
+    /// configured, the in-memory update happens while holding <see cref="_fileLock"/> so that, across concurrent
+    /// callers, the order entries are added in memory matches the order they are written to the file, and so
+    /// this cannot interleave with a concurrent <see cref="LoadAsync"/>. If the file write fails, the exception
+    /// propagates but the entry that was already added to memory is kept rather than rolled back.
     /// </summary>
     public async Task AppendAsync(AgentTimelineEntry entry, CancellationToken cancellationToken)
     {
-        lock (_entriesLock)
-        {
-            var entries = _entries.Add(entry);
-            _entries = entries.Count > _capacity ? entries.RemoveRange(0, entries.Count - _capacity) : entries;
-        }
-
         if (_filePath is null)
         {
+            lock (_entriesLock)
+            {
+                AddEntryLocked(entry);
+            }
+
             return;
         }
 
         await _fileLock.WaitAsync(cancellationToken);
         try
         {
+            lock (_entriesLock)
+            {
+                AddEntryLocked(entry);
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
-            await File.AppendAllTextAsync(_filePath, JsonSerializer.Serialize(entry, SerializerOptions) + "\n", cancellationToken);
+            await File.AppendAllTextAsync(_filePath, Serialize(entry) + "\n", cancellationToken);
+            _fileLineCount++;
+
+            if (_fileLineCount > _capacity * 2)
+            {
+                // Keep the file from growing without bound between loads: rewrite it with the entries
+                // already kept in memory, which are already capped at the capacity.
+                await WriteFileLockedAsync(Entries, cancellationToken);
+            }
         }
         finally
         {
             _fileLock.Release();
         }
+    }
+
+    private void AddEntryLocked(AgentTimelineEntry entry)
+    {
+        var entries = _entries.Add(entry);
+        _entries = entries.Count > _capacity ? entries.RemoveRange(0, entries.Count - _capacity) : entries;
+    }
+
+    /// <summary>Rewrites the file with exactly the given entries. Caller must hold <see cref="_fileLock"/>.</summary>
+    private async Task WriteFileLockedAsync(IReadOnlyCollection<AgentTimelineEntry> entries, CancellationToken cancellationToken)
+    {
+        var lines = entries.Select(Serialize);
+        var content = string.Join('\n', lines) + (entries.Count == 0 ? "" : "\n");
+        await AtomicFile.WriteAllTextAsync(_filePath!, content, cancellationToken);
+        _fileLineCount = entries.Count;
     }
 
     /// <summary>The newest non-quiet background runs, oldest first.</summary>
@@ -120,12 +158,16 @@ public sealed class AgentTimeline
 
             if (entry.Kind == AgentTimelineEntryKind.BackgroundRun && !entry.IsQuiet)
             {
-                findings.Insert(0, entry);
+                findings.Add(entry);
             }
         }
 
+        findings.Reverse();
         return findings;
     }
+
+    private static string Serialize(AgentTimelineEntry entry) =>
+        JsonSerializer.Serialize(entry, AgentJsonContext.Default.AgentTimelineEntry);
 
     private static AgentTimelineEntry? TryDeserialize(string line)
     {
@@ -136,7 +178,15 @@ public sealed class AgentTimeline
 
         try
         {
-            return JsonSerializer.Deserialize<AgentTimelineEntry>(line, SerializerOptions);
+            var entry = JsonSerializer.Deserialize(line, AgentJsonContext.Default.AgentTimelineEntry);
+            if (entry is null)
+            {
+                return null;
+            }
+
+            // The default for ToolCalls is an empty list, but an explicit "toolCalls": null in the file
+            // would otherwise override that default with a null that callers do not expect.
+            return entry.ToolCalls is null ? entry with { ToolCalls = [] } : entry;
         }
         catch (JsonException)
         {
