@@ -116,12 +116,12 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         {
             // Claimed before connecting: the base class parks only writes to properties this source
             // owns, so claiming after a connect that keeps failing drops every write made meanwhile.
-            var subscribeOptions = ClaimProperties(cancellationToken);
+            ClaimProperties(cancellationToken);
 
             (client, connectionMonitor, applicationMessageHandler, transportOwnership) =
                 await CreateMqttConnectionAsync(cancellationToken).ConfigureAwait(false);
             Metrics.MarkOperational();
-            await SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
+            await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
 
             var clientForLifetime = client;
             var monitorForLifetime = connectionMonitor;
@@ -543,9 +543,17 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
     }
 
-    private Task SubscribeToPropertiesAsync(CancellationToken cancellationToken)
+    private async Task SubscribeToPropertiesAsync(CancellationToken cancellationToken)
     {
-        return SubscribeAsync(ClaimProperties(cancellationToken), cancellationToken);
+        var subscribeOptions = ClaimProperties(cancellationToken);
+        if (subscribeOptions is null)
+        {
+            return;
+        }
+
+        await _client!.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation("Subscribed to {Count} MQTT topics.", subscribeOptions.TopicFilters.Count);
     }
 
     /// <summary>
@@ -604,18 +612,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
 
         return topicCount > 0 ? subscribeOptionsBuilder.Build() : null;
-    }
-
-    private async Task SubscribeAsync(MqttClientSubscribeOptions? subscribeOptions, CancellationToken cancellationToken)
-    {
-        if (subscribeOptions is null)
-        {
-            return;
-        }
-
-        await _client!.SubscribeAsync(subscribeOptions, cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("Subscribed to {Count} MQTT topics.", subscribeOptions.TopicFilters.Count);
     }
 
     internal (string? Topic, MqttPropertyMapping? Mapping) TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)
