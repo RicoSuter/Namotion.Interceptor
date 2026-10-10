@@ -49,7 +49,7 @@ public static class JsonSchemaTypeMapper
     /// otherwise a short .NET-style template (<c>hh:mm:ss</c> for <see cref="TimeSpan"/>, <c>HH:mm:ss</c> for
     /// <see cref="TimeOnly"/>). Null when the type has no format.
     /// </summary>
-    public static string? GetFormat(Type? type)
+    internal static string? GetFormat(Type? type)
     {
         type = UnwrapNullable(type);
         return type == typeof(DateTime) || type == typeof(DateTimeOffset) ? "date-time"
@@ -64,9 +64,8 @@ public static class JsonSchemaTypeMapper
     private static Type? UnwrapNullable(Type? type) =>
         type is null ? null : Nullable.GetUnderlyingType(type) ?? type;
 
-    // The types System.Text.Json writes as JSON strings by default; enums are listed and read by name.
+    // The types System.Text.Json writes as JSON strings by default; enums are listed and read by name. Every type
+    // with a format label is one of them, so GetFormat stays the single list of those.
     internal static bool IsWrittenAsString(Type type) =>
-        type == typeof(string) || type == typeof(char) || type.IsEnum ||
-        type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(DateOnly) ||
-        type == typeof(TimeOnly) || type == typeof(TimeSpan) || type == typeof(Guid) || type == typeof(Uri);
+        type == typeof(string) || type == typeof(char) || type.IsEnum || GetFormat(type) is not null;
 }
