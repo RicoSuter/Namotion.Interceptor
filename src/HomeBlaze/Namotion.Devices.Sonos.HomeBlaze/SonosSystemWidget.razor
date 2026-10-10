@@ -39,9 +39,9 @@
                              Icon="@(player.IsPlaying == true ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.Speaker)"
                              Color="@(player.IsConnected ? Color.Default : Color.Error)" />
                     <MudText Typo="Typo.body2">@player.RoomName</MudText>
-                    @if (player.IsPlaying == true && player.CurrentTrackTitle is not null)
+                    @if (player.IsPlaying == true && SonosTrackText.GetTitle(player.CurrentTrackTitle, player.MediaTitle) is { } title)
                     {
-                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@player.CurrentTrackTitle</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">@title</MudText>
                     }
                 </MudStack>
             }

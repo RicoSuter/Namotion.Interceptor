@@ -50,7 +50,7 @@ The system widget and the edit dialog show two chips: **Connected** once the fir
 
 ### Embed Widgets
 
-`SonosSystem`, `SonosPlayer` and `SonosGroup` have widgets: the system lists its rooms with what they play, a player shows its track, album art, transport buttons, mute and a volume slider, and a group shows its rooms, its track, play or pause and the group volume. Embed them in a [markdown page](../administration/pages.md) with `Widget` subjects that reference them by path. Each fenced block below uses the `subject(name)` info string documented there:
+`SonosSystem`, `SonosPlayer` and `SonosGroup` have widgets: the system lists its rooms with what they play, a player shows its track with the station or playlist it plays from (only the station while a stream starts), album art or a placeholder icon, transport buttons, mute and a volume slider, and a group shows its rooms, its track, play or pause and the group volume. Embed them in a [markdown page](../administration/pages.md) with `Widget` subjects that reference them by path. Each fenced block below uses the `subject(name)` info string documented there:
 
 <!-- The backticks are HTML entities so that this page shows the blocks instead of instantiating them: HomeBlaze turns every subject block of a page into a live subject, also inside code blocks. -->
 <pre><code>&#96;&#96;&#96;subject(sonosSystem)
@@ -621,7 +621,7 @@ Linux, macOS and Docker need nothing.
 - **`Next`, `Previous`, `Seek` or `SetShuffle` fail on TV or radio:** Sonos answers them with a UPnP fault for sources without a queue. `Seek` is disabled while the track has no duration; the others are not yet, see [Follow-ups](#follow-ups).
 - **Favorites are empty or `PlayFavorite` reports an unknown favorite:** the error lists the known titles. Shortcut favorites are not listed, and favorites are only read while a room player is connected.
 - **`PlayNotification` plays nothing:** the speaker must be S2 and able to download the sound URI itself (not `localhost`, not an address only HomeBlaze can reach), and it must reach TCP 1443 on the speaker. A rejected clip is not reported.
-- **Album art does not show:** the browser loads it directly from the speaker over plain HTTP. When HomeBlaze is served over HTTPS, the browser blocks it as mixed content; it also fails when the browser cannot reach the speakers' network.
+- **Album art does not show:** the browser loads it directly from the speaker over plain HTTP. When HomeBlaze is served over HTTPS, browsers may block it as mixed content (Chromium loads it from an IP address with a console warning, others block it); it also fails when the browser cannot reach the speakers' network. The player widget then shows a placeholder icon.
 - **A group widget shows "Cannot resolve path":** the group is keyed by its coordinator, which changed. Embed the player of the room instead, see [Embed Widgets](#embed-widgets).
 - **Night mode and speech enhancement do nothing or stay empty:** they exist only on home theater players (`IsHomeTheater`); the operations are disabled on other speakers.
 - **Volume operations fail on a Port, Amp or Connect:** the line-out is set to fixed volume in the Sonos app, so the speaker rejects volume changes.
@@ -629,7 +629,7 @@ Linux, macOS and Docker need nothing.
 ## Limitations
 
 - `Sonos.Base`, used for the SOAP calls, parses responses with `XmlSerializer`, so this library is not yet free of runtime reflection for Native AOT. The library's own parsers use LINQ to XML.
-- Album art is served by the speaker over plain HTTP, so the browser must be able to reach the speaker, and browsers block it as mixed content when HomeBlaze is served over HTTPS.
+- Album art is served by the speaker over plain HTTP, so the browser must be able to reach the speaker, and browsers may block it as mixed content when HomeBlaze is served over HTTPS. The player widget shows a placeholder icon instead.
 - On Windows, listening on all interfaces with `HttpListener` needs a URL reservation or administrator rights. Without either the system runs on polling only. Linux, macOS and Docker need nothing.
 - Notification clips use the Sonos audio clip API, which needs S2 speakers. The speaker's answer is not read, so a clip it rejects, for example for a URL it cannot load, is not reported.
 - `SetSpeechEnhancement` writes `DialogLevel` 1 or 0, the on and off values of most home theater players; the Arc Ultra levels 1 to 4 are read as on but cannot be set yet.
@@ -659,7 +659,7 @@ Not implemented yet; each fits the current structure:
 - Household identity: the household id (`GetHouseholdID`, or `MuseHouseholdId` from the topology event) so several households can be told apart.
 - Spotify tracks by id, as v1's `PlaySpotifyTrack` did. `PlayUri` passes a native Spotify URI through, but Sonos needs account metadata for it, so Spotify content is played through favorites today.
 - Our own audio clip client for `PlayNotification` that reads the speaker's answer and reports a rejected clip.
-- An album art proxy so artwork loads when HomeBlaze is served over HTTPS.
+- Serve album art through HomeBlaze so HTTPS pages can show it, for example a proxy endpoint for the speakers' `/getaa` paths. For a radio favorite, the favorite's HTTPS `ImageUri` (the station logo) could serve as the art.
 - Windows support for the event listener without a URL reservation, for example a raw socket listener.
 - An AOT-clean SOAP client replacing `Sonos.Base`.
 - `AvailableSoftwareUpdate`, from the topology event, which already carries it, or via `CheckForUpdate`.

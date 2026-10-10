@@ -25,13 +25,22 @@
         </MudStack>
 
         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
-            @if (Player?.CurrentTrackImageUri is { } image)
+            @if (Player?.CurrentTrackImageUri is { } image && image != _failedImageUri)
             {
-                <MudImage Src="@image" Width="64" Height="64" ObjectFit="ObjectFit.Cover" Class="rounded" />
+                <img src="@image" alt="" width="64" height="64" class="rounded flex-shrink-0" style="object-fit: cover"
+                     @onerror="@(() => _failedImageUri = image)" />
+            }
+            else
+            {
+                <div class="d-flex align-center justify-center rounded flex-shrink-0"
+                     style="width: 64px; height: 64px; background-color: var(--mud-palette-action-default-hover)">
+                    <MudIcon Icon="@(Player?.Source == SonosSource.Radio ? Icons.Material.Filled.Radio : Icons.Material.Filled.MusicNote)"
+                             Class="mud-text-secondary" />
+                </div>
             }
             <MudStack Spacing="0">
-                <MudText Typo="Typo.body1">@(Player?.CurrentTrackTitle ?? "Nothing playing")</MudText>
-                <MudText Typo="Typo.caption">@Player?.CurrentTrackArtist</MudText>
+                <MudText Typo="Typo.body1">@(SonosTrackText.GetTitle(Player?.CurrentTrackTitle, Player?.MediaTitle) ?? "Nothing playing")</MudText>
+                <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Player?.CurrentTrackArtist, Player?.CurrentTrackTitle, Player?.MediaTitle)</MudText>
             </MudStack>
         </MudStack>
 
@@ -59,6 +68,10 @@
     public IInterceptorSubject? Subject { get; set; }
 
     private SonosPlayer? Player => Subject as SonosPlayer;
+
+    // Some browsers block the speaker's plain HTTP art on an HTTPS page, and a browser outside the speakers' network
+    // cannot reach it. The placeholder then stays until the art URI changes, so a failing image is not reloaded.
+    private string? _failedImageUri;
 
     private Task RunAsync(Func<SonosPlayer, Task> command) =>
         Player is { } player ? SonosCommands.RunAsync(Snackbar, () => command(player)) : Task.CompletedTask;
