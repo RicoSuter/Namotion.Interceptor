@@ -1,0 +1,121 @@
+using HomeBlaze.Storage.Pages;
+
+var failures = 0;
+void Check(string name, bool condition) { if (!condition) { failures++; Console.WriteLine($"FAIL {name}"); } else Console.WriteLine($"ok   {name}"); }
+
+// Head
+Check("head parse", MarkdownBlockHead.TryParse(":::::HomeBlaze.Components.Tabs#tabs title=\"Heizung {x}\" icon=Thermostat speed=3000 path=\"/a/{b}\" q=\"a \\\"b\\\" \\\\ c\"", out var h, out var e)
+    && h!.FenceLength == 5 && h.Name == "HomeBlaze.Components.Tabs" && h.Id == "tabs" && h.Arguments.Count == 5
+    && h.Arguments[0] is { Key: "title", Value: "Heizung {x}", IsQuoted: true } && h.Arguments[2] is { Value: "3000", IsQuoted: false }
+    && h.Arguments[3].Value == "/a/{b}" && h.Arguments[4].Value == "a \"b\" \\ c" && h.IsWidget);
+Check("head roundtrip", h!.Format() == ":::::HomeBlaze.Components.Tabs#tabs title=\"Heizung {x}\" icon=Thermostat speed=3000 path=\"/a/{b}\" q=\"a \\\"b\\\" \\\\ c\"");
+Check("head slot", MarkdownBlockHead.TryParse("::::Tab title=x", out var s, out _) && !s!.IsWidget && s.Id is null);
+Check("head bad arg", !MarkdownBlockHead.TryParse(":::A.B {.extra}", out _, out e) && e!.Contains("key=value"));
+Check("head unclosed", !MarkdownBlockHead.TryParse(":::A.B t=\"x", out _, out e) && e!.Contains("closing quote"));
+Check("head dup", !MarkdownBlockHead.TryParse(":::A.B t=1 t=2", out _, out e) && e!.Contains("twice"));
+Check("head bad name", !MarkdownBlockHead.TryParse(":::A..B", out _, out e));
+Check("head timespan", MarkdownBlockHead.TryParse(":::A.B i=00:00:01.500", out var t, out _) && t!.Arguments[0].Value == "00:00:01.500");
+
+// Page
+var source = """
+---
+title: Test
+---
+
+text1 {{ a/b }}
+
+:::::HomeBlaze.Components.TabLayout#tabs
+::::Tab title="Heizung {x}" icon=Thermostat
+Body **bold** {{ /A/B }}
+
+:::HomeBlaze.Components.Widget path="/House/UG/{Heizung}"
+:::
+::::
+::::Tab title="Strom"
+::::
+:::::
+
+:::HomeBlaze.Samples.Motor#mymotor targetSpeed=3000
+```json
+{ "cells": [1, 2] }
+```
+:::
+
+- list
+  :::HomeBlaze.Components.Card
+  in list
+  :::
+
+```subject(old)
+{ "$type": "X" }
+```
+
+```mermaid
+graph TD;
+```
+
+::: {.hz-band}
+styled
+:::
+
+:::Footer
+top level slot
+:::
+
+:::
+unnamed
+:::
+""".Replace("\r\n", "\n");
+
+var page = MarkdownPageParser.Parse(source);
+foreach (var b in page.AllBlocks) Console.WriteLine($"  [{b.Index}] {b.Kind} line={b.Line} head=[{source.Substring(b.HeadSpan.Start, b.HeadSpan.Length)}] cfg=[{b.ConfigurationJson}] err=[{b.Error}] children={b.Children.Count}");
+Check("page top-level count", page.Blocks.Count == 6);
+Check("page tabs", page.Blocks[0] is { Kind: MarkdownBlockKind.Widget, Line: 7 } tabs && tabs.Children.Count == 2 && tabs.Children[0].Kind == MarkdownBlockKind.Slot && tabs.Children[0].Children[0].Head!.Arguments[0].Value == "/House/UG/{Heizung}");
+Check("page motor config", page.Blocks[1].ConfigurationJson == "{ \"cells\": [1, 2] }" && source.Substring(page.Blocks[1].ConfigurationSpan!.Value.Start, page.Blocks[1].ConfigurationSpan!.Value.Length).StartsWith("```json"));
+Check("page list invalid", page.Blocks[2] is { Kind: MarkdownBlockKind.Invalid } li && li.Error!.Contains("only allowed"));
+Check("page style", page.Blocks[3].Kind == MarkdownBlockKind.Style && page.Blocks[3].Index == -1);
+Check("page slot without owner", page.Blocks[4] is { Kind: MarkdownBlockKind.Invalid } so && so.Error!.Contains("not a type name"));
+Check("page unnamed", page.Blocks[5] is { Kind: MarkdownBlockKind.Invalid } un && un.Error!.Contains("outer block must be longer"));
+
+// Segments
+var segments = MarkdownSegmentBuilder.Build(page, url => "/rewritten/" + url);
+void Dump(IReadOnlyList<MarkdownSegment> list, int depth)
+{
+    foreach (var seg in list)
+    {
+        var indent = new string(' ', depth * 2);
+        switch (seg)
+        {
+            case HtmlMarkdownSegment html: Console.WriteLine($"{indent}HTML {html.Html.Replace("\n", "\\n")}"); break;
+            case ExpressionMarkdownSegment ex: Console.WriteLine($"{indent}EXPR [{ex.Path}]"); break;
+            case BlockMarkdownSegment bl: Console.WriteLine($"{indent}BLOCK {bl.Block.Index} {bl.Block.Head!.Name}"); Dump(bl.Content, depth + 1); break;
+        }
+    }
+}
+Dump(segments, 0);
+Check("segments no frontmatter", segments[0] is HtmlMarkdownSegment { Html: "<p>text1 " });
+Check("segments expr trimmed", segments[1] is ExpressionMarkdownSegment { Path: "a/b" });
+var tabsSegment = segments.OfType<BlockMarkdownSegment>().First();
+Check("segments nested", tabsSegment.Content.OfType<BlockMarkdownSegment>().Count() == 2 && tabsSegment.Content.OfType<BlockMarkdownSegment>().First().Content.OfType<BlockMarkdownSegment>().Single().Block.Head!.Name == "HomeBlaze.Components.Widget");
+var allHtml = string.Concat(segments.OfType<HtmlMarkdownSegment>().Select(x => x.Html));
+Check("segments legacy error", allHtml.Contains("no longer supported"));
+Check("segments mermaid kept", allHtml.Contains("<pre class=\"mermaid\">"));
+Check("segments style div", allHtml.Contains("<div class=\"hz-band\">"));
+Check("segments config skipped", !string.Concat(segments.OfType<BlockMarkdownSegment>().SelectMany(x => x.Content).OfType<HtmlMarkdownSegment>().Select(x => x.Html)).Contains("cells"));
+
+// Writer
+var motor = page.Blocks[1];
+var written = MarkdownBlockWriter.WriteConfiguration(source, motor, """{ "$type": "HomeBlaze.Samples.Motor", "name": "My Motor", "targetSpeed": 2500, "enabled": true, "nothing": null, "cells": [3] }""");
+var reparsed = MarkdownPageParser.Parse(written).Blocks[1];
+Console.WriteLine(written.Substring(reparsed.HeadSpan.Start, 120));
+Check("writer head", written.Substring(reparsed.HeadSpan.Start, reparsed.HeadSpan.Length) == ":::HomeBlaze.Samples.Motor#mymotor name=\"My Motor\" targetSpeed=2500 enabled=true");
+Check("writer fence", reparsed.ConfigurationJson!.Replace(" ", "").Replace("\n", "") == "{\"cells\":[3]}");
+var removed = MarkdownBlockWriter.WriteConfiguration(source, motor, """{ "$type": "X", "targetSpeed": 1 }""");
+Check("writer fence removed", removed.Contains(":::HomeBlaze.Samples.Motor#mymotor targetSpeed=1\n:::\n"));
+var widget = page.Blocks[0].Children[0].Children[0];
+var added = MarkdownBlockWriter.WriteConfiguration(source, widget, """{ "path": "/x", "cells": [] }""");
+Check("writer fence added", added.Contains(":::HomeBlaze.Components.Widget path=/x\n```json\n{\n  \"cells\": []\n}\n```\n:::\n"));
+Check("writer rest untouched", added.Replace(":::HomeBlaze.Components.Widget path=/x\n```json\n{\n  \"cells\": []\n}\n```\n", ":::HomeBlaze.Components.Widget path=\"/House/UG/{Heizung}\"\n") == source);
+Check("writer create", MarkdownBlockWriter.CreateBlock("A.B", "m", """{ "$type": "A.B", "name": "x y" }""") == ":::A.B#m name=\"x y\"\n:::");
+
+Console.WriteLine(failures == 0 ? "ALL OK" : $"{failures} FAILED");
