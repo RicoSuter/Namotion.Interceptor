@@ -9,7 +9,11 @@ public sealed record MarkdownParseResult(
     IReadOnlyDictionary<int, IInterceptorSubject> BlockSubjects,
     IReadOnlyDictionary<string, IInterceptorSubject> NamedSubjects)
 {
-    public static MarkdownParseResult Empty { get; } = new(
+    /// <summary>
+    /// Gets a new empty result on every call. The children dictionary is mutable and becomes
+    /// the children of a page, so two pages must never get the same one.
+    /// </summary>
+    public static MarkdownParseResult Empty => new(
         new Dictionary<string, IInterceptorSubject>(),
         null,
         new Dictionary<int, IInterceptorSubject>(),

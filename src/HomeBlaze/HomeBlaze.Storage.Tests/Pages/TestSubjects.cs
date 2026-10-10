@@ -30,3 +30,39 @@ public partial class TestLeaf : IConfigurable
         return Task.CompletedTask;
     }
 }
+
+/// <summary>Fails when its configuration is applied, depending on <see cref="Mode"/>.</summary>
+[InterceptorSubject]
+public partial class TestFaulty : IConfigurable
+{
+    public const string ThrowMode = "throw";
+    public const string CancelMode = "cancel";
+
+    [Configuration]
+    public partial string? Mode { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Mode switch
+    {
+        ThrowMode => throw new InvalidOperationException("apply failed"),
+        CancelMode => throw new OperationCanceledException(),
+        _ => Task.CompletedTask
+    };
+}
+
+[InterceptorSubject]
+public partial class TestThrowingConstructor : IConfigurable
+{
+    public TestThrowingConstructor()
+    {
+        throw new InvalidOperationException("constructor failed");
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+public abstract class TestAbstractConfigurable : IConfigurable
+{
+    public abstract Task ApplyConfigurationAsync(CancellationToken cancellationToken = default);
+}
+
+public interface ITestConfigurable : IConfigurable;

@@ -150,6 +150,26 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
+    /// Checks whether a JSON value converts to the given property type with the options that
+    /// <see cref="Deserialize"/> and <see cref="UpdateConfiguration"/> use.
+    /// </summary>
+    /// <remarks>
+    /// Both methods skip a property whose value does not convert without reporting it.
+    /// </remarks>
+    public bool CanDeserialize(string json, Type propertyType)
+    {
+        try
+        {
+            JsonSerializer.Deserialize(json, propertyType, _options);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Updates a subject's configuration properties from JSON.
     /// Uses same options as Serialize/Deserialize for consistent property handling.
     /// Note: STJ doesn't support populating existing objects, so we deserialize each property individually.

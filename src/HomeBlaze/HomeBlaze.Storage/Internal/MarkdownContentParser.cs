@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -22,6 +24,7 @@ public sealed partial class MarkdownContentParser
 {
     private const string HtmlKeyPrefix = "Html_";
     private const string ExpressionKeyPrefix = "Expression_";
+    private const string TypeDiscriminator = "$type";
 
     private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> ConfigurationPropertyCache = new();
 
@@ -31,6 +34,9 @@ public sealed partial class MarkdownContentParser
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly SubjectPathResolver _pathResolver;
     private readonly TypeProvider _typeProvider;
+
+    // The top-level keys of the configuration last applied to a subject. See CanUpdateInPlace.
+    private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();
 
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
@@ -219,7 +225,7 @@ public sealed partial class MarkdownContentParser
                     break;
 
                 case BlockMarkdownSegment block:
-                    var (key, subject, error) = await CreateWidgetAsync(block, existingChildren, index, state, cancellationToken);
+                    var (key, subject, error) = await CreateWidgetAsync(block, children, existingChildren, index, state, cancellationToken);
                     if (subject is null)
                     {
                         AddHtml(children, existingChildren, index, MarkdownErrorBox.Render(block.Block.Line, error!));
@@ -251,6 +257,7 @@ public sealed partial class MarkdownContentParser
 
     private async Task<(string? Key, IInterceptorSubject? Subject, string? Error)> CreateWidgetAsync(
         BlockMarkdownSegment segment,
+        Dictionary<string, IInterceptorSubject> children,
         IDictionary<string, IInterceptorSubject> existingChildren,
         int index,
         ParseState state,
@@ -258,6 +265,12 @@ public sealed partial class MarkdownContentParser
     {
         var block = segment.Block;
         var head = block.Head!;
+
+        // Claimed before every other check, so that a block that ends as an error box still owns its name.
+        if (head.Id is not null && !state.ClaimedIds.Add(head.Id))
+        {
+            return (null, null, FormatUsedTwice(head.Id));
+        }
 
         if (block.Kind == MarkdownBlockKind.Slot)
         {
@@ -270,38 +283,57 @@ public sealed partial class MarkdownContentParser
             return (null, null, $"Unknown type '{head.Name}'. Use the full type name including the namespace.");
         }
 
-        if (head.Id is not null && state.NamedSubjects.ContainsKey(head.Id))
+        if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
         {
-            return (null, null, $"The name '{head.Id}' is used twice on this page.");
+            return (null, null, $"The type '{head.Name}' cannot be created because it is abstract, an interface or an open generic type.");
         }
 
-        if (!TryBuildConfiguration(type, block, out var json, out var configurationError))
-        {
-            return (null, null, configurationError);
-        }
-
+        // An id can equal the positional key of another block, for example #Card_3.
         var key = head.Id ?? $"{type.Name}_{index}";
-        existingChildren.TryGetValue(key, out var existing);
-        var subject = await CreateOrUpdateAsync(type, existing, json, cancellationToken);
-        if (subject is null)
+        if (children.ContainsKey(key))
         {
-            return (null, null, $"The type '{head.Name}' could not be created.");
+            return (null, null, FormatUsedTwice(key));
         }
 
-        var contentError = await ApplyContentAsync(subject, type, segment.Content, state, cancellationToken);
-        if (contentError is not null)
+        try
         {
-            return (null, null, contentError);
-        }
+            if (!TryBuildConfiguration(type, block, out var json, out var configurationError))
+            {
+                return (null, null, configurationError);
+            }
 
-        state.Register(block, head.Id, subject);
-        return (key, subject, null);
+            existingChildren.TryGetValue(key, out var existing);
+            var subject = await CreateOrUpdateAsync(type, existing, json, cancellationToken);
+            if (subject is null)
+            {
+                return (null, null, $"The type '{head.Name}' could not be created.");
+            }
+
+            var contentError = await ApplyContentAsync(subject, type, segment.Content, state, cancellationToken);
+            if (contentError is not null)
+            {
+                return (null, null, contentError);
+            }
+
+            state.Register(block, head.Id, subject);
+            return (key, subject, null);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Constructors and ApplyConfigurationAsync run foreign code. One failing block must not take the page down.
+            return (null, null, $"The type '{head.Name}' could not be created: {exception.Message}");
+        }
     }
+
+    private static string FormatUsedTwice(string name) => $"The name '{name}' is used twice on this page.";
 
     private async Task<IInterceptorSubject?> CreateOrUpdateAsync(
         Type type, IInterceptorSubject? existing, string json, CancellationToken cancellationToken)
     {
-        if (existing is not null && existing.GetType() == type)
+        var keys = GetConfigurationKeys(json);
+
+        IInterceptorSubject? subject;
+        if (CanUpdateInPlace(existing, type, keys))
         {
             _serializer.UpdateConfiguration(existing, json);
             if (existing is IConfigurable configurable)
@@ -309,10 +341,55 @@ public sealed partial class MarkdownContentParser
                 await configurable.ApplyConfigurationAsync(cancellationToken);
             }
 
-            return existing;
+            subject = existing;
+        }
+        else
+        {
+            subject = _serializer.Deserialize(json) as IInterceptorSubject;
         }
 
-        return _serializer.Deserialize(json) as IInterceptorSubject;
+        if (subject is not null)
+        {
+            _appliedConfigurationKeys.AddOrUpdate(subject, keys);
+        }
+
+        return subject;
+    }
+
+    /// <summary>
+    /// Records the configuration that was written to the page for a subject, so that the reload
+    /// which follows the write updates the subject in place.
+    /// </summary>
+    public void RememberConfiguration(IInterceptorSubject subject, string configurationJson) =>
+        _appliedConfigurationKeys.AddOrUpdate(subject, GetConfigurationKeys(configurationJson));
+
+    // Updating in place only sets the keys that are present. A key that was removed from the page
+    // would keep its old value on the instance, unlike after a restart, so the subject is recreated then.
+    private bool CanUpdateInPlace([NotNullWhen(true)] IInterceptorSubject? existing, Type type, string[] keys)
+    {
+        if (existing is null || existing.GetType() != type)
+        {
+            return false;
+        }
+
+        return !_appliedConfigurationKeys.TryGetValue(existing, out var previousKeys)
+            || Array.TrueForAll(previousKeys, previousKey => Array.IndexOf(keys, previousKey) >= 0);
+    }
+
+    private static string[] GetConfigurationKeys(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+
+        var keys = new List<string>();
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.Name != TypeDiscriminator)
+            {
+                keys.Add(property.Name);
+            }
+        }
+
+        return keys.ToArray();
     }
 
     // Replaced in the slots task. Until then a widget block cannot have content.
@@ -344,56 +421,81 @@ public sealed partial class MarkdownContentParser
         }
     }
 
-    private static bool TryBuildConfiguration(Type type, MarkdownBlock block, out string json, out string? error)
+    private bool TryBuildConfiguration(Type type, MarkdownBlock block, out string json, out string? error)
     {
         json = string.Empty;
-        error = null;
-
-        JsonObject? configuration;
-        if (block.ConfigurationJson is { } text)
-        {
-            try
-            {
-                configuration = JsonNode.Parse(text, documentOptions: StrictJsonOptions) as JsonObject;
-            }
-            catch (JsonException)
-            {
-                configuration = null;
-            }
-
-            if (configuration is null)
-            {
-                error = "The json block must contain a JSON object.";
-                return false;
-            }
-        }
-        else
-        {
-            configuration = new JsonObject();
-        }
 
         var properties = GetConfigurationProperties(type);
+        var configuration = ParseConfigurationFence(type, block.ConfigurationJson, properties, out error);
+        if (configuration is null)
+        {
+            return false;
+        }
+
         foreach (var argument in block.Head!.Arguments)
         {
             if (!properties.TryGetValue(argument.Key, out var propertyType))
             {
-                error = $"{type.Name} has no configuration property '{argument.Key}'. Available: {string.Join(", ", properties.Keys.Order())}.";
+                error = FormatUnknownProperty(type, argument.Key, properties);
                 return false;
             }
 
-            if (!TryConvertArgument(argument, propertyType, out var node))
+            var node = CreateArgumentNode(argument.Value, propertyType);
+            if (node is null || !_serializer.CanDeserialize(node.ToJsonString(), propertyType))
             {
-                error = $"'{argument.Value}' is not a valid value for '{argument.Key}'.";
+                var expectedType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+                error = $"'{argument.Value}' is not a valid value for '{argument.Key}'. Expected a value of type {expectedType.Name}.";
                 return false;
             }
 
             configuration[argument.Key] = node;
         }
 
-        configuration["$type"] = type.FullName;
+        configuration[TypeDiscriminator] = type.FullName;
         json = configuration.ToJsonString();
         return true;
     }
+
+    private static JsonObject? ParseConfigurationFence(
+        Type type, string? text, IReadOnlyDictionary<string, Type> properties, out string? error)
+    {
+        error = null;
+        if (text is null)
+        {
+            return new JsonObject();
+        }
+
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(text, documentOptions: StrictJsonOptions);
+        }
+        catch (JsonException exception)
+        {
+            error = $"The json block must contain a valid JSON object without duplicate keys. {exception.Message}";
+            return null;
+        }
+
+        if (node is not JsonObject configuration)
+        {
+            error = "The json block must contain a JSON object.";
+            return null;
+        }
+
+        foreach (var (key, _) in configuration)
+        {
+            if (key != TypeDiscriminator && !properties.ContainsKey(key))
+            {
+                error = FormatUnknownProperty(type, key, properties);
+                return null;
+            }
+        }
+
+        return configuration;
+    }
+
+    private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties) =>
+        $"{type.Name} has no configuration property '{key}'. Available: {string.Join(", ", properties.Keys.Order())}.";
 
     private static IReadOnlyDictionary<string, Type> GetConfigurationProperties(Type type) =>
         ConfigurationPropertyCache.GetOrAdd(type, static key => key
@@ -401,34 +503,32 @@ public sealed partial class MarkdownContentParser
             .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null)
             .ToDictionary(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name), property => property.PropertyType));
 
-    private static bool TryConvertArgument(MarkdownBlockArgument argument, Type propertyType, out JsonNode? node)
+    // The literal an argument stands for: a bare literal for a bool or numeric property, a JSON string for every
+    // other type. Null when the text is no such literal.
+    private static JsonNode? CreateArgumentNode(string value, Type propertyType)
     {
         var target = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 
         if (target == typeof(bool))
         {
-            var isBoolean = bool.TryParse(argument.Value, out var boolean);
-            node = JsonValue.Create(boolean);
-            return isBoolean;
+            return bool.TryParse(value, out var boolean) ? JsonValue.Create(boolean) : null;
         }
 
         var isNumeric = target == typeof(decimal) || (target.IsPrimitive && target != typeof(char));
-        if (isNumeric)
+        if (!isNumeric)
         {
-            try
-            {
-                node = JsonNode.Parse(argument.Value);
-                return node is not null && node.GetValueKind() == JsonValueKind.Number;
-            }
-            catch (JsonException)
-            {
-                node = null;
-                return false;
-            }
+            return JsonValue.Create(value);
         }
 
-        node = JsonValue.Create(argument.Value);
-        return true;
+        try
+        {
+            var node = JsonNode.Parse(value);
+            return node?.GetValueKind() == JsonValueKind.Number ? node : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private sealed class ParseState(MarkdownFile page)
@@ -438,6 +538,8 @@ public sealed partial class MarkdownContentParser
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
 
         public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
+
+        public HashSet<string> ClaimedIds { get; } = [];
 
         public void Register(MarkdownBlock block, string? id, IInterceptorSubject subject)
         {

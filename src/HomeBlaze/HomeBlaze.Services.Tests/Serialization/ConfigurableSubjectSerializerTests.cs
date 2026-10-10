@@ -597,4 +597,28 @@ public class ConfigurableSubjectSerializerTests
     }
 
     #endregion
+
+    #region CanDeserialize Tests
+
+    [Theory]
+    [InlineData("5", typeof(int), true)]
+    [InlineData("1.5", typeof(int), false)]
+    [InlineData("1.5", typeof(double), true)]
+    [InlineData("5", typeof(int?), true)]
+    [InlineData("\"00:00:01.500\"", typeof(TimeSpan), true)]
+    [InlineData("\"abc\"", typeof(TimeSpan), false)]
+    [InlineData("\"Monday\"", typeof(DayOfWeek), true)]
+    [InlineData("\"Someday\"", typeof(DayOfWeek), false)]
+    [InlineData("\"text\"", typeof(string), true)]
+    [InlineData("true", typeof(string), false)]
+    public void WhenValueIsChecked_ThenTheResultMatchesWhatDeserializationAccepts(string json, Type propertyType, bool expected)
+    {
+        // Act
+        var canDeserialize = _serializer.CanDeserialize(json, propertyType);
+
+        // Assert
+        Assert.Equal(expected, canDeserialize);
+    }
+
+    #endregion
 }

@@ -27,9 +27,16 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
 
-    private MarkdownPage? _page;
-    private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects = new Dictionary<int, IInterceptorSubject>();
-    private IReadOnlyDictionary<string, IInterceptorSubject> _namedSubjects = new Dictionary<string, IInterceptorSubject>();
+    // The parse state is one immutable snapshot that is replaced as a whole. Reloads and write-backs run
+    // on different threads, and separate fields would let a reader pair the page of one parse with the
+    // subjects of another.
+    private volatile MarkdownParseResult _parseResult;
+
+    // Each access reads the current snapshot. Code that needs two of these together must take
+    // _parseResult into a local once and read both from that local.
+    private MarkdownPage? _page => _parseResult.Page;
+    private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;
+    private IReadOnlyDictionary<string, IInterceptorSubject> _namedSubjects => _parseResult.NamedSubjects;
 
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
@@ -90,7 +97,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Storage = storage;
         FullPath = fullPath;
         Name = Path.GetFileName(fullPath);
-        Children = new Dictionary<string, IInterceptorSubject>();
+        _parseResult = MarkdownParseResult.Empty;
+        Children = _parseResult.Children;
         _parser = parser;
         _serializer = serializer;
     }
@@ -98,21 +106,24 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     private async Task LoadFileAsync(CancellationToken cancellationToken)
     {
         var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
+
+        await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
+        using var reader = new StreamReader(stream);
+        var content = await reader.ReadToEndAsync(cancellationToken);
+        var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+        var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
+
+        // Nothing is assigned before the parse succeeded, so a failed reload leaves the previous state as it was.
+        _parseResult = result;
+        Content = content;
+        Frontmatter = frontmatter;
+        Children = result.Children;
+
         if (metadata != null)
         {
             FileSize = metadata.Size;
             LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
         }
-
-        await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
-        using var reader = new StreamReader(stream);
-        Content = await reader.ReadToEndAsync(cancellationToken);
-        Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
-        var result = await _parser.ParseAsync(Content, this, Children, cancellationToken);
-        _page = result.Page;
-        _blockSubjects = result.BlockSubjects;
-        _namedSubjects = result.NamedSubjects;
-        Children = result.Children;
     }
 
     /// <summary>
@@ -143,19 +154,24 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        var page = _page;
-        if (page is null || FindBlock(subject) is not (var blockIndex, var blockSubject))
+        var snapshot = _parseResult;
+        if (snapshot.Page is not { } page ||
+            FindBlock(snapshot.BlockSubjects, subject) is not (var blockIndex, var blockSubject))
         {
             return false;
         }
 
-        // The block spans index into the text the page was parsed from. Content can already be
-        // newer than that while a reload is still parsing, so it must not be the text written to.
-        var content = MarkdownBlockWriter.WriteConfiguration(
-            page.Source, page.AllBlocks[blockIndex], _serializer.Serialize(blockSubject));
+        // The block spans index into the text the page was parsed from, which is the source of the
+        // page and not necessarily Content.
+        var json = _serializer.Serialize(blockSubject);
+        var content = MarkdownBlockWriter.WriteConfiguration(page.Source, page.AllBlocks[blockIndex], json);
+
+        // Before the write, because the storage reloads this file from inside WriteAsync. The reload
+        // must find the keys that are now in the file, or a value that became null would recreate the subject.
+        _parser.RememberConfiguration(blockSubject, json);
 
         // The spans moved, the block order did not, so the block subjects stay valid.
-        _page = MarkdownPageParser.Parse(content);
+        _parseResult = snapshot with { Page = MarkdownPageParser.Parse(content) };
         Content = content;
 
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -164,12 +180,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         return true;
     }
 
-    private (int BlockIndex, IInterceptorSubject Subject)? FindBlock(IInterceptorSubject subject)
+    private (int BlockIndex, IInterceptorSubject Subject)? FindBlock(
+        IReadOnlyDictionary<int, IInterceptorSubject> blockSubjects, IInterceptorSubject subject)
     {
         // The edited subject can be nested in the configuration of a block subject, for example a grid cell.
         for (var current = subject; current is not null && !ReferenceEquals(current, this); current = GetSingleParent(current))
         {
-            foreach (var (blockIndex, blockSubject) in _blockSubjects)
+            foreach (var (blockIndex, blockSubject) in blockSubjects)
             {
                 if (ReferenceEquals(blockSubject, current))
                 {
