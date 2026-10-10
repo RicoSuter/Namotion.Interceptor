@@ -10,10 +10,10 @@ Each episode covers the docs of one row and lives in `episodes/<folder>/`. Statu
 |---|---|---|---|
 | 00 | `00-intro` | `README.md`, `docs/interceptor.md`, `docs/generator.md` | open |
 | 01 | `01-tracking` | `docs/tracking.md`, `docs/tracking-transactions.md` | open |
-| 02 | `02-validation` | `docs/validation.md` | open |
-| 03 | `03-registry` | `docs/registry.md`, `docs/dynamic.md` | open |
-| 04 | `04-hosting` | `docs/hosting.md` | open |
-| 05 | `05-subject-design` | `docs/subject-guidelines.md` (mainly the rules and contracts every subject must follow; modeling recommendations second) | open |
+| 02 | `02-subject-design` | `docs/subject-guidelines.md` (mainly the rules and contracts every subject must follow, modeling recommendations second; validation, registry attributes and hosted subjects only briefly, with a pointer to their episodes) | open |
+| 03 | `03-validation` | `docs/validation.md` | open |
+| 04 | `04-registry` | `docs/registry.md`, `docs/dynamic.md` | open |
+| 05 | `05-hosting` | `docs/hosting.md` | open |
 | 06 | `06-connectors` | `docs/connectors.md`, `docs/connectors-monitoring.md` | open |
 | 07 | `07-opcua` | `docs/connectors-opcua.md`, `docs/connectors-opcua-client.md`, `docs/connectors-opcua-server.md`, `docs/connectors-opcua-mapping.md` | open |
 | 08 | `08-mqtt` | `docs/connectors-mqtt.md` | open |
