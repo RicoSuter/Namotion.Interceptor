@@ -205,14 +205,9 @@ else
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
 
-        // Reload the file to update Children dictionary with new parsed content
+        // Reload the file to update Children dictionary with new parsed content.
+        // The reload keeps the edited subject and applies its configuration.
         await File.OnFileChangedAsync(CancellationToken.None);
-
-        // Apply configuration if needed
-        if (subject is IConfigurable configurable)
-        {
-            await configurable.ApplyConfigurationAsync(CancellationToken.None);
-        }
 
         // Update dirty state
         _originalContent = _currentContent;

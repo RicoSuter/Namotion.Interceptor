@@ -369,7 +369,7 @@ public sealed partial class MarkdownContentParser
         try
         {
             using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.TryGetProperty("type", out var typeElement))
+            if (doc.RootElement.TryGetProperty(ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName, out var typeElement))
             {
                 return typeElement.GetString();
             }
