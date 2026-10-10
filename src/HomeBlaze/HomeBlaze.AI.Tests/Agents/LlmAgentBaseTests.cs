@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.AI.Agents;
+using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Testing;
 using Xunit;
 
@@ -60,15 +61,22 @@ public class LlmAgentBaseTests
     public async Task WhenAnUnwatchedPropertyChanges_ThenNoRunIsTriggeredButAWatchedChangeStillIs()
     {
         // Arrange
-        await using var test = await StartAsync(agent => agent.WatchPaths = ["/Kitchen"]);
+        var logger = new RecordingLogger();
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services, logger),
+            agent => agent.WatchPaths = ["/Humidity"]);
 
         // Act
         test.Root.Temperature = 30;
-        test.Agent.RunNow();
+        test.Root.Humidity = 50;
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
 
         // Assert
-        Assert.Contains("Trigger: manual", Assert.Single(test.Agent.Requests).UserMessage);
+        // Changes are evaluated in order, so once the later watched change has caused a run, the earlier
+        // unwatched change has been evaluated too.
+        var runRequests = GetChangeRunRequests(logger);
+        Assert.Contains("Humidity", Assert.Single(runRequests));
+        Assert.Contains("Trigger: change", Assert.Single(test.Agent.Requests).UserMessage);
     }
 
     [Fact]
@@ -205,18 +213,23 @@ public class LlmAgentBaseTests
     public async Task WhenTheAgentStartsWithAnIntervalBeyondTheMaximum_ThenItReportsTheErrorAndStillRunsManually()
     {
         // Arrange
-        await using var test = await StartAsync(agent =>
-        {
-            agent.PollInterval = TimeSpan.FromDays(400);
-            agent.WatchPaths = ["/Temperature"];
-        });
+        var logger = new RecordingLogger();
+        await using var test = await AgentTestContext<FakeAgent>.StartAsync(
+            services => new FakeAgent(services, logger),
+            agent =>
+            {
+                agent.PollInterval = TimeSpan.FromDays(400);
+                agent.WatchPaths = ["/Temperature"];
+            });
 
         // Act
         test.Root.Temperature = 30;
+        await AsyncTestHelpers.WaitUntilAsync(() => logger.Entries.Any(entry => entry.Message.Contains("trigger configuration is invalid") && entry.Message.StartsWith("Ignored")));
         test.Agent.RunNow();
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
 
         // Assert
+        Assert.Empty(GetChangeRunRequests(logger));
         Assert.Contains("Trigger: manual", Assert.Single(test.Agent.Requests).UserMessage);
         Assert.Equal(ServiceStatus.Error, test.Agent.Status);
         Assert.Contains("Poll interval must not exceed", test.Agent.StatusMessage);
@@ -277,4 +290,162 @@ public class LlmAgentBaseTests
         // Assert
         Assert.Equal(2, test.Agent.Timeline.Entries.Count);
     }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsARunningChat_ThenTheStatusIsRestoredAndTheCancellationRecorded()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = WaitForCancellationAsync);
+        using var cancellation = new CancellationTokenSource();
+        var chat = test.Agent.SendMessageAsync("Hello", cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+
+        // Act
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => chat);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Running, test.Agent.Status);
+        Assert.Equal("Idle", test.Agent.StatusMessage);
+        Assert.False(test.Agent.IsBusy);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Error],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+        Assert.Equal(LlmAgentBase.CancelledText, test.Agent.Timeline.Entries[1].Text);
+    }
+
+    [Fact]
+    public async Task WhenTheCallerCancelsAChatWaitingForABackgroundRun_ThenTheWaitingMessageIsRemoved()
+    {
+        // Arrange
+        var release = new TaskCompletionSource();
+        await using var test = await StartAsync(agent => agent.Handler = async (request, _, cancellationToken) =>
+        {
+            if (request.Kind == AgentTurnKind.Background)
+            {
+                await release.Task.WaitAsync(cancellationToken);
+            }
+
+            return new AgentTurnResult("[quiet] ok", null, null);
+        });
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+        using var cancellation = new CancellationTokenSource();
+        var chat = test.Agent.SendMessageAsync("Hello", cancellation.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.StatusMessage == "Waiting for the background run");
+
+        // Act
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => chat);
+
+        // Assert
+        Assert.Equal("Running", test.Agent.StatusMessage);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Error],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+        release.SetResult();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1 && !test.Agent.IsBusy);
+        Assert.Equal("Idle", test.Agent.StatusMessage);
+        Assert.Single(test.Agent.Requests);
+    }
+
+    [Fact]
+    public async Task WhenTheAgentStopsDuringAChat_ThenTheChatIsCancelledAndTheAgentStaysStopped()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = WaitForCancellationAsync);
+        var chat = test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+
+        // Act
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+        await chat;
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+        Assert.False(test.Agent.IsBusy);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Error],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+    }
+
+    [Fact]
+    public async Task WhenTheAgentIsStopped_ThenAChatIsRecordedAsNotRunningAndRunNowDoesNothing()
+    {
+        // Arrange
+        await using var test = await StartAsync();
+        await ((IHostedService)test.Agent).StopAsync(CancellationToken.None);
+
+        // Act
+        test.Agent.RunNow();
+        await test.Agent.ApplyConfigurationAsync(CancellationToken.None);
+        await test.Agent.SendMessageAsync("Hello", CancellationToken.None);
+
+        // Assert
+        Assert.Equal(ServiceStatus.Stopped, test.Agent.Status);
+        Assert.Empty(test.Agent.Requests);
+        Assert.Equal(
+            [AgentTimelineEntryKind.User, AgentTimelineEntryKind.Error],
+            test.Agent.Timeline.Entries.Select(entry => entry.Kind));
+    }
+
+    [Fact]
+    public async Task WhenATurnExceedsTheTurnTimeout_ThenTheRunFailsWithATimeoutError()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent =>
+        {
+            agent.TurnTimeout = TimeSpan.FromMilliseconds(100);
+            agent.Handler = WaitForCancellationAsync;
+        });
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.Status == ServiceStatus.Error);
+
+        // Assert
+        Assert.Contains("did not finish", test.Agent.StatusMessage);
+        var entry = Assert.Single(test.Agent.Timeline.Entries);
+        Assert.Equal(AgentTimelineEntryKind.Error, entry.Kind);
+        Assert.Contains("did not finish", entry.Text);
+    }
+
+    [Fact]
+    public async Task WhenATurnStartsANewConversationOfItsOwnAgent_ThenItFailsFastInsteadOfDeadlocking()
+    {
+        // Arrange
+        await using var test = await StartAsync(agent => agent.Handler = async (_, _, cancellationToken) =>
+        {
+            try
+            {
+                await agent.NewConversationAsync(cancellationToken);
+                return new AgentTurnResult("reset", null, null);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return new AgentTurnResult(exception.Message, null, null);
+            }
+        });
+
+        // Act
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
+
+        // Assert
+        Assert.Contains("within a turn", Assert.Single(test.Agent.Timeline.Entries).Text);
+        Assert.Equal(0, test.Agent.ResetCount);
+    }
+
+    private static async Task<AgentTurnResult> WaitForCancellationAsync(
+        AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        return new AgentTurnResult(string.Empty, null, null);
+    }
+
+    private static List<string> GetChangeRunRequests(RecordingLogger logger) =>
+        logger.Entries
+            .Where(entry => entry.Message.Contains("requests a background run"))
+            .Select(entry => entry.Message)
+            .ToList();
 }

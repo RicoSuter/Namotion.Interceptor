@@ -5,6 +5,7 @@ using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
 using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -28,6 +29,9 @@ public partial class AgentTestRoot
     [State]
     public partial decimal Temperature { get; set; }
 
+    [State]
+    public partial decimal Humidity { get; set; }
+
     [InlinePaths]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 }
@@ -36,7 +40,7 @@ public partial class AgentTestRoot
 // cross-assembly subject inheritance in the generator.
 public class FakeAgent : LlmAgentBase
 {
-    public FakeAgent(AgentServices services) : base(services, NullLogger.Instance)
+    public FakeAgent(AgentServices services, ILogger? logger = null) : base(services, logger ?? NullLogger.Instance)
     {
     }
 
