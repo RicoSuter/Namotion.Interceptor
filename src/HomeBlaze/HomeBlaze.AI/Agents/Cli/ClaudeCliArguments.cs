@@ -37,6 +37,8 @@ public static class ClaudeCliArguments
     /// </summary>
     public static IReadOnlyList<string> Build(ClaudeCliOptions options)
     {
+        // --tools, --mcp-config and --allowedTools take several values and are terminated by the next flag, so each must
+        // stay followed by a flag and no positional prompt may be appended; the prompt goes through standard input.
         var arguments = new List<string>
         {
             "-p",
@@ -68,9 +70,9 @@ public static class ClaudeCliArguments
             arguments.AddRange(["--fallback-model", options.FallbackModel]);
         }
 
-        if (options.ResumeSessionId is { } sessionId)
+        if (!string.IsNullOrWhiteSpace(options.ResumeSessionId))
         {
-            arguments.AddRange(["--resume", sessionId]);
+            arguments.AddRange(["--resume", options.ResumeSessionId]);
         }
 
         if (!options.PersistSession)
@@ -93,7 +95,7 @@ public static class ClaudeCliArguments
             writer.WriteStartObject("mcpServers");
             writer.WriteStartObject(McpServerName);
             writer.WriteString("type", "http");
-            writer.WriteString("url", endpoint.ToString());
+            writer.WriteString("url", endpoint.AbsoluteUri);
             writer.WriteStartObject("headers");
             writer.WriteString("Authorization", "Bearer " + token);
             writer.WriteEndObject();

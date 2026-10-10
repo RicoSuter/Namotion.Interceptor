@@ -59,6 +59,21 @@ public class ClaudeCliArgumentsTests
         Assert.DoesNotContain("--fallback-model", arguments);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void WhenTheResumeSessionIdIsBlank_ThenResumeIsOmitted(string sessionId)
+    {
+        // Arrange
+        var options = new ClaudeCliOptions("SYSTEM", "/tmp/mcp.json", null, null, null, sessionId, PersistSession: true);
+
+        // Act
+        var arguments = ClaudeCliArguments.Build(options);
+
+        // Assert
+        Assert.DoesNotContain("--resume", arguments);
+    }
+
     [Fact]
     public void WhenBuildingTheMcpConfiguration_ThenTheServerUsesHttpWithTheBearerToken()
     {
