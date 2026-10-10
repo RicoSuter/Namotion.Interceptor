@@ -147,7 +147,7 @@ public class SonosPlayerOperationTests
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
         var kitchen = household.Kitchen;
-        var standalone = FakeSonosSpeaker.CreateStandaloneTopology(
+        var standalone = SonosEventBodies.CreateStandaloneTopology(
             (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri), (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri));
         kitchen.CallReceived = call =>
         {
@@ -172,7 +172,7 @@ public class SonosPlayerOperationTests
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
         var kitchen = household.Kitchen;
-        var grouped = FakeSonosSpeaker.CreateGroupTopology(
+        var grouped = SonosEventBodies.CreateGroupTopology(
             (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri), (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
         kitchen.CallReceived = call =>
         {
@@ -200,7 +200,7 @@ public class SonosPlayerOperationTests
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync(isGrouped: true, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
         var kitchen = household.Kitchen;
-        var grouped = FakeSonosSpeaker.CreateGroupTopology(
+        var grouped = SonosEventBodies.CreateGroupTopology(
             (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri), (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
         kitchen.CallReceived = null;
         household.Office.CallReceived = call =>
@@ -279,7 +279,7 @@ public class SonosPlayerOperationTests
         // Arrange
         await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
         var kitchen = household.Kitchen;
-        var withoutOffice = FakeSonosSpeaker.CreateStandaloneTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
+        var withoutOffice = SonosEventBodies.CreateStandaloneTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
         household.Office.CallReceived = null;
         kitchen.CallReceived = call =>
         {

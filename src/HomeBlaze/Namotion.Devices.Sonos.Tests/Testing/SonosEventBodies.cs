@@ -47,6 +47,26 @@ internal static class SonosEventBodies
                     new XElement(SonosXml.UpnpNamespace + "class", "object.item.audioItem.musicTrack")))
             .ToString(SaveOptions.DisableFormatting);
 
+    /// <summary>
+    /// Returns ZoneGroupState XML of standalone players, each at its own base URI.
+    /// </summary>
+    internal static string CreateStandaloneTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
+        "<ZoneGroupState><ZoneGroups>" +
+        string.Concat(players.Select(player =>
+            $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1">{CreateMember(player)}</ZoneGroup>""")) +
+        "</ZoneGroups></ZoneGroupState>";
+
+    /// <summary>
+    /// Returns ZoneGroupState XML of one group of all players, coordinated by the first.
+    /// </summary>
+    internal static string CreateGroupTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
+        "<ZoneGroupState><ZoneGroups>" +
+        $"""<ZoneGroup Coordinator="{players[0].Uuid}" ID="{players[0].Uuid}:1">{string.Concat(players.Select(CreateMember))}</ZoneGroup>""" +
+        "</ZoneGroups></ZoneGroupState>";
+
+    private static string CreateMember((string Uuid, string RoomName, Uri BaseUri) player) =>
+        $"""<ZoneGroupMember UUID="{player.Uuid}" Location="{player.BaseUri}xml/device_description.xml" ZoneName="{player.RoomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" />""";
+
     private static string LastChange(XNamespace serviceNamespace, IEnumerable<XElement> values)
     {
         var lastChange = new XElement(serviceNamespace + "Event",

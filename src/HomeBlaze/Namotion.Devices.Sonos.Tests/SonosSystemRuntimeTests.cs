@@ -553,7 +553,7 @@ public class SonosSystemRuntimeTests
         await using var connected = await ConnectedSystem.StartAsync(speaker, configure: system => system.PollingInterval = TimeSpan.FromHours(1));
         await using var moved = new FakeSonosSpeaker();
         moved.RespondAsIdlePlayer(TestFixtures.KitchenUuid, "Küche");
-        var topology = FakeSonosSpeaker.CreateStandaloneTopology((TestFixtures.KitchenUuid, "Küche", moved.BaseUri));
+        var topology = SonosEventBodies.CreateStandaloneTopology((TestFixtures.KitchenUuid, "Küche", moved.BaseUri));
 
         // Act
         Assert.Equal(HttpStatusCode.OK, await speaker.NotifyAsync(TopologyEventPath, SonosEventBodies.Properties(("ZoneGroupState", topology))));
@@ -572,7 +572,7 @@ public class SonosSystemRuntimeTests
         household.System.PollingInterval = TimeSpan.FromHours(1);
         var readsBefore = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState");
         var hold = household.Kitchen.HoldAction("GetZoneGroupState");
-        var grouped = FakeSonosSpeaker.CreateGroupTopology(
+        var grouped = SonosEventBodies.CreateGroupTopology(
             (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri),
             (TestFixtures.KitchenUuid, "Küche", household.Kitchen.BaseUri));
 

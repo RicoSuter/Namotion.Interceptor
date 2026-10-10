@@ -177,8 +177,8 @@ public class SonosSystemTopologyTests
         // Arrange
         var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
         var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
-        var household = FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office);
-        var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
+        var household = SonosEventBodies.CreateStandaloneTopology(kitchen, office);
+        var withoutKitchen = SonosEventBodies.CreateStandaloneTopology(office);
         var system = CreateSystem();
         system.ApplyPolledTopology(household, system.NextOrder());
         ReportAllReachable(system);
@@ -198,9 +198,9 @@ public class SonosSystemTopologyTests
         // Arrange
         var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
         var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
-        var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
+        var withoutKitchen = SonosEventBodies.CreateStandaloneTopology(office);
         var system = CreateSystem();
-        system.ApplyPolledTopology(FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office), system.NextOrder());
+        system.ApplyPolledTopology(SonosEventBodies.CreateStandaloneTopology(kitchen, office), system.NextOrder());
         ReportAllReachable(system);
 
         // Act
@@ -218,9 +218,9 @@ public class SonosSystemTopologyTests
         // Arrange
         var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
         var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
-        var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
+        var withoutKitchen = SonosEventBodies.CreateStandaloneTopology(office);
         var system = CreateSystem();
-        system.ApplyPolledTopology(FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office), system.NextOrder());
+        system.ApplyPolledTopology(SonosEventBodies.CreateStandaloneTopology(kitchen, office), system.NextOrder());
         ReportAllReachable(system);
         system.ApplyPolledTopology(withoutKitchen, system.NextOrder());
 
@@ -241,10 +241,10 @@ public class SonosSystemTopologyTests
         var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
         var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
         var system = CreateSystem();
-        system.ApplyPolledTopology(FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office), system.NextOrder());
+        system.ApplyPolledTopology(SonosEventBodies.CreateStandaloneTopology(kitchen, office), system.NextOrder());
 
         // Act
-        system.ApplyPolledTopology(FakeSonosSpeaker.CreateGroupTopology(office, kitchen), system.NextOrder(), confirmsMissingPlayers: false);
+        system.ApplyPolledTopology(SonosEventBodies.CreateGroupTopology(office, kitchen), system.NextOrder(), confirmsMissingPlayers: false);
 
         // Assert
         Assert.Equal(TestFixtures.OfficeUuid, system.Players[TestFixtures.KitchenUuid].GroupCoordinatorUuid);
@@ -257,14 +257,14 @@ public class SonosSystemTopologyTests
         // Arrange
         var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
         var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
-        var household = FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office);
+        var household = SonosEventBodies.CreateStandaloneTopology(kitchen, office);
         var system = CreateSystem();
         system.ApplyTopologyEvent(household);
         var pollStartedAt = system.NextOrder();
 
         // Act
         system.ApplyTopologyEvent(household);
-        system.ApplyPolledTopology(FakeSonosSpeaker.CreateGroupTopology(office, kitchen), pollStartedAt);
+        system.ApplyPolledTopology(SonosEventBodies.CreateGroupTopology(office, kitchen), pollStartedAt);
 
         // Assert
         Assert.Equal(2, system.Groups.Count);

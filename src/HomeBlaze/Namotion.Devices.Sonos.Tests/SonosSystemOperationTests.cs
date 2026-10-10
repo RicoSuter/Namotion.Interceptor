@@ -152,7 +152,7 @@ public class SonosSystemOperationTests
         var kitchen = household.Kitchen;
         var kitchenMember = (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri);
         var officeMember = (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri);
-        var standalone = FakeSonosSpeaker.CreateStandaloneTopology(kitchenMember, officeMember);
+        var standalone = SonosEventBodies.CreateStandaloneTopology(kitchenMember, officeMember);
         kitchen.CallReceived = null;
         household.Office.CallReceived = call =>
         {
@@ -198,7 +198,7 @@ public class SonosSystemOperationTests
         var kitchen = household.Kitchen;
         var kitchenMember = (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri);
         var officeMember = (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri);
-        var grouped = FakeSonosSpeaker.CreateGroupTopology(officeMember, kitchenMember);
+        var grouped = SonosEventBodies.CreateGroupTopology(officeMember, kitchenMember);
         household.Office.CallReceived = null;
         kitchen.CallReceived = call =>
         {

@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Security;
 using System.Text;
-using System.Xml.Linq;
 
 namespace Namotion.Devices.Sonos.Tests.Testing;
 
@@ -155,30 +154,13 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     /// Answers GetZoneGroupState with a household of standalone players, each at its own base URI.
     /// </summary>
     internal void RespondWithTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
-        Respond("GetZoneGroupState", ("ZoneGroupState", CreateStandaloneTopology(players)));
+        Respond("GetZoneGroupState", ("ZoneGroupState", SonosEventBodies.CreateStandaloneTopology(players)));
 
     /// <summary>
     /// Answers GetZoneGroupState with one group of all players, coordinated by the first.
     /// </summary>
     internal void RespondWithGroup(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
-        Respond("GetZoneGroupState", ("ZoneGroupState", CreateGroupTopology(players)));
-
-    /// <summary>
-    /// Returns ZoneGroupState XML of standalone players, each at its own base URI.
-    /// </summary>
-    internal static string CreateStandaloneTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
-        "<ZoneGroupState><ZoneGroups>" +
-        string.Concat(players.Select(player =>
-            $"""<ZoneGroup Coordinator="{player.Uuid}" ID="{player.Uuid}:1">{CreateMember(player)}</ZoneGroup>""")) +
-        "</ZoneGroups></ZoneGroupState>";
-
-    /// <summary>
-    /// Returns ZoneGroupState XML of one group of all players, coordinated by the first.
-    /// </summary>
-    internal static string CreateGroupTopology(params (string Uuid, string RoomName, Uri BaseUri)[] players) =>
-        "<ZoneGroupState><ZoneGroups>" +
-        $"""<ZoneGroup Coordinator="{players[0].Uuid}" ID="{players[0].Uuid}:1">{string.Concat(players.Select(CreateMember))}</ZoneGroup>""" +
-        "</ZoneGroups></ZoneGroupState>";
+        Respond("GetZoneGroupState", ("ZoneGroupState", SonosEventBodies.CreateGroupTopology(players)));
 
     /// <summary>
     /// Answers GetZoneGroupState with the kitchen as a home theater player at its base URI, bonded with a subwoofer.
@@ -219,9 +201,6 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         using var response = await httpClient.SendAsync(request);
         return response.StatusCode;
     }
-
-    private static string CreateMember((string Uuid, string RoomName, Uri BaseUri) player) =>
-        $"""<ZoneGroupMember UUID="{player.Uuid}" Location="{player.BaseUri}xml/device_description.xml" ZoneName="{player.RoomName}" SoftwareVersion="97.1-80312" EthLink="0" MoreInfo="" />""";
 
     /// <summary>
     /// Answers as a single-room household whose only player is this speaker, paused on Spotify Connect.
@@ -415,16 +394,4 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     }
 
     public ValueTask DisposeAsync() => _server.DisposeAsync();
-}
-
-/// <summary>
-/// One SOAP request: the control URL path it was posted to, the service and action from SOAPACTION, and the raw body.
-/// </summary>
-internal sealed record SoapCall(string Path, string Service, string Action, string Body)
-{
-    /// <summary>
-    /// Returns the value of the named argument, unescaped once as the speaker reads it, or null when it is absent.
-    /// </summary>
-    internal string? GetArgument(string name) =>
-        XDocument.Parse(Body).Descendants().FirstOrDefault(element => element.Name.LocalName == name)?.Value;
 }

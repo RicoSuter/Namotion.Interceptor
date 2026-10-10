@@ -66,7 +66,7 @@ public class SonosSystemEventDispatchTests
         Assert.Equal(2, household.System.Groups.Count);
         var topologyReads = household.Kitchen.Calls.Count(call => call.Action == "GetZoneGroupState") +
                             household.Office.Calls.Count(call => call.Action == "GetZoneGroupState");
-        var grouped = FakeSonosSpeaker.CreateGroupTopology(
+        var grouped = SonosEventBodies.CreateGroupTopology(
             (TestFixtures.OfficeUuid, "Büro", household.Office.BaseUri),
             (TestFixtures.KitchenUuid, "Küche", household.Kitchen.BaseUri));
 
