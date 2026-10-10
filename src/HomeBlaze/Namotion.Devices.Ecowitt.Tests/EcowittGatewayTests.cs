@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Devices.Ecowitt.Models;
 using Xunit;
@@ -89,6 +90,91 @@ public class EcowittGatewayTests
         Assert.Equal(0.0m, gateway.RainGauge!.RainRate);
         Assert.Equal(3.8m, gateway.RainGauge.DailyRain);
         Assert.Equal(56.5m, gateway.RainGauge.YearlyRain);
+    }
+
+    [Fact]
+    public void WhenGw2000RainParsed_ThenGaugeExposesEachBucket()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var data = EcowittClient.ParseLiveData(JsonSerializer.Deserialize<JsonElement>(EcowittClientTests.Gw2000RainJson));
+
+        // Act
+        gateway.UpdateFromLiveData(data);
+
+        // Assert
+        var gauge = gateway.RainGauge!;
+        Assert.Equal(0.3m, gauge.HourlyRain);
+        Assert.Equal(2.4m, gauge.Last24HoursRain);
+        Assert.Equal(0.9m, gauge.DailyRain);
+        Assert.Equal(14.8m, gauge.WeeklyRain);
+        Assert.Equal(20.5m, gauge.MonthlyRain);
+        Assert.Equal(506.1m, gauge.YearlyRain);
+        Assert.Equal(506.1m, gauge.TotalRain);
+    }
+
+    [Fact]
+    public void WhenStatePersistedBeforeIdRemap_ThenTotalRainDoesNotJump()
+    {
+        // Arrange
+        // The previous mapping read 0x13 as MonthlyRain and, without 0x14, accumulated it.
+        var gateway = CreateGateway();
+        gateway.RainCumulativeOffset = 120m;
+        gateway.RainLastMonthlyValue = 506.1m;
+        gateway.PiezoRainCumulativeOffset = 40m;
+        gateway.PiezoRainLastMonthlyValue = 294.9m;
+        var data = EcowittClient.ParseLiveData(JsonSerializer.Deserialize<JsonElement>(EcowittClientTests.Gw2000RainJson));
+
+        // Act
+        var configChanged = gateway.UpdateFromLiveData(data);
+
+        // Assert
+        Assert.False(configChanged);
+        Assert.Equal(626.1m, gateway.RainGauge!.TotalRain);
+        Assert.Equal(120m, gateway.RainCumulativeOffset);
+        Assert.Equal(334.9m, gateway.PiezoRainGauge!.TotalRain);
+        Assert.Equal(40m, gateway.PiezoRainCumulativeOffset);
+    }
+
+    [Fact]
+    public void WhenGatewayReportsTotalRain_ThenTotalRainAccumulatesFromItInsteadOfYearly()
+    {
+        // Arrange
+        // The previous mapping read 0x14 as YearlyRain and accumulated it.
+        var gateway = CreateGateway();
+        gateway.RainLastMonthlyValue = 1834.7m;
+
+        // Act
+        gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { MonthlyRain = 20.5m, YearlyRain = 506.1m, TotalRain = 1840.2m }
+        });
+
+        // Assert
+        Assert.Equal(1840.2m, gateway.RainGauge!.TotalRain);
+        Assert.Equal(0m, gateway.RainCumulativeOffset);
+        Assert.Equal(1840.2m, gateway.RainLastMonthlyValue);
+    }
+
+    [Fact]
+    public void WhenYearlyRainMissingForOnePoll_ThenShorterBucketIsNotCountedAsReset()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.RainCumulativeOffset = 120m;
+        gateway.RainLastMonthlyValue = 506.1m;
+
+        // Act
+        var configChanged = gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { DailyRain = 0.9m, WeeklyRain = 14.8m, MonthlyRain = 20.5m }
+        });
+
+        // Assert
+        Assert.False(configChanged);
+        Assert.Null(gateway.RainGauge!.TotalRain);
+        Assert.Equal(120m, gateway.RainCumulativeOffset);
+        Assert.Equal(506.1m, gateway.RainLastMonthlyValue);
     }
 
     [Fact]

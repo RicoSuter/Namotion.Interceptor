@@ -200,12 +200,12 @@ Subjects can also carry user-defined metadata — annotations, tags, and links t
 
 **How each consumer accesses the knowledge graph:**
 
-The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`), type listing (`list_types`), method discovery (`list_methods`), and method invocation (`invoke_method`) — usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) enriches these tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
+The knowledge graph is accessed through two layers of MCP tools. The base layer (`Namotion.Interceptor.Mcp`) provides subject browsing (`query`), property read/write (`get_property`, `set_property`) and type listing (`list_types`), usable with any Namotion.Interceptor application. The HomeBlaze layer (`HomeBlaze.AI`) adds method discovery (`list_methods`, with each parameter's type, format, enum names and unit) and method invocation (`invoke_method`, which accepts enum names and rejects missing or unknown arguments), and enriches the base tools with domain-specific metadata (`$type`, `$icon`, `$title`, units via `[State]`, methods via `[Operation]`/`[Query]`); see [AI](design/ai.md). History queries ship with the history packages instead: `HomeBlaze.History.Mcp` provides `get_property_history`, with `get_event_history` and `get_command_history` planned.
 
 | Consumer | Access Pattern |
 |----------|---------------|
 | Operator UI | TrackingScope for live updates, subject browser for navigation, operations for actions |
-| AI agents | Base MCP tools (`query`, `get_property`, `set_property`, `list_types`, `list_methods`, `invoke_method`) + HomeBlaze MCP tools (`get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
+| AI agents | Base MCP tools (`query`, `get_property`, `set_property`, `list_types`) + HomeBlaze MCP tools (`list_methods`, `invoke_method`, `get_property_history`, `get_event_history`, `get_command_history`, enriched metadata) |
 | Connectors | Read/write interceptors feed property changes in and out, operations map to protocol methods (e.g. OPC UA methods) |
 | WebSocket sync | SubjectUpdate messages replicate the subject graph and proxy operations between instances |
 

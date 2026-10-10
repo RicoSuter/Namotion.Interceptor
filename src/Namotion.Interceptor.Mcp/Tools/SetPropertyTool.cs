@@ -69,19 +69,14 @@ internal class SetPropertyTool
             return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
         }
 
-        var valueElement = input.GetProperty("value");
-
-        // The MCP SDK may pass values as strings (e.g., "true" instead of true).
-        // If the value is a string but the target type is not, try to deserialize the string content.
         object? newValue;
-        if (valueElement.ValueKind == JsonValueKind.String && property.Type != typeof(string))
+        try
         {
-            var stringValue = valueElement.GetString()!;
-            newValue = JsonSerializer.Deserialize(stringValue, property.Type);
+            newValue = McpValueConverter.Deserialize(input.GetProperty("value"), property.Type);
         }
-        else
+        catch (JsonException exception)
         {
-            newValue = JsonSerializer.Deserialize(valueElement.GetRawText(), property.Type);
+            return Task.FromResult<object?>(new { error = $"Invalid value for {path}: {exception.Message}" });
         }
 
         var previousValue = property.GetValue();

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.Storage.Pages;
 
@@ -96,7 +97,7 @@ public static class MarkdownBlockWriter
 
         foreach (var (key, value) in configuration)
         {
-            if (key == "$type" || value is null)
+            if (key == ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName || value is null)
             {
                 continue;
             }

@@ -23,8 +23,17 @@ public partial class EcowittRainGauge :
     [State(Unit = StateUnit.MillimeterPerHour)]
     public partial decimal? RainRate { get; internal set; }
 
+    /// <summary>
+    /// Gets the rain over the last hour.
+    /// </summary>
     [State(Unit = StateUnit.Millimeter)]
     public partial decimal? HourlyRain { get; internal set; }
+
+    /// <summary>
+    /// Gets the rain over the last 24 hours.
+    /// </summary>
+    [State(Unit = StateUnit.Millimeter)]
+    public partial decimal? Last24HoursRain { get; internal set; }
 
     [State(Unit = StateUnit.Millimeter)]
     public partial decimal? DailyRain { get; internal set; }
@@ -71,6 +80,7 @@ public partial class EcowittRainGauge :
         RainEvent = null;
         RainRate = null;
         HourlyRain = null;
+        Last24HoursRain = null;
         DailyRain = null;
         WeeklyRain = null;
         MonthlyRain = null;

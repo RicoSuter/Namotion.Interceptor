@@ -71,6 +71,23 @@ public class MarkdownWidgetBlockTests
     }
 
     [Fact]
+    public async Task WhenArgumentIsAPathWithACollectionIndex_ThenItIsTakenAsWrittenWithoutQuotes()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $$"""
+            :::{{LeafType}}#leaf name=/Devices/Sonos/Players[RINCON_000E58A0B1C201400]
+            :::
+            """);
+
+        // Assert
+        var leaf = Assert.IsType<TestLeaf>(page.Children["leaf"]);
+        Assert.Equal("/Devices/Sonos/Players[RINCON_000E58A0B1C201400]", leaf.Name);
+    }
+
+    [Fact]
     public async Task WhenPageIsParsedAgain_ThenTheSameInstanceIsUpdatedInPlace()
     {
         // Arrange

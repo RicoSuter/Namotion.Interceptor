@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 
@@ -14,7 +15,7 @@ namespace HomeBlaze.Storage.Internal;
 // Building the configuration of a block and applying it to a new or an existing subject.
 public sealed partial class MarkdownContentParser
 {
-    private const string TypeDiscriminator = "$type";
+    private const string TypeDiscriminator = ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName;
 
     private static readonly ConcurrentDictionary<Type, IReadOnlyDictionary<string, Type>> ConfigurationPropertyCache = new();
 

@@ -1,5 +1,7 @@
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -492,6 +494,56 @@ public class MarkdownSlotTests
         Assert.Same(row, Assert.Single(panel.Rows));
         Assert.Same(content, row.Content);
         Assert.Same(row, page.GetBlockSubject(1));
+    }
+
+    [Fact]
+    public async Task WhenSubjectNestedInSlotsIsSavedTheWayTheEditPanelSavesIt_ThenItsPageWritesOnlyItsBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content =
+            $":::::{Namespace}.TestPanel#panel title=T\n::::Row label=A\n:::{Namespace}.TestLeaf#leaf count=1\n:::\n::::\n:::::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var row = ((TestPanel)page.Children["panel"]).Rows[0];
+        var leaf = (TestLeaf)((MarkdownFragment)row.Content!).Children["leaf"];
+        var rootManager = fixture.Services.GetRequiredService<RootManager>();
+        leaf.Count = 5;
+
+        // Act: the edit panel writes the owner of the configuration through the nearest writer above it.
+        var owner = leaf.TryGetConfigurationOwner();
+        var writer = rootManager.GetConfigurationWriter(owner!);
+        var handled = await writer.WriteConfigurationAsync(owner!, CancellationToken.None);
+
+        // Assert: the page is the writer, not the storage above it, which is a configuration writer as well.
+        Assert.Same(leaf, owner);
+        Assert.Same(page, writer);
+        Assert.True(handled);
+        Assert.Equal(
+            content.Replace("#leaf count=1", "#leaf count=5 enabled=false interval=00:00:00"),
+            await fixture.ReadAsync("page.md"));
+    }
+
+    [Fact]
+    public async Task WhenSlotValueIsSavedTheWayTheEditPanelSavesIt_ThenItsPageWritesOnlyItsBlock()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var content = $"::::{Namespace}.TestPanel#panel title=T\n:::Row label=A\nrow text\n:::\n::::\n";
+        var page = await fixture.AddPageAsync("page.md", content);
+        var row = ((TestPanel)page.Children["panel"]).Rows[0];
+        var rootManager = fixture.Services.GetRequiredService<RootManager>();
+        row.Label = "B";
+
+        // Act
+        var owner = row.TryGetConfigurationOwner();
+        var writer = rootManager.GetConfigurationWriter(owner!);
+        var handled = await writer.WriteConfigurationAsync(owner!, CancellationToken.None);
+
+        // Assert
+        Assert.Same(row, owner);
+        Assert.Same(page, writer);
+        Assert.True(handled);
+        Assert.Equal(content.Replace(":::Row label=A", ":::Row label=B"), await fixture.ReadAsync("page.md"));
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Models;
 
 namespace Namotion.Interceptor.Mcp.Tools;
 
@@ -94,11 +95,8 @@ internal class ListTypesTool
                                 method.ReturnType == typeof(void) ? null : method.ReturnType),
                             parameters = method.GetParameters()
                                 .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
-                                .Select(parameter => new
-                                {
-                                    name = parameter.Name,
-                                    type = JsonSchemaTypeMapper.ToJsonSchemaType(parameter.ParameterType)
-                                })
+                                .Select(parameter => McpMethodParameter.Create(
+                                    parameter.Name ?? $"arg{parameter.Position}", parameter.ParameterType))
                                 .ToArray()
                         })
                         .ToArray()

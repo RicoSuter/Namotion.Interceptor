@@ -54,7 +54,9 @@
     <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.19.0" />
     <PackageVersion Include="Pro.NBench.xUnit" Version="2.0.0" />
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
+    <PackageVersion Include="Rssdp" Version="5.0.0" />
     <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.33.0.1635" />
+    <PackageVersion Include="Sonos.Base" Version="0.4.0" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
     <PackageVersion Include="System.Device.Gpio" Version="3.2.0" />
     <PackageVersion Include="System.Reactive" Version="6.1.0" />

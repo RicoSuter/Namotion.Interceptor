@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
+using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Services;
 
@@ -30,6 +31,42 @@ public static class ParameterConverter
     {
         var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
         return SupportedPrimitives.Contains(underlyingType) || underlyingType.IsEnum;
+    }
+
+    /// <summary>
+    /// Tries to convert a string input to the value of a parameter with the given unit. A
+    /// <see cref="StateUnit.Percent"/> input is entered from 0 to 100 and returned as the fraction from 0 to 1 the
+    /// parameter expects; integer types cannot hold a fraction and are returned unscaled.
+    /// </summary>
+    public static bool TryConvert(string? input, Type targetType, StateUnit? unit, out object? value)
+    {
+        if (!TryConvert(input, targetType, out value))
+        {
+            return false;
+        }
+
+        if (unit != StateUnit.Percent)
+        {
+            return true;
+        }
+
+        try
+        {
+            // Through decimal, so 33.3 becomes 0.333 and not 0.33299999999999996.
+            value = value switch
+            {
+                decimal percent => percent / 100m,
+                double percent => (double)((decimal)percent / 100m),
+                float percent => (float)((decimal)percent / 100m),
+                _ => value
+            };
+            return true;
+        }
+        catch (OverflowException)
+        {
+            value = null;
+            return false;
+        }
     }
 
     /// <summary>

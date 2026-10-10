@@ -219,17 +219,12 @@ else
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
 
-        // Reload the file to update Children dictionary with new parsed content
+        // Reload the file to update Children dictionary with new parsed content.
+        // The reload keeps the edited subject and applies its configuration.
         await File.OnFileChangedAsync(CancellationToken.None);
 
         // After the reload, so that the regions carry the subjects of the reloaded page.
         await RefreshDecorationsAsync();
-
-        // A reload replaces the instance when a configuration key was removed, so it is looked up again.
-        if (File.GetBlockSubject(blockIndex) is IConfigurable configurable)
-        {
-            await configurable.ApplyConfigurationAsync(CancellationToken.None);
-        }
 
         // Update dirty state
         _originalContent = _currentContent;
