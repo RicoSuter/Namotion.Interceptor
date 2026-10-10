@@ -1,4 +1,7 @@
 @using HomeBlaze.Components.Abstractions.Pages
+@using Microsoft.Extensions.Logging
+
+@inject ILogger<NavFolder> Logger
 
 <MudNavGroup Title="@Item.Title" Icon="@SubjectIconExtensions.ResolveMudBlazorIcon(Item.Icon)" Expanded="_expanded" ExpandedChanged="OnExpandedChanged">
     @if (_expanded && _children != null)
@@ -15,7 +18,7 @@
             }
             else if (child.IsFolder)
             {
-                <NavFolder Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
+                <NavFolder @key="child.Path" Item="child" NavigationResolver="NavigationResolver" CurrentPath="@CurrentPath" />
             }
         }
     }
@@ -44,8 +47,28 @@
             if (!string.IsNullOrEmpty(CurrentPath) && IsCurrentPageInFolder())
             {
                 _expanded = true;
-                _children ??= NavigationResolver.GetChildItems(Item.Subject).ToList();
             }
+        }
+
+        // Nothing observes the folder's children, so they are re-read on every parent render:
+        // NavMenu's refresh timer is what makes pages added or removed later show up here.
+        if (_expanded)
+        {
+            RefreshChildren();
+        }
+    }
+
+    private void RefreshChildren()
+    {
+        try
+        {
+            _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
+        }
+        catch (Exception exception)
+        {
+            // The graph changes on other threads while this runs on every refresh. An exception
+            // escaping here would end the circuit, so the previous list stays until the next refresh.
+            Logger.LogWarning(exception, "Error getting navigation items for {Path}", Item.Path);
         }
     }
 
@@ -62,9 +85,9 @@
     private void OnExpandedChanged(bool expanded)
     {
         _expanded = expanded;
-        if (_expanded && _children == null)
+        if (_expanded)
         {
-            _children = NavigationResolver.GetChildItems(Item.Subject).ToList();
+            RefreshChildren();
         }
     }
 }
