@@ -301,13 +301,14 @@ else
             return;
 
         // The block name is the subject's key in the page, so the names of the other blocks are taken.
-        var existingNames = Regex.Matches(_currentContent, @"```subject\(([^)]+)\)")
-            .Select(match => match.Groups[1].Value)
+        var existingNames = MarkdownDecorationParser.Parse(_currentContent)
+            .Where(region => region.Type == DecorationRegionType.SubjectBlock)
+            .Select(region => region.Name)
             .ToArray();
 
         var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
         {
-            Name = new SubjectNameOptions("Name", "", existingNames)
+            Name = new SubjectNameOptions("Block name", "", existingNames)
         });
 
         if (result?.Name is null)

@@ -92,8 +92,9 @@
     private string _subjectName = "";
     private string? _nameError;
     private bool _isNameEdited;
+    private bool _isCreating;
 
-    private bool CanCreate => _createdSubject is not null && _nameError is null && _isEditPanelValid;
+    private bool CanCreate => _createdSubject is not null && _nameError is null && _isEditPanelValid && !_isCreating;
 
     protected override void OnInitialized()
     {
@@ -113,7 +114,16 @@
     {
         // The subject only backs the form. It is attached to nothing until Create, so a subject that is
         // replaced here or left behind by Cancel is simply dropped.
-        _createdSubject = SubjectFactory.CreateSubject(descriptor.Type);
+        try
+        {
+            _createdSubject = SubjectFactory.CreateSubject(descriptor.Type);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add($"Failed to create subject: {exception.Message}", Severity.Error);
+            return;
+        }
+
         _selectedType = descriptor;
         _isEditPanelValid = false;
 
@@ -138,7 +148,9 @@
     private void OnNameChanged(string? name)
     {
         _subjectName = name ?? "";
-        _isNameEdited = true;
+
+        // A cleared name is not a choice to keep, so the next type gets its suggestion again.
+        _isNameEdited = !string.IsNullOrWhiteSpace(_subjectName);
         _nameError = ValidateName(_subjectName);
         RefreshDialog();
     }
@@ -194,6 +206,10 @@
             return;
         }
 
+        // A second click while the awaits below are pending would run BeforeSave again and attach the subject twice.
+        _isCreating = true;
+        RefreshDialog();
+
         try
         {
             // Attaching can start a hosted subject right away, and it reads its configuration once it
@@ -214,6 +230,11 @@
         catch (Exception exception)
         {
             Snackbar.Add($"Failed to create subject: {exception.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isCreating = false;
+            RefreshDialog();
         }
     }
 

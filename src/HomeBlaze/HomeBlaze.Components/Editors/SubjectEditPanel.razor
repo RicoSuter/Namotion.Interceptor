@@ -45,7 +45,7 @@
     [Parameter] public EventCallback<bool> IsValidChanged { get; set; }
 
     private ISubjectComponent? _subjectComponent;
-    private ISubjectEditComponent? _editComponent;
+    private ISubjectEditComponent? _subscribedEditComponent;
     private ConfigurationPropertiesEditor? _propertiesEditor;
     private bool? _reportedIsValid;
 
@@ -53,42 +53,40 @@
         ((IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup)) ||
          ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit));
 
-    public bool IsValid => _editComponent?.IsValid ?? _propertiesEditor?.IsValid ?? true;
+    // The hosted component is bound one render after this panel. Until then there is no editor to ask or to apply.
+    private bool IsSubjectComponentPending => UsesSubjectComponent && _subjectComponent is null;
 
-    protected override void OnParametersSet()
-    {
-        base.OnParametersSet();
-
-        // TODO: Extract event subscription/unsubscription to helper method - logic duplicated in OnParametersSet, OnAfterRender, and DisposeAsync
-        // Unsubscribe from previous edit component
-        if (_editComponent != null)
-        {
-            _editComponent.IsValidChanged -= OnIsValidChanged;
-            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-            _editComponent = null;
-        }
-    }
+    public bool IsValid => (_subjectComponent as ISubjectEditComponent)?.IsValid ?? _propertiesEditor?.IsValid ?? true;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await base.OnAfterRenderAsync(firstRender);
 
-        // Subscribe to new edit component if available
-        if (_subjectComponent is ISubjectEditComponent editComponent && _editComponent != editComponent)
+        var editComponent = _subjectComponent as ISubjectEditComponent;
+        if (_subscribedEditComponent != editComponent)
         {
-            if (_editComponent != null)
-            {
-                _editComponent.IsValidChanged -= OnIsValidChanged;
-                _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-            }
-
-            _editComponent = editComponent;
-            _editComponent.IsValidChanged += OnIsValidChanged;
-            _editComponent.IsDirtyChanged += OnIsDirtyChanged;
+            SubscribeTo(editComponent);
             StateHasChanged();
         }
 
         await ReportIsValidAsync();
+    }
+
+    private void SubscribeTo(ISubjectEditComponent? editComponent)
+    {
+        if (_subscribedEditComponent is not null)
+        {
+            _subscribedEditComponent.IsValidChanged -= OnIsValidChanged;
+            _subscribedEditComponent.IsDirtyChanged -= OnIsDirtyChanged;
+        }
+
+        _subscribedEditComponent = editComponent;
+
+        if (editComponent is not null)
+        {
+            editComponent.IsValidChanged += OnIsValidChanged;
+            editComponent.IsDirtyChanged += OnIsDirtyChanged;
+        }
     }
 
     private void OnIsValidChanged(bool isValid) => InvokeAsync(async () =>
@@ -101,9 +99,9 @@
 
     private async Task ReportIsValidAsync()
     {
-        // The hosted component is bound one render after this panel, and until then IsValid falls back
-        // to true. Reporting that would briefly enable the parent's confirm button for an invalid form.
-        if (UsesSubjectComponent && _subjectComponent is null)
+        // While the hosted component is pending, IsValid falls back to true. Reporting that would briefly
+        // enable the parent's confirm button for an invalid form.
+        if (!IsValidChanged.HasDelegate || IsSubjectComponentPending)
         {
             return;
         }
@@ -140,19 +138,19 @@
     /// <summary>
     /// Applies the buffered edits to the subject without persisting them.
     /// </summary>
-    /// <returns>False when there is no subject or the edits are invalid, in which case nothing was applied.</returns>
+    /// <returns>False when there is no subject, the editor is not ready yet or the edits are invalid, in which case nothing was applied.</returns>
     public async Task<bool> ApplyChangesAsync(CancellationToken cancellationToken)
     {
-        if (Subject == null) return false;
+        if (Subject == null || IsSubjectComponentPending) return false;
 
-        if (_editComponent != null)
+        if (_subjectComponent is ISubjectEditComponent editComponent)
         {
-            if (!_editComponent.IsValid)
+            if (!editComponent.IsValid)
             {
                 return false;
             }
 
-            await _editComponent.SaveAsync(cancellationToken);
+            await editComponent.SaveAsync(cancellationToken);
         }
         else
         {
@@ -199,12 +197,7 @@
 
     public ValueTask DisposeAsync()
     {
-        if (_editComponent != null)
-        {
-            _editComponent.IsValidChanged -= OnIsValidChanged;
-            _editComponent.IsDirtyChanged -= OnIsDirtyChanged;
-        }
-
+        SubscribeTo(null);
         return ValueTask.CompletedTask;
     }
 

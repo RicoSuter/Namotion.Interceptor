@@ -14,7 +14,8 @@
     <div class="subject-type-picker-body">
         <div class="subject-type-groups">
             <button type="button"
-                    class="@GetGroupClass(null)"
+                    class="subject-type-group"
+                    aria-pressed="@GetAriaPressed(null)"
                     @onclick="() => SelectGroup(null)"
                     data-testid="type-group-all">
                 <span>All</span>
@@ -24,7 +25,8 @@
             {
                 var groupName = group.Name;
                 <button type="button"
-                        class="@GetGroupClass(groupName)"
+                        class="subject-type-group"
+                        aria-pressed="@GetAriaPressed(groupName)"
                         @onclick="() => SelectGroup(groupName)"
                         data-testid="@($"type-group-{groupName.ToLowerInvariant()}")">
                     <span>@groupName</span>
@@ -111,11 +113,18 @@
         cursor: pointer;
     }
 
-    .subject-type-group:hover {
+    .subject-type-group:hover,
+    .subject-type-group:focus-visible {
         background: var(--mud-palette-action-default-hover);
     }
 
-    .subject-type-group.selected {
+    /* The selected group already has the hover background and MudBlazor removes the outline of every button. */
+    .subject-type-group:focus-visible {
+        outline: 2px solid var(--mud-palette-primary);
+        outline-offset: -2px;
+    }
+
+    .subject-type-group[aria-pressed="true"] {
         background: var(--mud-palette-action-default-hover);
         color: var(--mud-palette-primary);
     }
@@ -135,6 +144,8 @@
     .subject-type-row {
         display: flex;
         align-items: center;
+        /* MudBlazor centres the content of every button. */
+        justify-content: flex-start;
         gap: 12px;
         width: 100%;
         padding: 8px;
@@ -205,6 +216,7 @@
     [Parameter]
     public EventCallback<SubjectTypeDescriptor> OnTypeSelected { get; set; }
 
+    private IReadOnlyList<SubjectTypeDescriptor>? _refreshedTypes;
     private string _searchText = "";
     private string? _selectedGroup;
     private int _matchCount;
@@ -213,12 +225,25 @@
 
     protected override void OnParametersSet()
     {
-        Refresh();
+        // The host renders on every keystroke of its own fields, which sets the parameters again without changing them.
+        if (!ReferenceEquals(Types, _refreshedTypes))
+        {
+            _refreshedTypes = Types;
+            Refresh();
+        }
     }
 
     private void OnSearchChanged(string? searchText)
     {
         _searchText = searchText ?? "";
+
+        // A search spans all groups, so a match is never hidden behind a group that was selected before it.
+        // Selecting a group afterwards narrows the matches on purpose.
+        if (!string.IsNullOrWhiteSpace(_searchText))
+        {
+            _selectedGroup = null;
+        }
+
         Refresh();
     }
 
@@ -244,10 +269,8 @@
             .ToList();
     }
 
-    private string GetGroupClass(string? group)
+    private string GetAriaPressed(string? group)
     {
-        return string.Equals(group, _selectedGroup, StringComparison.Ordinal)
-            ? "subject-type-group selected"
-            : "subject-type-group";
+        return string.Equals(group, _selectedGroup, StringComparison.Ordinal) ? "true" : "false";
     }
 }

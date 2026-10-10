@@ -14,6 +14,7 @@ public class SubjectSetupDialogTests
 {
     private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 5000;
+    private const string MotorName = "Test motor";
 
     private readonly PlaywrightFixture _fixture;
 
@@ -87,7 +88,20 @@ public class SubjectSetupDialogTests
     private static async Task EnterMotorNameAsync(IPage page)
     {
         // The motor form reports its validity on key up, which a fill does not raise.
-        await Dialog(page).GetByLabel("Name", new() { Exact = true }).PressSequentiallyAsync("Test motor");
+        await Dialog(page).GetByLabel("Name", new() { Exact = true }).PressSequentiallyAsync(MotorName);
+    }
+
+    private static bool FileContains(string filePath, string text)
+    {
+        try
+        {
+            return File.ReadAllText(filePath).Contains(text, StringComparison.Ordinal);
+        }
+        catch (IOException)
+        {
+            // The writer can still hold the file, or has not created it yet.
+            return false;
+        }
     }
 
     [Fact]
@@ -106,6 +120,27 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0);
         await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0);
         await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task WhenTheDialogOpens_ThenTheTypeRowsAreLeftAligned()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+
+        // Act
+        await OpenDialogAsync(page);
+
+        // Assert - rows are equally wide, so centred content would start further left the longer its text is.
+        await Assertions.Expect(TypeRow(page, "gpiosubject")).ToBeVisibleAsync();
+        await Assertions.Expect(TypeRow(page, "luxtronikheatpump")).ToBeVisibleAsync();
+
+        // The dialog scales while it opens, so both icons are measured in the same frame.
+        var iconOffsets = await page.EvaluateAsync<double[]>(
+            "testIds => testIds.map(testId => document.querySelector(`[data-testid='${testId}'] .mud-icon-root`).getBoundingClientRect().left)",
+            new[] { "type-row-gpiosubject", "type-row-luxtronikheatpump" });
+
+        Assert.Equal(iconOffsets[0], iconOffsets[1], 0.5);
     }
 
     [Fact]
@@ -156,7 +191,10 @@ public class SubjectSetupDialogTests
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(0);
 
+        // Act
         await page.Locator("[data-testid='type-clear-search']").ClickAsync();
+
+        // Assert
         await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(SearchInput(page)).ToHaveValueAsync("");
     }
@@ -172,9 +210,56 @@ public class SubjectSetupDialogTests
         await page.Locator("[data-testid='type-group-layouts']").ClickAsync();
 
         // Assert
-        await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(2, new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
         await Assertions.Expect(TypeRow(page, "canvaslayout")).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task WhenSearchingWhileAGroupIsSelected_ThenAllGroupsAreSearched()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        var allGroup = page.Locator("[data-testid='type-group-all']");
+        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+        await layoutsGroup.ClickAsync();
+        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "true");
+
+        // Act
+        await SearchInput(page).FillAsync("simulated motor");
+
+        // Assert
+        await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(allGroup).ToHaveAttributeAsync("aria-pressed", "true");
+        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "false");
+    }
+
+    [Fact]
+    public async Task WhenAGroupIsSelectedDuringASearch_ThenItNarrowsTheMatchesAndSurvivesClearingTheSearch()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+        await SearchInput(page).FillAsync("simulated motor");
+        await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act
+        await layoutsGroup.ClickAsync();
+
+        // Assert
+        await Assertions.Expect(page.Locator("[data-testid='type-empty-state']"))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(0);
+
+        // Act
+        await page.Locator("[data-testid='type-clear-search']").ClickAsync();
+
+        // Assert
+        await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(TypeRow(page, "motor")).ToHaveCountAsync(0);
+        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "true");
     }
 
     [Fact]
@@ -195,7 +280,11 @@ public class SubjectSetupDialogTests
 
         // The suggested name is valid as it is, so the motor's own required name is all that Create waits for.
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act
         await EnterMotorNameAsync(page);
+
+        // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
@@ -217,7 +306,10 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(SearchInput(page)).ToHaveValueAsync("history");
         await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0);
 
+        // Act
         await PickTypeAsync(page, "sqlitehistorystoresubject");
+
+        // Assert
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create SQLite history");
         await Assertions.Expect(NameInput(page)).ToHaveValueAsync("SqliteHistoryStoreSubject");
     }
@@ -235,8 +327,10 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // The Shelly form reports its validity on key up, which a fill does not raise.
+        // Act - the Shelly form reports its validity on key up, which a fill does not raise.
         await page.GetByLabel("Host Address (IP or hostname)").PressSequentiallyAsync("192.0.2.1");
+
+        // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
@@ -297,6 +391,12 @@ public class SubjectSetupDialogTests
             // Assert
             await Assertions.Expect(Dialog(page)).Not.ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
             await AsyncTestHelpers.WaitUntilAsync(() => File.Exists(filePath), TimeSpan.FromSeconds(10));
+
+            // The file holds the edits of the motor form only when they were applied before it was written.
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => FileContains(filePath, MotorName),
+                TimeSpan.FromSeconds(10),
+                message: "The created file does not contain the motor name that was entered in the form.");
         }
         finally
         {
