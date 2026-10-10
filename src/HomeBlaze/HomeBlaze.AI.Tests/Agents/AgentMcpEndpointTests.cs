@@ -20,6 +20,7 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
 {
     private const string ExternalRoute = "/mcp";
     private const string RemoteAddressTestHeader = "X-Test-Remote-Address";
+    private const string LocalAddressTestHeader = "X-Test-Local-Address";
 
     private WebApplication? _app;
     private string _baseAddress = string.Empty;
@@ -45,12 +46,17 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
 
         _app = builder.Build();
 
-        // Simulates a remote caller; registered before the agent gate so the gate sees the changed address.
+        // Simulates other connection addresses; registered before the agent gate so the gate sees the changed addresses.
         _app.Use((context, next) =>
         {
-            if (context.Request.Headers.ContainsKey(RemoteAddressTestHeader))
+            if (context.Request.Headers.TryGetValue(RemoteAddressTestHeader, out var remoteAddress))
             {
-                context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.1");
+                context.Connection.RemoteIpAddress = IPAddress.Parse(remoteAddress.ToString());
+            }
+
+            if (context.Request.Headers.TryGetValue(LocalAddressTestHeader, out var localAddress))
+            {
+                context.Connection.LocalIpAddress = IPAddress.Parse(localAddress.ToString());
             }
 
             return next(context);
@@ -86,9 +92,9 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
     private Task<McpClient> ConnectAsync(string token) =>
         ConnectAsync(AgentMcpEndpoint.Route, "Bearer " + token);
 
-    private async Task<McpClient> ConnectAsync(string route, string? authorization)
+    private async Task<McpClient> ConnectAsync(string route, string? authorization, Dictionary<string, string>? additionalHeaders = null)
     {
-        var headers = new Dictionary<string, string>();
+        var headers = additionalHeaders ?? new Dictionary<string, string>();
         if (authorization is not null)
         {
             headers["Authorization"] = authorization;
@@ -161,7 +167,49 @@ public sealed class AgentMcpEndpointTests : IAsyncLifetime
         using var httpClient = new HttpClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", registration.Token);
-        request.Headers.Add(RemoteAddressTestHeader, "1");
+        request.Headers.Add(RemoteAddressTestHeader, "192.0.2.1");
+
+        // Act
+        using var response = await httpClient.SendAsync(request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task WhenTheRequestComesFromTheServersOwnNonLoopbackAddress_ThenAValidTokenIsAccepted()
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+        await using var client = await ConnectAsync(AgentMcpEndpoint.Route, "Bearer " + registration.Token, new Dictionary<string, string>
+        {
+            [RemoteAddressTestHeader] = "192.0.2.10",
+            [LocalAddressTestHeader] = "::ffff:192.0.2.10"
+        });
+
+        // Act
+        var tools = await client.ListToolsAsync();
+
+        // Assert
+        Assert.Equal(["browse", "update_memory"], tools.Select(tool => tool.Name).Order());
+    }
+
+    [Theory]
+    [InlineData("192.0.2.1", true)]
+    [InlineData("192.0.2.10", false)]
+    public async Task WhenTheRequestIsNotFromTheSameHostOrHasNoToken_ThenItIsRejected(string remoteAddress, bool sendToken)
+    {
+        // Arrange
+        using var registration = _registry.Register(CreateToolSet());
+        using var httpClient = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, _baseAddress + AgentMcpEndpoint.Route) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+        if (sendToken)
+        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", registration.Token);
+        }
+
+        request.Headers.Add(RemoteAddressTestHeader, remoteAddress);
+        request.Headers.Add(LocalAddressTestHeader, "192.0.2.10");
 
         // Act
         using var response = await httpClient.SendAsync(request);

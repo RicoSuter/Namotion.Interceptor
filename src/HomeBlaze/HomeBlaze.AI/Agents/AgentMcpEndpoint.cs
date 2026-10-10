@@ -10,7 +10,7 @@ using Namotion.Interceptor.Mcp;
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
-/// The MCP route used by CLI agents. Each request must come from a loopback address and carry the bearer token
+/// The MCP route used by CLI agents. Each request must come from the same host and carry the bearer token
 /// of a running turn; it then sees exactly that turn's tools.
 /// </summary>
 public static class AgentMcpEndpoint
@@ -29,7 +29,7 @@ public static class AgentMcpEndpoint
     /// </summary>
     /// <exception cref="InvalidOperationException">
     /// <see cref="AgentServiceCollectionExtensions.AddHomeBlazeAgents"/> was not called, or the HTTP transport is not
-    /// stateless or has no session options callback.
+    /// stateless.
     /// </exception>
     public static WebApplication MapHomeBlazeAgentMcp(this WebApplication app)
     {
@@ -40,11 +40,10 @@ public static class AgentMcpEndpoint
         }
 
         var transportOptions = app.Services.GetRequiredService<IOptions<HttpServerTransportOptions>>().Value;
-        if (!transportOptions.Stateless || transportOptions.ConfigureSessionOptions is null)
+        if (!transportOptions.Stateless)
         {
             throw new InvalidOperationException(
-                $"The agent MCP route requires the MCP HTTP transport to be stateless and to use {nameof(AgentMcpEndpoint)}.{nameof(ConfigureSessionOptions)} " +
-                "as its ConfigureSessionOptions callback; otherwise requests to the route would see the global tools.");
+                "The agent MCP route requires the MCP HTTP transport to be stateless; otherwise requests to the route would see the global tools.");
         }
 
         app.Use(AuthenticateAsync);
@@ -92,10 +91,8 @@ public static class AgentMcpEndpoint
         }
 
         var registry = context.RequestServices.GetRequiredService<AgentTurnTokenRegistry>();
-        var remoteAddress = context.Connection.RemoteIpAddress;
         var authorization = context.Request.Headers.Authorization.ToString();
-        if (remoteAddress is null ||
-            !IPAddress.IsLoopback(remoteAddress) ||
+        if (!IsSameHost(context.Connection.RemoteIpAddress, context.Connection.LocalIpAddress) ||
             !authorization.StartsWith(BearerScheme, StringComparison.OrdinalIgnoreCase) ||
             !registry.TryGetToolSet(authorization[BearerScheme.Length..], out var toolSet))
         {
@@ -107,6 +104,27 @@ public static class AgentMcpEndpoint
         context.Items[ToolSetItemKey] = toolSet;
         return next(context);
     }
+
+    private static bool IsSameHost(IPAddress? remoteAddress, IPAddress? localAddress)
+    {
+        if (remoteAddress is null)
+        {
+            return false;
+        }
+
+        remoteAddress = Normalize(remoteAddress);
+        if (IPAddress.IsLoopback(remoteAddress))
+        {
+            return true;
+        }
+
+        // A local client of a server bound only to a LAN address connects from that address. An off-host peer
+        // cannot complete a TCP handshake with the server's own address as source, so this does not open the route.
+        return localAddress is not null && remoteAddress.Equals(Normalize(localAddress));
+    }
+
+    private static IPAddress Normalize(IPAddress address) =>
+        address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 
     private static bool IsAgentRoute(HttpContext context) =>
         context.GetEndpoint()?.Metadata.GetMetadata<AgentRouteMarker>() is not null;
