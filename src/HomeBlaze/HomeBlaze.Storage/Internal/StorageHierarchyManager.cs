@@ -117,14 +117,22 @@ internal sealed class StorageHierarchyManager
     public void RemoveFromHierarchy(string path, IInterceptorSubject subject, Dictionary<string, IInterceptorSubject> children)
     {
         path = NormalizePath(path);
-        var segments = path.Split('/');
-        var key = GetChildKey(path, subject);
+        RemoveChild(path, GetChildKey(path, subject), folderOnly: false, children);
+    }
 
-        if (segments.Length == 1)
-        {
-            children.Remove(key);
-            return;
-        }
+    /// <summary>
+    /// Removes the VirtualFolder at the path together with everything below it.
+    /// </summary>
+    /// <returns>False when the path does not hold a VirtualFolder.</returns>
+    public bool RemoveFolderFromHierarchy(string path, Dictionary<string, IInterceptorSubject> children)
+    {
+        path = NormalizePath(path).TrimEnd('/');
+        return RemoveChild(path, Path.GetFileName(path), folderOnly: true, children);
+    }
+
+    private static bool RemoveChild(string path, string key, bool folderOnly, Dictionary<string, IInterceptorSubject> children)
+    {
+        var segments = path.Split('/');
 
         // Track folders and their new Children dicts as we traverse
         var foldersToUpdate = new List<(VirtualFolder folder, Dictionary<string, IInterceptorSubject> newChildren)>();
@@ -135,7 +143,7 @@ internal sealed class StorageHierarchyManager
             var folderName = segments[i];
 
             if (!current.TryGetValue(folderName, out var existing) || existing is not VirtualFolder vf)
-                return;
+                return false;
 
             // Create a COPY of the folder's Children (don't mutate the original!)
             var newChildren = new Dictionary<string, IInterceptorSubject>(vf.Children);
@@ -143,8 +151,12 @@ internal sealed class StorageHierarchyManager
             current = newChildren;
         }
 
-        // Remove the subject from the leaf folder's NEW children dict
-        current.Remove(key);
+        if (folderOnly && current.GetValueOrDefault(key) is not VirtualFolder)
+            return false;
+
+        // Remove the child from the leaf folder's NEW children dict
+        if (!current.Remove(key))
+            return false;
 
         // Reassign Children for all traversed folders (triggers change tracking)
         // Go in reverse order so child folders are updated before parent folders
@@ -153,6 +165,8 @@ internal sealed class StorageHierarchyManager
             var (folder, newChildren) = foldersToUpdate[i];
             folder.Children = newChildren;
         }
+
+        return true;
     }
 
     private static string NormalizePath(string path)

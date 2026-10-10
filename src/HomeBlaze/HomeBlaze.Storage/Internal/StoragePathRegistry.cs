@@ -65,6 +65,21 @@ internal sealed class StoragePathRegistry
         _fileSizes.TryRemove(lookupKey, out _);
     }
 
+    /// <summary>
+    /// Unregisters every subject whose path lies below the directory.
+    /// </summary>
+    public void UnregisterDirectory(string directoryPath)
+    {
+        var prefix = NormalizeForLookup(directoryPath).TrimEnd('/') + "/";
+        foreach (var (lookupKey, _) in _pathToSubject)
+        {
+            if (lookupKey.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                Unregister(lookupKey);
+            }
+        }
+    }
+
     public void UpdateHash(string path, string hash)
         => _contentHashes[NormalizeForLookup(path)] = hash;
 
