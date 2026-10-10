@@ -6,7 +6,7 @@ namespace HomeBlaze.AI.Agents;
 /// </summary>
 public sealed class AgentTriggerScheduler
 {
-    // Task.Delay rejects longer delays; the loop re-evaluates the policy after a capped wait.
+    // Task.Delay rejects delays above about 49.7 days; the 1-day cap keeps long waits within that and re-checked.
     private static readonly TimeSpan MaximumDelay = TimeSpan.FromDays(1);
 
     private readonly TimeProvider _timeProvider;
@@ -96,6 +96,7 @@ public sealed class AgentTriggerScheduler
     /// <summary>
     /// Runs until cancelled. Throws <see cref="OperationCanceledException"/> on cancellation.
     /// </summary>
+    /// <remarks>An exception thrown by the run callback ends the loop and propagates from the returned task.</remarks>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         while (true)
