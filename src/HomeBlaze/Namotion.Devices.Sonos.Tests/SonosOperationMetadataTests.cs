@@ -2,7 +2,11 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Media;
+using Namotion.Devices.Sonos.Tests.Testing;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Attributes;
 using Xunit;
 
@@ -97,6 +101,31 @@ public class SonosOperationMetadataTests
         Assert.NotNull(attribute);
         Assert.Equal(operationName, attribute.PropertyName);
         Assert.Equal(KnownAttributes.IsEnabled, attribute.AttributeName);
+    }
+
+    [Fact]
+    public void WhenPlaybackStateIsRegistered_ThenItsOwnDisplayPositionComesBeforeTheInterfaceOne()
+    {
+        // Arrange
+        var system = TestFixtures.CreateGroupedSystem();
+        IInterceptorSubject[] subjects = [system.Players[TestFixtures.OfficeUuid], system.Groups[TestFixtures.OfficeUuid]];
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        foreach (var subject in subjects)
+        {
+            subject.Context.AddFallbackContext(context);
+        }
+
+        // Act
+        // The first position set wins when the state attributes of a property are merged, class before interface.
+        var positions = subjects.Select(subject => subject
+            .TryGetRegisteredProperty(nameof(IMediaPlaybackState.PlaybackState))!
+            .ReflectionAttributes
+            .OfType<StateAttribute>()
+            .First(attribute => attribute.IsPositionSet)
+            .Position).ToArray();
+
+        // Assert
+        Assert.Equal([10, 10], positions);
     }
 
     [Fact]

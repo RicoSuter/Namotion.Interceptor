@@ -78,6 +78,7 @@ public partial class SonosPlayer : SonosDevice,
     /// player or its coordinator is not connected.
     /// </summary>
     [Derived]
+    [State(Position = 10)]
     public MediaPlaybackState? PlaybackState
     {
         get
