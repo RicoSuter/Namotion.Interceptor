@@ -161,7 +161,7 @@ Check the [installation guide](../administration/installation.md) for examples.
 
 Here's a complete example of a dashboard page:
 
-```markdown
+~~~~markdown
 ---
 title: Factory Dashboard
 navTitle: Dashboard
@@ -202,7 +202,7 @@ Temperature: **{{ cooler/Temperature }}** C
 ---
 
 For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
-```
+~~~~
 
 ---
 
