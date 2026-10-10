@@ -47,6 +47,19 @@ position: 1
 
 ---
 
+## Navigation Updates
+
+The navigation follows pages that are added, removed or changed while a browser tab is open:
+
+- **Sidebar.** The menu re-reads its items every 5 seconds, including the contents of every expanded folder. A folder appears once it contains a page.
+- **Top bar.** Pages with `location: AppBar` are read when the layout renders, which happens on navigation. Only pages at the top level of the data folder appear there.
+
+### Known Limitations and Follow-ups
+
+- A page with `location: AppBar` that is added or removed while a tab is open appears in or disappears from the top bar only after the next navigation in that tab. The 5 second refresh re-renders the sidebar menu, not the layout that owns the top bar.
+
+---
+
 ## Live Expressions
 
 Embed live values from your subject graph using the `{{ path }}` syntax:
@@ -101,7 +114,8 @@ Create subjects inline within your markdown using fenced code blocks:
 - Subjects are created when the page loads
 - If the subject type is a `BackgroundService`, it starts automatically
 - Subjects are stopped and disposed when the page is removed
-- Configuration changes in the JSON are applied reactively
+- A subject is kept when the page is reloaded, as long as its block keeps the same name and `$type`. Changed properties in the JSON are applied to the running subject, which keeps its runtime state
+- Changing the name or the `$type` of a block replaces the subject with a new one
 
 ### Widget Rendering
 

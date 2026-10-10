@@ -6,7 +6,12 @@
 public enum StateUnit
 {
     Default,
+
+    /// <summary>
+    /// A fraction from 0 to 1, displayed and entered in the operation dialog as 0 to 100 %.
+    /// </summary>
     Percent,
+
     DegreeCelsius,
     Watt,
     Kilowatt,

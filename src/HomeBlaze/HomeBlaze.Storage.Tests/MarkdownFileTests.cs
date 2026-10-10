@@ -1,4 +1,5 @@
 using System.Text;
+using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using HomeBlaze.Storage.Internal;
@@ -343,13 +344,105 @@ public class MarkdownFileTests
         Assert.Equal(string.Empty, result);
     }
 
+    [Fact]
+    public async Task WhenPageIsReloadedWithUnrelatedChange_ThenEmbeddedSubjectIsKept()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "embedded-unrelated.md", CreatePageWithMotor("# First heading", targetSpeed: 1000));
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-unrelated.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        var motor = Assert.IsType<Motor>(markdown.Children["mymotor"]);
+        motor.CurrentSpeed = 750;
+
+        // Act
+        await WriteFileAsync(storage, "embedded-unrelated.md", CreatePageWithMotor("# Second heading", targetSpeed: 1000));
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Same(motor, markdown.Children["mymotor"]);
+        Assert.Equal(750, motor.CurrentSpeed);
+        Assert.Contains(markdown.Children.Values.OfType<HtmlSegment>(), segment => segment.Html.Contains("Second heading"));
+    }
+
+    [Fact]
+    public async Task WhenPageIsReloadedWithChangedBlockProperty_ThenEmbeddedSubjectIsUpdatedInPlace()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "embedded-property.md", CreatePageWithMotor("# Heading", targetSpeed: 1000));
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-property.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        var motor = Assert.IsType<Motor>(markdown.Children["mymotor"]);
+        motor.CurrentSpeed = 750;
+
+        // Act
+        await WriteFileAsync(storage, "embedded-property.md", CreatePageWithMotor("# Heading", targetSpeed: 2000));
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Same(motor, markdown.Children["mymotor"]);
+        Assert.Equal(2000, motor.TargetSpeed);
+        Assert.Equal("MyMotor", motor.Name);
+        Assert.Equal(750, motor.CurrentSpeed);
+    }
+
+    [Fact]
+    public async Task WhenPageIsReloadedWithDifferentBlockType_ThenEmbeddedSubjectIsReplaced()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "embedded-type.md", CreatePageWithMotor("# Heading", targetSpeed: 1000));
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "embedded-type.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        var motor = Assert.IsType<Motor>(markdown.Children["mymotor"]);
+
+        // Act
+        var content = $$"""
+            # Heading
+
+            ```subject(mymotor)
+            {
+              "$type": "{{typeof(FluentStorageContainer).FullName}}",
+              "storageType": "inmemory"
+            }
+            ```
+            """;
+        await WriteFileAsync(storage, "embedded-type.md", content);
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotSame(motor, markdown.Children["mymotor"]);
+        Assert.IsType<FluentStorageContainer>(markdown.Children["mymotor"]);
+    }
+
+    private static string CreatePageWithMotor(string heading, int targetSpeed) => $$"""
+        {{heading}}
+
+        ```subject(mymotor)
+        {
+          "$type": "{{typeof(Motor).FullName}}",
+          "name": "MyMotor",
+          "targetSpeed": {{targetSpeed}}
+        }
+        ```
+        """;
+
     private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()
     {
         var typeProvider = new TypeProvider();
+        typeProvider.AddAssembly(typeof(Motor).Assembly);
+        typeProvider.AddAssembly(typeof(FluentStorageContainer).Assembly);
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var context = InterceptorSubjectContext.Create();
 
+        // The context of the application: an embedded subject is updated through the configuration
+        // properties of its registry entry when its page is reloaded.
         var services = new ServiceCollection();
+        var context = SubjectContextFactory.Create(services);
+
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton<IInterceptorSubjectContext>(context);

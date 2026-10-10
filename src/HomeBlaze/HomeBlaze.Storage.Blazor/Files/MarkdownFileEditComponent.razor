@@ -201,15 +201,10 @@ else
         // Refresh decorations
         await RefreshDecorationsAsync();
 
-        // Save the file, which also reloads it on the worker of its storage
+        // Save the file, which also reloads it on the worker of its storage. The reload keeps the edited
+        // subject and applies its configuration.
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
-
-        // Apply configuration if needed
-        if (subject is IConfigurable configurable)
-        {
-            await configurable.ApplyConfigurationAsync(CancellationToken.None);
-        }
 
         // Update dirty state
         _originalContent = _currentContent;

@@ -1,7 +1,5 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Services
-@using HomeBlaze.Storage.Abstractions
-@using Namotion.Interceptor.Tracking.Parent
 
 @implements IAsyncDisposable
 
@@ -133,8 +131,9 @@
     }
 
     /// <summary>
-    /// Writes the configuration through the nearest IConfigurationWriter among the subject's parents,
-    /// else the root manager, and applies it.
+    /// Writes the configuration that contains the subject through the nearest IConfigurationWriter among its
+    /// parents, else the root manager, and applies it. Nothing is written for a subject that is part of no
+    /// configuration, such as a file, which its edit component has saved.
     /// </summary>
     public async Task PersistAsync(CancellationToken cancellationToken)
     {
@@ -143,25 +142,14 @@
 
         try
         {
-            if (subject is not IConfigurable)
+            // The first configurable parent would be wrong here: for a file that is its storage, whose
+            // configuration does not contain the file.
+            var configurationOwner = subject.TryGetConfigurationOwner();
+            if (configurationOwner is IConfigurable configurable)
             {
-                subject = subject.TryGetFirstParent<IConfigurable>() as IInterceptorSubject;
-            }
-
-            if (subject is IConfigurable)
-            {
-                var configurationWriter = RootManager.GetConfigurationWriter(subject);
-                await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
-            }
-
-            if (subject is IStorageFile storageFile)
-            {
-                await storageFile.OnFileChangedAsync(cancellationToken);
-            }
-
-            if (subject is IConfigurable configurableSubject)
-            {
-                await configurableSubject.ApplyConfigurationAsync(cancellationToken);
+                var configurationWriter = RootManager.GetConfigurationWriter(configurationOwner);
+                await configurationWriter.WriteConfigurationAsync(configurationOwner, CancellationToken.None);
+                await configurable.ApplyConfigurationAsync(cancellationToken);
             }
 
             Snackbar.Add("Configuration saved.", Severity.Info);

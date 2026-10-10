@@ -1,0 +1,8 @@
+{
+  "$type": "Namotion.Devices.Sonos.SonosSystem",
+  "seedHost": null,
+  "eventCallbackHost": null,
+  "eventPort": 6329,
+  "pollingInterval": "00:00:30",
+  "retryInterval": "00:00:30"
+}

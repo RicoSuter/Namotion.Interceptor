@@ -1,3 +1,5 @@
+using HomeBlaze.Abstractions.Attributes;
+
 namespace HomeBlaze.Services.Tests;
 
 public class ParameterConverterTests
@@ -205,6 +207,79 @@ public class ParameterConverterTests
     {
         // Act
         var success = ParameterConverter.TryConvert("", typeof(int), out var value);
+
+        // Assert
+        Assert.False(success);
+    }
+
+    [Theory]
+    [InlineData("20", "0.2")]
+    [InlineData("100", "1")]
+    [InlineData("12.5", "0.125")]
+    [InlineData("-100", "-1")]
+    [InlineData("0", "0")]
+    public void WhenPercentDecimalIsEntered_ThenTheFractionIsReturned(string input, string expected)
+    {
+        // Act
+        var success = ParameterConverter.TryConvert(input, typeof(decimal), StateUnit.Percent, out var value);
+
+        // Assert
+        Assert.True(success);
+        Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), value);
+    }
+
+    [Fact]
+    public void WhenPercentDoubleIsEntered_ThenTheFractionIsReturned()
+    {
+        // Act
+        var success = ParameterConverter.TryConvert("33.3", typeof(double), StateUnit.Percent, out var value);
+
+        // Assert
+        Assert.True(success);
+        Assert.Equal(0.333, value);
+    }
+
+    [Fact]
+    public void WhenPercentNullableDecimalIsEntered_ThenTheFractionIsReturned()
+    {
+        // Act
+        var success = ParameterConverter.TryConvert("50", typeof(decimal?), StateUnit.Percent, out var value);
+
+        // Assert
+        Assert.True(success);
+        Assert.Equal(0.5m, value);
+    }
+
+    [Fact]
+    public void WhenPercentNullableDecimalIsEmpty_ThenNullIsReturned()
+    {
+        // Act
+        var success = ParameterConverter.TryConvert("", typeof(decimal?), StateUnit.Percent, out var value);
+
+        // Assert
+        Assert.True(success);
+        Assert.Null(value);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(StateUnit.Default)]
+    [InlineData(StateUnit.DegreeCelsius)]
+    public void WhenUnitIsNotPercent_ThenTheValueIsUnchanged(StateUnit? unit)
+    {
+        // Act
+        var success = ParameterConverter.TryConvert("20", typeof(decimal), unit, out var value);
+
+        // Assert
+        Assert.True(success);
+        Assert.Equal(20m, value);
+    }
+
+    [Fact]
+    public void WhenPercentInputIsInvalid_ThenConversionFails()
+    {
+        // Act
+        var success = ParameterConverter.TryConvert("abc", typeof(decimal), StateUnit.Percent, out _);
 
         // Assert
         Assert.False(success);

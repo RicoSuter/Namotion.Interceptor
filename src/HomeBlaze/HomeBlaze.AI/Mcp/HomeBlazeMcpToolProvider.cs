@@ -1,10 +1,13 @@
 using System.Text.Json;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Models;
+using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -30,7 +33,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             path = new { type = "string", description = "Subject path" },
             method = new { type = "string", description = "Method name" },
-            parameters = new { type = "object", description = "Method parameters (optional)" }
+            parameters = new { type = "object", description = "Arguments by parameter name, in the type, format and unit list_methods gives (optional)" }
         },
         required = new[] { "path", "method" }
     });
@@ -60,7 +63,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         yield return new McpToolInfo
         {
             Name = "list_methods",
-            Description = "List operations and queries available on a subject at the given path.",
+            Description = "List operations and queries available on a subject at the given path, with each parameter's type, format and unit.",
             InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync
         };
@@ -88,14 +91,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             kind = method.Kind.ToString().ToLowerInvariant(),
             title = method.Title,
             description = method.Description,
-            returnType = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
+            returnType = JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
             parameters = method.Parameters
                 .Where(parameter => parameter.RequiresInput)
-                .Select(parameter => new
-                {
-                    name = parameter.Name,
-                    type = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(parameter.Type)
-                })
+                .Select(parameter => McpMethodParameter.Create(
+                    parameter.Name, parameter.Type, parameter.IsNullable, GetUnitDescription(parameter.Unit)))
                 .ToArray()
         });
 
@@ -122,27 +122,23 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Operations are not allowed in read-only mode." };
         }
 
+        var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
+        var (arguments, argumentError) = ReadArguments(input, inputParameters);
+        if (argumentError is not null)
+        {
+            return new { error = argumentError };
+        }
+
         try
         {
-            // Parse user-input arguments from JSON
-            object?[]? userParameters = null;
-            if (input.TryGetProperty("parameters", out var argumentsElement))
-            {
-                var inputParams = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
-                userParameters = new object?[inputParams.Length];
-
-                for (var i = 0; i < inputParams.Length; i++)
-                {
-                    var parameter = inputParams[i];
-                    if (argumentsElement.TryGetProperty(parameter.Name, out var argumentValue))
-                    {
-                        userParameters[i] = JsonSerializer.Deserialize(argumentValue.GetRawText(), parameter.Type);
-                    }
-                }
-            }
-
-            var result = await method.InvokeAsync(userParameters, _serviceProvider, cancellationToken);
+            var result = await method.InvokeAsync(arguments, _serviceProvider, cancellationToken);
             return result is not null ? new { success = true, result } : new { success = true };
+        }
+        catch (ArgumentException exception)
+        {
+            // Argument validation messages are written for the caller, for example listing the known values.
+            _logger.LogWarning(exception, "Method '{MethodName}' rejected an argument.", methodName);
+            return new { error = exception.Message };
         }
         catch (Exception exception)
         {
@@ -150,6 +146,67 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return new { error = "Method invocation failed. Check server logs for details." };
         }
     }
+
+    private static (object?[]? Arguments, string? Error) ReadArguments(JsonElement input, MethodParameter[] inputParameters)
+    {
+        JsonElement? argumentsObject = null;
+        if (input.TryGetProperty("parameters", out var argumentsElement) && argumentsElement.ValueKind != JsonValueKind.Null)
+        {
+            if (argumentsElement.ValueKind != JsonValueKind.Object)
+            {
+                return (null, $"'parameters' must be an object. {DescribeExpectedParameters(inputParameters)}");
+            }
+
+            foreach (var argument in argumentsElement.EnumerateObject())
+            {
+                if (!inputParameters.Any(parameter => parameter.Name == argument.Name))
+                {
+                    return (null, $"Unknown parameter '{argument.Name}'. {DescribeExpectedParameters(inputParameters)}");
+                }
+            }
+
+            argumentsObject = argumentsElement;
+        }
+
+        var arguments = new object?[inputParameters.Length];
+        for (var i = 0; i < inputParameters.Length; i++)
+        {
+            var parameter = inputParameters[i];
+            if (argumentsObject is not { } providedArguments || !providedArguments.TryGetProperty(parameter.Name, out var argumentValue))
+            {
+                // A missing non-nullable argument would otherwise reach the method as default, for example a volume of 0.
+                if (!parameter.IsNullable)
+                {
+                    return (null, $"Missing parameter '{parameter.Name}'. {DescribeExpectedParameters(inputParameters)}");
+                }
+
+                continue;
+            }
+
+            try
+            {
+                arguments[i] = McpValueConverter.Deserialize(argumentValue, parameter.Type);
+            }
+            catch (JsonException exception)
+            {
+                return (null, $"Invalid value for parameter '{parameter.Name}': {exception.Message}");
+            }
+        }
+
+        return (arguments, null);
+    }
+
+    private static string DescribeExpectedParameters(MethodParameter[] inputParameters) =>
+        inputParameters.Length == 0
+            ? "The method takes no parameters."
+            : $"Expected parameters: {string.Join(", ", inputParameters.Select(parameter => parameter.Name))}.";
+
+    private static string? GetUnitDescription(StateUnit? unit) => unit switch
+    {
+        null or StateUnit.Default => null,
+        StateUnit.Percent => "fraction where 1 = 100% (0.2 = 20%)",
+        _ => $"unit: {unit}"
+    };
 
     private RegisteredSubject? ResolveSubject(string path)
     {

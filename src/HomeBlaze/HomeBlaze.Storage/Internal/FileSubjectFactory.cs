@@ -13,9 +13,6 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 internal sealed class FileSubjectFactory
 {
-    // What the serializer writes into a configurable subject's JSON: the full name of its type.
-    private const string TypeDiscriminator = "$type";
-
     private readonly SubjectTypeRegistry _typeRegistry;
     private readonly ConfigurableSubjectSerializer _serializer;
     private readonly IServiceProvider _serviceProvider;
@@ -86,7 +83,7 @@ internal sealed class FileSubjectFactory
     {
         using var document = JsonDocument.Parse(json);
         return document.RootElement.ValueKind == JsonValueKind.Object &&
-               document.RootElement.TryGetProperty(TypeDiscriminator, out var typeName) &&
+               document.RootElement.TryGetProperty(ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName, out var typeName) &&
                typeName.ValueKind == JsonValueKind.String &&
                typeName.ValueEquals(subject.GetType().FullName);
     }

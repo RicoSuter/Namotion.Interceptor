@@ -119,7 +119,7 @@ Reading the content of a file to its end on the worker has the same limit, but t
 
 **Connecting and stopping**
 
-A connection to the storage owns its worker, its index and its timers. Connecting again ends the old connection, lets its running work finish, and starts a new connection with every subject rebuilt. Applying the configuration of the storage therefore connects again only when a setting of the connection changed (storage type, connection string, container name, file watching, reconcile interval) or the storage is not connected. Saving a page in the editor applies the configuration of the storage that holds it, which changes nothing while the storage is connected. A connect that arrives while another one is running waits for it to finish.
+A connection to the storage owns its worker, its index and its timers. Connecting again ends the old connection, lets its running work finish, and starts a new connection with every subject rebuilt. Applying the configuration of the storage therefore connects again only when a setting of the connection changed (storage type, connection string, container name, file watching, reconcile interval) or the storage is not connected. A connect that arrives while another one is running waits for it to finish.
 
 `StopAsync` stops the file watcher and the timers, so the tree no longer follows the storage, while writes still work. A pass that is running or already queued on the worker still completes. `StartAsync` connects again.
 

@@ -1,0 +1,92 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SonosPlayer))]
+@implements ISubjectComponent
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Speaker" Class="mr-2" />
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.h6">@Player?.RoomName</MudText>
+                <MudText Typo="Typo.caption">@Player?.Model</MudText>
+            </MudStack>
+            <MudSpacer />
+            @if (Player?.Source is { } source && source != SonosSource.None)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@source</MudChip>
+            }
+            @if (Player?.BatteryLevel is { } battery)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Icon="@(Player.IsCharging == true ? Icons.Material.Filled.BatteryChargingFull : Icons.Material.Filled.BatteryStd)">
+                    @battery.ToString("P0")
+                </MudChip>
+            }
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+            @if (Player?.CurrentTrackImageUri is { } image && image != _failedImageUri)
+            {
+                <img src="@image" alt="" width="64" height="64" class="rounded flex-shrink-0" style="object-fit: cover"
+                     @onerror="@(() => _failedImageUri = image)" />
+            }
+            else
+            {
+                <div class="d-flex align-center justify-center rounded flex-shrink-0"
+                     style="width: 64px; height: 64px; background-color: var(--mud-palette-action-default-hover)">
+                    <MudIcon Icon="@(Player?.Source == SonosSource.Radio ? Icons.Material.Filled.Radio : Icons.Material.Filled.MusicNote)"
+                             Class="mud-text-secondary" />
+                </div>
+            }
+            <MudStack Spacing="0">
+                <MudText Typo="Typo.body1">@SonosTrackText.GetTitleOrState(Player?.CurrentTrackTitle, Player?.SourceTitle, Player?.IsPlaying)</MudText>
+                <MudText Typo="Typo.caption">@SonosTrackText.GetCaption(Player?.CurrentTrackArtist, Player?.CurrentTrackTitle, Player?.SourceTitle)</MudText>
+            </MudStack>
+        </MudStack>
+
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+            <MudIconButton Icon="@Icons.Material.Filled.SkipPrevious" Disabled="@(Player?.Previous_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.PreviousAsync(CancellationToken.None)))" />
+            <MudIconButton Icon="@(Player?.IsPlaying == true ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                           Disabled="@(Player?.TogglePlayback_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.TogglePlaybackAsync(CancellationToken.None)))" />
+            <MudIconButton Icon="@Icons.Material.Filled.SkipNext" Disabled="@(Player?.Next_IsEnabled != true)"
+                           OnClick="@(() => RunAsync(player => player.NextAsync(CancellationToken.None)))" />
+            <MudIconButton Icon="@(Player?.IsMuted == true ? Icons.Material.Filled.VolumeOff : Icons.Material.Filled.VolumeUp)"
+                           Disabled="@(!(Player?.IsMuted == true ? Player.Unmute_IsEnabled : Player?.Mute_IsEnabled == true))"
+                           OnClick="@(() => RunAsync(player => player.IsMuted == true ? player.UnmuteAsync(CancellationToken.None) : player.MuteAsync(CancellationToken.None)))" />
+            <MudSlider T="int" Min="0" Max="100" Immediate="false" Class="flex-grow-1"
+                       Disabled="@(Player?.SetVolume_IsEnabled != true)"
+                       Value="@((int)((Player?.Volume ?? 0m) * 100m))"
+                       ValueChanged="@(value => RunAsync(player => player.SetVolumeAsync(value / 100m, CancellationToken.None)))" />
+        </MudStack>
+
+        @if (Player?.HomeTheater is { } homeTheater)
+        {
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Wrap="Wrap.Wrap">
+                <MudSwitch T="bool" Label="Night mode" Color="Color.Primary" Size="Size.Small"
+                           Disabled="@(!homeTheater.SetNightMode_IsEnabled)"
+                           Value="@(homeTheater.NightMode == true)"
+                           ValueChanged="@(value => RunAsync(_ => homeTheater.SetNightModeAsync(value, CancellationToken.None)))" />
+                <MudSwitch T="bool" Label="Speech enhancement" Color="Color.Primary" Size="Size.Small"
+                           Disabled="@(!homeTheater.SetSpeechEnhancement_IsEnabled)"
+                           Value="@(homeTheater.SpeechEnhancement == true)"
+                           ValueChanged="@(value => RunAsync(_ => homeTheater.SetSpeechEnhancementAsync(value, CancellationToken.None)))" />
+            </MudStack>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SonosPlayer? Player => Subject as SonosPlayer;
+
+    // Some browsers block the speaker's plain HTTP art on an HTTPS page, and a browser outside the speakers' network
+    // cannot reach it. The placeholder then stays until the art URI changes, so a failing image is not reloaded.
+    private string? _failedImageUri;
+
+    private Task RunAsync(Func<SonosPlayer, Task> command) =>
+        Player is { } player ? SonosCommands.RunAsync(Snackbar, () => command(player)) : Task.CompletedTask;
+}
