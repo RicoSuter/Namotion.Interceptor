@@ -2,9 +2,9 @@ namespace HomeBlaze.AI.Tests.Agents.Cli;
 
 /// <summary>
 /// Writes a shell script that stands in for the Claude CLI: it records each invocation's arguments, standard
-/// input and MCP configuration, then replays a fixture.
+/// input and MCP configuration, then replays a fixture. Disposing deletes its temporary directory.
 /// </summary>
-internal sealed class FakeClaudeCli
+internal sealed class FakeClaudeCli : IDisposable
 {
     private FakeClaudeCli(string directory, string scriptPath)
     {
@@ -46,6 +46,18 @@ internal sealed class FakeClaudeCli
         {
             var path = Path.Combine(Directory, "pid.txt");
             return File.Exists(path) && int.TryParse(File.ReadAllText(path).Trim(), out var processId) ? processId : null;
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            System.IO.Directory.Delete(Directory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A temporary directory left behind does not affect the test outcome.
         }
     }
 

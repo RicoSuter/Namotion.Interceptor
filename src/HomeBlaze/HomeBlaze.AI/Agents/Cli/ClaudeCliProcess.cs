@@ -50,6 +50,17 @@ public sealed class ClaudeCliProcess
         ClaudeCliInvocation invocation, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(invocation.FileName))
+        {
+            throw new AgentTurnException(AgentFailureKind.Configuration, "The Claude CLI path is not set.");
+        }
+
+        if (!Directory.Exists(invocation.WorkingDirectory))
+        {
+            throw new AgentTurnException(
+                AgentFailureKind.Configuration,
+                $"The working directory '{invocation.WorkingDirectory}' of the Claude CLI does not exist.");
+        }
 
         var startInfo = new ProcessStartInfo(invocation.FileName)
         {
@@ -150,8 +161,30 @@ public sealed class ClaudeCliProcess
                 }
             }
 
+            // The helpers end once the pipes reach the end or the token is cancelled; the bound only guards against a
+            // descendant that escaped the kill and still holds a pipe open.
+            await Task.WhenAll(standardErrorTask ?? Task.CompletedTask, standardInputTask ?? Task.CompletedTask)
+                .WaitAsync(KilledProcessExitTimeout)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             ObserveFailure(standardErrorTask);
             ObserveFailure(standardInputTask);
+
+            // Releases the pipe handles now instead of leaving them to finalizers.
+            DisposeIgnoringBrokenPipe(process.StandardInput);
+            DisposeIgnoringBrokenPipe(process.StandardOutput);
+            DisposeIgnoringBrokenPipe(process.StandardError);
+        }
+    }
+
+    private static void DisposeIgnoringBrokenPipe(IDisposable stream)
+    {
+        try
+        {
+            stream.Dispose();
+        }
+        catch (IOException)
+        {
+            // Disposing standard input flushes what is left, which fails when the CLI has exited.
         }
     }
 

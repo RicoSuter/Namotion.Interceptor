@@ -11,7 +11,7 @@ public class ClaudeCliProcessTests
     public async Task WhenTheCliSucceeds_ThenTextSessionUsageAndRateLimitAreReturnedAndDeltasStreamed()
     {
         // Arrange
-        var cli = FakeClaudeCli.Create("success.jsonl");
+        using var cli = FakeClaudeCli.Create("success.jsonl");
         var updates = new List<AgentTurnUpdate>();
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hello there");
 
@@ -33,7 +33,7 @@ public class ClaudeCliProcessTests
     public async Task WhenTheCliReportsAnAuthenticationError_ThenTheErrorCodeIsReturned()
     {
         // Arrange
-        var cli = FakeClaudeCli.Create("not-logged-in.jsonl", exitCode: 1);
+        using var cli = FakeClaudeCli.Create("not-logged-in.jsonl", exitCode: 1);
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
 
         // Act
@@ -49,7 +49,7 @@ public class ClaudeCliProcessTests
     public async Task WhenTheCliWritesToStandardError_ThenItIsCapturedWithTheResult()
     {
         // Arrange
-        var cli = FakeClaudeCli.Create("success.jsonl", resumeFixture: "resume-missing.jsonl");
+        using var cli = FakeClaudeCli.Create("success.jsonl", resumeFixture: "resume-missing.jsonl");
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p", "--resume", "x"], cli.Directory, "hi");
 
         // Act
@@ -65,7 +65,7 @@ public class ClaudeCliProcessTests
     public async Task WhenTheStandardInputIsLargerThanThePipeBuffer_ThenItIsWrittenCompletely()
     {
         // Arrange
-        var cli = FakeClaudeCli.Create("success.jsonl");
+        using var cli = FakeClaudeCli.Create("success.jsonl");
         var input = new string('x', 1024 * 1024);
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, input);
 
@@ -89,11 +89,40 @@ public class ClaudeCliProcessTests
         Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
     }
 
+    [Fact]
+    public async Task WhenTheCliPathIsEmpty_ThenAConfigurationErrorIsThrown()
+    {
+        // Arrange
+        var invocation = new ClaudeCliInvocation(" ", ["-p"], Path.GetTempPath(), "hi");
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
+            new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+        Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
+        Assert.Equal("The Claude CLI path is not set.", exception.Message);
+    }
+
+    [UnixFact]
+    public async Task WhenTheWorkingDirectoryDoesNotExist_ThenAConfigurationErrorNamesTheDirectory()
+    {
+        // Arrange
+        using var cli = FakeClaudeCli.Create("success.jsonl");
+        var workingDirectory = Path.Combine(cli.Directory, "missing");
+        var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], workingDirectory, "hi");
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<AgentTurnException>(() =>
+            new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), CancellationToken.None));
+        Assert.Equal(AgentFailureKind.Configuration, exception.Kind);
+        Assert.Contains(workingDirectory, exception.Message);
+        Assert.Empty(cli.Invocations);
+    }
+
     [UnixFact]
     public async Task WhenCancelled_ThenTheProcessIsKilled()
     {
         // Arrange
-        var cli = FakeClaudeCli.Create("success.jsonl", sleepSeconds: 30);
+        using var cli = FakeClaudeCli.Create("success.jsonl", sleepSeconds: 30);
         var invocation = new ClaudeCliInvocation(cli.ScriptPath, ["-p"], cli.Directory, "hi");
         using var cancellation = new CancellationTokenSource();
         var run = new ClaudeCliProcess().RunAsync(invocation, new SynchronousProgress<AgentTurnUpdate>(_ => { }), cancellation.Token);
