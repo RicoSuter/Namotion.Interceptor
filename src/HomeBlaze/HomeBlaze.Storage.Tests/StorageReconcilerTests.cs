@@ -2,6 +2,7 @@ using System.Text;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -413,6 +414,64 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenStorageIsDisposedWhileSecondReconnectWaits_ThenThatReconnectFailsToo()
+    {
+        // Arrange
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+        var waitingReconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Act
+        storage.Dispose();
+        gate.Release();
+        await pass;
+
+        // Assert
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => reconnect);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => waitingReconnect);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+        Assert.Equal(StorageStatus.Disconnected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenReconnectIsCancelledWhilePreviousWorkRuns_ThenItFailsAndLaterReconnectWaitsAgain()
+    {
+        // Arrange
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        WriteFile("Slow.gated");
+        var gate = GatedFile.PauseNextLoad();
+        var pass = storage.ReconcileAsync();
+        await gate.WhenReachedAsync();
+        using var cancellation = new CancellationTokenSource();
+        var reconnect = storage.ConnectAsync(cancellation.Token);
+
+        // Act
+        await cancellation.CancelAsync();
+        var exception = await Record.ExceptionAsync(() => reconnect);
+        var previousWorkWasRunning = !pass.IsCompleted;
+        var statusAfterCancelledReconnect = storage.Status;
+        var laterReconnect = storage.ConnectAsync(CancellationToken.None);
+        var laterReconnectWasWaiting = !laterReconnect.IsCompleted;
+        gate.Release();
+        await pass;
+        await laterReconnect;
+
+        // Assert
+        Assert.IsType<OperationCanceledException>(exception, exactMatch: false);
+        Assert.True(previousWorkWasRunning);
+        Assert.Equal(StorageStatus.Error, statusAfterCancelledReconnect);
+        Assert.True(laterReconnectWasWaiting);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Notes.md", "Slow.gated"], storage.Children.Keys.Order());
+    }
+
+    [Fact]
     public async Task WhenStorageIsDisposed_ThenConfigurationIsNotWritten()
     {
         // Arrange
@@ -566,6 +625,27 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenPlainFileFailsToRefreshAfterBlobIsWritten_ThenNextPassRefreshesIt()
+    {
+        // Arrange
+        WriteFile("Data.bin", "first");
+        var storage = await ConnectAsync();
+        var file = (GenericFile)storage.Children["Data.bin"];
+        var failingWrite = new FailingWrite(nameof(GenericFile.FileSize));
+        Context!.AddService<IWriteInterceptor>(failingWrite);
+        failingWrite.FailNext();
+
+        // Act
+        await WriteBlobAsync(storage, "Data.bin", "second version");
+        var sizeAfterWrite = file.FileSize;
+        await storage.ReconcileAsync();
+
+        // Assert
+        Assert.Equal("first".Length, sizeAfterWrite);
+        Assert.Equal("second version".Length, file.FileSize);
+    }
+
+    [Fact]
     public async Task WhenFileChangesWhileItsSubjectLoads_ThenNextPassReloadsIt()
     {
         // Arrange
@@ -625,6 +705,23 @@ public class StorageReconcilerTests : StorageTestBase
                     _changes.Add((change.Subject, change.IsContextAttach, ExecutionContext.IsFlowSuppressed()));
                 }
             }
+        }
+    }
+
+    private sealed class FailingWrite(string propertyName) : IWriteInterceptor
+    {
+        private int _failNext;
+
+        public void FailNext() => Volatile.Write(ref _failNext, 1);
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            if (context.Property.Name == propertyName && Interlocked.Exchange(ref _failNext, 0) == 1)
+            {
+                throw new InvalidOperationException("The write was made to fail.");
+            }
+
+            next(ref context);
         }
     }
 

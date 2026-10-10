@@ -158,11 +158,18 @@ public partial class FluentStorageContainer :
         if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
+        // Read before the wait at the gate, so a Dispose during that wait fails this connect as well.
+        int disposeCount;
+        lock (_connectionLock)
+        {
+            disposeCount = _disposeCount;
+        }
+
         // One connect at a time: two of them would each end the same connection and both start a new one.
         await _connectGate.WaitAsync(cancellationToken);
         try
         {
-            await ReplaceConnectionAsync(isInMemory, cancellationToken);
+            await ReplaceConnectionAsync(isInMemory, disposeCount, cancellationToken);
         }
         finally
         {
@@ -170,16 +177,26 @@ public partial class FluentStorageContainer :
         }
     }
 
-    private async Task ReplaceConnectionAsync(bool isInMemory, CancellationToken cancellationToken)
+    private async Task ReplaceConnectionAsync(bool isInMemory, int disposeCount, CancellationToken cancellationToken)
     {
-        var previous = _connection;
-        previous?.End();
-
-        int disposeCount;
+        StorageConnection? previous;
         lock (_connectionLock)
         {
-            disposeCount = _disposeCount;
-            Status = StorageStatus.Initializing;
+            // After a Dispose during the wait at the gate, the connection that exists is not this connect's to
+            // end: a connect that started later can have published it.
+            ObjectDisposedException.ThrowIf(_disposeCount != disposeCount, this);
+            previous = _connection;
+        }
+
+        // Ended before the status is written, so a pass of it that completes now does not overwrite the status.
+        previous?.End();
+
+        lock (_connectionLock)
+        {
+            if (_disposeCount == disposeCount)
+            {
+                Status = StorageStatus.Initializing;
+            }
         }
 
         StorageConnection? published = null;
@@ -189,7 +206,7 @@ public partial class FluentStorageContainer :
             // the tree, so it has to finish before the first pass of the new connection starts.
             if (previous != null)
             {
-                await previous.EndAsync();
+                await previous.EndAsync(cancellationToken);
             }
 
             var storageDirectory = isInMemory ? null : ResolveStorageDirectory();
@@ -273,13 +290,13 @@ public partial class FluentStorageContainer :
         }
     }
 
-    internal Task ProcessFileEventAsync(FileSystemEventArgs e)
-        => _connection is { } connection ? ProcessFileEventAsync(connection, e) : Task.CompletedTask;
+    internal Task ProcessFileEventAsync(FileSystemEventArgs fileEvent)
+        => _connection is { } connection ? ProcessFileEventAsync(connection, fileEvent) : Task.CompletedTask;
 
-    private Task ProcessFileEventAsync(StorageConnection connection, FileSystemEventArgs e)
+    private Task ProcessFileEventAsync(StorageConnection connection, FileSystemEventArgs fileEvent)
     {
-        var namedPaths = new HashSet<string>(StringComparer.Ordinal) { GetRelativePath(connection, e.FullPath) };
-        if (e is RenamedEventArgs renamed)
+        var namedPaths = new HashSet<string>(StringComparer.Ordinal) { GetRelativePath(connection, fileEvent.FullPath) };
+        if (fileEvent is RenamedEventArgs renamed)
         {
             namedPaths.Add(GetRelativePath(connection, renamed.OldFullPath));
         }
@@ -455,8 +472,14 @@ public partial class FluentStorageContainer :
                 catch (Exception exception) when (!token.IsCancellationRequested)
                 {
                     // The bytes are written, so the caller gets no failure. Without a hash, the pass that the
-                    // event of this write names loads the subject again.
+                    // event of this write names loads the subject again. A plain file never has a hash and is
+                    // refreshed only when its version differs.
                     entry.Hash = null;
+                    if (entry.Subject is GenericFile)
+                    {
+                        entry.Version = default;
+                    }
+
                     _logger?.LogWarning(exception, "Failed to refresh the subject after writing: {Path}", relativePath);
                 }
             }

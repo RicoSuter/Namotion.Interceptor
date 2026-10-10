@@ -87,10 +87,14 @@ internal sealed class StorageConnection : IDisposable
     /// <summary>
     /// Ends the connection and completes when its worker has finished the item it was running.
     /// </summary>
-    public async Task EndAsync()
+    /// <param name="cancellationToken">
+    /// Cancels the wait for the worker, not the ending. The client is then left to another call of this method
+    /// or of <see cref="Dispose"/>.
+    /// </param>
+    public async Task EndAsync(CancellationToken cancellationToken)
     {
         End();
-        await Worker.StopAsync();
+        await Worker.StopAsync().WaitAsync(cancellationToken);
         Client.Dispose();
     }
 
