@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services;
 
@@ -108,5 +109,42 @@ public static class SubjectRegistryExtensions
                 return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Finds the configurable subject whose configuration contains the subject: the subject itself when it is
+    /// configurable, else the nearest configurable parent that holds it through [Configuration] properties only.
+    /// </summary>
+    /// <returns>Null when the subject is part of no configuration, such as a file in a storage.</returns>
+    public static IInterceptorSubject? TryGetConfigurationOwner(this IInterceptorSubject subject)
+    {
+        if (subject is IConfigurable)
+            return subject;
+
+        var visited = new HashSet<IInterceptorSubject>(ReferenceEqualityComparer.Instance) { subject };
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(subject);
+
+        while (queue.TryDequeue(out var current))
+        {
+            foreach (var parent in current.GetParents())
+            {
+                // Only [Configuration] properties are serialized, so a parent beyond any other property does not
+                // persist the subject.
+                if (parent.Property.TryGetRegisteredProperty()?.IsConfigurationProperty() != true)
+                    continue;
+
+                var parentSubject = parent.Property.Subject;
+                if (parentSubject is IConfigurable)
+                    return parentSubject;
+
+                if (visited.Add(parentSubject))
+                {
+                    queue.Enqueue(parentSubject);
+                }
+            }
+        }
+
+        return null;
     }
 }
