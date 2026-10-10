@@ -16,7 +16,7 @@ public class BlazorSubjectSetupService : ISubjectSetupService
         _dialogService = dialogService;
     }
 
-    public Task<CreateSubjectResult?> CreateSubjectAsync(CancellationToken cancellationToken)
+    public Task<CreateSubjectResult?> CreateSubjectAsync(SubjectSetupRequest request, CancellationToken cancellationToken)
     {
         return SubjectSetupDialog.ShowAsync(_dialogService);
     }

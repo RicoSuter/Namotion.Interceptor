@@ -7,8 +7,8 @@ namespace HomeBlaze.Storage.Abstractions;
 public interface ISubjectSetupService
 {
     /// <summary>
-    /// Prompts user to create a new subject.
+    /// Prompts the user to create a new subject.
     /// </summary>
-    /// <returns>The created subject and name, or null if cancelled</returns>
-    Task<CreateSubjectResult?> CreateSubjectAsync(CancellationToken cancellationToken);
+    /// <returns>The created subject and its name, or null if cancelled.</returns>
+    Task<CreateSubjectResult?> CreateSubjectAsync(SubjectSetupRequest request, CancellationToken cancellationToken);
 }

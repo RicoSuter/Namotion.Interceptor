@@ -91,5 +91,5 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, [.. Children.Keys], cancellationToken);
 }

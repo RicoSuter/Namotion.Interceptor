@@ -607,7 +607,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, [.. Children.Keys], cancellationToken);
 
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the registry.
