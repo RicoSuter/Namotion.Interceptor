@@ -212,6 +212,36 @@ public class SonosPlayerOperationTests
     }
 
     [Fact]
+    public async Task WhenTheSeedReportsPartOfTheHouseholdWhileItRegroups_ThenTheMissingRoomStaysConnected()
+    {
+        // Arrange
+        await using var household = await ConnectedHousehold.StartAsync(configure: system => system.PollingInterval = TimeSpan.FromHours(1));
+        var kitchen = household.Kitchen;
+        var withoutOffice = FakeSonosSpeaker.CreateStandaloneTopology((TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri));
+        household.Office.CallReceived = null;
+        kitchen.CallReceived = call =>
+        {
+            if (call.Action == "SetAVTransportURI")
+            {
+                // Every read of the wait and the reconciliation after it misses the office.
+                for (var read = 0; read < 5; read++)
+                {
+                    kitchen.RespondOnce("GetZoneGroupState", ("ZoneGroupState", withoutOffice));
+                }
+            }
+        };
+        var readsBefore = CountTopologyReads(kitchen);
+
+        // Act
+        await household.KitchenPlayer.JoinGroupAsync("Büro", CancellationToken.None).WaitAsync(ConnectedSystem.WaitTimeout);
+
+        // Assert
+        Assert.Equal(5, CountTopologyReads(kitchen) - readsBefore);
+        Assert.True(household.OfficePlayer.IsConnected);
+        Assert.Equal(2, household.System.Groups.Count);
+    }
+
+    [Fact]
     public async Task WhenTheCallerCancelsWhileTheTopologyIsReadBack_ThenTheGroupingCommandStillSucceeds()
     {
         // Arrange
@@ -309,6 +339,9 @@ public class SonosPlayerOperationTests
         Assert.All(GetPlayerOperationStates(member), state => Assert.True(state.IsEnabled, state.Name));
         Assert.True(member.LeaveGroup_IsEnabled);
     }
+
+    private static int CountTopologyReads(FakeSonosSpeaker speaker) =>
+        speaker.Calls.Count(call => call.Action == "GetZoneGroupState");
 
     // Commands sent to the player itself. SwitchToTv, SwitchToLineIn, SetNightMode and SetSpeechEnhancement also
     // need a capability the fixture players lack, and Seek needs a track duration, so they are covered elsewhere.

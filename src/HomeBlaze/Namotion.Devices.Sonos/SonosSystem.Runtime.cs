@@ -211,6 +211,8 @@ public partial class SonosSystem
     // Sonos regroups after answering the command, so a read right after it can still show the old groups. Only the
     // topology is read again, a few times and a short delay apart, rather than optimistically applying the expected
     // groups, which a regroup that Sonos rejects or changes would leave wrong. A topology event also ends the wait.
+    // These reads do not confirm missing players: a speaker can report part of the household while it regroups, and
+    // two reads this close together would take the other rooms offline.
     private async Task TryWaitForGroupingAsync(Func<bool> isApplied, CancellationToken cancellationToken)
     {
         try
@@ -225,7 +227,7 @@ public partial class SonosSystem
 
                 var pollStartedAt = NextOrder();
                 var zoneGroupState = await GetSeedConnection().ReadZoneGroupStateAsync(scopeCancellation.Token);
-                ApplyPolledTopology(zoneGroupState, pollStartedAt);
+                ApplyPolledTopology(zoneGroupState, pollStartedAt, confirmsMissingPlayers: false);
             }
         }
         catch (Exception exception)

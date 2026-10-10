@@ -326,7 +326,8 @@ public partial class SonosSystem : BackgroundService,
     /// </summary>
     /// <param name="zoneGroupState">The ZoneGroupState XML the poll read.</param>
     /// <param name="pollStartedAt">When the poll started, from <see cref="NextOrder"/>.</param>
-    internal void ApplyPolledTopology(string zoneGroupState, long pollStartedAt)
+    /// <param name="confirmsMissingPlayers">Whether the read counts toward the two that take a missing player offline, see <see cref="ApplyTopology"/>.</param>
+    internal void ApplyPolledTopology(string zoneGroupState, long pollStartedAt, bool confirmsMissingPlayers = true)
     {
         var topology = ParseUnlessApplied(zoneGroupState);
         lock (_topologyLock)
@@ -337,7 +338,7 @@ public partial class SonosSystem : BackgroundService,
                 return;
             }
 
-            ApplyZoneGroupState(zoneGroupState, topology);
+            ApplyZoneGroupState(zoneGroupState, topology, confirmsMissingPlayers);
         }
     }
 
@@ -350,7 +351,7 @@ public partial class SonosSystem : BackgroundService,
         var topology = ParseUnlessApplied(zoneGroupState);
         lock (_topologyLock)
         {
-            if (ApplyZoneGroupState(zoneGroupState, topology))
+            if (ApplyZoneGroupState(zoneGroupState, topology, confirmsMissingPlayers: true))
             {
                 _topologyOrder.RecordEvent(NextOrder());
             }
@@ -376,7 +377,7 @@ public partial class SonosSystem : BackgroundService,
         zoneGroupState == Volatile.Read(ref _appliedZoneGroupState) ? null : ZoneGroupStateParser.Parse(zoneGroupState);
 
     // Caller holds _topologyLock.
-    private bool ApplyZoneGroupState(string zoneGroupState, SonosTopology? topology)
+    private bool ApplyZoneGroupState(string zoneGroupState, SonosTopology? topology, bool confirmsMissingPlayers)
     {
         if (zoneGroupState == _appliedZoneGroupState)
         {
@@ -385,7 +386,7 @@ public partial class SonosSystem : BackgroundService,
             return true;
         }
 
-        if (!ApplyTopology(topology ?? ZoneGroupStateParser.Parse(zoneGroupState)))
+        if (!ApplyTopology(topology ?? ZoneGroupStateParser.Parse(zoneGroupState), confirmsMissingPlayers))
         {
             return false;
         }
@@ -398,8 +399,13 @@ public partial class SonosSystem : BackgroundService,
     /// Applies a topology. One that misses players of the current topology is applied only when the read before it
     /// missed them too, since a seed that just rebooted or woke up may briefly report only part of the household.
     /// </summary>
+    /// <param name="topology">The topology to apply.</param>
+    /// <param name="confirmsMissingPlayers">
+    /// Whether the read counts toward the two that take a missing player offline. A read that does not is skipped
+    /// while it misses players.
+    /// </param>
     /// <returns>Whether the topology was applied.</returns>
-    internal bool ApplyTopology(SonosTopology topology)
+    internal bool ApplyTopology(SonosTopology topology, bool confirmsMissingPlayers = true)
     {
         lock (_topologyLock)
         {
@@ -413,11 +419,19 @@ public partial class SonosSystem : BackgroundService,
                 .Where(player => player.IsInTopology && !present.Contains(player.Uuid))
                 .Select(player => player.Uuid)
                 .ToHashSet(StringComparer.Ordinal);
-            if (_hasConnectionTopology && missing.Count > 0 && !missing.IsSubsetOf(_unconfirmedMissingPlayers))
+            if (_hasConnectionTopology && missing.Count > 0)
             {
-                _unconfirmedMissingPlayers = missing;
-                _logger.LogDebug("The Sonos topology misses {Players}; it is applied once the next read confirms it.", string.Join(", ", missing));
-                return false;
+                if (!confirmsMissingPlayers)
+                {
+                    return false;
+                }
+
+                if (!missing.IsSubsetOf(_unconfirmedMissingPlayers))
+                {
+                    _unconfirmedMissingPlayers = missing;
+                    _logger.LogDebug("The Sonos topology misses {Players}; it is applied once the next read confirms it.", string.Join(", ", missing));
+                    return false;
+                }
             }
 
             _unconfirmedMissingPlayers.Clear();

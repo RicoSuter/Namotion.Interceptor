@@ -193,6 +193,65 @@ public class SonosSystemTopologyTests
     }
 
     [Fact]
+    public void WhenReadsThatDoNotConfirmMissingPlayersMissAPlayerTwice_ThenThePlayerStaysConnected()
+    {
+        // Arrange
+        var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
+        var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
+        var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
+        var system = CreateSystem();
+        system.ApplyPolledTopology(FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office), system.NextOrder());
+        ReportAllReachable(system);
+
+        // Act
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder(), confirmsMissingPlayers: false);
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder(), confirmsMissingPlayers: false);
+
+        // Assert
+        Assert.True(system.Players[TestFixtures.KitchenUuid].IsConnected);
+        Assert.Equal(2, system.Groups.Count);
+    }
+
+    [Fact]
+    public void WhenAReadThatDoesNotConfirmMissingPlayersFollowsAPollThatMissesAPlayer_ThenOnlyTheNextPollTakesThePlayerOffline()
+    {
+        // Arrange
+        var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
+        var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
+        var withoutKitchen = FakeSonosSpeaker.CreateStandaloneTopology(office);
+        var system = CreateSystem();
+        system.ApplyPolledTopology(FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office), system.NextOrder());
+        ReportAllReachable(system);
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder());
+
+        // Act
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder(), confirmsMissingPlayers: false);
+        var isConnectedAfterTheUnconfirmingRead = system.Players[TestFixtures.KitchenUuid].IsConnected;
+        system.ApplyPolledTopology(withoutKitchen, system.NextOrder());
+
+        // Assert
+        Assert.True(isConnectedAfterTheUnconfirmingRead);
+        Assert.False(system.Players[TestFixtures.KitchenUuid].IsConnected);
+    }
+
+    [Fact]
+    public void WhenAReadThatDoesNotConfirmMissingPlayersShowsAChangeOfAllPlayers_ThenItIsApplied()
+    {
+        // Arrange
+        var kitchen = (TestFixtures.KitchenUuid, "Küche", new Uri("http://10.0.0.121:1400/"));
+        var office = (TestFixtures.OfficeUuid, "Büro", new Uri("http://10.0.0.116:1400/"));
+        var system = CreateSystem();
+        system.ApplyPolledTopology(FakeSonosSpeaker.CreateStandaloneTopology(kitchen, office), system.NextOrder());
+
+        // Act
+        system.ApplyPolledTopology(FakeSonosSpeaker.CreateGroupTopology(office, kitchen), system.NextOrder(), confirmsMissingPlayers: false);
+
+        // Assert
+        Assert.Equal(TestFixtures.OfficeUuid, system.Players[TestFixtures.KitchenUuid].GroupCoordinatorUuid);
+        Assert.Single(system.Groups);
+    }
+
+    [Fact]
     public void WhenAnUnchangedTopologyEventArrivesDuringAPoll_ThenThePolledTopologyIsSkipped()
     {
         // Arrange
