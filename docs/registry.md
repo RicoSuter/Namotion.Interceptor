@@ -44,6 +44,22 @@ var frontPressureProperty = car.TryGetRegisteredProperty(c => c.Tires[0].Pressur
 
 Member-access hops resolve through the registry; index and dictionary segments evaluate against the object graph. The lookup is null-safe either way: if a subject along the path is null or not tracked by the registry, the method returns `null` instead of throwing.
 
+### Parents and children
+
+A registered property lists the subjects it holds in `Children`, and a registered subject lists the properties that hold it in `Parents`. Every entry carries an `Index`: `null` for a subject reference, the position for a collection and the key for a dictionary.
+
+```csharp
+garage.Cars = new Dictionary<string, Car> { ["Motor"] = car };
+
+var parent = car.TryGetRegisteredSubject()!.Parents[0];        // Property: Cars, Index: "Motor"
+var child = garage.TryGetRegisteredProperty(g => g.Cars)!.Children[0]; // Subject: car, Index: "Motor"
+```
+
+- The index follows the assigned value. When a new collection or dictionary keeps a subject at another position or under another key, both entries get the new index, and paths written afterwards use it. The subject stays attached throughout, so no lifecycle callback fires for the move.
+- `Children` is in the order the assigned value enumerates.
+- A subject that sits at several positions of one collection, or under several keys of one dictionary, is listed once, with the first of them in enumeration order.
+- The registry reads a collection or dictionary when it is assigned. Mutating one in place changes neither list.
+
 ## Enumerate property attributes
 
 The registry makes it easy to find metadata associated with properties:
