@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 namespace HomeBlaze.AI.Agents;
 
 /// <summary>
-/// Derives the agent route from the addresses the web server listens on, preferring a loopback address.
+/// Derives the agent route from the addresses the web server listens on, preferring HTTP and a loopback address.
 /// </summary>
 public sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
 {
@@ -20,9 +20,10 @@ public sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
         Resolve(_server.Features.Get<IServerAddressesFeature>()?.Addresses ?? []);
 
     /// <summary>
-    /// Picks the first usable address in this order: a loopback or wildcard binding over HTTP, then over HTTPS, then
-    /// any other IP binding over HTTP, then over HTTPS. Wildcard and localhost hosts become 127.0.0.1; bindings that
-    /// are not IP endpoints, such as Unix sockets and named pipes, are skipped.
+    /// Picks the first usable address in this order: a loopback or wildcard binding over HTTP, any other IP binding
+    /// over HTTP, a loopback or wildcard binding over HTTPS, then any other IP binding over HTTPS. Wildcard and
+    /// localhost hosts become 127.0.0.1; bindings that are not IP endpoints, such as Unix sockets and named pipes,
+    /// are skipped.
     /// </summary>
     public static Uri? Resolve(IEnumerable<string> addresses)
     {
@@ -80,7 +81,8 @@ public sealed class ServerAgentEndpointAddress : IAgentEndpointAddress
             return null;
         }
 
-        rank = (isLocal ? 0 : 2) + (isHttp ? 0 : 1);
+        // HTTP ranks above HTTPS even across hosts: a certificate rarely validates for the 127.0.0.1 rewrite.
+        rank = (isHttp ? 0 : 2) + (isLocal ? 0 : 1);
         var builder = new UriBuilder(uri);
         if (builder.Host is "0.0.0.0" or "[::]" || string.Equals(builder.Host, "localhost", StringComparison.OrdinalIgnoreCase))
         {

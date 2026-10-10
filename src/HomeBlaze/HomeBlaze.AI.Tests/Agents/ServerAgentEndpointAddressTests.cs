@@ -13,10 +13,12 @@ public class ServerAgentEndpointAddressTests
     [InlineData(new[] { "http://+:8080" }, "http://127.0.0.1:8080/mcp/agents")]
     [InlineData(new[] { "https://localhost:7298" }, "https://127.0.0.1:7298/mcp/agents")]
     [InlineData(new[] { "http://192.168.1.5:5192", "http://localhost:5193" }, "http://127.0.0.1:5193/mcp/agents")]
-    [InlineData(new[] { "http://192.168.1.5:5192", "https://localhost:7298" }, "https://127.0.0.1:7298/mcp/agents")]
+    [InlineData(new[] { "http://192.168.1.5:5192", "https://localhost:7298" }, "http://192.168.1.5:5192/mcp/agents")]
+    [InlineData(new[] { "https://192.168.1.5:7299", "https://localhost:7298" }, "https://127.0.0.1:7298/mcp/agents")]
+    [InlineData(new[] { "https://192.168.1.5:7299" }, "https://192.168.1.5:7299/mcp/agents")]
     [InlineData(new[] { "http://192.168.1.5:5192" }, "http://192.168.1.5:5192/mcp/agents")]
     [InlineData(new[] { "http://unix:/tmp/homeblaze.sock", "http://192.168.1.5:5192" }, "http://192.168.1.5:5192/mcp/agents")]
-    public void WhenResolvingFromServerAddresses_ThenALoopbackHttpAddressIsPreferred(string[] addresses, string expected)
+    public void WhenResolvingFromServerAddresses_ThenHttpIsPreferredOverHttpsAndLoopbackOverOtherAddresses(string[] addresses, string expected)
     {
         // Act
         var endpoint = ServerAgentEndpointAddress.Resolve(addresses);
