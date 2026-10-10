@@ -244,6 +244,10 @@ public class SonosPlayerStateTests
     [Theory]
     [InlineData(StationStreamUri, "96")]
     [InlineData("x-rincon-mp3radio://https://ads.example:443/preroll.mp3?player=sonos&language=en%2cde", "preroll.mp3?player=sonos&language=en,de")]
+    [InlineData("https://ads.example/preroll.mp3", "preroll.mp3")]
+    [InlineData("https://ads.example/preroll.mp3?player=sonos", "preroll.mp3?player=sonos")]
+    [InlineData("https://ads.example/preroll.mp3?redirect=https://cdn.example/a", "preroll.mp3")]
+    [InlineData("https://ads.example/preroll.mp3?redirect=https://cdn.example/a", "preroll.mp3?redirect=https://cdn.example/a")]
     public void WhenAStreamIsTitledWithTheEndOfItsUri_ThenTheTitleIsEmpty(string trackUri, string title)
     {
         // Arrange
@@ -253,6 +257,56 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(StreamPlaying(trackUri, SonosEventBodies.Didl(title)), T0);
 
         // Assert
+        Assert.Null(player.CurrentTrackTitle);
+    }
+
+    [Theory]
+    [InlineData("https://files.example.com/beep.mp3", "beep.mp3")]
+    [InlineData("https://files.example.com/beep.mp3?token=abc", "beep.mp3")]
+    public void WhenAnHttpFilePlayedOnceIsTitledWithItsFileName_ThenTheTitleIsKept(string fileUri, string title)
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", "NORMAL", fileUri, fileUri, "0:00:02", SonosEventBodies.Didl(title)), T0);
+
+        // Assert
+        Assert.Equal(title, player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenAnHttpTrackIsFirstAStationsAdAndThenPlayedAsAFile_ThenOnlyTheFileShowsItsFileName()
+    {
+        // Arrange
+        const string fileUri = "https://files.example.com/beep.mp3";
+        var metadata = SonosEventBodies.Didl("beep.mp3");
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(fileUri, metadata), T0);
+        var titleAsAd = player.CurrentTrackTitle;
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", "NORMAL", fileUri, fileUri, "0:00:02", metadata), T0 + 1);
+
+        // Assert
+        Assert.Null(titleAsAd);
+        Assert.Equal("beep.mp3", player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenTheMediaTitleOfAStreamEqualsTheEndOfItsUri_ThenTheMediaTitleIsKept()
+    {
+        // Arrange
+        const string streamUri = "x-rincon-mp3radio://radio.example/station/96";
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyAvTransportEvent(
+            new AvTransportChange("PLAYING", "NORMAL", streamUri, streamUri, "0:00:00", SonosEventBodies.Didl("96"), SonosEventBodies.Didl("96")),
+            T0);
+
+        // Assert
+        Assert.Equal("96", player.MediaTitle);
         Assert.Null(player.CurrentTrackTitle);
     }
 

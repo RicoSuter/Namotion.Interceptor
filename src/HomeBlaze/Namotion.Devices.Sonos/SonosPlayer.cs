@@ -39,6 +39,7 @@ public partial class SonosPlayer : SonosDevice,
     private string? _imageUri;
     private DidlTrack? _titleTrack;
     private string? _titleTrackUri;
+    private string? _titleMediaUri;
     private string? _title;
 
     internal SonosPlayer(SonosSystem system, string uuid)
@@ -751,7 +752,8 @@ public partial class SonosPlayer : SonosDevice,
         if (mediaMetaData != _lastMediaMetaData || isMediaChange)
         {
             var title = DidlParser.ParseTitle(mediaMetaData);
-            _lastMediaTitle = title is not null && SonosValues.IsTitleOfStreamUri(title, MediaUri) ? null : title;
+            // Only the URL itself is dropped. A title that equals the end of the URL may be the caller's.
+            _lastMediaTitle = title is not null && SonosValues.IsStreamUri(title, MediaUri) ? null : title;
             _lastMediaMetaData = mediaMetaData;
         }
 
@@ -801,12 +803,14 @@ public partial class SonosPlayer : SonosDevice,
     private void ApplyTrackTitle(DidlTrack? track, bool isTrackChange)
     {
         var trackUri = CurrentTrackUri;
-        if (!ReferenceEquals(track, _titleTrack) || trackUri != _titleTrackUri)
+        var mediaUri = MediaUri;
+        if (!ReferenceEquals(track, _titleTrack) || trackUri != _titleTrackUri || mediaUri != _titleMediaUri)
         {
             var title = track?.Title;
-            _title = title is not null && SonosValues.IsTitleOfStreamUri(title, trackUri) ? null : title;
+            _title = title is not null && SonosValues.IsTitleOfTrackUri(title, trackUri, mediaUri) ? null : title;
             _titleTrack = track;
             _titleTrackUri = trackUri;
+            _titleMediaUri = mediaUri;
         }
 
         if (_title is null || SonosValues.IsKnown(_title))

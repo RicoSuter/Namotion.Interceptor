@@ -186,24 +186,45 @@ internal static class SonosValues
     }
 
     /// <summary>
-    /// Whether the title only repeats a radio or http(s) URI, which Sonos and other controllers report as the title of a
-    /// stream without one: its last path segment, such as <c>96</c> for <c>aac://http://host/aac/96</c>, or the whole URI
-    /// with any schemes, such as <c>https://host/live.mp3</c> or <c>host/live.mp3</c> for
-    /// <c>x-rincon-mp3radio://host/live.mp3</c>.
+    /// Whether the title is the radio or http(s) URI itself, with or without its schemes, such as
+    /// <c>https://host/live.mp3</c> or <c>host/live.mp3</c> for <c>x-rincon-mp3radio://host/live.mp3</c>, which other
+    /// controllers write for a stream without a title.
     /// </summary>
-    internal static bool IsTitleOfStreamUri(string title, string? uri)
+    internal static bool IsStreamUri(string title, string? uri) =>
+        uri is not null && (IsRadioUri(uri) || IsHttpUri(uri)) && WithoutSchemes(title).SequenceEqual(WithoutSchemes(uri));
+
+    /// <summary>
+    /// Whether the track title only repeats the track URI: the URI itself, see <see cref="IsStreamUri"/>, or for a
+    /// stream the end of its path, such as <c>96</c> for <c>aac://http://host/aac/96</c>, which Sonos reports for a
+    /// stream without a title.
+    /// </summary>
+    internal static bool IsTitleOfTrackUri(string title, string? trackUri, string? mediaUri)
     {
-        // Plain http(s) too: a station's ad plays as such a track while the media stays the station.
-        if (uri is null || !(IsRadioUri(uri) || IsHttpUri(uri)))
+        if (trackUri is null)
         {
             return false;
         }
 
-        var segment = uri.AsSpan(uri.LastIndexOf('/') + 1);
-        return segment.SequenceEqual(title) ||
-            (segment.Contains('%') && Uri.UnescapeDataString(segment) == title) ||
-            WithoutSchemes(title).SequenceEqual(WithoutSchemes(uri));
+        // An http(s) track is a stream only as the ad of a station, which stays the media. Played on its own or from
+        // the queue it is a file, and its file name is the only title an untagged file has.
+        var isStream = IsRadioUri(trackUri) || (mediaUri is not null && IsRadioUri(mediaUri) && IsHttpUri(trackUri));
+        return (isStream && IsEndOfPath(title, trackUri)) || IsStreamUri(title, trackUri);
     }
+
+    // Whether the title is the last path segment of the URI, escaped or not, with or without the query.
+    private static bool IsEndOfPath(string title, string uri)
+    {
+        // The query is cut off before the last slash is searched, since it may contain one.
+        var text = uri.AsSpan();
+        var queryStart = text.IndexOf('?');
+        var path = queryStart < 0 ? text : text[..queryStart];
+        var segmentStart = path.LastIndexOf('/') + 1;
+        return EqualsEscaped(path[segmentStart..], title) ||
+            (queryStart >= 0 && EqualsEscaped(text[segmentStart..], title));
+    }
+
+    private static bool EqualsEscaped(ReadOnlySpan<char> escaped, string title) =>
+        escaped.SequenceEqual(title) || (escaped.Contains('%') && Uri.UnescapeDataString(escaped) == title);
 
     // Returns the URI without its leading schemes: host/live for x-rincon-mp3radio://host/live or aac://https://host/live.
     private static ReadOnlySpan<char> WithoutSchemes(ReadOnlySpan<char> uri)
