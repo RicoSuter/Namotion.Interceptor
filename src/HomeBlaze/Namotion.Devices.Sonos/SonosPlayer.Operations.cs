@@ -190,13 +190,13 @@ public partial class SonosPlayer
     public Task PlayStreamAsync(string uri, string? title, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(uri);
-        var isHttp = SonosValues.IsHttpUri(uri);
+        var isHttp = SonosUris.IsHttpUri(uri);
         if (!isHttp && !uri.StartsWith("x-rincon-mp3radio:", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("The stream URI must start with http://, https:// or x-rincon-mp3radio:.", nameof(uri));
         }
 
-        var transportUri = isHttp ? SonosValues.ToStreamUri(uri) : uri;
+        var transportUri = isHttp ? SonosUris.ToStreamUri(uri) : uri;
         var metadata = SonosValues.CreateStreamMetadata(title);
 
         return RunOnCoordinatorAsync(async (connection, token) =>

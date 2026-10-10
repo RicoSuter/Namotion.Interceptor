@@ -86,7 +86,7 @@ public partial class SonosPlayer : SonosDevice,
         get
         {
             var coordinator = GetCoordinator();
-            return SonosValues.DetectSource(coordinator.MediaUri ?? coordinator.CurrentTrackUri);
+            return SonosUris.DetectSource(coordinator.MediaUri ?? coordinator.CurrentTrackUri);
         }
     }
 

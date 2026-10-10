@@ -1,4 +1,3 @@
-using Namotion.Devices.Sonos.Tests.Testing;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -17,33 +16,6 @@ public class SonosValuesTests
 
         // Assert
         Assert.Equal((decimal)expected, volume);
-    }
-
-    [Theory]
-    [InlineData(0, 30)]
-    [InlineData(-10, 30)]
-    [InlineData(1, 5)]
-    [InlineData(5, 5)]
-    [InlineData(600, 600)]
-    [InlineData(3600, 3600)]
-    [InlineData(7200, 3600)]
-    public void WhenIntervalIsConfigured_ThenItIsClampedOrFallsBackToTheDefault(int configuredSeconds, int expectedSeconds)
-    {
-        // Act
-        var interval = SonosValues.GetEffectiveInterval(TimeSpan.FromSeconds(configuredSeconds), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5));
-
-        // Assert
-        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), interval);
-    }
-
-    [Fact]
-    public void WhenIntervalIsTheLargestTimeSpan_ThenItIsClampedToOneHour()
-    {
-        // Act
-        var interval = SonosValues.GetEffectiveInterval(TimeSpan.MaxValue, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5));
-
-        // Assert
-        Assert.Equal(TimeSpan.FromHours(1), interval);
     }
 
     [Theory]
@@ -166,33 +138,6 @@ public class SonosValuesTests
         Assert.Null(parsed);
     }
 
-    [Theory]
-    [InlineData(null, SonosSource.None)]
-    [InlineData("", SonosSource.None)]
-    [InlineData("x-sonos-htastream:RINCON_A0000000000701400:spdif", SonosSource.Tv)]
-    [InlineData("x-rincon-stream:RINCON_A0000000000601400", SonosSource.LineIn)]
-    [InlineData(TestFixtures.SpotifyConnectUri, SonosSource.SpotifyConnect)]
-    [InlineData("x-sonos-vli:RINCON_A0000000000601400:1,airplay:4F9A2B", SonosSource.AirPlay)]
-    [InlineData("x-sonos-vli:RINCON_A0000000000601400:3,unknown:1", SonosSource.Other)]
-    [InlineData("x-rincon-mp3radio://stream.example.com/live.mp3", SonosSource.Radio)]
-    [InlineData("x-sonosapi-stream:tunein%3a9557?sid=303&flags=8232&sn=1", SonosSource.Radio)]
-    [InlineData("aac://https://stream.example.com/live", SonosSource.Radio)]
-    [InlineData("x-sonosapi-radio:radio%3a1?sid=236", SonosSource.Radio)]
-    [InlineData("x-sonosapi-hls:live%3a1?sid=284", SonosSource.Radio)]
-    [InlineData("hls-radio://stream.example.com/live.m3u8", SonosSource.Radio)]
-    [InlineData("https://stream.example.com/live.mp3", SonosSource.Other)]
-    [InlineData("http://files.example.com/chime.mp3", SonosSource.Other)]
-    [InlineData("x-rincon-queue:RINCON_A0000000000601400#0", SonosSource.Queue)]
-    [InlineData("x-rincon:RINCON_A0000000000101400", SonosSource.Other)]
-    public void WhenDetectingSource_ThenMapsUriScheme(string? uri, SonosSource expected)
-    {
-        // Act
-        var source = SonosValues.DetectSource(uri);
-
-        // Assert
-        Assert.Equal(expected, source);
-    }
-
     [Fact]
     public void WhenParsingBatteryInfo_ThenReturnsLevelAndCharging()
     {
@@ -229,36 +174,6 @@ public class SonosValuesTests
     }
 
     [Fact]
-    public void WhenUriIsRelative_ThenItIsResolvedAgainstTheSpeaker()
-    {
-        // Act
-        var uri = SonosValues.ToAbsoluteUri("/getaa?s=1&u=x-sonos-spotify", new Uri("http://10.0.0.121:1400/"));
-
-        // Assert
-        Assert.Equal("http://10.0.0.121:1400/getaa?s=1&u=x-sonos-spotify", uri);
-    }
-
-    [Fact]
-    public void WhenUriIsAbsolute_ThenItIsKept()
-    {
-        // Act
-        var uri = SonosValues.ToAbsoluteUri("https://images.example.com/cover.jpg", new Uri("http://10.0.0.121:1400/"));
-
-        // Assert
-        Assert.Equal("https://images.example.com/cover.jpg", uri);
-    }
-
-    [Fact]
-    public void WhenConvertingHttpStream_ThenUsesRadioScheme()
-    {
-        // Act
-        var uri = SonosValues.ToStreamUri("http://stream.example.com/live.mp3");
-
-        // Assert
-        Assert.Equal("x-rincon-mp3radio://stream.example.com/live.mp3", uri);
-    }
-
-    [Fact]
     public void WhenCreatingStreamMetadata_ThenTitleIsEscaped()
     {
         // Act
@@ -277,70 +192,5 @@ public class SonosValuesTests
 
         // Assert
         Assert.Contains("<dc:title></dc:title>", metadata);
-    }
-
-    [Theory]
-    [InlineData("https://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
-    [InlineData("host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
-    [InlineData("x-rincon-mp3radio://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
-    [InlineData("http://host.example/live", "aac://https://host.example/live", true)]
-    [InlineData("host.example/beep.mp3", "https://host.example/beep.mp3", true)]
-    [InlineData("96", "aac://http://host.example/aac/96", false)]
-    [InlineData("live.mp3", "x-rincon-mp3radio://host.example/live.mp3", false)]
-    [InlineData("https://host.example/live.mp3", "x-rincon-mp3radio://other.example/live.mp3", false)]
-    [InlineData("host.example", "x-rincon-mp3radio://host.example/live.mp3", false)]
-    [InlineData("https://host.example/song.mp3", "x-file-cifs://host.example/song.mp3", false)]
-    [InlineData("https://host.example/live.mp3", null, false)]
-    public void WhenTitleIsTheStreamUri_ThenItIsNotATitle(string title, string? uri, bool expected)
-    {
-        // Act
-        var isUri = SonosValues.IsStreamUri(title, uri);
-
-        // Assert
-        Assert.Equal(expected, isUri);
-    }
-
-    private const string StationUri = "x-sonosapi-stream:s1?sid=303";
-    private const string QueueUri = "x-rincon-queue:RINCON_A0000000000601400#0";
-    private const string AdUri = "https://ads.example/preroll.mp3";
-    private const string AdWithQueryUri = "https://ads.example/preroll.mp3?player=sonos&language=en%2cde";
-    private const string AdWithSlashInQueryUri = "https://ads.example/preroll.mp3?redirect=https://cdn.example/a";
-    private const string FileUri = "https://files.example/beep.mp3";
-
-    [Theory]
-    // A radio track URI, whatever the media.
-    [InlineData("96", "aac://http://host.example/aac/96", StationUri, true)]
-    [InlineData("96", "aac://http://host.example/aac/96", null, true)]
-    [InlineData("live.mp3", "x-rincon-mp3radio://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
-    [InlineData("host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
-    // A station's ad, an http(s) track while the media is the station.
-    [InlineData("preroll.mp3", AdUri, StationUri, true)]
-    [InlineData("preroll.mp3", AdUri, "x-rincon-mp3radio://host.example/live.mp3", true)]
-    [InlineData("preroll.mp3", AdWithQueryUri, StationUri, true)]
-    [InlineData("preroll.mp3?player=sonos&language=en%2cde", AdWithQueryUri, StationUri, true)]
-    [InlineData("preroll.mp3?player=sonos&language=en,de", AdWithQueryUri, StationUri, true)]
-    [InlineData("preroll.mp3", AdWithSlashInQueryUri, StationUri, true)]
-    [InlineData("preroll.mp3?redirect=https://cdn.example/a", AdWithSlashInQueryUri, StationUri, true)]
-    [InlineData("my ad.mp3", "https://ads.example/my%20ad.mp3", StationUri, true)]
-    [InlineData("https://ads.example/preroll.mp3", AdUri, StationUri, true)]
-    [InlineData("a", AdWithSlashInQueryUri, StationUri, false)]
-    [InlineData("Advertisement", AdUri, StationUri, false)]
-    // An http(s) file played once names itself by its file name, but never by its URL.
-    [InlineData("beep.mp3", FileUri, FileUri, false)]
-    [InlineData("beep.mp3", FileUri, QueueUri, false)]
-    [InlineData("beep.mp3", FileUri, null, false)]
-    [InlineData("https://files.example/beep.mp3", FileUri, FileUri, true)]
-    [InlineData("files.example/beep.mp3", FileUri, FileUri, true)]
-    // Any other track.
-    [InlineData("song.mp3", "x-file-cifs://nas/music/song.mp3", QueueUri, false)]
-    [InlineData("song.mp3", "x-file-cifs://nas/music/song.mp3", StationUri, false)]
-    [InlineData("Song", null, StationUri, false)]
-    public void WhenTrackTitleRepeatsTheTrackUri_ThenItIsNotATitle(string title, string? trackUri, string? mediaUri, bool expected)
-    {
-        // Act
-        var isUri = SonosValues.IsTitleOfTrackUri(title, trackUri, mediaUri);
-
-        // Assert
-        Assert.Equal(expected, isUri);
     }
 }

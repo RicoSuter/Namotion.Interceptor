@@ -30,30 +30,6 @@ internal static class SonosValues
     internal static bool IsKnown([NotNullWhen(true)] string? value) =>
         value is not null && value != NotImplemented && !value.StartsWith(PlaceholderPrefix, StringComparison.Ordinal);
 
-    /// <summary>
-    /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.
-    /// </summary>
-    internal static readonly TimeSpan MaximumInterval = TimeSpan.FromSeconds(SonosSystem.MaximumIntervalSeconds);
-
-    /// <summary>
-    /// Returns the configured interval clamped to <paramref name="minimum"/> through <see cref="MaximumInterval"/>,
-    /// or <paramref name="fallback"/> when it is zero or negative.
-    /// </summary>
-    internal static TimeSpan GetEffectiveInterval(TimeSpan configured, TimeSpan fallback, TimeSpan minimum)
-    {
-        if (configured <= TimeSpan.Zero)
-        {
-            return fallback;
-        }
-
-        if (configured < minimum)
-        {
-            return minimum;
-        }
-
-        return configured > MaximumInterval ? MaximumInterval : configured;
-    }
-
     internal static string? NullIfEmpty(string? value) =>
         string.IsNullOrEmpty(value) ? null : value;
 
@@ -143,118 +119,6 @@ internal static class SonosValues
         _ => throw new ArgumentOutOfRangeException(nameof(repeat), repeat, "Unknown repeat mode.")
     };
 
-    private static readonly string[] RadioUriPrefixes =
-        ["x-rincon-mp3radio:", "x-sonosapi-stream:", "x-sonosapi-radio:", "x-sonosapi-hls:", "aac:", "hls-radio:"];
-
-    /// <summary>
-    /// Returns where the audio comes from. A plain http(s) URI is a file played once, which is <see cref="SonosSource.Other"/>;
-    /// Sonos plays an http(s) stream as radio only behind a radio scheme such as <c>x-rincon-mp3radio:</c>.
-    /// </summary>
-    internal static SonosSource DetectSource(string? uri)
-    {
-        if (string.IsNullOrEmpty(uri))
-        {
-            return SonosSource.None;
-        }
-
-        if (uri.StartsWith("x-sonos-htastream:", StringComparison.Ordinal))
-        {
-            return SonosSource.Tv;
-        }
-
-        if (uri.StartsWith("x-rincon-stream:", StringComparison.Ordinal))
-        {
-            return SonosSource.LineIn;
-        }
-
-        if (uri.StartsWith("x-rincon-queue:", StringComparison.Ordinal))
-        {
-            return SonosSource.Queue;
-        }
-
-        if (uri.StartsWith("x-sonos-vli:", StringComparison.Ordinal))
-        {
-            if (uri.Contains(",spotify:", StringComparison.Ordinal))
-            {
-                return SonosSource.SpotifyConnect;
-            }
-
-            return uri.Contains(",airplay:", StringComparison.Ordinal) ? SonosSource.AirPlay : SonosSource.Other;
-        }
-
-        return IsRadioUri(uri) ? SonosSource.Radio : SonosSource.Other;
-    }
-
-    /// <summary>
-    /// Whether the title is the radio or http(s) URI itself, with or without its schemes, such as
-    /// <c>https://host/live.mp3</c> or <c>host/live.mp3</c> for <c>x-rincon-mp3radio://host/live.mp3</c>, which other
-    /// controllers write for a stream without a title.
-    /// </summary>
-    internal static bool IsStreamUri(string title, string? uri) =>
-        uri is not null && (IsRadioUri(uri) || IsHttpUri(uri)) && WithoutSchemes(title).SequenceEqual(WithoutSchemes(uri));
-
-    /// <summary>
-    /// Whether the track title only repeats the track URI: the URI itself, see <see cref="IsStreamUri"/>, or for a
-    /// stream the end of its path, such as <c>96</c> for <c>aac://http://host/aac/96</c>, which Sonos reports for a
-    /// stream without a title.
-    /// </summary>
-    internal static bool IsTitleOfTrackUri(string title, string? trackUri, string? mediaUri)
-    {
-        if (trackUri is null)
-        {
-            return false;
-        }
-
-        // An http(s) track is a stream only as the ad of a station, which stays the media. Played on its own or from
-        // the queue it is a file, and its file name is the only title an untagged file has.
-        var isStream = IsRadioUri(trackUri) || (mediaUri is not null && IsRadioUri(mediaUri) && IsHttpUri(trackUri));
-        return (isStream && IsEndOfPath(title, trackUri)) || IsStreamUri(title, trackUri);
-    }
-
-    // Whether the title is the last path segment of the URI, escaped or not, with or without the query.
-    private static bool IsEndOfPath(string title, string uri)
-    {
-        // The query is cut off before the last slash is searched, since it may contain one.
-        var text = uri.AsSpan();
-        var queryStart = text.IndexOf('?');
-        var path = queryStart < 0 ? text : text[..queryStart];
-        var segmentStart = path.LastIndexOf('/') + 1;
-        return EqualsEscaped(path[segmentStart..], title) ||
-            (queryStart >= 0 && EqualsEscaped(text[segmentStart..], title));
-    }
-
-    private static bool EqualsEscaped(ReadOnlySpan<char> escaped, string title) =>
-        escaped.SequenceEqual(title) || (escaped.Contains('%') && Uri.UnescapeDataString(escaped) == title);
-
-    // Returns the URI without its leading schemes: host/live for x-rincon-mp3radio://host/live or aac://https://host/live.
-    private static ReadOnlySpan<char> WithoutSchemes(ReadOnlySpan<char> uri)
-    {
-        int separator;
-        while ((separator = uri.IndexOf("://", StringComparison.Ordinal)) > 0 && !uri[..separator].Contains('/'))
-        {
-            uri = uri[(separator + 3)..];
-        }
-
-        return uri;
-    }
-
-    private static bool IsRadioUri(string uri)
-    {
-        foreach (var prefix in RadioUriPrefixes)
-        {
-            if (uri.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    internal static bool IsHttpUri(string uri) =>
-        uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-        uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-
     /// <summary>
     /// Reads the battery from a topology <c>MoreInfo</c> value such as <c>BattPct:87,BattChg:CHARGING</c>.
     /// </summary>
@@ -289,26 +153,6 @@ internal static class SonosValues
 
         return (level, isCharging);
     }
-
-    /// <summary>
-    /// Resolves the speaker-relative paths Sonos uses for album art (<c>/getaa?...</c>) against the speaker.
-    /// </summary>
-    internal static string? ToAbsoluteUri(string? uri, Uri? baseUri)
-    {
-        if (string.IsNullOrEmpty(uri))
-        {
-            return null;
-        }
-
-        return baseUri is not null && uri.StartsWith('/') ? new Uri(baseUri, uri).AbsoluteUri : uri;
-    }
-
-    /// <summary>
-    /// Returns the URI with its scheme replaced by <c>x-rincon-mp3radio</c>.
-    /// </summary>
-    internal static string ToStreamUri(string uri) =>
-        // Sonos renders a plain http(s) stream as radio, with its title and without a seek bar, only behind this scheme.
-        "x-rincon-mp3radio" + uri[uri.IndexOf(':')..];
 
     /// <summary>
     /// Returns the radio DIDL item for a stream, with an empty title when there is none, so the URI is never shown as

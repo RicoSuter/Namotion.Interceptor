@@ -38,7 +38,7 @@ internal static class FavoritesParser
             }
 
             var metadata = (string?)item.Element(SonosXml.RinconNamespace + "resMD") ?? string.Empty;
-            var imageUri = SonosValues.ToAbsoluteUri((string?)item.Element(SonosXml.UpnpNamespace + "albumArtURI"), baseUri);
+            var imageUri = SonosUris.ToAbsoluteUri((string?)item.Element(SonosXml.UpnpNamespace + "albumArtURI"), baseUri);
             favorites.Add(new SonosFavorite(title, uri, IsContainer(uri, metadata), imageUri) { Metadata = metadata });
         }
 

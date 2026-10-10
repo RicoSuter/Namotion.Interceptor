@@ -40,9 +40,33 @@ public partial class SonosSystem
     // A persistent failure is logged at Warning once and at Debug while it lasts, see LogFailure.
     private readonly FailureTracker _failures = new();
 
-    private TimeSpan EffectivePollingInterval => SonosValues.GetEffectiveInterval(PollingInterval, DefaultInterval, MinimumInterval);
+    /// <summary>
+    /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.
+    /// </summary>
+    internal static readonly TimeSpan MaximumInterval = TimeSpan.FromSeconds(MaximumIntervalSeconds);
 
-    private TimeSpan EffectiveRetryInterval => SonosValues.GetEffectiveInterval(RetryInterval, DefaultInterval, MinimumInterval);
+    private TimeSpan EffectivePollingInterval => GetEffectiveInterval(PollingInterval, DefaultInterval, MinimumInterval);
+
+    private TimeSpan EffectiveRetryInterval => GetEffectiveInterval(RetryInterval, DefaultInterval, MinimumInterval);
+
+    /// <summary>
+    /// Returns the configured interval clamped to <paramref name="minimum"/> through <see cref="MaximumInterval"/>,
+    /// or <paramref name="fallback"/> when it is zero or negative.
+    /// </summary>
+    internal static TimeSpan GetEffectiveInterval(TimeSpan configured, TimeSpan fallback, TimeSpan minimum)
+    {
+        if (configured <= TimeSpan.Zero)
+        {
+            return fallback;
+        }
+
+        if (configured < minimum)
+        {
+            return minimum;
+        }
+
+        return configured > MaximumInterval ? MaximumInterval : configured;
+    }
 
     /// <inheritdoc />
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
