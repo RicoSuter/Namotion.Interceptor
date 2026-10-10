@@ -173,7 +173,7 @@ Card footer text
 - **Slot blocks with arguments**: Some slot blocks create a subject and take arguments and a `#name`, like `Tab` with `title` and `icon`. All others hold content only and take no arguments, no name and no `json` fence, like `Footer` and `Item`.
 - **Widgets without a default slot**: A type that declares no default slot cannot have content. The motor above is such a type, so its block stays empty.
 
-A block that contains other blocks needs a longer fence than every block inside it. Count from the inside out: the innermost block has three colons, and each block around it has at least one more. With fences of equal length, the first closing line closes the outer block, and the line that was meant to close it is shown as an error.
+A block that contains other blocks needs a longer fence than every block inside it. Count from the inside out: the innermost block has three colons, and each block around it has at least one more. With fences of equal length, the first closing line closes the outer block, and the line that was meant to close it is shown as an error. That line opens a block without a name, which takes everything up to the next line of colons with it, also when that line is inside a code fence, and none of it is shown.
 
 ### Card
 

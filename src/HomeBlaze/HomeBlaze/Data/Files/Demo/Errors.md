@@ -6,7 +6,7 @@ position: 10
 
 # Errors Demo
 
-Each section of this page has a block that is broken on purpose. A block that cannot be shown is replaced by a red box with the line of the block and a message. Each section says what is wrong and how to fix it, then shows the text of the block and below it the box that the block becomes.
+Each section of this page has a block that is broken on purpose, and says what is wrong and how to fix it. Below the text of the block is the red box that replaces it on the page, with the line of the block and a message.
 
 ## A type that does not exist
 
@@ -173,7 +173,7 @@ The card and the motor inside it have fences of the same length. The first line 
 :::
 :::
 
-A block without a name takes everything up to the next line of colons with it, and nothing of that is shown. This page has one more line of colons after the example, so that the sections below are still there.
+A block without a name takes everything up to the next line of colons with it, also when that line is inside a code fence, and none of it is shown. The documentation of markdown pages states this rule in its section "Content and Slots", where it explains the fences of nested blocks. This page has one more line of colons after the example, so that the sections below are still there.
 
 ## A block in a quote
 

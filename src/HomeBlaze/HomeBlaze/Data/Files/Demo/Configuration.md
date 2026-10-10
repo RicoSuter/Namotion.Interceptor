@@ -22,7 +22,7 @@ Each `key=value` pair on the head line sets one configuration property of the su
 
 The page reads two of the values back: the motor is called {{ valuemotor/Name }} and its target speed is {{ valuemotor/TargetSpeed }} RPM.
 
-A yes or no is written as `true` or `false`. The canvas below is empty, and its `isSnapToGridEnabled` is such a value. The page reads it back as {{ canvas/IsSnapToGridEnabled }}.
+A yes or no is written as `true` or `false`. The block below is a `CanvasLayout`, an area on which widgets are placed at any position, and it is empty here. Its `isSnapToGridEnabled` is such a value: with `true`, a widget that is placed or moved on the canvas snaps to a grid. `gridSize=20` gives that grid a step of 20 pixels, and `minHeight=120` makes the canvas 120 pixels high. The page reads the yes or no back as {{ canvas/IsSnapToGridEnabled }}.
 
 ~~~~markdown
 :::HomeBlaze.Components.CanvasLayout#canvas minHeight=120 isSnapToGridEnabled=true gridSize=20
@@ -110,9 +110,11 @@ The page editor writes the configuration of a block for you. Try it on this moto
 3. Put the cursor on that line. The toolbar above the editor now shows the button "Edit editmotor".
 4. Click "Edit editmotor", change "Target Speed (RPM)" and click "Save" in the dialog.
 5. Look at the text of the page again. Only the head line of this block changed, and the page is saved already.
-6. Put the cursor on an empty line and click "Create". Enter a name, choose a type, click "Next", and then "Create" in the dialog. The new block stands at the line of the cursor with three colons, and the name you entered is its `#name`.
+6. Put the cursor on an empty line and click "Create". The dialog "Step 1: Select Type" opens.
+7. Type a name for the block into the field "Name", for example `trymotor`. It starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on this page yet. Then click the type "Motor" in the group "Samples". The dialog goes on to "Step 2: Create Motor" by itself. If you click the type before the name is valid, the dialog stays where it is, and you go on with "Next" once the name is valid.
+8. Fill in the field "Name" of this second step. It is the name that the motor shows, it is required, and it may contain spaces. Then click "Create", which is disabled as long as that field is empty. The new block stands at the line of the cursor with three colons, the name from step 7 is its `#name`, and the page is saved already.
 
-Steps 4 and 6 change the file `Demo/Configuration.md` of your checkout. The same menu, which is now in the toolbar of the editor, has "View" to leave the editor.
+Steps 4 and 8 change the file `Demo/Configuration.md` of your checkout. The same menu, which is now in the toolbar of the editor, has "View" to leave the editor.
 
 ## Expressions in code
 

@@ -11,8 +11,10 @@ public class RepositoryPagesTests
         "src/HomeBlaze/HomeBlaze.E2E.Tests/TestData"
     ];
 
+    internal const string DemoFolder = "src/HomeBlaze/HomeBlaze/Data/Files/Demo/";
+
     // Left out of the guard: this page shows every block error on purpose, so that a reader sees the red boxes.
-    private const string ErrorsDemoPage = "src/HomeBlaze/HomeBlaze/Data/Files/Demo/Errors.md";
+    private const string ErrorsDemoPage = DemoFolder + "Errors.md";
 
     public static TheoryData<string> PagePaths()
     {

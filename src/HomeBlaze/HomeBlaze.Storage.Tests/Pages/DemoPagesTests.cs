@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
@@ -17,8 +18,6 @@ namespace HomeBlaze.Storage.Tests.Pages;
 [Collection(MarkdownPageFixture.StorageCollection)]
 public partial class DemoPagesTests
 {
-    private const string DemoFolder = "src/HomeBlaze/HomeBlaze/Data/Files/Demo/";
-
     // The reader of the JSON adds its own text after this, which is not ours to pin.
     private const string BrokenJsonError = "The json block must contain a valid JSON object without duplicate keys.";
 
@@ -42,6 +41,32 @@ public partial class DemoPagesTests
 
         // Assert
         Assert.Empty(FindErrorMessages(page));
+    }
+
+    // A page that creates nothing has no error box either, so each page is also asked for subjects it names.
+    [Theory]
+    [InlineData("Blocks.md", "cardmotor", typeof(Motor))]
+    [InlineData("Blocks.md", "exhaust", typeof(Tab))]
+    [InlineData("Layouts.md", "notes", typeof(Tab))]
+    [InlineData("Layouts.md", "pumps", typeof(Tab))]
+    [InlineData("Layouts.md", "cardexhaust", typeof(Tab))]
+    [InlineData("References.md", "refmotor", typeof(Motor))]
+    [InlineData("References.md", "depth", typeof(Tab))]
+    [InlineData("References.md", "secondcard", typeof(Card))]
+    [InlineData("Configuration.md", "valuemotor", typeof(Motor))]
+    [InlineData("Configuration.md", "canvas", typeof(CanvasLayout))]
+    [InlineData("Configuration.md", "grid", typeof(GridLayout))]
+    [InlineData("Configuration.md", "keptmotor", typeof(Motor))]
+    public async Task WhenDemoPageIsLoaded_ThenTheBlockWithANameCreatesItsSubject(string fileName, string name, Type expectedType)
+    {
+        // Arrange
+        var fixture = await CreateFixtureAsync();
+
+        // Act
+        IPathScope page = await AddDemoPageAsync(fixture, fileName);
+
+        // Assert
+        Assert.IsType(expectedType, page.TryGetNamedSubject(name));
     }
 
     [Fact]
@@ -89,7 +114,11 @@ public partial class DemoPagesTests
         // Assert
         var healthy = Assert.IsType<Motor>(page.Children["healthy"]);
         Assert.Equal("Healthy Motor", healthy.Name);
-        Assert.Same(healthy, page.Children.Last().Value);
+
+        // The healthy block is the last block of the page text, so it comes after every error.
+        var lastBlock = MarkdownPageParser.Parse(ReadDemoPage("Errors.md")).AllBlocks[^1];
+        Assert.Equal("healthy", lastBlock.Head?.Id);
+        Assert.Same(healthy, page.GetBlockSubject(lastBlock.Index));
 
         // The first of two blocks with the same name keeps the name.
         Assert.Equal("First Twin", Assert.IsType<Motor>(page.Children["twin"]).Name);
@@ -109,9 +138,17 @@ public partial class DemoPagesTests
         });
 
     private static Task<MarkdownFile> AddDemoPageAsync(MarkdownPageFixture fixture, string fileName) =>
-        fixture.AddPageAsync(fileName, RepositoryPagesTests.ReadPage(DemoFolder + fileName));
+        fixture.AddPageAsync(fileName, ReadDemoPage(fileName));
+
+    private static string ReadDemoPage(string fileName) =>
+        RepositoryPagesTests.ReadPage(RepositoryPagesTests.DemoFolder + fileName);
 
     /// <summary>Gets the messages of all error boxes of the page, in the order of the page, without the line numbers.</summary>
+    /// <remarks>
+    /// The order is that of the page because the parser fills the children of a page and of a fragment in
+    /// document order into a new dictionary and removes nothing from it, and such a dictionary enumerates
+    /// in the order of insertion.
+    /// </remarks>
     private static List<string> FindErrorMessages(MarkdownFile page) =>
         Flatten(page.Children.Values)
             .OfType<HtmlSegment>()
