@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using HomeBlaze.Storage.Pages;
 using Namotion.Interceptor;
 
@@ -7,14 +6,12 @@ namespace HomeBlaze.Storage.Blazor.Models;
 /// <summary>
 /// Finds the regions of a page that the editor decorates: widget blocks and expressions.
 /// </summary>
-public static partial class MarkdownDecorationParser
+public static class MarkdownDecorationParser
 {
-    [GeneratedRegex(MarkdownSegmentBuilder.ExpressionPattern)]
-    private static partial Regex ExpressionRegex();
-
     /// <summary>
     /// Gets one region per widget block, per slot block that created a subject, and per expression.
     /// The region of a block covers its head line and its json fence, not its content.
+    /// Braces inside markdown code are no expression and get no region.
     /// </summary>
     /// <param name="content">The page text.</param>
     /// <param name="getBlockSubject">Returns the subject a block created, by block index.</param>
@@ -28,7 +25,8 @@ public static partial class MarkdownDecorationParser
             return regions;
         }
 
-        foreach (var block in MarkdownPageParser.Parse(content).AllBlocks)
+        var page = MarkdownPageParser.Parse(content);
+        foreach (var block in page.AllBlocks)
         {
             if (block.Head is null || block.Kind is not (MarkdownBlockKind.Widget or MarkdownBlockKind.Slot))
             {
@@ -56,13 +54,13 @@ public static partial class MarkdownDecorationParser
                 block.Index));
         }
 
-        foreach (Match match in ExpressionRegex().Matches(content))
+        foreach (var expression in MarkdownSegmentBuilder.FindExpressions(page))
         {
-            var (startLine, startColumn) = GetLineAndColumn(content, match.Index);
-            var (endLine, endColumn) = GetLineAndColumn(content, match.Index + match.Length);
+            var (startLine, startColumn) = GetLineAndColumn(content, expression.Span.Start);
+            var (endLine, endColumn) = GetLineAndColumn(content, expression.Span.End);
 
             regions.Add(new DecorationRegion(
-                startLine, startColumn, endLine, endColumn, DecorationRegionType.Expression, match.Groups[1].Value));
+                startLine, startColumn, endLine, endColumn, DecorationRegionType.Expression, expression.Path));
         }
 
         return regions;

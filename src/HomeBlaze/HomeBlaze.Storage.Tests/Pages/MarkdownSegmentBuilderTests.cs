@@ -1,3 +1,4 @@
+using System.Net;
 using HomeBlaze.Storage.Pages;
 
 namespace HomeBlaze.Storage.Tests.Pages;
@@ -209,4 +210,113 @@ public class MarkdownSegmentBuilderTests
         // Assert
         Assert.Contains("href=\"/pages/notes.md\"", AllHtml(segments));
     }
+
+    [Theory]
+    [InlineData("~~~~markdown\nSpeed {{ a/B }} RPM\n~~~~")]
+    [InlineData("```\nSpeed {{ a/B }} RPM\n```")]
+    [InlineData("```text\nSpeed {{ a/B }} RPM\n```")]
+    [InlineData("```\nSpeed {{ a/B }} RPM")]
+    [InlineData("Intro\n\n    Speed {{ a/B }} RPM")]
+    [InlineData("Write `Speed {{ a/B }} RPM` here")]
+    [InlineData(":::Demo.Card\n```\nSpeed {{ a/B }} RPM\n```\n:::")]
+    public void WhenExpressionIsInsideMarkdownCode_ThenItIsShownAsWrittenAndIsNoSegment(string source)
+    {
+        // Act
+        var segments = Build(source);
+
+        // Assert
+        Assert.DoesNotContain(Flatten(segments), segment => segment is ExpressionMarkdownSegment);
+        Assert.Contains("Speed {{ a/B }} RPM", VisibleText(segments));
+    }
+
+    [Fact]
+    public void WhenExpressionIsNextToInlineCode_ThenOnlyTheOneOutsideTheCodeIsASegment()
+    {
+        // Act
+        var segments = Build("Write `{{ a/B }}` to show {{ c/D }} here");
+
+        // Assert
+        var expression = Assert.Single(segments.OfType<ExpressionMarkdownSegment>());
+        Assert.Equal("c/D", expression.Path);
+        Assert.Contains("<code>{{ a/B }}</code>", VisibleText(segments));
+    }
+
+    [Fact]
+    public void WhenInlineCodeHasOnlyOpeningBraces_ThenTheExpressionAfterItIsStillASegment()
+    {
+        // Act
+        var segments = Build("An expression starts with `{{` like {{ a/B }} here");
+
+        // Assert
+        var expression = Assert.Single(segments.OfType<ExpressionMarkdownSegment>());
+        Assert.Equal("a/B", expression.Path);
+        Assert.Contains("<code>{{</code>", VisibleText(segments));
+    }
+
+    [Fact]
+    public void WhenClosingBracesAreInsideInlineCode_ThenTheyCloseNoExpression()
+    {
+        // Act
+        var segments = Build("Open with {{ and close with `}}` here");
+
+        // Assert
+        Assert.Empty(segments.OfType<ExpressionMarkdownSegment>());
+        Assert.Contains("Open with {{ and close with <code>}}</code> here", VisibleText(segments));
+    }
+
+    [Theory]
+    [InlineData("Value <code>{{ a/B }}</code> now")]
+    [InlineData("<div>{{ a/B }}</div>")]
+    [InlineData("<pre>{{ a/B }}</pre>")]
+    public void WhenExpressionIsInsideRawHtmlOfTheAuthor_ThenItIsStillASegment(string source)
+    {
+        // Act
+        var segments = Build(source);
+
+        // Assert
+        var expression = Assert.Single(segments.OfType<ExpressionMarkdownSegment>());
+        Assert.Equal("a/B", expression.Path);
+    }
+
+    [Fact]
+    public void WhenMermaidFenceContainsDoubleBraces_ThenItRendersAsDiagramWithoutExpression()
+    {
+        // Act
+        var segments = Build("""
+            ```mermaid
+            graph TD;
+                A{{text}} --> B
+            ```
+            """);
+
+        // Assert
+        Assert.Empty(segments.OfType<ExpressionMarkdownSegment>());
+        Assert.Contains("<pre class=\"mermaid\">", AllHtml(segments));
+        Assert.Contains("A{{text}} --> B", VisibleText(segments));
+    }
+
+    [Fact]
+    public void WhenBlockIsInsideFencedCode_ThenItIsShownAsWrittenAndIsNoBlock()
+    {
+        // Act
+        var segments = Build("""
+            ~~~~markdown
+            :::Demo.Widget path=/x
+            :::
+            ~~~~
+            """);
+
+        // Assert
+        Assert.Empty(segments.OfType<BlockMarkdownSegment>());
+        Assert.Contains(":::Demo.Widget path=/x", AllHtml(segments));
+    }
+
+    private static IEnumerable<MarkdownSegment> Flatten(IEnumerable<MarkdownSegment> segments) =>
+        segments.SelectMany(segment => segment is BlockMarkdownSegment block
+            ? Flatten(block.Content).Prepend(segment)
+            : [segment]);
+
+    // What a browser shows for the HTML: character references are decoded.
+    private static string VisibleText(IEnumerable<MarkdownSegment> segments) =>
+        WebUtility.HtmlDecode(AllHtml(segments));
 }

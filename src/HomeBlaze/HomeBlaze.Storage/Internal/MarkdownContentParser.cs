@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
@@ -131,14 +130,9 @@ public sealed partial class MarkdownContentParser
         _typeProvider = typeProvider;
     }
 
-    // Shared with the segment builder so that rendering the raw content and splitting the HTML
-    // agree on what a {{...}} is.
-    [GeneratedRegex(MarkdownSegmentBuilder.ExpressionPattern)]
-    private static partial Regex ExpressionRegex();
-
     /// <summary>
     /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
-    /// Embedded subject blocks are kept as-is. Frontmatter is preserved.
+    /// Embedded subject blocks are kept as-is. Frontmatter is preserved. An expression inside markdown code is kept as written.
     /// Uses the same resolution semantics as <see cref="RenderExpression"/> (in the scope of the markdown file).
     /// </summary>
     public string? RenderContent(string? content, MarkdownFile parent)
@@ -146,19 +140,28 @@ public sealed partial class MarkdownContentParser
         if (string.IsNullOrEmpty(content))
             return content;
 
-        return ExpressionRegex().Replace(content, match =>
+        StringBuilder? rendered = null;
+        var copiedLength = 0;
+        foreach (var expression in MarkdownSegmentBuilder.FindExpressions(MarkdownPageParser.Parse(content)))
         {
-            var path = match.Groups[1].Value;
+            rendered ??= new StringBuilder(content.Length);
+            rendered.Append(content, copiedLength, expression.Span.Start - copiedLength);
             try
             {
-                var value = _pathResolver.ResolveScopedValue(path, PathStyle.Canonical, parent);
-                return value?.ToString() ?? string.Empty;
+                var value = _pathResolver.ResolveScopedValue(expression.Path, PathStyle.Canonical, parent);
+                rendered.Append(value);
             }
             catch
             {
-                return match.Value;
+                rendered.Append(content, expression.Span.Start, expression.Span.Length);
             }
-        });
+
+            copiedLength = expression.Span.End;
+        }
+
+        return rendered is null
+            ? content
+            : rendered.Append(content, copiedLength, content.Length - copiedLength).ToString();
     }
 
     /// <summary>

@@ -179,6 +179,49 @@ public class MarkdownPageScopeTests
         Assert.Contains("Count: 7", evaluated);
     }
 
+    [Fact]
+    public async Task WhenEvaluatedContentIsRead_ThenExpressionInsideCodeStaysAsWritten()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $$$"""
+            :::{{{Namespace}}}.TestLeaf#leaf count=7
+            :::
+
+            Count: {{ leaf/Count }}
+
+            ~~~~markdown
+            Example: {{ leaf/Count }}
+            ~~~~
+            """);
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent();
+
+        // Assert
+        Assert.Contains("Count: 7\n", evaluated);
+        Assert.Contains("~~~~markdown\nExample: {{ leaf/Count }}\n~~~~", evaluated);
+    }
+
+    [Fact]
+    public async Task WhenEvaluatedContentIsRead_ThenBracesInInlineCodeDoNotHideTheExpressionAfterThem()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync("page.md", $$$"""
+            :::{{{Namespace}}}.TestLeaf#leaf count=7
+            :::
+
+            Write `{{ leaf/Count }}` or only `{{` to show {{ leaf/Count }} here.
+            """);
+
+        // Act
+        var evaluated = page.ReadEvaluatedContent();
+
+        // Assert
+        Assert.Contains("Write `{{ leaf/Count }}` or only `{{` to show 7 here.", evaluated);
+    }
+
     [Theory]
     [InlineData("../other.md", false)]
     [InlineData("../other.md", true)]

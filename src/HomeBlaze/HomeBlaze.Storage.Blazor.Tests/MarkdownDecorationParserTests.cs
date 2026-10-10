@@ -244,4 +244,43 @@ public class MarkdownDecorationParserTests
         // Assert
         Assert.Empty(regions);
     }
+
+    [Fact]
+    public void WhenExpressionsAreInsideCode_ThenOnlyTheOneOutsideCodeGetsARegion()
+    {
+        // Arrange
+        const string content = "Live {{ a/B }} value\n\nWrite `{{ c/D }}` here\n\n```\n{{ e/F }}\n```\n";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal(DecorationRegionType.Expression, region.Type);
+        Assert.Equal("a/B", region.Name);
+        Assert.Equal((1, 6, 1, 15), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Fact]
+    public void WhenInlineCodeHasOnlyOpeningBraces_ThenTheExpressionAfterItGetsARegion()
+    {
+        // Arrange
+        const string content = "Start with `{{` to show {{ a/B }} here";
+
+        // Act
+        var region = Assert.Single(MarkdownDecorationParser.Parse(content));
+
+        // Assert
+        Assert.Equal("a/B", region.Name);
+        Assert.Equal((1, 25, 1, 34), (region.StartLine, region.StartColumn, region.EndLine, region.EndColumn));
+    }
+
+    [Fact]
+    public void WhenClosingBracesAreInsideInlineCode_ThenTheyCloseNoExpression()
+    {
+        // Act
+        var regions = MarkdownDecorationParser.Parse("Open with {{ and close with `}}` here");
+
+        // Assert
+        Assert.Empty(regions);
+    }
 }

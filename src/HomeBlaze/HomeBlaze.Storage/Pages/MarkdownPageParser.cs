@@ -1,7 +1,10 @@
 using Markdig;
 using Markdig.Extensions.CustomContainers;
+using Markdig.Extensions.Mathematics;
+using Markdig.Extensions.Yaml;
 using Markdig.Renderers.Html;
 using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 
 namespace HomeBlaze.Storage.Pages;
 
@@ -47,10 +50,14 @@ public sealed class MarkdownPage
     private readonly Dictionary<CustomContainer, MarkdownBlock> _containers = new();
     private readonly List<MarkdownBlock> _allBlocks = [];
 
-    internal MarkdownPage(string source, MarkdownDocument document)
+    // Ordered by start and never overlapping, which the search in IsInsideCode relies on.
+    private readonly MarkdownSpan[] _codeSpans;
+
+    internal MarkdownPage(string source, MarkdownDocument document, MarkdownSpan[] codeSpans)
     {
         Source = source;
         Document = document;
+        _codeSpans = codeSpans;
     }
 
     public string Source { get; }
@@ -62,6 +69,36 @@ public sealed class MarkdownPage
     public IReadOnlyList<MarkdownBlock> AllBlocks => _allBlocks;
 
     internal MarkdownDocument Document { get; }
+
+    /// <summary>
+    /// Gets whether the offset into <see cref="Source"/> lies inside markdown code: a fenced code block
+    /// with its fence lines, an indented code block, or an inline code span with its backticks.
+    /// </summary>
+    /// <remarks>Code in raw HTML, such as a <c>code</c> or <c>pre</c> element, is not markdown code.</remarks>
+    public bool IsInsideCode(int offset)
+    {
+        var low = 0;
+        var high = _codeSpans.Length - 1;
+        while (low <= high)
+        {
+            var middle = (low + high) / 2;
+            var span = _codeSpans[middle];
+            if (offset < span.Start)
+            {
+                high = middle - 1;
+            }
+            else if (offset >= span.End)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     internal MarkdownBlock GetBlock(CustomContainer container) => _containers[container];
 
@@ -88,9 +125,57 @@ public static class MarkdownPageParser
     public static MarkdownPage Parse(string source)
     {
         var document = Markdig.Markdown.Parse(source, Pipeline);
-        var page = new MarkdownPage(source, document);
+        var page = new MarkdownPage(source, document, FindCodeSpans(source, document));
         Visit(document, page.Blocks, page, allowsBlocks: true, hasOwner: false);
         return page;
+    }
+
+    private static MarkdownSpan[] FindCodeSpans(string source, MarkdownDocument document)
+    {
+        var spans = new List<MarkdownSpan>();
+        foreach (var descendant in document.Descendants())
+        {
+            var start = descendant.Span.Start;
+            var end = descendant.Span.End + 1;
+            switch (descendant)
+            {
+                // Markdig reports inline code on some tab-indented lines at a wrong place. Such code is
+                // left out, because its span would make unrelated text code.
+                case CodeInline inline when IsDelimitedBy(source, inline.Delimiter, start, end):
+                    break;
+
+                // Front matter and math blocks derive from the code block types, but they are not code:
+                // the code block renderer does not render them.
+                case CodeBlock block and not (YamlFrontMatterBlock or MathBlock):
+                    // The span of a fence that is never closed ends inside its opening line, so the ends
+                    // of that line and of the last code line count as well.
+                    end = Math.Max(end, FindLineEnd(source, start));
+                    if (block.Lines.Count > 0)
+                    {
+                        end = Math.Max(end, FindLineEnd(source, block.Lines.Lines[block.Lines.Count - 1].Position));
+                    }
+
+                    break;
+
+                default:
+                    continue;
+            }
+
+            spans.Add(new MarkdownSpan(start, end - start));
+        }
+
+        // Markdig moves some blocks, for example footnotes to the end of the document.
+        spans.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+        return [.. spans];
+    }
+
+    private static bool IsDelimitedBy(string source, char delimiter, int start, int end) =>
+        start >= 0 && end <= source.Length && end - start >= 2 && source[start] == delimiter && source[end - 1] == delimiter;
+
+    private static int FindLineEnd(string source, int position)
+    {
+        var lineEnd = source.IndexOf('\n', position);
+        return lineEnd < 0 ? source.Length : lineEnd;
     }
 
     private static void Visit(

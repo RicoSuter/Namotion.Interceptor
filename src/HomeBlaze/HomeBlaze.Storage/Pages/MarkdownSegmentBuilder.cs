@@ -3,7 +3,9 @@ using System.Text.RegularExpressions;
 using Markdig.Extensions.CustomContainers;
 using Markdig.Renderers;
 using Markdig.Renderers.Html;
+using Markdig.Renderers.Html.Inlines;
 using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 
 namespace HomeBlaze.Storage.Pages;
 
@@ -15,6 +17,9 @@ public sealed record ExpressionMarkdownSegment(string Path) : MarkdownSegment;
 
 public sealed record BlockMarkdownSegment(MarkdownBlock Block, IReadOnlyList<MarkdownSegment> Content) : MarkdownSegment;
 
+/// <summary>One {{ path }} expression in the text of a page: where it stands and the path between the braces.</summary>
+public readonly record struct MarkdownExpression(MarkdownSpan Span, string Path);
+
 public static class MarkdownErrorBox
 {
     public static string Render(int line, string message) =>
@@ -24,10 +29,47 @@ public static class MarkdownErrorBox
 /// <summary>Renders a parsed page to HTML and cuts it into segments per block.</summary>
 public static partial class MarkdownSegmentBuilder
 {
-    public const string ExpressionPattern = @"\{\{\s*([^}]+?)\s*\}\}";
+    private const string ExpressionPattern = @"\{\{\s*([^}]+?)\s*\}\}";
 
     [GeneratedRegex(@"<!--(/?)BLOCK:([0-9a-f]{32}):(\d+)-->|" + ExpressionPattern)]
     private static partial Regex MarkerRegex();
+
+    [GeneratedRegex(ExpressionPattern)]
+    private static partial Regex ExpressionRegex();
+
+    private static readonly char[] Braces = ['{', '}'];
+
+    /// <summary>
+    /// Gets the expressions in the text of the page in document order. These are the expressions that
+    /// <see cref="Build"/> turns into segments: a brace inside markdown code neither opens nor closes one.
+    /// </summary>
+    public static IEnumerable<MarkdownExpression> FindExpressions(MarkdownPage page)
+    {
+        var source = page.Source;
+        foreach (Match match in ExpressionRegex().Matches(HideBracesInCode(page)))
+        {
+            var path = match.Groups[1];
+            yield return new MarkdownExpression(
+                new MarkdownSpan(match.Index, match.Length), source.Substring(path.Index, path.Length));
+        }
+    }
+
+    /// <summary>Gets the text of the page with every brace inside markdown code replaced. All offsets stay the same.</summary>
+    private static string HideBracesInCode(MarkdownPage page)
+    {
+        var source = page.Source;
+        char[]? hidden = null;
+        for (var index = source.IndexOfAny(Braces); index >= 0; index = source.IndexOfAny(Braces, index + 1))
+        {
+            if (page.IsInsideCode(index))
+            {
+                hidden ??= source.ToCharArray();
+                hidden[index] = '\0';
+            }
+        }
+
+        return hidden is null ? source : new string(hidden);
+    }
 
     public static IReadOnlyList<MarkdownSegment> Build(MarkdownPage page, Func<string, string>? linkRewriter = null)
     {
@@ -38,24 +80,34 @@ public static partial class MarkdownSegmentBuilder
         MarkdownPageParser.Pipeline.Setup(renderer);
         renderer.ObjectRenderers.Replace<HtmlCustomContainerRenderer>(new BlockMarkerRenderer(page, token));
 
-        // Extensions configure the code block renderer by exact type during Setup, so the
-        // replacement is put in afterwards and takes over what they configured.
+        // Extensions configure the code renderers by exact type during Setup, so the
+        // replacements are put in afterwards and take over what they configured.
+        var literalCode = new LiteralCodeWriter();
         var codeBlockRenderer = renderer.ObjectRenderers.FindExact<CodeBlockRenderer>();
         if (codeBlockRenderer is not null)
         {
-            var legacyRenderer = new LegacySubjectFenceRenderer
+            var literalRenderer = new LiteralCodeBlockRenderer(literalCode)
             {
                 OutputAttributesOnPre = codeBlockRenderer.OutputAttributesOnPre
             };
-            legacyRenderer.BlocksAsDiv.UnionWith(codeBlockRenderer.BlocksAsDiv);
+            literalRenderer.BlocksAsDiv.UnionWith(codeBlockRenderer.BlocksAsDiv);
             foreach (var (language, tag) in codeBlockRenderer.BlockMapping)
             {
-                legacyRenderer.BlockMapping[language] = tag;
+                literalRenderer.BlockMapping[language] = tag;
             }
 
-            legacyRenderer.TryWriters.AddRange(codeBlockRenderer.TryWriters);
-            renderer.ObjectRenderers.Replace<CodeBlockRenderer>(legacyRenderer);
+            literalRenderer.TryWriters.AddRange(codeBlockRenderer.TryWriters);
+            renderer.ObjectRenderers.Replace<CodeBlockRenderer>(literalRenderer);
         }
+
+        var codeInlineRenderer = renderer.ObjectRenderers.FindExact<CodeInlineRenderer>();
+        if (codeInlineRenderer is not null)
+        {
+            var literalRenderer = new LiteralCodeInlineRenderer(literalCode);
+            literalRenderer.TryWriters.AddRange(codeInlineRenderer.TryWriters);
+            renderer.ObjectRenderers.Replace<CodeInlineRenderer>(literalRenderer);
+        }
+
         renderer.Render(page.Document);
         writer.Flush();
 
@@ -146,7 +198,37 @@ public static partial class MarkdownSegmentBuilder
         }
     }
 
-    private sealed class LegacySubjectFenceRenderer : CodeBlockRenderer
+    /// <summary>
+    /// Collects what a code renderer writes and passes it on with every brace as a character reference.
+    /// A browser shows the braces, and the expression pattern does not match them.
+    /// </summary>
+    private sealed class LiteralCodeWriter
+    {
+        private readonly StringWriter _code = new();
+
+        public TextWriter Begin(HtmlRenderer renderer)
+        {
+            var output = renderer.Writer;
+            renderer.Writer = _code;
+            return output;
+        }
+
+        public void End(HtmlRenderer renderer, TextWriter output)
+        {
+            renderer.Writer = output;
+
+            var code = _code.GetStringBuilder();
+            code.Replace("{", "&#123;").Replace("}", "&#125;");
+            foreach (var chunk in code.GetChunks())
+            {
+                output.Write(chunk.Span);
+            }
+
+            code.Clear();
+        }
+    }
+
+    private sealed class LiteralCodeBlockRenderer(LiteralCodeWriter literalCode) : CodeBlockRenderer
     {
         protected override void Write(HtmlRenderer renderer, CodeBlock block)
         {
@@ -159,8 +241,20 @@ public static partial class MarkdownSegmentBuilder
             }
             else
             {
+                var output = literalCode.Begin(renderer);
                 base.Write(renderer, block);
+                literalCode.End(renderer, output);
             }
+        }
+    }
+
+    private sealed class LiteralCodeInlineRenderer(LiteralCodeWriter literalCode) : CodeInlineRenderer
+    {
+        protected override void Write(HtmlRenderer renderer, CodeInline code)
+        {
+            var output = literalCode.Begin(renderer);
+            base.Write(renderer, code);
+            literalCode.End(renderer, output);
         }
     }
 }
