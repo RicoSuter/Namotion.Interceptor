@@ -24,12 +24,11 @@ internal static class DidlParser
 
         // Radio stations put the current song into streamContent and the station into title. A ZPSTR_ placeholder in
         // streamContent is kept as the title rather than falling back, so the player can tell "not known yet" apart.
-        var streamContent = SonosValues.NullIfEmpty((string?)item.Element(SonosXml.RinconNamespace + "streamContent"));
         return new DidlTrack(
-            streamContent ?? ReadTitle(item),
-            SonosValues.NullIfEmpty((string?)item.Element(SonosXml.DcNamespace + "creator")),
-            SonosValues.NullIfEmpty((string?)item.Element(SonosXml.UpnpNamespace + "album")),
-            SonosValues.NullIfEmpty((string?)item.Element(SonosXml.UpnpNamespace + "albumArtURI")));
+            ReadText(item, SonosXml.RinconNamespace + "streamContent") ?? ReadTitle(item),
+            ReadText(item, SonosXml.DcNamespace + "creator"),
+            ReadText(item, SonosXml.UpnpNamespace + "album"),
+            ReadText(item, SonosXml.UpnpNamespace + "albumArtURI"));
     }
 
     /// <summary>
@@ -44,7 +43,11 @@ internal static class DidlParser
     /// Returns the <c>dc:title</c> of a DIDL item or container, null when it is absent or empty.
     /// </summary>
     internal static string? ReadTitle(XElement item) =>
-        SonosValues.NullIfEmpty((string?)item.Element(SonosXml.DcNamespace + "title"));
+        ReadText(item, SonosXml.DcNamespace + "title");
+
+    // Stations pad their texts with spaces.
+    private static string? ReadText(XElement item, XName name) =>
+        SonosValues.NullIfEmpty(((string?)item.Element(name))?.Trim());
 
     private static XElement? ParseItem(string? metadata)
     {

@@ -33,6 +33,34 @@ public class DidlParserTests
     }
 
     [Fact]
+    public void WhenTextsArePadded_ThenTheyAreTrimmed()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl(" Station ", " Artist ", " Album ", streamContent: "ARTIST - LIVE SONG  ");
+
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+        var title = DidlParser.ParseTitle(metadata);
+
+        // Assert
+        Assert.Equal(new DidlTrack("ARTIST - LIVE SONG", "Artist", "Album", null), track);
+        Assert.Equal("Station", title);
+    }
+
+    [Fact]
+    public void WhenStreamContentIsOnlySpaces_ThenTheTitleIsUsed()
+    {
+        // Arrange
+        var metadata = SonosEventBodies.Didl("Station", streamContent: "  ");
+
+        // Act
+        var track = DidlParser.ParseTrack(metadata);
+
+        // Assert
+        Assert.Equal("Station", track?.Title);
+    }
+
+    [Fact]
     public void WhenReadingTheSourceTitle_ThenTheTitleIsReadWithoutTheStreamContent()
     {
         // Arrange
