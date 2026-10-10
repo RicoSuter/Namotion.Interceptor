@@ -83,6 +83,30 @@ internal sealed class StoragePathRegistry
     public void UpdateHash(string path, string hash)
         => _contentHashes[NormalizeForLookup(path)] = hash;
 
+    /// <summary>
+    /// Records the hash unless it is already the recorded one.
+    /// </summary>
+    /// <returns>True for exactly one of the callers that report the same new hash at the same time.</returns>
+    public bool TryUpdateHash(string path, string hash)
+    {
+        var lookupKey = NormalizeForLookup(path);
+        while (true)
+        {
+            if (_contentHashes.TryGetValue(lookupKey, out var recordedHash))
+            {
+                if (recordedHash == hash)
+                    return false;
+
+                if (_contentHashes.TryUpdate(lookupKey, hash, recordedHash))
+                    return true;
+            }
+            else if (_contentHashes.TryAdd(lookupKey, hash))
+            {
+                return true;
+            }
+        }
+    }
+
     public void UpdateSize(string path, long size)
         => _fileSizes[NormalizeForLookup(path)] = size;
 

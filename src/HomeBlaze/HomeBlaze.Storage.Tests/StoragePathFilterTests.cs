@@ -35,4 +35,46 @@ public class StoragePathFilterTests
         // Assert
         Assert.False(isHidden);
     }
+
+    [Theory]
+    [InlineData("Home.md~")]
+    [InlineData("~Draft.md")]
+    [InlineData("Notes.md.tmp")]
+    [InlineData("Notes.tmp.md")]
+    [InlineData("/Build.tmp/Output.md")]
+    [InlineData("Docs/~Backup/Notes.md")]
+    [InlineData("Docs\\Old~\\Notes.md")]
+    public void WhenPathHasSegmentWithTemporaryName_ThenItHasTemporarySegment(string path)
+    {
+        // Act
+        var hasTemporarySegment = StoragePathFilter.HasTemporarySegment(path);
+
+        // Assert
+        Assert.True(hasTemporarySegment);
+    }
+
+    [Theory]
+    [InlineData("Home.md")]
+    [InlineData("/Docs/Readme.md")]
+    [InlineData("Docs/tmp/Notes.md")]
+    [InlineData("Docs/a~b/Notes.md")]
+    [InlineData("")]
+    public void WhenNoSegmentHasTemporaryName_ThenItHasNoTemporarySegment(string path)
+    {
+        // Act
+        var hasTemporarySegment = StoragePathFilter.HasTemporarySegment(path);
+
+        // Assert
+        Assert.False(hasTemporarySegment);
+    }
+
+    [Fact]
+    public void WhenOnlyParentFolderHasTemporaryName_ThenItIsNotTemporaryFile()
+    {
+        // Act
+        var isTemporaryFile = StoragePathFilter.IsTemporaryFile("/data/Build.tmp/Output.md");
+
+        // Assert
+        Assert.False(isTemporaryFile);
+    }
 }

@@ -28,6 +28,12 @@ public partial class FluentStorageContainer :
         ?? throw new InvalidOperationException("Storage not connected");
 
     private readonly StoragePathRegistry _pathRegistry = new();
+
+    // Guards every update of the hierarchy (Children here and on the folders below) together with the path
+    // registry, except for ScanAsync. Children is copied, modified and reassigned, so unsynchronized callers
+    // overwrite each other's update. The helpers that take it are also called while it is held, which relies
+    // on Lock being reentrant. It is never held across an await: a subject loads outside of it, so what was
+    // read from disk or the registry before has to be checked again inside.
     private readonly Lock _hierarchyLock = new();
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
@@ -153,6 +159,11 @@ public partial class FluentStorageContainer :
         Status = StorageStatus.Initializing;
         try
         {
+            // A reconnect replaces both. A watcher left running would keep handling events of the previous directory.
+            _fileWatcher?.Dispose();
+            _fileWatcher = null;
+            var previousClient = _client;
+
             _storageDirectory = isInMemory ? null : ResolveStorageDirectory();
             _client = StorageType switch
             {
@@ -160,6 +171,7 @@ public partial class FluentStorageContainer :
                 "inmemory" => StorageFactory.Blobs.InMemory(),
                 _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
             };
+            previousClient?.Dispose();
 
             _jsonSyncHelper = new JsonSubjectSynchronizer(_pathRegistry, _serializer, _client, _logger);
 
@@ -196,7 +208,7 @@ public partial class FluentStorageContainer :
         var children = new Dictionary<string, IInterceptorSubject>();
         foreach (var blob in blobs)
         {
-            if (StoragePathFilter.IsHidden(blob.FullPath))
+            if (IsIgnored(blob.FullPath))
             {
                 continue;
             }
@@ -212,22 +224,14 @@ public partial class FluentStorageContainer :
             try
             {
                 var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
-                if (subject != null)
+                if (subject != null && _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, this))
                 {
-                    _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, this);
                     _pathRegistry.Register(subject, blob.FullPath);
 
-                    if (Path.GetExtension(blob.FullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+                    var hash = await TryComputeJsonHashAsync(blob.FullPath, cancellationToken);
+                    if (hash != null)
                     {
-                        try
-                        {
-                            var content = await Client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
-                            _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", blob.FullPath);
-                        }
+                        _pathRegistry.UpdateHash(blob.FullPath, hash);
                     }
                 }
             }
@@ -246,97 +250,147 @@ public partial class FluentStorageContainer :
         _fileWatcher = new StorageFileWatcher(
             _storageDirectory!,
             ProcessFileEventAsync,
-            () => ScanAsync(CancellationToken.None),
+            ResyncAsync,
             _logger);
 
         _fileWatcher.Start();
     }
 
-    internal async Task ProcessFileEventAsync(FileSystemEventArgs e)
+    /// <summary>
+    /// Brings the whole hierarchy in line with what is on disk after file events were lost. Unlike
+    /// <see cref="ScanAsync"/> it keeps the subjects of unchanged paths and can run while events are processed.
+    /// </summary>
+    internal async Task ResyncAsync()
     {
-        if (e is RenamedEventArgs renamed)
-        {
-            await SyncPathAsync(GetRelativePath(renamed.OldFullPath), isNew: false);
-        }
+        RemoveMissingChildren(Children);
+        await SyncBlobsAsync(await Client.ListAsync(recurse: true));
 
-        var isNew = e.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed;
-        await SyncPathAsync(GetRelativePath(e.FullPath), isNew);
+        _logger?.LogInformation("Synchronized storage after lost file events.");
     }
 
-    private string GetRelativePath(string fullPath)
-        => Path.GetRelativePath(_storageDirectory!, fullPath).Replace('\\', '/');
+    // Temporary paths are skipped because the watcher drops their events, so one that was added could never be removed.
+    private static bool IsIgnored(ReadOnlySpan<char> relativePath)
+        => StoragePathFilter.IsHidden(relativePath) || StoragePathFilter.HasTemporarySegment(relativePath);
 
-    /// <summary>
-    /// Brings the hierarchy in line with what is on disk at the path. The event only says where to look:
-    /// coalesced and delayed events can describe a state that no longer exists.
-    /// </summary>
-    private async Task SyncPathAsync(string relativePath, bool isNew)
+    internal async Task ProcessFileEventAsync(FileSystemEventArgs e)
     {
-        if (StoragePathFilter.IsHidden(relativePath))
-            return;
-
-        var fullPath = GetFileSystemPath(relativePath);
-        if (Directory.Exists(fullPath))
+        // Deliberately no switch on the change type: coalesced and delayed events can describe a state
+        // that no longer exists, so each path is looked up on disk instead.
+        var relativePath = GetRelativePath(e.FullPath);
+        if (e is RenamedEventArgs renamed)
         {
-            // An existing directory reports a change for every entry written inside it, and those raise their own events.
-            if (isNew)
+            var oldRelativePath = GetRelativePath(renamed.OldFullPath);
+            if (!oldRelativePath.Equals(relativePath, StringComparison.OrdinalIgnoreCase))
             {
-                await AddDirectoryAsync(relativePath, fullPath);
+                await SyncPathAsync(oldRelativePath, reportedAsCreated: false);
+            }
+            else if (oldRelativePath != relativePath)
+            {
+                // Only the casing changed. On a case-insensitive file system the old path still resolves,
+                // so it is removed without looking at the disk and added again under the new casing below.
+                Remove(oldRelativePath);
             }
         }
-        else if (!File.Exists(fullPath))
+
+        var reportedAsCreated = e.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed;
+        await SyncPathAsync(relativePath, reportedAsCreated);
+    }
+
+    private string GetRelativePath(string fileSystemPath)
+        => Path.GetRelativePath(_storageDirectory!, fileSystemPath).Replace('\\', '/');
+
+    /// <summary>
+    /// Brings the hierarchy in line with what is on disk at the path.
+    /// </summary>
+    /// <param name="relativePath">The path within the storage.</param>
+    /// <param name="reportedAsCreated">
+    /// Whether the event reported the path as created or renamed to. A directory is only synchronized then.
+    /// </param>
+    private async Task SyncPathAsync(string relativePath, bool reportedAsCreated)
+    {
+        if (IsIgnored(relativePath))
+            return;
+
+        var fileSystemPath = GetFileSystemPath(relativePath);
+        if (Directory.Exists(fileSystemPath))
         {
-            RemovePath(relativePath, fullPath);
+            // An existing directory reports a change for every entry written inside it, and those raise their own events.
+            if (reportedAsCreated)
+            {
+                await SyncDirectoryAsync(relativePath);
+            }
+        }
+        else if (!File.Exists(fileSystemPath))
+        {
+            RemoveIfMissing(relativePath);
         }
         else if (_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
         {
-            await NotifyFileChangedAsync(existingSubject, relativePath, fullPath);
+            await NotifyFileChangedAsync(existingSubject, relativePath, fileSystemPath);
         }
         else
         {
-            await AddFileAsync(new Blob(relativePath), fullPath);
+            await AddFileAsync(new Blob(relativePath));
         }
     }
 
-    private async Task AddDirectoryAsync(string relativePath, string fullPath)
+    private async Task SyncDirectoryAsync(string relativePath)
     {
-        if (!EnsureFolder(relativePath, fullPath))
+        var folder = EnsureFolder(relativePath);
+        if (folder == null)
             return;
 
-        _logger?.LogInformation("Added folder from external: {Path}", relativePath);
+        // The directory can have replaced another one of the same name, whose entries are then gone from disk.
+        RemoveMissingChildren(folder.Children);
 
         // A directory that is moved or copied in raises no events for the entries it already contains.
-        var blobs = await Client.ListAsync(folderPath: relativePath, recurse: true);
+        await SyncBlobsAsync(await Client.ListAsync(folderPath: relativePath, recurse: true));
+
+        _logger?.LogInformation("Synchronized folder from external: {Path}", relativePath);
+    }
+
+    private async Task SyncBlobsAsync(IReadOnlyCollection<Blob> blobs)
+    {
         foreach (var blob in blobs)
         {
-            if (StoragePathFilter.IsHidden(blob.FullPath) || StoragePathFilter.IsTemporaryFile(blob.FullPath))
+            if (IsIgnored(blob.FullPath))
                 continue;
 
             try
             {
-                var blobFullPath = GetFileSystemPath(blob.FullPath);
                 if (blob.IsFolder)
                 {
-                    EnsureFolder(blob.FullPath, blobFullPath);
+                    EnsureFolder(blob.FullPath);
                 }
-                else if (!_pathRegistry.TryGetSubject(blob.FullPath, out _))
+                else if (_pathRegistry.TryGetSubject(blob.FullPath, out var existingSubject))
                 {
-                    await AddFileAsync(blob, blobFullPath);
+                    await NotifyFileChangedAsync(existingSubject, blob.FullPath, GetFileSystemPath(blob.FullPath));
+                }
+                else
+                {
+                    await AddFileAsync(blob);
                 }
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "Failed to create subject for blob: {Path}", blob.FullPath);
+                _logger?.LogWarning(ex, "Failed to synchronize blob: {Path}", blob.FullPath);
             }
         }
     }
 
-    private bool EnsureFolder(string relativePath, string fullPath)
+    /// <summary>
+    /// Returns the folder at the path, creating it when the directory exists on disk.
+    /// </summary>
+    private VirtualFolder? EnsureFolder(string relativePath)
     {
         lock (_hierarchyLock)
         {
-            if (!Directory.Exists(fullPath))
-                return false;
+            if (!Directory.Exists(GetFileSystemPath(relativePath)))
+                return null;
+
+            var folder = StorageHierarchyManager.FindFolder(relativePath, Children);
+            if (folder != null)
+                return folder;
 
             // A file of the same name was replaced by the directory.
             if (_pathRegistry.TryGetSubject(relativePath, out var replacedFile))
@@ -347,56 +401,91 @@ public partial class FluentStorageContainer :
             var children = new Dictionary<string, IInterceptorSubject>(Children);
             _hierarchyManager.PlaceInHierarchy(relativePath, null, children, this);
             Children = children;
-            return true;
+
+            return StorageHierarchyManager.FindFolder(relativePath, children);
         }
     }
 
-    private async Task AddFileAsync(Blob blob, string fullPath)
+    private void RemoveMissingChildren(Dictionary<string, IInterceptorSubject> children)
     {
-        var path = blob.FullPath;
-        _logger?.LogDebug("File created: {Path}", path);
+        foreach (var child in children.Values)
+        {
+            if (child is VirtualFolder childFolder)
+            {
+                if (!RemoveIfMissing(childFolder.RelativePath))
+                {
+                    RemoveMissingChildren(childFolder.Children);
+                }
+            }
+            else if (_pathRegistry.TryGetPath(child, out var path))
+            {
+                RemoveIfMissing(path);
+            }
+        }
+    }
+
+    private async Task AddFileAsync(Blob blob)
+    {
+        var relativePath = blob.FullPath;
+        var fileSystemPath = GetFileSystemPath(relativePath);
 
         var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, CancellationToken.None);
         if (subject == null)
             return;
 
-        string? hash = null;
-        if (Path.GetExtension(path).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                var content = await Client.ReadTextAsync(path);
-                hash = StoragePathRegistry.ComputeHash(content);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", path);
-            }
-        }
+        var hash = await TryComputeJsonHashAsync(relativePath, CancellationToken.None);
 
+        IInterceptorSubject? addedMeanwhile;
         lock (_hierarchyLock)
         {
-            // Both are checked under the lock because the subject loaded outside of it. A concurrent event may have
-            // added the file meanwhile. If it was deleted meanwhile, adding it now would leave a phantom: its delete
-            // event may already have run and found nothing to remove.
-            if (_pathRegistry.TryGetSubject(path, out _) || !File.Exists(fullPath))
+            // If the file was deleted while the subject loaded, its delete event may already have run
+            // and found nothing to remove.
+            if (!File.Exists(fileSystemPath))
                 return;
 
-            // A directory of the same name was replaced by the file.
-            RemoveFolder(path);
-
-            if (hash != null)
+            if (!_pathRegistry.TryGetSubject(relativePath, out addedMeanwhile))
             {
-                _pathRegistry.UpdateHash(path, hash);
-            }
+                // A directory of the same name was replaced by the file.
+                RemoveFolder(relativePath);
 
-            AddToHierarchy(path, subject);
+                if (!AddToHierarchy(relativePath, subject))
+                    return;
+
+                if (hash != null)
+                {
+                    _pathRegistry.UpdateHash(relativePath, hash);
+                }
+            }
         }
 
-        _logger?.LogInformation("Added file from external: {Path}", path);
+        if (addedMeanwhile != null)
+        {
+            // A concurrent event added the file first and may have read it before the content this one saw.
+            await NotifyFileChangedAsync(addedMeanwhile, relativePath, fileSystemPath);
+            return;
+        }
+
+        _logger?.LogInformation("Added file from external: {Path}", relativePath);
     }
 
-    private async Task NotifyFileChangedAsync(IInterceptorSubject existingSubject, string relativePath, string fullPath)
+    private async Task<string?> TryComputeJsonHashAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        if (!Path.GetExtension(relativePath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            var content = await Client.ReadTextAsync(relativePath, cancellationToken: cancellationToken);
+            return StoragePathRegistry.ComputeHash(content);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", relativePath);
+            return null;
+        }
+    }
+
+    private async Task NotifyFileChangedAsync(IInterceptorSubject existingSubject, string relativePath, string fileSystemPath)
     {
         if (existingSubject is IStorageFile storageFile)
         {
@@ -412,19 +501,32 @@ public partial class FluentStorageContainer :
         }
         else if (existingSubject is IConfigurable)
         {
-            await _jsonSyncHelper!.TryRefreshAsync(existingSubject, relativePath, fullPath, CancellationToken.None);
+            await _jsonSyncHelper!.TryRefreshAsync(existingSubject, relativePath, fileSystemPath, CancellationToken.None);
         }
     }
 
-    private void RemovePath(string relativePath, string fullPath)
+    /// <summary>
+    /// Removes the subject or folder at the path unless the path is on disk.
+    /// </summary>
+    /// <returns>True when the path is gone from disk.</returns>
+    private bool RemoveIfMissing(string relativePath)
+    {
+        var fileSystemPath = GetFileSystemPath(relativePath);
+        lock (_hierarchyLock)
+        {
+            // A path that reappeared meanwhile is refreshed or added by its own event, removing it now would lose it.
+            if (File.Exists(fileSystemPath) || Directory.Exists(fileSystemPath))
+                return false;
+
+            Remove(relativePath);
+            return true;
+        }
+    }
+
+    private void Remove(string relativePath)
     {
         lock (_hierarchyLock)
         {
-            // Checked under the lock: when the path reappeared meanwhile, its own event has refreshed the subject
-            // or will add it, and removing it now would lose it until the next scan.
-            if (File.Exists(fullPath) || Directory.Exists(fullPath))
-                return;
-
             if (_pathRegistry.TryGetSubject(relativePath, out var subject))
             {
                 RemoveFromHierarchy(relativePath, subject);
@@ -463,47 +565,71 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a new subject to storage at the specified path.
     /// </summary>
+    /// <exception cref="ArgumentException">The path is hidden or temporary and would not be loaded again.</exception>
+    /// <exception cref="InvalidOperationException">The path or its key in the hierarchy is already taken.</exception>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        var fullPath = GetFileSystemPath(path);
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
+        if (IsIgnored(path))
+            throw new ArgumentException($"A subject at '{path}' would not be loaded again: the path is hidden or temporary.", nameof(path));
+
+        // Covers a file that is on disk without a subject in the hierarchy, which the registry does not know.
+        if (await Client.ExistsAsync(path, cancellationToken))
+            throw new InvalidOperationException($"A file already exists at '{path}'.");
 
         var json = _subjectFactory.Serialize(subject);
-        _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        // Placed before the file is written: an event or a directory reconcile that sees the new file
+        // then finds the subject registered instead of adding a second instance.
+        lock (_hierarchyLock)
+        {
+            if (_pathRegistry.TryGetSubject(path, out _) || !AddToHierarchy(path, subject))
+                throw new InvalidOperationException($"A subject already exists at '{path}'.");
 
-        // Update hierarchy - extracted to reusable method
-        AddToHierarchy(path, subject);
+            _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
+        }
+
+        try
+        {
+            _fileWatcher?.MarkAsOwnWrite(GetFileSystemPath(path));
+            await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        }
+        catch
+        {
+            RemoveFromHierarchy(path, subject);
+            throw;
+        }
 
         _logger?.LogInformation("Added subject to storage: {Path}", path);
     }
 
     /// <summary>
-    /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
+    /// Places the subject in the hierarchy and registers its path.
     /// </summary>
-    private void AddToHierarchy(string path, IInterceptorSubject subject)
+    /// <returns>False when its key is already claimed. The subject is then neither placed nor registered.</returns>
+    private bool AddToHierarchy(string path, IInterceptorSubject subject)
     {
-        // Children is copied, modified and reassigned, so concurrent callers (watcher events for different
-        // paths, UI operations) would otherwise overwrite each other's update.
         lock (_hierarchyLock)
         {
             var children = new Dictionary<string, IInterceptorSubject>(Children);
+            if (!_hierarchyManager.PlaceInHierarchy(path, subject, children, this))
+                return false;
 
             _pathRegistry.Register(subject, path);
-            _hierarchyManager.PlaceInHierarchy(path, subject, children, this);
-
             Children = children;
+            return true;
         }
     }
 
-    /// <summary>
-    /// Removes a subject from the hierarchy. Reusable helper for delete operations and file watcher events.
-    /// </summary>
     private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
     {
         lock (_hierarchyLock)
         {
+            // The registry finds a path whatever its casing, but the key in Children has the casing it was registered with.
+            if (_pathRegistry.TryGetPath(subject, out var registeredPath))
+            {
+                path = registeredPath;
+            }
+
             _pathRegistry.Unregister(path);
 
             var children = new Dictionary<string, IInterceptorSubject>(Children);
@@ -516,10 +642,15 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Removes the folder at the path and unregisters every subject below it.
     /// </summary>
+    /// <returns>False when the path does not hold a folder.</returns>
     private bool RemoveFolder(string path)
     {
         lock (_hierarchyLock)
         {
+            // Looked up first because the removal works on a copy of Children, and this runs for every added file.
+            if (StorageHierarchyManager.FindFolder(path, Children) == null)
+                return false;
+
             var children = new Dictionary<string, IInterceptorSubject>(Children);
             if (!_hierarchyManager.RemoveFolderFromHierarchy(path, children))
                 return false;
@@ -536,6 +667,13 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
+        if (_storageDirectory != null)
+        {
+            // Asked for every markdown file that loads, so the directory is not listed to find one entry.
+            var file = new FileInfo(GetFileSystemPath(path));
+            return file.Exists ? new BlobMetadata(file.Length, file.LastWriteTimeUtc) : null;
+        }
+
         var blobs = await Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
             recurse: false, cancellationToken: cancellationToken);
         var blob = blobs.FirstOrDefault(b =>
