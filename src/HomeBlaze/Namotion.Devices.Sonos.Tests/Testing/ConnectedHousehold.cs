@@ -4,7 +4,7 @@ namespace Namotion.Devices.Sonos.Tests.Testing;
 
 /// <summary>
 /// A running SonosSystem connected to two FakeSonosSpeakers, the kitchen and the office, optionally grouped
-/// with the office as coordinator.
+/// with the office as coordinator. Both speakers answer the new topology right after a grouping command.
 /// </summary>
 internal sealed class ConnectedHousehold : IAsyncDisposable
 {
@@ -49,6 +49,8 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
                 }
             }
 
+            kitchen.CallReceived = office.CallReceived = call => Regroup(call, kitchen, office);
+
             var system = await ConnectedSystem.StartWithEventsAsync(
                 () => ConnectedSystem.CreateSystem(kitchen.Host, logger: logger, configure: configure),
                 system => system.IsConnected &&
@@ -67,6 +69,31 @@ internal sealed class ConnectedHousehold : IAsyncDisposable
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Answers the topology after a grouping command as the household does once it has regrouped: a join groups both
+    /// rooms under the joined coordinator, and a leave makes both rooms standalone.
+    /// </summary>
+    private static void Regroup(SoapCall call, FakeSonosSpeaker kitchen, FakeSonosSpeaker office)
+    {
+        var kitchenMember = (TestFixtures.KitchenUuid, "Küche", kitchen.BaseUri);
+        var officeMember = (TestFixtures.OfficeUuid, "Büro", office.BaseUri);
+        foreach (var speaker in new[] { kitchen, office })
+        {
+            if (call.Action == "BecomeCoordinatorOfStandaloneGroup")
+            {
+                speaker.RespondWithTopology(kitchenMember, officeMember);
+            }
+            else if (call.Action == "SetAVTransportURI" && call.GetArgument("CurrentURI") == $"x-rincon:{TestFixtures.OfficeUuid}")
+            {
+                speaker.RespondWithGroup(officeMember, kitchenMember);
+            }
+            else if (call.Action == "SetAVTransportURI" && call.GetArgument("CurrentURI") == $"x-rincon:{TestFixtures.KitchenUuid}")
+            {
+                speaker.RespondWithGroup(kitchenMember, officeMember);
+            }
         }
     }
 

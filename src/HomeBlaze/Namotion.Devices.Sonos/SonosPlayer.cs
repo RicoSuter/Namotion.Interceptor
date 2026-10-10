@@ -539,12 +539,18 @@ public partial class SonosPlayer : SonosDevice,
             return Task.CompletedTask;
         }
 
-        return RunGroupingOnPlayerAsync((connection, token) => connection.JoinAsync(coordinatorUuid, token), cancellationToken);
+        return RunGroupingOnPlayerAsync(
+            (connection, token) => connection.JoinAsync(coordinatorUuid, token),
+            () => GroupKey == coordinatorUuid,
+            cancellationToken);
     }
 
     [Operation(Title = "Leave Group", Position = 51, Description = "Removes this player from its group so it plays standalone.")]
     public Task LeaveGroupAsync(CancellationToken cancellationToken) =>
-        RunGroupingOnPlayerAsync((connection, token) => connection.LeaveGroupAsync(token), cancellationToken);
+        RunGroupingOnPlayerAsync(
+            (connection, token) => connection.LeaveGroupAsync(token),
+            () => GroupKey == Uuid && !_system.Players.Values.Any(player => player != this && player.IsInTopology && player.GroupKey == Uuid),
+            cancellationToken);
 
     private void EnsureHomeTheater()
     {
@@ -567,10 +573,10 @@ public partial class SonosPlayer : SonosDevice,
     internal Task RunOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken) =>
         RunAsync(Uuid, command, cancellationToken);
 
-    private async Task RunGroupingOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)
+    private async Task RunGroupingOnPlayerAsync(Func<SonosConnection, CancellationToken, Task> command, Func<bool> isApplied, CancellationToken cancellationToken)
     {
         var connection = _system.GetConnectionForCommand(Uuid);
-        await _system.RunGroupingCommandsAsync(token => command(connection, token), cancellationToken);
+        await _system.RunGroupingCommandsAsync(token => command(connection, token), isApplied, cancellationToken);
     }
 
     private async Task RunAsync(string targetUuid, Func<SonosConnection, CancellationToken, Task> command, CancellationToken cancellationToken)

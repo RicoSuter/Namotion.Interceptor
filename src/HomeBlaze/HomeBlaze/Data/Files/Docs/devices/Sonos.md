@@ -202,7 +202,7 @@ Transport, `PlayFavorite`, `PlayUri`, `PlayStream`, `SetShuffle`, `SetRepeat` an
 | `GroupAll` | `room` | Groups every connected room with the given room, which becomes coordinator |
 | `UngroupAll` | | Makes every connected room standalone |
 
-Operations are disabled while the system, the target or, for coordinator operations, the coordinator is not connected. An unknown room or favorite fails with the list of known names. After each command the players of the commanded group are read back, also when it failed, so the result shows without waiting for events; grouping commands run a full reconciliation instead.
+Operations are disabled while the system, the target or, for coordinator operations, the coordinator is not connected. An unknown room or favorite fails with the list of known names. After each command the players of the commanded group are read back, also when it failed, so the result shows without waiting for events; grouping commands run a full reconciliation instead. Sonos regroups after it has answered the command, so a successful grouping command first re-reads the topology, for about 2 seconds at most, until it shows the new groups.
 
 ## Behavior
 

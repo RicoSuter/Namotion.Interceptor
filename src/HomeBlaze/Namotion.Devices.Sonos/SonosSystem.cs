@@ -279,7 +279,7 @@ public partial class SonosSystem : BackgroundService,
                     await GetConnectionForCommand(player.Uuid).JoinAsync(coordinator.Uuid, token);
                 }
             }
-        }, cancellationToken);
+        }, () => Players.Values.All(player => !player.IsConnected || player.GroupKey == coordinator.Uuid), cancellationToken);
     }
 
     /// <summary>
@@ -298,7 +298,7 @@ public partial class SonosSystem : BackgroundService,
                     await GetConnectionForCommand(player.Uuid).LeaveGroupAsync(token);
                 }
             }
-        }, cancellationToken);
+        }, () => Players.Values.All(player => !player.IsConnected || player.IsGroupCoordinator), cancellationToken);
     }
 
     private void EnsureConnected()

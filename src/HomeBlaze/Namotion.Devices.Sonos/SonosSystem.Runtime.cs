@@ -25,6 +25,8 @@ public partial class SonosSystem
     private static readonly TimeSpan TeardownTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SeedProbeTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MinimumLoopWait = TimeSpan.FromSeconds(1);
+    private const int MaxGroupingTopologyReads = 4;
+    private static readonly TimeSpan GroupingTopologyReadDelay = TimeSpan.FromMilliseconds(500);
 
     // Never disposed: neither exposes a wait handle, so there is nothing to release, and disposing them while the
     // loop is still unwinding from a Dispose without StopAsync made its last waits throw or hang.
@@ -187,9 +189,10 @@ public partial class SonosSystem
 
     /// <summary>
     /// Runs grouping commands, then reads the topology back, also after a failure, since earlier commands may
-    /// already have regrouped rooms. Only the commands' exception propagates; a failed read is logged.
+    /// already have regrouped rooms. After success it first waits, about 2 seconds at most, until
+    /// <paramref name="isApplied"/> holds. Only the commands' exception propagates; a failed read is logged.
     /// </summary>
-    internal async Task RunGroupingCommandsAsync(Func<CancellationToken, Task> commands, CancellationToken cancellationToken)
+    internal async Task RunGroupingCommandsAsync(Func<CancellationToken, Task> commands, Func<bool> isApplied, CancellationToken cancellationToken)
     {
         try
         {
@@ -201,7 +204,35 @@ public partial class SonosSystem
             throw;
         }
 
+        await TryWaitForGroupingAsync(isApplied, cancellationToken);
         await TryReconcileAfterGroupingAsync(cancellationToken);
+    }
+
+    // Sonos regroups after answering the command, so a read right after it can still show the old groups. Only the
+    // topology is read again, a few times and a short delay apart, rather than optimistically applying the expected
+    // groups, which a regroup that Sonos rejects or changes would leave wrong. A topology event also ends the wait.
+    private async Task TryWaitForGroupingAsync(Func<bool> isApplied, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scopeCancellation = CreateScopeCancellation(cancellationToken);
+            for (var read = 0; read < MaxGroupingTopologyReads && !isApplied(); read++)
+            {
+                if (read > 0)
+                {
+                    await Task.Delay(GroupingTopologyReadDelay, Clock, scopeCancellation.Token);
+                }
+
+                var pollStartedAt = NextOrder();
+                var zoneGroupState = await GetSeedConnection().ReadZoneGroupStateAsync(scopeCancellation.Token);
+                ApplyPolledTopology(zoneGroupState, pollStartedAt);
+            }
+        }
+        catch (Exception exception)
+        {
+            // The reconciliation that follows reads the topology again and logs its own failure.
+            _logger.LogDebug(exception, "Waiting for the Sonos topology to show a grouping command stopped early.");
+        }
     }
 
     private async Task TryReconcileAfterGroupingAsync(CancellationToken cancellationToken)

@@ -16,6 +16,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
     private readonly LoopbackHttpServer _server;
     private readonly ConcurrentDictionary<string, string> _responses = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<string>> _onceResponses = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _faults = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, bool> _serverErrors = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<SoapCall> _calls = new();
@@ -58,6 +59,12 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
     internal IReadOnlyCollection<(string Path, DateTimeOffset At)> RenewalAttempts => _renewed.ToArray();
 
     /// <summary>
+    /// Called with every SOAP request after it is recorded and before it is answered, so a test can change what the
+    /// speaker answers next, as a real speaker changes its state after a command.
+    /// </summary>
+    internal Action<SoapCall>? CallReceived { get; set; }
+
+    /// <summary>
     /// Fails every renewal with a dropped connection, as an unreachable speaker would.
     /// </summary>
     internal bool AbortRenewals { get; set; }
@@ -87,7 +94,17 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
         _callbacks.TryGetValue(eventPath, out var callback) ? callback : null;
 
     internal void Respond(string action, params (string Name, string Value)[] values) =>
-        _responses[action] = string.Concat(values.Select(value => $"<{value.Name}>{SecurityElement.Escape(value.Value)}</{value.Name}>"));
+        _responses[action] = FormatValues(values);
+
+    /// <summary>
+    /// Answers the next request of the action with these values, before the answer set by <see cref="Respond"/>;
+    /// several calls queue several answers.
+    /// </summary>
+    internal void RespondOnce(string action, params (string Name, string Value)[] values) =>
+        _onceResponses.GetOrAdd(action, _ => new ConcurrentQueue<string>()).Enqueue(FormatValues(values));
+
+    private static string FormatValues((string Name, string Value)[] values) =>
+        string.Concat(values.Select(value => $"<{value.Name}>{SecurityElement.Escape(value.Value)}</{value.Name}>"));
 
     /// <summary>
     /// Answers GetEQ for one EQType, so each equalizer setting can carry its own value.
@@ -315,6 +332,7 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
 
         var call = new SoapCall(path, service, action, body);
         _calls.Enqueue(call);
+        CallReceived?.Invoke(call);
         if (_holds.TryGetValue(action, out var hold))
         {
             await hold.Task;
@@ -373,6 +391,11 @@ internal sealed class FakeSonosSpeaker : IAsyncDisposable
             _responses.TryGetValue(BrowsePageKey(startingIndex), out var pageValues))
         {
             return pageValues;
+        }
+
+        if (_onceResponses.TryGetValue(action, out var onceValues) && onceValues.TryDequeue(out var values))
+        {
+            return values;
         }
 
         return _responses.GetValueOrDefault(action, string.Empty);
