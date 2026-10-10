@@ -143,7 +143,7 @@ Dispatch starts on the writing thread, outside the subject lock. The pull queue 
 - **Synchronous channel order**: each `PropertyChangeInterceptor` enqueues to its pull queues first, publishes to its Rx observable second, and dispatches to its resolved per-property subscriptions last. A scheduled per-property subscription accepts the change in that last phase, although its callback may run later or inline according to its scheduler. With aggregated contexts, the innermost interceptor resolves the per-property subscriptions, so they may accept or invoke a change before an outer context's pull queue and Rx channels. A throwing synchronous observer propagates out of the write and suppresses later deliveries in this order; queue items already enqueued remain available.
 - **Ordering**: under concurrent writes to the same property, notifications may arrive out of commit order. If you need the current value, re-read the property rather than relying on the delivered new value: `change.GetCurrentValue<TValue>()` does this for you, reading the property now instead of returning the value captured when the change was created, without needing to keep a separately typed reference to the subject. `GetOldValue<TValue>()` is the value the setter observed when it started, including when the subscription raced the write. It is not necessarily the value immediately preceding the commit, so under concurrency delivered old and new pairs may not chain.
 - **A derived recalculation publishes the stabilized value**: the change carries the value the recalculation committed rather than a fresh read of the getter. The getter therefore runs once per recalculation instead of twice, a throwing getter does not suppress the notification, and an interceptor that rewrites `NewValue` on that path now changes what is published.
-- **Transactions replay on commit**: with `WithTransactions()`, writes captured inside a transaction do not notify during capture. They replay through the interceptor on commit in write order, and each write notifies as it is applied, so listeners can observe intermediate combinations of values while the commit replays. If the transaction is disposed without commit, the changes are discarded, no notifications fire, and the property keeps its pre-transaction value. If a `Rollback` commit partially applies and then reverts, listeners observe the apply-and-revert pair, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
+- **Transactions replay on commit**: with `WithTransactions()`, captured writes are silent until commit, which replays them one by one, so listeners see each change and intermediate combinations of values (see [Commit Flow](tracking-transactions.md#commit-flow)). A transaction disposed without commit fires nothing and keeps the pre-transaction values. A `Rollback` commit that fails partway publishes both the apply and the revert, so a consumer such as a watchdog or dirty flag must not treat the revert as a user change.
 
 ### Delivery Guarantees
 
@@ -185,7 +185,7 @@ Uses `EqualityComparer<T>.Default` for every property type. Reference equality i
 
 ## Transactions
 
-Transactions allow you to batch property changes and commit them all or nothing. Writes inside the transaction are captured without being applied or published. On commit they are applied in write order through the normal setters, and each applied write publishes its change notification and updates derived properties as it lands, so observers can see intermediate combinations of values while the commit runs.
+Transactions batch property changes: writes inside a transaction are captured silently and replayed through the normal setters on commit, each one notifying and updating derived properties as it lands. See [Commit Flow](tracking-transactions.md#commit-flow) for ordering and failure handling.
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -205,15 +205,14 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
     Console.WriteLine(person.FullName); // Output: John Doe
 
     await transaction.CommitAsync(cancellationToken);
-    // Changes applied in write order, each notifying as it lands
+    // Applied one by one, each notifying as it lands
 }
 ```
 
 Key features:
-- **All or nothing**: With `TransactionFailureHandling.Rollback`, a failed apply reverts the changes already applied
 - **Read-your-writes**: Reading returns pending values inside the transaction
 - **Silent capture**: Captured writes are neither applied nor published until commit
-- **Per-write notifications on commit**: Each write notifies as it is applied, in write order; the model is consistent once the commit completes, not at every notification
+- **Rollback mode**: With `TransactionFailureHandling.Rollback`, a failed apply reverts the changes already applied, best effort (see [Rollback is Best-Effort](tracking-transactions.md#rollback-is-best-effort))
 - **Rollback on dispose**: Uncommitted changes discarded if transaction not committed
 
 For external source integration (OPC UA, MQTT, etc.), use `WithSourceTransactions()` from the Connectors package to write changes to external sources before applying them to the local model.

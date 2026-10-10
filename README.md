@@ -222,7 +222,7 @@ Higher-level features rely on this to start and stop work as the graph grows and
 
 ### Transactions
 
-`WithTransactions()` enables atomic batching: writes inside a transaction are captured and applied together on commit, with notifications firing only after the commit succeeds. Reading a property inside the transaction returns its pending value (read-your-writes), and an uncommitted transaction discards its changes when disposed.
+`WithTransactions()` enables batching: writes inside a transaction are captured silently and replayed on commit, each notifying as it lands, so observers can see intermediate states while the commit runs. Reading a property inside the transaction returns its pending value (read-your-writes), and an uncommitted transaction discards its changes when disposed. See [Commit Flow](docs/tracking-transactions.md#commit-flow).
 
 ```csharp
 var context = InterceptorSubjectContext

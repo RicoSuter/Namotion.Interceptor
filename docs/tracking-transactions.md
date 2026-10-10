@@ -1,6 +1,6 @@
 # Transactions
 
-The `Namotion.Interceptor.Tracking` package provides transaction support for batching property changes and committing them atomically. This is particularly useful when integrating with external data sources (OPC UA, MQTT, databases) where you want to write multiple changes as a single operation, or when you need to ensure consistency across multiple property updates.
+The `Namotion.Interceptor.Tracking` package provides transaction support for batching property changes and committing them together. This is particularly useful when integrating with external data sources (OPC UA, MQTT, databases) where you want to write multiple changes as a single operation, or when you need to ensure consistency across multiple property updates.
 
 ## When to Use Transactions
 
@@ -13,7 +13,7 @@ Use transactions when you need guarantees about what was actually persisted to e
 Transactions provide:
 - **Configurable commit modes**: Choose between best-effort or rollback behavior on partial failures
 - **Read-your-writes consistency**: Reading a property inside a transaction returns the pending value
-- **Notification suppression**: Captured non-derived writes stay silent until commit replay applies them; the replay then publishes each write as it is applied, in write order
+- **Notification suppression**: Captured non-derived writes stay silent until commit replay applies them (see [Commit Flow](#commit-flow))
 - **External source integration**: Changes can be written to external sources before being applied to the local model
 - **Rollback on dispose**: Uncommitted changes are discarded when the transaction is disposed
 
@@ -46,7 +46,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 
     await transaction.CommitAsync(cancellationToken);
 
-    // All changes are now applied; each notified as it was applied
+    // Applied one by one, each notifying as it lands
 }
 ```
 
@@ -132,7 +132,7 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 | Value | Description |
 |-------|-------------|
 | `BestEffort` | Apply successful changes, rollback failed ones to keep each property in sync with its source. |
-| `Rollback` | All-or-nothing across all properties - any failure reverts everything. |
+| `Rollback` | All-or-nothing across all properties - any failure reverts everything (best effort). |
 
 **Behavior comparison:**
 
@@ -141,8 +141,8 @@ using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Ro
 | All succeed | All changes applied | All changes applied |
 | Source write fails | Successful applied, failed not applied | All reverted |
 | Local apply fails | Successful applied, failed sources rolled back | All reverted |
-| Consistency | Per-property (each stays in sync) | All-or-nothing |
-| Use when | Partial progress acceptable | Full atomicity required |
+| Consistency | Per-property (each stays in sync) | All-or-nothing (best effort) |
+| Use when | Partial progress acceptable | Full atomicity required (best effort) |
 
 ### Locking
 
@@ -222,8 +222,8 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the local model in write order (calls property setters, triggers `OnChanging/OnChanged` methods). Each applied write publishes its change notification and updates derived properties immediately, so observers can see intermediate combinations of values during the commit.
-2. If any apply fails and `Rollback` mode: revert successful applies. The reverts publish notifications too.
+1. **Apply** each pending change to the local model through its setter (triggers `OnChanging/OnChanged`), in the order each property was first written, using its last written value (see [Write order limitation](#capture-and-commit-replay)). Each apply publishes its change notification and recalculates dependent derived properties immediately, so observers can see intermediate combinations of values.
+2. If an apply fails in `Rollback` mode, revert the applied changes in reverse order. The reverts notify too and are best effort (see [Rollback is Best-Effort](#rollback-is-best-effort)).
 
 ### With Source Transactions
 
@@ -240,6 +240,8 @@ When `WithSourceTransactions()` is configured, commits execute in two stages:
 │  any whose source write failed (triggers OnChanging/OnChanged).           │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
+
+Stage 2 applies and notifies each change in turn, like the local-only flow.
 
 Stage 2 applies source-bound changes marked with a `Confirmed` origin carrying the source that accepted them in stage 1, so the outbound change queue treats their notifications as echoes and a committed value is written to its source exactly once. See [Change notification source semantics](connectors.md#change-notification-source-semantics) for the full contract, including cascade and derived property behavior. Value-transforming write interceptors are not supported with source transactions: the source would receive the stage 1 value while the local model applies the transformed one.
 
@@ -623,7 +625,7 @@ For strict atomicity, use a single source per transaction or implement applicati
 
 ### Rollback is Best-Effort
 
-Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case. See [Failure Flows and Consistency](#failure-flows-and-consistency) for the full matrix of end states.
+Rollback operations can also fail. If revert fails, `SubjectTransactionException` includes both the original failure and the revert failure. The system cannot guarantee consistency in this case. A synchronous change observer that throws while a change is applied also fails that apply after its setter already stored the value, and such a change is not reverted. See [Failure Flows and Consistency](#failure-flows-and-consistency) for the full matrix of end states.
 
 ## Implementing a Custom Transaction Writer
 
