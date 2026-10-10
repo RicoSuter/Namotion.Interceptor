@@ -38,6 +38,10 @@ public sealed partial class MarkdownContentParser
     // The top-level keys of the configuration last applied to a subject. See CanUpdateInPlace.
     private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();
 
+    // The #id of the slot block that created a slot value. A value keeps it for its lifetime, because a block
+    // with a name only ever reuses the value of that name. See FindExistingSlotValue.
+    private readonly ConditionalWeakTable<IInterceptorSubject, string> _slotValueNames = new();
+
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
     /// </summary>
@@ -195,7 +199,7 @@ public sealed partial class MarkdownContentParser
         var basePath = GetLinkBasePath(parent);
         var segments = MarkdownSegmentBuilder.Build(page, url => RewriteLink(url, basePath));
 
-        var state = new ParseState(parent);
+        var state = new ParseState(parent, page.AllBlocks);
         var children = await BuildChildrenAsync(segments, existingChildren, state, cancellationToken);
         return new MarkdownParseResult(children, page, state.BlockSubjects, state.NamedSubjects);
     }
@@ -266,8 +270,7 @@ public sealed partial class MarkdownContentParser
         var block = segment.Block;
         var head = block.Head!;
 
-        // Claimed before every other check, so that a block that ends as an error box still owns its name.
-        if (head.Id is not null && !state.ClaimedIds.Add(head.Id))
+        if (head.Id is not null && !state.OwnsName(block))
         {
             return (null, null, new BlockError(block.Line, FormatUsedTwice(head.Id)));
         }
@@ -328,6 +331,13 @@ public sealed partial class MarkdownContentParser
         BlockError? error;
         try
         {
+            // Before anything is created, so that a type that can never be filled runs no constructor.
+            var slots = SlotMap.For(type);
+            if (slots.Error is not null)
+            {
+                return (null, new BlockError(block.Line, slots.Error));
+            }
+
             if (!TryBuildConfiguration(type, block, out var configuration, out var configurationError))
             {
                 return (null, new BlockError(block.Line, configurationError!));
@@ -340,7 +350,7 @@ public sealed partial class MarkdownContentParser
                     block.Line, $"{typeDescription} could not be created. It must be a registered configurable subject type."));
             }
 
-            error = await ApplyContentAsync(subject, type, segment, state, cancellationToken);
+            error = await ApplyContentAsync(subject, type, slots, segment, state, cancellationToken);
             if (error is null)
             {
                 state.Register(block, block.Head!.Id, subject);
@@ -427,17 +437,12 @@ public sealed partial class MarkdownContentParser
     private async Task<BlockError?> ApplyContentAsync(
         IInterceptorSubject subject,
         Type type,
+        SlotMap slots,
         BlockMarkdownSegment owner,
         ParseState state,
         CancellationToken cancellationToken)
     {
         var ownerLine = owner.Block.Line;
-
-        var slots = SlotMap.For(type);
-        if (slots.Error is not null)
-        {
-            return new BlockError(ownerLine, slots.Error);
-        }
 
         if (owner.Content.Count == 0 && slots.Named.Count == 0)
         {
@@ -475,12 +480,12 @@ public sealed partial class MarkdownContentParser
                     blocks[1].Block.Line, $"The slot '{slot.Name}' takes one block, but there are {blocks.Count}.");
             }
 
-            // A value is reused by its position in the slot, like a widget without a name by its position in the content.
             var existingValues = GetSlotValues(subject, slot);
+            var unnamedPosition = 0;
             var values = new List<IInterceptorSubject>(blocks.Count);
             for (var index = 0; index < blocks.Count; index++)
             {
-                var existing = index < existingValues.Count ? existingValues[index] : null;
+                var existing = FindExistingSlotValue(existingValues, blocks[index].Block.Head!.Id, ref unnamedPosition);
                 var (value, error) = await CreateSlotValueAsync(slot, blocks[index], existing, state, cancellationToken);
                 if (value is null)
                 {
@@ -510,7 +515,7 @@ public sealed partial class MarkdownContentParser
                     ownerLine, $"The slot '{slots.Default.Name}' is filled by a block and by loose content.");
             }
 
-            var existing = slots.Default.Property.GetValue(subject) as IInterceptorSubject;
+            var existing = slots.Default.GetValue(subject) as IInterceptorSubject;
             var fragment = await CreateFragmentAsync(existing, defaultContent, state, cancellationToken);
             SetSlotValues(subject, slots.Default, [fragment]);
             filled.Add(slots.Default);
@@ -537,21 +542,27 @@ public sealed partial class MarkdownContentParser
         var block = segment.Block;
         var head = block.Head!;
 
-        // Claimed before every other check, like the name of a widget block.
-        if (head.Id is not null && !state.ClaimedIds.Add(head.Id))
+        if (head.Id is not null && !state.OwnsName(block))
         {
             return (null, new BlockError(block.Line, FormatUsedTwice(head.Id)));
         }
 
         if (!slot.IsOpen)
         {
-            return await CreateBlockSubjectAsync(
+            var result = await CreateBlockSubjectAsync(
                 slot.ValueType,
                 $"The type '{slot.ValueType.FullName}' of the slot '{slot.Name}'",
                 segment,
                 existing,
                 state,
                 cancellationToken);
+
+            if (result.Subject is not null && head.Id is not null)
+            {
+                _slotValueNames.AddOrUpdate(result.Subject, head.Id);
+            }
+
+            return result;
         }
 
         if (head.Arguments.Count > 0 || head.Id is not null || block.ConfigurationJson is not null)
@@ -575,9 +586,40 @@ public sealed partial class MarkdownContentParser
         return fragment;
     }
 
+    // A block with a name takes the value that the block of that name created before, wherever it is in the slot
+    // now. A block without a name takes the next value that no name created, so those are reused by position
+    // among themselves, like widgets without a name in the content.
+    private IInterceptorSubject? FindExistingSlotValue(
+        IReadOnlyList<IInterceptorSubject?> existingValues, string? name, ref int unnamedPosition)
+    {
+        if (name is not null)
+        {
+            foreach (var value in existingValues)
+            {
+                if (value is not null && _slotValueNames.TryGetValue(value, out var existingName) && existingName == name)
+                {
+                    return value;
+                }
+            }
+
+            return null;
+        }
+
+        while (unnamedPosition < existingValues.Count)
+        {
+            var value = existingValues[unnamedPosition++];
+            if (value is null || !_slotValueNames.TryGetValue(value, out _))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
     private static IReadOnlyList<IInterceptorSubject?> GetSlotValues(IInterceptorSubject subject, SlotDefinition slot)
     {
-        var value = slot.Property.GetValue(subject);
+        var value = slot.GetValue(subject);
         if (slot.IsList)
         {
             return value is IInterceptorSubject?[] array ? array : [];
@@ -590,17 +632,17 @@ public sealed partial class MarkdownContentParser
     {
         if (slot.IsList)
         {
-            var array = Array.CreateInstanceFromArrayType(slot.Property.PropertyType, values.Count);
+            var array = Array.CreateInstanceFromArrayType(slot.PropertyType, values.Count);
             for (var index = 0; index < values.Count; index++)
             {
                 array.SetValue(values[index], index);
             }
 
-            slot.Property.SetValue(subject, array);
+            slot.SetValue(subject, array);
         }
         else
         {
-            slot.Property.SetValue(subject, values.Count > 0 ? values[0] : null);
+            slot.SetValue(subject, values.Count > 0 ? values[0] : null);
         }
     }
 
@@ -750,19 +792,40 @@ public sealed partial class MarkdownContentParser
     /// <summary>What an error box shows: the line of the block to fix and the message.</summary>
     private sealed record BlockError(int Line, string Message);
 
-    private sealed class ParseState(MarkdownFile page)
+    private sealed class ParseState
     {
         private readonly List<(int BlockIndex, string? Id)> _registrations = [];
+        private readonly Dictionary<string, int> _nameOwners = new();
 
-        public MarkdownFile Page { get; } = page;
+        public ParseState(MarkdownFile page, IReadOnlyList<MarkdownBlock> blocksInDocumentOrder)
+        {
+            Page = page;
+
+            // Decided before anything is built: slot blocks are built before the loose content around them, and
+            // the blocks inside a block that ends as an error box are not built at all.
+            foreach (var block in blocksInDocumentOrder)
+            {
+                if (block.Head?.Id is { } id)
+                {
+                    _nameOwners.TryAdd(id, block.Index);
+                }
+            }
+        }
+
+        public MarkdownFile Page { get; }
 
         public Dictionary<int, IInterceptorSubject> BlockSubjects { get; } = new();
 
         public Dictionary<string, IInterceptorSubject> NamedSubjects { get; } = new();
 
-        public HashSet<string> ClaimedIds { get; } = [];
-
         public int RegistrationCount => _registrations.Count;
+
+        /// <summary>
+        /// Whether the block is the first one in the document with its name. Every other block
+        /// with that name is an error, whatever becomes of the first one.
+        /// </summary>
+        public bool OwnsName(MarkdownBlock block) =>
+            block.Head?.Id is not { } id || _nameOwners[id] == block.Index;
 
         public void Register(MarkdownBlock block, string? id, IInterceptorSubject subject)
         {
@@ -777,7 +840,7 @@ public sealed partial class MarkdownContentParser
 
         /// <summary>
         /// Removes the subjects registered after <see cref="RegistrationCount"/> had the given value.
-        /// Their names stay claimed.
+        /// Their blocks still own their names.
         /// </summary>
         public void RemoveRegistrationsSince(int registrationCount)
         {

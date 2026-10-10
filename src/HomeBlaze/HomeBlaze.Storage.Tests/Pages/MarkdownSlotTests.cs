@@ -470,6 +470,323 @@ public class MarkdownSlotTests
         Assert.Equal(content.Replace(":::Row label=A", ":::Row label=\"New Label\""), await fixture.ReadAsync("page.md"));
     }
 
+    [Fact]
+    public async Task WhenSlotValueIsWrittenBackAndThePageIsLoadedAgain_ThenTheInstanceIsKept()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $"::::{Namespace}.TestPanel#panel\n:::Row label=A\nrow text\n:::\n::::\n");
+        var panel = (TestPanel)page.Children["panel"];
+        var row = panel.Rows[0];
+        var content = row.Content;
+        row.Label = null;
+        await page.WriteConfigurationAsync(row, CancellationToken.None);
+
+        // Act
+        await page.OnFileChangedAsync(CancellationToken.None);
+
+        // Assert
+        Assert.DoesNotContain("label=", page.Content);
+        Assert.Same(panel, page.Children["panel"]);
+        Assert.Same(row, Assert.Single(panel.Rows));
+        Assert.Same(content, row.Content);
+        Assert.Same(row, page.GetBlockSubject(1));
+    }
+
+    [Fact]
+    public async Task WhenNamedSlotBlockIsEmpty_ThenAnOpenSlotGetsAnEmptyFragmentAndAConcreteSlotAValueWithoutContent()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $$"""
+            ::::{{Namespace}}.TestPanel#panel
+            :::Footer
+            :::
+            :::Item
+            :::
+            :::Row
+            :::
+            ::::
+            """);
+
+        // Assert
+        var panel = (TestPanel)page.Children["panel"];
+        Assert.Empty(Assert.IsType<MarkdownFragment>(panel.Footer).Children);
+        Assert.Empty(Assert.IsType<MarkdownFragment>(Assert.Single(panel.Items)).Children);
+        Assert.Null(Assert.Single(panel.Rows).Content);
+        Assert.Null(panel.Content);
+    }
+
+    [Fact]
+    public async Task WhenNamedSlotBlockIsInsertedBeforeOthers_ThenTheNamedValuesAndTheirContentAreKept()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var source = $$"""
+            :::::{{Namespace}}.TestPanel#panel
+            ::::Row#one label=1
+            ::::
+            ::::Row#two label=2
+            ::::
+            ::::Row#three label=3
+            :::{{Namespace}}.TestLeaf#leaf count=1
+            :::
+            ::::
+            :::::
+            """;
+        var page = await fixture.AddPageAsync("page.md", source);
+        var panel = (TestPanel)page.Children["panel"];
+        var rows = panel.Rows;
+        var fragment = rows[2].Content;
+        var leaf = ((MarkdownFragment)fragment!).Children["leaf"];
+
+        // Act
+        await fixture.UpdatePageAsync(page, source.Replace("::::Row#one", "::::Row#zero label=0\n::::\n::::Row#one"));
+
+        // Assert
+        Assert.Equal(["0", "1", "2", "3"], panel.Rows.Select(row => row.Label));
+        Assert.Same(rows[0], panel.Rows[1]);
+        Assert.Same(rows[1], panel.Rows[2]);
+        Assert.Same(rows[2], panel.Rows[3]);
+        Assert.Same(fragment, panel.Rows[3].Content);
+        Assert.Same(leaf, ((MarkdownFragment)panel.Rows[3].Content!).Children["leaf"]);
+        Assert.Same(panel.Rows[3], page.GetBlockSubject(4));
+    }
+
+    [Fact]
+    public async Task WhenNamedSlotBlocksAreReordered_ThenTheValuesAreKeptAndFollowThePage()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $"::::{Namespace}.TestPanel#panel\n:::Row#a label=A\n:::\n:::Row#b label=B\n:::\n::::");
+        var panel = (TestPanel)page.Children["panel"];
+        var rows = panel.Rows;
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page, $"::::{Namespace}.TestPanel#panel\n:::Row#b label=B\n:::\n:::Row#a label=A\n:::\n::::");
+
+        // Assert
+        Assert.Equal(["B", "A"], panel.Rows.Select(row => row.Label));
+        Assert.Same(rows[1], panel.Rows[0]);
+        Assert.Same(rows[0], panel.Rows[1]);
+    }
+
+    [Fact]
+    public async Task WhenNamedSlotBlockIsRemoved_ThenTheOtherNamedValuesAreKept()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md",
+            $"::::{Namespace}.TestPanel#panel\n:::Row#a label=A\n:::\n:::Row#b label=B\n:::\n:::Row#c label=C\n:::\n::::");
+        var panel = (TestPanel)page.Children["panel"];
+        var rows = panel.Rows;
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page, $"::::{Namespace}.TestPanel#panel\n:::Row#a label=A\n:::\n:::Row#c label=C\n:::\n::::");
+
+        // Assert
+        Assert.Equal(["A", "C"], panel.Rows.Select(row => row.Label));
+        Assert.Same(rows[0], panel.Rows[0]);
+        Assert.Same(rows[2], panel.Rows[1]);
+    }
+
+    [Fact]
+    public async Task WhenSlotBlockWithoutNameIsInsertedBeforeOthers_ThenTheValuesAreReusedByPosition()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $"::::{Namespace}.TestPanel#panel\n:::Row label=A\n:::\n:::Row label=B\n:::\n::::");
+        var panel = (TestPanel)page.Children["panel"];
+        var rows = panel.Rows;
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page,
+            $"::::{Namespace}.TestPanel#panel\n:::Row label=New\n:::\n:::Row label=A\n:::\n:::Row label=B\n:::\n::::");
+
+        // Assert
+        Assert.Equal(["New", "A", "B"], panel.Rows.Select(row => row.Label));
+        Assert.Same(rows[0], panel.Rows[0]);
+        Assert.Same(rows[1], panel.Rows[1]);
+        Assert.DoesNotContain(panel.Rows[2], rows);
+    }
+
+    [Fact]
+    public async Task WhenNamedAndUnnamedSlotBlocksAreMixed_ThenNamedMatchByNameAndTheRestByPositionAmongThemselves()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $"::::{Namespace}.TestPanel#panel\n:::Row#named label=N\n:::\n:::Row label=U\n:::\n::::");
+        var panel = (TestPanel)page.Children["panel"];
+        var named = panel.Rows[0];
+        var unnamed = panel.Rows[1];
+
+        // Act
+        await fixture.UpdatePageAsync(
+            page,
+            $"::::{Namespace}.TestPanel#panel\n:::Row label=X\n:::\n:::Row#named label=N\n:::\n:::Row label=U\n:::\n::::");
+
+        // Assert
+        Assert.Equal(["X", "N", "U"], panel.Rows.Select(row => row.Label));
+        Assert.Same(unnamed, panel.Rows[0]);
+        Assert.Same(named, panel.Rows[1]);
+        Assert.NotSame(named, panel.Rows[2]);
+        Assert.NotSame(unnamed, panel.Rows[2]);
+    }
+
+    [Theory]
+    [InlineData(":::Row#other label=A")]
+    [InlineData(":::Row label=A")]
+    public async Task WhenNamedSlotBlockIsRenamedOrLosesItsName_ThenANewValueIsCreated(string newHead)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $"::::{Namespace}.TestPanel#panel\n:::Row#name label=A\n:::\n::::");
+        var panel = (TestPanel)page.Children["panel"];
+        var row = panel.Rows[0];
+
+        // Act
+        await fixture.UpdatePageAsync(page, $"::::{Namespace}.TestPanel#panel\n{newHead}\n:::\n::::");
+
+        // Assert
+        Assert.Same(panel, page.Children["panel"]);
+        Assert.NotSame(row, Assert.Single(panel.Rows));
+    }
+
+    [Fact]
+    public async Task WhenNameIsFirstUsedInsideAWidgetThatFails_ThenALaterBlockWithThatNameIsAnErrorBox()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $$"""
+            :::::{{Namespace}}.TestPanel
+            ::::Footr
+            :::{{Namespace}}.TestLeaf#a
+            :::
+            ::::
+            :::::
+
+            :::{{Namespace}}.TestLeaf#a
+            :::
+            """);
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode("TestPanel has no slot 'Footr'"), html);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode("Line 8: The name 'a' is used twice on this page."), html);
+        Assert.All(page.Children.Values, child => Assert.IsType<HtmlSegment>(child));
+    }
+
+    [Fact]
+    public async Task WhenNameIsUsedInLooseContentAndThenInASlotBlock_ThenTheSlotBlockIsTheError()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $$"""
+            ::::{{Namespace}}.TestPanel
+            :::{{Namespace}}.TestLeaf#a
+            :::
+            :::Row#a label=A
+            :::
+            ::::
+            """);
+
+        // Assert
+        Assert.Contains(
+            System.Net.WebUtility.HtmlEncode("Line 4: The name 'a' is used twice on this page."),
+            MarkdownPageFixture.Html(page.Children));
+        Assert.Empty(page.Children.Values.OfType<TestPanel>());
+    }
+
+    [Fact]
+    public async Task WhenTypeDeclaresItsSlotsWrongly_ThenNoInstanceIsCreated()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $":::{Namespace}.TestInvalidSlots\n:::");
+
+        // Assert
+        Assert.Contains("must hold subjects", MarkdownPageFixture.Html(page.Children));
+        Assert.Equal(0, TestInvalidSlots.CreatedCount);
+    }
+
+    [Fact]
+    public async Task WhenSettingASlotFails_ThenTheErrorBoxShowsTheMessageOfTheFailure()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var page = await fixture.AddPageAsync(
+            "page.md", $"::::{Namespace}.TestRequiredSlotHost#host\n:::Needed\ntext\n:::\n::::");
+        var host = Assert.IsType<TestRequiredSlotHost>(page.Children["host"]);
+
+        // Act
+        await fixture.UpdatePageAsync(page, $":::{Namespace}.TestRequiredSlotHost#host\n:::");
+
+        // Assert
+        var html = MarkdownPageFixture.Html(page.Children);
+        Assert.Contains("could not be created or updated", html);
+        Assert.Contains("Needed", html);
+        Assert.DoesNotContain("target of an invocation", html);
+        Assert.NotNull(host.Needed);
+    }
+
+    [Fact]
+    public async Task WhenTwoReloadsOverlap_ThenThePageIsTheResultOfTheLastOne()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var first = Source("one", "one");
+        var second = Source("two", "two-a", "two-b");
+        var third = Source("three", "three");
+        var page = await fixture.AddPageAsync("page.md", first);
+        var gate = (TestGate)page.Children["gate"];
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        gate.Gate = release.Task;
+
+        // Act
+        var firstReload = fixture.UpdatePageAsync(page, second);
+        await gate.Entered.Task;
+        gate.Gate = null;
+        await fixture.WriteAsync(page.Name, third);
+        var secondReload = page.OnFileChangedAsync(CancellationToken.None);
+        var secondReloadWaited = !secondReload.IsCompleted;
+        release.SetResult();
+        await Task.WhenAll(firstReload, secondReload);
+
+        // Assert
+        Assert.True(secondReloadWaited);
+        Assert.Equal(third, page.Content);
+        Assert.Equal("three", gate.Label);
+        var panel = (TestPanel)page.Children["panel"];
+        var row = Assert.Single(panel.Rows);
+        Assert.Equal("three", row.Label);
+        Assert.Same(gate, page.GetBlockSubject(0));
+        Assert.Same(panel, page.GetBlockSubject(1));
+        Assert.Same(row, page.GetBlockSubject(2));
+        Assert.Null(page.GetBlockSubject(3));
+
+        static string Source(string gateLabel, params string[] rowLabels) =>
+            $":::{Namespace}.TestGate#gate label={gateLabel}\n:::\n\n::::{Namespace}.TestPanel#panel\n" +
+            string.Concat(rowLabels.Select(label => $":::Row label={label}\n:::\n")) +
+            "::::\n";
+    }
+
     private static string Flatten(IEnumerable<Namotion.Interceptor.IInterceptorSubject?> subjects) =>
         string.Concat(subjects.Select(subject => subject switch
         {

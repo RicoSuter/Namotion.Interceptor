@@ -205,7 +205,7 @@ public class MarkdownWidgetBlockTests
     }
 
     [Fact]
-    public async Task WhenReloadFails_ThenContentAndChildrenStayAsTheyWere()
+    public async Task WhenReloadIsCancelled_ThenContentAndTopLevelChildrenStayAsTheyWere()
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();

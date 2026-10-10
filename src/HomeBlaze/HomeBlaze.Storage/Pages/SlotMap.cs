@@ -5,7 +5,15 @@ using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Pages;
 
-internal sealed record SlotDefinition(string Name, PropertyInfo Property, Type ValueType, bool IsList, bool IsDefault)
+/// <summary>One slot of a type. The accessors are those of the intercepted property, so a write is tracked.</summary>
+internal sealed record SlotDefinition(
+    string Name,
+    Type PropertyType,
+    Type ValueType,
+    bool IsList,
+    bool IsDefault,
+    Func<IInterceptorSubject, object?> GetValue,
+    Action<IInterceptorSubject, object?> SetValue)
 {
     /// <summary>An open slot takes block content as a fragment, any other slot takes an instance of its type.</summary>
     public bool IsOpen => ValueType == typeof(IInterceptorSubject);
@@ -14,6 +22,9 @@ internal sealed record SlotDefinition(string Name, PropertyInfo Property, Type V
 /// <summary>The slots a type declares with <see cref="SlotAttribute"/>.</summary>
 internal sealed class SlotMap
 {
+    // The name of the static member that the subject generator emits on every subject class.
+    private const string DefaultPropertiesName = "DefaultProperties";
+
     private static readonly ConcurrentDictionary<Type, SlotMap> Cache = new();
 
     private SlotMap(SlotDefinition? defaultSlot, IReadOnlyDictionary<string, SlotDefinition> named, string? error)
@@ -37,6 +48,7 @@ internal sealed class SlotMap
     {
         var named = new Dictionary<string, SlotDefinition>();
         SlotDefinition? defaultSlot = null;
+        var interceptedProperties = FindInterceptedProperties(type);
 
         SlotMap Invalid(string error) => new(null, new Dictionary<string, SlotDefinition>(), $"{type.Name}: {error}");
 
@@ -61,7 +73,7 @@ internal sealed class SlotMap
 
             var isList = property.PropertyType.IsArray;
             var valueType = isList ? property.PropertyType.GetElementType()! : property.PropertyType;
-            var slot = new SlotDefinition(name, property, valueType, isList, attribute.IsDefault);
+            var isOpen = valueType == typeof(IInterceptorSubject);
 
             if (!typeof(IInterceptorSubject).IsAssignableFrom(valueType))
             {
@@ -69,12 +81,12 @@ internal sealed class SlotMap
             }
 
             // A slot that is not open gets an instance of its type per block.
-            if (!slot.IsOpen && (valueType.IsInterface || valueType.IsAbstract))
+            if (!isOpen && (valueType.IsInterface || valueType.IsAbstract))
             {
                 return Invalid($"the type {valueType.Name} of the slot '{name}' cannot be created because it is abstract or an interface.");
             }
 
-            if (!named.TryAdd(name, slot))
+            if (named.ContainsKey(name))
             {
                 return Invalid($"the slot '{name}' is declared twice.");
             }
@@ -86,15 +98,51 @@ internal sealed class SlotMap
                     return Invalid("there is more than one default slot.");
                 }
 
-                if (isList || !slot.IsOpen)
+                if (isList || !isOpen)
                 {
                     return Invalid($"the default slot '{name}' must be of type IInterceptorSubject.");
                 }
+            }
 
+            // Only a write through an intercepted property attaches the slot values to the graph.
+            if (interceptedProperties is null ||
+                !interceptedProperties.TryGetValue(property.Name, out var metadata) ||
+                metadata is not { IsIntercepted: true, GetValue: { } getValue })
+            {
+                return Invalid($"the slot '{name}' must be a partial property of a subject class.");
+            }
+
+            if (metadata.SetValue is not { } setValue)
+            {
+                return Invalid($"the slot '{name}' needs a setter.");
+            }
+
+            var slot = new SlotDefinition(name, property.PropertyType, valueType, isList, attribute.IsDefault, getValue, setValue);
+            named.Add(name, slot);
+            if (attribute.IsDefault)
+            {
                 defaultSlot = slot;
             }
         }
 
         return new SlotMap(defaultSlot, named, null);
+    }
+
+    // An instance has the same metadata in IInterceptorSubject.Properties, but the map is needed before
+    // an instance exists. A class that derives from a subject class without being one has the member of its base.
+    private static IReadOnlyDictionary<string, SubjectPropertyMetadata>? FindInterceptedProperties(Type type)
+    {
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            if (current.GetProperty(DefaultPropertiesName, flags)?.GetValue(null)
+                is IReadOnlyDictionary<string, SubjectPropertyMetadata> properties)
+            {
+                return properties;
+            }
+        }
+
+        return null;
     }
 }

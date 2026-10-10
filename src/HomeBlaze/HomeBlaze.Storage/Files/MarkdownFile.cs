@@ -34,6 +34,11 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     // subjects of another.
     private volatile MarkdownParseResult _parseResult;
 
+    // A parse changes the subjects it reuses in place, so two reloads at once would leave the nested subjects
+    // from one parse and the snapshot from another. Only LoadFileAsync takes this. A write-back must not:
+    // the storage reloads the file from inside the write, on the same call chain, and would wait for itself.
+    private readonly SemaphoreSlim _reloadLock = new(1, 1);
+
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
     private MarkdownPage? _page => _parseResult.Page;
@@ -107,27 +112,37 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     private async Task LoadFileAsync(CancellationToken cancellationToken)
     {
-        var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
-
-        await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
-        using var reader = new StreamReader(stream);
-        var content = await reader.ReadToEndAsync(cancellationToken);
-        var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
-        var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
-
-        // Nothing is assigned before the parse succeeded, so a failed reload leaves the previous state as it was.
-        _parseResult = result;
-        Content = content;
-        Frontmatter = frontmatter;
-        Children = result.Children;
-
-        if (metadata != null)
+        await _reloadLock.WaitAsync(cancellationToken);
+        try
         {
-            FileSize = metadata.Size;
-            LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
-        }
+            var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
 
-        RecalculateDerivedPropertiesOfContent();
+            await using var stream = await Storage.ReadBlobAsync(FullPath, cancellationToken);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync(cancellationToken);
+            var frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(content);
+            var result = await _parser.ParseAsync(content, this, Children, cancellationToken);
+
+            // The page itself is assigned only after the parse succeeded, so a failed reload leaves its content,
+            // its top-level children and the snapshot as they were. Subjects that the parse reused were already
+            // updated in place, with their slots and the children of their fragments.
+            _parseResult = result;
+            Content = content;
+            Frontmatter = frontmatter;
+            Children = result.Children;
+
+            if (metadata != null)
+            {
+                FileSize = metadata.Size;
+                LastModified = metadata.LastModifiedUtc ?? DateTime.UtcNow;
+            }
+
+            RecalculateDerivedPropertiesOfContent();
+        }
+        finally
+        {
+            _reloadLock.Release();
+        }
     }
 
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)

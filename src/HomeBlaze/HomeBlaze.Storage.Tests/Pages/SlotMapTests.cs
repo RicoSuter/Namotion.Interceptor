@@ -65,6 +65,9 @@ public class SlotMapTests
     [InlineData(typeof(StringSlot), "the slot 'Content' must hold subjects")]
     [InlineData(typeof(InterfaceSlot), "the type ITestSlotValue of the slot 'Content' cannot be created")]
     [InlineData(typeof(AbstractSlot), "the type TestAbstractRow of the slot 'Row' cannot be created")]
+    [InlineData(typeof(NotInterceptedSlot), "the slot 'Content' must be a partial property of a subject class")]
+    [InlineData(typeof(PlainSlotHost), "the slot 'Content' must be a partial property of a subject class")]
+    [InlineData(typeof(NoSetterSlot), "the slot 'Content' needs a setter")]
     public void WhenDeclarationIsInvalid_ThenMapCarriesAnError(Type type, string expectedPart)
     {
         // Act

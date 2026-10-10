@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -151,91 +152,169 @@ public partial class TestFaultyHost : IConfigurable
 [InterceptorSubject]
 public partial class TestInvalidSlots : IConfigurable
 {
+    private static int _createdCount;
+
+    public TestInvalidSlots()
+    {
+        Interlocked.Increment(ref _createdCount);
+    }
+
+    /// <summary>How many instances were ever created. A type with invalid slots must not be created at all.</summary>
+    public static int CreatedCount => Volatile.Read(ref _createdCount);
+
     [Slot]
     public partial string? Text { get; set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
-public class TwoDefaults
-{
-    [Slot(IsDefault = true)]
-    public IInterceptorSubject? First { get; set; }
-
-    [Slot(IsDefault = true)]
-    public IInterceptorSubject? Second { get; set; }
-}
-
-public class TypedDefault
-{
-    [Slot(IsDefault = true)]
-    public TestRow? Content { get; set; }
-}
-
-public class DottedName
-{
-    [Slot("A.B")]
-    public IInterceptorSubject? Content { get; set; }
-}
-
-public class DuplicateNames
-{
-    [Slot("Item")]
-    public IInterceptorSubject? First { get; set; }
-
-    [Slot("Item")]
-    public IInterceptorSubject? Second { get; set; }
-}
-
-public class EmptyName
-{
-    [Slot("")]
-    public IInterceptorSubject? Content { get; set; }
-}
-
-public class WhitespaceName
-{
-    [Slot(" ")]
-    public IInterceptorSubject? Content { get; set; }
-}
-
-public class StringSlot
+/// <summary>Clearing its slot fails in the setter, because the validation rejects null.</summary>
+[InterceptorSubject]
+public partial class TestRequiredSlotHost : IConfigurable
 {
     [Slot]
-    public string? Content { get; set; }
+    [Required]
+    public partial IInterceptorSubject? Needed { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
-public class ArrayDefault
+/// <summary>Holds a reload inside <see cref="ApplyConfigurationAsync"/> until the test lets it go on.</summary>
+[InterceptorSubject]
+public partial class TestGate : IConfigurable
+{
+    [Configuration]
+    public partial string? Label { get; set; }
+
+    /// <summary>Completes when the configuration is being applied.</summary>
+    public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Awaited while the configuration is applied. Null lets it pass.</summary>
+    public Task? Gate { get; set; }
+
+    public async Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        Entered.TrySetResult();
+        if (Gate is { } gate)
+        {
+            await gate;
+        }
+    }
+}
+
+[InterceptorSubject]
+public partial class TwoDefaults
 {
     [Slot(IsDefault = true)]
-    public IInterceptorSubject[] Content { get; set; } = [];
+    public partial IInterceptorSubject? First { get; set; }
+
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject? Second { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TypedDefault
+{
+    [Slot(IsDefault = true)]
+    public partial TestRow? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DottedName
+{
+    [Slot("A.B")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DuplicateNames
+{
+    [Slot("Item")]
+    public partial IInterceptorSubject? First { get; set; }
+
+    [Slot("Item")]
+    public partial IInterceptorSubject? Second { get; set; }
+}
+
+[InterceptorSubject]
+public partial class EmptyName
+{
+    [Slot("")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class WhitespaceName
+{
+    [Slot(" ")]
+    public partial IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class StringSlot
+{
+    [Slot]
+    public partial string? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class ArrayDefault
+{
+    [Slot(IsDefault = true)]
+    public partial IInterceptorSubject[]? Content { get; set; }
 }
 
 public interface ITestSlotValue : IInterceptorSubject;
 
-public class InterfaceSlot
+[InterceptorSubject]
+public partial class InterfaceSlot
 {
     [Slot]
-    public ITestSlotValue? Content { get; set; }
+    public partial ITestSlotValue? Content { get; set; }
 }
 
 public abstract class TestAbstractRow : TestRow;
 
-public class AbstractSlot
+[InterceptorSubject]
+public partial class AbstractSlot
 {
     [Slot("Row")]
-    public TestAbstractRow[] Rows { get; set; } = [];
+    public partial TestAbstractRow[]? Rows { get; set; }
 }
 
-public class TestSlotBase
+[InterceptorSubject]
+public partial class TestSlotBase
 {
     [Slot(IsDefault = true)]
-    public virtual IInterceptorSubject? Content { get; set; }
+    public virtual partial IInterceptorSubject? Content { get; set; }
 }
 
-public class TestSlotDerived : TestSlotBase
+[InterceptorSubject]
+public partial class TestSlotDerived : TestSlotBase
 {
-    public override IInterceptorSubject? Content { get; set; }
+    public override partial IInterceptorSubject? Content { get; set; }
+}
+
+/// <summary>A subject whose slot is an ordinary property, so a write to it is not tracked.</summary>
+[InterceptorSubject]
+public partial class NotInterceptedSlot
+{
+    [Slot]
+    public IInterceptorSubject? Content { get; set; }
+}
+
+/// <summary>Not a subject class at all.</summary>
+public class PlainSlotHost
+{
+    [Slot]
+    public IInterceptorSubject? Content { get; set; }
+}
+
+[InterceptorSubject]
+public partial class NoSetterSlot
+{
+    [Slot]
+    public partial IInterceptorSubject? Content { get; }
 }
 
 /// <summary>Resolves a path in page scope from a derived property, like a widget that shows another subject.</summary>

@@ -107,7 +107,8 @@ public sealed class MarkdownPageFixture
     public static string Html(IEnumerable<KeyValuePair<string, IInterceptorSubject>> children) =>
         string.Concat(children.Select(child => child.Value is HtmlSegment html ? html.Html : string.Empty));
 
-    private async Task WriteAsync(string name, string content)
+    /// <summary>Writes the file without telling the page, like a change that the file watcher has not reported yet.</summary>
+    public async Task WriteAsync(string name, string content)
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content.Replace("\r\n", "\n")));
         await Storage.WriteBlobAsync(name, stream, CancellationToken.None);
