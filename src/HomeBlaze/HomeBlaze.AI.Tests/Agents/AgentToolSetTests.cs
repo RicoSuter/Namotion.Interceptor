@@ -60,6 +60,25 @@ public class AgentToolSetTests
     }
 
     [Fact]
+    public async Task WhenTheBudgetIsExhausted_ThenUpdateMemoryStillRuns()
+    {
+        // Arrange
+        var toolSet = AgentToolSet.Create([Tool("browse")], ["browse"], MemoryTool, maxToolCalls: 1, progress: null);
+        var browse = toolSet.Tools.First(tool => tool.Name == "browse");
+        var memory = toolSet.Tools.First(tool => tool.Name == "update_memory");
+        var input = JsonSerializer.SerializeToElement(new { path = "/" });
+
+        // Act
+        await browse.Handler(input, CancellationToken.None);
+        var memoryResult = JsonSerializer.SerializeToElement(await memory.Handler(input, CancellationToken.None));
+
+        // Assert
+        Assert.False(memoryResult.TryGetProperty("error", out _));
+        Assert.Equal(2, toolSet.Calls.Count);
+        Assert.False(toolSet.Calls[1].IsError);
+    }
+
+    [Fact]
     public async Task WhenAToolIsCalled_ThenTheCallIsRecordedAndReported()
     {
         // Arrange

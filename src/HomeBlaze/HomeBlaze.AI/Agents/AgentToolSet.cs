@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Namotion.Interceptor.Mcp;
 
 namespace HomeBlaze.AI.Agents;
@@ -16,6 +18,14 @@ public sealed class AgentToolSet
 
     private const int PreviewLength = 2000;
 
+    // Display only: previews are for the timeline and audit, never sent back to the model, so relaxed escaping
+    // keeps non-ASCII characters readable and the enum converter matches what the model actually received.
+    private static readonly JsonSerializerOptions PreviewSerializerOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private readonly int _maxToolCalls;
     private readonly IProgress<AgentTurnUpdate>? _progress;
     private int _callCount;
@@ -31,7 +41,7 @@ public sealed class AgentToolSet
     /// <summary>The wrapped tools.</summary>
     public IReadOnlyList<McpToolInfo> Tools { get; private set; }
 
-    /// <summary>The calls made so far, in order.</summary>
+    /// <summary>The calls made so far, in completion order.</summary>
     public IReadOnlyList<AgentToolCall> Calls => Volatile.Read(ref _calls);
 
     /// <summary>
@@ -45,7 +55,8 @@ public sealed class AgentToolSet
     /// </summary>
     /// <param name="availableTools">All tools the configuration offers.</param>
     /// <param name="allowedTools">The names the agent may use; update_memory is always added.</param>
-    /// <param name="memoryTool">The agent's update_memory tool.</param>
+    /// <param name="memoryTool">The agent's update_memory tool. Does not count against the call budget, so the
+    /// agent can still save memory after exhausting it.</param>
     /// <param name="maxToolCalls">Calls after which further calls return an error.</param>
     /// <param name="progress">Receives an update per completed call.</param>
     public static AgentToolSet Create(
@@ -58,13 +69,13 @@ public sealed class AgentToolSet
         var toolSet = new AgentToolSet(maxToolCalls, progress);
         toolSet.Tools = availableTools
             .Where(tool => allowedTools.Contains(tool.Name))
-            .Append(memoryTool)
-            .Select(toolSet.Wrap)
+            .Select(tool => toolSet.Wrap(tool, countsAgainstBudget: true))
+            .Append(toolSet.Wrap(memoryTool, countsAgainstBudget: false))
             .ToList();
         return toolSet;
     }
 
-    private McpToolInfo Wrap(McpToolInfo tool) => new()
+    private McpToolInfo Wrap(McpToolInfo tool, bool countsAgainstBudget) => new()
     {
         Name = tool.Name,
         Description = tool.Description,
@@ -72,27 +83,29 @@ public sealed class AgentToolSet
         Handler = async (input, cancellationToken) =>
         {
             var arguments = input.GetRawText();
-            if (Interlocked.Increment(ref _callCount) > _maxToolCalls)
+            if (countsAgainstBudget && Interlocked.Increment(ref _callCount) > _maxToolCalls)
             {
-                var message = $"The tool call budget of {_maxToolCalls} calls for this run is exhausted. Answer with what you have.";
+                var message = $"The tool call budget of {_maxToolCalls} calls for this turn is exhausted. Answer with what you have.";
                 Record(new AgentToolCall(tool.Name, arguments, message, IsError: true));
                 return new { error = message };
             }
 
+            object? result;
             try
             {
-                var result = await tool.Handler(input, cancellationToken);
-                var element = result is null or string ? default : JsonSerializer.SerializeToElement(result);
-                var isError = element.ValueKind == JsonValueKind.Object && element.TryGetProperty("error", out _);
-                var preview = result as string ?? (element.ValueKind == JsonValueKind.Undefined ? "null" : element.GetRawText());
-                Record(new AgentToolCall(tool.Name, arguments, Truncate(preview), isError));
-                return result;
+                result = await tool.Handler(input, cancellationToken);
             }
-            catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
                 Record(new AgentToolCall(tool.Name, arguments, Truncate(exception.Message), IsError: true));
                 throw;
             }
+
+            var element = result is null or string ? default : JsonSerializer.SerializeToElement(result, PreviewSerializerOptions);
+            var isError = element.ValueKind == JsonValueKind.Object && element.TryGetProperty("error", out _);
+            var preview = result as string ?? (element.ValueKind == JsonValueKind.Undefined ? "null" : element.GetRawText());
+            Record(new AgentToolCall(tool.Name, arguments, Truncate(preview), isError));
+            return result;
         }
     };
 
