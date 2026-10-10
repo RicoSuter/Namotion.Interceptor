@@ -27,7 +27,7 @@ The gateway automatically discovers these sensor types:
 |--------|-------------|
 | Outdoor | Temperature, humidity, dew point, feels-like, wind speed/gust/direction, UV index, solar radiation, illuminance, vapor pressure deficit |
 | Indoor (the gateway's built-in sensor, or a paired WH25/WH32B) | Temperature, humidity, absolute/relative pressure |
-| Rain Gauge | Event, rate, hourly/daily/weekly/monthly/yearly totals |
+| Rain Gauge | Event, rate, last hour, last 24 hours, daily/weekly/monthly/yearly totals |
 | Piezo Rain (WS90) | Same as rain gauge |
 | Channel Sensors | Per-channel temperature and humidity |
 | Soil Moisture | Per-channel soil moisture percentage |
@@ -141,4 +141,18 @@ Note: The local HTTP API battery format differs from the Ecowitt push/custom ser
 
 ### Rain accumulation
 
-The API provides periodic rain buckets (hourly, daily, weekly, monthly, yearly) that reset at their respective boundaries. `TotalRain` is a monotonically increasing cumulative counter built from the longest available bucket (yearly, falling back to monthly). When that bucket decreases compared to the previous poll, the gateway detects a reset and adds the previous value to a persisted `RainCumulativeOffset`. Separate offsets are maintained for traditional and piezo rain gauges.
+The `rain` and `piezoRain` arrays of `get_livedata_info` identify each value by item id:
+
+| ID | Value |
+|----|-------|
+| `0x0D` | Rain event |
+| `0x0E` | Rain rate |
+| `0x7D` | Last hour, not sent by every firmware and not documented by Ecowitt |
+| `0x7C` | Last 24 hours, not sent by every firmware |
+| `0x10` | Daily |
+| `0x11` | Weekly |
+| `0x12` | Monthly |
+| `0x13` | Yearly (carries the sensor battery) |
+| `0x14` | Gateway rain total, not sent by every firmware |
+
+The daily, weekly, monthly and yearly buckets reset at their respective boundaries. `TotalRain` is a monotonically increasing cumulative counter built from the longest available bucket (the gateway total, falling back to yearly). When that bucket decreases compared to the previous poll, the gateway detects a reset and adds the previous value to a persisted `RainCumulativeOffset`. Separate offsets are maintained for traditional and piezo rain gauges.

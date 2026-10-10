@@ -377,7 +377,7 @@ public partial class EcowittGateway : BackgroundService,
         if (data.Rain != null && !IsSensorHidden("rain"))
         {
             RainGauge ??= new EcowittRainGauge("Rain Gauge");
-            var longestBucket = data.Rain.YearlyRain ?? data.Rain.MonthlyRain;
+            var longestBucket = GetLongestRainBucket(data.Rain);
             var previousLastBucketValue = RainLastMonthlyValue;
             var cumulativeOffset = RainCumulativeOffset;
             var lastBucketValue = RainLastMonthlyValue;
@@ -395,7 +395,7 @@ public partial class EcowittGateway : BackgroundService,
         if (data.PiezoRain != null && !IsSensorHidden("piezo"))
         {
             PiezoRainGauge ??= new EcowittRainGauge("Piezo Rain");
-            var longestBucket = data.PiezoRain.YearlyRain ?? data.PiezoRain.MonthlyRain;
+            var longestBucket = GetLongestRainBucket(data.PiezoRain);
             var previousPiezoLastValue = PiezoRainLastMonthlyValue;
             var piezoOffset = PiezoRainCumulativeOffset;
             var piezoLastValue = PiezoRainLastMonthlyValue;
@@ -574,6 +574,11 @@ public partial class EcowittGateway : BackgroundService,
         }
     }
 
+    // The persisted Rain*LastMonthlyValue holds the last reading of the item chosen here (0x14, else 0x13).
+    // Choosing another item reads as a bucket reset or a huge increase and makes TotalRain jump.
+    private static decimal? GetLongestRainBucket(EcowittRainData data)
+        => data.TotalRain ?? data.YearlyRain;
+
     /// <summary>
     /// Builds a monotonically increasing total from a periodic bucket that resets
     /// (e.g., yearly rain resets to 0 on Jan 1). Detects resets when the current
@@ -604,6 +609,7 @@ public partial class EcowittGateway : BackgroundService,
         gauge.RainEvent = data.RainEvent;
         gauge.RainRate = data.RainRate;
         gauge.HourlyRain = data.HourlyRain;
+        gauge.Last24HoursRain = data.Last24HoursRain;
         gauge.DailyRain = data.DailyRain;
         gauge.WeeklyRain = data.WeeklyRain;
         gauge.MonthlyRain = data.MonthlyRain;
