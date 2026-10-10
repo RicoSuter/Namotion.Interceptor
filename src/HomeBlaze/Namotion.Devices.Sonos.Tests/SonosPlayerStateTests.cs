@@ -339,6 +339,36 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
+    public void WhenEventReportsTheSameTrackWithoutAlbumArt_ThenTheAlbumArtIsCleared()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", albumArtUri: "/getaa?s=1&u=station", streamContent: "Artist - Song")), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "Artist - Next Song")), T0 + 1);
+
+        // Assert
+        Assert.Equal("Artist - Next Song", player.CurrentTrackTitle);
+        Assert.Null(player.CurrentTrackImageUri);
+    }
+
+    [Fact]
+    public void WhenPollFollowsAnEventThatClearedTheAlbumArt_ThenTheAlbumArtStaysEmpty()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", albumArtUri: "/getaa?s=1&u=station", streamContent: "Artist - Song")), T0);
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "Artist - Next Song")), T0 + 1);
+
+        // Act
+        player.ApplyPoll(Reading(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "Artist - Next Song"))), T0 + 2);
+
+        // Assert
+        Assert.Null(player.CurrentTrackImageUri);
+    }
+
+    [Fact]
     public void WhenAnotherTrackHasNoAlbumArt_ThenTheAlbumArtIsCleared()
     {
         // Arrange

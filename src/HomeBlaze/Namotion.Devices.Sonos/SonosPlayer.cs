@@ -641,7 +641,7 @@ public partial class SonosPlayer : SonosDevice,
         lock (_stateLock)
         {
             _avTransportOrder.RecordEvent(order);
-            ApplyAvTransport(change);
+            ApplyAvTransport(change, isPoll: false);
         }
     }
 
@@ -671,7 +671,7 @@ public partial class SonosPlayer : SonosDevice,
 
             if (appliesAvTransport)
             {
-                ApplyAvTransport(reading.AvTransport);
+                ApplyAvTransport(reading.AvTransport, isPoll: true);
                 if (reading.HasPosition)
                 {
                     CurrentTrackPosition = reading.Position;
@@ -690,7 +690,7 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
-    private void ApplyAvTransport(AvTransportChange change)
+    private void ApplyAvTransport(AvTransportChange change, bool isPoll)
     {
         if (SonosValues.IsKnown(change.TransportState))
         {
@@ -741,7 +741,7 @@ public partial class SonosPlayer : SonosDevice,
             CurrentTrackDuration = null;
         }
 
-        ApplyTrackMetaData(change.TrackMetaData, isTrackChange);
+        ApplyTrackMetaData(change.TrackMetaData, isTrackChange, isPoll);
     }
 
     // Caller holds _stateLock. Polls often report the media metadata empty that events delivered, so only a parsable
@@ -766,7 +766,7 @@ public partial class SonosPlayer : SonosDevice,
     }
 
     // Caller holds _stateLock.
-    private void ApplyTrackMetaData(string? trackMetaData, bool isTrackChange)
+    private void ApplyTrackMetaData(string? trackMetaData, bool isTrackChange, bool isPoll)
     {
         if (SonosValues.IsKnown(trackMetaData))
         {
@@ -776,26 +776,27 @@ public partial class SonosPlayer : SonosDevice,
                 _lastTrackMetaData = trackMetaData;
             }
 
-            ApplyTrack(_lastTrack, isTrackChange);
+            ApplyTrack(_lastTrack, isTrackChange, isPoll);
         }
         else if (isTrackChange)
         {
             _lastTrack = null;
             _lastTrackMetaData = null;
-            ApplyTrack(null, isTrackChange);
+            ApplyTrack(null, isTrackChange, isPoll);
         }
     }
 
-    // Caller holds _stateLock. A placeholder title (connecting, buffering) and missing album art keep the current
-    // value while the track stays the same, like NOT_IMPLEMENTED: a station's stream keeps its track URI from song to
-    // song, and its polls report the art that its events delivered as absent.
-    private void ApplyTrack(DidlTrack? track, bool isTrackChange)
+    // Caller holds _stateLock.
+    private void ApplyTrack(DidlTrack? track, bool isTrackChange, bool isPoll)
     {
         ApplyTrackTitle(track, isTrackChange);
         CurrentTrackArtist = track?.Artist;
         CurrentTrackAlbum = track?.Album;
-        ApplyTrackImage(track, isTrackChange);
+        ApplyTrackImage(track, isTrackChange, isPoll);
     }
+
+    // A placeholder title (connecting, buffering) keeps the current one while the track stays the same, like
+    // NOT_IMPLEMENTED.
 
     private void ApplyTrackTitle(DidlTrack? track, bool isTrackChange)
     {
@@ -818,7 +819,9 @@ public partial class SonosPlayer : SonosDevice,
         }
     }
 
-    private void ApplyTrackImage(DidlTrack? track, bool isTrackChange)
+    // Only a poll keeps the current art when it reports none for the same track: polls omit the art that events
+    // delivered. An event without art clears it, since a stream keeps its track URI from song to song.
+    private void ApplyTrackImage(DidlTrack? track, bool isTrackChange, bool isPoll)
     {
         var baseUri = BaseUri;
         if (!ReferenceEquals(track, _imageUriTrack) || baseUri != _imageUriBaseUri)
@@ -828,7 +831,7 @@ public partial class SonosPlayer : SonosDevice,
             _imageUriBaseUri = baseUri;
         }
 
-        if (_imageUri is not null || isTrackChange)
+        if (_imageUri is not null || isTrackChange || !isPoll)
         {
             CurrentTrackImageUri = _imageUri;
         }
