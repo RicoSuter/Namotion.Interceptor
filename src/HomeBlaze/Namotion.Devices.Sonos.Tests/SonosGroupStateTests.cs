@@ -1,4 +1,5 @@
 using System.Reflection;
+using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Client;
 using Namotion.Devices.Sonos.Parsing;
 using Namotion.Devices.Sonos.Tests.Testing;
@@ -120,6 +121,7 @@ public class SonosGroupStateTests
             T0);
 
         // Assert
+        Assert.Equal(MediaPlaybackState.Playing, group.PlaybackState);
         Assert.True(group.IsPlaying);
         Assert.Equal("Song", group.CurrentTrackTitle);
         Assert.Equal("Artist", group.CurrentTrackArtist);

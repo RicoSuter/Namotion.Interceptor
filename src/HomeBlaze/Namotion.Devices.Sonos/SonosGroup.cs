@@ -46,7 +46,10 @@ public partial class SonosGroup :
     public partial bool? IsMuted { get; internal set; }
 
     [Derived]
-    public bool? IsPlaying => Coordinator.IsPlaying;
+    public MediaPlaybackState? PlaybackState => Coordinator.PlaybackState;
+
+    [Derived]
+    public bool IsPlaying => Coordinator.IsPlaying;
 
     [Derived]
     public string? CurrentTrackTitle => Coordinator.CurrentTrackTitle;

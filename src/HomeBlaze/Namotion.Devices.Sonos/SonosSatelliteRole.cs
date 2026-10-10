@@ -5,6 +5,9 @@ namespace Namotion.Devices.Sonos;
 /// </summary>
 public enum SonosSatelliteRole
 {
+    /// <summary>
+    /// A role without a member of its own, which a later version may refine into one.
+    /// </summary>
     Other,
     Subwoofer,
     RearLeft,

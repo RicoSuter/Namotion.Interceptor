@@ -29,7 +29,6 @@ public partial class SonosPlayer : SonosDevice,
         : base(uuid)
     {
         _system = system;
-        TransportState = SonosTransportState.Unknown;
         Satellites = new Dictionary<string, SonosSatellite>(StringComparer.Ordinal);
     }
 
@@ -38,16 +37,10 @@ public partial class SonosPlayer : SonosDevice,
     /// </summary>
     internal partial string? MediaUri { get; set; }
 
-    [State(Position = 10)]
-    public partial SonosTransportState TransportState { get; internal set; }
+    public partial MediaPlaybackState? PlaybackState { get; internal set; }
 
     [Derived]
-    public bool? IsPlaying => TransportState switch
-    {
-        SonosTransportState.Playing or SonosTransportState.Transitioning => true,
-        SonosTransportState.Unknown => null,
-        _ => false
-    };
+    public bool IsPlaying => PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Buffering;
 
     public partial bool? IsMuted { get; internal set; }
 
@@ -79,16 +72,14 @@ public partial class SonosPlayer : SonosDevice,
 
     internal partial string? ReportedSourceTitle { get; set; }
 
+    internal partial SonosSource? ReportedSource { get; set; }
+
+    /// <summary>
+    /// Where the audio of the group comes from, or null until the transport of its coordinator was read.
+    /// </summary>
     [Derived]
     [State(Position = 11)]
-    public SonosSource Source
-    {
-        get
-        {
-            var coordinator = GetCoordinator();
-            return SonosUris.DetectSource(coordinator.MediaUri ?? coordinator.CurrentTrackUri);
-        }
-    }
+    public SonosSource? Source => GetCoordinator().ReportedSource;
 
     [Derived]
     [State(Position = 12)]
@@ -153,7 +144,7 @@ public partial class SonosPlayer : SonosDevice,
     public partial Dictionary<string, SonosSatellite> Satellites { get; internal set; }
 
     [Derived]
-    public override string? IconName => IsPlaying == true ? "PlayCircle" : "Speaker";
+    public override string? IconName => IsPlaying ? "PlayCircle" : "Speaker";
 
     // The coordinator of the player's group, or the player itself when it coordinates or the coordinator is unknown.
     private SonosPlayer GetCoordinator() =>
@@ -260,7 +251,7 @@ public partial class SonosPlayer : SonosDevice,
     {
         if (SonosValues.IsKnown(change.TransportState))
         {
-            TransportState = SonosValues.ParseTransportState(change.TransportState);
+            PlaybackState = SonosValues.ParsePlaybackState(change.TransportState);
         }
 
         if (SonosValues.ParsePlayMode(change.PlayMode) is { } playMode)
@@ -269,26 +260,7 @@ public partial class SonosPlayer : SonosDevice,
             ReportedRepeat = playMode.Repeat;
         }
 
-        // An unknown value keeps the current one only while the track stays the same: Spotify Connect polls report
-        // NOT_IMPLEMENTED for what its events delivered. After a change, the kept values would describe the
-        // previous track.
-        var isMediaChange = false;
-        if (SonosValues.IsKnown(change.MediaUri))
-        {
-            var mediaUri = SonosValues.NullIfEmpty(change.MediaUri);
-            isMediaChange = mediaUri != MediaUri;
-            MediaUri = mediaUri;
-        }
-
-        var isTrackChange = isMediaChange;
-
-        if (SonosValues.IsKnown(change.TrackUri))
-        {
-            var trackUri = SonosValues.NullIfEmpty(change.TrackUri);
-            isTrackChange |= trackUri != CurrentTrackUri;
-            CurrentTrackUri = trackUri;
-        }
-
+        var (isMediaChange, isTrackChange) = ApplyUris(change);
         if (isTrackChange)
         {
             // Position comes only from polls; the next one reads it for the new track.
@@ -308,6 +280,37 @@ public partial class SonosPlayer : SonosDevice,
         }
 
         ApplyTrackMetaData(change.TrackMetaData, isTrackChange, isPoll);
+    }
+
+    // Caller holds _stateLock. Returns whether the media and the track changed. An unknown value keeps the current
+    // one only while the track stays the same: Spotify Connect polls report NOT_IMPLEMENTED for what its events
+    // delivered. After a change, the kept values would describe the previous track.
+    private (bool IsMediaChange, bool IsTrackChange) ApplyUris(AvTransportChange change)
+    {
+        var isMediaChange = false;
+        var isMediaKnown = SonosValues.IsKnown(change.MediaUri);
+        if (isMediaKnown)
+        {
+            var mediaUri = SonosValues.NullIfEmpty(change.MediaUri);
+            isMediaChange = mediaUri != MediaUri;
+            MediaUri = mediaUri;
+        }
+
+        var isTrackChange = isMediaChange;
+        var isTrackKnown = SonosValues.IsKnown(change.TrackUri);
+        if (isTrackKnown)
+        {
+            var trackUri = SonosValues.NullIfEmpty(change.TrackUri);
+            isTrackChange |= trackUri != CurrentTrackUri;
+            CurrentTrackUri = trackUri;
+        }
+
+        if (isMediaKnown || isTrackKnown)
+        {
+            ReportedSource = SonosUris.DetectSource(MediaUri ?? CurrentTrackUri);
+        }
+
+        return (isMediaChange, isTrackChange);
     }
 
     private void ApplyRenderingControl(RenderingControlChange change)

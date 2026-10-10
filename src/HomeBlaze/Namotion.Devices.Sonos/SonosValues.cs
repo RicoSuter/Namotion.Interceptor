@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security;
+using HomeBlaze.Abstractions.Media;
 using Namotion.Devices.Sonos.Parsing;
 
 namespace Namotion.Devices.Sonos;
@@ -88,13 +89,16 @@ internal static class SonosValues
     internal static string FormatDuration(TimeSpan value) =>
         string.Create(CultureInfo.InvariantCulture, $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}");
 
-    internal static SonosTransportState ParseTransportState(string? value) => value switch
+    /// <summary>
+    /// Maps a UPnP transport state to a playback state, null for an absent or unrecognized one.
+    /// </summary>
+    internal static MediaPlaybackState? ParsePlaybackState(string? value) => value switch
     {
-        "PLAYING" => SonosTransportState.Playing,
-        "PAUSED_PLAYBACK" => SonosTransportState.Paused,
-        "STOPPED" => SonosTransportState.Stopped,
-        "TRANSITIONING" => SonosTransportState.Transitioning,
-        _ => SonosTransportState.Unknown
+        "PLAYING" => MediaPlaybackState.Playing,
+        "PAUSED_PLAYBACK" => MediaPlaybackState.Paused,
+        "STOPPED" => MediaPlaybackState.Stopped,
+        "TRANSITIONING" => MediaPlaybackState.Buffering,
+        _ => null
     };
 
     internal static (bool Shuffle, SonosRepeatMode Repeat)? ParsePlayMode(string? value) => value switch

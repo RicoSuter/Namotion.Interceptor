@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Media;
 using Xunit;
 
 namespace Namotion.Devices.Sonos.Tests;
@@ -95,16 +96,16 @@ public class SonosValuesTests
     }
 
     [Theory]
-    [InlineData("PLAYING", SonosTransportState.Playing)]
-    [InlineData("PAUSED_PLAYBACK", SonosTransportState.Paused)]
-    [InlineData("STOPPED", SonosTransportState.Stopped)]
-    [InlineData("TRANSITIONING", SonosTransportState.Transitioning)]
-    [InlineData("SOMETHING_ELSE", SonosTransportState.Unknown)]
-    [InlineData(null, SonosTransportState.Unknown)]
-    public void WhenParsingTransportState_ThenMapsToEnum(string? value, SonosTransportState expected)
+    [InlineData("PLAYING", MediaPlaybackState.Playing)]
+    [InlineData("PAUSED_PLAYBACK", MediaPlaybackState.Paused)]
+    [InlineData("STOPPED", MediaPlaybackState.Stopped)]
+    [InlineData("TRANSITIONING", MediaPlaybackState.Buffering)]
+    [InlineData("SOMETHING_ELSE", null)]
+    [InlineData(null, null)]
+    public void WhenParsingPlaybackState_ThenMapsToEnumOrUnknown(string? value, MediaPlaybackState? expected)
     {
         // Act
-        var state = SonosValues.ParseTransportState(value);
+        var state = SonosValues.ParsePlaybackState(value);
 
         // Assert
         Assert.Equal(expected, state);

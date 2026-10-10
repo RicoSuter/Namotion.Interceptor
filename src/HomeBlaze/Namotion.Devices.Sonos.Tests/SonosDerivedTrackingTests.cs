@@ -16,7 +16,7 @@ public class SonosDerivedTrackingTests
 {
 
     [Fact]
-    public void WhenTransportStateChanges_ThenIsPlayingRaisesPropertyChanged()
+    public void WhenPlaybackStateChanges_ThenIsPlayingRaisesPropertyChanged()
     {
         // Arrange
         var system = CreateHousehold();

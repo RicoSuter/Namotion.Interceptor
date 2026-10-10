@@ -57,7 +57,7 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Equal(0.5m, player.Volume);
-        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
         Assert.Equal(TimeSpan.FromSeconds(42), player.CurrentTrackPosition);
     }
 
@@ -87,7 +87,7 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
 
         // Assert
-        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
         Assert.True(player.IsPlaying);
         Assert.True(player.Shuffle);
         Assert.Equal(SonosRepeatMode.Off, player.Repeat);
@@ -519,7 +519,7 @@ public class SonosPlayerStateTests
     }
 
     [Fact]
-    public void WhenEventReportsNotImplementedTransportState_ThenTransportStateIsKept()
+    public void WhenEventReportsNotImplementedTransportState_ThenPlaybackStateIsKept()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
@@ -529,11 +529,11 @@ public class SonosPlayerStateTests
         player.ApplyAvTransportEvent(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null), T0 + 1);
 
         // Assert
-        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
     }
 
     [Fact]
-    public void WhenPollReportsNotImplementedTransportState_ThenTransportStateIsKept()
+    public void WhenPollReportsNotImplementedTransportState_ThenPlaybackStateIsKept()
     {
         // Arrange
         var player = CreateHousehold().Players[KitchenUuid];
@@ -543,7 +543,64 @@ public class SonosPlayerStateTests
         player.ApplyPoll(Reading(new AvTransportChange("NOT_IMPLEMENTED", null, null, null, null, null)), T0 + 1);
 
         // Assert
-        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
+    }
+
+    [Fact]
+    public void WhenPlayerWasNeverPolled_ThenPlaybackStateAndSourceAreUnknown()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        var (playbackState, isPlaying, source) = (player.PlaybackState, player.IsPlaying, player.Source);
+
+        // Assert
+        Assert.Null(playbackState);
+        Assert.False(isPlaying);
+        Assert.Null(source);
+    }
+
+    [Fact]
+    public void WhenTransportStateIsUnrecognized_ThenPlaybackStateIsUnknown()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(SpotifyPlaying(), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("SOMETHING_ELSE", null, null, null, null, null), T0 + 1);
+
+        // Assert
+        Assert.Null(player.PlaybackState);
+        Assert.False(player.IsPlaying);
+    }
+
+    [Fact]
+    public void WhenPlayerIsTransitioning_ThenItBuffersAndCountsAsPlaying()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("TRANSITIONING", null, null, null, null, null), T0);
+
+        // Assert
+        Assert.Equal(MediaPlaybackState.Buffering, player.PlaybackState);
+        Assert.True(player.IsPlaying);
+    }
+
+    [Fact]
+    public void WhenPollReportsNeitherMediaNorTrack_ThenSourceStaysUnknown()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyPoll(Reading(new AvTransportChange("STOPPED", "NORMAL", null, null, null, null)), T0);
+
+        // Assert
+        Assert.Null(player.Source);
     }
 
     [Fact]
@@ -585,7 +642,7 @@ public class SonosPlayerStateTests
             T0);
 
         // Assert
-        Assert.Equal(SonosTransportState.Playing, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Playing, player.PlaybackState);
         Assert.Equal("Song", player.CurrentTrackTitle);
         Assert.Equal(0.1m, player.Volume);
         Assert.Null(player.CurrentTrackPosition);
@@ -602,7 +659,7 @@ public class SonosPlayerStateTests
         player.ApplyPoll(Reading(new AvTransportChange("STOPPED", "NORMAL", "", "", "0:00:00", "")), T0 + 1);
 
         // Assert
-        Assert.Equal(SonosTransportState.Stopped, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Stopped, player.PlaybackState);
         Assert.False(player.IsPlaying);
         Assert.Null(player.CurrentTrackTitle);
         Assert.Null(player.CurrentTrackUri);

@@ -80,7 +80,7 @@ A player is a room as the Sonos app shows it, titled with model and room, for ex
 | `Subwoofer` | Home theater channel map lists `SW` | Sub, Sub Mini |
 | `RearLeft`, `RearRight` | Home theater channel map lists `LR` or `RR` | Era 100 surrounds |
 | `StereoPartner` | Invisible group member listed in the room's stereo channel map | second speaker of a stereo pair |
-| `Other` | Any other channel | |
+| `Other` | Any other channel; may be refined into new roles later | |
 
 A satellite carries its player's room name and is titled with model, room and role, for example "Sonos Sub (Living Room, subwoofer)". Invisible members that are no stereo partner are skipped.
 
@@ -141,13 +141,13 @@ The speakers do not report `SubnetMask`, `Gateway`, `SignalStrength` or `Availab
 | Property | Unit | Description |
 |----------|------|-------------|
 | `Uuid`, `RoomName` | | RINCON id and room name |
-| `TransportState`, `IsPlaying` | | `Unknown`, `Stopped`, `Playing`, `Paused` or `Transitioning`; `IsPlaying` includes transitioning |
+| `PlaybackState`, `IsPlaying` | | `Stopped`, `Playing`, `Paused` or `Buffering` (Sonos's transitioning), empty while unknown; `IsPlaying` is true for playing and buffering and false while unknown |
 | `Volume`, `IsMuted` | 0..1 | This room |
 | `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum`, `CurrentTrackUri` | | See [Track Details](#track-details) |
 | `CurrentTrackImageUri` | URI | Album art; Sonos's relative `/getaa?...` paths are resolved against the speaker |
 | `CurrentTrackDuration` | TimeSpan | Empty for streams, TV and line-in |
 | `CurrentTrackPosition` | TimeSpan | As of the last poll or command read-back; Sonos does not event it |
-| `Source` | | `None`, `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, from the coordinator's transport URI |
+| `Source` | | `None` (nothing loaded), `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, from the coordinator's transport URI; empty until it was read. `Other` may be refined into new values later |
 | `SourceTitle` | | The station, playlist or album the group plays, not the track. For a queue it is the playlist or album enqueued last, which the current track need not come from |
 | `Shuffle`, `Repeat` | | Group play mode; `Repeat` is `Off`, `All` or `One` |
 | `SleepTimerRemaining` | TimeSpan | Group sleep timer as of the last poll; empty when none runs |

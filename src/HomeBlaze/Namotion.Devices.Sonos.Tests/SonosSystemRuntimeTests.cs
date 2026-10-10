@@ -1,5 +1,6 @@
 using System.Net;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Media;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Sonos.Tests.Testing;
 using Namotion.Interceptor.Testing;
@@ -32,7 +33,7 @@ public class SonosSystemRuntimeTests
         Assert.Equal("00-00-00-00-00-06:D", player.SerialNumber);
         Assert.Equal("18.8", player.SoftwareVersion);
         Assert.Equal(0.44m, player.Volume);
-        Assert.Equal(SonosTransportState.Paused, player.TransportState);
+        Assert.Equal(MediaPlaybackState.Paused, player.PlaybackState);
         Assert.Equal(SonosSource.SpotifyConnect, player.Source);
         Assert.Equal(new[] { "Radio FM1", "SRF 3" }, system.Favorites.Select(favorite => favorite.Title));
         Assert.Equal(0.44m, Assert.Single(system.Groups).Value.Volume);
@@ -52,7 +53,7 @@ public class SonosSystemRuntimeTests
         // Assert
         Assert.Equal(HttpStatusCode.OK, status);
         await AsyncTestHelpers.WaitUntilAsync(
-            () => connected.Player.TransportState == SonosTransportState.Playing,
+            () => connected.Player.PlaybackState == MediaPlaybackState.Playing,
             ConnectedSystem.WaitTimeout,
             message: "The event should reach the player.");
     }

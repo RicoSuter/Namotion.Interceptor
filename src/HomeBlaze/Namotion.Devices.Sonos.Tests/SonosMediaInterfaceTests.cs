@@ -37,6 +37,37 @@ public class SonosMediaInterfaceTests
             inherited.OrderBy(type => type.Name, StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void WhenPlaybackStateIsInspected_ThenUnknownIsNullAndNotAnEnumMember()
+    {
+        // Act
+        var playbackState = typeof(IMediaPlaybackState).GetProperty(nameof(IMediaPlaybackState.PlaybackState))!;
+        var isPlaying = typeof(IMediaPlaybackState).GetProperty(nameof(IMediaPlaybackState.IsPlaying))!;
+
+        // Assert
+        Assert.Equal(typeof(MediaPlaybackState?), playbackState.PropertyType);
+        Assert.Equal(typeof(bool), isPlaying.PropertyType);
+        Assert.Equal(["Stopped", "Playing", "Paused", "Buffering"], Enum.GetNames<MediaPlaybackState>());
+    }
+
+    [Theory]
+    [InlineData(MediaPlaybackState.Playing, true)]
+    [InlineData(MediaPlaybackState.Buffering, true)]
+    [InlineData(MediaPlaybackState.Paused, false)]
+    [InlineData(MediaPlaybackState.Stopped, false)]
+    [InlineData(null, false)]
+    public void WhenPlaybackStateIsGiven_ThenIsPlayingDerivesFromIt(MediaPlaybackState? playbackState, bool expected)
+    {
+        // Arrange
+        IMediaPlaybackState state = new PlaybackStateStub(playbackState);
+
+        // Act
+        var isPlaying = state.IsPlaying;
+
+        // Assert
+        Assert.Equal(expected, isPlaying);
+    }
+
     [Theory]
     [InlineData(typeof(SonosPlayer))]
     [InlineData(typeof(SonosGroup))]
@@ -47,5 +78,10 @@ public class SonosMediaInterfaceTests
 
         // Assert
         Assert.True(isAudioPlayer);
+    }
+
+    private sealed class PlaybackStateStub(MediaPlaybackState? playbackState) : IMediaPlaybackState
+    {
+        public MediaPlaybackState? PlaybackState { get; } = playbackState;
     }
 }
