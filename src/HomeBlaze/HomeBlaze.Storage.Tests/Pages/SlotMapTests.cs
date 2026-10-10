@@ -41,11 +41,30 @@ public class SlotMapTests
         Assert.Empty(map.Named);
     }
 
+    [Fact]
+    public void WhenDerivedTypeOverridesSlotProperty_ThenTheSlotIsFoundOnce()
+    {
+        // Act
+        var map = SlotMap.For(typeof(TestSlotDerived));
+
+        // Assert
+        Assert.Null(map.Error);
+        var slot = Assert.Single(map.Named.Values);
+        Assert.Equal("Content", slot.Name);
+        Assert.Same(slot, map.Default);
+    }
+
     [Theory]
     [InlineData(typeof(TwoDefaults), "more than one default slot")]
     [InlineData(typeof(TypedDefault), "default slot 'Content' must be of type IInterceptorSubject")]
+    [InlineData(typeof(ArrayDefault), "default slot 'Content' must be of type IInterceptorSubject")]
     [InlineData(typeof(DottedName), "'A.B' must not contain a dot")]
     [InlineData(typeof(DuplicateNames), "'Item' is declared twice")]
+    [InlineData(typeof(EmptyName), "the slot of the property 'Content' needs a name")]
+    [InlineData(typeof(WhitespaceName), "the slot of the property 'Content' needs a name")]
+    [InlineData(typeof(StringSlot), "the slot 'Content' must hold subjects")]
+    [InlineData(typeof(InterfaceSlot), "the type ITestSlotValue of the slot 'Content' cannot be created")]
+    [InlineData(typeof(AbstractSlot), "the type TestAbstractRow of the slot 'Row' cannot be created")]
     public void WhenDeclarationIsInvalid_ThenMapCarriesAnError(Type type, string expectedPart)
     {
         // Act

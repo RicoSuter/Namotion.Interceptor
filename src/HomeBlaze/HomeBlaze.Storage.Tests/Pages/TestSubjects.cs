@@ -151,3 +151,54 @@ public class DuplicateNames
     [Slot("Item")]
     public IInterceptorSubject? Second { get; set; }
 }
+
+public class EmptyName
+{
+    [Slot("")]
+    public IInterceptorSubject? Content { get; set; }
+}
+
+public class WhitespaceName
+{
+    [Slot(" ")]
+    public IInterceptorSubject? Content { get; set; }
+}
+
+public class StringSlot
+{
+    [Slot]
+    public string? Content { get; set; }
+}
+
+public class ArrayDefault
+{
+    [Slot(IsDefault = true)]
+    public IInterceptorSubject[] Content { get; set; } = [];
+}
+
+public interface ITestSlotValue : IInterceptorSubject;
+
+public class InterfaceSlot
+{
+    [Slot]
+    public ITestSlotValue? Content { get; set; }
+}
+
+public abstract class TestAbstractRow : TestRow;
+
+public class AbstractSlot
+{
+    [Slot("Row")]
+    public TestAbstractRow[] Rows { get; set; } = [];
+}
+
+public class TestSlotBase
+{
+    [Slot(IsDefault = true)]
+    public virtual IInterceptorSubject? Content { get; set; }
+}
+
+public class TestSlotDerived : TestSlotBase
+{
+    public override IInterceptorSubject? Content { get; set; }
+}

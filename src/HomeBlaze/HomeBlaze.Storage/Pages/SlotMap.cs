@@ -49,6 +49,11 @@ internal sealed class SlotMap
             }
 
             var name = attribute.Name ?? property.Name;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return Invalid($"the slot of the property '{property.Name}' needs a name.");
+            }
+
             if (name.Contains('.'))
             {
                 return Invalid($"the slot name '{name}' must not contain a dot.");
@@ -61,6 +66,12 @@ internal sealed class SlotMap
             if (!typeof(IInterceptorSubject).IsAssignableFrom(valueType))
             {
                 return Invalid($"the slot '{name}' must hold subjects.");
+            }
+
+            // A slot that is not open gets an instance of its type per block.
+            if (!slot.IsOpen && (valueType.IsInterface || valueType.IsAbstract))
+            {
+                return Invalid($"the type {valueType.Name} of the slot '{name}' cannot be created because it is abstract or an interface.");
             }
 
             if (!named.TryAdd(name, slot))
