@@ -11,7 +11,7 @@ using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, IFaultInjectable
+internal class OpcUaSubjectServer : SubjectServerBase, IOpcUaSubjectServer, IFaultInjectable
 {
     // Per-instance key so multiple servers can expose the same property tree without
     // overwriting each other's BaseDataVariableState reference on shared properties.
@@ -29,7 +29,6 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     private readonly OpcUaServerConfiguration _configuration;
 
     private volatile OpcUaStandardServer? _server;
-    private int _consecutiveFailures;
 
     internal ThroughputCounter IncomingThroughput => Metrics.Incoming!;
 
@@ -75,17 +74,13 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     /// <summary>
     /// Gets the consecutive failure count.
     /// </summary>
-    internal int ConsecutiveFailures => Volatile.Read(ref _consecutiveFailures);
-
-    internal int RecordConsecutiveFailure() => Interlocked.Increment(ref _consecutiveFailures);
-
-    private void ResetConsecutiveFailures() => Interlocked.Exchange(ref _consecutiveFailures, 0);
+    internal int ConsecutiveFailureCount => ConsecutiveFailures;
 
     public OpcUaSubjectServer(
         IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
         ILogger logger)
-        : base(new ConnectorMetrics(new ThroughputCounter(), new ThroughputCounter()))
+        : base(new ConnectorMetrics(new ThroughputCounter(), new ThroughputCounter()), logger)
     {
         _subject = subject;
         _context = subject.Context;
@@ -107,17 +102,21 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         return false;
     }
 
+    /// <inheritdoc />
+    protected override ChangeQueueProcessor CreateChangeQueueProcessor(Action<long> dropHandler) =>
+        CreateOutboundProcessor(dropHandler);
+
     /// <summary>
     /// Builds the outbound processor. Extracted so a test can read back the rule it selected: asserting
     /// the constant alone would not catch a different value being inlined at the construction site,
     /// which is the mistake the constant exists to prevent.
     /// </summary>
-    internal ChangeQueueProcessor CreateChangeQueueProcessor() =>
+    internal ChangeQueueProcessor CreateOutboundProcessor(Action<long>? dropHandler) =>
         new(source: this, _context,
             propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
             DeliveryRule,
             _configuration.BufferTime, maxQueueDepth: null, logger: _logger,
-            dropHandler: Metrics.OutboundChanges.CreateDropReporter());
+            dropHandler: dropHandler);
 
     private bool IsPropertyIncluded(PropertyReference propertyReference)
     {
@@ -192,17 +191,15 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     }
 
     /// <inheritdoc />
-    protected override async Task RunAsync(CancellationToken stoppingToken)
+    protected override Task<IAsyncDisposable?> InitializeAsync(CancellationToken stoppingToken)
     {
         _context.WithRegistry();
 
-        // Null when the context has no lifecycle interceptor, which using treats as nothing to release.
-        using var detachingSubscription = SubscribeToSubjectDetaching();
-
-        await ExecuteServerLoopAsync(stoppingToken).ConfigureAwait(false);
+        // Null when the context has no lifecycle interceptor, which the base treats as nothing to release.
+        return Task.FromResult(SubscribeToSubjectDetaching());
     }
 
-    private IDisposable? SubscribeToSubjectDetaching()
+    private IAsyncDisposable? SubscribeToSubjectDetaching()
     {
         if (_context.TryGetLifecycleInterceptor() is not { } lifecycleInterceptor)
         {
@@ -213,126 +210,72 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
         return new SubjectDetachingSubscription(lifecycleInterceptor, OnSubjectDetaching);
     }
 
-    private async Task ExecuteServerLoopAsync(CancellationToken stoppingToken)
+    /// <inheritdoc />
+    protected override async Task<IAsyncDisposable?> StartServerAsync(ConnectorRunAttempt attempt, CancellationToken stoppingToken)
     {
-        // Reset failure counter on fresh start so that accumulated failures from
-        // previous stop/start cycles don't cause excessive backoff delays.
-        ResetConsecutiveFailures();
+        var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
-        while (!stoppingToken.IsCancellationRequested)
+        if (_configuration.CleanCertificateStore)
         {
-            await RunAttemptAsync(stoppingToken, async attempt =>
+            CleanCertificateStore(application);
+        }
+
+        var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
+        _server = server;
+
+        var teardown = new AttemptTeardown(this, attempt, application, server);
+        try
+        {
+            await application.CheckApplicationInstanceCertificatesAsync(true, ct: attempt.Token).ConfigureAwait(false);
+            await application.StartAsync(server).ConfigureAwait(false);
+            return teardown;
+        }
+        catch
+        {
+            await teardown.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private async Task TearDownAttemptAsync(
+        ConnectorRunAttempt attempt, ApplicationInstance application, OpcUaStandardServer server)
+    {
+        _server = null;
+
+        // In a finally, because a throwing ClearPropertyData must not skip the listener close, the
+        // shutdown and the disposal below: skipping any of those leaks the port and the SDK's internal
+        // tasks, and every later bind on the same port fails.
+        try
+        {
+            server.ClearPropertyData();
+        }
+        finally
+        {
+            try
             {
-                var linkedToken = attempt.Token;
-
-                var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-
-                if (_configuration.CleanCertificateStore)
+                if (attempt.WasForceKilled && application.Server is OpcUaStandardServer startedServer)
                 {
-                    CleanCertificateStore(application);
+                    // Force-kill: close transport listeners immediately so clients see an abrupt connection
+                    // loss (realistic crash simulation).
+                    startedServer.CloseTransportListeners();
                 }
 
-                var server = new OpcUaStandardServer(_subject, this, _configuration, _logger);
-
-                try
-                {
-                    try
-                    {
-                        _server = server;
-
-                        // Create the ChangeQueueProcessor (and its subscription) BEFORE starting the server.
-                        // This ensures property changes during OPC UA node creation are captured in the queue
-                        // and not lost in the gap between node creation and processing start.
-                        using var changeQueueProcessor = CreateChangeQueueProcessor();
-
-                        // Declared after the processor so it is released first, which is what lets the
-                        // next restart register its own: a second Register while one is still live throws.
-                        using var outboundRegistration = Metrics.OutboundChanges.Register(
-                            () => changeQueueProcessor.QueueDepth, capacity: null);
-
-                        await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
-                        await application.StartAsync(server).ConfigureAwait(false);
-
-                        ResetConsecutiveFailures();
-
-                        // LastError is deliberately left in place: clearing it on recovery would erase
-                        // the only evidence of a transient fault.
-                        Metrics.MarkOperational();
-
-                        await changeQueueProcessor.ProcessAsync(linkedToken);
-                    }
-                    finally
-                    {
-                        Metrics.MarkNotOperational();
-                        var serverToClean = _server;
-                        _server = null;
-                        serverToClean?.ClearPropertyData();
-                    }
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    // Normal shutdown takes priority over force-kill (checked first intentionally).
-                }
-                catch (OperationCanceledException) when (attempt.WasForceKilled)
-                {
-                    // Not reported as an error: an injected fault the server recovers from by restarting.
-                    _logger.LogWarning("OPC UA server force-killed. Restarting...");
-                }
-                catch (Exception ex)
-                {
-                    // A stop tears the server down with an arbitrary exception rather than a cancellation,
-                    // so only the stopping token tells a shutdown apart from a genuine fault.
-                    if (stoppingToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-
-                    var consecutiveFailures = RecordConsecutiveFailure();
-
-                    // Nothing outside this loop reports its failures.
-                    Metrics.ReportError(ex);
-                    _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", consecutiveFailures);
-
-                    // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
-                    // Jitter prevents thundering herd when multiple servers fail simultaneously
-                    var baseDelay = Math.Min(Math.Pow(2, consecutiveFailures - 1), 30);
-                    var jitter = Random.Shared.NextDouble() * 2;
-                    await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
-                }
-                finally
-                {
-                    try
-                    {
-                        if (attempt.WasForceKilled)
-                        {
-                            // Force-kill: close transport listeners immediately so clients see
-                            // an abrupt connection loss (realistic crash simulation).
-                            if (application.Server is OpcUaStandardServer s)
-                            {
-                                s.CloseTransportListeners();
-                            }
-                        }
-
-                        // Always run ShutdownServerAsync to ensure the SDK's internal tasks
-                        // (SubscriptionManager publish/refresh threads) are properly signaled
-                        // to exit via OnServerStoppingAsync. Without StopAsync, these
-                        // fire-and-forget tasks keep the entire server object graph alive as
-                        // GC roots, causing ~8-16 MB leak per server restart.
-                        // On force-kill the transport is already dead, so this only cleans up
-                        // internal state and does not change what clients observe.
-                        await ShutdownServerAsync(application).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to shutdown OPC UA server.");
-                    }
-                    finally
-                    {
-                        try { server.Dispose(); }
-                        catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
-                    }
-                }
-            }).ConfigureAwait(false);
+                // Always run ShutdownServerAsync to ensure the SDK's internal tasks (SubscriptionManager
+                // publish/refresh threads) are properly signaled to exit via OnServerStoppingAsync. Without
+                // StopAsync, these fire-and-forget tasks keep the entire server object graph alive as GC roots,
+                // causing ~8-16 MB leak per server restart. On force-kill the transport is already dead, so
+                // this only cleans up internal state and does not change what clients observe.
+                await ShutdownServerAsync(application).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to shutdown OPC UA server.");
+            }
+            finally
+            {
+                try { server.Dispose(); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+            }
         }
     }
 
@@ -436,8 +379,32 @@ internal class OpcUaSubjectServer : SubjectConnectorBase, IOpcUaSubjectServer, I
     }
 
     private sealed class SubjectDetachingSubscription(
-        LifecycleInterceptor lifecycleInterceptor, Action<SubjectLifecycleChange> handler) : IDisposable
+        LifecycleInterceptor lifecycleInterceptor, Action<SubjectLifecycleChange> handler) : IAsyncDisposable
     {
-        public void Dispose() => lifecycleInterceptor.SubjectDetaching -= handler;
+        public ValueTask DisposeAsync()
+        {
+            lifecycleInterceptor.SubjectDetaching -= handler;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class AttemptTeardown : IAsyncDisposable
+    {
+        private readonly OpcUaSubjectServer _owner;
+        private readonly ConnectorRunAttempt _attempt;
+        private readonly ApplicationInstance _application;
+        private readonly OpcUaStandardServer _opcUaServer;
+
+        public AttemptTeardown(
+            OpcUaSubjectServer owner, ConnectorRunAttempt attempt, ApplicationInstance application, OpcUaStandardServer opcUaServer)
+        {
+            _owner = owner;
+            _attempt = attempt;
+            _application = application;
+            _opcUaServer = opcUaServer;
+        }
+
+        public async ValueTask DisposeAsync() =>
+            await _owner.TearDownAttemptAsync(_attempt, _application, _opcUaServer).ConfigureAwait(false);
     }
 }
