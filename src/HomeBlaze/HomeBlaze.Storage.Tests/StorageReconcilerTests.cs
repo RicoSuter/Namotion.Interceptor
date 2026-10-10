@@ -600,7 +600,7 @@ public class StorageReconcilerTests : StorageTestBase
         var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
-        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+        var reconnect = storage.ConnectAsync(CancellationToken.None);
 
         // Act
         storage.Dispose();
@@ -623,8 +623,8 @@ public class StorageReconcilerTests : StorageTestBase
         var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
         await gate.WhenReachedAsync();
-        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
-        var waitingReconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+        var reconnect = storage.ConnectAsync(CancellationToken.None);
+        var waitingReconnect = storage.ConnectAsync(CancellationToken.None);
 
         // Act
         storage.Dispose();

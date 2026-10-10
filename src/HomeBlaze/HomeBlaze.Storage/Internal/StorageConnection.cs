@@ -5,6 +5,19 @@ using Microsoft.Extensions.Logging;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
+/// The settings of a container that decide which storage it connects to and how it follows it.
+/// </summary>
+internal readonly record struct StorageConnectionSettings(
+    string StorageType,
+    string ConnectionString,
+    string? ContainerName,
+    bool EnableFileWatching,
+    int ReconcileIntervalSeconds)
+{
+    public bool IsInMemory => StorageType == "inmemory";
+}
+
+/// <summary>
 /// Everything that belongs to one connection of a container to its storage. A reconnect replaces it as a whole,
 /// so work of an ended connection never touches the index or the client of the connection after it.
 /// </summary>
@@ -20,6 +33,7 @@ internal sealed class StorageConnection : IDisposable
     private bool _isTriggerStopped;
 
     public StorageConnection(
+        StorageConnectionSettings settings,
         IBlobStorage client,
         string? storageDirectory,
         FluentStorageContainer storage,
@@ -29,6 +43,7 @@ internal sealed class StorageConnection : IDisposable
         ILogger? logger)
     {
         _client = new TimeLimitedBlobStorage(client, timeProvider, logger);
+        Settings = settings;
         StorageDirectory = storageDirectory;
         TimeProvider = timeProvider;
         Index = new StorageIndex();
@@ -36,6 +51,9 @@ internal sealed class StorageConnection : IDisposable
         Worker = new StorageWorker(logger);
         _logger = logger;
     }
+
+    /// <summary>The settings the connection was created with.</summary>
+    public StorageConnectionSettings Settings { get; }
 
     /// <summary>The storage. Every call on it returns within <see cref="StorageCallTimeout.Limit"/>.</summary>
     public IBlobStorage Client => _client;

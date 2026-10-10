@@ -178,42 +178,51 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IConfigurable implementation - called after configuration properties are updated.
+    /// IConfigurable implementation - called after configuration properties are updated. Connects again when a
+    /// setting of the connection has changed or the storage is not connected, which rebuilds every subject.
     /// </summary>
+    /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
-        // Reconnect if configuration changed
-        return ConnectAsync(cancellationToken);
+        // Called for every save of a subject whose first configurable parent is this container, such as a page.
+        return Status == StorageStatus.Connected && _connection is { IsEnded: false } connection && connection.Settings == Settings
+            ? Task.CompletedTask
+            : ConnectAsync(cancellationToken);
     }
+
+    private StorageConnectionSettings Settings
+        => new(StorageType, ConnectionString, ContainerName, EnableFileWatching, ReconcileIntervalSeconds);
 
     /// <summary>
     /// Returns the file system path of a storage-relative path, resolving a relative
     /// <see cref="ConnectionString"/> against the instance data directory.
     /// </summary>
     internal string GetFileSystemPath(string relativePath)
-        => GetFileSystemPath(_connection?.StorageDirectory ?? ResolveStorageDirectory(), relativePath);
+        => GetFileSystemPath(_connection?.StorageDirectory ?? ResolveStorageDirectory(ConnectionString), relativePath);
 
     private static string GetFileSystemPath(string storageDirectory, string relativePath)
         => Path.GetFullPath(Path.Combine(storageDirectory, relativePath.TrimStart('/', '\\')));
 
-    private string ResolveStorageDirectory()
+    private string ResolveStorageDirectory(string connectionString)
     {
         var baseDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory
             ?? Directory.GetCurrentDirectory();
 
-        return string.IsNullOrEmpty(ConnectionString)
+        return string.IsNullOrEmpty(connectionString)
             ? baseDirectory
-            : Path.GetFullPath(ConnectionString, baseDirectory);
+            : Path.GetFullPath(connectionString, baseDirectory);
     }
 
     /// <summary>
     /// Initializes the storage client based on configuration and loads the subject tree. A connection that
     /// exists is ended first, and its running work has finished before the new one starts.
     /// </summary>
+    /// <remarks>A container that was stopped does not follow its storage after this either, see <see cref="StopAsync"/>.</remarks>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        var isInMemory = StorageType == "inmemory";
-        if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
+        // Read once, so the connection is created with exactly the settings it is later compared by.
+        var settings = Settings;
+        if (!settings.IsInMemory && string.IsNullOrWhiteSpace(settings.ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
         // Read before the wait at the gate, so a Dispose during that wait fails this connect as well.
@@ -227,7 +236,7 @@ public partial class FluentStorageContainer :
         await _connectGate.WaitAsync(cancellationToken);
         try
         {
-            await ReplaceConnectionAsync(isInMemory, disposeCount, cancellationToken);
+            await ReplaceConnectionAsync(settings, disposeCount, cancellationToken);
         }
         finally
         {
@@ -235,7 +244,8 @@ public partial class FluentStorageContainer :
         }
     }
 
-    private async Task ReplaceConnectionAsync(bool isInMemory, int disposeCount, CancellationToken cancellationToken)
+    private async Task ReplaceConnectionAsync(
+        StorageConnectionSettings settings, int disposeCount, CancellationToken cancellationToken)
     {
         StorageConnection? previous;
         lock (_connectionLock)
@@ -267,31 +277,31 @@ public partial class FluentStorageContainer :
                 await previous.EndAsync(cancellationToken);
             }
 
-            var storageDirectory = isInMemory ? null : ResolveStorageDirectory();
-            var client = StorageType switch
+            var storageDirectory = settings.IsInMemory ? null : ResolveStorageDirectory(settings.ConnectionString);
+            var client = settings.StorageType switch
             {
                 "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(storageDirectory!),
                 "inmemory" => StorageFactory.Blobs.InMemory(),
-                _ => throw new NotSupportedException($"Storage type '{StorageType}' is not supported")
+                _ => throw new NotSupportedException($"Storage type '{settings.StorageType}' is not supported")
             };
 
             client = ClientDecorator?.Invoke(client) ?? client;
 
             var connection = new StorageConnection(
-                client, storageDirectory, this, _subjectFactory, _serializer, TimeProvider, _logger);
+                settings, client, storageDirectory, this, _subjectFactory, _serializer, TimeProvider, _logger);
             var followsStorage = Publish(connection, disposeCount);
             published = connection;
 
-            _logger?.LogInformation("Connected to storage: {Type} at {Path}", StorageType,
-                isInMemory ? "(in-memory)" : storageDirectory);
+            _logger?.LogInformation("Connected to storage: {Type} at {Path}", settings.StorageType,
+                settings.IsInMemory ? "(in-memory)" : storageDirectory);
 
             // Started before the first pass, so a change during startup leads to another pass.
             if (followsStorage)
             {
                 connection.StartTrigger(
                     (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
-                    TimeSpan.FromSeconds(ReconcileIntervalSeconds),
-                    watchFiles: EnableFileWatching && !isInMemory);
+                    TimeSpan.FromSeconds(settings.ReconcileIntervalSeconds),
+                    watchFiles: settings.EnableFileWatching && !settings.IsInMemory);
             }
 
             using var passCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, connection.Token);

@@ -590,6 +590,99 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenUnchangedConfigurationIsApplied_ThenEverySubjectKeepsItsInstance()
+    {
+        // Arrange
+        var timeProvider = new ManualTimeProvider();
+        WriteFile("Motor.json", SerializeMotor("Pump"));
+        WriteFile("Docs/Notes.md");
+        var storage = await ConnectAsync(configure: container => container.TimeProvider = timeProvider);
+        var motor = storage.Children["Motor"];
+        var docs = Assert.IsType<VirtualFolder>(storage.Children["Docs"]);
+        var notes = docs.Children["Notes.md"];
+        var detaches = CountDetachesOf(motor);
+        WriteFile("Added.md");
+
+        // Act
+        await storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert: a reconnect would also have loaded the file that no pass has seen yet.
+        Assert.Equal(["Docs", "Motor"], storage.Children.Keys.Order());
+        Assert.Same(motor, storage.Children["Motor"]);
+        Assert.Same(docs, storage.Children["Docs"]);
+        Assert.Same(notes, docs.Children["Notes.md"]);
+        Assert.Equal(0, detaches.Count);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(1, timeProvider.ArmedTimerCount);
+    }
+
+    [Theory]
+    [InlineData(nameof(FluentStorageContainer.StorageType))]
+    [InlineData(nameof(FluentStorageContainer.ConnectionString))]
+    [InlineData(nameof(FluentStorageContainer.ContainerName))]
+    [InlineData(nameof(FluentStorageContainer.EnableFileWatching))]
+    [InlineData(nameof(FluentStorageContainer.ReconcileIntervalSeconds))]
+    public async Task WhenOneConnectionSettingChanges_ThenApplyingConfigurationReconnects(string setting)
+    {
+        // Arrange
+        WriteFile("Notes.md");
+        var storage = await ConnectAsync();
+        var notes = storage.Children["Notes.md"];
+        WriteFile("Added.md");
+
+        switch (setting)
+        {
+            case nameof(FluentStorageContainer.StorageType):
+                storage.StorageType = "filesystem";
+                break;
+            case nameof(FluentStorageContainer.ConnectionString):
+                storage.ConnectionString = StorageDirectory.FullName + Path.DirectorySeparatorChar;
+                break;
+            case nameof(FluentStorageContainer.ContainerName):
+                storage.ContainerName = "other";
+                break;
+            case nameof(FluentStorageContainer.EnableFileWatching):
+                storage.EnableFileWatching = true;
+                break;
+            default:
+                storage.ReconcileIntervalSeconds = 60;
+                break;
+        }
+
+        // Act
+        await storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.Equal(["Added.md", "Notes.md"], storage.Children.Keys.Order());
+        Assert.NotSame(notes, storage.Children["Notes.md"]);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+    }
+
+    [Fact]
+    public async Task WhenUnchangedConfigurationIsAppliedAfterConnectFailed_ThenStorageConnectsAgain()
+    {
+        // Arrange
+        var missingDirectory = Path.Combine(StorageDirectory.FullName, "Missing");
+        FluentStorageContainer? storage = null;
+        var exception = await Record.ExceptionAsync(() => ConnectAsync(enableFileWatching: true, configure: container =>
+        {
+            storage = container;
+            container.ConnectionString = missingDirectory;
+        }));
+        var statusAfterFailedConnect = storage!.Status;
+        WriteFile("Missing/Notes.md");
+
+        // Act
+        await storage.ApplyConfigurationAsync(CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(exception);
+        Assert.Equal(StorageStatus.Error, statusAfterFailedConnect);
+        Assert.Equal(StorageStatus.Connected, storage.Status);
+        Assert.Equal(["Notes.md"], storage.Children.Keys);
+    }
+
+    [Fact]
     public async Task WhenNoEventArrives_ThenPeriodicPassPicksUpTheChange()
     {
         // Arrange
@@ -707,7 +800,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         await gate.WhenReachedAsync();
 
         // Waits for the pass of the connection it replaces, and publishes the new connection only after that.
-        var reconnect = storage.ApplyConfigurationAsync(CancellationToken.None);
+        var reconnect = storage.ConnectAsync(CancellationToken.None);
 
         // Act
         await storage.StopAsync(CancellationToken.None);
@@ -798,7 +891,7 @@ public class FluentStorageContainerReconcileTests : StorageTestBase
         var armedTimerCountOfOneConnection = timeProvider.ArmedTimerCount;
 
         // Act
-        await storage.ApplyConfigurationAsync(CancellationToken.None);
+        await storage.ConnectAsync(CancellationToken.None);
 
         // Assert
         Assert.Equal(1, armedTimerCountOfOneConnection);
