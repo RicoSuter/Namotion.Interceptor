@@ -436,6 +436,50 @@ public class LlmAgentBaseTests
         Assert.Equal(0, test.Agent.ResetCount);
     }
 
+    [Fact]
+    public async Task WhenAStaleRunEndsAfterARestart_ThenTheNewRunKeepsRunning()
+    {
+        // Arrange
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var test = await StartAsync(agent => agent.Handler = async (_, _, _) =>
+        {
+            if (agent.Requests.Count == 1)
+            {
+                // Ignores cancellation, so the first run outlives its stop.
+                await release.Task;
+            }
+
+            return new AgentTurnResult("[quiet] ok", null, null);
+        });
+        test.Agent.RunNow();
+        await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.IsBusy);
+        var staleRun = test.Agent.ExecuteTask!;
+        using var expired = new CancellationTokenSource();
+        await expired.CancelAsync();
+        try
+        {
+            await ((IHostedService)test.Agent).StopAsync(expired.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The stop gave up waiting for the run, which is the situation under test.
+        }
+
+        // Act
+        await ((IHostedService)test.Agent).StartAsync(CancellationToken.None);
+        release.SetResult();
+        await staleRun;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(() =>
+        {
+            test.Agent.RunNow();
+            return test.Agent.RunCount == 2 && !test.Agent.IsBusy;
+        });
+        Assert.Equal(ServiceStatus.Running, test.Agent.Status);
+        Assert.Equal("Idle", test.Agent.StatusMessage);
+    }
+
     private static async Task<AgentTurnResult> WaitForCancellationAsync(
         AgentTurnRequest request, IProgress<AgentTurnUpdate> progress, CancellationToken cancellationToken)
     {

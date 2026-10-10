@@ -36,11 +36,14 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
     private readonly Lock _streamingLock = new();
     private readonly StringBuilder _streamingText = new();
 
-    // Guards _scheduler, _lifetime, the configuration error and every status write of a started agent, so a
-    // turn that ends after the agent stopped cannot report it as running. A non-null _scheduler means started.
+    // Guards _scheduler, _lifetime, _runGeneration, the configuration error and every status write of a started
+    // agent, so a turn that ends after the agent stopped cannot report it as running. A non-null _scheduler means
+    // started. Status and StatusMessage are intercepted property writes, so change subscribers run while this lock
+    // is held and must neither block nor call back into the agent synchronously.
     private readonly Lock _stateLock = new();
     private AgentTriggerScheduler? _scheduler;
     private CancellationTokenSource? _lifetime;
+    private int _runGeneration;
     private string[] _normalizedWatchPaths = [];
     private volatile string? _configurationError;
     private string? _storageDirectory;
@@ -359,8 +362,10 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        int generation;
         lock (_stateLock)
         {
+            generation = ++_runGeneration;
             Status = ServiceStatus.Starting;
             StatusMessage = null;
         }
@@ -386,10 +391,15 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         await lifetime.CancelAsync();
         lock (_stateLock)
         {
-            _scheduler = null;
-            _lifetime = null;
-            Status = finalStatus;
-            StatusMessage = finalStatusMessage;
+            // A run that outlived its stop, after a restart already began a newer one, must not clear or
+            // overwrite the newer run's state; this also holds when the old run never published a scheduler.
+            if (generation == _runGeneration)
+            {
+                _scheduler = null;
+                _lifetime = null;
+                Status = finalStatus;
+                StatusMessage = finalStatusMessage;
+            }
         }
     }
 
@@ -431,6 +441,8 @@ public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, I
         // concurrent configuration change is either read here or applied to this scheduler.
         lock (_stateLock)
         {
+            // A run stopped before publishing must not publish over a newer run started meanwhile.
+            stoppingToken.ThrowIfCancellationRequested();
             _scheduler = scheduler;
             _lifetime = lifetime;
             Volatile.Write(ref _normalizedWatchPaths, AgentWatchPaths.Normalize(WatchPaths));
