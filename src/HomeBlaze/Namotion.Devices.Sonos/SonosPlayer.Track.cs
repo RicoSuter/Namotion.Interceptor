@@ -129,11 +129,23 @@ public partial class SonosPlayer
     /// <summary>
     /// Whether the title is the radio or http(s) URI itself, with or without its schemes, such as
     /// <c>https://host/live.mp3</c> or <c>host/live.mp3</c> for <c>x-rincon-mp3radio://host/live.mp3</c>, which other
-    /// controllers write for a stream without a title.
+    /// controllers write for a stream without a title. A title with a scheme only has to start the URI.
     /// </summary>
-    internal static bool IsStreamUri(string title, string? uri) =>
-        uri is not null && (SonosUris.IsRadioUri(uri) || SonosUris.IsHttpUri(uri)) &&
-        SonosUris.WithoutSchemes(title).SequenceEqual(SonosUris.WithoutSchemes(uri));
+    internal static bool IsStreamUri(string title, string? uri)
+    {
+        if (uri is null || !(SonosUris.IsRadioUri(uri) || SonosUris.IsHttpUri(uri)))
+        {
+            return false;
+        }
+
+        // Sonos cuts a title off after 100 characters, so a long URL arrives without its end. Only a title with a
+        // scheme is surely a URL; without one, the start of the URI may be the caller's title.
+        var titleWithoutSchemes = SonosUris.WithoutSchemes(title);
+        var uriWithoutSchemes = SonosUris.WithoutSchemes(uri);
+        return titleWithoutSchemes.Length < title.Length
+            ? uriWithoutSchemes.StartsWith(titleWithoutSchemes, StringComparison.Ordinal)
+            : uriWithoutSchemes.SequenceEqual(titleWithoutSchemes);
+    }
 
     /// <summary>
     /// Whether the track title only repeats the track URI: the URI itself, see <see cref="IsStreamUri"/>, or for a

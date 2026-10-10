@@ -10,6 +10,10 @@ public class SonosPlayerTrackTests
     [InlineData("x-rincon-mp3radio://host.example/live.mp3", "x-rincon-mp3radio://host.example/live.mp3", true)]
     [InlineData("http://host.example/live", "aac://https://host.example/live", true)]
     [InlineData("host.example/beep.mp3", "https://host.example/beep.mp3", true)]
+    // Sonos cuts a title off after 100 characters, so a long URL arrives without its end.
+    [InlineData("https://host.example/download/audio.mp3?filename=long-", "x-rincon-mp3radio://host.example/download/audio.mp3?filename=long-name.mp3", true)]
+    [InlineData("https://host.example/li", "https://host.example/live.mp3", true)]
+    [InlineData("host.example/li", "x-rincon-mp3radio://host.example/live.mp3", false)]
     [InlineData("96", "aac://http://host.example/aac/96", false)]
     [InlineData("live.mp3", "x-rincon-mp3radio://host.example/live.mp3", false)]
     [InlineData("https://host.example/live.mp3", "x-rincon-mp3radio://other.example/live.mp3", false)]
@@ -48,6 +52,7 @@ public class SonosPlayerTrackTests
     [InlineData("preroll.mp3?redirect=https://cdn.example/a", AdWithSlashInQueryUri, StationUri, true)]
     [InlineData("my ad.mp3", "https://ads.example/my%20ad.mp3", StationUri, true)]
     [InlineData("https://ads.example/preroll.mp3", AdUri, StationUri, true)]
+    [InlineData("https://ads.example/pre", AdUri, StationUri, true)]
     [InlineData("a", AdWithSlashInQueryUri, StationUri, false)]
     [InlineData("Advertisement", AdUri, StationUri, false)]
     // An http(s) file played once names itself by its file name, but never by its URL.
