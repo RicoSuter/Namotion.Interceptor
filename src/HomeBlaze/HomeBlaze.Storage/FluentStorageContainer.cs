@@ -28,6 +28,7 @@ public partial class FluentStorageContainer :
         ?? throw new InvalidOperationException("Storage not connected");
 
     private readonly StoragePathRegistry _pathRegistry = new();
+    private readonly Lock _hierarchyLock = new();
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
     private readonly ILogger<FluentStorageContainer>? _logger;
@@ -195,9 +196,7 @@ public partial class FluentStorageContainer :
         var children = new Dictionary<string, IInterceptorSubject>();
         foreach (var blob in blobs)
         {
-            // Filter out hidden files/folders (e.g. .DS_Store, .idea)
-            var name = Path.GetFileName(blob.FullPath.TrimEnd('/'));
-            if (name.StartsWith('.') || blob.FullPath.Contains("/."))
+            if (StoragePathFilter.IsHidden(blob.FullPath))
             {
                 continue;
             }
@@ -253,55 +252,152 @@ public partial class FluentStorageContainer :
         _fileWatcher.Start();
     }
 
-    private Task ProcessFileEventAsync(FileSystemEventArgs e)
+    internal async Task ProcessFileEventAsync(FileSystemEventArgs e)
     {
-        var relativePath = _fileWatcher!.GetRelativePath(e.FullPath);
-
-        return e.ChangeType switch
+        if (e is RenamedEventArgs renamed)
         {
-            WatcherChangeTypes.Created => HandleFileCreatedAsync(relativePath),
-            WatcherChangeTypes.Changed => HandleFileChangedAsync(relativePath, e.FullPath),
-            WatcherChangeTypes.Deleted => HandleFileDeletedAsync(relativePath),
-            WatcherChangeTypes.Renamed when e is RenamedEventArgs re =>
-                HandleFileRenamedAsync(relativePath, _fileWatcher.GetRelativePath(re.OldFullPath)),
-            _ => Task.CompletedTask
-        };
+            await SyncPathAsync(GetRelativePath(renamed.OldFullPath), isNew: false);
+        }
+
+        var isNew = e.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed;
+        await SyncPathAsync(GetRelativePath(e.FullPath), isNew);
     }
 
-    private async Task HandleFileCreatedAsync(string relativePath)
+    private string GetRelativePath(string fullPath)
+        => Path.GetRelativePath(_storageDirectory!, fullPath).Replace('\\', '/');
+
+    /// <summary>
+    /// Brings the hierarchy in line with what is on disk at the path. The event only says where to look:
+    /// coalesced and delayed events can describe a state that no longer exists.
+    /// </summary>
+    private async Task SyncPathAsync(string relativePath, bool isNew)
     {
-        _logger?.LogDebug("File created: {Path}", relativePath);
+        if (StoragePathFilter.IsHidden(relativePath))
+            return;
 
-        var blob = new Blob(relativePath);
-        var subject = await _subjectFactory.CreateFromBlobAsync(_client!, this, blob, CancellationToken.None);
-
-        if (subject != null)
+        var fullPath = GetFileSystemPath(relativePath);
+        if (Directory.Exists(fullPath))
         {
-            if (Path.GetExtension(relativePath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+            // An existing directory reports a change for every entry written inside it, and those raise their own events.
+            if (isNew)
             {
-                try
-                {
-                    var content = await _client!.ReadTextAsync(relativePath);
-                    _pathRegistry.UpdateHash(relativePath, StoragePathRegistry.ComputeHash(content));
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", relativePath);
-                }
+                await AddDirectoryAsync(relativePath, fullPath);
             }
-
-            // Use reusable helper to add to hierarchy
-            AddToHierarchy(relativePath, subject);
-
-            _logger?.LogInformation("Added file from external: {Path}", relativePath);
+        }
+        else if (!File.Exists(fullPath))
+        {
+            RemovePath(relativePath, fullPath);
+        }
+        else if (_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
+        {
+            await NotifyFileChangedAsync(existingSubject, relativePath, fullPath);
+        }
+        else
+        {
+            await AddFileAsync(new Blob(relativePath), fullPath);
         }
     }
 
-    private async Task HandleFileChangedAsync(string relativePath, string fullPath)
+    private async Task AddDirectoryAsync(string relativePath, string fullPath)
     {
-        if (!_pathRegistry.TryGetSubject(relativePath, out var existingSubject))
+        if (!EnsureFolder(relativePath, fullPath))
             return;
 
+        _logger?.LogInformation("Added folder from external: {Path}", relativePath);
+
+        // A directory that is moved or copied in raises no events for the entries it already contains.
+        var blobs = await Client.ListAsync(folderPath: relativePath, recurse: true);
+        foreach (var blob in blobs)
+        {
+            if (StoragePathFilter.IsHidden(blob.FullPath) || StoragePathFilter.IsTemporaryFile(blob.FullPath))
+                continue;
+
+            try
+            {
+                var blobFullPath = GetFileSystemPath(blob.FullPath);
+                if (blob.IsFolder)
+                {
+                    EnsureFolder(blob.FullPath, blobFullPath);
+                }
+                else if (!_pathRegistry.TryGetSubject(blob.FullPath, out _))
+                {
+                    await AddFileAsync(blob, blobFullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to create subject for blob: {Path}", blob.FullPath);
+            }
+        }
+    }
+
+    private bool EnsureFolder(string relativePath, string fullPath)
+    {
+        lock (_hierarchyLock)
+        {
+            if (!Directory.Exists(fullPath))
+                return false;
+
+            // A file of the same name was replaced by the directory.
+            if (_pathRegistry.TryGetSubject(relativePath, out var replacedFile))
+            {
+                RemoveFromHierarchy(relativePath, replacedFile);
+            }
+
+            var children = new Dictionary<string, IInterceptorSubject>(Children);
+            _hierarchyManager.PlaceInHierarchy(relativePath, null, children, this);
+            Children = children;
+            return true;
+        }
+    }
+
+    private async Task AddFileAsync(Blob blob, string fullPath)
+    {
+        var path = blob.FullPath;
+        _logger?.LogDebug("File created: {Path}", path);
+
+        var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, CancellationToken.None);
+        if (subject == null)
+            return;
+
+        string? hash = null;
+        if (Path.GetExtension(path).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var content = await Client.ReadTextAsync(path);
+                hash = StoragePathRegistry.ComputeHash(content);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", path);
+            }
+        }
+
+        lock (_hierarchyLock)
+        {
+            // Both are checked under the lock because the subject loaded outside of it. A concurrent event may have
+            // added the file meanwhile. If it was deleted meanwhile, adding it now would leave a phantom: its delete
+            // event may already have run and found nothing to remove.
+            if (_pathRegistry.TryGetSubject(path, out _) || !File.Exists(fullPath))
+                return;
+
+            // A directory of the same name was replaced by the file.
+            RemoveFolder(path);
+
+            if (hash != null)
+            {
+                _pathRegistry.UpdateHash(path, hash);
+            }
+
+            AddToHierarchy(path, subject);
+        }
+
+        _logger?.LogInformation("Added file from external: {Path}", path);
+    }
+
+    private async Task NotifyFileChangedAsync(IInterceptorSubject existingSubject, string relativePath, string fullPath)
+    {
         if (existingSubject is IStorageFile storageFile)
         {
             try
@@ -320,27 +416,25 @@ public partial class FluentStorageContainer :
         }
     }
 
-    private Task HandleFileDeletedAsync(string relativePath)
+    private void RemovePath(string relativePath, string fullPath)
     {
-        _logger?.LogDebug("File deleted: {Path}", relativePath);
-
-        if (!_pathRegistry.TryGetSubject(relativePath, out var subject))
+        lock (_hierarchyLock)
         {
-            _logger?.LogDebug("Subject not found for path: {Path}", relativePath);
-            return Task.CompletedTask;
+            // Checked under the lock: when the path reappeared meanwhile, its own event has refreshed the subject
+            // or will add it, and removing it now would lose it until the next scan.
+            if (File.Exists(fullPath) || Directory.Exists(fullPath))
+                return;
+
+            if (_pathRegistry.TryGetSubject(relativePath, out var subject))
+            {
+                RemoveFromHierarchy(relativePath, subject);
+                _logger?.LogInformation("Removed deleted file: {Path}", relativePath);
+            }
+            else if (RemoveFolder(relativePath))
+            {
+                _logger?.LogInformation("Removed deleted folder: {Path}", relativePath);
+            }
         }
-
-        // Use reusable helper to remove from hierarchy
-        RemoveFromHierarchy(relativePath, subject);
-
-        _logger?.LogInformation("Removed deleted file: {Path}", relativePath);
-        return Task.CompletedTask;
-    }
-
-    private async Task HandleFileRenamedAsync(string newPath, string oldPath)
-    {
-        await HandleFileDeletedAsync(oldPath);
-        await HandleFileCreatedAsync(newPath);
     }
 
     /// <summary>
@@ -388,15 +482,19 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
     /// </summary>
-    // TODO: Consider adding synchronization (lock) for thread safety if AddSubjectAsync/DeleteSubjectAsync can be called concurrently
     private void AddToHierarchy(string path, IInterceptorSubject subject)
     {
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        // Children is copied, modified and reassigned, so concurrent callers (watcher events for different
+        // paths, UI operations) would otherwise overwrite each other's update.
+        lock (_hierarchyLock)
+        {
+            var children = new Dictionary<string, IInterceptorSubject>(Children);
 
-        _pathRegistry.Register(subject, path);
-        _hierarchyManager.PlaceInHierarchy(path, subject, children, this);
+            _pathRegistry.Register(subject, path);
+            _hierarchyManager.PlaceInHierarchy(path, subject, children, this);
 
-        Children = children;
+            Children = children;
+        }
     }
 
     /// <summary>
@@ -404,12 +502,33 @@ public partial class FluentStorageContainer :
     /// </summary>
     private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
     {
-        _pathRegistry.Unregister(path);
+        lock (_hierarchyLock)
+        {
+            _pathRegistry.Unregister(path);
 
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(path, subject, children);
+            var children = new Dictionary<string, IInterceptorSubject>(Children);
+            _hierarchyManager.RemoveFromHierarchy(path, subject, children);
 
-        Children = children;
+            Children = children;
+        }
+    }
+
+    /// <summary>
+    /// Removes the folder at the path and unregisters every subject below it.
+    /// </summary>
+    private bool RemoveFolder(string path)
+    {
+        lock (_hierarchyLock)
+        {
+            var children = new Dictionary<string, IInterceptorSubject>(Children);
+            if (!_hierarchyManager.RemoveFolderFromHierarchy(path, children))
+                return false;
+
+            _pathRegistry.UnregisterDirectory(path);
+
+            Children = children;
+            return true;
+        }
     }
 
     /// <summary>

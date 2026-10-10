@@ -7,7 +7,7 @@ namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
 /// Manages FileSystemWatcher with Rx-based debouncing, event coalescing, and self-write tracking.
-/// Coalesces delete+create patterns (from editors using temp files) into update events.
+/// Coalesces the events of one path (e.g. from editors saving through temp files) into its final state.
 /// </summary>
 internal sealed class StorageFileWatcher : IDisposable
 {
@@ -56,14 +56,14 @@ internal sealed class StorageFileWatcher : IDisposable
         _watcher.Error += OnWatcherError;
 
         // Process events with coalescing: group by path, collect events in time window, then coalesce
-        // Note: We don't filter temp files here - they're handled in coalescing logic
+        // Note: We don't filter temp files here, a rename from or to one says what happened to the real file
         _fileEventSubscription = _fileEvents
             .Where(e => !IsOwnWrite(e.FullPath))
             .GroupBy(e => GetCanonicalPath(e.FullPath))
             .SelectMany(group => group
                 .Buffer(CoalesceWindow)
                 .Where(batch => batch.Count > 0)
-                .Select(batch => CoalesceEvents(group.Key, batch)))
+                .Select(CoalesceEvents))
             .Where(e => e != null)
             .Subscribe(
                 onNext: async e => await ProcessEventSafeAsync(e!),
@@ -73,80 +73,45 @@ internal sealed class StorageFileWatcher : IDisposable
     }
 
     /// <summary>
-    /// Coalesces a batch of events for the same path into a single effective event.
-    /// Key insight: if a file is deleted and (re)appears in same window = update.
-    /// Filters out temp file events at the end.
+    /// Coalesces the events one path received within a window into the single event describing its final state.
+    /// Returns null for temp files, which are never tracked.
     /// </summary>
-    private FileSystemEventArgs? CoalesceEvents(string canonicalPath, IList<FileSystemEventArgs> events)
+    internal static FileSystemEventArgs? CoalesceEvents(IList<FileSystemEventArgs> events)
     {
-        if (events.Count == 0)
-            return null;
+        var last = events[^1];
+        var rename = events
+            .OfType<RenamedEventArgs>()
+            .LastOrDefault(e => !StoragePathFilter.IsTemporaryFile(e.OldFullPath));
 
-        // Skip temp files entirely - return null to filter them out
-        if (IsTempFile(canonicalPath))
-            return null;
-
-        var hasDelete = events.Any(e => e.ChangeType == WatcherChangeTypes.Deleted);
-        var hasCreate = events.Any(e => e.ChangeType == WatcherChangeTypes.Created);
-        var hasChange = events.Any(e => e.ChangeType == WatcherChangeTypes.Changed);
-        var renamed = events.OfType<RenamedEventArgs>().LastOrDefault();
-
-        // Delete + (Create OR Rename-to-this-path) = Update
-        // This handles: delete+create, AND delete+rename-from-temp patterns
-        if (hasDelete && (hasCreate || renamed != null))
+        if (StoragePathFilter.IsTemporaryFile(last.FullPath))
         {
-            _logger?.LogDebug("Coalesced delete+reappear to update for: {Path}", canonicalPath);
-            return new FileSystemEventArgs(WatcherChangeTypes.Changed,
-                Path.GetDirectoryName(canonicalPath) ?? _basePath,
-                Path.GetFileName(canonicalPath));
+            // A tracked file renamed to a temp name has left the tree under its old path.
+            return rename is not null ? CreateEvent(WatcherChangeTypes.Deleted, rename.OldFullPath) : null;
         }
 
-        // Handle genuine rename (not from temp file)
-        if (renamed != null && !IsTempFile(renamed.OldFullPath))
-            return renamed;
+        // Kept even when later events follow: the handler looks both paths up on disk.
+        if (rename is not null)
+            return rename;
 
-        // Rename from temp file (without prior delete) = effectively a create/update
-        if (renamed != null && IsTempFile(renamed.OldFullPath))
-        {
-            _logger?.LogDebug("Treating rename-from-temp as update for: {Path}", canonicalPath);
-            return new FileSystemEventArgs(WatcherChangeTypes.Changed,
-                Path.GetDirectoryName(canonicalPath) ?? _basePath,
-                Path.GetFileName(canonicalPath));
-        }
+        if (last.ChangeType == WatcherChangeTypes.Deleted)
+            return last;
 
-        // Just delete
-        if (hasDelete && !hasCreate)
-            return events.First(e => e.ChangeType == WatcherChangeTypes.Deleted);
-
-        // Just create
-        if (hasCreate && !hasDelete)
-            return events.First(e => e.ChangeType == WatcherChangeTypes.Created);
-
-        // Change events (deduplicate)
-        if (hasChange)
-            return events.First(e => e.ChangeType == WatcherChangeTypes.Changed);
-
-        // Fallback: return last event
-        return events.Last();
+        // Created must win over a trailing Changed, only a creation makes the handler scan a new directory.
+        // A rename from a temp file counts as one, that is how editors save a new file atomically.
+        var isNew = events.Any(e => e.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Renamed);
+        return isNew ? CreateEvent(WatcherChangeTypes.Created, last.FullPath) : last;
     }
+
+    // Built from the event path rather than the group key, which is lowercased and
+    // does not exist on a case-sensitive file system.
+    private static FileSystemEventArgs CreateEvent(WatcherChangeTypes changeType, string fullPath)
+        => new(changeType, Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath));
 
     /// <summary>
     /// Gets canonical path for grouping (handles case-insensitivity on Windows).
     /// </summary>
-    private string GetCanonicalPath(string fullPath)
+    private static string GetCanonicalPath(string fullPath)
         => fullPath.ToLowerInvariant();
-
-    /// <summary>
-    /// Checks if path is a temporary file created by editors.
-    /// </summary>
-    private static bool IsTempFile(string fullPath)
-    {
-        var fileName = Path.GetFileName(fullPath);
-        return fileName.StartsWith("~") ||
-               fileName.EndsWith("~") ||
-               fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-               fileName.Contains(".tmp.", StringComparison.OrdinalIgnoreCase);
-    }
 
     /// <summary>
     /// Marks a path as being written by us (prevents feedback loop).
@@ -162,12 +127,6 @@ internal sealed class StorageFileWatcher : IDisposable
             _pendingWrites.TryRemove(fullPath, out _);
         });
     }
-
-    /// <summary>
-    /// Converts a full path to a relative path within the watched directory.
-    /// </summary>
-    public string GetRelativePath(string fullPath)
-        => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
 
     private bool IsOwnWrite(string fullPath)
     {
