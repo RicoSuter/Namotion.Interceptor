@@ -29,6 +29,20 @@ public partial class SonosPlayer : SonosDevice,
         : base(uuid)
     {
         _system = system;
+        MediaUri = null;
+        ReportedPlaybackState = null;
+        ReportedTrackTitle = null;
+        ReportedTrackArtist = null;
+        ReportedTrackAlbum = null;
+        ReportedTrackImageUri = null;
+        ReportedTrackUri = null;
+        ReportedTrackPosition = null;
+        ReportedTrackDuration = null;
+        ReportedShuffle = null;
+        ReportedRepeat = null;
+        ReportedSleepTimerRemaining = null;
+        ReportedSourceTitle = null;
+        ReportedSource = null;
         HomeTheater = null;
         Satellites = new Dictionary<string, SonosSatellite>(StringComparer.Ordinal);
     }
