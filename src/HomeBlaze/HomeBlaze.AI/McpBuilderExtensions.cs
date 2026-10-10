@@ -1,10 +1,6 @@
-using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
-using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Extensions;
 using Namotion.Interceptor.Registry.Paths;

@@ -145,7 +145,7 @@ Controls the built-in Model Context Protocol server that exposes the knowledge g
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Registers the MCP server and maps the `/mcp` endpoint |
+| `McpServer:Enabled` | bool | `true` in Development, `false` otherwise | Maps the `/mcp` endpoint; the MCP server itself is always registered |
 | `McpServer:ReadOnly` | bool | `true` | Restricts MCP tools to read-only operations; set to `false` to allow property writes and operation invocations |
 
 ### Example: Development override

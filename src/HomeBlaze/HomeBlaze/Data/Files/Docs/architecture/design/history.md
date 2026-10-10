@@ -44,7 +44,7 @@ The package responsibilities are:
 
 `HomeBlaze.History.Abstractions` has no project references at all. That is enforced by its own csproj and, indirectly, by its test project, which references nothing else either. Everything that needs the object graph, meaning `HasHistory` and the recording glue, lives one layer up in `HomeBlaze.History`.
 
-The MCP tool ships with the history packages rather than with `HomeBlaze.AI`, so installing history brings its tool along and the AI package does not reference the history stack. The host composes the two by passing the provider into `WithHomeBlazeMcpTools`.
+The MCP tool ships with the history packages rather than with `HomeBlaze.AI`, so installing history brings its tool along and the AI package does not reference the history stack. The host composes the two by registering the provider with `AddHomeBlazeMcpToolProvider`, which adds it to every HomeBlaze tool configuration.
 
 ## Store contract
 
