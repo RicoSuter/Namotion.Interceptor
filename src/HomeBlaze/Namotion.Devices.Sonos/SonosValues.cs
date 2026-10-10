@@ -13,6 +13,8 @@ internal static class SonosValues
 {
     internal const string NotImplemented = "NOT_IMPLEMENTED";
 
+    private const string PlaceholderPrefix = "ZPSTR_";
+
     internal const int DevicePort = 1400;
 
     /// <summary>
@@ -21,11 +23,12 @@ internal static class SonosValues
     internal static readonly TimeSpan MaximumSleepTimer = new(23, 59, 59);
 
     /// <summary>
-    /// A value Sonos actually reported. Null means the field was absent and <c>NOT_IMPLEMENTED</c> means the
-    /// source cannot tell (Spotify Connect, TV), so both keep the current value rather than clearing it.
+    /// A value Sonos actually reported. Null means the field was absent, <c>NOT_IMPLEMENTED</c> means the source
+    /// cannot tell (Spotify Connect, TV) and a <c>ZPSTR_</c> placeholder such as <c>ZPSTR_BUFFERING</c> means it does
+    /// not know yet, so all keep the current value rather than clearing it.
     /// </summary>
     internal static bool IsKnown([NotNullWhen(true)] string? value) =>
-        value is not null && value != NotImplemented;
+        value is not null && value != NotImplemented && !value.StartsWith(PlaceholderPrefix, StringComparison.Ordinal);
 
     /// <summary>
     /// The longest polling or retry interval, so a hand-edited value cannot overflow the loop's waits.
@@ -176,6 +179,22 @@ internal static class SonosValues
         }
 
         return IsRadioUri(uri) ? SonosSource.Radio : SonosSource.Other;
+    }
+
+    /// <summary>
+    /// Whether the title is the last path segment of a radio track URI, such as <c>96</c> for
+    /// <c>aac://http://host/aac/96</c>, which Sonos reports as the title of a stream without one.
+    /// </summary>
+    internal static bool IsTitleOfStreamUri(string title, string? trackUri)
+    {
+        if (trackUri is null || !IsRadioUri(trackUri))
+        {
+            return false;
+        }
+
+        var segment = trackUri.AsSpan(trackUri.LastIndexOf('/') + 1);
+        return segment.SequenceEqual(title) ||
+            (segment.Contains('%') && Uri.UnescapeDataString(segment) == title);
     }
 
     private static bool IsRadioUri(string uri)

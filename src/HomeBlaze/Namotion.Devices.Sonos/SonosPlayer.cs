@@ -37,6 +37,9 @@ public partial class SonosPlayer : SonosDevice,
     private DidlTrack? _imageUriTrack;
     private Uri? _imageUriBaseUri;
     private string? _imageUri;
+    private DidlTrack? _titleTrack;
+    private string? _titleTrackUri;
+    private string? _title;
 
     internal SonosPlayer(SonosSystem system, string uuid)
         : base(uuid)
@@ -724,7 +727,8 @@ public partial class SonosPlayer : SonosDevice,
 
         if (SonosValues.IsKnown(change.TrackDuration))
         {
-            CurrentTrackDuration = SonosValues.ParseDuration(change.TrackDuration);
+            // Streams report a zero duration.
+            CurrentTrackDuration = SonosValues.ParseDuration(change.TrackDuration) is { Ticks: > 0 } duration ? duration : null;
         }
         else if (isTrackChange)
         {
@@ -765,21 +769,50 @@ public partial class SonosPlayer : SonosDevice,
                 _lastTrackMetaData = trackMetaData;
             }
 
-            ApplyTrack(_lastTrack);
+            ApplyTrack(_lastTrack, isTrackChange);
         }
         else if (isTrackChange)
         {
             _lastTrack = null;
             _lastTrackMetaData = null;
-            ApplyTrack(null);
+            ApplyTrack(null, isTrackChange);
         }
     }
 
-    private void ApplyTrack(DidlTrack? track)
+    // Caller holds _stateLock. A placeholder title (connecting, buffering) and missing album art keep the current
+    // value while the track stays the same, like NOT_IMPLEMENTED: a station's stream keeps its track URI from song to
+    // song, and its polls report the art that its events delivered as absent.
+    private void ApplyTrack(DidlTrack? track, bool isTrackChange)
     {
-        CurrentTrackTitle = track?.Title;
+        ApplyTrackTitle(track, isTrackChange);
         CurrentTrackArtist = track?.Artist;
         CurrentTrackAlbum = track?.Album;
+        ApplyTrackImage(track, isTrackChange);
+    }
+
+    private void ApplyTrackTitle(DidlTrack? track, bool isTrackChange)
+    {
+        var trackUri = CurrentTrackUri;
+        if (!ReferenceEquals(track, _titleTrack) || trackUri != _titleTrackUri)
+        {
+            var title = track?.Title;
+            _title = title is not null && SonosValues.IsTitleOfStreamUri(title, trackUri) ? null : title;
+            _titleTrack = track;
+            _titleTrackUri = trackUri;
+        }
+
+        if (_title is null || SonosValues.IsKnown(_title))
+        {
+            CurrentTrackTitle = _title;
+        }
+        else if (isTrackChange)
+        {
+            CurrentTrackTitle = null;
+        }
+    }
+
+    private void ApplyTrackImage(DidlTrack? track, bool isTrackChange)
+    {
         var baseUri = BaseUri;
         if (!ReferenceEquals(track, _imageUriTrack) || baseUri != _imageUriBaseUri)
         {
@@ -788,7 +821,10 @@ public partial class SonosPlayer : SonosDevice,
             _imageUriBaseUri = baseUri;
         }
 
-        CurrentTrackImageUri = _imageUri;
+        if (_imageUri is not null || isTrackChange)
+        {
+            CurrentTrackImageUri = _imageUri;
+        }
     }
 
     private void ApplyRenderingControl(RenderingControlChange change)

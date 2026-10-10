@@ -22,7 +22,8 @@ internal static class DidlParser
             return null;
         }
 
-        // Radio stations put the current song into streamContent and the station into title.
+        // Radio stations put the current song into streamContent and the station into title. A ZPSTR_ placeholder in
+        // streamContent is kept as the title rather than falling back, so the player can tell "not known yet" apart.
         var streamContent = SonosValues.NullIfEmpty((string?)item.Element(SonosXml.RinconNamespace + "streamContent"));
         return new DidlTrack(
             streamContent ?? ReadTitle(item),
@@ -33,10 +34,11 @@ internal static class DidlParser
 
     /// <summary>
     /// Returns the title of the first item or container, such as a station or playlist name, and null for absent,
-    /// <c>NOT_IMPLEMENTED</c> or malformed metadata, for the same reason as <see cref="ParseTrack"/>.
+    /// <c>NOT_IMPLEMENTED</c> or malformed metadata, for the same reason as <see cref="ParseTrack"/>, and for a
+    /// <c>ZPSTR_</c> placeholder title.
     /// </summary>
     internal static string? ParseTitle(string? metadata) =>
-        ParseItem(metadata) is { } item ? ReadTitle(item) : null;
+        ParseItem(metadata) is { } item && ReadTitle(item) is { } title && SonosValues.IsKnown(title) ? title : null;
 
     /// <summary>
     /// Returns the <c>dc:title</c> of a DIDL item or container, null when it is absent or empty.

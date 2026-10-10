@@ -215,10 +215,10 @@ Volumes and battery levels are fractions from 0 to 1, which the UI shows as 0 to
 | `IsPlaying` | | True while playing or transitioning, empty while the state is unknown |
 | `Volume` | 0..1 | Volume of this room |
 | `IsMuted` | | Mute of this room |
-| `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum` | | The current track. On radio the title is the song the station reports, otherwise the station |
+| `CurrentTrackTitle`, `CurrentTrackArtist`, `CurrentTrackAlbum` | | The current track. On radio the title is the song the station reports (often "ARTIST - TITLE"), otherwise the station, and empty while the station reports neither |
 | `CurrentTrackImageUri` | URI | Album art as an absolute URI; Sonos's relative `/getaa?...` paths are resolved against the speaker |
 | `CurrentTrackUri` | URI | The URI of the current track |
-| `CurrentTrackDuration` | TimeSpan | Zero or empty for streams, TV and line-in |
+| `CurrentTrackDuration` | TimeSpan | Empty for streams, TV and line-in, which report no duration or a zero one |
 | `CurrentTrackPosition` | TimeSpan | The position at the last poll or command read-back; it is not advanced between polls and is cleared when the track changes |
 | `Source` | | Where the group's audio comes from: `None`, `Tv`, `LineIn`, `SpotifyConnect`, `AirPlay`, `Radio`, `Queue` or `Other`, detected from the coordinator's transport URI |
 | `MediaTitle` | | The station, playlist or album the group plays, when Sonos reports it |
@@ -238,6 +238,8 @@ Volumes and battery levels are fractions from 0 to 1, which the UI shows as 0 to
 | `IsConnected`, `StatusMessage` | | See [Offline Handling](#offline-handling) |
 
 When the track changes and Sonos reports no details for the new one, the track values are cleared rather than kept from the previous track. Spotify Connect is the exception in the other direction: its polls answer `NOT_IMPLEMENTED` for details its events delivered, so those are kept while the track stays the same, and they only arrive through events.
+
+Radio follows the same rule. A station's stream keeps its track URI from song to song, so while it stays the same, a `ZPSTR_` placeholder title such as `ZPSTR_CONNECTING` or `ZPSTR_BUFFERING` keeps the current title, and album art that a poll omits keeps the art the events delivered. When the stream starts or the station changes, the track URI changes, so a placeholder clears the title instead of showing the previous station's song. A stream title that is only the end of the stream URL (`96` for `.../aac/96`, or the file name and query of an ad), which Sonos reports when the station sends no song, is left empty, and `MediaTitle` still names the station.
 
 ### SonosSatellite
 

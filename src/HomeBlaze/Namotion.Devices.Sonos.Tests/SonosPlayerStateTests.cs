@@ -29,6 +29,12 @@ public class SonosPlayerStateTests
     private static AvTransportChange RadioPlaying(string mediaUri, string mediaMetaData) =>
         new("PLAYING", "NORMAL", mediaUri, mediaUri, null, null, mediaMetaData);
 
+    private const string StationStreamUri = "aac://http://radio.example/station/aac/96";
+
+    // A radio station plays a stream whose track URI stays the same from song to song.
+    private static AvTransportChange StreamPlaying(string trackUri, string trackMetaData) =>
+        new("PLAYING", "NORMAL", "x-sonosapi-stream:s1?sid=303", trackUri, "0:00:00", trackMetaData);
+
     private static SonosPlayerReading Reading(AvTransportChange avTransport, RenderingControlChange? renderingControl = null) =>
         new(avTransport, TimeSpan.FromSeconds(42), null, renderingControl ?? EmptyRenderingControl);
 
@@ -189,6 +195,129 @@ public class SonosPlayerStateTests
 
         // Assert
         Assert.Null(player.MediaTitle);
+    }
+
+    [Theory]
+    [InlineData("ZPSTR_BUFFERING")]
+    [InlineData("ZPSTR_CONNECTING")]
+    public void WhenStreamReportsAPlaceholderForTheSameTrack_ThenTheTitleIsKept(string placeholder)
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "Artist - Song")), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: placeholder)), T0 + 1);
+
+        // Assert
+        Assert.Equal("Artist - Song", player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenTheMediaTitleIsAPlaceholder_ThenTheMediaTitleIsKept()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("SRF 3")), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(RadioPlaying("x-sonosapi-stream:s1", SonosEventBodies.Didl("ZPSTR_CONNECTING")), T0 + 1);
+
+        // Assert
+        Assert.Equal("SRF 3", player.MediaTitle);
+    }
+
+    [Fact]
+    public void WhenAnotherTrackStartsWithAPlaceholder_ThenTheTitleIsCleared()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "Artist - Song")), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(StreamPlaying("aac://http://radio.example/other/64", SonosEventBodies.Didl("64", streamContent: "ZPSTR_CONNECTING")), T0 + 1);
+
+        // Assert
+        Assert.Null(player.CurrentTrackTitle);
+    }
+
+    [Theory]
+    [InlineData(StationStreamUri, "96")]
+    [InlineData("x-rincon-mp3radio://https://ads.example:443/preroll.mp3?player=sonos&language=en%2cde", "preroll.mp3?player=sonos&language=en,de")]
+    public void WhenAStreamIsTitledWithTheEndOfItsUri_ThenTheTitleIsEmpty(string trackUri, string title)
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyAvTransportEvent(StreamPlaying(trackUri, SonosEventBodies.Didl(title)), T0);
+
+        // Assert
+        Assert.Null(player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenAQueueTrackIsTitledWithItsFileName_ThenTheTitleIsKept()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+
+        // Act
+        player.ApplyAvTransportEvent(
+            new AvTransportChange("PLAYING", "NORMAL", "x-rincon-queue:RINCON_A0000000000601400#0", "x-file-cifs://nas/music/song.mp3", null, SonosEventBodies.Didl("song.mp3")),
+            T0);
+
+        // Assert
+        Assert.Equal("song.mp3", player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenPollReportsTheSameTrackWithoutAlbumArt_ThenTheAlbumArtIsKept()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", albumArtUri: "/getaa?s=1&u=station", streamContent: "Artist - Song")), T0);
+
+        // Act
+        player.ApplyPoll(Reading(StreamPlaying(StationStreamUri, SonosEventBodies.Didl("96", streamContent: "Artist - Song"))), T0 + 1);
+
+        // Assert
+        Assert.Equal("http://10.0.0.121:1400/getaa?s=1&u=station", player.CurrentTrackImageUri);
+        Assert.Equal("Artist - Song", player.CurrentTrackTitle);
+    }
+
+    [Fact]
+    public void WhenAnotherTrackHasNoAlbumArt_ThenTheAlbumArtIsCleared()
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(QueueTrackPlaying(), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(
+            new AvTransportChange("PLAYING", "NORMAL", "x-rincon-queue:RINCON_A0000000000601400#0", "x-file-cifs://nas/music/song-b.mp3", "0:02:00", SonosEventBodies.Didl("Song B")),
+            T0 + 1);
+
+        // Assert
+        Assert.Equal("Song B", player.CurrentTrackTitle);
+        Assert.Null(player.CurrentTrackImageUri);
+    }
+
+    [Theory]
+    [InlineData("0:00:00")]
+    [InlineData("00:00:00")]
+    public void WhenAStreamReportsAZeroDuration_ThenTheDurationIsEmptyAndSeekIsDisabled(string duration)
+    {
+        // Arrange
+        var player = CreateHousehold().Players[KitchenUuid];
+        player.ApplyAvTransportEvent(QueueTrackPlaying(), T0);
+
+        // Act
+        player.ApplyAvTransportEvent(new AvTransportChange("PLAYING", "NORMAL", StationStreamUri, StationStreamUri, duration, SonosEventBodies.Didl("96")), T0 + 1);
+
+        // Assert
+        Assert.Null(player.CurrentTrackDuration);
+        Assert.False(player.Seek_IsEnabled);
     }
 
     [Fact]
