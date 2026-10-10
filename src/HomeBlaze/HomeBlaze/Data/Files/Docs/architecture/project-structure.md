@@ -186,7 +186,7 @@ Storage.Abs.   Components.Abs.   Abstractions
 - **Blob Storage**: Local or cloud via FluentStorage
 - **Virtual File System**: Folders and files as subjects
 - **File Types**: Generic, JSON, Markdown with frontmatter
-- **Change Detection**: FileSystemWatcher integration
+- **Change Detection**: reconcile passes that FileSystemWatcher events and a periodic timer trigger
 
 **Dependencies**: `HomeBlaze.Services`, `FluentStorage`, `YamlDotNet`
 

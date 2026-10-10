@@ -122,7 +122,7 @@ To add a new motor to the demo:
 }
 ```
 
-2. The motor appears immediately in the UI (file watching)
+2. The motor appears in the UI after about a second (file watching)
 3. It's automatically tracked and exposed via protocols
 
 ## Removing the Demo

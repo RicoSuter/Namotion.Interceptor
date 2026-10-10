@@ -22,7 +22,7 @@ Subjects can be managed in two ways, and both produce the same result:
 
 **Via files directly:**
 - Edit JSON and Markdown files in the `Files/` folder of the [data folder](configuration.md#data-folder) with any editor
-- Changes are picked up automatically via file system watching
+- Changes are picked up automatically via file system watching, usually within a few seconds
 - This is useful for bulk setup, version control, or scripting
 
 Both approaches work on the same underlying files. The UI is a management layer on top of the file-based storage, not a separate system.
@@ -45,6 +45,8 @@ Both approaches work on the same underlying files. The UI is a management layer 
 |----------|-------------|
 | `storageType` | `disk` for local files, `inmemory` for testing |
 | `connectionString` | Folder with your subjects, relative to the data folder |
+| `enableFileWatching` | `true` (default) to follow edits of files on disk through file system events, `false` to switch the events off |
+| `reconcileIntervalSeconds` | Seconds between the periodic checks of the folder, which catch changes that no event reported. Default 300, 0 switches the periodic check off |
 
 For the design rationale (pluggable backends, recovery behavior), see [Storage Design](../architecture/design/storage.md).
 
