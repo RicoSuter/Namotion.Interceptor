@@ -1044,7 +1044,7 @@ A declaration that breaks one of these rules cannot be used. Every block of that
 
 **Rules for a subject that is used on a page:**
 
-- A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows the "Unknown type" error.
+- A type that a page uses as a block must implement `IConfigurable`, also when it has no configuration, like `TabLayout`. For a type without it, the page shows an error that says the type cannot be used as a block.
 - A page updates the subject of a block in place while the block stays. When an argument is removed from the block, the page creates a new instance.
 - The page does not call `ApplyConfigurationAsync` when it first creates the subject of a block. It calls it on every reload of the page for a subject that it keeps, also when the arguments of that block did not change. A reload happens with every change of the page text, so expect the method to run often.
 - A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.

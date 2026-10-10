@@ -21,8 +21,8 @@
                                   Label="Name"
                                   Required="true"
                                   RequiredError="Name is required"
-                                  Validation="@((Func<string?, string?>)(name => IsValidFileName(name) ? null : "Name contains invalid characters"))"
-                                  HelperText="Name for the subject (will be saved as {name}.json)"
+                                  Validation="@((Func<string?, string?>)GetNameError)"
+                                  HelperText="@(NameHelperText ?? "Name for the subject (will be saved as {name}.json)")"
                                   Immediate="true"
                                   data-testid="create-name-input" />
 
@@ -113,10 +113,23 @@
     [Parameter]
     public Action<IInterceptorSubject>? BeforeSave { get; set; }
 
+    /// <summary>
+    /// Optional check of the name, for a caller that does not save the subject as a file. It gets the name and
+    /// returns the message to show, or null when the name can be used. It replaces the check for a file name.
+    /// </summary>
+    [Parameter]
+    public Func<string, string?>? NameValidation { get; set; }
+
+    /// <summary>
+    /// Optional text under the name field, for a caller that does not save the subject as a file.
+    /// </summary>
+    [Parameter]
+    public string? NameHelperText { get; set; }
+
     // TODO: Invalidate cache when types can be dynamically loaded
     private Dictionary<string, List<Type>>? _groupedTypes;
 
-    private bool IsNameValid => !string.IsNullOrWhiteSpace(_subjectName) && IsValidFileName(_subjectName);
+    private bool IsNameValid => !string.IsNullOrWhiteSpace(_subjectName) && GetNameError(_subjectName) is null;
 
     private bool CanCreate => _activeStep == StepConfigure
         && IsNameValid
@@ -128,6 +141,17 @@
         return _activeStep == StepSelectType
             ? "Step 1: Select Type"
             : $"Step 2: Create {_selectedType?.Name ?? "Subject"}";
+    }
+
+    private string? GetNameError(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return null; // Required attribute handles empty
+
+        if (NameValidation is not null)
+            return NameValidation(name);
+
+        return IsValidFileName(name) ? null : "Name contains invalid characters";
     }
 
     // TODO: Cache Path.GetInvalidFileNameChars() in static HashSet<char> to avoid allocation per keystroke
@@ -221,9 +245,13 @@
     /// </summary>
     /// <param name="dialogService">The dialog service.</param>
     /// <param name="beforeSave">Optional callback that establishes the parent chain, invoked after the edits are applied and before they are persisted.</param>
+    /// <param name="nameValidation">Optional check of the name that replaces the check for a file name. It returns the message to show, or null when the name can be used.</param>
+    /// <param name="nameHelperText">Optional text under the name field that replaces the hint about the file the subject is saved as.</param>
     public static async Task<CreateSubjectResult?> ShowAsync(
         IDialogService dialogService,
-        Action<IInterceptorSubject>? beforeSave = null)
+        Action<IInterceptorSubject>? beforeSave = null,
+        Func<string, string?>? nameValidation = null,
+        string? nameHelperText = null)
     {
         var options = new DialogOptions
         {
@@ -234,7 +262,9 @@
 
         var parameters = new DialogParameters<SubjectSetupDialog>
         {
-            { x => x.BeforeSave, beforeSave }
+            { x => x.BeforeSave, beforeSave },
+            { x => x.NameValidation, nameValidation },
+            { x => x.NameHelperText, nameHelperText }
         };
 
         var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create Subject", parameters, options);

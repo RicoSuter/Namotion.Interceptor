@@ -436,7 +436,7 @@ public class MarkdownPageScopeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task WhenSlotContentWasEvaluatedBeforeItsPageWasReachable_ThenReadsAreCorrect_KnownLimitationChangesAreNotNotified(bool parseBeforeAttach)
+    public async Task WhenSlotContentWasEvaluatedBeforeItsPageWasReachable_ThenAReadStillReturnsTheCurrentValue(bool parseBeforeAttach)
     {
         // Arrange
         // The serializer creates the panel with the context, so what is put into its slots is attached and

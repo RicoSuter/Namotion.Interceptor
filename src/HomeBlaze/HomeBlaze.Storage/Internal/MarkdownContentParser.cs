@@ -25,6 +25,7 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Rewrites relative .md links to /pages/... route format with Children segments.
+    /// A fragment after the page stays on the link.
     /// </summary>
     private static string RewriteLink(string url, string basePath)
     {
@@ -38,14 +39,17 @@ public sealed partial class MarkdownContentParser
             return url;
         }
 
+        var fragmentStart = url.IndexOf('#');
+        var pagePath = fragmentStart < 0 ? url : url[..fragmentStart];
+
         // Only process .md links
-        if (!url.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+        if (!pagePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
         {
             return url;
         }
 
         // Resolve relative path against base path
-        var resolvedPath = ResolvePath(basePath, url);
+        var resolvedPath = ResolvePath(basePath, pagePath);
 
         // Convert to /pages/... format with Children segments
         // e.g., "foo/bar/baz.md" => "/pages/foo/bar/baz.md"
@@ -56,6 +60,11 @@ public sealed partial class MarkdownContentParser
         {
             result.Append("/");
             result.Append(segment);
+        }
+
+        if (fragmentStart >= 0)
+        {
+            result.Append(url, fragmentStart, url.Length - fragmentStart);
         }
 
         return result.ToString();
@@ -279,10 +288,17 @@ public sealed partial class MarkdownContentParser
         }
 
         var type = _typeProvider.Types.FirstOrDefault(candidate => candidate.FullName == head.Name);
-        if (type is null || !typeof(IConfigurable).IsAssignableFrom(type))
+        if (type is null)
         {
             return (null, null, new BlockError(
                 block.Line, $"Unknown type '{head.Name}'. Use the full type name including the namespace."));
+        }
+
+        if (!typeof(IConfigurable).IsAssignableFrom(type))
+        {
+            return (null, null, new BlockError(
+                block.Line,
+                $"The type '{head.Name}' cannot be used as a block because it does not implement {nameof(IConfigurable)}."));
         }
 
         if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)

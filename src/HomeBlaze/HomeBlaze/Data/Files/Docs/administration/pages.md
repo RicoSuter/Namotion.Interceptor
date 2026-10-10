@@ -194,7 +194,7 @@ Lays its cells out from left to right and wraps them to as many rows as the widt
 
 | Part | Kind | Description |
 |------|------|-------------|
-| `minWidth` | Argument | The narrowest a cell may get, in pixels. The default is 320 |
+| `minWidth` | Argument | The narrowest a cell may get, in pixels. The default is 320, and a value below 50 counts as 50 |
 | `Item` | Slot block, any number | One cell. Holds any page content |
 
 ~~~~markdown
@@ -306,6 +306,7 @@ A block that cannot be shown is replaced by a red box with the line number of th
 |-----------|---------|
 | A line of colons without a type name or a slot name. This is what a miscounted fence produces | A block needs a name. If this line was meant to close a block, the fence of the outer block must be longer than the fences inside it. |
 | The type does not exist or is misspelled | Unknown type 'HomeBlaze.Components.Crad'. Use the full type name including the namespace. |
+| The type exists but is not made to be configured, so a page cannot create it | The type 'HomeBlaze.Storage.Files.MarkdownFile' cannot be used as a block because it does not implement IConfigurable. |
 | A type name without its namespace at the top level of the page, or a slot block there | 'Card' is not a type name. A slot block is only allowed directly inside a widget block. |
 | The widget has no slot of that name | Card has no slot 'Footr'. Available: Content, Footer. |
 | The type has no configuration property of that name | Card has no configuration property 'titel'. Available: icon, title. |
@@ -327,6 +328,7 @@ When the text of a page changes, the page is read again. A subject that is still
 - **Without a name**: A subject without a name is known by its position. Adding or removing a block or an expression before it creates it again.
 - **Removed arguments**: When an argument is removed from a block, its subject is created again, so that the property gets its default value like after a restart.
 - **Nested blocks**: A subject inside another block is kept only when the block around it is kept. A named motor inside a card without a name is created again when the card is.
+- **Subjects in the configuration**: A subject that is nested in the JSON configuration of a block, for example a widget in a cell of a `GridLayout`, is created again on every reload of the page. The block itself is kept, but its configuration is applied again, and that creates the subjects in it anew.
 - **Tabs**: A `Tab` with a name keeps itself and everything inside it when tabs are added, removed or moved. Tabs without a name are matched by their position among the tabs without a name. Adding, renaming or removing the name of a tab creates the tab again once.
 - **Flow items**: An `Item` cannot have a name. A subject inside an item is created again when an item is added or removed before it, also when the subject has a name.
 - **Errors**: Everything inside a block that was shown as an error is created again once the error is fixed.
@@ -338,7 +340,7 @@ A subject that is created again starts from its configuration, the same as after
 The page editor marks the head line of every widget block and of every slot block that creates a subject, together with its `json` fence.
 
 - **Edit**: With the cursor on a marked head line, the toolbar shows a button that opens the edit dialog of the subject. Saving the dialog writes the configuration back into the block and saves the page. Only the head line and the `json` fence change, the content of the block stays as it is.
-- **Create**: The "Create" button adds a new block with three colons at the line of the cursor and saves the page. The name you enter becomes the `#name` of the block.
+- **Create**: The "Create" button adds a new block with three colons at the line of the cursor and saves the page. The name you enter becomes the `#name` of the block. The wizard checks it while you type: it must start with a letter or `_`, contain only letters, digits, `_` and `-`, and not be used on the page yet.
 - **Save first**: "Edit" needs the saved page and the text in the editor to be the same from the start of the page to the end of the block's head line and `json` fence. When that part has unsaved changes, the editor asks you to save the page first. Unsaved text after the block is saved together with the edit.
 - **What is written**: Single values are written on the head line. Lists, objects and text with a line break are written into the `json` fence. Values that are not set are left out.
 

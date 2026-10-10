@@ -42,7 +42,10 @@ public sealed class MarkdownBlock
 
     public MarkdownSpan? ConfigurationSpan { get; init; }
 
-    public List<MarkdownBlock> Children { get; } = [];
+    public IReadOnlyList<MarkdownBlock> Children => ChildList;
+
+    /// <summary>The list behind <see cref="Children"/>, which only the parser fills.</summary>
+    internal List<MarkdownBlock> ChildList { get; } = [];
 }
 
 public sealed class MarkdownPage
@@ -63,7 +66,10 @@ public sealed class MarkdownPage
     public string Source { get; }
 
     /// <summary>Top-level blocks in document order.</summary>
-    public List<MarkdownBlock> Blocks { get; } = [];
+    public IReadOnlyList<MarkdownBlock> Blocks => BlockList;
+
+    /// <summary>The list behind <see cref="Blocks"/>, which only the parser fills.</summary>
+    internal List<MarkdownBlock> BlockList { get; } = [];
 
     /// <summary>All widget, slot and invalid blocks in document order. The position equals <see cref="MarkdownBlock.Index"/>.</summary>
     public IReadOnlyList<MarkdownBlock> AllBlocks => _allBlocks;
@@ -126,7 +132,7 @@ public static class MarkdownPageParser
     {
         var document = Markdig.Markdown.Parse(source, Pipeline);
         var page = new MarkdownPage(source, document, FindCodeSpans(source, document));
-        Visit(document, page.Blocks, page, allowsBlocks: true, hasOwner: false);
+        Visit(document, page.BlockList, page, allowsBlocks: true, hasOwner: false);
         return page;
     }
 
@@ -192,7 +198,7 @@ public static class MarkdownPageParser
                 var isOwner = block.Kind is MarkdownBlockKind.Widget or MarkdownBlockKind.Slot;
                 if (block.Kind != MarkdownBlockKind.Invalid)
                 {
-                    Visit(customContainer, block.Children, page, allowsBlocks: isOwner, hasOwner: isOwner);
+                    Visit(customContainer, block.ChildList, page, allowsBlocks: isOwner, hasOwner: isOwner);
                 }
             }
             else if (child is ContainerBlock other)

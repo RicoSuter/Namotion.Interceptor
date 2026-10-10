@@ -39,7 +39,6 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     // Each access reads the current snapshot. Code that needs two of these together must take
     // _parseResult into a local once and read both from that local.
-    private MarkdownPage? _page => _parseResult.Page;
     private IReadOnlyDictionary<int, IInterceptorSubject> _blockSubjects => _parseResult.BlockSubjects;
     private IReadOnlyDictionary<string, IInterceptorSubject> _namedSubjects => _parseResult.NamedSubjects;
 

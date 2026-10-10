@@ -97,7 +97,10 @@ public class MarkdownWidgetBlockTests
     }
 
     [Theory]
-    [InlineData(":::Missing.Type\n:::", "Unknown type 'Missing.Type'")]
+    [InlineData(":::Missing.Type\n:::", "Unknown type 'Missing.Type'. Use the full type name including the namespace.")]
+    [InlineData(
+        ":::HomeBlaze.Storage.Tests.Pages.TestPlain\n:::",
+        "The type 'HomeBlaze.Storage.Tests.Pages.TestPlain' cannot be used as a block because it does not implement IConfigurable.")]
     [InlineData(":::" + LeafType + " cont=1\n:::", "has no configuration property 'cont'")]
     [InlineData(":::" + LeafType + " count=abc\n:::", "'abc' is not a valid value for 'count'")]
     [InlineData(":::" + LeafType + " count=1.5\n:::", "'1.5' is not a valid value for 'count'. Expected a value of type Int32")]
@@ -477,5 +480,24 @@ public class MarkdownWidgetBlockTests
 
         // Assert
         Assert.False(handled);
+    }
+
+    [Theory]
+    [InlineData("[link](other.md#blocks)", "href=\"/pages/other.md#blocks\"")]
+    [InlineData("[link](sub/other.md#a-b)", "href=\"/pages/sub/other.md#a-b\"")]
+    [InlineData("[link](other.md)", "href=\"/pages/other.md\"")]
+    [InlineData("[link](#blocks)", "href=\"#blocks\"")]
+    [InlineData("[link](https://example.com/other.md#blocks)", "href=\"https://example.com/other.md#blocks\"")]
+    [InlineData("[link](other.html#blocks)", "href=\"other.html#blocks\"")]
+    public async Task WhenLinkHasAFragment_ThenThePagePartIsRewrittenAndTheFragmentIsKept(string source, string expected)
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", source);
+
+        // Assert
+        Assert.Contains(expected, MarkdownPageFixture.Html(page.Children));
     }
 }

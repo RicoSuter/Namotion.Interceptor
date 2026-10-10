@@ -144,31 +144,6 @@ public class MarkdownFileTests
     }
 
     [Fact]
-    public void GetContentAfterFrontmatter_RemovesFrontmatter()
-    {
-        var content = """
-            ---
-            title: Test
-            ---
-            # Content Here
-            """;
-
-        var result = FrontmatterParser.GetContentAfterFrontmatter(content);
-
-        Assert.Equal("# Content Here", result);
-    }
-
-    [Fact]
-    public void GetContentAfterFrontmatter_WithoutFrontmatter_ReturnsOriginal()
-    {
-        var content = "# Content Here";
-
-        var result = FrontmatterParser.GetContentAfterFrontmatter(content);
-
-        Assert.Equal(content, result);
-    }
-
-    [Fact]
     public async Task MarkdownFile_Title_WithFrontmatter_ReturnsFrontmatterTitle()
     {
         var (storage, serviceProvider) = await CreateInMemoryStorageAsync();

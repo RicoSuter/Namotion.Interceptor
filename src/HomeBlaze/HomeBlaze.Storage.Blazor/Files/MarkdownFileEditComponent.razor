@@ -322,33 +322,30 @@ else
         if (File == null || _editor == null)
             return;
 
-        // Open the SubjectSetupDialog
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
+        // _currentContent follows the editor with a delay, and the names must be those of what was typed last.
+        _currentContent = await _editor.GetValue();
+
+        // The name becomes the #id of the block. It is checked while the wizard is open, because the
+        // subject that was configured in it is gone once the wizard has closed.
+        var usedNames = MarkdownBlockNames.GetUsedNames(_currentContent);
+        var result = await SubjectSetupDialog.ShowAsync(
+            DialogService,
+            nameValidation: name => MarkdownBlockNames.GetError(name, usedNames),
+            nameHelperText: $"Name of the block on this page. {MarkdownBlockNames.Rule}");
         if (result == null)
             return;
-
-        // The name becomes the #id of the block. A second block with the same id renders as an error.
-        if (!MarkdownBlockHead.IsValidId(result.Name))
-        {
-            Snackbar.Add($"'{result.Name}' cannot be used as a name on a page. A name starts with a letter or '_' and contains only letters, digits, '_' and '-'.", Severity.Warning);
-            return;
-        }
-
-        if (MarkdownPageParser.Parse(_currentContent).AllBlocks.Any(block => block.Head?.Id == result.Name))
-        {
-            Snackbar.Add($"The name '{result.Name}' is already used on this page.", Severity.Warning);
-            return;
-        }
 
         // Serialize the new subject
         var json = Serializer.Serialize(result.Subject);
 
+        // The editor gives the text with one line ending for all lines.
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(_currentContent);
         var typeName = result.Subject.GetType().FullName!;
-        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json).Split('\n');
+        var blockLines = MarkdownBlockWriter.CreateBlock(typeName, result.Name, json, lineEnding).Split(lineEnding);
 
         // Insert at cursor line (or end if no cursor)
         var position = await _editor.GetPosition();
-        var lines = _currentContent.Split('\n');
+        var lines = _currentContent.Split(lineEnding);
         var insertLine = position?.LineNumber ?? lines.Length;
         var newLines = new List<string>(lines);
 
@@ -367,7 +364,7 @@ else
             newLines.Insert(lineAfterBlock, "");
         }
 
-        _currentContent = string.Join('\n', newLines);
+        _currentContent = string.Join(lineEnding, newLines);
 
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);

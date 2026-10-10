@@ -429,6 +429,59 @@ public class MarkdownBlockTests
             sourceAfter[changedLine]);
     }
 
+    [Fact]
+    public async Task WhenNameInTheCreateWizardIsNoValidBlockName_ThenTheWizardStaysOpenUntilTheNameIsCorrected()
+    {
+        // Arrange
+        await WriteScratchPageAsync("# Scratch\n\nText before the block\n");
+
+        var page = await OpenPageAsync(ScratchPage);
+        await Assertions.Expect(page.GetByText("Text before the block")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SelectEditModeAsync(page, "Split");
+
+        var textLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "Text before the block" });
+        await Assertions.Expect(textLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await textLine.ClickAsync();
+
+        await page.GetByTestId("create-subject-button").ClickAsync();
+        var wizard = page.GetByRole(AriaRole.Dialog);
+        await Assertions.Expect(wizard.GetByTestId("type-card-motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        var nameInput = wizard.GetByLabel("Name");
+        var nextButton = wizard.GetByTestId("next-button");
+
+        // Act: a name that is fine for a file, but not for a block
+        await nameInput.FillAsync("Living Room");
+        await wizard.GetByTestId("type-card-motor").ClickAsync();
+
+        // Assert: the wizard says what a valid name is and does not go on
+        await Assertions.Expect(wizard.GetByText("'Living Room' cannot be used as a name on a page. A name starts with a letter"))
+            .ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(nextButton).ToBeDisabledAsync();
+        await Assertions.Expect(wizard.GetByText("Step 1:")).ToBeVisibleAsync();
+
+        // Act: correct the name and finish
+        await nameInput.FillAsync("livingroom");
+        await Assertions.Expect(wizard.GetByText("Name of the block on this page.")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(wizard).Not.ToContainTextAsync("will be saved as");
+        await nextButton.ClickAsync();
+
+        // The second step has the fields of the motor, and the name of a motor is required.
+        await Assertions.Expect(wizard.GetByText("Step 2: Create Motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await wizard.GetByLabel("Name").FillAsync("Living Room Motor");
+        await wizard.GetByTestId("create-button").ClickAsync();
+
+        // Assert: the block is in the editor, in the file and on the page
+        await Assertions.Expect(wizard).ToBeHiddenAsync(new() { Timeout = 30000 });
+        var headLine = page.Locator(
+            ".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor#livingroom" });
+        await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(page.Locator(".markdown-block-error")).ToHaveCountAsync(0);
+
+        var source = await File.ReadAllTextAsync(GetPagePath(ScratchPage));
+        Assert.Contains(":::HomeBlaze.Samples.Motor#livingroom name=\"Living Room Motor\"", source);
+        Assert.Contains("Text before the block", source);
+    }
+
     private static ILocator GetTab(ILocator tabLayout, string title)
     {
         return tabLayout.GetByRole(AriaRole.Tab, new() { Name = title, Exact = true });

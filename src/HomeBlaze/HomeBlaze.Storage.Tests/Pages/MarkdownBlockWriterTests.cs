@@ -141,4 +141,92 @@ public class MarkdownBlockWriterTests
         Assert.Null(motor.Error);
         Assert.Equal(value, motor.Head!.Arguments.Single(argument => argument.Key == "label").Value);
     }
+
+    private static void AssertOnlyWindowsLineEndings(string text)
+    {
+        Assert.Contains("\r\n", text);
+        Assert.DoesNotContain("\n", text.Replace("\r\n", string.Empty));
+        Assert.DoesNotContain("\r", text.Replace("\r\n", string.Empty));
+    }
+
+    [Fact]
+    public void WhenPageHasWindowsLineEndingsAndAFenceIsAdded_ThenTheResultHasOnlyWindowsLineEndings()
+    {
+        // Arrange
+        var source = Source.Replace("\n", "\r\n");
+        var card = MarkdownPageParser.Parse(source).Blocks[0];
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(source, card, """{ "title": "New", "cells": [1, 2] }""");
+
+        // Assert
+        AssertOnlyWindowsLineEndings(result);
+        var written = MarkdownPageParser.Parse(result).Blocks[0];
+        Assert.Equal("New", Assert.Single(written.Head!.Arguments).Value);
+        Assert.Equal("{\"cells\":[1,2]}", written.ConfigurationJson!.Replace(" ", "").Replace("\r\n", ""));
+    }
+
+    [Fact]
+    public void WhenPageHasWindowsLineEndingsAndAFenceIsReplaced_ThenTheResultHasOnlyWindowsLineEndings()
+    {
+        // Arrange
+        var source = Source.Replace("\n", "\r\n");
+        var motorBlock = MarkdownPageParser.Parse(source).Blocks[0].Children[0];
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(source, motorBlock, """{ "speed": 5, "cells": [3, 4] }""");
+
+        // Assert
+        AssertOnlyWindowsLineEndings(result);
+        var written = MarkdownPageParser.Parse(result).Blocks[0].Children[0];
+        Assert.Equal("{\"cells\":[3,4]}", written.ConfigurationJson!.Replace(" ", "").Replace("\r\n", ""));
+    }
+
+    [Fact]
+    public void WhenCreatedBlockIsInsertedIntoPageWithWindowsLineEndings_ThenTheResultHasOnlyWindowsLineEndings()
+    {
+        // Arrange
+        const string source = "before\r\n\r\nafter\r\n";
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source);
+
+        // Act
+        var block = MarkdownBlockWriter.CreateBlock("Demo.Grid", "grid", """{ "rows": 2, "cells": [1] }""", lineEnding);
+        var result = source.Insert("before\r\n\r\n".Length, block + lineEnding + lineEnding);
+
+        // Assert
+        AssertOnlyWindowsLineEndings(result);
+        var written = Assert.Single(MarkdownPageParser.Parse(result).Blocks);
+        Assert.Equal("grid", written.Head!.Id);
+        Assert.Equal("{\"cells\":[1]}", written.ConfigurationJson!.Replace(" ", "").Replace("\r\n", ""));
+    }
+
+    [Fact]
+    public void WhenPageHasUnixLineEndingsAndAFenceIsAdded_ThenTheResultHasNoCarriageReturn()
+    {
+        // Arrange
+        var card = Card;
+
+        // Act
+        var result = MarkdownBlockWriter.WriteConfiguration(Source, card, """{ "title": "New", "cells": [1, 2] }""");
+
+        // Assert
+        Assert.DoesNotContain("\r", result);
+    }
+
+    [Theory]
+    [InlineData("one\r\ntwo\r\n", 0, "\r\n")]
+    [InlineData("one\ntwo\n", 0, "\n")]
+    [InlineData("one line", 0, "\n")]
+    [InlineData("", 0, "\n")]
+    [InlineData("one\ntwo\r\nthree", 4, "\r\n")]
+    [InlineData("one\r\ntwo", 5, "\r\n")]
+    public void WhenLineEndingIsAskedFor_ThenItIsTheOneOfTheLineAtTheOffsetOrTheFirstOfTheText(
+        string source, int offset, string expected)
+    {
+        // Act
+        var lineEnding = MarkdownBlockWriter.GetLineEnding(source, offset);
+
+        // Assert
+        Assert.Equal(expected, lineEnding);
+    }
 }

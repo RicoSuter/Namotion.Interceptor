@@ -38,6 +38,10 @@ public class MarkdownEditorTests
         var monacoEditor = page.Locator(".monaco-editor");
         await Assertions.Expect(monacoEditor).ToBeVisibleAsync(new() { Timeout = 30000 });
 
+        // The editor only knows its block regions once the decorations are applied, a round trip
+        // after .monaco-editor appears. A cursor that is placed earlier is not matched against them.
+        await Assertions.Expect(page.Locator(".subject-block-decoration").First).ToBeVisibleAsync(new() { Timeout = 30000 });
+
         // Act
         // Click on the head line of the motor block to put the cursor inside it
         var headLine = page.Locator(".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor" });

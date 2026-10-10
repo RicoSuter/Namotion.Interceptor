@@ -102,9 +102,9 @@ A `MarkdownFile` turns its text into child subjects when the file is loaded and 
 | `MarkdownContentParser` | `HomeBlaze.Storage/Internal` | Segments to subjects. Creates the subject of a block or updates the existing one in place, fills its slots, and reports the errors that need the types |
 | `SlotMap` | `HomeBlaze.Storage/Pages` | Reads the `[Slot]` declarations of a type for the content parser and reports a declaration that cannot be used |
 | `MarkdownFragment` | `HomeBlaze.Storage/Pages` | The subject that holds the content of one slot. Its `Children` have the same shape as the `Children` of the page |
-| `MarkdownBlockWriter` | `HomeBlaze.Storage/Pages` | Writes the configuration of one block back into the page text. Replaces the head line and the `json` fence and never touches the content of the block. Also creates the text of a new block for the editor |
+| `MarkdownBlockWriter` | `HomeBlaze.Storage/Pages` | Writes the configuration of one block back into the page text. Replaces the head line and the `json` fence and never touches the content of the block. Also creates the text of a new block for the editor. What it adds gets the line ending of the page |
 | `MarkdownContentView` | `HomeBlaze.Storage.Blazor/Files` | Renders the children of a page or of a fragment. HTML and expression values are joined into one markup string, every other child is rendered through `SubjectComponent` |
-| `MarkdownDecorationParser`, `MarkdownBlockMatcher` | `HomeBlaze.Storage.Blazor/Models` | The regions that the editor marks, and the check that a block of the editor text is the same block as in the saved page |
+| `MarkdownDecorationParser`, `MarkdownBlockMatcher`, `MarkdownBlockNames` | `HomeBlaze.Storage.Blazor/Models` | The regions that the editor marks, the check that a block of the editor text is the same block as in the saved page, and the check of the name that the editor gives a new block |
 
 The subjects of a page with a card and a named motor:
 
