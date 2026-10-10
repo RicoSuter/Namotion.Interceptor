@@ -377,7 +377,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 }
 ```
 
-The example omits ownership for brevity. A real source claims its properties at the start of `StartListeningAsync`, before opening the connection, as shown in [SourceOwnershipManager](#sourceownershipmanager); only claimed properties have their local writes sent or retried.
+The example omits ownership for brevity; see [SourceOwnershipManager](#sourceownershipmanager) for when to claim. Only claimed properties have their local writes sent or retried.
 
 **Constructor parameters**: `bufferTime` (default 8ms) controls the change queue batching window. Changes within this window are coalesced into a single `WriteChangesAsync` call. `retryTime` (default 10s) controls the delay between retry attempts when `StartListeningAsync` or the pump loop fails.
 
@@ -473,7 +473,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 Sources claim ownership of properties inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and for subtrees bound later when they follow [structural changes](#structural-changes).
 
-Claim a property as soon as its binding is known. When the binding comes from local configuration, that is before connecting: the base class parks a local write in the write retry queue only if the property is owned by this source when the change queue drains, so a write made while the connection keeps failing is discarded if the claim comes after the connect. Claiming early also makes ownership depend on configuration rather than on which source connects first. A source that learns its bindings from the remote side, for example from a server handshake or a browse, can only claim after connecting; local writes to those properties made before the first successful synchronization are not retained.
+Claim a property as soon as its binding is known. When the binding comes from local configuration, claim before connecting: a local write is parked in the write retry queue only if this source owns its property when the change queue drains, so claiming after the connect loses writes made while connecting keeps failing. A source that learns its bindings from the remote side, for example from a handshake or a browse, can only claim after connecting; see [Known Limitations](#known-limitations).
 
 The `SourceOwnershipManager` class simplifies this by handling:
 - Property ownership tracking (which properties this source is responsible for)
@@ -908,7 +908,7 @@ Cases where the local model and the external system can end up disagreeing, or w
 
 **A property with an `OnChanging` hook loses a connect-window write to the initial-state load.** A hook that rewrites the incoming value, which the generated `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` can do, means the stored value is not the value the source sent, so the change publishes as `Local`. The drain then treats the load's own value as an ordinary local write and it wins the per-property collapse, discarding a write the user made moments earlier. Without the hook the load's apply is skipped as an echo and the user's write is restored and sent, which is what [Write Consistency Guarantees](#write-consistency-guarantees) promises. Both ends still converge, on the loaded value; what is lost is the user's write. Tracked in the connectors epic [#442](https://github.com/RicoSuter/Namotion.Interceptor/issues/442).
 
-**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. First connection only, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
+**Writes to properties a source has not claimed yet are discarded.** Ownership is established inside `StartListeningAsync`, and the drain must empty the subscription to keep it bounded, so a write it cannot attribute is dropped without an error. This applies to sources that claim after connecting, until their first successful connection, since ownership persists across reconnects. These discards are not counted by `Diagnostics.OutboundRetries.TotalDropped`: with no owner recorded yet, there is nothing to attribute them to.
 
 **Connector-internal reconnects skip the reconcile.** Transport-level reconnects handled inside a connector (the OPC UA health loop, the MQTT and WebSocket monitors) reload initial state without running the connect-window reconciliation. They also do not flush the retry queue: the queue is flushed only when the change processor hands it a change, or by the reconcile that these reconnects skip. So a write parked before such a reconnect is not merely delivered without the supersession check, it may not be delivered at all until some other owned property changes, while the source still reports `Synchronized` and `Diagnostics.OutboundRetries.Depth` shows it pending. Tracked as [#362](https://github.com/RicoSuter/Namotion.Interceptor/issues/362).
 
