@@ -8,6 +8,7 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// One tab of a <see cref="TabLayout"/>.
 /// </summary>
+[ExcludeFromCreation]
 [InterceptorSubject]
 public partial class Tab : IConfigurable
 {

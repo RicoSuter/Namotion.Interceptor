@@ -18,8 +18,10 @@ namespace Namotion.Devices.Luxtronik;
 /// <summary>
 /// A Luxtronik 2.1 heat pump read through the Smart Home Interface (Modbus TCP, port 502). Read only.
 /// </summary>
-[Category("Devices")]
+[Category("Climate")]
 [Description("Luxtronik 2.1 heat pump (Alpha Innotec, Novelan) via the Smart Home Interface, read only")]
+[DisplayName("Luxtronik heat pump")]
+[SubjectIcon("HeatPump")]
 [InterceptorSubject]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class LuxtronikHeatPump :

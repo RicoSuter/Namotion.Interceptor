@@ -9,8 +9,10 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// A titled card that wraps page content.
 /// </summary>
-[Category("Components")]
+[Category("Dashboard")]
 [Description("A titled card that wraps page content")]
+[DisplayName("Card")]
+[SubjectIcon("WebAsset")]
 [InterceptorSubject]
 public partial class Card : IConfigurable, ITitleProvider
 {

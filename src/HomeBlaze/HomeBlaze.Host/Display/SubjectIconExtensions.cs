@@ -44,9 +44,12 @@ public static class SubjectIconExtensions
     }
 
     /// <summary>
-    /// Resolves an icon name to a MudBlazor icon string via reflection.
+    /// Resolves an icon name to a MudBlazor icon string.
     /// </summary>
-    public static string ResolveMudBlazorIcon(string iconName) => MudBlazorIcons.Resolve(iconName);
+    public static string ResolveMudBlazorIcon(string iconName)
+    {
+        return MudBlazorIconResolver.Resolve(iconName);
+    }
 
     /// <summary>
     /// Resolves a color name to a MudBlazor Color enum value.

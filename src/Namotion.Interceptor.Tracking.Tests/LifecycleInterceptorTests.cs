@@ -411,6 +411,39 @@ public class LifecycleInterceptorTests
     }
 
     [Fact]
+    public void WhenDictionaryEnumeratorIsDisposable_ThenScanningTheDictionaryDisposesIt()
+    {
+        // Arrange
+        var handler = new TestLifecycleHandler();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => handler)
+            .WithContextInheritance();
+
+        var holder = new BroadlyDeclaredHolder(context);
+        var car1 = new Car { Name = "Car1" };
+        var car2 = new Car { Name = "Car2" };
+        var first = new EnumeratorCountingDictionary(new Dictionary<string, Car> { ["first"] = car1 });
+        var second = new EnumeratorCountingDictionary(new Dictionary<string, Car> { ["second"] = car2 });
+
+        // Act: the second write scans both the old and the new value.
+        holder.BroadCars = first;
+        holder.BroadCars = second;
+
+        // Assert
+        var events = handler.GetEvents();
+        Assert.Contains(events, e => e.Contains("BroadCars[first] -> Car1") && e.Contains("attached"));
+        Assert.Contains(events, e => e.Contains("BroadCars[first] -> Car1") && e.Contains("detached"));
+        Assert.Contains(events, e => e.Contains("BroadCars[second] -> Car2") && e.Contains("attached"));
+
+        Assert.True(first.CreatedEnumerators > 0);
+        Assert.True(second.CreatedEnumerators > 0);
+        Assert.Equal(first.CreatedEnumerators, first.DisposedEnumerators);
+        Assert.Equal(second.CreatedEnumerators, second.DisposedEnumerators);
+    }
+
+    [Fact]
     public void WhenAssigningImmutableArray_ThenSubjectsAreAttached()
     {
         // Arrange

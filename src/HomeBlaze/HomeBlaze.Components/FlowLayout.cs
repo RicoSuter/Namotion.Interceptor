@@ -9,8 +9,10 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Lays its items out in equal columns that wrap to as many rows as the width needs.
 /// </summary>
-[Category("Components")]
+[Category("Dashboard")]
 [Description("Lays items out in columns that wrap by screen width")]
+[DisplayName("Flow layout")]
+[SubjectIcon("ViewColumn")]
 [InterceptorSubject]
 public partial class FlowLayout : IConfigurable, ITitleProvider
 {

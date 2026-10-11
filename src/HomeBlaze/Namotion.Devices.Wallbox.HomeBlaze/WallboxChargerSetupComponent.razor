@@ -36,7 +36,10 @@
 
     @if (_chargers.Length > 0)
     {
-        <MudList T="string" @bind-SelectedValue="_selectedSerialNumber" Class="mt-4">
+        <MudList T="string"
+                 @bind-SelectedValue="_selectedSerialNumber"
+                 @bind-SelectedValue:after="OnSelectedChargerChanged"
+                 Class="mt-4">
             <MudDivider />
             @foreach (var charger in _chargers)
             {
@@ -73,6 +76,12 @@
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
+
+    private void OnSelectedChargerChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
 
     private async Task LoadChargersAsync()
     {

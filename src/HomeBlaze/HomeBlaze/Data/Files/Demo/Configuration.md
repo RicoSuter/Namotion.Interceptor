@@ -110,9 +110,9 @@ The page editor writes the configuration of a block for you. Try it on this moto
 3. Put the cursor on that line. The toolbar above the editor now shows the button "Edit editmotor".
 4. Click "Edit editmotor", change "Target Speed (RPM)" and click "Save" in the dialog.
 5. Look at the text of the page again. Only the head line of this block changed, and the page is saved already.
-6. Put the cursor on an empty line outside of every block, for example the last line of the page, and click "Create". The dialog "Step 1: Select Type" opens.
-7. Type a name for the block into the field "Name", for example `trymotor`. It starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on this page yet. Then click the type "Motor" in the group "Samples". The dialog goes on to "Step 2: Create Motor" by itself. If you click the type before the name is valid, the dialog stays where it is, and you go on with "Next" once the name is valid.
-8. Fill in the field "Name" of this second step before you click "Create". It is the name that the motor shows, it is required, and it may contain spaces. A click on "Create" while the field is empty creates nothing. Then click "Create". The new block stands at the line of the cursor with two colons, the name from step 7 is its `#name`, and the page is saved already. With the cursor inside the content of a block, the new block gets one colon more than the block around it.
+6. Put the cursor on an empty line outside of every block, for example the last line of the page, and click "Create". The dialog "Create subject" opens with the list of the types.
+7. Click the type "Motor" in the group "Samples". The dialog is now called "Create Motor", and its field "Block name" holds the suggestion `Motor`. Replace it with a name of your own, for example `trymotor`. A block name starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on this page yet.
+8. Fill in the field "Name". It is the name that the motor shows, it is required, and it may contain spaces. "Create" stays disabled while it is empty. Then click "Create". The new block stands at the line of the cursor with two colons, the block name from step 7 is its `#name`, and the page is saved already. With the cursor inside the content of a block, the new block gets one colon more than the block around it.
 
 Steps 4 and 8 change the file `Demo/Configuration.md` of your checkout. The same menu, which is now in the toolbar of the editor, has "View" to leave the editor.
 

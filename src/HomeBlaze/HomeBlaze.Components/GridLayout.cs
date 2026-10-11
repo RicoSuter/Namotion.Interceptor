@@ -8,8 +8,10 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Grid layout with configurable rows and columns.
 /// </summary>
-[Category("Layouts")]
+[Category("Dashboard")]
 [Description("Grid layout with configurable rows and columns")]
+[DisplayName("Grid layout")]
+[SubjectIcon("GridView")]
 [InterceptorSubject]
 public partial class GridLayout : IConfigurable, ITitleProvider
 {

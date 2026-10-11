@@ -21,7 +21,7 @@
         {
             <MudTabPanel Tag="@tab"
                          Text="@tab.Title"
-                         Icon="@(string.IsNullOrEmpty(tab.Icon) ? null : MudBlazorIcons.Resolve(tab.Icon))">
+                         Icon="@(string.IsNullOrEmpty(tab.Icon) ? null : MudBlazorIconResolver.Resolve(tab.Icon))">
                 <div class="tab-layout-panel layout-cell pa-4" data-testid="tab-panel">
                     <SubjectComponent @key="tab" Subject="@tab.Content" Type="SubjectComponentType.Widget" />
                 </div>

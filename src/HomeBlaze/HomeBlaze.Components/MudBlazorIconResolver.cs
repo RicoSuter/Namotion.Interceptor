@@ -5,25 +5,26 @@ using MudBlazor;
 namespace HomeBlaze.Components;
 
 /// <summary>
-/// Resolves icon names such as "Thermostat" to MudBlazor icons.
+/// Resolves subject icon names (e.g., "Folder", "Hub") to MudBlazor icon strings.
 /// </summary>
-public static class MudBlazorIcons
+public static class MudBlazorIconResolver
 {
     private static readonly ConcurrentDictionary<string, string> IconCache = new();
 
     /// <summary>
-    /// Returns the filled Material icon with this name, or the default icon when the name is empty or unknown.
+    /// Resolves an icon name to the Material filled icon of that name, or to the article icon
+    /// when the name is null, empty or unknown.
     /// </summary>
     public static string Resolve(string? iconName)
     {
         if (string.IsNullOrEmpty(iconName))
+        {
             return Icons.Material.Filled.Article;
+        }
 
         return IconCache.GetOrAdd(iconName, name =>
         {
-            var field = typeof(Icons.Material.Filled).GetField(name,
-                BindingFlags.Public | BindingFlags.Static);
-
+            var field = typeof(Icons.Material.Filled).GetField(name, BindingFlags.Public | BindingFlags.Static);
             return field?.GetValue(null) as string ?? Icons.Material.Filled.Article;
         });
     }

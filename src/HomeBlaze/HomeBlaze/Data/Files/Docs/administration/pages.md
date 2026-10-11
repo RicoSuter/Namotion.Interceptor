@@ -901,10 +901,10 @@ The page editor shows the text of the page. It marks the head line of every widg
 
 The steps of "Create":
 
-1. Put the cursor on the line where the block should go and click "Create". The dialog "Step 1: Select Type" opens.
-2. Type the name of the block into the field "Name". It becomes the `#name`. The dialog checks it while you type: it starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on the page yet.
-3. Click a type. The dialog goes on to the second step by itself. If you click the type before the name is valid, the dialog stays where it is, and you go on with "Next" once the name is valid.
-4. Fill in the fields of the second step. Fill in every required field before you click "Create", because a click on "Create" while a required field is empty creates nothing.
+1. Put the cursor on the line where the block should go and click "Create". The dialog "Create subject" opens with the list of the types. The search box and the groups narrow the list.
+2. Click a type. The dialog now shows the field "Block name" and the fields of the type, and its title names the type, like "Create Motor". "Back" returns to the list.
+3. Check the field "Block name". Its value becomes the `#name`. The dialog suggests the name of the type, with a number after it when the page already uses that name, like `Motor2`. The dialog checks the name while you type: it starts with a letter or `_`, contains only letters, digits, `_` and `-`, and is not used on the page yet. The dialog also rejects a name that differs from a used one only in upper and lower case.
+4. Fill in the fields of the type. "Create" stays disabled until the block name is valid and every required field is filled in.
 5. Click "Create". The new block stands at the line of the cursor, and the page is saved already.
 
 What the editor writes:

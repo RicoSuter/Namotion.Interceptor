@@ -7,7 +7,7 @@
         <div class="d-flex align-center mb-2">
             @if (!string.IsNullOrEmpty(CardSubject?.Icon))
             {
-                <MudIcon Icon="@MudBlazorIcons.Resolve(CardSubject.Icon)" Class="mr-2" />
+                <MudIcon Icon="@MudBlazorIconResolver.Resolve(CardSubject.Icon)" Class="mr-2" />
             }
             <MudText Typo="Typo.h6">@CardSubject?.Title</MudText>
         </div>

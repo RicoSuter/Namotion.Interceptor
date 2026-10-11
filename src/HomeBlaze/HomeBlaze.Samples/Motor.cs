@@ -13,6 +13,8 @@ namespace HomeBlaze.Samples;
 /// </summary>
 [Category("Samples")]
 [Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
+[SubjectIcon("Settings")]
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurable, ITemperatureSensor, ITitleProvider, IIconProvider
 {

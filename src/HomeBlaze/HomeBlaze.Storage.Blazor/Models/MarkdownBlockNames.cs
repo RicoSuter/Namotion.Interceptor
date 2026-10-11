@@ -1,3 +1,4 @@
+using HomeBlaze.Components.Dialogs;
 using HomeBlaze.Storage.Pages;
 
 namespace HomeBlaze.Storage.Blazor.Models;
@@ -9,6 +10,15 @@ public static class MarkdownBlockNames
 {
     /// <summary>What a valid name is, as a sentence for the user.</summary>
     public const string Rule = "A name starts with a letter or '_' and contains only letters, digits, '_' and '-'.";
+
+    /// <summary>
+    /// Gets how the create subject dialog asks for the name of a new block of the page text: the name must be
+    /// a valid block name, and the names that the blocks of the page already use are taken.
+    /// </summary>
+    public static SubjectNameOptions CreateNameOptions(string pageText)
+    {
+        return new SubjectNameOptions("Block name", "", GetUsedNames(pageText)) { Rule = GetError };
+    }
 
     /// <summary>Gets the names that the blocks of the page text already use.</summary>
     public static IReadOnlySet<string> GetUsedNames(string pageText)
@@ -26,16 +36,12 @@ public static class MarkdownBlockNames
     }
 
     /// <summary>
-    /// Gets the message for a name that a new block cannot have, or null when the name can be used.
+    /// Gets the message for a name that no block can have, or null when the name is a valid block name.
     /// </summary>
-    public static string? GetError(string name, IReadOnlySet<string> usedNames)
+    public static string? GetError(string name)
     {
-        if (!MarkdownBlockHead.IsValidId(name))
-        {
-            return $"'{name}' cannot be used as a name on a page. {Rule}";
-        }
-
-        // A second block with the same name renders as an error.
-        return usedNames.Contains(name) ? $"The name '{name}' is already used on this page." : null;
+        return MarkdownBlockHead.IsValidId(name)
+            ? null
+            : $"'{name}' cannot be used as a name on a page. {Rule}";
     }
 }

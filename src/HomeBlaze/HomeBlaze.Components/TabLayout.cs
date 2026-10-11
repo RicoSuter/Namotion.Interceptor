@@ -8,8 +8,10 @@ namespace HomeBlaze.Components;
 /// <summary>
 /// Shows one of several tabs at a time.
 /// </summary>
-[Category("Components")]
+[Category("Dashboard")]
 [Description("Shows page content in tabs")]
+[DisplayName("Tab layout")]
+[SubjectIcon("Tab")]
 [InterceptorSubject]
 public partial class TabLayout : IConfigurable, ITitleProvider
 {

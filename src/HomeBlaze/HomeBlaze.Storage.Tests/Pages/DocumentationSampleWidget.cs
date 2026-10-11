@@ -13,6 +13,7 @@ namespace MyCompany.Widgets;
 /// <summary>
 /// The sidebar of a <see cref="SidebarLayout"/>.
 /// </summary>
+[ExcludeFromCreation]
 [InterceptorSubject]
 public partial class Sidebar : IConfigurable
 {
@@ -39,7 +40,7 @@ public partial class Sidebar : IConfigurable
 /// <summary>
 /// Shows page content next to a sidebar.
 /// </summary>
-[Category("Components")]
+[Category("Dashboard")]
 [Description("Shows page content next to a sidebar")]
 [InterceptorSubject]
 public partial class SidebarLayout : IConfigurable

@@ -477,7 +477,7 @@ public class MarkdownBlockTests
     }
 
     [Fact]
-    public async Task WhenNameInTheCreateWizardIsNoValidBlockName_ThenTheWizardStaysOpenUntilTheNameIsCorrected()
+    public async Task WhenNameInTheCreateDialogIsNoValidBlockName_ThenCreateStaysDisabledUntilTheNameIsCorrected()
     {
         // Arrange
         await WriteScratchPageAsync("# Scratch\n\nText before the block\n");
@@ -491,34 +491,37 @@ public class MarkdownBlockTests
         await textLine.ClickAsync();
 
         await page.GetByTestId("create-subject-button").ClickAsync();
-        var wizard = page.GetByRole(AriaRole.Dialog);
-        await Assertions.Expect(wizard.GetByTestId("type-card-motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        var nameInput = wizard.GetByLabel("Name");
-        var nextButton = wizard.GetByTestId("next-button");
+        await Assertions.Expect(SubjectSetupDialogTests.TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SubjectSetupDialogTests.PickTypeAsync(page, "motor");
+
+        var dialog = SubjectSetupDialogTests.Dialog(page);
+        var blockNameInput = dialog.GetByLabel("Block name");
+        var createButton = SubjectSetupDialogTests.CreateButton(page);
+
+        // The dialog suggests the name of the type and does not show the name as that of a file. The name
+        // of a motor is required, so Create is enabled only once it is entered, and from then on only the
+        // block name can disable it.
+        await Assertions.Expect(blockNameInput).ToHaveValueAsync("Motor", new() { Timeout = 30000 });
+        await Assertions.Expect(dialog.GetByText(".json", new() { Exact = true })).ToHaveCountAsync(0);
+        await SubjectSetupDialogTests.EnterMotorNameAsync(page, "Living Room Motor");
+        await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
 
         // Act: a name that is fine for a file, but not for a block
-        await nameInput.FillAsync("Living Room");
-        await wizard.GetByTestId("type-card-motor").ClickAsync();
+        await blockNameInput.FillAsync("Living Room");
 
-        // Assert: the wizard says what a valid name is and does not go on
-        await Assertions.Expect(wizard.GetByText("'Living Room' cannot be used as a name on a page. A name starts with a letter"))
+        // Assert: the dialog says what a valid name is and does not create
+        await Assertions.Expect(dialog.GetByText("'Living Room' cannot be used as a name on a page. A name starts with a letter"))
             .ToBeVisibleAsync(new() { Timeout = 30000 });
-        await Assertions.Expect(nextButton).ToBeDisabledAsync();
-        await Assertions.Expect(wizard.GetByText("Step 1:")).ToBeVisibleAsync();
+        await Assertions.Expect(createButton).ToBeDisabledAsync();
 
         // Act: correct the name and finish
-        await nameInput.FillAsync("livingroom");
-        await Assertions.Expect(wizard.GetByText("Name of the block on this page.")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await Assertions.Expect(wizard).Not.ToContainTextAsync("will be saved as");
-        await nextButton.ClickAsync();
-
-        // The second step has the fields of the motor, and the name of a motor is required.
-        await Assertions.Expect(wizard.GetByText("Step 2: Create Motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await wizard.GetByLabel("Name").FillAsync("Living Room Motor");
-        await wizard.GetByTestId("create-button").ClickAsync();
+        await blockNameInput.FillAsync("livingroom");
+        await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(dialog).Not.ToContainTextAsync("cannot be used as a name on a page");
+        await createButton.ClickAsync();
 
         // Assert: the block is in the editor, in the file and on the page
-        await Assertions.Expect(wizard).ToBeHiddenAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
         var headLine = page.Locator(
             ".monaco-editor .view-line", new() { HasTextString = "HomeBlaze.Samples.Motor#livingroom" });
         await Assertions.Expect(headLine).ToBeVisibleAsync(new() { Timeout = 30000 });
@@ -547,17 +550,19 @@ public class MarkdownBlockTests
 
         // Act
         await page.GetByTestId("create-subject-button").ClickAsync();
-        var wizard = page.GetByRole(AriaRole.Dialog);
-        await Assertions.Expect(wizard.GetByTestId("type-card-motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await wizard.GetByLabel("Name").FillAsync("innermotor");
-        await wizard.GetByTestId("type-card-motor").ClickAsync();
-        await Assertions.Expect(wizard.GetByText("Step 2: Create Motor")).ToBeVisibleAsync(new() { Timeout = 30000 });
-        await wizard.GetByLabel("Name").FillAsync("Inner Motor");
-        await wizard.GetByTestId("create-button").ClickAsync();
+        await Assertions.Expect(SubjectSetupDialogTests.TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = 30000 });
+        await SubjectSetupDialogTests.PickTypeAsync(page, "motor");
+
+        var dialog = SubjectSetupDialogTests.Dialog(page);
+        var createButton = SubjectSetupDialogTests.CreateButton(page);
+        await dialog.GetByLabel("Block name").FillAsync("innermotor");
+        await SubjectSetupDialogTests.EnterMotorNameAsync(page, "Inner Motor");
+        await Assertions.Expect(createButton).ToBeEnabledAsync(new() { Timeout = 30000 });
+        await createButton.ClickAsync();
 
         // Assert: the block is in the file after the json block with the fence of a block inside the card,
         // and the card shows it and still has its title
-        await Assertions.Expect(wizard).ToBeHiddenAsync(new() { Timeout = 30000 });
+        await Assertions.Expect(dialog).ToBeHiddenAsync(new() { Timeout = 30000 });
         await SelectEditModeAsync(page, "View");
         await Assertions.Expect(card).ToContainTextAsync("Inner Motor", new() { Timeout = 30000 });
         await Assertions.Expect(card.GetByText("Text inside the card")).ToBeVisibleAsync();

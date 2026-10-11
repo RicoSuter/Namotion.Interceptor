@@ -19,6 +19,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject ConfigurableSubjectSerializer Serializer
+@inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 @inject TypeProvider TypeProvider
 
@@ -322,18 +323,26 @@ else
         // _currentContent follows the editor with a delay, and the names must be those of what was typed last.
         _currentContent = await _editor.GetValue();
 
-        // The name becomes the #id of the block. It is checked while the wizard is open, because the
-        // subject that was configured in it is gone once the wizard has closed.
-        var usedNames = MarkdownBlockNames.GetUsedNames(_currentContent);
-        var result = await SubjectSetupDialog.ShowAsync(
-            DialogService,
-            nameValidation: name => MarkdownBlockNames.GetError(name, usedNames),
-            nameHelperText: $"Name of the block on this page. {MarkdownBlockNames.Rule}");
-        if (result == null)
+        // The name becomes the #id of the block. It is checked while the dialog is open, because the
+        // subject that was configured in it is gone once the dialog has closed.
+        var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
+        {
+            NameField = MarkdownBlockNames.CreateNameOptions(_currentContent)
+        });
+
+        if (result?.Name is null)
             return;
 
-        // Serialize the new subject
-        var json = Serializer.Serialize(result.Subject, ConfigurationNaming.PropertyName);
+        string json;
+        try
+        {
+            json = Serializer.Serialize(result.Subject, ConfigurationNaming.PropertyName);
+        }
+        finally
+        {
+            // Only the text of the subject goes into the page, and the reload below creates the instance that lives on.
+            SubjectFactory.DiscardSubject(result.Subject);
+        }
 
         // The editor gives the text with one line ending for all lines.
         var lineEnding = MarkdownBlockWriter.GetLineEnding(_currentContent);
