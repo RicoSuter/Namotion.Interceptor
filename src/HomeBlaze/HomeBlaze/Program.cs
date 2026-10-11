@@ -21,6 +21,8 @@ using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Shelly;
 using Namotion.Devices.Shelly.HomeBlaze;
+using Namotion.Devices.Sonos;
+using Namotion.Devices.Sonos.HomeBlaze;
 using Namotion.Devices.SunSpec;
 using Namotion.Devices.SunSpec.HomeBlaze;
 using Namotion.Devices.Wallbox;
@@ -111,6 +113,8 @@ typeProvider
     .AddAssembly(typeof(SqliteHistoryStoreEditComponent).Assembly)                          // HomeBlaze.History.Sqlite.Blazor
     .AddAssembly(typeof(LuxtronikHeatPump).Assembly)                                        // Namotion.Devices.Luxtronik
     .AddAssembly(typeof(LuxtronikHeatPumpWidget).Assembly)                                  // Namotion.Devices.Luxtronik.HomeBlaze
+    .AddAssembly(typeof(SonosSystem).Assembly)                                              // Namotion.Devices.Sonos
+    .AddAssembly(typeof(SonosSystemWidget).Assembly)                                        // Namotion.Devices.Sonos.HomeBlaze
     .AddAssembly(typeof(ClaudeCliAgent).Assembly)                                           // HomeBlaze.AI
     .AddAssembly(typeof(HomeBlaze.AI.Blazor.AgentPage).Assembly);                           // HomeBlaze.AI.Blazor
 

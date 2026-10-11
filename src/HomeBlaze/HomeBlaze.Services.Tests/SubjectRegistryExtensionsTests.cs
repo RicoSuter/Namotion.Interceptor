@@ -7,6 +7,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Parent;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -187,6 +188,101 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
+    public void WhenSubjectIsConfigurable_ThenConfigurationOwnerIsTheSubject()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var parent = new ConfigurationOwnerTestParent(context);
+        var subject = new ConfigurationOwnerTestParent(context);
+        parent.StateChild = subject;
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(subject, owner);
+    }
+
+    [Fact]
+    public void WhenSubjectIsHeldThroughConfigurationProperty_ThenConfigurationOwnerIsTheParent()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [subject] };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, owner);
+    }
+
+    [Fact]
+    public void WhenSubjectIsNestedThroughConfigurationProperties_ThenConfigurationOwnerIsTheNearestConfigurableParent()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var intermediate = new ConfigurationOwnerTestChild(context) { ConfigurationChild = subject };
+        var parent = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [intermediate] };
+        _ = new ConfigurationOwnerTestParent(context) { ConfigurationChildren = [parent] };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, owner);
+    }
+
+    [Fact]
+    public void WhenSubjectIsHeldThroughStateProperty_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var parent = new ConfigurationOwnerTestParent(context) { StateChild = subject };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, subject.TryGetFirstParent<IConfigurable>());
+        Assert.Null(owner);
+    }
+
+    [Fact]
+    public void WhenStatePropertyIsAboveConfigurationProperty_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestChild(context);
+        var intermediate = new ConfigurationOwnerTestChild(context) { ConfigurationChild = subject };
+        var parent = new ConfigurationOwnerTestParent(context) { StateChild = intermediate };
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Same(parent, subject.TryGetFirstParent<IConfigurable>());
+        Assert.Null(owner);
+    }
+
+    [Fact]
+    public void WhenSubjectHasNoParent_ThenThereIsNoConfigurationOwner()
+    {
+        // Arrange
+        var context = CreateContext().WithParents();
+        var subject = new ConfigurationOwnerTestChild(context);
+
+        // Act
+        var owner = subject.TryGetConfigurationOwner();
+
+        // Assert
+        Assert.Null(owner);
+    }
+
+    [Fact]
     public void DynamicSubject_WithProgrammaticAttributes_WorksIdentically()
     {
         // Arrange
@@ -233,4 +329,23 @@ public partial class StateOnlyTestSubject
 public partial class DynamicTestSubject
 {
     public partial decimal Value { get; set; }
+}
+
+[InterceptorSubject]
+public partial class ConfigurationOwnerTestParent : IConfigurable
+{
+    [Configuration]
+    public partial List<IInterceptorSubject> ConfigurationChildren { get; set; }
+
+    [State]
+    public partial IInterceptorSubject? StateChild { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+[InterceptorSubject]
+public partial class ConfigurationOwnerTestChild
+{
+    [Configuration]
+    public partial ConfigurationOwnerTestChild? ConfigurationChild { get; set; }
 }

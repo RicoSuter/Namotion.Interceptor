@@ -62,6 +62,7 @@ Key conventions:
 - **Collapsed child subject:** `Name/ (ItemType)` for a single subject property beyond the depth limit (omitted when the property is null)
 - **Footer:** `[N subjects]` or `[N subjects, truncated]`
 - Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
+- Collection values (arrays, lists, dictionaries of plain values) render as compact JSON, such as `[{"Title":"Radio","IsContainer":false}]`. Whole items are shown up to about 500 characters and the rest as `... +N more`; `get_property` returns the full value. Byte arrays render as their length, such as `<16 bytes>`.
 
 ## Tools
 
@@ -202,7 +203,7 @@ Read a property value by path. Returns the value, JSON schema type, and optional
 
 ### `set_property`
 
-Write a property value by path. Blocked when `IsReadOnly` is true.
+Write a property value by path. Blocked when `IsReadOnly` is true. The value is converted by `McpValueConverter`, which a custom tool can use for its own arguments: `TimeSpan`, `TimeOnly`, `DateOnly`, `DateTime`, `DateTimeOffset`, `Guid`, `Uri` and enums from their string form, enums by name (ignoring case) or by a defined number, and other values also from a string holding their JSON, such as `"0.5"`. A value that cannot be converted returns an error and leaves the property unchanged.
 
 ### `list_types`
 
@@ -212,6 +213,8 @@ List available types from registered type providers. Interface types include pro
 |-----------|---------|-------------|
 | `kind` | `all` | Filter by kind: `interfaces`, `concrete`, or `all` |
 | `type` | (none) | Search type names (case-insensitive contains match) |
+
+Method parameters are listed as `McpMethodParameter` objects: `name` and JSON Schema `type`, plus the `format` of a string value: the standard JSON Schema name where one matches (`date-time`, `date`, `uuid`, `uri`), otherwise a short label: `hh:mm:ss` for `TimeSpan` (accepted as `[-][d.]hh:mm:ss[.fffffff]`) `HH:mm:ss` for `TimeOnly` (accepted as `HH:mm:ss[.fffffff]`) and `base64` for a byte array. `TimeSpan` is not `duration`, which means ISO 8601 (`PT1M30S`) and is not read by System.Text.Json. A parameter also has `enum` with the allowed names of an enum, `nullable`, and an optional `description`. `list_types` leaves `description` empty. A custom tool that lists methods can build the same shape with `McpMethodParameter.Create` and put a host-specific hint, such as a unit, into `description`.
 
 ## Configuration
 

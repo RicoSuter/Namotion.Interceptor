@@ -34,3 +34,14 @@ public partial class TestSensor
 {
     public partial decimal Reading { get; internal set; }
 }
+
+[InterceptorSubject]
+public partial class TestSchedule
+{
+    public partial TimeSpan Interval { get; set; }
+    public partial DateTime CreatedAt { get; set; }
+    public partial DateTimeOffset StartsAt { get; set; }
+    public partial Guid Id { get; set; }
+    public partial DayOfWeek Day { get; set; }
+    public partial DayOfWeek? OptionalDay { get; set; }
+}

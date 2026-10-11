@@ -33,7 +33,7 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         {
             typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
             {
-                TypeDiscriminatorPropertyName = "$type",
+                TypeDiscriminatorPropertyName = ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName,
                 IgnoreUnrecognizedTypeDiscriminators = false,
                 UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
             };

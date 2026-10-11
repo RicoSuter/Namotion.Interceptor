@@ -164,7 +164,7 @@
             return;
         }
 
-        if (!ParameterConverter.TryConvert(input, parameter.Type, out _))
+        if (!ParameterConverter.TryConvert(input, parameter.Type, parameter.Unit, out _))
         {
             _errors[name] = $"Invalid value for {parameter.Type.Name}";
         }
@@ -209,7 +209,8 @@
         for (var i = 0; i < inputParameters.Length; i++)
         {
             var input = _inputValues.GetValueOrDefault(inputParameters[i].Name);
-            if (ParameterConverter.TryConvert(input, inputParameters[i].Type, out var value))
+            // A percent is entered from 0 to 100 next to the % adornment, but the operation takes a fraction.
+            if (ParameterConverter.TryConvert(input, inputParameters[i].Type, inputParameters[i].Unit, out var value))
             {
                 parameters[i] = value;
             }
