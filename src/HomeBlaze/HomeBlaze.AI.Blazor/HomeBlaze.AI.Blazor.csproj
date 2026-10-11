@@ -3,6 +3,7 @@
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />
         <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+        <PackageReference Include="Markdig" />
         <PackageReference Include="MudBlazor" />
     </ItemGroup>
 

@@ -14,7 +14,7 @@
         break;
     case AgentTimelineEntryKind.Assistant:
         <MudPaper Class="pa-2 my-1" Elevation="1" Style="max-width: 80%;" data-testid="agent-reply">
-            <MudText Style="white-space: pre-wrap;">@Entry.Text</MudText>
+            <div class="agent-markdown mud-typography-body1">@_html</div>
             <AgentToolCalls Calls="Entry.ToolCalls" />
         </MudPaper>
         break;
@@ -27,12 +27,14 @@
     case AgentTimelineEntryKind.BackgroundRun:
         <MudAlert Severity="Severity.Info" Dense="true" Class="my-1" data-testid="agent-background-run">
             <MudText Typo="Typo.subtitle2">Background run @TimeZone.Format(Entry.Timestamp) (@Entry.Trigger)</MudText>
-            <MudText Style="white-space: pre-wrap;">@Entry.Text</MudText>
+            <div class="agent-markdown mud-typography-body1">@_html</div>
             <AgentToolCalls Calls="Entry.ToolCalls" />
         </MudAlert>
         break;
     case AgentTimelineEntryKind.Error:
-        <MudAlert Severity="Severity.Error" Dense="true" Class="my-1" data-testid="agent-error">@Entry.Text</MudAlert>
+        <MudAlert Severity="Severity.Error" Dense="true" Class="my-1" data-testid="agent-error">
+            <span style="white-space: pre-wrap;">@Entry.Text</span>
+        </MudAlert>
         break;
     case AgentTimelineEntryKind.Divider:
         <MudDivider Class="my-2" />
@@ -42,6 +44,8 @@
 
 @code {
     private AgentTimelineEntry? _renderedEntry;
+    private AgentTimelineEntry? _htmlEntry;
+    private MarkupString _html;
     private int _renderedQuietCount;
     private int _renderedTimeZoneVersion;
 
@@ -54,6 +58,18 @@
 
     [Parameter]
     public int TimeZoneVersion { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Converted once per entry; the parent passes the same entry again on every timeline change.
+        if (!ReferenceEquals(_htmlEntry, Entry))
+        {
+            _htmlEntry = Entry;
+            _html = Entry.Kind == AgentTimelineEntryKind.Assistant || Entry is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: false }
+                ? new MarkupString(AgentMarkdownRenderer.ToHtml(Entry.Text))
+                : default;
+        }
+    }
 
     // Entries are immutable, so an entry renders again only when it is replaced (a growing quiet group) or the
     // display time zone changed. Compared by reference: records compare by value, which would cost a deep compare.

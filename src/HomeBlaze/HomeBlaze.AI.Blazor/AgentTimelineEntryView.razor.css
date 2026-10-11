@@ -1,0 +1,95 @@
+.agent-markdown {
+    overflow-wrap: anywhere;
+}
+
+.agent-markdown ::deep > :first-child {
+    margin-top: 0;
+}
+
+.agent-markdown ::deep > :last-child {
+    margin-bottom: 0;
+}
+
+.agent-markdown ::deep p,
+.agent-markdown ::deep ul,
+.agent-markdown ::deep ol,
+.agent-markdown ::deep pre,
+.agent-markdown ::deep table,
+.agent-markdown ::deep blockquote {
+    margin: 0.5rem 0;
+}
+
+.agent-markdown ::deep h1,
+.agent-markdown ::deep h2,
+.agent-markdown ::deep h3,
+.agent-markdown ::deep h4 {
+    margin: 0.75rem 0 0.5rem;
+    font-weight: 500;
+    line-height: 1.3;
+}
+
+.agent-markdown ::deep h1 { font-size: 1.4rem; }
+.agent-markdown ::deep h2 { font-size: 1.25rem; }
+.agent-markdown ::deep h3 { font-size: 1.1rem; }
+.agent-markdown ::deep h4 { font-size: 1rem; }
+
+.agent-markdown ::deep ul,
+.agent-markdown ::deep ol {
+    padding-left: 1.5rem;
+}
+
+.agent-markdown ::deep ul { list-style: disc; }
+.agent-markdown ::deep ol { list-style: decimal; }
+
+.agent-markdown ::deep li {
+    margin: 0.15rem 0;
+}
+
+.agent-markdown ::deep code {
+    font-family: monospace;
+    font-size: 0.9em;
+    background: rgba(128, 128, 128, 0.15);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+}
+
+.agent-markdown ::deep pre {
+    background: rgba(128, 128, 128, 0.15);
+    padding: 0.75rem;
+    border-radius: 6px;
+    overflow-x: auto;
+}
+
+.agent-markdown ::deep pre code {
+    background: transparent;
+    padding: 0;
+}
+
+.agent-markdown ::deep table {
+    border-collapse: collapse;
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.agent-markdown ::deep th,
+.agent-markdown ::deep td {
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    padding: 0.25rem 0.6rem;
+    text-align: left;
+}
+
+.agent-markdown ::deep th {
+    background: rgba(128, 128, 128, 0.12);
+    font-weight: 500;
+}
+
+.agent-markdown ::deep blockquote {
+    border-left: 4px solid rgba(128, 128, 128, 0.4);
+    padding-left: 0.75rem;
+    opacity: 0.85;
+}
+
+.agent-markdown ::deep a {
+    color: var(--mud-palette-primary);
+}

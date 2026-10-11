@@ -23,6 +23,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />
+        <ProjectReference Include="..\HomeBlaze.AI.Blazor\HomeBlaze.AI.Blazor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Testing\Namotion.Interceptor.Testing.csproj" />
     </ItemGroup>
