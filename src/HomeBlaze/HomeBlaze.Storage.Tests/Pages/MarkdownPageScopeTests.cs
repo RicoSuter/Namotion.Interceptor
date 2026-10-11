@@ -55,20 +55,20 @@ public class MarkdownPageScopeTests
 
     // One reference directly on the page, one in an open slot, and one in the content of a typed value of a list slot.
     private static string ReferencesAtEveryDepth(string path) => $$"""
-        :: {{Namespace}}.TestReference#direct path={{path}}
+        :: {{Namespace}}.TestReference#direct Path={{path}}
         ::
 
         :: {{Namespace}}.TestPanel#panel
-        ::: {{Namespace}}.TestReference#inFragment path={{path}}
+        ::: {{Namespace}}.TestReference#inFragment Path={{path}}
         :::
 
-        ::: Row label=a
-        :::: {{Namespace}}.TestReference#inRow path={{path}}
+        ::: Row Label=a
+        :::: {{Namespace}}.TestReference#inRow Path={{path}}
         ::::
         :::
 
         ::: Footer
-        :::: {{Namespace}}.TestLeaf#leaf count=1
+        :::: {{Namespace}}.TestLeaf#leaf Count=1
         ::::
         :::
         ::
@@ -83,7 +83,7 @@ public class MarkdownPageScopeTests
         // Act
         var page = await fixture.AddPageAsync("page.md", $$$"""
             :: {{{Namespace}}}.TestPanel#panel
-            ::: {{{Namespace}}}.TestLeaf#leaf count=42
+            ::: {{{Namespace}}}.TestLeaf#leaf Count=42
             :::
             ::
 
@@ -102,7 +102,7 @@ public class MarkdownPageScopeTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :: {{{Namespace}}}.TestLeaf#leaf name=Top
+            :: {{{Namespace}}}.TestLeaf#leaf Name=Top
             ::
 
             :: {{{Namespace}}}.TestPanel#panel
@@ -165,7 +165,7 @@ public class MarkdownPageScopeTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$$"""
             :: {{{Namespace}}}.TestPanel#panel
-            ::: {{{Namespace}}}.TestLeaf#leaf count=7
+            ::: {{{Namespace}}}.TestLeaf#leaf Count=7
             :::
             ::
 
@@ -185,7 +185,7 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :: {{{Namespace}}}.TestLeaf#leaf count=7
+            :: {{{Namespace}}}.TestLeaf#leaf Count=7
             ::
 
             Count: {{ leaf/Count }}
@@ -209,7 +209,7 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :: {{{Namespace}}}.TestLeaf#leaf count=7
+            :: {{{Namespace}}}.TestLeaf#leaf Count=7
             ::
 
             Write `{{ leaf/Count }}` or only `{{` to show {{ leaf/Count }} here.
@@ -366,11 +366,11 @@ public class MarkdownPageScopeTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var content = $$$"""
-            :: {{{Namespace}}}.TestReference#reference path=leaf
+            :: {{{Namespace}}}.TestReference#reference Path=leaf
             ::
 
             :: {{{Namespace}}}.TestPanel#panel
-            ::: {{{Namespace}}}.TestLeaf#leaf count=1
+            ::: {{{Namespace}}}.TestLeaf#leaf Count=1
             :::
             ::
 
@@ -385,7 +385,7 @@ public class MarkdownPageScopeTests
 
         // Act
         // Removing an argument makes the reload create the subject again.
-        await fixture.UpdatePageAsync(page, content.Replace("count=1", "name=New"));
+        await fixture.UpdatePageAsync(page, content.Replace("Count=1", "Name=New"));
         var secondLeaf = Flatten(page.Children.Values).OfType<TestLeaf>().Single();
         var expressionChangeCountAfterReload = expressionChanges.Count;
         secondLeaf.Count = 99;
@@ -407,7 +407,7 @@ public class MarkdownPageScopeTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var content = $$$"""
             :: {{{Namespace}}}.TestPanel#panel
-            ::: {{{Namespace}}}.TestLeaf#leaf count=1
+            ::: {{{Namespace}}}.TestLeaf#leaf Count=1
             :::
 
             Nested {{ leaf/Count }}
@@ -421,7 +421,7 @@ public class MarkdownPageScopeTests
 
         // Act
         // Removing an argument makes the reload create the subject again.
-        await fixture.UpdatePageAsync(page, content.Replace("count=1", "name=New"));
+        await fixture.UpdatePageAsync(page, content.Replace("Count=1", "Name=New"));
         var secondLeaf = Flatten(page.Children.Values).OfType<TestLeaf>().Single();
         var expressionChangeCountAfterReload = expressionChanges.Count;
         secondLeaf.Count = 99;
@@ -460,13 +460,13 @@ public class MarkdownPageScopeTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await AddPageAsync(fixture, $$$"""
             :: {{{Namespace}}}.TestPanel#panel
-            ::: {{{Namespace}}}.TestReference#byPath path=../later.md
+            ::: {{{Namespace}}}.TestReference#byPath Path=../later.md
             :::
 
-            ::: {{{Namespace}}}.TestReference#byName path=leaf
+            ::: {{{Namespace}}}.TestReference#byName Path=leaf
             :::
 
-            ::: {{{Namespace}}}.TestLeaf#leaf count=1
+            ::: {{{Namespace}}}.TestLeaf#leaf Count=1
             :::
 
             Nested {{ leaf/Count }}

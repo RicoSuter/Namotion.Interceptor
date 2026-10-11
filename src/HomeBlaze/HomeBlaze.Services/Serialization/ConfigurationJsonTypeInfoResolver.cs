@@ -16,16 +16,29 @@ namespace HomeBlaze.Services.Serialization;
 /// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
 /// - Creates IConfigurable types that have no parameterless constructor through the service provider
+/// - Names every property by its declared name when the naming is <see cref="ConfigurationNaming.PropertyName"/>
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
 {
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ConfigurationNaming _naming;
 
-    public ConfigurationJsonTypeInfoResolver(TypeProvider typeProvider, IServiceProvider serviceProvider)
+    /// <param name="typeProvider">The types that a <c>$type</c> discriminator can name.</param>
+    /// <param name="serviceProvider">Creates the configurable types that have no parameterless constructor.</param>
+    /// <param name="naming">
+    /// With <see cref="ConfigurationNaming.PropertyName"/> every property gets its declared name, whatever the
+    /// naming policy of the options is. With <see cref="ConfigurationNaming.CamelCase"/> the names are left
+    /// to the options.
+    /// </param>
+    public ConfigurationJsonTypeInfoResolver(
+        TypeProvider typeProvider,
+        IServiceProvider serviceProvider,
+        ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
+        _naming = naming;
     }
 
     public override JsonTypeInfo GetTypeInfo(Type type, JsonSerializerOptions options)
@@ -68,6 +81,13 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
             foreach (var property in typeInfo.Properties)
             {
                 var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+
+                // Also replaces an explicit JSON name, which options without a naming policy would keep.
+                if (_naming == ConfigurationNaming.PropertyName)
+                {
+                    property.Name = propertyName;
+                }
+
                 var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
                 property.ShouldSerialize = (parent, value) =>
                 {

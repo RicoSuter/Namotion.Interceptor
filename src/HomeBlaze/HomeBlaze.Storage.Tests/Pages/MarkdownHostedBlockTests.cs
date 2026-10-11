@@ -42,7 +42,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenValidBlockIsReloadedAndThenRemoved_ThenItsSubjectStartsOnceAndStopsWithTheBlock()
     {
         // Arrange
-        var content = $":: {HostedType}#hosted name=A\n::";
+        var content = $":: {HostedType}#hosted Name=A\n::";
         var page = await _fixture.AddPageAsync("page.md", content);
         var hosted = page.Children["hosted"];
         await _fixture.SettleHostedServicesAsync();
@@ -69,7 +69,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenBlockHasContentButItsTypeHasNoDefaultSlot_ThenNoSubjectIsStarted()
     {
         // Arrange
-        var content = $":: {HostedType}#hosted name=B\nSome text.\n::";
+        var content = $":: {HostedType}#hosted Name=B\nSome text.\n::";
 
         // Act
         var page = await _fixture.AddPageAsync("page.md", content);
@@ -86,12 +86,12 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenBlockWithContentErrorIsFixed_ThenExactlyOneInstanceRuns()
     {
         // Arrange
-        var broken = $":: {HostedType}#hosted name=B\nSome text.\n::";
+        var broken = $":: {HostedType}#hosted Name=B\nSome text.\n::";
         var page = await _fixture.AddPageAsync("page.md", broken);
         await ReloadAsync(page, broken, times: 3);
 
         // Act
-        await _fixture.UpdatePageAsync(page, $":: {HostedType}#hosted name=B\n::");
+        await _fixture.UpdatePageAsync(page, $":: {HostedType}#hosted Name=B\n::");
         await _fixture.SettleHostedServicesAsync();
 
         // Assert
@@ -103,12 +103,12 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenConfigurationOfReusedBlockFailsToApply_ThenItsInstanceIsStopped()
     {
         // Arrange
-        var page = await _fixture.AddPageAsync("page.md", $":: {HostedType}#hosted mode=ok\n::");
+        var page = await _fixture.AddPageAsync("page.md", $":: {HostedType}#hosted Mode=ok\n::");
         await _fixture.SettleHostedServicesAsync();
         var runningBefore = Log.Running;
 
         // Act
-        await _fixture.UpdatePageAsync(page, $":: {HostedType}#hosted mode={TestHosted.ThrowMode}\n::");
+        await _fixture.UpdatePageAsync(page, $":: {HostedType}#hosted Mode={TestHosted.ThrowMode}\n::");
         await _fixture.SettleHostedServicesAsync();
 
         // Assert
@@ -122,7 +122,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenConfigurationValueOfNewBlockIsRejectedByItsSetter_ThenNoInstanceKeepsRunning()
     {
         // Arrange
-        var content = $":: {HostedType}#hosted level=99\n::";
+        var content = $":: {HostedType}#hosted Level=99\n::";
 
         // Act
         var page = await _fixture.AddPageAsync("page.md", content);
@@ -140,7 +140,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     {
         // Arrange
         var content =
-            $":: {Namespace}.TestFailingDetach#failing level=99\n::\n\n:: {HostedType}#hosted name=A\n::";
+            $":: {Namespace}.TestFailingDetach#failing Level=99\n::\n\n:: {HostedType}#hosted Name=A\n::";
 
         // Act
         var page = await _fixture.AddPageAsync("page.md", content);
@@ -162,15 +162,15 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenReleasingSubjectOfCancelledReloadFails_ThenTheCancellationIsReportedAndTheOthersAreReleased()
     {
         // Arrange
-        var page = await _fixture.AddPageAsync("page.md", $":: {Namespace}.TestFaulty#faulty mode=ok\n::");
+        var page = await _fixture.AddPageAsync("page.md", $":: {Namespace}.TestFaulty#faulty Mode=ok\n::");
         using var cancellationSource = new CancellationTokenSource();
         Assert.IsType<TestFaulty>(page.Children["faulty"]).CancellationSource = cancellationSource;
 
         // Act
         var exception = await Record.ExceptionAsync(() => _fixture.UpdatePageAsync(
             page,
-            $":: {Namespace}.TestFailingDetach#failing level=1\n::\n\n:: {HostedType}#added name=B\n::\n\n" +
-            $":: {Namespace}.TestFaulty#faulty mode={TestFaulty.CancelMode}\n::",
+            $":: {Namespace}.TestFailingDetach#failing Level=1\n::\n\n:: {HostedType}#added Name=B\n::\n\n" +
+            $":: {Namespace}.TestFaulty#faulty Mode={TestFaulty.CancelMode}\n::",
             cancellationSource.Token));
         await _fixture.SettleHostedServicesAsync();
 
@@ -186,7 +186,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         // Arrange
         var content = $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label=A
+            ::: Row Label=A
             :::: {{HostedType}}#inner
             ::::
             :::
@@ -212,11 +212,11 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         // Arrange
         var content = $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label=A
+            ::: Row Label=A
             :::: {{HostedType}}#inner
             ::::
             :::
-            ::: Row unknown=1
+            ::: Row Unknown=1
             :::
             ::
             """;
@@ -242,7 +242,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
             :::: {{HostedType}}#inner
             ::::
             :::
-            ::: Row unknown=1
+            ::: Row Unknown=1
             :::
             ::
             """;
@@ -262,7 +262,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         // Arrange
         var page = await _fixture.AddPageAsync(
             "page.md",
-            $":: {HostedType}#kept name=A\n::\n\n:: {Namespace}.TestFaulty#faulty mode=ok\n::");
+            $":: {HostedType}#kept Name=A\n::\n\n:: {Namespace}.TestFaulty#faulty Mode=ok\n::");
         await _fixture.SettleHostedServicesAsync();
         var kept = page.Children["kept"];
         using var cancellationSource = new CancellationTokenSource();
@@ -271,8 +271,8 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         // Act
         var exception = await Record.ExceptionAsync(() => _fixture.UpdatePageAsync(
             page,
-            $":: {HostedType}#kept name=A\n::\n\n:: {HostedType}#added name=B\n::\n\n" +
-            $":: {Namespace}.TestFaulty#faulty mode={TestFaulty.CancelMode}\n::",
+            $":: {HostedType}#kept Name=A\n::\n\n:: {HostedType}#added Name=B\n::\n\n" +
+            $":: {Namespace}.TestFaulty#faulty Mode={TestFaulty.CancelMode}\n::",
             cancellationSource.Token));
         await _fixture.SettleHostedServicesAsync();
 
@@ -288,7 +288,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         // Arrange
         var page = await _fixture.AddPageAsync(
             "page.md",
-            $":: {HostedType}#kept name=A\n::\n\n:: {Namespace}.TestFaulty#faulty mode=ok\n::");
+            $":: {HostedType}#kept Name=A\n::\n\n:: {Namespace}.TestFaulty#faulty Mode=ok\n::");
         await _fixture.SettleHostedServicesAsync();
         var kept = page.Children["kept"];
         using var cancellationSource = new CancellationTokenSource();
@@ -298,11 +298,11 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
         var exception = await Record.ExceptionAsync(() => _fixture.UpdatePageAsync(
             page,
             $$"""
-            :: {{HostedType}}#kept name=A
+            :: {{HostedType}}#kept Name=A
             ::
 
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label=A
+            ::: Row Label=A
             :::: {{HostedType}}#inRow
             ::::
             :::
@@ -311,7 +311,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
             :::
             ::
 
-            :: {{Namespace}}.TestFaulty#faulty mode={{TestFaulty.CancelMode}}
+            :: {{Namespace}}.TestFaulty#faulty Mode={{TestFaulty.CancelMode}}
             ::
             """,
             cancellationSource.Token));
@@ -326,7 +326,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     public async Task WhenReloadIsCancelledAfterSubjectWasPutIntoReusedWidget_ThenItRunsUntilItLeavesThePage()
     {
         // Arrange
-        var before = $":: {Namespace}.TestPanel#panel\n::\n\n:: {Namespace}.TestFaulty#faulty mode=ok\n::";
+        var before = $":: {Namespace}.TestPanel#panel\n::\n\n:: {Namespace}.TestFaulty#faulty Mode=ok\n::";
         var page = await _fixture.AddPageAsync("page.md", before);
         var panel = Assert.IsType<TestPanel>(page.Children["panel"]);
         using var cancellationSource = new CancellationTokenSource();
@@ -341,7 +341,7 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
             :::
             ::
 
-            :: {{Namespace}}.TestFaulty#faulty mode={{TestFaulty.CancelMode}}
+            :: {{Namespace}}.TestFaulty#faulty Mode={{TestFaulty.CancelMode}}
             ::
             """,
             cancellationSource.Token));

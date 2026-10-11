@@ -18,6 +18,10 @@ namespace HomeBlaze.Services;
 /// Only serializes properties marked with [Configuration].
 /// Uses ActivatorUtilities for DI-aware construction during deserialization.
 /// </summary>
+/// <remarks>
+/// Every method that reads or writes JSON takes a <see cref="ConfigurationNaming"/>. It defaults to
+/// <see cref="ConfigurationNaming.CamelCase"/>, the naming of configuration files.
+/// </remarks>
 public class ConfigurableSubjectSerializer
 {
     /// <summary>
@@ -27,26 +31,39 @@ public class ConfigurableSubjectSerializer
 
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
-    private readonly JsonSerializerOptions _options;
+    private readonly JsonSerializerOptions _camelCaseOptions;
+    private readonly JsonSerializerOptions _propertyNameOptions;
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
-        _options = new JsonSerializerOptions
+        _camelCaseOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CamelCase);
+        _propertyNameOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.PropertyName);
+    }
+
+    private static JsonSerializerOptions CreateOptions(
+        TypeProvider typeProvider, IServiceProvider serviceProvider, ConfigurationNaming naming) =>
+        new()
         {
-            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider),
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider, naming),
+            PropertyNamingPolicy = naming == ConfigurationNaming.CamelCase ? JsonNamingPolicy.CamelCase : null,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             Converters = { new JsonStringEnumConverter() }
         };
-    }
+
+    private JsonSerializerOptions GetOptions(ConfigurationNaming naming) =>
+        naming == ConfigurationNaming.CamelCase ? _camelCaseOptions : _propertyNameOptions;
+
+    // The configuration properties of the subject itself are matched by this name and not by the options.
+    private static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
+        naming == ConfigurationNaming.CamelCase ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
 
     /// <summary>
     /// Serializes an IConfigurable to JSON with $type discriminator.
     /// </summary>
-    public string Serialize(IInterceptorSubject subject)
+    public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         if (subject is not IConfigurable configurableSubject)
         {
@@ -55,17 +72,18 @@ public class ConfigurableSubjectSerializer
                 nameof(subject));
         }
 
-        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), _options);
+        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), GetOptions(naming));
     }
 
     /// <summary>
     /// Deserializes JSON to an IConfigurable using $type discriminator.
     /// Uses ActivatorUtilities for DI-aware construction.
     /// </summary>
-    public IConfigurable? Deserialize(string json) => Deserialize(json, created: null);
+    public IConfigurable? Deserialize(string json, ConfigurationNaming naming = ConfigurationNaming.CamelCase) =>
+        Deserialize(json, created: null, naming);
 
     /// <summary>
-    /// Deserializes like <see cref="Deserialize(string)"/> and hands a new subject to
+    /// Deserializes like <see cref="Deserialize(string, ConfigurationNaming)"/> and hands a new subject to
     /// <paramref name="created"/> before its configuration properties are set.
     /// </summary>
     /// <remarks>
@@ -73,7 +91,8 @@ public class ConfigurableSubjectSerializer
     /// throws, this method throws and the callback is the only way to get the subject, which
     /// <see cref="Release"/> then detaches. Call <see cref="Release"/> only after this method has returned or thrown.
     /// </remarks>
-    public IConfigurable? Deserialize(string json, Action<IInterceptorSubject>? created)
+    public IConfigurable? Deserialize(
+        string json, Action<IInterceptorSubject>? created, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -110,14 +129,14 @@ public class ConfigurableSubjectSerializer
             created(interceptorSubject);
         }
 
-        PopulateConfigurationProperties(subject, type, root);
+        PopulateConfigurationProperties(subject, type, root, naming);
         return subject;
     }
 
     /// <summary>
-    /// Releases a subject that <see cref="Deserialize(string)"/> created and that is not used after all: detaches it
-    /// and the subjects in its properties from the context, which stops their hosted services. A hosted service
-    /// that was not started yet is stopped without having been started.
+    /// Releases a subject that <see cref="Deserialize(string, ConfigurationNaming)"/> created and that is not used
+    /// after all: detaches it and the subjects in its properties from the context, which stops their hosted
+    /// services. A hosted service that was not started yet is stopped without having been started.
     /// </summary>
     /// <remarks>
     /// Does nothing for a subject that a property references. Such a subject is in the graph and leaves the
@@ -142,8 +161,11 @@ public class ConfigurableSubjectSerializer
     /// Populates [Configuration] properties on a newly created subject.
     /// Uses registry attribute lookup when available, falls back to reflection.
     /// </summary>
-    private void PopulateConfigurationProperties(IConfigurable subject, Type type, JsonElement root)
+    private void PopulateConfigurationProperties(
+        IConfigurable subject, Type type, JsonElement root, ConfigurationNaming naming)
     {
+        var options = GetOptions(naming);
+
         if (subject is IInterceptorSubject interceptorSubject)
         {
             var registered = interceptorSubject.TryGetRegisteredSubject();
@@ -154,12 +176,12 @@ public class ConfigurableSubjectSerializer
                     if (property.TryGetAttribute(KnownAttributes.Configuration) == null)
                         continue;
 
-                    var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+                    var jsonName = GetJsonName(property.Name, naming);
                     if (root.TryGetProperty(jsonName, out var jsonValue))
                     {
                         try
                         {
-                            var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
+                            var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, options);
                             property.SetValue(value);
                         }
                         catch (JsonException)
@@ -179,12 +201,12 @@ public class ConfigurableSubjectSerializer
             if (!hasConfigAttribute || !property.CanWrite)
                 continue;
 
-            var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+            var jsonName = GetJsonName(property.Name, naming);
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
                 try
                 {
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, _options);
+                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, options);
                     property.SetValue(subject, value);
                 }
                 catch (JsonException)
@@ -197,16 +219,18 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Checks whether a JSON value converts to the given property type with the options that
-    /// <see cref="Deserialize(string)"/> and <see cref="UpdateConfiguration"/> use.
+    /// <see cref="Deserialize(string, ConfigurationNaming)"/> and <see cref="UpdateConfiguration"/> use
+    /// for <paramref name="naming"/>.
     /// </summary>
     /// <remarks>
     /// Both methods skip a property whose value does not convert without reporting it.
     /// </remarks>
-    public bool CanDeserialize(string json, Type propertyType)
+    public bool CanDeserialize(
+        string json, Type propertyType, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         try
         {
-            JsonSerializer.Deserialize(json, propertyType, _options);
+            JsonSerializer.Deserialize(json, propertyType, GetOptions(naming));
             return true;
         }
         catch (JsonException)
@@ -220,20 +244,22 @@ public class ConfigurableSubjectSerializer
     /// Uses same options as Serialize/Deserialize for consistent property handling.
     /// Note: STJ doesn't support populating existing objects, so we deserialize each property individually.
     /// </summary>
-    public void UpdateConfiguration(IInterceptorSubject subject, string json)
+    public void UpdateConfiguration(
+        IInterceptorSubject subject, string json, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
+        var options = GetOptions(naming);
 
         foreach (var property in subject.GetConfigurationProperties())
         {
-            var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+            var jsonName = GetJsonName(property.Name, naming);
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
                 try
                 {
-                    // Use same _options for consistent deserialization behavior
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
+                    // Use the options of Serialize/Deserialize for consistent deserialization behavior
+                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, options);
                     property.SetValue(value);
                 }
                 catch (JsonException)

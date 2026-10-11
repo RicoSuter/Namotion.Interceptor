@@ -15,7 +15,8 @@ public static class MarkdownBlockWriter
 
     /// <summary>
     /// Replaces the head line arguments and the json fence of <paramref name="block"/> with
-    /// <paramref name="configurationJson"/>, a JSON object as the configuration serializer produces it.
+    /// <paramref name="configurationJson"/>, a JSON object as the configuration serializer produces it
+    /// with <see cref="ConfigurationNaming.PropertyName"/>. The keys are written as they are.
     /// </summary>
     public static string WriteConfiguration(string source, MarkdownBlock block, string configurationJson)
     {
@@ -58,7 +59,8 @@ public static class MarkdownBlockWriter
     }
 
     /// <summary>
-    /// Creates the text of a new, empty widget block with a fence of <paramref name="fenceLength"/> characters.
+    /// Creates the text of a new, empty widget block with a fence of <paramref name="fenceLength"/> characters
+    /// from a configuration like the one <see cref="WriteConfiguration"/> takes.
     /// Its lines end with <paramref name="lineEnding"/>, except the last one, which has no line ending.
     /// </summary>
     public static string CreateBlock(

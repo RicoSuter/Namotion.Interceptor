@@ -137,7 +137,7 @@ public class MarkdownDecorationParserTests
     public void WhenContentHasWidgetBlock_ThenRegionCoversTheHeadLine()
     {
         // Arrange
-        const string content = "Line 1\n\n:: Demo.Motor#mymotor speed=3000\n::\n";
+        const string content = "Line 1\n\n:: Demo.Motor#mymotor Speed=3000\n::\n";
 
         // Act
         var region = Assert.Single(MarkdownDecorationParser.Parse(content));
@@ -163,7 +163,7 @@ public class MarkdownDecorationParserTests
     public void WhenBlockHasJsonFence_ThenRegionEndsAfterTheFence()
     {
         // Arrange
-        const string content = ":: Demo.Grid rows=1\n```json\n{ \"cells\": [] }\n```\n::\n";
+        const string content = ":: Demo.Grid Rows=1\n```json\n{ \"Cells\": [] }\n```\n::\n";
 
         // Act
         var region = Assert.Single(MarkdownDecorationParser.Parse(content));
@@ -177,7 +177,7 @@ public class MarkdownDecorationParserTests
     public void WhenBlocksAreNested_ThenRegionsDoNotOverlap()
     {
         // Arrange
-        const string content = ":: Demo.Card title=A\ntext\n\n::: Demo.Widget path=/x\n:::\n::\n";
+        const string content = ":: Demo.Card Title=A\ntext\n\n::: Demo.Widget Path=/x\n:::\n::\n";
 
         // Act
         var regions = MarkdownDecorationParser.Parse(content);
@@ -190,9 +190,9 @@ public class MarkdownDecorationParserTests
     }
 
     [Theory]
-    [InlineData("::Demo.Motor speed=1", 21)]
-    [InlineData(":: Demo.Motor speed=1", 22)]
-    [InlineData("::::  Demo.Motor speed=1", 25)]
+    [InlineData("::Demo.Motor Speed=1", 21)]
+    [InlineData(":: Demo.Motor Speed=1", 22)]
+    [InlineData("::::  Demo.Motor Speed=1", 25)]
     public void WhenHeadLineHasAnyFenceLengthAndSpacing_ThenTheRegionCoversTheWholeHeadLine(string headLine, int endColumn)
     {
         // Arrange
@@ -253,8 +253,8 @@ public class MarkdownDecorationParserTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor speed=\"1\ntext\n::\n")]
-    [InlineData(":: Demo.Motor speed=1\ntext\n")]
+    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
+    [InlineData(":: Demo.Motor Speed=1\ntext\n")]
     [InlineData("::\ntext\n")]
     public void WhenBlockIsInvalid_ThenItGetsNoRegion(string content)
     {

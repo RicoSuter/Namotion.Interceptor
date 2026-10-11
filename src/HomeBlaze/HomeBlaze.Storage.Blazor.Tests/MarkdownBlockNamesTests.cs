@@ -5,7 +5,7 @@ namespace HomeBlaze.Storage.Blazor.Tests;
 public class MarkdownBlockNamesTests
 {
     private const string Page =
-        "# Page\n\n:: Demo.Card#card\n::: Footer\n:::: Demo.Motor#inner speed=1\n::::\n:::\n::\n\n:: Demo.Motor speed=2\n::\n";
+        "# Page\n\n:: Demo.Card#card\n::: Footer\n:::: Demo.Motor#inner Speed=1\n::::\n:::\n::\n\n:: Demo.Motor Speed=2\n::\n";
 
     [Fact]
     public void WhenPageHasNamedBlocksAtAnyDepth_ThenTheirNamesAreUsed()

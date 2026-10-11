@@ -209,7 +209,8 @@ else
             return;
         }
 
-        _currentContent = MarkdownBlockWriter.WriteConfiguration(_currentContent, block, Serializer.Serialize(subject));
+        _currentContent = MarkdownBlockWriter.WriteConfiguration(
+            _currentContent, block, Serializer.Serialize(subject, ConfigurationNaming.PropertyName));
 
         // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
@@ -331,7 +332,7 @@ else
             return;
 
         // Serialize the new subject
-        var json = Serializer.Serialize(result.Subject);
+        var json = Serializer.Serialize(result.Subject, ConfigurationNaming.PropertyName);
 
         // The editor gives the text with one line ending for all lines.
         var lineEnding = MarkdownBlockWriter.GetLineEnding(_currentContent);

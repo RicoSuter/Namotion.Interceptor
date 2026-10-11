@@ -4,9 +4,9 @@ namespace HomeBlaze.Storage.Blazor.Tests;
 
 public class MarkdownBlockMatcherTests
 {
-    private const string TwoMotors = "# Page\n\n:: Demo.Motor#first speed=1\n::\n\nText\n\n:: Demo.Motor#second speed=2\n::\n\nEnd\n";
+    private const string TwoMotors = "# Page\n\n:: Demo.Motor#first Speed=1\n::\n\nText\n\n:: Demo.Motor#second Speed=2\n::\n\nEnd\n";
 
-    private const string Grid = "# Page\n\n:: Demo.Grid#grid rows=1\n```json\n{ \"cells\": [] }\n```\n::\n\nEnd\n";
+    private const string Grid = "# Page\n\n:: Demo.Grid#grid Rows=1\n```json\n{ \"Cells\": [] }\n```\n::\n\nEnd\n";
 
     [Fact]
     public void WhenTextsAreIdentical_ThenTheBlockIsFound()
@@ -17,14 +17,14 @@ public class MarkdownBlockMatcherTests
         // Assert
         Assert.NotNull(block);
         Assert.Equal("second", block.Head!.Id);
-        Assert.Equal(":: Demo.Motor#second speed=2", TwoMotors.Substring(block.HeadSpan.Start, block.HeadSpan.Length));
+        Assert.Equal(":: Demo.Motor#second Speed=2", TwoMotors.Substring(block.HeadSpan.Start, block.HeadSpan.Length));
     }
 
     [Fact]
     public void WhenUnsavedTextFollowsTheBlock_ThenTheBlockIsFound()
     {
         // Arrange
-        var editorText = TwoMotors.Replace("End\n", "Changed end\n\n:: Demo.Motor#third speed=3\n::\n");
+        var editorText = TwoMotors.Replace("End\n", "Changed end\n\n:: Demo.Motor#third Speed=3\n::\n");
 
         // Act
         var first = MarkdownBlockMatcher.FindSavedBlock(editorText, TwoMotors, 0);
@@ -37,7 +37,7 @@ public class MarkdownBlockMatcherTests
 
     [Theory]
     [InlineData("# Page\n\nTyped above\n\n")]
-    [InlineData("# Page\n\n:: Demo.Motor#typed speed=9\n::\n\n")]
+    [InlineData("# Page\n\n:: Demo.Motor#typed Speed=9\n::\n\n")]
     public void WhenUnsavedTextIsTypedAboveTheBlock_ThenTheBlockIsRefused(string newStart)
     {
         // Arrange
@@ -54,8 +54,8 @@ public class MarkdownBlockMatcherTests
     public void WhenFirstOfTwoBlocksWithoutIdIsDeletedInTheEditor_ThenTheRemainingBlockIsRefused()
     {
         // Arrange
-        const string savedText = ":: Demo.Motor speed=1\n::\n\n:: Demo.Motor speed=2\n::\n";
-        const string editorText = ":: Demo.Motor speed=2\n::\n";
+        const string savedText = ":: Demo.Motor Speed=1\n::\n\n:: Demo.Motor Speed=2\n::\n";
+        const string editorText = ":: Demo.Motor Speed=2\n::\n";
 
         // Act
         var block = MarkdownBlockMatcher.FindSavedBlock(editorText, savedText, 0);
@@ -68,8 +68,8 @@ public class MarkdownBlockMatcherTests
     public void WhenTwoBlocksWithoutIdAreSwappedInTheEditor_ThenBothAreRefused()
     {
         // Arrange
-        const string savedText = ":: Demo.Motor speed=1\n::\n\n:: Demo.Motor speed=2\n::\n";
-        const string editorText = ":: Demo.Motor speed=2\n::\n\n:: Demo.Motor speed=1\n::\n";
+        const string savedText = ":: Demo.Motor Speed=1\n::\n\n:: Demo.Motor Speed=2\n::\n";
+        const string editorText = ":: Demo.Motor Speed=2\n::\n\n:: Demo.Motor Speed=1\n::\n";
 
         // Act
         var first = MarkdownBlockMatcher.FindSavedBlock(editorText, savedText, 0);
@@ -81,13 +81,13 @@ public class MarkdownBlockMatcherTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor#first speed=5")]
+    [InlineData(":: Demo.Motor#first Speed=5")]
     [InlineData(":: Demo.Motor#first")]
-    [InlineData(":: Demo.Motor#first speed=1 name=Typed")]
+    [InlineData(":: Demo.Motor#first Speed=1 Name=Typed")]
     public void WhenHeadLineOfTheBlockHasUnsavedChange_ThenOnlyTheMatchAfterWriteBackFindsIt(string editorHead)
     {
         // Arrange
-        var editorText = TwoMotors.Replace(":: Demo.Motor#first speed=1", editorHead);
+        var editorText = TwoMotors.Replace(":: Demo.Motor#first Speed=1", editorHead);
 
         // Act
         var block = MarkdownBlockMatcher.FindSavedBlock(editorText, TwoMotors, 0);
@@ -102,7 +102,7 @@ public class MarkdownBlockMatcherTests
     public void WhenHeadLineOfAnEarlierBlockHasUnsavedChange_ThenALaterBlockIsRefusedByBothMatches()
     {
         // Arrange
-        var editorText = TwoMotors.Replace("speed=1", "speed=5");
+        var editorText = TwoMotors.Replace("Speed=1", "Speed=5");
 
         // Act
         var block = MarkdownBlockMatcher.FindSavedBlock(editorText, TwoMotors, 1);
@@ -114,9 +114,9 @@ public class MarkdownBlockMatcherTests
     }
 
     [Theory]
-    [InlineData("# Page\n\n:: Demo.Grid#grid rows=1\n```json\n{ \"cells\": [1] }\n```\n::\n\nEnd\n")]
-    [InlineData("# Page\n\n:: Demo.Grid#grid rows=1\n::\n\nEnd\n")]
-    [InlineData("# Page\n\n:: Demo.Grid#grid rows=1\n```json\n{ \"cells\": [] }\n```x\n```\n::\n\nEnd\n")]
+    [InlineData("# Page\n\n:: Demo.Grid#grid Rows=1\n```json\n{ \"Cells\": [1] }\n```\n::\n\nEnd\n")]
+    [InlineData("# Page\n\n:: Demo.Grid#grid Rows=1\n::\n\nEnd\n")]
+    [InlineData("# Page\n\n:: Demo.Grid#grid Rows=1\n```json\n{ \"Cells\": [] }\n```x\n```\n::\n\nEnd\n")]
     public void WhenJsonFenceOfTheBlockHasUnsavedChange_ThenOnlyTheMatchAfterWriteBackFindsIt(string editorText)
     {
         // Act
@@ -132,7 +132,7 @@ public class MarkdownBlockMatcherTests
     public void WhenJsonFenceIsAddedInTheEditor_ThenTheBlockIsRefused()
     {
         // Arrange
-        const string savedText = "# Page\n\n:: Demo.Grid#grid rows=1\n::\n\nEnd\n";
+        const string savedText = "# Page\n\n:: Demo.Grid#grid Rows=1\n::\n\nEnd\n";
 
         // Act
         var block = MarkdownBlockMatcher.FindSavedBlock(Grid, savedText, 0);
@@ -152,8 +152,8 @@ public class MarkdownBlockMatcherTests
     }
 
     [Theory]
-    [InlineData(TwoMotors, ":: Demo.Motor#first speed=1\n::\n", 1)]
-    [InlineData("# Page\n\n:: Demo.Motor#first speed=1\n::\n", TwoMotors, 1)]
+    [InlineData(TwoMotors, ":: Demo.Motor#first Speed=1\n::\n", 1)]
+    [InlineData("# Page\n\n:: Demo.Motor#first Speed=1\n::\n", TwoMotors, 1)]
     [InlineData(TwoMotors, TwoMotors, 2)]
     [InlineData(TwoMotors, TwoMotors, -1)]
     [InlineData(TwoMotors, "", 0)]
@@ -171,8 +171,8 @@ public class MarkdownBlockMatcherTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor speed=\"1\ntext\n::\n")]
-    [InlineData(":: Demo.Motor speed=1\ntext\n")]
+    [InlineData(":: Demo.Motor Speed=\"1\ntext\n::\n")]
+    [InlineData(":: Demo.Motor Speed=1\ntext\n")]
     [InlineData("::\ntext\n")]
     public void WhenBlockIsInvalid_ThenItIsRefusedByBothMatches(string text)
     {
@@ -186,14 +186,14 @@ public class MarkdownBlockMatcherTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor#other speed=1")]
-    [InlineData(":: Demo.Pump#first speed=1")]
-    [InlineData(":: Demo.Motor speed=1")]
-    [InlineData(":: first speed=1")]
+    [InlineData(":: Demo.Motor#other Speed=1")]
+    [InlineData(":: Demo.Pump#first Speed=1")]
+    [InlineData(":: Demo.Motor Speed=1")]
+    [InlineData(":: first Speed=1")]
     public void WhenNameOrIdOfTheBlockDiffers_ThenTheMatchAfterWriteBackRefusesIt(string editorHead)
     {
         // Arrange
-        var editorText = TwoMotors.Replace(":: Demo.Motor#first speed=1", editorHead);
+        var editorText = TwoMotors.Replace(":: Demo.Motor#first Speed=1", editorHead);
 
         // Act
         var blockAfterWriteBack = MarkdownBlockMatcher.FindSavedBlockAfterWriteBack(editorText, TwoMotors, 0);
@@ -206,8 +206,8 @@ public class MarkdownBlockMatcherTests
     public void WhenWriteBackAddedTheSpaceAfterTheFence_ThenTheMatchAfterWriteBackFindsTheBlock()
     {
         // Arrange
-        const string editorText = "# Page\n\n::Demo.Card#card\n::::Demo.Motor#inner speed=1\n::::\n::\n";
-        const string savedText = "# Page\n\n::Demo.Card#card\n:::: Demo.Motor#inner speed=5\n::::\n::\n";
+        const string editorText = "# Page\n\n::Demo.Card#card\n::::Demo.Motor#inner Speed=1\n::::\n::\n";
+        const string savedText = "# Page\n\n::Demo.Card#card\n:::: Demo.Motor#inner Speed=5\n::::\n::\n";
 
         // Act
         var block = MarkdownBlockMatcher.FindSavedBlock(editorText, savedText, 1);
@@ -223,14 +223,14 @@ public class MarkdownBlockMatcherTests
     public void WhenBlockIsInsideAnotherBlockAndTextsAreIdentical_ThenTheInnerBlockIsFound()
     {
         // Arrange
-        const string text = "# Page\n\n:: Demo.Card#card\n::: Demo.Motor#inner speed=1\n:::\n::\n";
+        const string text = "# Page\n\n:: Demo.Card#card\n::: Demo.Motor#inner Speed=1\n:::\n::\n";
 
         // Act
         var block = MarkdownBlockMatcher.FindSavedBlock(text, text, 1);
 
         // Assert
         Assert.NotNull(block);
-        Assert.Equal("::: Demo.Motor#inner speed=1", text.Substring(block.HeadSpan.Start, block.HeadSpan.Length));
+        Assert.Equal("::: Demo.Motor#inner Speed=1", text.Substring(block.HeadSpan.Start, block.HeadSpan.Length));
     }
 
     [Fact]

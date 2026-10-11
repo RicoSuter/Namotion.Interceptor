@@ -21,7 +21,7 @@ public class MarkdownSlotTests
 
         // Act
         var page = await fixture.AddPageAsync("page.md", $$$"""
-            :: {{{Namespace}}}.TestPanel#panel title=A
+            :: {{{Namespace}}}.TestPanel#panel Title=A
             Body **bold** {{ /x/y }}
             ::
             """);
@@ -111,7 +111,7 @@ public class MarkdownSlotTests
             :: {{Namespace}}.TestPanel#panel
             text
 
-            ::: {{Namespace}}.TestLeaf#leaf count=3
+            ::: {{Namespace}}.TestLeaf#leaf Count=3
             :::
             ::
             """);
@@ -132,10 +132,10 @@ public class MarkdownSlotTests
         // Act
         var page = await fixture.AddPageAsync("page.md", $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label="First row"
+            ::: Row Label="First row"
             row one
             :::
-            ::: Row label=Second
+            ::: Row Label=Second
             :::
             ::
             """);
@@ -204,9 +204,9 @@ public class MarkdownSlotTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync("page.md", $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label=A
+            ::: Row Label=A
             :::
-            ::: Row label=B
+            ::: Row Label=B
             :::
             ::
             """);
@@ -218,7 +218,7 @@ public class MarkdownSlotTests
         // Act
         await fixture.UpdatePageAsync(page, $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label=A
+            ::: Row Label=A
             :::
             ::
             """);
@@ -242,8 +242,8 @@ public class MarkdownSlotTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var source = $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row label=A
-            :::: {{Namespace}}.TestLeaf#leaf count=1
+            ::: Row Label=A
+            :::: {{Namespace}}.TestLeaf#leaf Count=1
             ::::
             :::
             ::
@@ -255,7 +255,7 @@ public class MarkdownSlotTests
         var leaf = ((MarkdownFragment)fragment!).Children["leaf"];
 
         // Act
-        await fixture.UpdatePageAsync(page, source.Replace("label=A", "label=B").Replace("count=1", "count=2"));
+        await fixture.UpdatePageAsync(page, source.Replace("Label=A", "Label=B").Replace("Count=1", "Count=2"));
 
         // Assert
         Assert.Same(panel, page.Children["panel"]);
@@ -271,7 +271,7 @@ public class MarkdownSlotTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var page = await fixture.AddPageAsync("page.md", $":: {Namespace}.TestPanel#panel\n::: Row label=A\n:::\n::");
+        var page = await fixture.AddPageAsync("page.md", $":: {Namespace}.TestPanel#panel\n::: Row Label=A\n:::\n::");
         var panel = (TestPanel)page.Children["panel"];
         var row = panel.Rows[0];
 
@@ -297,7 +297,7 @@ public class MarkdownSlotTests
             ::: Footer
             foot
             :::
-            ::: Row label=A
+            ::: Row Label=A
             :::
             ::
             """);
@@ -318,11 +318,11 @@ public class MarkdownSlotTests
     [Theory]
     [InlineData(":: {0}.TestPanel\n::: Footr\nx\n:::\n::", "TestPanel has no slot 'Footr'. Available: Content, Footer, Item, Row")]
     [InlineData(":: {0}.TestPanel\n::: Footer\na\n:::\n::: Footer\nb\n:::\n::", "The slot 'Footer' takes one block, but there are 2")]
-    [InlineData(":: {0}.TestPanel\n::: Footer title=x\na\n:::\n::", "The slot 'Footer' holds content only")]
+    [InlineData(":: {0}.TestPanel\n::: Footer Title=x\na\n:::\n::", "The slot 'Footer' holds content only")]
     [InlineData(":: {0}.TestPanel\n::: Footer#name\na\n:::\n::", "The slot 'Footer' holds content only")]
     [InlineData(":: {0}.TestPanel\n::: Footer\n```json\n{{ }}\n```\n:::\n::", "The slot 'Footer' holds content only")]
     [InlineData(":: {0}.TestPanel\nloose\n\n::: Content\nexplicit\n:::\n::", "The slot 'Content' is filled by a block and by loose content")]
-    [InlineData(":: {0}.TestPanel\n::: Row labl=x\n:::\n::", "TestRow has no configuration property 'labl'")]
+    [InlineData(":: {0}.TestPanel\n::: Row Labl=x\n:::\n::", "TestRow has no configuration property 'Labl'")]
     [InlineData(":: {0}.TestPanel\n::: Row\n:::: Footer\nx\n::::\n:::\n::", "TestRow has no slot 'Footer'. Available: Content")]
     [InlineData(":: {0}.TestPanel\n::: Item\n:::: Footer\nx\n::::\n:::\n::", "'Footer' is not a slot at this position")]
     [InlineData(":: {0}.TestLeaf\ncontent\n::", "TestLeaf has no default slot, so it cannot have content")]
@@ -351,7 +351,7 @@ public class MarkdownSlotTests
         // Act
         var page = await fixture.AddPageAsync(
             "page.md",
-            $"intro\n\n:: {Namespace}.TestPanel\n::: Row label=A\n:::\n::: Row labl=B\n:::\n::");
+            $"intro\n\n:: {Namespace}.TestPanel\n::: Row Label=A\n:::\n::: Row Labl=B\n:::\n::");
 
         // Assert
         Assert.Contains("Line 6: TestRow has no configuration property", MarkdownPageFixture.Html(page.Children));
@@ -366,7 +366,7 @@ public class MarkdownSlotTests
         // Act
         var page = await fixture.AddPageAsync(
             "page.md",
-            $":: {Namespace}.TestFaultyHost#host\n::: Broken\n:::\n::\n\n:: {Namespace}.TestLeaf#leaf count=1\n::");
+            $":: {Namespace}.TestFaultyHost#host\n::: Broken\n:::\n::\n\n:: {Namespace}.TestLeaf#leaf Count=1\n::");
 
         // Assert
         Assert.Contains(
@@ -384,12 +384,12 @@ public class MarkdownSlotTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var source = $":: {Namespace}.TestFaultyHost#host\n::: Faulty mode=ok\n:::\n::\n\n:: {Namespace}.TestLeaf#leaf count=1\n::";
+        var source = $":: {Namespace}.TestFaultyHost#host\n::: Faulty Mode=ok\n:::\n::\n\n:: {Namespace}.TestLeaf#leaf Count=1\n::";
         var page = await fixture.AddPageAsync("page.md", source);
         var leaf = page.Children["leaf"];
 
         // Act
-        await fixture.UpdatePageAsync(page, source.Replace("mode=ok", $"mode={mode}").Replace("count=1", "count=2"));
+        await fixture.UpdatePageAsync(page, source.Replace("Mode=ok", $"Mode={mode}").Replace("Count=1", "Count=2"));
 
         // Assert
         var html = MarkdownPageFixture.Html(page.Children);
@@ -413,9 +413,9 @@ public class MarkdownSlotTests
             :::: {{Namespace}}.TestLeaf#leaf
             ::::
             :::
-            ::: Row label=A
+            ::: Row Label=A
             :::
-            ::: Footer title=x
+            ::: Footer Title=x
             :::
             ::
 
@@ -434,10 +434,10 @@ public class MarkdownSlotTests
     }
 
     [Theory]
-    [InlineData(":: {0}.TestPanel\n::: Row#a label=A\n:::\n::\n\n:: {0}.TestLeaf#a\n::", 1)]
+    [InlineData(":: {0}.TestPanel\n::: Row#a Label=A\n:::\n::\n\n:: {0}.TestLeaf#a\n::", 1)]
     [InlineData(":: {0}.TestPanel\n::: {0}.TestLeaf#a\n:::\n::\n\n:: {0}.TestLeaf#a\n::", 1)]
-    [InlineData(":: {0}.TestPanel\n::: Row#a labl=A\n:::\n::\n\n:: {0}.TestLeaf#a\n::", 0)]
-    [InlineData(":: {0}.TestLeaf#a\n::\n\n:: {0}.TestPanel\n::: Row#a label=A\n:::\n::", 0)]
+    [InlineData(":: {0}.TestPanel\n::: Row#a Labl=A\n:::\n::\n\n:: {0}.TestLeaf#a\n::", 0)]
+    [InlineData(":: {0}.TestLeaf#a\n::\n\n:: {0}.TestPanel\n::: Row#a Label=A\n:::\n::", 0)]
     [InlineData(":: {0}.TestPanel\n::: Item\n:::: {0}.TestLeaf#a\n::::\n:::\n::: Item\n:::: {0}.TestLeaf#a\n::::\n:::\n::", 1)]
     public async Task WhenNameIsUsedAgainAtAnotherDepth_ThenTheSecondBlockIsAnErrorBox(string template, int expectedPanels)
     {
@@ -459,7 +459,7 @@ public class MarkdownSlotTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var content = $":: {Namespace}.TestPanel#panel title=T\n::: Row label=A\nrow text\n:::\n::\n";
+        var content = $":: {Namespace}.TestPanel#panel Title=T\n::: Row Label=A\nrow text\n:::\n::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var row = ((TestPanel)page.Children["panel"]).Rows[0];
         row.Label = "New Label";
@@ -469,7 +469,7 @@ public class MarkdownSlotTests
 
         // Assert
         Assert.True(handled);
-        Assert.Equal(content.Replace("::: Row label=A", "::: Row label=\"New Label\""), await fixture.ReadAsync("page.md"));
+        Assert.Equal(content.Replace("::: Row Label=A", "::: Row Label=\"New Label\""), await fixture.ReadAsync("page.md"));
     }
 
     [Fact]
@@ -478,7 +478,7 @@ public class MarkdownSlotTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row label=A\nrow text\n:::\n::\n");
+            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row Label=A\nrow text\n:::\n::\n");
         var panel = (TestPanel)page.Children["panel"];
         var row = panel.Rows[0];
         var content = row.Content;
@@ -489,7 +489,7 @@ public class MarkdownSlotTests
         await page.OnFileChangedAsync(CancellationToken.None);
 
         // Assert
-        Assert.DoesNotContain("label=", page.Content);
+        Assert.DoesNotContain("Label=", page.Content);
         Assert.Same(panel, page.Children["panel"]);
         Assert.Same(row, Assert.Single(panel.Rows));
         Assert.Same(content, row.Content);
@@ -502,7 +502,7 @@ public class MarkdownSlotTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var content =
-            $":: {Namespace}.TestPanel#panel title=T\n::: Row label=A\n:::: {Namespace}.TestLeaf#leaf count=1\n::::\n:::\n::\n";
+            $":: {Namespace}.TestPanel#panel Title=T\n::: Row Label=A\n:::: {Namespace}.TestLeaf#leaf Count=1\n::::\n:::\n::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var row = ((TestPanel)page.Children["panel"]).Rows[0];
         var leaf = (TestLeaf)((MarkdownFragment)row.Content!).Children["leaf"];
@@ -519,7 +519,7 @@ public class MarkdownSlotTests
         Assert.Same(page, writer);
         Assert.True(handled);
         Assert.Equal(
-            content.Replace("#leaf count=1", "#leaf count=5 enabled=false interval=00:00:00"),
+            content.Replace("#leaf Count=1", "#leaf Count=5 Enabled=false Interval=00:00:00"),
             await fixture.ReadAsync("page.md"));
     }
 
@@ -528,7 +528,7 @@ public class MarkdownSlotTests
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
-        var content = $":: {Namespace}.TestPanel#panel title=T\n::: Row label=A\nrow text\n:::\n::\n";
+        var content = $":: {Namespace}.TestPanel#panel Title=T\n::: Row Label=A\nrow text\n:::\n::\n";
         var page = await fixture.AddPageAsync("page.md", content);
         var row = ((TestPanel)page.Children["panel"]).Rows[0];
         var rootManager = fixture.Services.GetRequiredService<RootManager>();
@@ -543,7 +543,7 @@ public class MarkdownSlotTests
         Assert.Same(row, owner);
         Assert.Same(page, writer);
         Assert.True(handled);
-        Assert.Equal(content.Replace("::: Row label=A", "::: Row label=B"), await fixture.ReadAsync("page.md"));
+        Assert.Equal(content.Replace("::: Row Label=A", "::: Row Label=B"), await fixture.ReadAsync("page.md"));
     }
 
     [Fact]
@@ -579,12 +579,12 @@ public class MarkdownSlotTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var source = $$"""
             :: {{Namespace}}.TestPanel#panel
-            ::: Row#one label=1
+            ::: Row#one Label=1
             :::
-            ::: Row#two label=2
+            ::: Row#two Label=2
             :::
-            ::: Row#three label=3
-            :::: {{Namespace}}.TestLeaf#leaf count=1
+            ::: Row#three Label=3
+            :::: {{Namespace}}.TestLeaf#leaf Count=1
             ::::
             :::
             ::
@@ -596,7 +596,7 @@ public class MarkdownSlotTests
         var leaf = ((MarkdownFragment)fragment!).Children["leaf"];
 
         // Act
-        await fixture.UpdatePageAsync(page, source.Replace("::: Row#one", "::: Row#zero label=0\n:::\n::: Row#one"));
+        await fixture.UpdatePageAsync(page, source.Replace("::: Row#one", "::: Row#zero Label=0\n:::\n::: Row#one"));
 
         // Assert
         Assert.Equal(["0", "1", "2", "3"], panel.Rows.Select(row => row.Label));
@@ -614,13 +614,13 @@ public class MarkdownSlotTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row#a label=A\n:::\n::: Row#b label=B\n:::\n::");
+            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row#a Label=A\n:::\n::: Row#b Label=B\n:::\n::");
         var panel = (TestPanel)page.Children["panel"];
         var rows = panel.Rows;
 
         // Act
         await fixture.UpdatePageAsync(
-            page, $":: {Namespace}.TestPanel#panel\n::: Row#b label=B\n:::\n::: Row#a label=A\n:::\n::");
+            page, $":: {Namespace}.TestPanel#panel\n::: Row#b Label=B\n:::\n::: Row#a Label=A\n:::\n::");
 
         // Assert
         Assert.Equal(["B", "A"], panel.Rows.Select(row => row.Label));
@@ -635,13 +635,13 @@ public class MarkdownSlotTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
             "page.md",
-            $":: {Namespace}.TestPanel#panel\n::: Row#a label=A\n:::\n::: Row#b label=B\n:::\n::: Row#c label=C\n:::\n::");
+            $":: {Namespace}.TestPanel#panel\n::: Row#a Label=A\n:::\n::: Row#b Label=B\n:::\n::: Row#c Label=C\n:::\n::");
         var panel = (TestPanel)page.Children["panel"];
         var rows = panel.Rows;
 
         // Act
         await fixture.UpdatePageAsync(
-            page, $":: {Namespace}.TestPanel#panel\n::: Row#a label=A\n:::\n::: Row#c label=C\n:::\n::");
+            page, $":: {Namespace}.TestPanel#panel\n::: Row#a Label=A\n:::\n::: Row#c Label=C\n:::\n::");
 
         // Assert
         Assert.Equal(["A", "C"], panel.Rows.Select(row => row.Label));
@@ -655,14 +655,14 @@ public class MarkdownSlotTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row label=A\n:::\n::: Row label=B\n:::\n::");
+            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::");
         var panel = (TestPanel)page.Children["panel"];
         var rows = panel.Rows;
 
         // Act
         await fixture.UpdatePageAsync(
             page,
-            $":: {Namespace}.TestPanel#panel\n::: Row label=New\n:::\n::: Row label=A\n:::\n::: Row label=B\n:::\n::");
+            $":: {Namespace}.TestPanel#panel\n::: Row Label=New\n:::\n::: Row Label=A\n:::\n::: Row Label=B\n:::\n::");
 
         // Assert
         Assert.Equal(["New", "A", "B"], panel.Rows.Select(row => row.Label));
@@ -677,7 +677,7 @@ public class MarkdownSlotTests
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row#named label=N\n:::\n::: Row label=U\n:::\n::");
+            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row#named Label=N\n:::\n::: Row Label=U\n:::\n::");
         var panel = (TestPanel)page.Children["panel"];
         var named = panel.Rows[0];
         var unnamed = panel.Rows[1];
@@ -685,7 +685,7 @@ public class MarkdownSlotTests
         // Act
         await fixture.UpdatePageAsync(
             page,
-            $":: {Namespace}.TestPanel#panel\n::: Row label=X\n:::\n::: Row#named label=N\n:::\n::: Row label=U\n:::\n::");
+            $":: {Namespace}.TestPanel#panel\n::: Row Label=X\n:::\n::: Row#named Label=N\n:::\n::: Row Label=U\n:::\n::");
 
         // Assert
         Assert.Equal(["X", "N", "U"], panel.Rows.Select(row => row.Label));
@@ -696,14 +696,14 @@ public class MarkdownSlotTests
     }
 
     [Theory]
-    [InlineData("::: Row#other label=A")]
-    [InlineData("::: Row label=A")]
+    [InlineData("::: Row#other Label=A")]
+    [InlineData("::: Row Label=A")]
     public async Task WhenNamedSlotBlockIsRenamedOrLosesItsName_ThenANewValueIsCreated(string newHead)
     {
         // Arrange
         var fixture = await MarkdownPageFixture.CreateAsync();
         var page = await fixture.AddPageAsync(
-            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row#name label=A\n:::\n::");
+            "page.md", $":: {Namespace}.TestPanel#panel\n::: Row#name Label=A\n:::\n::");
         var panel = (TestPanel)page.Children["panel"];
         var row = panel.Rows[0];
 
@@ -752,7 +752,7 @@ public class MarkdownSlotTests
             :: {{Namespace}}.TestPanel
             ::: {{Namespace}}.TestLeaf#a
             :::
-            ::: Row#a label=A
+            ::: Row#a Label=A
             :::
             ::
             """);
@@ -834,8 +834,8 @@ public class MarkdownSlotTests
         Assert.Null(page.GetBlockSubject(3));
 
         static string Source(string gateLabel, params string[] rowLabels) =>
-            $":: {Namespace}.TestGate#gate label={gateLabel}\n::\n\n:: {Namespace}.TestPanel#panel\n" +
-            string.Concat(rowLabels.Select(label => $"::: Row label={label}\n:::\n")) +
+            $":: {Namespace}.TestGate#gate Label={gateLabel}\n::\n\n:: {Namespace}.TestPanel#panel\n" +
+            string.Concat(rowLabels.Select(label => $"::: Row Label={label}\n:::\n")) +
             "::\n";
     }
 

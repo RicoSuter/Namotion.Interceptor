@@ -386,7 +386,7 @@ public class MarkdownFileTests
         var content = $"""
             # Heading
 
-            :: {typeof(FluentStorageContainer).FullName}#mymotor storageType=inmemory
+            :: {typeof(FluentStorageContainer).FullName}#mymotor StorageType=inmemory
             ::
             """;
         await WriteFileAsync(storage, "embedded-type.md", content);
@@ -400,7 +400,7 @@ public class MarkdownFileTests
     private static string CreatePageWithMotor(string heading, int targetSpeed) => $"""
         {heading}
 
-        :: {typeof(Motor).FullName}#mymotor name=MyMotor targetSpeed={targetSpeed}
+        :: {typeof(Motor).FullName}#mymotor Name=MyMotor TargetSpeed={targetSpeed}
         ::
         """;
 

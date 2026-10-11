@@ -42,7 +42,7 @@ public class MarkdownSegmentBuilderTests
             :: Demo.Card
             Text {{ /A/B }}
 
-            ::: Demo.Widget path=/x
+            ::: Demo.Widget Path=/x
             :::
             ::
             """);
@@ -63,7 +63,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             :: Demo.Grid
             ```json
-            { "cells": [] }
+            { "Cells": [] }
             ```
             Visible text
             ::
@@ -82,7 +82,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             first
 
-            :: Demo.Card title="open
+            :: Demo.Card Title="open
             inside
             ::
 
@@ -92,7 +92,7 @@ public class MarkdownSegmentBuilderTests
         // Assert
         Assert.Empty(segments.OfType<BlockMarkdownSegment>());
         var html = WebUtility.HtmlDecode(AllHtml(segments));
-        Assert.Contains("<div class=\"markdown-block-error\" role=\"alert\">Line 3: The value of 'title' has no closing quote.</div>", html);
+        Assert.Contains("<div class=\"markdown-block-error\" role=\"alert\">Line 3: The value of 'Title' has no closing quote.</div>", html);
         Assert.Contains("<p>first</p>", html);
         Assert.Contains("<p>last</p>", html);
         Assert.DoesNotContain("inside", html);
@@ -175,7 +175,7 @@ public class MarkdownSegmentBuilderTests
 
             :: Demo.Card
             before
-            ::: Demo.Widget path=/x
+            ::: Demo.Widget Path=/x
             inside
             ::
 
@@ -204,7 +204,7 @@ public class MarkdownSegmentBuilderTests
 
             :: Demo.Card
             before
-            :: Demo.Widget path=/x
+            :: Demo.Widget Path=/x
             hidden
             ::
             after
@@ -237,13 +237,13 @@ public class MarkdownSegmentBuilderTests
     {
         // Act
         var segments = Build(
-            $":: Demo.Card\nbefore\n\n{codeFence}\n::: Demo.Widget path=/x\n:::\n::\n{codeFence}\n\nafter\n::\n\nlast");
+            $":: Demo.Card\nbefore\n\n{codeFence}\n::: Demo.Widget Path=/x\n:::\n::\n{codeFence}\n\nafter\n::\n\nlast");
 
         // Assert
         var card = Assert.Single(segments.OfType<BlockMarkdownSegment>());
         Assert.Empty(card.Content.OfType<BlockMarkdownSegment>());
         var content = AllHtml(card.Content);
-        Assert.Contains("::: Demo.Widget path=/x\n:::\n::\n</code></pre>", content);
+        Assert.Contains("::: Demo.Widget Path=/x\n:::\n::\n</code></pre>", content);
         Assert.Contains("<p>after</p>", content);
         var outside = AllHtml(segments.Where(segment => segment is HtmlMarkdownSegment));
         Assert.Contains("<p>last</p>", outside);
@@ -361,7 +361,7 @@ public class MarkdownSegmentBuilderTests
         var segments = Build("""
             <!--BLOCK:0-->
 
-            :: Demo.Widget path=/x
+            :: Demo.Widget Path=/x
             ::
             """);
 
@@ -491,14 +491,14 @@ public class MarkdownSegmentBuilderTests
         // Act
         var segments = Build("""
             ~~~~markdown
-            :: Demo.Widget path=/x
+            :: Demo.Widget Path=/x
             ::
             ~~~~
             """);
 
         // Assert
         Assert.Empty(segments.OfType<BlockMarkdownSegment>());
-        Assert.Contains(":: Demo.Widget path=/x", AllHtml(segments));
+        Assert.Contains(":: Demo.Widget Path=/x", AllHtml(segments));
     }
 
     [Fact]

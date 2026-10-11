@@ -35,7 +35,7 @@ public sealed partial class MarkdownContentParser
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
-            _serializer.UpdateConfiguration(existing, configuration.Json);
+            _serializer.UpdateConfiguration(existing, configuration.Json, ConfigurationNaming.PropertyName);
             if (existing is IConfigurable configurable)
             {
                 await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -47,7 +47,8 @@ public sealed partial class MarkdownContentParser
         {
             // Recorded before the configuration is set: when a setter throws, the instance is already attached
             // and this parse is the only one that knows it.
-            subject = _serializer.Deserialize(configuration.Json, state.AddCreated) as IInterceptorSubject;
+            subject = _serializer.Deserialize(
+                configuration.Json, state.AddCreated, ConfigurationNaming.PropertyName) as IInterceptorSubject;
         }
 
         if (subject is not null)
@@ -60,7 +61,8 @@ public sealed partial class MarkdownContentParser
 
     /// <summary>
     /// Records the configuration that was written to the page for a subject, so that the reload
-    /// which follows the write updates the subject in place.
+    /// which follows the write updates the subject in place. The JSON must have the naming of a page,
+    /// <see cref="ConfigurationNaming.PropertyName"/>, because its keys are compared with those of the page.
     /// </summary>
     internal void RememberConfiguration(IInterceptorSubject subject, string configurationJson)
     {
@@ -112,7 +114,8 @@ public sealed partial class MarkdownContentParser
             }
 
             var node = CreateArgumentNode(argument.Value, propertyType);
-            if (node is null || !_serializer.CanDeserialize(node.ToJsonString(), propertyType))
+            if (node is null ||
+                !_serializer.CanDeserialize(node.ToJsonString(), propertyType, ConfigurationNaming.PropertyName))
             {
                 var expectedType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
                 error = $"'{argument.Value}' is not a valid value for '{argument.Key}'. Expected a value of type {expectedType.Name}.";
@@ -177,14 +180,20 @@ public sealed partial class MarkdownContentParser
         return configuration;
     }
 
-    private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties) =>
-        $"{type.Name} has no configuration property '{key}'. Available: {string.Join(", ", properties.Keys.Order())}.";
+    private static string FormatUnknownProperty(Type type, string key, IReadOnlyDictionary<string, Type> properties)
+    {
+        var names = properties.Keys.Order(StringComparer.Ordinal).ToArray();
+        var sameNameInOtherCase = Array.Find(names, name => string.Equals(name, key, StringComparison.OrdinalIgnoreCase));
+        var hint = sameNameInOtherCase is null ? string.Empty : $" Did you mean '{sameNameInOtherCase}'?";
+
+        return $"{type.Name} has no configuration property '{key}'.{hint} Available: {string.Join(", ", names)}.";
+    }
 
     private static IReadOnlyDictionary<string, Type> GetConfigurationProperties(Type type) =>
         ConfigurationPropertyCache.GetOrAdd(type, static key => key
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.GetCustomAttribute<ConfigurationAttribute>(true) is not null)
-            .ToDictionary(property => JsonNamingPolicy.CamelCase.ConvertName(property.Name), property => property.PropertyType));
+            .ToDictionary(property => property.Name, property => property.PropertyType));
 
     // The literal an argument stands for: a bare literal for a bool or numeric property, a JSON string for every
     // other type. Null when the text is no such literal.

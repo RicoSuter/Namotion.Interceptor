@@ -18,13 +18,13 @@ public class MarkdownPageParserTests
             text
 
             :: Demo.TabLayout#tabs
-            ::: Tab#cooling title="Cooling Fan {x}"
+            ::: Tab#cooling Title="Cooling Fan {x}"
             The fan runs at {{ ../CoolingFan/CurrentSpeed }} RPM.
 
-            :::: Demo.Widget path="/House/{Fan}"
+            :::: Demo.Widget Path="/House/{Fan}"
             ::::
             :::
-            ::: Tab title="Exhaust Fan"
+            ::: Tab Title="Exhaust Fan"
             More content.
             :::
             ::
@@ -45,7 +45,7 @@ public class MarkdownPageParserTests
         var cooling = tabs.Children[0];
         Assert.Equal((3, 8, 13), (cooling.FenceLength, cooling.Line, cooling.EndLine));
         Assert.Equal(
-            """::: Tab#cooling title="Cooling Fan {x}" """.TrimEnd(),
+            """::: Tab#cooling Title="Cooling Fan {x}" """.TrimEnd(),
             source.Substring(cooling.HeadSpan.Start, cooling.HeadSpan.Length));
         var exhaust = tabs.Children[1];
         Assert.Equal((3, 14, 16), (exhaust.FenceLength, exhaust.Line, exhaust.EndLine));
@@ -62,9 +62,9 @@ public class MarkdownPageParserTests
     }
 
     [Theory]
-    [InlineData(":: Demo.Motor#m speed=3000")]
-    [InlineData("::Demo.Motor#m speed=3000")]
-    [InlineData("::   Demo.Motor#m speed=3000")]
+    [InlineData(":: Demo.Motor#m Speed=3000")]
+    [InlineData("::Demo.Motor#m Speed=3000")]
+    [InlineData("::   Demo.Motor#m Speed=3000")]
     public void WhenBlockHasHeadLine_ThenHeadSpanCoversExactlyThatLine(string headLine)
     {
         // Arrange
@@ -150,9 +150,9 @@ public class MarkdownPageParserTests
     {
         // Arrange
         var source = Normalize("""
-            :: Demo.Grid rows=1
+            :: Demo.Grid Rows=1
             ```json
-            { "cells": [1, 2] }
+            { "Cells": [1, 2] }
             ```
             ::
             """);
@@ -161,7 +161,7 @@ public class MarkdownPageParserTests
         var block = MarkdownPageParser.Parse(source).Blocks[0];
 
         // Assert
-        Assert.Equal("{ \"cells\": [1, 2] }", block.ConfigurationJson);
+        Assert.Equal("{ \"Cells\": [1, 2] }", block.ConfigurationJson);
         var span = block.ConfigurationSpan!.Value;
         Assert.StartsWith("```json", source.Substring(span.Start, span.Length));
         Assert.EndsWith("```", source.Substring(span.Start, span.Length));
@@ -228,7 +228,7 @@ public class MarkdownPageParserTests
 
             :: Demo.Card
             before
-            :: Demo.Widget path=/x
+            :: Demo.Widget Path=/x
             inside
             ::
             after
@@ -375,7 +375,7 @@ public class MarkdownPageParserTests
         var source = Normalize("""
             :: Demo.Card
             before
-            ::: Demo.Widget path=/x
+            ::: Demo.Widget Path=/x
             inside
             ::
             after
@@ -398,7 +398,7 @@ public class MarkdownPageParserTests
     public void WhenBlockWithAnotherErrorIsNotClosed_ThenTheErrorSaysBoth()
     {
         // Arrange
-        const string source = "before\n\n:: Demo.Card title=\"open\ntext";
+        const string source = "before\n\n:: Demo.Card Title=\"open\ntext";
 
         // Act
         var block = Assert.Single(MarkdownPageParser.Parse(source).AllBlocks);
@@ -417,7 +417,7 @@ public class MarkdownPageParserTests
     {
         // Arrange
         var closingCodeFence = codeFence.TrimEnd("markdown".ToCharArray());
-        var source = $":: Demo.Card\nbefore\n\n{codeFence}\n::: Demo.Widget path=/x\n:::\n::\n:::\n{closingCodeFence}\n\nafter\n::\nrest";
+        var source = $":: Demo.Card\nbefore\n\n{codeFence}\n::: Demo.Widget Path=/x\n:::\n::\n:::\n{closingCodeFence}\n\nafter\n::\nrest";
 
         // Act
         var page = MarkdownPageParser.Parse(source);
@@ -435,7 +435,7 @@ public class MarkdownPageParserTests
     public void WhenFenceLineIsInsideIndentedCodeInsideABlock_ThenTheBlockContinues()
     {
         // Arrange
-        const string source = ":: Demo.Card\nbefore\n\n    ::: Demo.Widget path=/x\n    :::\n    ::\n\nafter\n::\nrest";
+        const string source = ":: Demo.Card\nbefore\n\n    ::: Demo.Widget Path=/x\n    :::\n    ::\n\nafter\n::\nrest";
 
         // Act
         var page = MarkdownPageParser.Parse(source);
@@ -497,7 +497,7 @@ public class MarkdownPageParserTests
     public void WhenFenceLinesFollowHtmlWithoutAnEmptyLineAndCloseNoOpenBlock_ThenTheyStayText()
     {
         // Arrange
-        const string source = ":: Demo.Card\n<div>\n::: Demo.Widget path=/x\n:::\n</div>\n::\nrest";
+        const string source = ":: Demo.Card\n<div>\n::: Demo.Widget Path=/x\n:::\n</div>\n::\nrest";
 
         // Act
         var page = MarkdownPageParser.Parse(source);
@@ -526,7 +526,7 @@ public class MarkdownPageParserTests
     public void WhenBlockInsideAListItemIsLeftOpenAndTheListEnds_ThenTheClosingLineClosesTheBlockAroundTheList()
     {
         // Arrange
-        const string source = ":: Demo.Card\n- item\n  ::: Demo.Widget path=/x\n  text\n::\nrest";
+        const string source = ":: Demo.Card\n- item\n  ::: Demo.Widget Path=/x\n  text\n::\nrest";
 
         // Act
         var page = MarkdownPageParser.Parse(source);
@@ -594,7 +594,7 @@ public class MarkdownPageParserTests
     {
         // Arrange
         var source = Normalize("""
-            :: Demo.Card title="open
+            :: Demo.Card Title="open
             ::
             """);
 
@@ -603,7 +603,7 @@ public class MarkdownPageParserTests
 
         // Assert
         Assert.Equal(MarkdownBlockKind.Invalid, block.Kind);
-        Assert.Equal("The value of 'title' has no closing quote.", block.Error);
+        Assert.Equal("The value of 'Title' has no closing quote.", block.Error);
     }
 
     [Theory]
