@@ -44,6 +44,7 @@ All persistent files flow through `IStorageContainer` (`HomeBlaze.Storage.Abstra
 | `GetBlobMetadataAsync` | Query size and modification time |
 | `AddSubjectAsync` | Serialize and persist a subject |
 | `DeleteSubjectAsync` | Remove a subject |
+| `ChildNames` | Names under which the direct children are stored |
 
 ### Backends
 

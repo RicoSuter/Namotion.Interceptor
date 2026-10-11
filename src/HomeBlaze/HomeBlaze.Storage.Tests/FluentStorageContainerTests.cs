@@ -219,4 +219,25 @@ public class FluentStorageContainerTests
         // Cleanup
         storage.Dispose();
     }
+
+    [Fact]
+    public async Task WhenSubjectsAreAdded_ThenChildNamesAreTheNamesOfTheDirectChildren()
+    {
+        // Arrange
+        var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
+        using var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
+
+        storage.StorageType = "inmemory";
+        await storage.ConnectAsync(CancellationToken.None);
+
+        var context = serviceProvider.GetRequiredService<IInterceptorSubjectContext>();
+        await storage.AddSubjectAsync("testmotor.json", new Samples.Motor(context), CancellationToken.None);
+        await storage.AddSubjectAsync("demo/nestedmotor.json", new Samples.Motor(context), CancellationToken.None);
+
+        // Act
+        var childNames = storage.ChildNames;
+
+        // Assert
+        Assert.Equal(["demo", "testmotor"], childNames.Order());
+    }
 }

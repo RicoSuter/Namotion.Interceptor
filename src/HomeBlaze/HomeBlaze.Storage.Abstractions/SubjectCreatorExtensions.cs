@@ -10,15 +10,13 @@ public static class SubjectCreatorExtensions
     /// </summary>
     /// <param name="subjectSetupService">The setup service.</param>
     /// <param name="storage">The storage the subject is added to.</param>
-    /// <param name="existingNames">The names that are already used in the storage, so the dialog can reject a duplicate.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     public static async Task CreateSubjectAndAddToStorageAsync(
         this ISubjectSetupService subjectSetupService,
         IStorageContainer storage,
-        IReadOnlyCollection<string> existingNames,
         CancellationToken cancellationToken)
     {
-        var result = await subjectSetupService.CreateSubjectAsync(new SubjectSetupRequest(existingNames), cancellationToken);
+        var result = await subjectSetupService.CreateSubjectAsync(storage, cancellationToken);
         if (result?.Name is not { } name)
             return;
 

@@ -36,6 +36,9 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
 
     public StorageStatus Status => Storage.Status;
 
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
+
     public VirtualFolder(IStorageContainer storage, string relativePath)
     {
         Storage = storage;
@@ -91,5 +94,5 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, [.. Children.Keys], cancellationToken);
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 }

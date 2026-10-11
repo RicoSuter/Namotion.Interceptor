@@ -81,6 +81,9 @@ public partial class FluentStorageContainer :
     [State]
     public partial StorageStatus Status { get; set; }
 
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
+
     public string Title => string.IsNullOrEmpty(ConnectionString)
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
@@ -607,7 +610,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
-        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, [.. Children.Keys], cancellationToken);
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 
     /// <summary>
     /// IStorageContainer - Deletes a subject by finding its path in the registry.
