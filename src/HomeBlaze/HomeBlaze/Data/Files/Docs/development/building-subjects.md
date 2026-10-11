@@ -289,30 +289,34 @@ public partial class Motor : IIconProvider
 
 ## Create Dialog
 
-Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then the setup or edit component of the chosen type. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then a configure page for the chosen type. The configure page shows the type's Setup component when it has one, otherwise its Edit component, and otherwise the generated properties editor for its `[Configuration]` properties. Setup and Edit components receive `IsCreating = true`. "Back" on the configure page returns to the list. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
 
 The dialog describes a type with attributes on the class. All of them are optional:
 
 | Attribute | Purpose | Without it |
 |-----------|---------|------------|
-| `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words |
+| `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words in sentence case: `ShellyDevice` becomes "Shelly device" and `HTTPServer` becomes "HTTP server" |
 | `[Description("...")]` | One sentence below the title, also searched | No description |
 | `[Category("Samples")]` | Group in the sidebar | Group "Other", listed last |
-| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName` | Icon of the group for the built-in groups (Devices, Servers, Clients, History, Layouts, Components, Samples, Storage), otherwise a generic icon |
+| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName`. An unknown icon name shows the generic article icon | Icon of the group for the built-in groups (Devices, Servers, Clients, History, Layouts, Components, Samples, Storage), otherwise a generic icon |
 
 `[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`. The create dialog attributes, including the two under [Hiding a Type](#hiding-a-type), are read from the class itself and are not inherited from a base class.
 
 ```csharp
 using System.ComponentModel;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor.Attributes;
 
 [Category("Samples")]
-[DisplayName("Motor")]
 [Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
 [SubjectIcon("Settings")]
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurable
 {
+    // ...
 }
 ```
 
@@ -320,7 +324,7 @@ public partial class Motor : BackgroundService, IConfigurable
 
 ### Name of a New Subject
 
-Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected.
+Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected, and the messages name the field by its label ("This file name is already used").
 
 - In a storage folder the field is labelled "File name" and shows the suffix `.json`. The file name is part of the subject's path, and the path is its ID, so it should not be changed later.
 - In the markdown editor the field is labelled "Block name" and has no suffix. It becomes the name in the `subject(Name)` block.
@@ -331,13 +335,18 @@ Where the new subject needs a name, the dialog asks for it on the configure page
 Two attributes from `HomeBlaze.Abstractions.Attributes` control whether a type is offered:
 
 - `[ExcludeFromCreation]`: the type is never offered. Use it for a type that only exists as part of another subject, such as the cell of a grid.
-- `[SingleInstance]`: the type is offered only while no instance of it exists in the subject graph.
+- `[SingleInstance]`: the type is offered only while no instance of it exists in the subject graph. An instance of a derived type does not count.
 
 ```csharp
-[InterceptorSubject]
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
+
 [ExcludeFromCreation]
+[InterceptorSubject]
 public partial class GridCell : IConfigurable
 {
+    // ...
 }
 ```
 
@@ -548,6 +557,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 ## Complete Example: Motor
 
 ```csharp
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
@@ -556,6 +566,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Samples;
 
+[Category("Samples")]
+[Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
+[SubjectIcon("Settings")]
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
@@ -601,7 +615,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     // Display interfaces
 
     public string? Title => Name;
-    public string? Icon { get; } = null;
+    public string? IconName => "Settings";
 
     // Constructor with defaults
 
@@ -783,7 +797,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -1098,7 +1112,7 @@ Edit components provide configuration forms:
 | `IsCreating` | Set by the hosting panel: `true` while the subject is being created, `false` while it is edited |
 | `SaveAsync` | Persist changes |
 
-In the create dialog the "Create" button follows the component's `IsValid`, so a component raises `IsValidChanged` whenever `IsValid` changes. Binding with `@bind-Value:after` covers every way a value can change (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not, and `Immediate="true"` on a text field updates the value on every keystroke instead of when the field loses focus.
+In the create dialog the "Create" button follows the component's `IsValid`, so a component raises `IsValidChanged` whenever `IsValid` changes. The handler of `@bind-Value:after` runs each time the bound value is committed, whichever way it changed (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not cover. A text field commits its value when it loses focus, and with `Immediate="true"` on every keystroke.
 
 ### Edit Component Lifecycle: OnInitialized vs OnParametersSet
 

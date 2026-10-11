@@ -2,6 +2,7 @@ namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
 /// Sets the icon shown for a subject type where no instance exists yet, such as the create dialog.
+/// It applies to the exact type and is not inherited by derived types.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class SubjectIconAttribute(string iconName) : Attribute
