@@ -315,11 +315,8 @@ public class ConfigurableSubjectSerializerNamingTests
     public void WhenValueIsCheckedInANaming_ThenItIsJudgedWithTheNamesOfThatNaming(
         ConfigurationNaming naming, string json, Type propertyType, bool expected)
     {
-        // Arrange
-        var serializer = _serializer;
-
         // Act
-        var canDeserialize = serializer.CanDeserialize(json, propertyType, naming);
+        var canDeserialize = _serializer.CanDeserialize(json, propertyType, naming);
 
         // Assert
         Assert.Equal(expected, canDeserialize);

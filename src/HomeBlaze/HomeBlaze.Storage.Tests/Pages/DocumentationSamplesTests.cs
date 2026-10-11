@@ -1,17 +1,16 @@
-using System.Net;
-using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
-using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
 using Markdig.Syntax;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -24,7 +23,7 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// A sample of page source is a fenced code block with the language <c>markdown</c>. A sample that is
 /// meant to show an error has the comment <see cref="ErrorMarker"/> on the line above it, and the fenced
 /// code block with the language <c>text</c> after it lists the error boxes as the page shows them, one
-/// per line. A line that ends with <see cref="AnyEnding"/> gives the start of a box only.
+/// per line.
 /// </remarks>
 [Collection(MarkdownPageFixture.StorageCollection)]
 public partial class DocumentationSamplesTests
@@ -38,13 +37,7 @@ public partial class DocumentationSamplesTests
     private const string SampleWidgetSource = "src/HomeBlaze/HomeBlaze.Storage.Tests/Pages/DocumentationSampleWidget.cs";
     private const string SampleWidgetDocumentation = DocumentationFolder + "/development/building-subjects.md";
 
-    // For the part of a message that the reader of the JSON writes, which is not ours to pin.
-    private const string AnyEnding = "...";
-
     private static readonly Lazy<IReadOnlyList<Sample>> AllSamples = new(ReadSamples);
-
-    [GeneratedRegex("""<div class="markdown-block-error" role="alert">(Line \d+: .*?)</div>""", RegexOptions.Singleline)]
-    private static partial Regex ErrorBoxRegex();
 
     [GeneratedRegex(@"^Line (\d+): ")]
     private static partial Regex BoxLineRegex();
@@ -56,6 +49,9 @@ public partial class DocumentationSamplesTests
     public static TheoryData<string, int> ValidSamplesWithJsonBlock() => ToTheoryData(sample =>
         sample.ExpectedErrors is null &&
         MarkdownPageParser.Parse(sample.Source).AllBlocks.Any(block => block.ConfigurationJson is not null));
+
+    public static TheoryData<string, int> ValidSamplesWithPathsThatStartAtThePage() => ToTheoryData(sample =>
+        sample.ExpectedErrors is null && FindPathsThatStartAtThePage(MarkdownPageParser.Parse(sample.Source)).Any());
 
     [Fact]
     public void WhenDocumentationIsRead_ThenEveryFenceOfPageSourceIsFoundAsASample()
@@ -102,7 +98,7 @@ public partial class DocumentationSamplesTests
         var page = await fixture.AddPageAsync("Sample.md", sample.Source);
 
         // Assert
-        Assert.Empty(FindErrorBoxes(page));
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
 
         // A sample that the page reads as plain text has no error box either.
         var widgetBlocks = MarkdownPageParser.Parse(sample.Source).AllBlocks.Where(block => block.Kind == MarkdownBlockKind.Widget);
@@ -149,21 +145,31 @@ public partial class DocumentationSamplesTests
         var page = await fixture.AddPageAsync("Sample.md", sample.Source);
 
         // Assert
-        var expectedErrors = sample.ExpectedErrors!;
-        var errors = FindErrorBoxes(page);
-        Assert.NotEmpty(expectedErrors);
-        Assert.Equal(expectedErrors.Count, errors.Count);
-        Assert.All(expectedErrors.Zip(errors), pair =>
-        {
-            if (pair.First.EndsWith(AnyEnding, StringComparison.Ordinal))
-            {
-                Assert.StartsWith(pair.First[..^AnyEnding.Length], pair.Second, StringComparison.Ordinal);
-            }
-            else
-            {
-                Assert.Equal(pair.First, pair.Second);
-            }
-        });
+        Assert.NotEmpty(sample.ExpectedErrors!);
+        Assert.Equal(sample.ExpectedErrors, PageErrorBoxes.FindSortedByLine(page));
+    }
+
+    // A path with a prefix leads out of the sample, to the files next to the page or to the root, so a
+    // sample alone cannot say whether it is right. Every other path starts at the page: at a block that the
+    // sample names, or at a property of the page.
+    [Theory]
+    [MemberData(nameof(ValidSamplesWithPathsThatStartAtThePage))]
+    public async Task WhenSampleHasAPathThatStartsAtThePage_ThenThePathLeadsToSomething(string relativePath, int line)
+    {
+        // Arrange
+        var sample = FindSample(relativePath, line);
+        var fixture = await CreateFixtureAsync();
+        var resolver = fixture.Services.GetRequiredService<SubjectPathResolver>();
+
+        // Act
+        var page = await fixture.AddPageAsync("Sample.md", sample.Source);
+
+        // Assert
+        var pathsToNothing = FindPathsThatStartAtThePage(MarkdownPageParser.Parse(sample.Source))
+            .Where(path => !LeadsToSomething(path, page, resolver))
+            .Select(path => path.Text);
+
+        Assert.Empty(pathsToNothing);
     }
 
     private static TheoryData<string, int> ToTheoryData(Func<Sample, bool> filter)
@@ -227,44 +233,74 @@ public partial class DocumentationSamplesTests
                 .AddAssembly(typeof(Motor).Assembly);
         });
 
-    /// <summary>Gets the texts of all error boxes of the page as the page shows them, ordered by their line.</summary>
-    internal static List<string> FindErrorBoxes(MarkdownFile page) =>
-        SortByLine(
-            Flatten(page.Children.Values)
-                .OfType<HtmlSegment>()
-                .SelectMany(segment => ErrorBoxRegex().Matches(segment.Html))
-                .Select(match => WebUtility.HtmlDecode(match.Groups[1].Value)));
-
-    // The boxes inside a widget are found slot by slot, which is not the order of the page.
+    // The page is asked for its boxes by line, so the order in which the documentation lists them does not matter.
     private static List<string> SortByLine(IEnumerable<string> boxes) =>
         boxes
             .OrderBy(box => BoxLineRegex().Match(box) is { Success: true } match ? int.Parse(match.Groups[1].Value) : 0)
             .ToList();
 
-    private static IEnumerable<IInterceptorSubject> Flatten(IEnumerable<IInterceptorSubject?> subjects)
+    /// <summary>
+    /// Gets the paths of the sample that have no prefix: those of its expressions, whose last segment is a
+    /// property, and those of its <see cref="Widget"/> blocks and of the widgets in its json blocks, which
+    /// lead to a subject.
+    /// </summary>
+    private static IEnumerable<SamplePath> FindPathsThatStartAtThePage(MarkdownPage page)
     {
-        foreach (var subject in subjects.OfType<IInterceptorSubject>())
-        {
-            yield return subject;
+        var expressions = MarkdownSegmentBuilder.FindExpressions(page)
+            .Select(expression => new SamplePath(expression.Path, IsExpression: true));
 
-            var nested = subject is MarkdownFragment fragment ? fragment.Children.Values : GetSlotValues(subject);
-            foreach (var child in Flatten(nested))
-            {
-                yield return child;
-            }
+        var widgetBlocks = page.AllBlocks
+            .Where(block => block.Head?.Name == typeof(Widget).FullName)
+            .SelectMany(block => block.Head!.Arguments)
+            .Where(argument => argument.Key == nameof(Widget.Path))
+            .Select(argument => argument.Value);
+
+        var nestedWidgets = page.AllBlocks
+            .Where(block => block.ConfigurationJson is not null)
+            .SelectMany(block => FindNestedWidgetPaths(JsonNode.Parse(block.ConfigurationJson!)));
+
+        return expressions
+            .Concat(widgetBlocks.Concat(nestedWidgets).Select(path => new SamplePath(path, IsExpression: false)))
+            .Where(path => !path.Text.StartsWith('/') && path.Text.Split('/')[0] is not ("." or ".."));
+    }
+
+    /// <summary>Gets the path of every <see cref="Widget"/> that the JSON has at any depth.</summary>
+    private static IEnumerable<string> FindNestedWidgetPaths(JsonNode? node)
+    {
+        if (node is JsonObject json &&
+            json[ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName]?.GetValueKind() == JsonValueKind.String &&
+            json[ConfigurableSubjectSerializer.TypeDiscriminatorPropertyName]!.GetValue<string>() == typeof(Widget).FullName &&
+            json[nameof(Widget.Path)]?.GetValueKind() == JsonValueKind.String)
+        {
+            yield return json[nameof(Widget.Path)]!.GetValue<string>();
+        }
+
+        var children = node switch
+        {
+            JsonObject parent => parent.Select(property => property.Value),
+            JsonArray items => items,
+            _ => []
+        };
+
+        foreach (var path in children.SelectMany(FindNestedWidgetPaths))
+        {
+            yield return path;
         }
     }
 
-    private static IEnumerable<IInterceptorSubject?> GetSlotValues(IInterceptorSubject subject) =>
-        subject.GetType()
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.GetCustomAttribute<SlotAttribute>(true) is not null)
-            .SelectMany(property => property.GetValue(subject) switch
-            {
-                IInterceptorSubject value => [value],
-                IEnumerable<IInterceptorSubject?> values => values,
-                _ => []
-            });
+    // The same lookup as the page does for an expression and a Widget for its path. A property counts as
+    // found when it exists, whatever its value is.
+    private static bool LeadsToSomething(SamplePath path, MarkdownFile page, SubjectPathResolver resolver)
+    {
+        if (!path.IsExpression)
+        {
+            return resolver.ResolveScopedSubject(path.Text, PathStyle.Canonical, page) is not null;
+        }
+
+        var lastSlash = path.Text.LastIndexOf('/');
+        IInterceptorSubject? owner = lastSlash < 0 ? page : resolver.ResolveScopedSubject(path.Text[..lastSlash], PathStyle.Canonical, page);
+        return owner?.TryGetRegisteredProperty(path.Text[(lastSlash + 1)..]) is not null;
+    }
 
     /// <summary>Gets the names in <paramref name="written"/>, at any depth, that <paramref name="read"/> does not have at the same place.</summary>
     private static IEnumerable<string> FindNamesNotRead(JsonNode? written, JsonNode? read, string path)
@@ -308,4 +344,7 @@ public partial class DocumentationSamplesTests
 
     /// <summary>One sample of page source. <see cref="Line"/> is the 1-based line of its opening fence.</summary>
     private sealed record Sample(string RelativePath, int Line, string Source, IReadOnlyList<string>? ExpectedErrors);
+
+    /// <summary>One path in a sample. The last segment of the path of an expression is the name of a property.</summary>
+    private readonly record struct SamplePath(string Text, bool IsExpression);
 }

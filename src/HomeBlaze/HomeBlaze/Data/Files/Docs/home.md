@@ -33,6 +33,8 @@ Setup, deployment, and runtime configuration for operators and administrators.
 - [Subjects, Storage & Files](administration/subjects.md): Creating and editing subjects, `Root.json`, file layout
 - [Paths](administration/paths.md): Path syntax for referencing subjects
 - [Markdown Pages](administration/pages.md): Interactive pages with live expressions and widget blocks
+- [Page Widgets](administration/page-widgets.md): Reference of the widgets for markdown pages
+- [Page Errors](administration/page-errors.md): Every error message of a markdown page with its cause and its fix
 - [Monitoring](administration/monitoring.md): Health endpoints, OpenTelemetry and Seq
 
 ### Development

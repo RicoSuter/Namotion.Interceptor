@@ -152,7 +152,7 @@ public class MarkdownPageMistakeTests
         var page = await fixture.AddPageAsync("page.md", $"Text before.\n\n{widget}\n\nText after.");
 
         // Assert
-        Assert.Equal(expectedBoxes, DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Equal(expectedBoxes, PageErrorBoxes.FindSortedByLine(page));
 
         var html = MarkdownPageFixture.Html(page.Children);
         Assert.Contains("Text before.", html);
@@ -189,7 +189,7 @@ public class MarkdownPageMistakeTests
             """);
 
         // Assert
-        Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
         var flow = Assert.IsType<FlowLayout>(page.Children["flow"]);
         Assert.Equal(2, flow.Items.Length);
     }
@@ -226,7 +226,7 @@ public class MarkdownPageMistakeTests
         // Assert
         Assert.Equal(
             ["Line 3: FlowLayout has no default slot, so it cannot have content."],
-            DocumentationSamplesTests.FindErrorBoxes(page));
+            PageErrorBoxes.FindSortedByLine(page));
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public class MarkdownPageMistakeTests
         Assert.InRange(box, content.IndexOf("The body of the card.", StringComparison.Ordinal), int.MaxValue);
         Assert.InRange(content.IndexOf("The end of the body.", StringComparison.Ordinal), box, int.MaxValue);
         Assert.DoesNotContain("The footer of the card.", content);
-        Assert.Equal([$"Line 4: {HeadError}"], DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Equal([$"Line 4: {HeadError}"], PageErrorBoxes.FindSortedByLine(page));
     }
 
     [Fact]
@@ -280,7 +280,7 @@ public class MarkdownPageMistakeTests
             """);
 
         // Assert
-        Assert.Equal([$"Line 6: {HeadError}"], DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Equal([$"Line 6: {HeadError}"], PageErrorBoxes.FindSortedByLine(page));
         Assert.False(page.Children.ContainsKey("card"));
     }
 
@@ -304,7 +304,7 @@ public class MarkdownPageMistakeTests
             """);
 
         // Assert
-        Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
         var card = Assert.IsType<Card>(page.Children["card"]);
         Assert.Contains("The body of the card.", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(card.Content).Children));
         Assert.Contains("The footer of the card.", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(card.Footer).Children));
@@ -335,7 +335,7 @@ public class MarkdownPageMistakeTests
                 "Line 2: A block inside another block needs more ':' characters than the block around it. " +
                 "This block has 2 and the block around it, at line 1, has 2. Write ':::' here and on its closing line."
             ],
-            DocumentationSamplesTests.FindErrorBoxes(page));
+            PageErrorBoxes.FindSortedByLine(page));
 
         var card = Assert.IsType<Card>(page.Children["card"]);
         Assert.Contains("text", MarkdownPageFixture.Html(Assert.IsType<MarkdownFragment>(card.Content).Children));
@@ -366,7 +366,7 @@ public class MarkdownPageMistakeTests
                 "Line 3: This block is not closed. The line '::' that ends it is missing. " +
                 "The '::' at line 6 closed the block at line 4, which is inside this block and has 2 characters as well."
             ],
-            DocumentationSamplesTests.FindErrorBoxes(page));
+            PageErrorBoxes.FindSortedByLine(page));
         Assert.Contains("Text before.", MarkdownPageFixture.Html(page.Children));
     }
 
@@ -389,7 +389,7 @@ public class MarkdownPageMistakeTests
         // Assert
         Assert.Equal(
             ["Line 3: This block is not closed. The line '::' that ends it is missing."],
-            DocumentationSamplesTests.FindErrorBoxes(page));
+            PageErrorBoxes.FindSortedByLine(page));
         Assert.Contains("Text before.", MarkdownPageFixture.Html(page.Children));
     }
 
@@ -415,7 +415,7 @@ public class MarkdownPageMistakeTests
         // Assert
         Assert.Equal(
             ["Line 3: 'three' is not a valid value for 'Rows'. Expected a value of type Int32."],
-            DocumentationSamplesTests.FindErrorBoxes(page));
+            PageErrorBoxes.FindSortedByLine(page));
         Assert.False(page.Children.ContainsKey("grid"));
         Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
     }
@@ -434,7 +434,7 @@ public class MarkdownPageMistakeTests
             "page.md", $":: HomeBlaze.Components.GridLayout\n```json\n{{ \"Rows\": {value} }}\n```\n::");
 
         // Assert
-        Assert.Equal([$"Line 1: {expectedMessage}"], DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Equal([$"Line 1: {expectedMessage}"], PageErrorBoxes.FindSortedByLine(page));
     }
 
     [Fact]
@@ -462,7 +462,7 @@ public class MarkdownPageMistakeTests
             """);
 
         // Assert
-        var box = Assert.Single(DocumentationSamplesTests.FindErrorBoxes(page));
+        var box = Assert.Single(PageErrorBoxes.FindSortedByLine(page));
         Assert.StartsWith("Line 3: The value of 'Cells' in the json block cannot be read at Cells[1].Child: ", box);
         Assert.Contains("HomeBlaze.Components.Widgt", box);
         Assert.DoesNotContain("LineNumber", box);
@@ -484,7 +484,7 @@ public class MarkdownPageMistakeTests
             "page.md", $":: HomeBlaze.Components.GridLayout\n```json\n{{ \"Cells\": {cells} }}\n```\n::");
 
         // Assert
-        var box = Assert.Single(DocumentationSamplesTests.FindErrorBoxes(page));
+        var box = Assert.Single(PageErrorBoxes.FindSortedByLine(page));
         Assert.StartsWith(expectedStart, box);
         Assert.DoesNotContain("LineNumber", box);
     }
@@ -511,7 +511,7 @@ public class MarkdownPageMistakeTests
             """);
 
         // Assert
-        Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
         var host = Assert.IsType<TestChildHost>(page.Children["host"]);
         Assert.Equal(["one", "two"], host.Children.Select(child => Assert.IsType<TestCountedChild>(child).Name));
         Assert.Equal(2, counter.Count);
@@ -533,7 +533,7 @@ public class MarkdownPageMistakeTests
         // Assert
         Assert.Equal(
             ["Line 1: 'many' is not a valid value for 'Count'. Expected a value of type Int32."],
-            DocumentationSamplesTests.FindErrorBoxes(page));
+            PageErrorBoxes.FindSortedByLine(page));
         Assert.False(page.Children.ContainsKey("leaf"));
         Assert.Null(page.GetBlockSubject(0));
         Assert.Null(leaf.TryGetRegisteredSubject());
@@ -548,14 +548,14 @@ public class MarkdownPageMistakeTests
         var fixture = await MarkdownPageFixture.CreateAsync();
         var source = $":: {TestNamespace}.TestLeaf#leaf\n```json\n{{ \"Count\": \"many\" }}\n```\n::";
         var page = await fixture.AddPageAsync("page.md", source);
-        var boxesBefore = DocumentationSamplesTests.FindErrorBoxes(page);
+        var boxesBefore = PageErrorBoxes.FindSortedByLine(page);
 
         // Act
         await fixture.UpdatePageAsync(page, source.Replace("\"many\"", "4"));
 
         // Assert
         Assert.Single(boxesBefore);
-        Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Empty(PageErrorBoxes.FindSortedByLine(page));
         Assert.Equal(4, Assert.IsType<TestLeaf>(page.Children["leaf"]).Count);
     }
 
@@ -581,6 +581,6 @@ public class MarkdownPageMistakeTests
         var page = await fixture.AddPageAsync("page.md", source);
 
         // Assert
-        Assert.Equal([expectedBox], DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Equal([expectedBox], PageErrorBoxes.FindSortedByLine(page));
     }
 }

@@ -43,10 +43,10 @@ public class RepositoryPagesTests
         var page = MarkdownPageParser.Parse(ReadPage(relativePath));
 
         // Act
-        var html = Flatten(MarkdownSegmentBuilder.Build(page));
+        var html = PageErrorBoxes.RenderSyntaxOnly(page);
 
         // Assert
-        Assert.DoesNotContain("markdown-block-error", html);
+        Assert.DoesNotContain(PageErrorBoxes.CssClass, html);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class RepositoryPagesTests
         var page = MarkdownPageParser.Parse(ReadPage(ErrorsDemoPage));
 
         // Act
-        var html = Flatten(MarkdownSegmentBuilder.Build(page));
+        var html = PageErrorBoxes.RenderSyntaxOnly(page);
 
         // Assert
         Assert.Contains("closes no block.", html);
@@ -67,14 +67,6 @@ public class RepositoryPagesTests
 
     internal static string ReadPage(string relativePath) =>
         File.ReadAllText(Path.Combine(FindRepositoryRoot(), relativePath)).Replace("\r\n", "\n");
-
-    private static string Flatten(IEnumerable<MarkdownSegment> segments) =>
-        string.Concat(segments.Select(segment => segment switch
-        {
-            HtmlMarkdownSegment html => html.Html,
-            BlockMarkdownSegment block => Flatten(block.Content),
-            _ => string.Empty
-        }));
 
     internal static string FindRepositoryRoot()
     {

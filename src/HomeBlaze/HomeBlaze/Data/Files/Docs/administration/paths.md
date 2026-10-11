@@ -1,7 +1,7 @@
 ---
 title: Paths
 navTitle: Paths
-position: 5
+position: 7
 ---
 
 # Paths
@@ -23,7 +23,7 @@ On a markdown page the current subject is the page, and a path without a prefix 
 
 ---
 
-## Canonical Syntax and `[InlinePaths]` {#canonical}
+## Canonical Syntax and `[InlinePaths]`
 
 For `[InlinePaths]` dictionaries (like the `Children` dictionary on folders), child keys are inlined as path segments:
 
@@ -35,7 +35,7 @@ This is the canonical (route) form of `/Children[Demo]/Children[Conveyor]/Proper
 
 ---
 
-## Brackets for Collection Indices {#brackets}
+## Brackets for Collection Indices
 
 Use brackets when accessing non-inlined collection entries explicitly:
 

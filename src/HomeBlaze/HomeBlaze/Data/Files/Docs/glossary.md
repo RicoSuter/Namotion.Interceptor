@@ -173,7 +173,7 @@ A part of a markdown page between a head line that starts with two or more colon
 
 ### Slot
 
-A property of a widget type that a markdown page fills with the content of a block, declared with `[Slot]`. A type has at most one default slot, which takes everything in its block that is not a slot block, and any number of named slots. A slot of the type `IInterceptorSubject` holds content. A slot with a subject class as its type gets one instance of that class per block, configured by the arguments of the block. See [Markdown Pages: Content and Slots](administration/pages.md#slots) for the page side and [Building Subjects: Content Slots](development/building-subjects.md#content-slots) for the declaration.
+A property of a widget type that a markdown page fills with the content of a block, declared with `[Slot]`. A type has at most one default slot, which takes everything in its block that is not a slot block, and any number of named slots. A slot of the type `IInterceptorSubject` holds content. A slot with a subject class as its type gets one instance of that class per block, configured by the arguments of the block. See [Markdown Pages: Content and Slots](administration/pages.md#content-and-slots) for the page side and [Building Subjects: Content Slots](development/building-subjects.md#content-slots) for the declaration.
 
 ### Fragment
 
@@ -195,11 +195,11 @@ Full prefix table, examples, and resolution order: [Paths](administration/paths.
 
 ### Canonical Notation
 
-For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths — Canonical](administration/paths.md#canonical).
+For `[InlinePaths]` collections, child keys are inlined as path segments: `/Demo/Conveyor`. See [Paths — Canonical](administration/paths.md#canonical-syntax-and-inlinepaths).
 
 ### Brackets for Collection Indices
 
-Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths — Brackets](administration/paths.md#brackets).
+Used for non-inlined collections: `/Devices[0]/Temperature`. See [Paths — Brackets](administration/paths.md#brackets-for-collection-indices).
 
 ---
 

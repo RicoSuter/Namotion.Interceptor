@@ -982,7 +982,7 @@ When a widget has a corresponding Edit component, the host automatically renders
 
 A widget type can take content from the markdown page it is used on: text, expressions and other widgets. The type declares where the content goes with `[Slot]` on properties, and the page fills these properties from the content of the block. The attribute is in `HomeBlaze.Abstractions.Attributes`.
 
-[Markdown Pages](../administration/pages.md) is the reference for the page side: the colon lines that open and close a block, the arguments and what a page author sees when something is wrong. This section is the side of the widget author. Its samples of page source use the names of that reference: a block starts with a head line of colons and a name, and a block whose name has no dot is a slot block.
+[Markdown Pages](../administration/pages.md) is the guide for the page side: the colon lines that open and close a block, the arguments and what a page author sees when something is wrong. [Page Widgets](../administration/page-widgets.md) is the reference of the widgets that ship, and [Page Errors](../administration/page-errors.md) lists the messages. This section is the side of the widget author. Its samples of page source use the names of that guide: a block starts with a head line of colons and a name, and a block whose name has no dot is a slot block.
 
 #### Declaring Slots
 
@@ -1093,7 +1093,7 @@ The value of `Content` of the second `Tab`.
 ::
 ~~~~
 
-**A single typed value.** The same without an array: one block creates one instance. None of the widgets that ship has such a slot. The `SidebarLayout` of ["A Complete Widget"](building-subjects.md#complete-widget) below declares one:
+**A single typed value.** The same without an array: one block creates one instance. None of the widgets that ship has such a slot. The `SidebarLayout` of ["A Complete Widget"](#a-complete-widget) below declares one:
 
 ```csharp
 [Slot]
@@ -1128,6 +1128,7 @@ A slot property must meet these rules. A declaration that breaks one cannot be u
 | A subject class as slot type can be created, so it is no interface and no abstract class | `the type GaugeBase of the slot 'Scale' cannot be created because it is abstract or an interface.` |
 | The slot name is not empty | `the slot of the property 'Content' needs a name.` |
 | The slot name contains no dot, because a name with a dot is a type name on a page | `the slot name 'My.Slot' must not contain a dot.` |
+| The slot name can be written as the name of a slot block: it starts with a letter or `_` and has only letters, digits and `_` | `the slot name 'My-Item' cannot be written on a page. A slot name starts with a letter or '_' and has only letters, digits and '_'.` |
 | Each slot name is declared once per type | `the slot 'Content' is declared twice.` |
 | A type has at most one default slot | `there is more than one default slot.` |
 | The default slot has the type `IInterceptorSubject` and is no array | `the default slot 'Content' must be of type IInterceptorSubject.` |
@@ -1235,7 +1236,7 @@ What a widget author must know about the life of a subject that a page creates. 
 - **Names of the configuration**: A page names a `[Configuration]` property by its property name, for example `TargetSpeed=1200` on the head line and `"TargetSpeed"` in the `json` block, also for the properties of nested objects and subjects. Configuration files keep camelCase, and a page uses the property names. An explicit JSON name on a property, such as `[JsonPropertyName]`, applies to configuration files only.
 - **Creation**: The page creates the subject through the service provider, so constructor injection works, then sets the `[Configuration]` properties that the block names and then fills the slots. It does not call `ApplyConfigurationAsync` for a new subject.
 - **Kept across reloads**: The page is read again with every change of its text. While the block stays, the page keeps the instance and updates it in place: it sets every `[Configuration]` property that the block names again, also when the value did not change, calls `ApplyConfigurationAsync`, and assigns the slots again. Expect all of this to run often.
-- **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#identity) has the rules as a page author sees them.
+- **A new instance**: The page creates a new instance when the name, the position or the type of the block changes, when an argument is removed from the block, and when the block around it gets a new instance. The section "What an Edit of the Page Keeps" of [Markdown Pages](../administration/pages.md#what-an-edit-of-the-page-keeps) has the rules as a page author sees them.
 - **Slot values**: A content slot keeps its value while its block stays, and a list slot gets a new array on every reload. A slot whose block was removed is set to `null`, or to an empty array.
 - **Subjects in the configuration**: A subject that is a value of a `[Configuration]` property, like the child of a grid cell, is created again on every reload, because the configuration is applied again.
 - **Release after an error**: The subject of a block that ends as an error box is released again. This also holds for the typed slot values and nested subjects that were created for it. A hosted subject can therefore get `StopAsync` without a preceding `StartAsync`.
@@ -1243,11 +1244,11 @@ What a widget author must know about the life of a subject that a page creates. 
 - **Never wait for the own page**: A subject must not wait for a write or a reload of its own page from its constructor, from a property setter or from `ApplyConfigurationAsync`. The reloads of one page run one after the other, so such a wait would never end.
 - **Paths**: A subject that resolves a path from its configuration should call `ResolveScopedSubject` or `ResolveScopedValue`, so that the path starts at the page and can use the names of blocks. See "Referencing Other Subjects" above.
 
-#### A Complete Widget {#complete-widget}
+#### A Complete Widget
 
 A layout that shows page content next to a sidebar, from the subject to the component to the page. The sidebar is a typed slot value with a width, and the main content is the default slot.
 
-The subjects, in a subject project as [Project Structure](building-subjects.md#project-structure) describes it:
+The subjects, in a subject project as [Project Structure](#project-structure) describes it:
 
 ```csharp
 using System.ComponentModel;

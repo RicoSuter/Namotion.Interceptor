@@ -50,7 +50,7 @@ For the design rationale (pluggable backends, recovery behavior), see [Storage D
 
 ---
 
-## File Types {#file-types}
+## File Types
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|

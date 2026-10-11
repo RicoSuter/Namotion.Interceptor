@@ -1,13 +1,9 @@
-using System.Net;
-using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Components;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
-using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
-using Namotion.Interceptor;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -16,13 +12,10 @@ namespace HomeBlaze.Storage.Tests.Pages;
 /// stops working is found here and not by the person who opens it.
 /// </summary>
 [Collection(MarkdownPageFixture.StorageCollection)]
-public partial class DemoPagesTests
+public class DemoPagesTests
 {
     // The reader of the JSON adds its own text after this, which is not ours to pin.
     private const string BrokenJsonError = "The json block must contain a valid JSON object without duplicate keys.";
-
-    [GeneratedRegex("""<div class="markdown-block-error" role="alert">Line \d+: (.*?)</div>""", RegexOptions.Singleline)]
-    private static partial Regex ErrorBoxRegex();
 
     // References.md is here as well: what a Widget block says about its path is shown by the widget when it
     // renders and is no block error, and the sample motors next to the pages are not part of the fixture.
@@ -40,7 +33,7 @@ public partial class DemoPagesTests
         var page = await AddDemoPageAsync(fixture, fileName);
 
         // Assert
-        Assert.Empty(FindErrorMessages(page));
+        Assert.Empty(PageErrorBoxes.FindMessages(page));
     }
 
     // A page that creates nothing has no error box either, so each page is also asked for subjects it names.
@@ -103,7 +96,8 @@ public partial class DemoPagesTests
             "The subject(name) fence is no longer supported. Write the subject as a block: a line with :: Full.Type.Name#name key=value, then a closing :: line."
         ];
 
-        var messages = FindErrorMessages(page)
+        // The order is that of the page, because every error of this page is in a section of its own.
+        var messages = PageErrorBoxes.FindMessages(page)
             .Select(message => message.StartsWith(BrokenJsonError, StringComparison.Ordinal) ? BrokenJsonError : message);
 
         Assert.Equal(expectedMessages, messages);
@@ -179,40 +173,4 @@ public partial class DemoPagesTests
         MarkdownPageParser.Parse(ReadDemoPage(fileName)).AllBlocks
             .Single(block => block.Head is not null && block.Head.Arguments.Any(argument => argument.Key == "Title" && argument.Value == title))
             .Line;
-
-    /// <summary>Gets the messages of all error boxes of the page, in the order of the page, without the line numbers.</summary>
-    /// <remarks>
-    /// The order is that of the page because the parser fills the children of a page and of a fragment in
-    /// document order into a new dictionary and removes nothing from it, and such a dictionary enumerates
-    /// in the order of insertion.
-    /// </remarks>
-    private static List<string> FindErrorMessages(MarkdownFile page) =>
-        Flatten(page.Children.Values)
-            .OfType<HtmlSegment>()
-            .SelectMany(segment => ErrorBoxRegex().Matches(segment.Html))
-            .Select(match => WebUtility.HtmlDecode(match.Groups[1].Value))
-            .ToList();
-
-    private static IEnumerable<IInterceptorSubject> Flatten(IEnumerable<IInterceptorSubject?> subjects)
-    {
-        foreach (var subject in subjects.OfType<IInterceptorSubject>())
-        {
-            yield return subject;
-
-            IInterceptorSubject?[] nested = subject switch
-            {
-                MarkdownFragment fragment => [.. fragment.Children.Values],
-                Card card => [card.Content, card.Footer],
-                FlowLayout flow => [.. flow.Items],
-                TabLayout tabs => [.. tabs.Tabs],
-                Tab tab => [tab.Content],
-                _ => []
-            };
-
-            foreach (var child in Flatten(nested))
-            {
-                yield return child;
-            }
-        }
-    }
 }
