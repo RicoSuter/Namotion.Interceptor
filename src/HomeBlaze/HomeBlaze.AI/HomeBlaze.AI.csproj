@@ -6,6 +6,7 @@
 
     <ItemGroup>
         <PackageReference Include="Anthropic" />
+        <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
         <PackageReference Include="Microsoft.Extensions.AI" />
         <PackageReference Include="ModelContextProtocol.AspNetCore" />
     </ItemGroup>

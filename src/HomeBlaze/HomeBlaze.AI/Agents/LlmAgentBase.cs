@@ -18,6 +18,7 @@ namespace HomeBlaze.AI.Agents;
 /// A subclass only executes a turn on its backend and resets its chat session.
 /// </summary>
 [InterceptorSubject]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The agent base coordinates configuration, triggers, the turn gate, prompts, memory, timeline and tool scoping around one lifecycle and state lock; the logic already lives in dedicated helper types, so splitting further would spread that shared state.")]
 public abstract partial class LlmAgentBase : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
 {
     /// <summary>The text of the error entry recorded for a chat message that was cancelled before a reply.</summary>

@@ -11,6 +11,7 @@ namespace HomeBlaze.AI.Agents;
 /// <summary>
 /// The agent-owned memory: key-value entries whose keys are slash paths, included in the system prompt of every turn.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "Validation, the update_memory tool and file persistence with legacy migration form one consistency unit under the memory's write lock.")]
 public sealed class AgentMemory
 {
     /// <summary>The maximum total size of all keys and values in UTF-8 bytes.</summary>

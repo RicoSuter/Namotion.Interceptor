@@ -21,6 +21,7 @@ namespace HomeBlaze.AI.Agents.Anthropic;
 [Category("AI")]
 [Description("AI agent using the Anthropic API with an API key.")]
 [InterceptorSubject]
+[System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "The in-process turn adapts between the Anthropic SDK, its exception hierarchy, Microsoft.Extensions.AI and the agent types; that coupling is the adapter's purpose.")]
 public partial class AnthropicAgent : LlmAgentBase
 {
     private const int SummaryMaxOutputTokens = 4096;
@@ -260,6 +261,7 @@ public partial class AnthropicAgent : LlmAgentBase
         return text.ToString();
     }
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S6667", Justification = "The cancellation is an expected stop, and the failure is logged with its redacted message only because the exception text can echo the API key.")]
     private async Task CompactHistoryIfNeededAsync(
         IChatClient client, string apiKey, string model, int maxTokens, long firstRequestInputTokens, long lastRequestInputTokens,
         CancellationToken cancellationToken)
