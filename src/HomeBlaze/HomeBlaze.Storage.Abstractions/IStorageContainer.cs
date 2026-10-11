@@ -19,6 +19,13 @@ public interface IStorageContainer
     StorageStatus Status { get; }
 
     /// <summary>
+    /// Gets a snapshot of the names under which the direct children of this container are stored: a subject
+    /// stored as a JSON file without the file extension, any other file with its extension, and a folder
+    /// with its folder name.
+    /// </summary>
+    IReadOnlyCollection<string> ChildNames { get; }
+
+    /// <summary>
     /// Gets metadata about a blob at the specified path.
     /// </summary>
     /// <param name="path">The relative path to the blob.</param>

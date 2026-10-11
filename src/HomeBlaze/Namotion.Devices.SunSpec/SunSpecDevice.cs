@@ -21,8 +21,10 @@ namespace Namotion.Devices.SunSpec;
 /// A SunSpec device (inverter, meter, storage) read over Modbus TCP. Discovers the model chain of every configured
 /// unit ID on each connect, and again periodically while a configured unit is missing. Read only.
 /// </summary>
-[Category("Devices")]
+[Category("Energy")]
 [Description("SunSpec device (inverter, meter, storage) via Modbus TCP, read only")]
+[DisplayName("SunSpec device")]
+[SubjectIcon("SolarPower")]
 [InterceptorSubject]
 [System.Diagnostics.CodeAnalysis.SuppressMessage("SonarAnalyzer", "S1200", Justification = "A device root aggregates its function subjects and the capability interfaces it implements; splitting it would only spread the same dependencies across files.")]
 public partial class SunSpecDevice :

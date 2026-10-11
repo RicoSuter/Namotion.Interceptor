@@ -21,8 +21,10 @@ namespace Namotion.Devices.Philips.Hue;
 /// Philips Hue Bridge for controlling lights, sensors, and buttons.
 /// Discovers and manages child devices via the Hue API.
 /// </summary>
-[Category("Devices")]
+[Category("Lighting")]
 [Description("Philips Hue Bridge for controlling lights, sensors, and buttons")]
+[DisplayName("Philips Hue bridge")]
+[SubjectIcon("Hub")]
 [InterceptorSubject]
 public partial class HueBridge : BackgroundService,
     IConfigurable,

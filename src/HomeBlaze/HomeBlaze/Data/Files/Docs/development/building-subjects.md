@@ -281,11 +281,92 @@ public partial class Motor : ITitleProvider
 ### IIconProvider
 
 ```csharp
-using MudBlazor;
-
 public partial class Motor : IIconProvider
 {
-    public string? Icon => Icons.Material.Filled.Settings;
+    public string? IconName => "Settings";  // Name of a Material filled icon, shown in navigation, browser, etc.
+}
+```
+
+## Create Dialog
+
+Every registered, non-abstract subject type that implements `IConfigurable` is offered in the create dialog, which is opened from a storage folder, from the markdown editor and from the grid and canvas layouts. The dialog shows a searchable list of types with a group sidebar, and then a configure page for the chosen type. The configure page shows the type's Setup component when it has one, otherwise its Edit component, and otherwise the generated properties editor for its `[Configuration]` properties. Setup and Edit components receive `IsCreating = true`. "Back" on the configure page returns to the list. Typing in the search box selects the group "All" so that a match is never hidden behind a group that was selected before, and selecting a group during a search narrows the matches to it.
+
+The dialog describes a type with attributes on the class. All of them are optional:
+
+| Attribute | Purpose | Without it |
+|-----------|---------|------------|
+| `[DisplayName("Motor")]` | Title in the list and in the dialog title, in sentence case | Class name split into words in sentence case: `ShellyDevice` becomes "Shelly device" and `HTTPServer` becomes "HTTP server" |
+| `[Description("...")]` | One sentence below the title, also searched | No description |
+| `[Category("Samples")]` | Group in the sidebar, see [Groups](#groups) | Group "Other", listed last |
+| `[SubjectIcon("Settings")]` | Icon in the list, using the same names as `IIconProvider.IconName`. An unknown icon name shows the generic article icon | Icon of the group for a [built-in group](#groups), otherwise a generic icon |
+
+`[DisplayName]`, `[Description]` and `[Category]` come from `System.ComponentModel`, `[SubjectIcon]` from `HomeBlaze.Abstractions.Attributes`. The create dialog attributes, including the two under [Hiding a Type](#hiding-a-type), are read from the class itself and are not inherited from a base class.
+
+```csharp
+using System.ComponentModel;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor.Attributes;
+
+[Category("Samples")]
+[Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
+[SubjectIcon("Settings")]
+[InterceptorSubject]
+public partial class Motor : BackgroundService, IConfigurable
+{
+    // ...
+}
+```
+
+`[SubjectIcon]` is needed in addition to `IIconProvider` because the dialog has no instance to ask, and an instance's icon often depends on its state.
+
+### Groups
+
+A type belongs to exactly one group, the one that its `[Category]` names. The sidebar lists the groups alphabetically, with "Other" last. Use the built-in group that says what the type is for:
+
+| Group | Use it for |
+|-------|------------|
+| Climate | Heating, cooling and weather |
+| Dashboard | Layouts and the widgets that are placed in them |
+| Energy | Inverters, energy meters, batteries and vehicle chargers |
+| Hardware | Local hardware access, such as GPIO pins |
+| History | Stores that record history |
+| Integrations | Connections to external systems, such as an OPC UA client or server |
+| Lighting | Lights and lighting bridges |
+| Media | Audio and video players |
+| Samples | Examples and simulated devices |
+| Switches | Switches, relays and smart plugs |
+| System | Parts of HomeBlaze itself, such as storage and plugins |
+
+When none of them fits, name a new group in `[Category]`. Using the name is all it takes to create the group, and group names are compared ignoring case. A type in such a group that sets no `[SubjectIcon]` gets a generic icon.
+
+### Name of a New Subject
+
+Where the new subject needs a name, the dialog asks for it on the configure page and suggests the class name, with a number appended when it is already used (`Motor`, `Motor2`). A name that already exists in the same place is rejected, and the messages name the field by its label ("This file name is already used").
+
+- In a storage folder the field is labelled "File name" and shows the suffix `.json`. The file name is part of the subject's path, and the path is its ID, so it should not be changed later.
+- In the markdown editor the field is labelled "Block name" and has no suffix. It becomes the name in the `subject(Name)` block.
+- The grid and canvas layouts ask for no name.
+
+### Hiding a Type
+
+Two attributes from `HomeBlaze.Abstractions.Attributes` control whether a type is offered:
+
+- `[ExcludeFromCreation]`: the type is never offered. Use it for a type that only exists as part of another subject, such as the cell of a grid.
+- `[SingleInstance]`: the type is offered only while no instance of it exists in the subject graph. An instance of a derived type does not count.
+
+```csharp
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor.Attributes;
+
+[ExcludeFromCreation]
+[InterceptorSubject]
+public partial class GridCell : IConfigurable
+{
+    // ...
 }
 ```
 
@@ -497,6 +578,7 @@ This associates `TargetSpeed_Minimum` and `TargetSpeed_Maximum` as metadata for 
 ## Complete Example: Motor
 
 ```csharp
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
@@ -505,6 +587,10 @@ using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Samples;
 
+[Category("Samples")]
+[Description("Simulated motor with speed control and temperature monitoring")]
+[DisplayName("Motor")]
+[SubjectIcon("Settings")]
 [InterceptorSubject]
 public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
@@ -550,7 +636,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     // Display interfaces
 
     public string? Title => Name;
-    public string? Icon { get; } = null;
+    public string? IconName => "Settings";
 
     // Constructor with defaults
 
@@ -706,6 +792,8 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
 | `[Operation]` | Executable actions from UI | No | Yes (as buttons) |
+| `[DisplayName]`, `[Description]`, `[Category]`, `[SubjectIcon]` | Describe the type in the create dialog | No | In the create dialog |
+| `[ExcludeFromCreation]`, `[SingleInstance]` | Hide the type from the create dialog | No | No |
 
 | Interface | Purpose |
 |-----------|---------|
@@ -730,7 +818,7 @@ Core platform interfaces and attributes:
 
 | Area | Contents |
 |------|----------|
-| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `[SubjectIcon]`, `[ExcludeFromCreation]`, `[SingleInstance]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
@@ -984,26 +1072,51 @@ Edit components provide configuration forms:
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
 @implements ISubjectEditComponent
 
-<MudTextField @bind-Value="MotorSubject.Name" Label="Name" />
-<MudNumericField @bind-Value="MotorSubject.TargetSpeed" Label="Target Speed" />
+<MudTextField @bind-Value="_name"
+              @bind-Value:after="OnFieldChanged"
+              Label="Name"
+              Required="true"
+              Immediate="true" />
 
 @code {
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
+    [Parameter]
+    public bool IsCreating { get; set; }
+
     private Motor? MotorSubject => Subject as Motor;
 
-    public bool IsValid => !string.IsNullOrWhiteSpace(MotorSubject?.Name);
-    public bool IsDirty { get; private set; }
+    private string _name = string.Empty;
+    private string _originalName = string.Empty;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name);
+    public bool IsDirty => _name != _originalName;
 
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    public Task SaveAsync(CancellationToken cancellationToken = default)
+    protected override void OnInitialized()
     {
-        // Save logic here
-        IsDirty = false;
-        IsDirtyChanged?.Invoke(false);
+        _name = MotorSubject?.Name ?? string.Empty;
+        _originalName = _name;
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (MotorSubject != null && IsValid)
+        {
+            MotorSubject.Name = _name;
+            _originalName = _name;
+            IsDirtyChanged?.Invoke(false);
+        }
+
         return Task.CompletedTask;
     }
 }
@@ -1017,7 +1130,10 @@ Edit components provide configuration forms:
 | `IsDirty` | Have changes been made? |
 | `IsValidChanged` | Event fired when validity changes |
 | `IsDirtyChanged` | Event fired when dirty state changes |
+| `IsCreating` | Set by the hosting panel: `true` while the subject is being created, `false` while it is edited |
 | `SaveAsync` | Persist changes |
+
+A component raises `IsValidChanged` whenever `IsValid` changes. The remarks on `ISubjectEditComponent.IsValidChanged` describe what the dialogs and the page editor do with it. The handler of `@bind-Value:after` runs each time the bound value is committed, whichever way it changed (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not cover. A text field commits its value when it loses focus, and with `Immediate="true"` on every keystroke.
 
 ### Edit Component Lifecycle: OnInitialized vs OnParametersSet
 
@@ -1038,15 +1154,16 @@ Edit components provide configuration forms:
 
 <MudForm>
     <MudTextField @bind-Value="_name"
+                  @bind-Value:after="OnFieldChanged"
                   Label="Name"
                   Required="true"
-                  OnKeyUp="OnFieldChanged" />
+                  Immediate="true" />
 
     <MudNumericField @bind-Value="_targetSpeed"
+                     @bind-Value:after="OnFieldChanged"
                      Label="Target Speed (RPM)"
                      Min="0" Max="10000"
-                     Class="mt-4"
-                     OnChange="OnFieldChanged" />
+                     Class="mt-4" />
 </MudForm>
 
 @code {
@@ -1167,7 +1284,7 @@ protected override void OnParametersSet()
 
 This pattern applies to:
 - **Edit components** (opened via SubjectEditDialog)
-- **Setup/creation wizards** (SubjectSetupDialog uses the same edit components with `IsCreating = true`)
+- **The create dialog** (SubjectSetupDialog hosts the same edit components with `IsCreating = true`)
 - **Widget components** (if they use local state for inline editing)
 - **Configuration editors** (ConfigurationPropertiesEditor pattern)
 

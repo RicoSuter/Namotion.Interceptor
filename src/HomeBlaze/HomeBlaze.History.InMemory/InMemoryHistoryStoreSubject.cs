@@ -23,6 +23,8 @@ namespace HomeBlaze.History.InMemory;
 /// </summary>
 [Category("History")]
 [Description("Records recent [State] history in memory (priority 100).")]
+[DisplayName("In-memory history")]
+[SubjectIcon("History")]
 [InterceptorSubject]
 public partial class InMemoryHistoryStoreSubject :
     BackgroundService, IConfigurable, ITitleProvider, IHistoryStore, ILifecycleHandler

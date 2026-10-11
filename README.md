@@ -4,7 +4,7 @@
 
 # Namotion.Interceptor for .NET
 
-Namotion.Interceptor is a .NET library for building reactive applications with automatic property tracking and change propagation. It uses **C# 13 partial properties** and **source generation** to transform your classes into observable object graphs, without runtime reflection or proxy objects.
+Namotion.Interceptor is a .NET library for building reactive applications with automatic property tracking and change propagation. It uses **C# 13 partial properties** and **source generation** to transform your classes into observable object graphs, without reflection on property access or proxy objects.
 
 Mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining reactive capabilities.
 
@@ -15,10 +15,10 @@ The library supports **bidirectional synchronization** with external systems. Wh
 ## Why Namotion.Interceptor?
 
 - **Reactive object graphs** - Property changes automatically propagate to derived properties and external systems
-- **Zero runtime reflection** - All interception logic is generated at compile-time for maximum performance
+- **No reflection on property access** - All interception logic is generated at compile-time for maximum performance
 - **Bidirectional synchronization** - Connect your object model to MQTT brokers, OPC UA servers, or databases with minimal code
 - **Clean domain models** - Your classes stay as POCOs with simple attributes
-- **INotifyPropertyChanged built-in** - Generated classes implement it automatically, including derived properties, for UI data binding
+- **INotifyPropertyChanged built-in** - Generated classes implement it automatically for UI data binding, including derived properties when derived property change detection is enabled
 
 ## Packages
 
@@ -113,12 +113,12 @@ For the patterns that work, the patterns that don't (collection mutation, explic
 
 The source generator (`Namotion.Interceptor.Generator`) is the bridge between your `partial` declarations and the interception pipeline. It runs at compile-time.
 
-For each partial property, the generator expands the declaration into a real getter and setter that route through the subject's context. A read passes through the chain of `IReadInterceptor`s. A write first runs your optional `OnXxxChanging` hook (which can cancel or coerce the value), then the chain of `IWriteInterceptor`s (where validation, change tracking, and source synchronization plug in), then the backing-field write, then `OnXxxChanged`, and finally raises `INotifyPropertyChanged`.
+For each partial property, the generator expands the declaration into a real getter and setter that route through the subject's context. A read passes through the chain of `IReadInterceptor`s. A write first runs your optional `OnXxxChanging` hook (which can cancel or coerce the value), then the chain of `IWriteInterceptor`s (where validation, change tracking, and source synchronization plug in), whose innermost step writes the backing field. Only if that field write happened does the setter call `OnXxxChanged` and raise `INotifyPropertyChanged`.
 
 Concretely, for each `[InterceptorSubject]` class the generator emits:
 
 - A backing field paired with the expanded getter and setter for every partial property.
-- A constructor accepting `IInterceptorSubjectContext`, chained to the parameterless constructor, which the generator also adds when the class declares no constructor.
+- A constructor accepting `IInterceptorSubjectContext`, chained to the parameterless constructor, which the generator also adds when the class declares no constructor (see [Constructors](docs/generator.md#constructors) for when each is generated).
 - `IInterceptorSubject`, `INotifyPropertyChanged`, and `IRaisePropertyChanged` implementations.
 - Static metadata describing the class's properties.
 
@@ -132,15 +132,17 @@ partial void OnFirstNameChanging(ref string newValue, ref bool cancel)
 }
 ```
 
-Because everything is generated at compile-time, there is no runtime reflection or proxy creation. See [Generator](docs/generator.md) for supported features (inheritance, init-only, virtual/override, partial-class spanning) and limitations.
+Because the interception code is generated at compile-time, property access involves no reflection and no proxy creation. See [Generator](docs/generator.md) for supported features (inheritance, init-only, virtual/override, partial-class spanning) and limitations.
 
 If partial properties aren't an option (for example, you need to add interfaces to a subject at runtime), the [Dynamic](docs/dynamic.md) package builds equivalent subjects from interfaces using Castle DynamicProxy. For advanced scenarios where neither path fits, `IInterceptorSubject` can also be implemented by hand.
 
 ### Interception Pipeline
 
-Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives the value plus a `next` delegate, so it can run code before and after the actual field access. This is how tracking, validation, sources, transactions, and everything else plug in.
+Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives a context and a `next` delegate, so it can run code before and after the actual field access. A write interceptor finds the new value in the context; a read interceptor gets the value back from `next`. This is how tracking, validation, sources, transactions, and everything else plug in.
 
 ```csharp
+using Namotion.Interceptor.Interceptors;
+
 public class LoggingInterceptor : IWriteInterceptor
 {
     public void WriteProperty<T>(ref PropertyWriteContext<T> context, WriteInterceptionDelegate<T> next)
@@ -169,7 +171,7 @@ var context = InterceptorSubjectContext
     .WithFullPropertyTracking();
 ```
 
-`WithFullPropertyTracking()` registers equality checking, derived-property change detection, the property-change subscriptions (observable, queue, and per-property), and context inheritance for child subjects.
+`WithFullPropertyTracking()` registers equality checking, derived-property change detection, the property-change subscriptions (observable, queue, and per-property), lifecycle tracking, and context inheritance for child subjects.
 
 The samples below use the `Person` class from the Core section above.
 
@@ -196,6 +198,8 @@ person.LastName = "Doe";
 // Property 'FullName' changed from 'John ' to 'John Doe'.
 ```
 
+By default the callbacks run on the thread pool, so the lines above appear shortly after each assignment, in order. Pass `ImmediateScheduler.Instance` to `GetPropertyChangeObservable` to run them synchronously inside the setter.
+
 For high-throughput scenarios (>1000 changes/second, source synchronization, IoT pipelines), use the lock-free queue instead of the observable. It avoids per-event allocations and is the mechanism the connectors use internally. To follow a single property, subscribe to it directly instead of filtering the whole stream. All three mechanisms are described in [Tracking](docs/tracking.md#change-tracking).
 
 ### Derived Properties
@@ -207,14 +211,20 @@ When `[Derived]` properties read other properties during evaluation, the trackin
 The tracking package also reports when subjects enter or leave the object graph:
 
 ```csharp
+var lifecycle = context.TryGetLifecycleInterceptor()!;
+lifecycle.SubjectAttached += change => Console.WriteLine($"Attached: {((Person)change.Subject).FirstName}");
+lifecycle.SubjectDetaching += change => Console.WriteLine($"Detaching: {((Person)change.Subject).FirstName}");
+
 person.Children = [new Person { FirstName = "Alice" }, new Person { FirstName = "Bob" }];
 // Attached: Alice
 // Attached: Bob
 
 person.Children = [];
-// Detached: Alice
-// Detached: Bob
+// Detaching: Bob
+// Detaching: Alice
 ```
+
+Collection items detach in reverse order. Handlers registered at startup implement `ILifecycleHandler` instead, see [Tracking](docs/tracking.md#subject-lifecycle-tracking).
 
 Higher-level features rely on this to start and stop work as the graph grows and shrinks: the registry inserts and removes entries, the hosting package starts and stops services, and connectors subscribe and unsubscribe from external sources.
 
@@ -303,6 +313,8 @@ Writes are **local-first** by default: the in-process model updates immediately 
 The MQTT connector illustrates a typical setup. Define your subject with topic mappings:
 
 ```csharp
+using Namotion.Interceptor.Registry.Attributes;
+
 [InterceptorSubject]
 public partial class Sensor
 {
@@ -371,7 +383,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor** | Core interfaces and the read/write interceptor pipeline | [Interceptors](docs/interceptor.md) |
-| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | [Generator](docs/generator.md) |
+| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes | [Generator](docs/generator.md) |
 | **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime | [Dynamic](docs/dynamic.md) |
 
 ### Tracking

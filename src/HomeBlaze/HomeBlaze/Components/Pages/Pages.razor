@@ -50,14 +50,14 @@
                                 </div>
                                 <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                                     <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
-                                        <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="StateHasChanged"/>
+                                        <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
                                     </div>
 
                                     <div class="d-flex justify-end gap-2 pa-4" style="border-top: 1px solid var(--mud-palette-divider); flex-shrink: 0; width: 100%">
                                         <span data-testid="save-button">
                                             <MudButton Color="Color.Primary"
                                                        OnClick="OnSaveClicked"
-                                                       Disabled="@(!(_editPanel?.IsValid ?? true))">Save (Ctrl+S)</MudButton>
+                                                       Disabled="@(!_isEditPanelValid)">Save (Ctrl+S)</MudButton>
                                         </span>
                                     </div>
                                 </div>
@@ -77,14 +77,14 @@
                     </div>
                     <div style="flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; width: 100%">
                         <div style="flex-grow: 1; overflow: hidden; min-height: 0; width: 100%">
-                            <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="StateHasChanged"/>
+                            <SubjectEditPanel @ref="_editPanel" Subject="@_subject" IsValidChanged="OnEditPanelIsValidChanged"/>
                         </div>
 
                         <div class="d-flex justify-end gap-2 pa-4" style="border-top: 1px solid var(--mud-palette-divider); flex-shrink: 0; width: 100%">
                             <span data-testid="save-button">
                                 <MudButton Color="Color.Primary"
                                            OnClick="OnSaveClicked"
-                                           Disabled="@(!(_editPanel?.IsValid ?? true))">Save (Ctrl+S)</MudButton>
+                                           Disabled="@(!_isEditPanelValid)">Save (Ctrl+S)</MudButton>
                             </span>
                         </div>
                     </div>
@@ -117,6 +117,10 @@
     private PageEditMode _editMode = PageEditMode.View;
     private double _splitDimension = 50;
     private SubjectEditPanel? _editPanel;
+
+    // Stays false until the panel reports, which it does once its editor is ready and can be saved.
+    private bool _isEditPanelValid;
+
     private HotKeysContext? _hotKeysContext;
 
     private enum PageEditMode
@@ -144,7 +148,7 @@
     protected override void OnParametersSet()
     {
         LoadSubject();
-        _editMode = PageEditMode.View;
+        SetEditMode(PageEditMode.View);
     }
 
     private void LoadSubject()
@@ -185,12 +189,32 @@
 
     private void SetEditMode(PageEditMode mode)
     {
+        if (mode == _editMode)
+        {
+            return;
+        }
+
         _editMode = mode;
+
+        // Every mode with an editor has an edit panel of its own, which reports its validity once it is ready.
+        _isEditPanelValid = false;
+    }
+
+    private void OnEditPanelIsValidChanged(bool isValid)
+    {
+        _isEditPanelValid = isValid;
     }
 
     private async Task OnCtrlS()
     {
-        if (ShowEditor && _editPanel?.IsValid == true)
+        if (!ShowEditor || _editPanel is not { } editPanel)
+        {
+            return;
+        }
+
+        // The shortcut does not depend on the button, so it reads the validity itself, which the button then follows.
+        await editPanel.RefreshIsValidAsync();
+        if (editPanel.IsValid)
         {
             await OnSaveClicked();
         }
@@ -207,12 +231,22 @@
 
     private async Task OnSaveClicked()
     {
-        if (_editPanel != null)
+        if (_editPanel is not { } editPanel)
         {
-            await _editPanel.SaveAsync(CancellationToken.None);
-            _componentKey++;
-            StateHasChanged();
+            return;
         }
+
+        if (await editPanel.SaveAsync(CancellationToken.None))
+        {
+            _componentKey++;
+        }
+        else
+        {
+            // The button may have been enabled from a validity the form no longer has.
+            await editPanel.RefreshIsValidAsync();
+        }
+
+        StateHasChanged();
     }
 
     private void ResetSplitDimension()

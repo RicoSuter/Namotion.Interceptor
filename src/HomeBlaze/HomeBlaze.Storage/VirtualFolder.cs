@@ -36,6 +36,9 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
 
     public StorageStatus Status => Storage.Status;
 
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> ChildNames => [.. Children.Keys];
+
     public VirtualFolder(IStorageContainer storage, string relativePath)
     {
         Storage = storage;
@@ -87,7 +90,7 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => Storage.DeleteSubjectAsync(subject, cancellationToken);
 
     /// <summary>
-    /// Opens the create subject wizard to add a new subject to this folder.
+    /// Opens the create subject dialog to add a new subject to this folder.
     /// </summary>
     [Operation(Title = "Create", Icon = "Add", Position = 1)]
     public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)

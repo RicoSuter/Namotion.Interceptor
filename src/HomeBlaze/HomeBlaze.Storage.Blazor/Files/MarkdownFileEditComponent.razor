@@ -18,6 +18,7 @@
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
 @inject ConfigurableSubjectSerializer Serializer
+@inject SubjectFactory SubjectFactory
 @inject SubjectComponentRegistry ComponentRegistry
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
@@ -300,13 +301,30 @@ else
         if (File == null || _editor == null)
             return;
 
-        // Open the SubjectSetupDialog
-        var result = await SubjectSetupDialog.ShowAsync(DialogService);
-        if (result == null)
+        // The block name is the subject's key in the page, so the names of the other blocks are taken.
+        var existingNames = MarkdownDecorationParser.Parse(_currentContent)
+            .Where(region => region.Type == DecorationRegionType.SubjectBlock)
+            .Select(region => region.Name)
+            .ToArray();
+
+        var result = await SubjectSetupDialog.ShowAsync(DialogService, new SubjectSetupOptions
+        {
+            NameField = new SubjectNameOptions("Block name", "", existingNames)
+        });
+
+        if (result?.Name is null)
             return;
 
-        // Serialize the new subject
-        var json = Serializer.Serialize(result.Subject);
+        string json;
+        try
+        {
+            json = Serializer.Serialize(result.Subject);
+        }
+        finally
+        {
+            // Only the text of the subject goes into the page, and the reload below creates the instance that lives on.
+            SubjectFactory.DiscardSubject(result.Subject);
+        }
 
         // Create the subject block
         var subjectBlock = $"```subject({result.Name})\n{json}\n```";
