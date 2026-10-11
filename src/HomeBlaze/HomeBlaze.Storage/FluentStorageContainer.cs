@@ -19,8 +19,8 @@ namespace HomeBlaze.Storage;
 /// Supports FileSystemWatcher for reactive file monitoring on disk storage.
 /// </summary>
 [Category("Storage")]
-[DisplayName("Storage")]
 [Description("Mounts a storage location and loads the files in it as subjects")]
+[DisplayName("Storage")]
 [SubjectIcon("Storage")]
 [InterceptorSubject]
 public partial class FluentStorageContainer :

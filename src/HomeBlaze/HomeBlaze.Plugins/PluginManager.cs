@@ -7,8 +7,8 @@ using Namotion.NuGet.Plugins;
 
 namespace HomeBlaze.Plugins;
 
-[DisplayName("Plugin manager")]
 [Description("Loads plugins from NuGet feeds")]
+[DisplayName("Plugin manager")]
 [SubjectIcon("Extension")]
 [SingleInstance]
 [InterceptorSubject]
