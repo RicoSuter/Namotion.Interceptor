@@ -93,7 +93,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             Name = "list_methods",
             Description = _isReadOnly ? ReadOnlyListMethodsDescription : ListMethodsDescription,
             InputSchema = ListMethodsSchema,
-            Handler = HandleListMethodsAsync
+            Handler = HandleListMethodsAsync,
+            Annotations = McpToolAnnotations.ReadOnly
         };
 
         yield return new McpToolInfo
@@ -101,7 +102,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             Name = InvokeQueryToolName,
             Description = InvokeQueryDescription,
             InputSchema = InvokeMethodSchema,
-            Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Query, cancellationToken)
+            Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Query, cancellationToken),
+            Annotations = McpToolAnnotations.ReadOnly
         };
 
         if (!_isReadOnly)
@@ -111,7 +113,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                 Name = InvokeOperationToolName,
                 Description = InvokeOperationDescription,
                 InputSchema = InvokeMethodSchema,
-                Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken)
+                Handler = (input, cancellationToken) => HandleInvokeAsync(input, MethodKind.Operation, cancellationToken),
+                Annotations = McpToolAnnotations.Destructive
             };
         }
     }

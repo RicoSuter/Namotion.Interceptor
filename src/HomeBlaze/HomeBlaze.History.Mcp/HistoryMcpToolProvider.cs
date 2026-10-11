@@ -78,7 +78,8 @@ public class HistoryMcpToolProvider : IMcpToolProvider
                           "All input and output timestamps are UTC. " +
                           "Use browse or search to discover paths first.",
             InputSchema = GetPropertyHistorySchema,
-            Handler = HandleGetPropertyHistoryAsync
+            Handler = HandleGetPropertyHistoryAsync,
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 

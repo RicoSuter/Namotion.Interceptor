@@ -31,7 +31,8 @@ internal class SetPropertyTool
         Description = "Write a property value by its full path (e.g. /Devices/Motor/TargetSpeed). " +
                       "Only writable properties can be set. Blocked when server is read-only.",
         InputSchema = Schema,
-        Handler = HandleSetPropertyAsync
+        Handler = HandleSetPropertyAsync,
+        Annotations = McpToolAnnotations.Destructive
     };
 
     private Task<object?> HandleSetPropertyAsync(JsonElement input, CancellationToken cancellationToken)

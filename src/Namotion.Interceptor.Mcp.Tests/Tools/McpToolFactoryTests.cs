@@ -55,4 +55,27 @@ public class McpToolFactoryTests
             };
         }
     }
+
+    [Theory]
+    [InlineData("browse", true)]
+    [InlineData("search", true)]
+    [InlineData("get_property", true)]
+    [InlineData("list_types", true)]
+    [InlineData("set_property", false)]
+    public void WhenCreatingTheCoreTools_ThenTheyAreAnnotatedAsReadOnlyOrDestructive(string toolName, bool isReadOnly)
+    {
+        // Arrange
+        var room = new TestRoom(InterceptorSubjectContext.Create().WithRegistry()) { Name = "Room" };
+        var configuration = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+
+        // Act
+        var annotations = new McpToolFactory(room, configuration).CreateTools().Single(tool => tool.Name == toolName).Annotations;
+
+        // Assert
+        Assert.NotNull(annotations);
+        Assert.Equal(isReadOnly, annotations.ReadOnlyHint);
+        Assert.Equal(isReadOnly ? null : true, annotations.DestructiveHint);
+        Assert.Null(annotations.IdempotentHint);
+        Assert.False(annotations.OpenWorldHint);
+    }
 }

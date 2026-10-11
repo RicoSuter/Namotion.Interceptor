@@ -31,7 +31,8 @@ internal class GetPropertyTool
         Description = "Read a single property value by its full path (e.g. /Devices/Sensor/Temperature). " +
                       "Returns the value, type, and any attributes. Use browse or search to discover paths first.",
         InputSchema = Schema,
-        Handler = HandleGetPropertyAsync
+        Handler = HandleGetPropertyAsync,
+        Annotations = McpToolAnnotations.ReadOnly
     };
 
     private Task<object?> HandleGetPropertyAsync(JsonElement input, CancellationToken cancellationToken)

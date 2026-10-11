@@ -46,7 +46,8 @@ internal class SearchTool
                       "To find subjects by capability, call list_types first to get the interface name, then pass it to types. " +
                       "Use format=json for structured data, text (default) for overview.",
         InputSchema = Schema,
-        Handler = HandleSearchAsync
+        Handler = HandleSearchAsync,
+        Annotations = McpToolAnnotations.ReadOnly
     };
 
     private Task<object?> HandleSearchAsync(JsonElement input, CancellationToken cancellationToken)

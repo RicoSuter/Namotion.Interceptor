@@ -26,6 +26,7 @@ public class McpToolInfo
         Description = source.Description;
         InputSchema = source.InputSchema;
         Handler = source.Handler;
+        Annotations = source.Annotations;
     }
 
     /// <summary>
@@ -47,4 +48,9 @@ public class McpToolInfo
     /// Gets the handler function that executes the tool.
     /// </summary>
     public required Func<JsonElement, CancellationToken, Task<object?>> Handler { get; init; }
+
+    /// <summary>
+    /// Gets the hints that describe the tool's behavior to MCP clients, or null for none.
+    /// </summary>
+    public McpToolAnnotations? Annotations { get; init; }
 }

@@ -310,13 +310,16 @@ public class MyToolProvider : IMcpToolProvider
             Name = "my_tool",
             Description = "My custom tool",
             InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-            Handler = async (input, ct) => new { result = "hello" }
+            Handler = async (input, ct) => new { result = "hello" },
+            Annotations = McpToolAnnotations.ReadOnly
         };
     }
 }
 ```
 
 Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubjectRegistryTools`.
+
+`Annotations` carries the MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) that clients may use to decide which calls need the user's approval. They are hints, not enforcement. `McpToolAnnotations.ReadOnly` marks a tool that only reads and `McpToolAnnotations.Destructive` one that can change state; both set `openWorldHint` to false. The core tools carry these: `set_property` is destructive, the other core tools are read-only.
 
 ## Connecting Claude Desktop (Local Development)
 

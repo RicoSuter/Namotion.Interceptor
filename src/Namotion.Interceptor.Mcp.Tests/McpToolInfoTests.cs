@@ -13,7 +13,8 @@ public class McpToolInfoTests
             Name = "tool",
             Description = "Description",
             InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }),
-            Handler = (_, _) => Task.FromResult<object?>("result")
+            Handler = (_, _) => Task.FromResult<object?>("result"),
+            Annotations = McpToolAnnotations.ReadOnly
         };
 
         // Act
@@ -22,6 +23,7 @@ public class McpToolInfoTests
         // Assert
         Assert.All(typeof(McpToolInfo).GetProperties(), property =>
         {
+            Assert.NotNull(property.GetValue(source));
             var sourceValue = property.GetValue(source);
             var copyValue = property.GetValue(copy);
             if (sourceValue is JsonElement sourceElement)

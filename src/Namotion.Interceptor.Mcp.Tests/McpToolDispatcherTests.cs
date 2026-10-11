@@ -28,6 +28,28 @@ public class McpToolDispatcherTests
     }
 
     [Fact]
+    public void WhenAToolHasAnnotations_ThenTheyAreListedAndAToolWithoutHasNone()
+    {
+        // Arrange
+        var annotated = new McpToolInfo(CreateTool("write", _ => null))
+        {
+            Annotations = new McpToolAnnotations { ReadOnlyHint = false, DestructiveHint = true, OpenWorldHint = false }
+        };
+        var tools = new[] { annotated, CreateTool("plain", _ => null) };
+
+        // Act
+        var result = McpToolDispatcher.ListTools(tools);
+
+        // Assert
+        var annotations = result.Tools[0].Annotations!;
+        Assert.False(annotations.ReadOnlyHint);
+        Assert.True(annotations.DestructiveHint);
+        Assert.Null(annotations.IdempotentHint);
+        Assert.False(annotations.OpenWorldHint);
+        Assert.Null(result.Tools[1].Annotations);
+    }
+
+    [Fact]
     public async Task WhenCallingAToolReturningAnObject_ThenResultIsJsonText()
     {
         // Arrange

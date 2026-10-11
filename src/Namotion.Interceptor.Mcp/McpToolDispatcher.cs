@@ -23,7 +23,16 @@ public static class McpToolDispatcher
             {
                 Name = tool.Name,
                 Description = tool.Description,
-                InputSchema = tool.InputSchema
+                InputSchema = tool.InputSchema,
+                Annotations = tool.Annotations is { } annotations
+                    ? new ToolAnnotations
+                    {
+                        ReadOnlyHint = annotations.ReadOnlyHint,
+                        DestructiveHint = annotations.DestructiveHint,
+                        IdempotentHint = annotations.IdempotentHint,
+                        OpenWorldHint = annotations.OpenWorldHint
+                    }
+                    : null
             }).ToList()
         };
     }
