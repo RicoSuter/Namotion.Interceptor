@@ -145,7 +145,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 2);
 
         // Assert
-        Assert.Contains("alerts/freezer: remember the freezer", test.Agent.Requests[1].SystemPrompt);
+        Assert.Contains("""{"key":"alerts/freezer","value":"remember the freezer",""", test.Agent.Requests[1].SystemPrompt);
         Assert.Contains("remember the freezer", await File.ReadAllTextAsync(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.json")));
     }
 
@@ -165,7 +165,7 @@ public class LlmAgentBaseTests
         await AsyncTestHelpers.WaitUntilAsync(() => test.Agent.RunCount == 1);
 
         // Assert
-        Assert.Contains("notes/legacy: - remember the freezer", test.Agent.Requests[0].SystemPrompt);
+        Assert.Contains("""{"key":"notes/legacy","value":"- remember the freezer",""", test.Agent.Requests[0].SystemPrompt);
         Assert.True(File.Exists(Path.Combine(test.DataDirectory, "Agents", "Agent.memory.json")));
         Assert.True(File.Exists(legacyPath + ".migrated"));
     }
