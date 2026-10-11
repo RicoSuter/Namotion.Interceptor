@@ -362,18 +362,24 @@ public sealed partial class MarkdownContentParser
                 return (null, contentError);
             }
 
-            var subject = await CreateOrUpdateAsync(type, existing, configuration, state, cancellationToken);
-            if (subject is null)
+            var (subject, valueError) = await CreateOrUpdateAsync(type, existing, configuration, state, cancellationToken);
+            if (valueError is not null)
+            {
+                error = new BlockError(block.Line, valueError);
+            }
+            else if (subject is null)
             {
                 return (null, new BlockError(
                     block.Line, $"{typeDescription} could not be created. It must be a registered configurable subject type."));
             }
-
-            error = await ApplyContentAsync(subject, slots, content, state, cancellationToken);
-            if (error is null)
+            else
             {
-                state.Register(block, block.Head!.Id, subject);
-                return (subject, null);
+                error = await ApplyContentAsync(subject, slots, content, state, cancellationToken);
+                if (error is null)
+                {
+                    state.Register(block, block.Head!.Id, subject);
+                    return (subject, null);
+                }
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)

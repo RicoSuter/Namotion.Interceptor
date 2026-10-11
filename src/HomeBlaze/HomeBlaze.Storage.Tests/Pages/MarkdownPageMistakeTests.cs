@@ -1,6 +1,8 @@
 using HomeBlaze.Components;
 using HomeBlaze.Storage.Internal;
 using HomeBlaze.Storage.Pages;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Storage.Tests.Pages;
 
@@ -389,5 +391,171 @@ public class MarkdownPageMistakeTests
             ["Line 3: This block is not closed. The line '::' that ends it is missing."],
             DocumentationSamplesTests.FindErrorBoxes(page));
         Assert.Contains("Text before.", MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Fact]
+    public async Task WhenSingleValueInTheJsonBlockDoesNotFitItsProperty_ThenTheBoxNamesThePropertyAndTheExpectedType()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", """
+            Text before.
+
+            :: HomeBlaze.Components.GridLayout#grid Columns=3
+            ```json
+            { "Rows": "three" }
+            ```
+            ::
+
+            Text after.
+            """);
+
+        // Assert
+        Assert.Equal(
+            ["Line 3: 'three' is not a valid value for 'Rows'. Expected a value of type Int32."],
+            DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Theory]
+    [InlineData("1.5", "'1.5' is not a valid value for 'Rows'. Expected a value of type Int32.")]
+    [InlineData("null", "'null' is not a valid value for 'Rows'. Expected a value of type Int32.")]
+    [InlineData("true", "'true' is not a valid value for 'Rows'. Expected a value of type Int32.")]
+    public async Task WhenValueInTheJsonBlockIsNoText_ThenTheBoxShowsItAsItIsWritten(string value, string expectedMessage)
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: HomeBlaze.Components.GridLayout\n```json\n{{ \"Rows\": {value} }}\n```\n::");
+
+        // Assert
+        Assert.Equal([$"Line 1: {expectedMessage}"], DocumentationSamplesTests.FindErrorBoxes(page));
+    }
+
+    [Fact]
+    public async Task WhenTypeOfASubjectInsideAValueOfTheJsonBlockIsMisspelled_ThenTheBoxNamesThePropertyAndThePlace()
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", """
+            Text before.
+
+            :: HomeBlaze.Components.GridLayout#grid Rows=1 Columns=2
+            ```json
+            {
+              "Cells": [
+                { "Row": 0, "Column": 0, "Child": { "$type": "HomeBlaze.Components.Widget", "Path": "../Compressor" } },
+                { "Row": 0, "Column": 1, "Child": { "$type": "HomeBlaze.Components.Widgt", "Path": "../WaterPump" } }
+              ]
+            }
+            ```
+            ::
+
+            Text after.
+            """);
+
+        // Assert
+        var box = Assert.Single(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.StartsWith("Line 3: The value of 'Cells' in the json block cannot be read at Cells[1].Child: ", box);
+        Assert.Contains("HomeBlaze.Components.Widgt", box);
+        Assert.DoesNotContain("LineNumber", box);
+        Assert.False(page.Children.ContainsKey("grid"));
+        Assert.Contains("Text after.", MarkdownPageFixture.Html(page.Children));
+    }
+
+    [Theory]
+    [InlineData("\"none\"", "Line 1: The value of 'Cells' in the json block cannot be read: ")]
+    [InlineData("[ { \"Row\": \"zero\" } ]", "Line 1: The value of 'Cells' in the json block cannot be read at Cells[0].Row: ")]
+    public async Task WhenListInTheJsonBlockCannotBeRead_ThenTheBoxNamesThePropertyAndThePlaceInsideIt(
+        string cells, string expectedStart)
+    {
+        // Arrange
+        var fixture = await DocumentationSamplesTests.CreateFixtureAsync();
+
+        // Act
+        var page = await fixture.AddPageAsync(
+            "page.md", $":: HomeBlaze.Components.GridLayout\n```json\n{{ \"Cells\": {cells} }}\n```\n::");
+
+        // Assert
+        var box = Assert.Single(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.StartsWith(expectedStart, box);
+        Assert.DoesNotContain("LineNumber", box);
+    }
+
+    [Fact]
+    public async Task WhenValueInTheJsonBlockHoldsSubjectsAndFits_ThenThereIsNoBoxAndEachSubjectIsCreatedOnce()
+    {
+        // Arrange
+        var counter = new TestCreationCounter();
+        var fixture = await MarkdownPageFixture.CreateAsync(services => services.AddSingleton(counter));
+
+        // Act
+        var page = await fixture.AddPageAsync("page.md", $$"""
+            :: {{TestNamespace}}.TestChildHost#host Count=2
+            ```json
+            {
+              "Children": [
+                { "$type": "{{TestNamespace}}.TestCountedChild", "Name": "one" },
+                { "$type": "{{TestNamespace}}.TestCountedChild", "Name": "two" }
+              ]
+            }
+            ```
+            ::
+            """);
+
+        // Assert
+        Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
+        var host = Assert.IsType<TestChildHost>(page.Children["host"]);
+        Assert.Equal(["one", "two"], host.Children.Select(child => Assert.IsType<TestCountedChild>(child).Name));
+        Assert.Equal(2, counter.Count);
+    }
+
+    [Fact]
+    public async Task WhenBlockIsUpdatedInPlaceWithAValueInTheJsonBlockThatDoesNotFit_ThenItIsABoxAndItsSubjectLeavesThePage()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var source = $":: {TestNamespace}.TestLeaf#leaf Name=A\n```json\n{{ \"Count\": 1 }}\n```\n::\n\n:: {TestNamespace}.TestLeaf#other Count=1\n::";
+        var page = await fixture.AddPageAsync("page.md", source);
+        var leaf = Assert.IsType<TestLeaf>(page.Children["leaf"]);
+        var other = page.Children["other"];
+
+        // Act
+        await fixture.UpdatePageAsync(page, source.Replace("\"Count\": 1", "\"Count\": \"many\"").Replace("Count=1", "Count=2"));
+
+        // Assert
+        Assert.Equal(
+            ["Line 1: 'many' is not a valid value for 'Count'. Expected a value of type Int32."],
+            DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.False(page.Children.ContainsKey("leaf"));
+        Assert.Null(page.GetBlockSubject(0));
+        Assert.Null(leaf.TryGetRegisteredSubject());
+        Assert.Same(other, page.Children["other"]);
+        Assert.Equal(2, ((TestLeaf)other).Count);
+    }
+
+    [Fact]
+    public async Task WhenValueInTheJsonBlockIsFixed_ThenTheBlockIsCreatedAgain()
+    {
+        // Arrange
+        var fixture = await MarkdownPageFixture.CreateAsync();
+        var source = $":: {TestNamespace}.TestLeaf#leaf\n```json\n{{ \"Count\": \"many\" }}\n```\n::";
+        var page = await fixture.AddPageAsync("page.md", source);
+        var boxesBefore = DocumentationSamplesTests.FindErrorBoxes(page);
+
+        // Act
+        await fixture.UpdatePageAsync(page, source.Replace("\"many\"", "4"));
+
+        // Assert
+        Assert.Single(boxesBefore);
+        Assert.Empty(DocumentationSamplesTests.FindErrorBoxes(page));
+        Assert.Equal(4, Assert.IsType<TestLeaf>(page.Children["leaf"]).Count);
     }
 }

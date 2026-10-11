@@ -25,18 +25,30 @@ public sealed partial class MarkdownContentParser
     // The top-level keys of the configuration last applied to a subject. See CanUpdateInPlace.
     private readonly ConditionalWeakTable<IInterceptorSubject, string[]> _appliedConfigurationKeys = new();
 
-    private async Task<IInterceptorSubject?> CreateOrUpdateAsync(
+    /// <summary>
+    /// Creates the subject of a block from its configuration, or updates <paramref name="existing"/> in place.
+    /// The error is set when a value of the configuration does not fit its property. The block is an error
+    /// then, and the subject is not used: a new one is released by the caller, an existing one leaves the page.
+    /// </summary>
+    private async Task<(IInterceptorSubject? Subject, string? Error)> CreateOrUpdateAsync(
         Type type,
         IInterceptorSubject? existing,
         BlockConfiguration configuration,
         ParseState state,
         CancellationToken cancellationToken)
     {
+        // The serializer says which values it could not convert while it applies the configuration. Converting
+        // them beforehand to find that out would create the subjects inside a value a second time.
+        SkippedConfigurationProperty? skipped = null;
+        void RememberFirstSkipped(SkippedConfigurationProperty property) => skipped ??= property;
+
         IInterceptorSubject? subject;
         if (CanUpdateInPlace(existing, type, configuration.Keys))
         {
-            _serializer.UpdateConfiguration(existing, configuration.Json, ConfigurationNaming.PropertyName);
-            if (existing is IConfigurable configurable)
+            _serializer.UpdateConfiguration(
+                existing, configuration.Json, RememberFirstSkipped, ConfigurationNaming.PropertyName);
+
+            if (skipped is null && existing is IConfigurable configurable)
             {
                 await configurable.ApplyConfigurationAsync(cancellationToken);
             }
@@ -48,7 +60,12 @@ public sealed partial class MarkdownContentParser
             // Recorded before the configuration is set: when a setter throws, the instance is already attached
             // and this parse is the only one that knows it.
             subject = _serializer.Deserialize(
-                configuration.Json, state.AddCreated, ConfigurationNaming.PropertyName) as IInterceptorSubject;
+                configuration.Json, state.AddCreated, RememberFirstSkipped, ConfigurationNaming.PropertyName) as IInterceptorSubject;
+        }
+
+        if (skipped is not null)
+        {
+            return (null, FormatSkippedProperty(skipped));
         }
 
         if (subject is not null)
@@ -56,7 +73,7 @@ public sealed partial class MarkdownContentParser
             _appliedConfigurationKeys.AddOrUpdate(subject, configuration.Keys);
         }
 
-        return subject;
+        return (subject, null);
     }
 
     /// <summary>
@@ -117,8 +134,7 @@ public sealed partial class MarkdownContentParser
             if (node is null ||
                 !_serializer.CanDeserialize(node.ToJsonString(), propertyType, ConfigurationNaming.PropertyName))
             {
-                var expectedType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-                error = $"'{argument.Value}' is not a valid value for '{argument.Key}'. Expected a value of type {expectedType.Name}.";
+                error = FormatInvalidValue(argument.Value, argument.Key, propertyType);
                 return false;
             }
 
@@ -187,6 +203,48 @@ public sealed partial class MarkdownContentParser
         var hint = sameNameInOtherCase is null ? string.Empty : $" Did you mean '{sameNameInOtherCase}'?";
 
         return $"{type.Name} has no configuration property '{key}'.{hint} Available: {string.Join(", ", names)}.";
+    }
+
+    private static string FormatInvalidValue(string value, string key, Type propertyType)
+    {
+        var expectedType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        return $"'{value}' is not a valid value for '{key}'. Expected a value of type {expectedType.Name}.";
+    }
+
+    /// <summary>
+    /// Gets the message for a value of the json block that the serializer could not convert. An argument of
+    /// the head line never gets here, because it is checked before the configuration is applied.
+    /// </summary>
+    private static string FormatSkippedProperty(SkippedConfigurationProperty property)
+    {
+        using var document = JsonDocument.Parse(property.Json);
+        var value = document.RootElement;
+
+        // A single value for a property that takes one is the mistake an argument can have as well, so it
+        // gets the message of an argument.
+        var expectedType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+        if (value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array) &&
+            (expectedType.IsValueType || expectedType == typeof(string)))
+        {
+            var text = value.ValueKind == JsonValueKind.String ? value.GetString()! : property.Json;
+            return FormatInvalidValue(text, property.PropertyName, property.PropertyType);
+        }
+
+        // The serializer appends where it stopped: a path from the value on and a position in JSON text that
+        // is not the text of the page. The path is kept, counted from the property.
+        var exception = property.Exception;
+        var reason = exception.Message;
+        var positionStart = reason.LastIndexOf(" Path: ", StringComparison.Ordinal);
+        if (positionStart >= 0)
+        {
+            reason = reason[..positionStart];
+        }
+
+        var place = exception.Path is { Length: > 1 } path && path[0] == '$'
+            ? $" at {property.PropertyName}{path[1..]}"
+            : string.Empty;
+
+        return $"The value of '{property.PropertyName}' in the json block cannot be read{place}: {reason}";
     }
 
     private static IReadOnlyDictionary<string, Type> GetConfigurationProperties(Type type) =>

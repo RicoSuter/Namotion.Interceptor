@@ -441,7 +441,7 @@ What the page checks in a `json` block, and what it does not:
 
 - **Checked**: The text must be one valid JSON object without a name that stands twice. A name at the top level of the object that the type does not have is an error like an unknown argument, with the same hint when only the case differs.
 - **Not checked below the top level**: A name deeper in the object that is no property of its type is skipped without a message, and the property keeps its default. This is the trap when you paste from a `*.json` configuration file, which spells the names in camelCase: `"path"` in the widget of a cell is skipped, the widget has no path and shows "Cannot resolve path". When a nested value is missing on the page, check the spelling and the case of its name.
-- **Values are not checked**: A value in the `json` block that does not fit its property is skipped without a message, also at the top level, and the property keeps its default. If the `$type` of a nested subject names no type, the whole top level value that contains it is skipped. On the head line the same mistakes are errors, so write single values as arguments.
+- **Values are checked**: A value at the top level of the object that does not fit its property is an error, and the block is not created. For a single value the message is the one of an argument and names the expected type. For a list or an object the message names the property and the place inside the value where the reader of the JSON stopped. If the `$type` of a nested subject names no type, the whole top level value that contains it is such an error.
 
 The page editor writes configuration in a fixed way, see [Editing in the Page Editor](pages.md#editor): text without a line break, numbers, yes or no and durations go on the head line, and lists, objects and text with a line break go into the `json` block.
 
@@ -1059,7 +1059,7 @@ Editing a subject elsewhere in the UI, for example through the edit button of it
 - Short names for types. A block always has the full type name.
 - The cells of a `GridLayout` and the nodes of a `CanvasLayout` as blocks. They are part of the configuration and stand in the `json` block.
 - A name for an `Item` of a `FlowLayout`, and with it a subject inside an item that survives a change of the items before it.
-- A check of the names and values below the top level of a `json` block.
+- A check of the names below the top level of a `json` block.
 - A widget block inside a list item, a quote, a style block or an HTML element.
 - Blocks of one page that are shared with another page. Keep a shared subject in a file of its own and show it with a `Widget` block.
 

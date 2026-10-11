@@ -136,6 +136,46 @@ public class MarkdownHostedBlockTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WhenValueInTheJsonBlockOfNewBlockDoesNotFit_ThenNoInstanceKeepsRunning()
+    {
+        // Arrange
+        var content = $":: {HostedType}#hosted Name=A\n```json\n{{ \"Level\": \"high\" }}\n```\n::";
+
+        // Act
+        var page = await _fixture.AddPageAsync("page.md", content);
+        await ReloadAsync(page, content, times: 3);
+        await _fixture.SettleHostedServicesAsync();
+
+        // Assert
+        Assert.Contains(
+            System.Net.WebUtility.HtmlEncode("'high' is not a valid value for 'Level'. Expected a value of type Int32."),
+            MarkdownPageFixture.Html(page.Children));
+        Assert.False(page.Children.ContainsKey("hosted"));
+        Assert.Empty(Log.Running);
+    }
+
+    [Fact]
+    public async Task WhenValueInTheJsonBlockOfReusedBlockDoesNotFit_ThenItsInstanceIsStopped()
+    {
+        // Arrange
+        var content = $":: {HostedType}#hosted Name=A\n```json\n{{ \"Level\": 1 }}\n```\n::";
+        var page = await _fixture.AddPageAsync("page.md", content);
+        await _fixture.SettleHostedServicesAsync();
+        var runningBefore = Log.Running;
+
+        // Act
+        await _fixture.UpdatePageAsync(page, content.Replace("\"Level\": 1", "\"Level\": \"high\""));
+        await _fixture.SettleHostedServicesAsync();
+
+        // Assert
+        Assert.Single(runningBefore);
+        Assert.Contains("is not a valid value for", MarkdownPageFixture.Html(page.Children));
+        Assert.False(page.Children.ContainsKey("hosted"));
+        Assert.Empty(Log.Running);
+        Assert.Equal(1, Log.StartCount);
+    }
+
+    [Fact]
     public async Task WhenReleasingSubjectOfFailedBlockFails_ThenThePageStillRendersAndTheFailureIsLogged()
     {
         // Arrange

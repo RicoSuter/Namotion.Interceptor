@@ -319,6 +319,49 @@ public partial class NoSetterSlot
     public partial IInterceptorSubject? Content { get; }
 }
 
+/// <summary>Counts the <see cref="TestCountedChild"/> subjects that were created with it. One fixture has one.</summary>
+public sealed class TestCreationCounter
+{
+    private int _count;
+
+    public int Count => Volatile.Read(ref _count);
+
+    public void Increment() => Interlocked.Increment(ref _count);
+}
+
+/// <summary>A subject in the configuration of another one that tells how often it was created.</summary>
+[InterceptorSubject]
+public partial class TestCountedChild : IConfigurable
+{
+    public TestCountedChild(TestCreationCounter counter)
+    {
+        counter.Increment();
+    }
+
+    [Configuration]
+    public partial string? Name { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+/// <summary>Holds subjects in its configuration, like a layout that holds a widget per cell.</summary>
+[InterceptorSubject]
+public partial class TestChildHost : IConfigurable
+{
+    public TestChildHost()
+    {
+        Children = [];
+    }
+
+    [Configuration]
+    public partial int Count { get; set; }
+
+    [Configuration]
+    public partial List<IInterceptorSubject> Children { get; set; }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
 /// <summary>Resolves a path in page scope from a derived property, like a widget that shows another subject.</summary>
 [InterceptorSubject]
 public partial class TestReference : IConfigurable

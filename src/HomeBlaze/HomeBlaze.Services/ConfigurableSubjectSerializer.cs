@@ -92,7 +92,23 @@ public class ConfigurableSubjectSerializer
     /// <see cref="Release"/> then detaches. Call <see cref="Release"/> only after this method has returned or thrown.
     /// </remarks>
     public IConfigurable? Deserialize(
-        string json, Action<IInterceptorSubject>? created, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+        string json, Action<IInterceptorSubject>? created, ConfigurationNaming naming = ConfigurationNaming.CamelCase) =>
+        Deserialize(json, created, skipped: null, naming);
+
+    /// <summary>
+    /// Deserializes like <see cref="Deserialize(string, Action{IInterceptorSubject}, ConfigurationNaming)"/> and
+    /// hands every configuration property whose value does not convert to <paramref name="skipped"/>.
+    /// </summary>
+    /// <remarks>
+    /// Such a property is skipped and keeps its default, with and without the callback. A subject that was
+    /// created inside its value before the conversion failed is in no property. If its constructor attached
+    /// it to the context, <see cref="Release"/> of the returned subject does not detach it.
+    /// </remarks>
+    public IConfigurable? Deserialize(
+        string json,
+        Action<IInterceptorSubject>? created,
+        Action<SkippedConfigurationProperty>? skipped,
+        ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -129,7 +145,7 @@ public class ConfigurableSubjectSerializer
             created(interceptorSubject);
         }
 
-        PopulateConfigurationProperties(subject, type, root, naming);
+        PopulateConfigurationProperties(subject, type, root, skipped, naming);
         return subject;
     }
 
@@ -162,7 +178,11 @@ public class ConfigurableSubjectSerializer
     /// Uses registry attribute lookup when available, falls back to reflection.
     /// </summary>
     private void PopulateConfigurationProperties(
-        IConfigurable subject, Type type, JsonElement root, ConfigurationNaming naming)
+        IConfigurable subject,
+        Type type,
+        JsonElement root,
+        Action<SkippedConfigurationProperty>? skipped,
+        ConfigurationNaming naming)
     {
         var options = GetOptions(naming);
 
@@ -179,14 +199,16 @@ public class ConfigurableSubjectSerializer
                     var jsonName = GetJsonName(property.Name, naming);
                     if (root.TryGetProperty(jsonName, out var jsonValue))
                     {
+                        var valueJson = jsonValue.GetRawText();
                         try
                         {
-                            var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, options);
+                            var value = JsonSerializer.Deserialize(valueJson, property.Type, options);
                             property.SetValue(value);
                         }
-                        catch (JsonException)
+                        catch (JsonException exception)
                         {
                             // Skip properties that can't be deserialized
+                            skipped?.Invoke(new SkippedConfigurationProperty(property.Name, property.Type, valueJson, exception));
                         }
                     }
                 }
@@ -204,14 +226,16 @@ public class ConfigurableSubjectSerializer
             var jsonName = GetJsonName(property.Name, naming);
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
+                var valueJson = jsonValue.GetRawText();
                 try
                 {
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, options);
+                    var value = JsonSerializer.Deserialize(valueJson, property.PropertyType, options);
                     property.SetValue(subject, value);
                 }
-                catch (JsonException)
+                catch (JsonException exception)
                 {
                     // Skip properties that can't be deserialized
+                    skipped?.Invoke(new SkippedConfigurationProperty(property.Name, property.PropertyType, valueJson, exception));
                 }
             }
         }
@@ -219,11 +243,13 @@ public class ConfigurableSubjectSerializer
 
     /// <summary>
     /// Checks whether a JSON value converts to the given property type with the options that
-    /// <see cref="Deserialize(string, ConfigurationNaming)"/> and <see cref="UpdateConfiguration"/> use
+    /// <see cref="Deserialize(string, ConfigurationNaming)"/> and
+    /// <see cref="UpdateConfiguration(IInterceptorSubject, string, ConfigurationNaming)"/> use
     /// for <paramref name="naming"/>.
     /// </summary>
     /// <remarks>
-    /// Both methods skip a property whose value does not convert without reporting it.
+    /// Both methods skip a property whose value does not convert, and report it only to a caller that
+    /// passes a callback for the skipped properties.
     /// </remarks>
     public bool CanDeserialize(
         string json, Type propertyType, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
@@ -245,7 +271,22 @@ public class ConfigurableSubjectSerializer
     /// Note: STJ doesn't support populating existing objects, so we deserialize each property individually.
     /// </summary>
     public void UpdateConfiguration(
-        IInterceptorSubject subject, string json, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+        IInterceptorSubject subject, string json, ConfigurationNaming naming = ConfigurationNaming.CamelCase) =>
+        UpdateConfiguration(subject, json, skipped: null, naming);
+
+    /// <summary>
+    /// Updates like <see cref="UpdateConfiguration(IInterceptorSubject, string, ConfigurationNaming)"/> and hands
+    /// every configuration property whose value does not convert to <paramref name="skipped"/>.
+    /// </summary>
+    /// <remarks>
+    /// Such a property is skipped and keeps its value, with and without the callback. The properties
+    /// before and after it are updated.
+    /// </remarks>
+    public void UpdateConfiguration(
+        IInterceptorSubject subject,
+        string json,
+        Action<SkippedConfigurationProperty>? skipped,
+        ConfigurationNaming naming = ConfigurationNaming.CamelCase)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -256,15 +297,17 @@ public class ConfigurableSubjectSerializer
             var jsonName = GetJsonName(property.Name, naming);
             if (root.TryGetProperty(jsonName, out var jsonValue))
             {
+                var valueJson = jsonValue.GetRawText();
                 try
                 {
                     // Use the options of Serialize/Deserialize for consistent deserialization behavior
-                    var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, options);
+                    var value = JsonSerializer.Deserialize(valueJson, property.Type, options);
                     property.SetValue(value);
                 }
-                catch (JsonException)
+                catch (JsonException exception)
                 {
                     // Skip properties that can't be deserialized
+                    skipped?.Invoke(new SkippedConfigurationProperty(property.Name, property.Type, valueJson, exception));
                 }
             }
         }
