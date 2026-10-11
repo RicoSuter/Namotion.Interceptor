@@ -266,7 +266,7 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Unlock", Icon = "LockOpen")]
+    [Operation(Title = "Unlock", Icon = "LockOpen", RequiresConfirmation = true)]
     public async Task UnlockAsync(CancellationToken cancellationToken)
     {
         if (_client is not null)
@@ -339,7 +339,7 @@ public partial class WallboxCharger : BackgroundService,
     // mechanically while a charging session is active and unlocks when paused.
     // These operations therefore toggle pause/resume to control the physical latch.
 
-    [Operation(Title = "Toggle Charge Port Lock")]
+    [Operation(Title = "Toggle Charge Port Lock", RequiresConfirmation = true)]
     public async Task ToggleChargePortLockAsync(CancellationToken cancellationToken)
     {
         if (ChargerStatus == WallboxChargerStatus.Paused)
@@ -356,7 +356,7 @@ public partial class WallboxCharger : BackgroundService,
             await ResumeChargingAsync(cancellationToken);
     }
 
-    [Operation(Title = "Unlock Charge Port")]
+    [Operation(Title = "Unlock Charge Port", RequiresConfirmation = true)]
     public async Task UnlockChargePortAsync(CancellationToken cancellationToken)
     {
         // The Type 2 connector latch disengages when the session is paused.

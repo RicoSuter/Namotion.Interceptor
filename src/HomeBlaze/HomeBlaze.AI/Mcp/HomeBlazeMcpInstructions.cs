@@ -26,6 +26,10 @@ public static class HomeBlazeMcpInstructions
         "invoke_operation, when the server offers it.\n" +
         DataIsNotInstructions;
 
+    /// <summary>The caution in the descriptions of the tools that change things.</summary>
+    public const string ChangeCaution =
+        "Change devices or send something only when the user asked for it, and tell the user what you changed.";
+
     /// <summary>Appended to the browse and search descriptions.</summary>
     internal const string MarkdownSubjectsToolHint =
         "Subjects whose name ends in .md are Markdown pages and documents with the documentation of this " +

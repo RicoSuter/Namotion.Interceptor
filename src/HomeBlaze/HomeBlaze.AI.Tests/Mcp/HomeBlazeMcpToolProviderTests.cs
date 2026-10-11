@@ -391,6 +391,65 @@ public class HomeBlazeMcpToolProviderTests
     }
 
     [Fact]
+    public async Task WhenInvokeOperationCallsAnOperationThatRequiresConfirmation_ThenItIsRefusedWithoutInvoking()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var isInvoked = false;
+        room.TryGetRegisteredSubject()!.AddProperty<MethodMetadata>("Unlock", _ => new MethodMetadata(_ =>
+        {
+            isInvoked = true;
+            return null;
+        })
+        {
+            Kind = MethodKind.Operation,
+            PropertyName = "Unlock",
+            RequiresConfirmation = true,
+            Parameters = [new MethodParameter { Name = "code", Type = typeof(string) }]
+        });
+
+        // Act
+        var error = await InvokeForErrorAsync(factory, "Unlock", parameters: null, toolName: "invoke_operation");
+
+        // Assert
+        Assert.Equal("'Unlock' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI.", error);
+        Assert.False(isInvoked);
+    }
+
+    [Fact]
+    public async Task WhenListMethods_ThenEachMethodReportsWhetherItRequiresConfirmation()
+    {
+        // Arrange
+        var (room, _, factory) = CreateTestSetup(isReadOnly: false);
+        var registered = room.TryGetRegisteredSubject()!;
+        registered.AddProperty<MethodMetadata>("Unlock", _ => new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "Unlock", RequiresConfirmation = true });
+        registered.AddProperty<MethodMetadata>("Lock", _ => new MethodMetadata(_ => null) { Kind = MethodKind.Operation, PropertyName = "Lock" });
+
+        // Act
+        var unlock = await ListMethodAsync(factory, "Unlock");
+        var lockMethod = await ListMethodAsync(factory, "Lock");
+
+        // Assert
+        Assert.True(unlock.GetProperty("requiresConfirmation").GetBoolean());
+        Assert.False(lockMethod.GetProperty("requiresConfirmation").GetBoolean());
+    }
+
+    [Fact]
+    public void WhenNotReadOnly_ThenTheOperationToolsDescribeTheConfirmationRuleAndCaution()
+    {
+        // Arrange
+        var (_, _, factory) = CreateTestSetup(isReadOnly: false);
+
+        // Act
+        var tools = factory.CreateTools().ToDictionary(tool => tool.Name, tool => tool.Description);
+
+        // Assert
+        Assert.Contains("requiresConfirmation", tools["list_methods"]);
+        Assert.Contains("require confirmation", tools["invoke_operation"]);
+        Assert.Contains(HomeBlazeMcpInstructions.ChangeCaution, tools["invoke_operation"]);
+    }
+
+    [Fact]
     public void WhenReadOnly_ThenInvokeQueryIsOfferedAndInvokeOperationIsNot()
     {
         // Arrange

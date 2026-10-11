@@ -90,7 +90,8 @@ public static class HomeBlazeMcpConfigurationFactory
             ToolDescriptionAdditions =
             {
                 ["browse"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
-                ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint
+                ["search"] = HomeBlazeMcpInstructions.MarkdownSubjectsToolHint,
+                ["set_property"] = HomeBlazeMcpInstructions.ChangeCaution
             },
             PropertyWriteFilter = propertyWriteFilter,
             IsReadOnly = isReadOnly

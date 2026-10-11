@@ -63,6 +63,19 @@ public class HomeBlazeMcpConfigurationFactoryTests
     }
 
     [Fact]
+    public void WhenCreatingAConfiguration_ThenSetPropertyCarriesTheChangeCaution()
+    {
+        // Arrange
+        var (room, _, _) = HomeBlazeMcpToolProviderTests.CreateTestSetup(isReadOnly: false);
+
+        // Act
+        var tools = CreateTools(room, forAgents: false);
+
+        // Assert
+        Assert.EndsWith(HomeBlazeMcpInstructions.ChangeCaution, tools["set_property"].Description);
+    }
+
+    [Fact]
     public void WhenRegisteringTheHomeBlazeTools_ThenTheServerInstructionsPointToTheMarkdownPages()
     {
         // Arrange

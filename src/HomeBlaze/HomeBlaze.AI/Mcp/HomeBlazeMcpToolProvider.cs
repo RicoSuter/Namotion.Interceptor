@@ -29,7 +29,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
     private const string ListMethodsDescription =
         "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
         "(reads, no side effects; call it with invoke_query) or an operation (changes devices or sends something; " +
-        "call it with invoke_operation). The kind field of each method says which.";
+        "call it with invoke_operation). The kind field of each method says which. Operations with requiresConfirmation " +
+        "set need a person's confirmation and cannot be called through MCP.";
 
     private const string ReadOnlyListMethodsDescription =
         "List the methods of a subject, with each parameter's type, format and unit. Every method is either a query " +
@@ -43,7 +44,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private const string InvokeOperationDescription =
         "Call an operation method of a subject: it can change devices or send something, for example SendNotification. " +
-        "Find methods and their kind with list_methods.";
+        "Operations that require confirmation by a person cannot be called. Find methods and their kind with list_methods. " +
+        HomeBlazeMcpInstructions.ChangeCaution;
 
     private static readonly JsonElement ListMethodsSchema = JsonSerializer.SerializeToElement(new
     {
@@ -129,6 +131,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             title = method.Title,
             description = method.Description,
             returnType = JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
+            requiresConfirmation = method.RequiresConfirmation,
             parameters = method.Parameters
                 .Where(parameter => parameter.RequiresInput)
                 .Select(parameter => McpMethodParameter.Create(
@@ -157,6 +160,11 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         if (method.Kind != allowedKind)
         {
             return new { error = DescribeWrongKind(methodName, method.Kind) };
+        }
+
+        if (method.RequiresConfirmation)
+        {
+            return new { error = $"'{methodName}' requires confirmation by a person and cannot be called through MCP; run it from the HomeBlaze UI." };
         }
 
         var inputParameters = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();

@@ -528,6 +528,22 @@ public class MethodPropertyInitializerTests
         Assert.Single(registered.Properties, property => property.Name == "Stop");
     }
 
+    [Theory]
+    [InlineData("Unlock", true)]
+    [InlineData("ToggleLock", true)]
+    [InlineData("Lock", false)]
+    public void WhenASubjectImplementsTheDoorLockController_ThenOperationsThatCanUnlockRequireConfirmation(string methodName, bool expected)
+    {
+        // Arrange
+        var subject = new DoorLockTestSubject(CreateContext());
+
+        // Act
+        var metadata = (MethodMetadata)subject.TryGetRegisteredSubject()!.TryGetProperty(methodName)!.GetValue()!;
+
+        // Assert
+        Assert.Equal(expected, metadata.RequiresConfirmation);
+    }
+
     [Fact]
     public void WhenASubjectHasNoMethods_ThenNoMethodPropertiesAreRegistered()
     {
@@ -666,4 +682,12 @@ public partial class MethodWithRequiredServiceSubject
 public partial class NoMethodsSubject
 {
     public partial string? Name { get; set; }
+}
+
+[InterceptorSubject]
+public partial class DoorLockTestSubject : HomeBlaze.Abstractions.Devices.Locks.IDoorLockController
+{
+    public Task LockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task UnlockAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
