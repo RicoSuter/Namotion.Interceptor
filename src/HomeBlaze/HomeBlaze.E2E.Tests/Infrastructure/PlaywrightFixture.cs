@@ -1,4 +1,5 @@
 using HomeBlaze.Components;
+using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
@@ -44,6 +45,14 @@ public class PlaywrightFixture : IAsyncLifetime
         catch (TimeoutException exception)
         {
             throw new TimeoutException("The root subject was not loaded before the tests started", exception);
+        }
+
+        // Registered once for the whole run, so that every test sees the same types. Resolving a qualified
+        // name adds the type to the registry.
+        var typeRegistry = _factory.ServerServices.GetRequiredService<SubjectTypeRegistry>();
+        if (typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!) is null)
+        {
+            throw new InvalidOperationException("The test-only subject type could not be registered");
         }
 
         // Initialize Playwright and launch browser

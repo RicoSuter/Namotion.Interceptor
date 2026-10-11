@@ -114,25 +114,21 @@ public class VirtualFolderTests
     }
 
     [Fact]
-    public void WhenChildrenAreReplacedAfterReading_ThenChildNamesReadBeforeAreUnchanged()
+    public void WhenChildrenChangeAfterReading_ThenChildNamesReadBeforeAreUnchanged()
     {
         // Arrange
         var (_, typeRegistry, serializer, serviceProvider, _) = CreateDependencies();
         var storage = new FluentStorageContainer(typeRegistry, serializer, serviceProvider);
-        var folder = new VirtualFolder(storage, "test/")
+        var children = new Dictionary<string, IInterceptorSubject>
         {
-            Children = new Dictionary<string, IInterceptorSubject>
-            {
-                ["Motor"] = new VirtualFolder(storage, "test/Motor/")
-            }
+            ["Motor"] = new VirtualFolder(storage, "test/Motor/")
         };
+        var folder = new VirtualFolder(storage, "test/") { Children = children };
         var childNames = folder.ChildNames;
 
-        // Act
-        folder.Children = new Dictionary<string, IInterceptorSubject>
-        {
-            ["Pump"] = new VirtualFolder(storage, "test/Pump/")
-        };
+        // Act - the same dictionary is changed, which a view of its keys would follow.
+        children.Remove("Motor");
+        children["Pump"] = new VirtualFolder(storage, "test/Pump/");
 
         // Assert
         Assert.Equal(["Motor"], childNames);

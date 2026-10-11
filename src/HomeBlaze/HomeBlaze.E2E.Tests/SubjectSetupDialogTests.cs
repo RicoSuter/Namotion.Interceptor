@@ -4,11 +4,13 @@ using HomeBlaze.E2E.Tests.Infrastructure;
 using HomeBlaze.E2E.Tests.Models;
 using HomeBlaze.Samples;
 using HomeBlaze.Services;
+using HomeBlaze.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Testing;
+using Xunit.Abstractions;
 
 namespace HomeBlaze.E2E.Tests;
 
@@ -24,10 +26,12 @@ public class SubjectSetupDialogTests
     private const string MotorName = "Test motor";
 
     private readonly PlaywrightFixture _fixture;
+    private readonly ITestOutputHelper _output;
 
-    public SubjectSetupDialogTests(PlaywrightFixture fixture)
+    public SubjectSetupDialogTests(PlaywrightFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;
+        _output = output;
     }
 
     /// <summary>
@@ -99,9 +103,9 @@ public class SubjectSetupDialogTests
     /// Enters the motor's own name, which the motor form requires and which starts empty, so Create
     /// stays disabled for a motor until this has run.
     /// </summary>
-    private static async Task EnterMotorNameAsync(IPage page)
+    private static async Task EnterMotorNameAsync(IPage page, string motorName = MotorName)
     {
-        await Dialog(page).GetByLabel("Name", new() { Exact = true }).FillAsync(MotorName);
+        await Dialog(page).GetByLabel("Name", new() { Exact = true }).FillAsync(motorName);
     }
 
     private static bool FileContains(string filePath, string text)
@@ -236,7 +240,13 @@ public class SubjectSetupDialogTests
         await PaneCreateButton(page).ClickAsync();
         await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
 
-        // Assert - everything is measured in one frame, because the dialog scales while it opens.
+        // The dialog scales while it opens, and a box that is measured meanwhile is smaller than the final one.
+        await page.WaitForFunctionAsync(
+            "() => document.querySelector('.mud-dialog.subject-setup-dialog').getAnimations().every(animation => animation.playState === 'finished')",
+            null,
+            new() { Timeout = ElementVisibilityTimeout });
+
+        // Assert
         var pickerLayout = await page.EvaluateAsync<double[]>(
             """
             () => {
@@ -283,6 +293,9 @@ public class SubjectSetupDialogTests
         var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions { HasTouch = true, IsMobile = true });
         await OpenSubjectBrowserAsync(page);
         await page.SetViewportSizeAsync(375, 812);
+        Assert.True(
+            await page.EvaluateAsync<bool>("() => matchMedia('(pointer: coarse)').matches"),
+            "The browser context does not report a coarse pointer, so it does not stand for a touch device.");
         await page.EvaluateAsync(
             """
             () => {
@@ -610,11 +623,7 @@ public class SubjectSetupDialogTests
     [Fact]
     public async Task WhenTheGeneratedPropertiesEditorIsUntouched_ThenCreateFollowsItsPrefilledValues()
     {
-        // Arrange - no type of the application is without an edit component, so one of this assembly is
-        // registered. Resolving a qualified name adds the type to the registry for the rest of the host's life.
-        var typeRegistry = _fixture.ServerServices.GetRequiredService<SubjectTypeRegistry>();
-        Assert.NotNull(typeRegistry.ResolveType(typeof(PlainConfigurableSubject).AssemblyQualifiedName!));
-
+        // Arrange
         var page = await _fixture.CreatePageAsync();
         await OpenDialogAsync(page);
         var intervalInput = Dialog(page).GetByLabel("Interval");
@@ -640,6 +649,138 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenAnOptionalFieldOfTheGeneratedPropertiesEditorIsEdited_ThenCreateStaysEnabled()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        await PickTypeAsync(page, "plainconfigurablesubject");
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act - the required number stays untouched. The name is then made invalid and valid again: the
+        // circuit handles the edits in order, so once the last one shows, the label has been handled.
+        await Dialog(page).GetByLabel("Label", new() { Exact = true }).FillAsync("Some label");
+        await NameInput(page).FillAsync("invalid/name");
+        await Assertions.Expect(NameHelperText(page, "File name contains invalid characters"))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
+        await NameInput(page).FillAsync("ValidName");
+
+        // Assert
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenANumberFieldHoldsTextThatIsNotANumber_ThenCreateIsDisabled()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        await PickTypeAsync(page, "plainconfigurablesubject");
+        var limitInput = Dialog(page).GetByLabel("Limit");
+        await Assertions.Expect(limitInput).ToHaveValueAsync("", new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act - the number is optional and stays unset, so only the text that is no whole number can disable
+        // Create. Enter commits it without leaving the field.
+        await limitInput.FillAsync("1.5");
+        await limitInput.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act
+        await limitInput.FillAsync("3");
+        await limitInput.PressAsync("Enter");
+
+        // Assert
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenCreateIsClickedWhileANumberFieldHoldsTextThatIsNotANumber_ThenNothingIsCreated()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        await PickTypeAsync(page, "plainconfigurablesubject");
+        var limitInput = Dialog(page).GetByLabel("Limit");
+        await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+        await limitInput.FillAsync("1.5");
+
+        // Act - the click is what commits the text, so Create is still enabled when it is clicked.
+        await CreateButton(page).ClickAsync();
+
+        // Assert - a created subject would have closed the dialog.
+        await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Plain configurable");
+        await Assertions.Expect(Dialog(page).GetByText("Not a valid number")).ToBeVisibleAsync();
+    }
+
+    [Theory]
+    [InlineData("Tags (String[])", "not a list", "Failed to set 'Tags'")]
+    [InlineData("Limit", "1.5", "Not a valid number")]
+    public async Task WhenAValueCannotBeAppliedInTheEditDialog_ThenNothingIsAppliedAndTheDialogStaysOpen(
+        string fieldLabel, string text, string expectedError)
+    {
+        // Arrange - the subject is put under the root for this test only. The serializer does not know the
+        // test-only type, so it cannot be created through the dialog, which stores it in a file.
+        var name = $"Plain{Guid.NewGuid():N}";
+        var subjectFactory = _fixture.ServerServices.GetRequiredService<SubjectFactory>();
+        var root = Assert.IsType<FluentStorageContainer>(_fixture.ServerServices.GetRequiredService<RootManager>().Root);
+        var subject = subjectFactory.CreateSubject<PlainConfigurableSubject>();
+        subject.Label = "Original label";
+        root.Children = new Dictionary<string, IInterceptorSubject>(root.Children) { [name] = subject };
+        try
+        {
+            // The type has no edit component, so the edit dialog shows the generated properties editor.
+            var page = await _fixture.CreatePageAsync();
+            await page.GotoAsync($"{_fixture.ServerAddress}browser/{name}");
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+
+            // The edit button is prerendered, and a click before the circuit is connected is lost.
+            await Assertions.Expect(page.GetByTitle(new Regex(@"^Automatic \(")))
+                .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+            var editButton = page.Locator("#scrollContainer button.mud-icon-button.mud-button-filled-primary").Last;
+            await Assertions.Expect(editButton).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await editButton.ClickAsync();
+
+            var editDialog = page.GetByRole(AriaRole.Dialog);
+            var labelInput = editDialog.GetByLabel("Label", new() { Exact = true });
+            await Assertions.Expect(labelInput).ToHaveValueAsync("Original label", new() { Timeout = ElementVisibilityTimeout });
+            await labelInput.FillAsync("Changed label");
+            await editDialog.GetByLabel(fieldLabel).FillAsync(text);
+
+            // Act
+            await editDialog.GetByRole(AriaRole.Button, new() { Name = "Save", Exact = true }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(page.GetByText("The values could not be applied"))
+                .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            await Assertions.Expect(editDialog.GetByText(expectedError)).ToBeVisibleAsync();
+            await Assertions.Expect(labelInput).ToHaveValueAsync("Changed label");
+            Assert.Equal("Original label", subject.Label);
+            Assert.Null(subject.Tags);
+            Assert.Null(subject.Limit);
+
+            // Act
+            await editDialog.GetByRole(AriaRole.Button, new() { Name = "Cancel", Exact = true }).ClickAsync();
+
+            // Assert
+            await Assertions.Expect(editDialog).ToHaveCountAsync(0, new() { Timeout = ElementVisibilityTimeout });
+            Assert.Equal("Original label", subject.Label);
+        }
+        finally
+        {
+            var children = new Dictionary<string, IInterceptorSubject>(root.Children);
+            children.Remove(name);
+            root.Children = children;
+            subjectFactory.DiscardSubject(subject);
+        }
     }
 
     [Fact]
@@ -681,15 +822,19 @@ public class SubjectSetupDialogTests
         // File watching is off in testRoot.json, so the created motor stays in the live graph for the rest
         // of the host's life, which is why the name is unique per run.
         var name = $"CreatedMotor{Guid.NewGuid():N}";
+        var motorName = $"Motor of {name}";
         var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
         var isCompleted = false;
         try
         {
             // Arrange
+            var registry = _fixture.ServerServices.GetRequiredService<IInterceptorSubjectContext>().GetService<ISubjectRegistry>();
+            Motor? FindCreatedMotor() => registry.KnownSubjects.Keys.OfType<Motor>().FirstOrDefault(motor => motor.Name == motorName);
+
             var page = await _fixture.CreatePageAsync();
             await OpenDialogAsync(page);
             await PickTypeAsync(page, "motor");
-            await EnterMotorNameAsync(page);
+            await EnterMotorNameAsync(page, motorName);
             await NameInput(page).FillAsync(name);
             await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
@@ -702,9 +847,24 @@ public class SubjectSetupDialogTests
 
             // The file holds the edits of the motor form only when they were applied before it was written.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => FileContains(filePath, MotorName),
+                () => FileContains(filePath, motorName),
                 TimeSpan.FromSeconds(10),
                 message: "The created file does not contain the motor name that was entered in the form.");
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => FindCreatedMotor()?.Status == MotorStatus.Running,
+                TimeSpan.FromSeconds(10),
+                message: "The created motor is not in the graph or does not run.");
+            var createdMotor = FindCreatedMotor();
+
+            // Act - the page is loaded again, which is later than the disposal of the closed dialog.
+            await page.ReloadAsync();
+            await Assertions.Expect(PaneCreateButton(page)).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+
+            // Assert - the dialog discards a subject it did not hand over, which this one was.
+            Assert.NotNull(createdMotor);
+            Assert.Contains(createdMotor, registry.KnownSubjects.Keys);
+            Assert.Equal(MotorStatus.Running, createdMotor.Status);
             isCompleted = true;
         }
         finally
@@ -713,9 +873,10 @@ public class SubjectSetupDialogTests
             {
                 File.Delete(filePath);
             }
-            catch (Exception) when (!isCompleted)
+            catch (Exception exception) when (!isCompleted)
             {
                 // The failure of the test itself is the one to report.
+                _output.WriteLine($"Deleting {filePath} failed: {exception}");
             }
         }
     }
@@ -847,9 +1008,10 @@ public class SubjectSetupDialogTests
             {
                 await File.WriteAllBytesAsync(gridPagePath, originalGridPage);
             }
-            catch (Exception) when (!isCompleted)
+            catch (Exception exception) when (!isCompleted)
             {
                 // The failure of the test itself is the one to report.
+                _output.WriteLine($"Restoring {gridPagePath} failed: {exception}");
             }
         }
     }

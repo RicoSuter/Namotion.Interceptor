@@ -13,8 +13,7 @@ public class SubjectTypeCatalogGroupIconTests
 
         // Act
         var unresolvedIcons = SubjectTypeCatalog.GroupIconNames
-            .Where(groupIcon => groupIcon.Value != "Article" &&
-                                MudBlazorIconResolver.Resolve(groupIcon.Value) == fallbackIcon)
+            .Where(groupIcon => MudBlazorIconResolver.Resolve(groupIcon.Value) == fallbackIcon)
             .Select(groupIcon => $"{groupIcon.Key}: {groupIcon.Value}")
             .ToList();
 
