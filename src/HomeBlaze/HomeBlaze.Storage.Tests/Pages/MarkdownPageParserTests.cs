@@ -1740,6 +1740,10 @@ public class MarkdownPageParserTests
     // A style block, also inside a block that takes blocks.
     [InlineData(":::: {.band}\ntext\n", 3, 2)]
     [InlineData($":: {TestNamespace}.TestPanel\n:::: {{.band}}\ntext\n", 4, 3)]
+    // A block that is no slot block follows the line inside the block: a style block, and a closing line that closes nothing.
+    [InlineData(":: {.band}\n::: {.inner}\ntext\n", 2, 2)]
+    [InlineData(":: {.band}\n::: {.inner}\none\n::: {.inner}\ntwo\n", 4, 2)]
+    [InlineData($":: {TestNamespace}.TestLeaf\n:::\n", 2, 2)]
     public void WhenNewBlockIsInsertedIntoBlocksWithoutClosingLineThatTakeNoBlock_ThenItIsInTheNextBlockAroundThemThatTakesOne(
         string source, int line, int expectedFenceLength)
     {

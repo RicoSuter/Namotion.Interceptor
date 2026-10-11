@@ -130,7 +130,7 @@ A cell can hold any page content, not only widgets.
 The pump runs at {{ pump/CurrentSpeed }} RPM.
 ::
 
-With `MinWidth=120` a cell may get as narrow as 120 pixels, so many cells fit into one row. The six cards wrap only when the window gets very narrow:
+With `MinWidth=120` a cell may get as narrow as 120 pixels, so many cells fit into one row. The six cards stand in one row while the page is at least 800 pixels wide, and wrap below that:
 
 <!-- sample: live -->
 ~~~~markdown
@@ -468,7 +468,7 @@ One node in `Nodes`:
 | `Height` | Whole number | `150` | The height in pixels |
 | `Child` | Subject with `$type` | Not set | The subject that the node shows |
 
-A canvas with two nodes that show the sample motors by name. A canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels, so the two nodes here stand below each other, where a narrow window shows them as well:
+A canvas with two nodes that show the sample motors by name. A canvas does not adapt to the width of the screen: every node keeps its position and its size in pixels. The two nodes here are placed below each other, so that a narrow window shows both:
 
 <!-- sample: live -->
 ~~~~markdown

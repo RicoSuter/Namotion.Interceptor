@@ -149,9 +149,9 @@ public sealed class MarkdownPage
     /// </summary>
     /// <remarks>
     /// The new block is inside the innermost block around the line that has a closing line of its own,
-    /// takes a widget block as content, or has a block of its own at or after the line. A block further
-    /// in has none of these, so the head line of the new block ends it: a widget whose type has no
-    /// default slot, a style block or a block that is an error, with nothing of it after the line.
+    /// takes a widget block as content, or has a slot block of its own at or after the line. A block
+    /// further in has none of these, so the head line of the new block ends it: a widget whose type has
+    /// no default slot, a style block or a block that is an error, with no slot block of it after the line.
     /// </remarks>
     /// <param name="line">The line that <see cref="GetLineForNewBlock"/> returned.</param>
     /// <param name="findType">Gets the type that a widget block names with its full name, or null when there is none.</param>
@@ -173,12 +173,13 @@ public sealed class MarkdownPage
                 type = slot.IsOpen ? null : slot.ValueType;
             }
 
-            // The head line of the new block would end a block that is left here. With a block of its own
-            // after the line, such as the next item of a layout, that would put those blocks outside of it.
+            // The head line of the new block would end a block that is left here. With a slot block of its
+            // own after the line, such as the next item of a layout, that would put those slot blocks
+            // outside of their widget. Any other block after the line is still valid outside of it.
             if (block.HasClosingLine ||
                 takesBlocks ||
                 (type is not null && SlotMap.For(type).Default is not null) ||
-                block.ChildList.Exists(child => child.Line >= line))
+                HasSlotBlockAtOrAfter(block, line))
             {
                 outer = block;
             }
@@ -188,6 +189,19 @@ public sealed class MarkdownPage
         }
 
         return outer is null ? MarkdownBlockFence.MinimumLength : outer.FenceLength + 1;
+    }
+
+    private static bool HasSlotBlockAtOrAfter(MarkdownBlock block, int line)
+    {
+        foreach (var child in block.ChildList)
+        {
+            if (child.Kind == MarkdownBlockKind.Slot && child.Line >= line)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Gets the innermost block that a line inserted before <paramref name="line"/> is inside of.</summary>

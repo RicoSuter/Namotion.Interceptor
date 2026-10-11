@@ -170,6 +170,7 @@ public class PageWidgetsPageTests
 
         // A tab with plain content.
         var notes = Assert.IsType<MarkdownFragment>(layouts[0].Tabs[2].Content);
+        Assert.NotEmpty(notes.Children);
         Assert.All(notes.Children.Values, child => Assert.IsType<HtmlSegment>(child));
 
         // Every other tab has a name, which keeps it selected while the page is edited.
@@ -209,8 +210,9 @@ public class PageWidgetsPageTests
         var canvas = Assert.IsType<CanvasLayout>(page.TryGetNamedSubject("plan"));
         Assert.Equal([PumpName, FanName], canvas.Nodes.Select(node => Assert.IsType<Widget>(node.Child).Path));
 
-        // The content of a page is 358 pixels wide in a window of 390 pixels.
-        Assert.All(canvas.Nodes, node => Assert.InRange(node.X + node.Width, 0, 358));
+        // The content of a page is this wide in a window of 390 pixels.
+        const int contentWidthOnAPhone = 358;
+        Assert.All(canvas.Nodes, node => Assert.InRange(node.X + node.Width, 0, contentWidthOnAPhone));
         Assert.All(canvas.Nodes, node => Assert.InRange(node.Y + node.Height, 0, canvas.MinHeight!.Value));
     }
 
