@@ -19,8 +19,8 @@
                         <div>@path</div>
                     }
                 </text>)
-                @SettingRow("Poll interval", Agent.PollInterval?.ToString() ?? "none")
-                @SettingRow("Minimum run interval", Agent.MinRunInterval.ToString())
+                @SettingRow("Poll interval", Agent.PollInterval is { } pollInterval && pollInterval > TimeSpan.Zero ? AgentTimeSpanInput.Format(pollInterval) : "none")
+                @SettingRow("Minimum run interval", AgentTimeSpanInput.Format(Agent.MinRunInterval))
                 @SettingRow("Allowed tools", @<text>
                     @if (Agent.AllowedTools.Length > 0)
                     {
@@ -36,7 +36,7 @@
                         <text>none (memory only)</text>
                     }
                 </text>)
-                @SettingRow("Turn timeout", Agent.TurnTimeout.ToString())
+                @SettingRow("Turn timeout", FormatTurnTimeout(Agent.TurnTimeout))
                 @SettingRow("Tool calls per turn", Agent.MaxToolCallsPerTurn.ToString())
                 @if (Agent is ClaudeCliAgent cliAgent)
                 {
@@ -84,6 +84,10 @@
 
     // The page re-renders when the agent writes its memory, so the draft follows or flags that write here.
     protected override void OnParametersSet() => Draft.Refresh();
+
+    // The runtime treats zero, negative and over int.MaxValue milliseconds as no limit.
+    private static string FormatTurnTimeout(TimeSpan turnTimeout) =>
+        turnTimeout > TimeSpan.Zero && turnTimeout.TotalMilliseconds <= int.MaxValue ? AgentTimeSpanInput.Format(turnTimeout) : "none";
 
     private static RenderFragment SettingRow(string label, string value) => SettingRow(label, @<text>@value</text>);
 

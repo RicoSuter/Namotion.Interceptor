@@ -47,16 +47,16 @@
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6" md="3">
                 <MudTextField T="string" Label="Poll interval" @bind-Value="_pollInterval" @bind-Value:after="OnChanged" Immediate="true"
-                              HelperText="hh:mm:ss, empty for none" Validation="@(new Func<string?, string?>(ValidateOptionalTimeSpan))"
+                              HelperText="[d.]hh:mm:ss, empty for none" Validation="@(new Func<string?, string?>(ValidateOptionalTimeSpan))"
                               data-testid="agent-edit-poll-interval" />
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
                 <MudTextField T="string" Label="Minimum run interval" @bind-Value="_minRunInterval" @bind-Value:after="OnChanged" Immediate="true"
-                              HelperText="hh:mm:ss" Validation="@(new Func<string?, string?>(ValidateTimeSpan))" />
+                              HelperText="[d.]hh:mm:ss" Validation="@(new Func<string?, string?>(ValidateTimeSpan))" />
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
                 <MudTextField T="string" Label="Turn timeout" @bind-Value="_turnTimeout" @bind-Value:after="OnChanged" Immediate="true"
-                              HelperText="hh:mm:ss, 00:00:00 for none" Validation="@(new Func<string?, string?>(ValidateTimeSpan))" />
+                              HelperText="[d.]hh:mm:ss, 00:00:00 for none" Validation="@(new Func<string?, string?>(ValidateTimeSpan))" />
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
                 <MudNumericField T="int" Label="Tool calls per turn" @bind-Value="_maxToolCalls" @bind-Value:after="OnChanged" Min="1" Max="1000" />
