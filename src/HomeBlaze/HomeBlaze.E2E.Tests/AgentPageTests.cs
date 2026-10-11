@@ -19,6 +19,7 @@ public class AgentPageTests
 {
     private const string AgentPath = "Agents/TestAgent";
     private const string TimelineAgentPath = "Agents/TimelineAgent";
+    private const string ScrollAgentPath = "Agents/ScrollAgent";
     private const int PageLoadTimeout = 30000;
     private const int ReplyTimeout = 30000;
 
@@ -230,14 +231,17 @@ public class AgentPageTests
             await Assertions.Expect(rows.First).ToHaveTextAsync("Question 70");
 
             // Show earlier adds 50 rows above and keeps the row that was first where it was.
-            await timeline.EvaluateAsync("timeline => timeline.scrollTop = 0");
+            await timeline.HoverAsync();
+            await page.Mouse.WheelAsync(0, -100000);
+            await WaitForTopAsync(timeline);
             var heldRow = rows.Filter(new() { HasText = "Question 70" });
             var offsetBefore = await ReadOffsetInTimelineAsync(heldRow);
             await page.GetByTestId("agent-timeline-show-earlier").ClickAsync();
             await Assertions.Expect(rows).ToHaveCountAsync(100, new() { Timeout = PageLoadTimeout });
             Assert.Equal(offsetBefore, await ReadOffsetInTimelineAsync(heldRow), 2.0);
 
-            await timeline.EvaluateAsync("timeline => timeline.scrollTop = 0");
+            await page.Mouse.WheelAsync(0, -100000);
+            await WaitForTopAsync(timeline);
             await page.GetByTestId("agent-timeline-show-earlier").ClickAsync();
             await Assertions.Expect(rows).ToHaveCountAsync(120, new() { Timeout = PageLoadTimeout });
             await Assertions.Expect(page.GetByTestId("agent-timeline-show-earlier")).ToHaveCountAsync(0);
@@ -258,6 +262,88 @@ public class AgentPageTests
         {
             DeleteAgentData(resolver, agent);
         }
+    }
+
+    [Fact]
+    public async Task WhenSendingWithEnterAfterScrollingUpInALongTimeline_ThenTheMessageAndReplyShowAtTheBottom()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return; // The fake CLI is a shell script.
+        }
+
+        // Arrange - a separate agent with more rows than the chat renders, so each new row also drops the oldest one
+        // above the view. Its storage is loaded once it runs; entries appended before that would be replaced.
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{ScrollAgentPath}");
+        await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
+            new Regex("Running|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + ScrollAgentPath, PathStyle.Canonical));
+        var reply = "Reply " + Guid.NewGuid().ToString("N");
+        var message = "Message " + Guid.NewGuid().ToString("N");
+        var scriptDirectory = Directory.CreateTempSubdirectory("e2e-fake-claude").FullName;
+        var originalCliPath = agent.CliPath;
+        try
+        {
+            var start = DateTimeOffset.UtcNow.AddDays(-1);
+            for (var index = 0; index < 120; index++)
+            {
+                await agent.Timeline.AppendAsync(new AgentTimelineEntry
+                {
+                    Kind = index % 2 == 0 ? AgentTimelineEntryKind.User : AgentTimelineEntryKind.Assistant,
+                    Timestamp = start.AddMinutes(index),
+                    Text = $"Entry {index}"
+                }, CancellationToken.None);
+            }
+
+            var scriptPath = Path.Combine(scriptDirectory, "claude");
+            await File.WriteAllTextAsync(scriptPath,
+                "#!/bin/sh\ncat > /dev/null\ncat <<'EOF'\n" +
+                """{"type":"system","subtype":"init","session_id":"e2e-session","tools":[],"mcp_servers":[]}""" + "\n" +
+                $$$"""{"type":"result","subtype":"success","is_error":false,"result":"{{{reply}}}","session_id":"e2e-session","usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}""" +
+                "\nEOF\n");
+            File.SetUnixFileMode(scriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            agent.CliPath = scriptPath;
+
+            await page.ReloadAsync();
+            var timelineLocator = page.GetByTestId("agent-timeline");
+            await Assertions.Expect(timelineLocator).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            var timeline = await timelineLocator.ElementHandleAsync();
+            await timelineLocator.HoverAsync();
+            await page.Mouse.WheelAsync(0, -600);
+            await WaitForDistanceToBottomAsync(page, timeline, "> 500");
+
+            // Act
+            var input = page.GetByTestId("agent-chat-input").Locator("textarea");
+            await input.FillAsync(message);
+            await input.PressAsync("Enter");
+
+            // Assert - the message shows at the bottom right away, and the reply follows it there.
+            await Assertions.Expect(page.GetByTestId("agent-timeline-row").Filter(new() { HasText = message })).ToBeVisibleAsync(new() { Timeout = ReplyTimeout });
+            await WaitForDistanceToBottomAsync(page, timeline, "<= 32");
+            await Assertions.Expect(page.GetByTestId("agent-reply").Last).ToContainTextAsync(reply, new() { Timeout = ReplyTimeout });
+            await WaitForDistanceToBottomAsync(page, timeline, "<= 32");
+            Assert.True(await IsInViewAsync(page.GetByTestId("agent-timeline-row").Filter(new() { HasText = message })));
+        }
+        finally
+        {
+            agent.CliPath = originalCliPath;
+            DeleteAgentData(resolver, agent);
+            Directory.Delete(scriptDirectory, recursive: true);
+        }
+    }
+
+    private static Task<bool> IsInViewAsync(ILocator row) =>
+        row.EvaluateAsync<bool>(
+            "row => { const view = row.closest('[data-testid=agent-timeline]').getBoundingClientRect(); " +
+            "const box = row.getBoundingClientRect(); return box.top >= view.top - 1 && box.bottom <= view.bottom + 1; }");
+
+    private static async Task WaitForTopAsync(ILocator timeline)
+    {
+        var handle = await timeline.ElementHandleAsync();
+        await timeline.Page.WaitForFunctionAsync("timeline => timeline.scrollTop === 0", handle, new() { Timeout = ReplyTimeout });
     }
 
     // Read after two animation frames, so the script that keeps the row in place has run.
