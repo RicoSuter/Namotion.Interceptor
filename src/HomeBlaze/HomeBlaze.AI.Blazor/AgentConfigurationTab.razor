@@ -86,7 +86,8 @@
                     </div>
                     <div data-testid="agent-memory-value">
                         <MudTextField T="string" @bind-Value="MemoryEditor.Value" Label="Value" Variant="Variant.Outlined" Lines="3" Sizing="InputSizing.Auto" MaxLines="12"
-                                      Immediate="true" Disabled="MemoryEditor.IsSaving" Counter="@AgentMemory.MaxValueLength" />
+                                      Immediate="true" Disabled="MemoryEditor.IsSaving" Counter="@AgentMemory.MaxValueLength"
+                                      Error="@(MemoryEditor.ValueError is not null)" ErrorText="@MemoryEditor.ValueError" />
                     </div>
                 </MudStack>
                 @if (MemoryEditor.IsStale)
@@ -107,7 +108,7 @@
                 <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-2">
                     <MudButton Variant="Variant.Text" OnClick="MemoryEditor.Cancel" Disabled="MemoryEditor.IsSaving" data-testid="agent-memory-cancel">Cancel</MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="MemoryEditor.SaveAsync"
-                               Disabled="@(MemoryEditor.IsSaving || string.IsNullOrWhiteSpace(MemoryEditor.Key) || string.IsNullOrWhiteSpace(MemoryEditor.Value))"
+                               Disabled="@(MemoryEditor.IsSaving || string.IsNullOrWhiteSpace(MemoryEditor.Key) || string.IsNullOrWhiteSpace(MemoryEditor.Value) || MemoryEditor.ValueError is not null)"
                                data-testid="agent-memory-save">Save</MudButton>
                 </MudStack>
             </MudPaper>
@@ -134,7 +135,7 @@
                     <div class="d-flex justify-end flex-nowrap">
                         <MudTooltip Text="Edit">
                             <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" aria-label="@($"Edit {context.Key}")"
-                                           OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="MemoryEditor.IsSaving" data-testid="agent-memory-edit" />
+                                           OnClick="@(() => MemoryEditor.StartEdit(context))" Disabled="@(MemoryEditor.IsSaving || MemoryEditor.IsEditing)" data-testid="agent-memory-edit" />
                         </MudTooltip>
                         <MudTooltip Text="Delete">
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" aria-label="@($"Delete {context.Key}")"

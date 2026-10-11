@@ -82,6 +82,41 @@ public class AgentMemoryEditorTests
     }
 
     [Fact]
+    public async Task WhenTheAgentRemovesTheEditedEntry_ThenReloadKeepsTheFormAsANewEntry()
+    {
+        // Arrange
+        await _memory.UpdateAsync([AgentMemoryChange.Set("alerts/freezer", "notified")], CancellationToken.None);
+        var editor = new AgentMemoryEditor(() => _memory);
+        editor.StartEdit(_memory.GetSnapshot().Entries[0]);
+        editor.Value = "edited by the operator";
+        await _memory.UpdateAsync([AgentMemoryChange.Remove("alerts/freezer")], CancellationToken.None);
+
+        // Act
+        var isStale = editor.IsStale;
+        editor.Reload();
+        await editor.SaveAsync();
+
+        // Assert
+        Assert.True(isStale);
+        Assert.Null(editor.OriginalKey);
+        Assert.Equal("edited by the operator", Assert.Single(_memory.GetSnapshot().Entries).Value);
+    }
+
+    [Fact]
+    public void WhenTheValueIsTooLong_ThenTheEditorFlagsItBeforeSaving()
+    {
+        // Arrange
+        var editor = new AgentMemoryEditor(() => _memory);
+        editor.StartAdd();
+
+        // Act
+        editor.Value = new string('x', AgentMemory.MaxValueLength + 1);
+
+        // Assert
+        Assert.Contains(AgentMemory.MaxValueLength.ToString(), editor.ValueError);
+    }
+
+    [Fact]
     public async Task WhenAddingAKeyThatExists_ThenTheEditorSaysItReplacesTheEntry()
     {
         // Arrange
