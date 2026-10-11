@@ -47,13 +47,19 @@ public class StorageWorkerTests
         // Arrange
         using var worker = new StorageWorker();
 
+        var laterItemWasRun = false;
+
         // Act
         var failing = worker.RunAsync(_ => throw new InvalidOperationException("failed"), CancellationToken.None);
-        var result = await worker.RunAsync(_ => Task.FromResult(42), CancellationToken.None).WaitAsync(Timeout);
+        await worker.RunAsync(_ =>
+        {
+            laterItemWasRun = true;
+            return Task.CompletedTask;
+        }, CancellationToken.None).WaitAsync(Timeout);
 
         // Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() => failing);
-        Assert.Equal(42, result);
+        Assert.True(laterItemWasRun);
     }
 
     [Fact]
@@ -62,21 +68,27 @@ public class StorageWorkerTests
         // Arrange
         using var worker = new StorageWorker();
         var wasRun = false;
+        var laterItemWasRun = false;
+        Exception? exception = null;
 
         // Act
-        var exception = await worker.RunAsync(
-            token => Record.ExceptionAsync(() => worker.RunAsync(_ =>
+        await worker.RunAsync(
+            async token => exception = await Record.ExceptionAsync(() => worker.RunAsync(_ =>
             {
                 wasRun = true;
                 return Task.CompletedTask;
             }, token)),
             CancellationToken.None).WaitAsync(Timeout);
-        var result = await worker.RunAsync(_ => Task.FromResult(42), CancellationToken.None).WaitAsync(Timeout);
+        await worker.RunAsync(_ =>
+        {
+            laterItemWasRun = true;
+            return Task.CompletedTask;
+        }, CancellationToken.None).WaitAsync(Timeout);
 
         // Assert
         Assert.Equal(StorageWorker.CallFromWithinItemMessage, Assert.IsType<InvalidOperationException>(exception).Message);
         Assert.False(wasRun);
-        Assert.Equal(42, result);
+        Assert.True(laterItemWasRun);
     }
 
     [Fact]
@@ -154,11 +166,20 @@ public class StorageWorkerTests
             return Task.CompletedTask;
         }, CancellationToken.None);
 
-        Task<int>? call = null;
-        ExecutionContext.Run(flowOfItem!, _ => call = worker.RunAsync(_ => Task.FromResult(42), CancellationToken.None), null);
+        var wasRun = false;
+        Task? call = null;
+        ExecutionContext.Run(
+            flowOfItem!,
+            _ => call = worker.RunAsync(_ =>
+            {
+                wasRun = true;
+                return Task.CompletedTask;
+            }, CancellationToken.None),
+            null);
 
         // Assert
-        Assert.Equal(42, await call!.WaitAsync(Timeout));
+        await call!.WaitAsync(Timeout);
+        Assert.True(wasRun);
     }
 
     [Fact]
@@ -251,13 +272,19 @@ public class StorageWorkerTests
         using var first = new StorageWorker();
         using var second = new StorageWorker();
 
+        var wasRunBySecondWorker = false;
+
         // Act
-        var result = await first.RunAsync(
-            token => second.RunAsync(_ => Task.FromResult("run by the second worker"), token),
+        await first.RunAsync(
+            token => second.RunAsync(_ =>
+            {
+                wasRunBySecondWorker = true;
+                return Task.CompletedTask;
+            }, token),
             CancellationToken.None).WaitAsync(Timeout);
 
         // Assert
-        Assert.Equal("run by the second worker", result);
+        Assert.True(wasRunBySecondWorker);
     }
 
     [Fact]
@@ -289,11 +316,12 @@ public class StorageWorkerTests
         var worker = new StorageWorker();
         var runningStarted = NewSignal();
         var runningRelease = NewSignal();
+        var hasRunningFinished = false;
         var running = worker.RunAsync(async _ =>
         {
             runningStarted.SetResult();
             await runningRelease.Task;
-            return "finished";
+            hasRunningFinished = true;
         }, CancellationToken.None);
         var queued = worker.RunAsync(_ => Task.CompletedTask, CancellationToken.None);
         await runningStarted.Task.WaitAsync(Timeout);
@@ -304,7 +332,8 @@ public class StorageWorkerTests
         var afterDispose = worker.RunAsync(_ => Task.CompletedTask, CancellationToken.None);
 
         // Assert
-        Assert.Equal("finished", await running.WaitAsync(Timeout));
+        await running.WaitAsync(Timeout);
+        Assert.True(hasRunningFinished);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(Timeout));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => afterDispose.WaitAsync(Timeout));
     }
@@ -320,7 +349,6 @@ public class StorageWorkerTests
         {
             runningStarted.SetResult();
             await runningRelease.Task;
-            return "finished";
         }, CancellationToken.None);
         var queued = worker.RunAsync(_ => Task.CompletedTask, CancellationToken.None);
         await runningStarted.Task.WaitAsync(Timeout);
@@ -334,7 +362,6 @@ public class StorageWorkerTests
         // Assert
         Assert.True(stopWasWaiting);
         Assert.True(running.IsCompletedSuccessfully);
-        Assert.Equal("finished", await running);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(Timeout));
     }
 
@@ -345,15 +372,12 @@ public class StorageWorkerTests
         var worker = new StorageWorker();
 
         // Act
-        var result = await worker.RunAsync(async _ =>
-        {
-            await worker.StopAsync();
-            return "finished";
-        }, CancellationToken.None).WaitAsync(Timeout);
+        var item = worker.RunAsync(_ => worker.StopAsync(), CancellationToken.None);
+        await item.WaitAsync(Timeout);
         var afterStop = worker.RunAsync(_ => Task.CompletedTask, CancellationToken.None);
 
         // Assert
-        Assert.Equal("finished", result);
+        Assert.True(item.IsCompletedSuccessfully);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => afterStop.WaitAsync(Timeout));
     }
 

@@ -3,25 +3,13 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// What a listing reports about the content of a file. Only compared for equality: a backend with a stronger
-/// token than size and time can supply that instead.
+/// What a listing reports about the content of a file. Compared for equality only.
 /// </summary>
+/// <remarks>
+/// The default value is recorded where the version of a file is not known, so that the next pass looks at the
+/// file again. It equals the version of an empty file that a storage lists without a modification time.
+/// </remarks>
 internal readonly record struct StorageVersion(long Size, DateTimeOffset? Modified);
-
-internal enum StorageEntryState
-{
-    /// <summary>Loaded in this pass and not applied to the tree yet.</summary>
-    New,
-
-    /// <summary>The subject is in the tree under <see cref="StorageEntry.Key"/>.</summary>
-    Placed,
-
-    /// <summary>Not in the tree: its key is held by another entry, or its folder is not placed.</summary>
-    KeyTaken,
-
-    /// <summary>The file could not be loaded.</summary>
-    Failed
-}
 
 /// <summary>
 /// What was applied last for one path.
@@ -39,11 +27,25 @@ internal sealed class StorageEntry
 
     public IInterceptorSubject? Subject { get; set; }
 
-    /// <summary>The content hash, for subjects that hold content. Null for folders and plain files.</summary>
+    /// <summary>
+    /// The hash of the content that the subject was last brought in line with. Null for a folder, for a file
+    /// that is never read, and from the start of a load or a write until the subject has taken the content,
+    /// so also after a load that failed.
+    /// </summary>
     public string? Hash { get; set; }
 
-    /// <summary>The key in the parent folder that the entry holds or asked for.</summary>
+    /// <summary>
+    /// The key in the parent folder that the entry holds or asked for. Null until the entry was first applied
+    /// to the tree.
+    /// </summary>
     public string? Key { get; set; }
 
-    public StorageEntryState State { get; set; }
+    /// <summary>True when the subject is in the tree under <see cref="Key"/>.</summary>
+    public bool IsPlaced => Key != null && Subject != null;
+
+    /// <summary>
+    /// True when the entry was applied and is not in the tree, because its key is held by another entry or its
+    /// folder is not placed.
+    /// </summary>
+    public bool IsKeyTaken => Key != null && Subject == null;
 }

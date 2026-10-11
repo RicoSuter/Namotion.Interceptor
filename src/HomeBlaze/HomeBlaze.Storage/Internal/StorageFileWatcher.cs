@@ -9,7 +9,7 @@ namespace HomeBlaze.Storage.Internal;
 internal sealed class StorageFileWatcher : IDisposable
 {
     private readonly string _basePath;
-    private readonly Action<string, string?> _onChanged;
+    private readonly Action<string> _onChanged;
     private readonly Action _onEventsLost;
     private readonly ILogger? _logger;
 
@@ -17,12 +17,12 @@ internal sealed class StorageFileWatcher : IDisposable
     private volatile bool _isDisposed;
 
     /// <param name="basePath">The watched directory.</param>
-    /// <param name="onChanged">Receives the path within the directory, and for a rename the old path as well.</param>
+    /// <param name="onChanged">Receives each path within the directory that an event names and that is not ignored. A rename names two.</param>
     /// <param name="onEventsLost">Called when the watcher failed and events may be missing.</param>
     /// <param name="logger">The logger.</param>
     public StorageFileWatcher(
         string basePath,
-        Action<string, string?> onChanged,
+        Action<string> onChanged,
         Action onEventsLost,
         ILogger? logger = null)
     {
@@ -102,18 +102,21 @@ internal sealed class StorageFileWatcher : IDisposable
 
     private void OnWatcherEvent(object sender, FileSystemEventArgs fileEvent)
     {
-        var path = GetRelativePath(fileEvent.FullPath);
-        var oldPath = fileEvent is RenamedEventArgs { OldFullPath: { } oldFullPath } ? GetRelativePath(oldFullPath) : null;
-
-        // A rename between a tracked name and an ignored one changes the tree, so it counts when either side is tracked.
-        if (StoragePathFilter.IsIgnored(path) && (oldPath == null || StoragePathFilter.IsIgnored(oldPath)))
-            return;
-
-        _onChanged(path, oldPath);
+        Report(fileEvent.FullPath);
+        if (fileEvent is RenamedEventArgs { OldFullPath: { } oldFullPath })
+        {
+            Report(oldFullPath);
+        }
     }
 
-    private string GetRelativePath(string fullPath)
-        => Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
+    private void Report(string fullPath)
+    {
+        var path = Path.GetRelativePath(_basePath, fullPath).Replace('\\', '/');
+        if (!StoragePathFilter.IsIgnored(path))
+        {
+            _onChanged(path);
+        }
+    }
 
     private void OnWatcherError(object? sender, ErrorEventArgs error)
     {

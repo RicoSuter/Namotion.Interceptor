@@ -42,26 +42,27 @@ public class StorageIndexTests
         index.Set(new StorageEntry { Path = "readme.md", IsFolder = false });
 
         // Assert
-        Assert.Equal(2, index.Count);
+        Assert.Equal(2, index.Entries.Count);
         Assert.True(index.TryGet("README.md", out _));
         Assert.False(index.TryGet("Readme.md", out _));
     }
 
     [Fact]
-    public void WhenSubjectIsInIndex_ThenItsPathIsFound()
+    public void WhenSubjectIsInIndex_ThenItsEntryIsFound()
     {
         // Arrange
         var index = new StorageIndex();
         var subject = new Mock<IInterceptorSubject>().Object;
-        index.Set(new StorageEntry { Path = "Docs/Motor.json", IsFolder = false, Subject = subject });
+        var entry = new StorageEntry { Path = "Docs/Motor.json", IsFolder = false, Subject = subject };
+        index.Set(entry);
 
         // Act
-        var found = index.TryGetPath(subject, out var path);
+        var isFound = index.TryGetEntry(subject, out var found);
 
         // Assert
-        Assert.True(found);
-        Assert.Equal("Docs/Motor.json", path);
-        Assert.False(index.TryGetPath(new Mock<IInterceptorSubject>().Object, out _));
+        Assert.True(isFound);
+        Assert.Same(entry, found);
+        Assert.False(index.TryGetEntry(new Mock<IInterceptorSubject>().Object, out _));
     }
 
     [Fact]
@@ -69,7 +70,7 @@ public class StorageIndexTests
     {
         // Arrange
         var index = new StorageIndex();
-        var docs = new StorageEntry { Path = "Docs", IsFolder = true, State = StorageEntryState.Placed };
+        var docs = new StorageEntry { Path = "Docs", IsFolder = true };
         index.Set(docs);
 
         // Act

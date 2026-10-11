@@ -54,13 +54,8 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
 
-    public async Task OnFileChangedAsync(CancellationToken cancellationToken)
-    {
-        var metadata = await Storage.GetBlobMetadataAsync(FullPath, cancellationToken);
-        if (metadata != null)
-        {
-            FileSize = metadata.Size;
-            LastModified = metadata.LastModifiedUtc ?? LastModified;
-        }
-    }
+    /// <summary>
+    /// Does nothing: the file holds only size and time, which the storage sets from its listing.
+    /// </summary>
+    public Task OnFileChangedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

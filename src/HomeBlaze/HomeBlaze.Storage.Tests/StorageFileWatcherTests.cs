@@ -10,7 +10,7 @@ public class StorageFileWatcherTests
     private static readonly string BasePath = Path.Combine(Path.GetTempPath(), "homeblaze-watcher");
     private static readonly TimeSpan WatcherTimeout = TimeSpan.FromSeconds(20);
 
-    private readonly List<(string Path, string? OtherPath)> _changes = [];
+    private readonly List<string> _changes = [];
 
     [Fact]
     public void WhenFileChanges_ThenItsRelativePathIsReported()
@@ -23,7 +23,7 @@ public class StorageFileWatcherTests
             WatcherChangeTypes.Changed, Path.Combine(BasePath, "Docs"), "Readme.md"));
 
         // Assert
-        Assert.Equal([("Docs/Readme.md", null)], _changes);
+        Assert.Equal(["Docs/Readme.md"], _changes);
     }
 
     [Theory]
@@ -51,13 +51,13 @@ public class StorageFileWatcherTests
         watcher.SimulateFileEvent(new RenamedEventArgs(WatcherChangeTypes.Renamed, BasePath, "New.md", "Old.md"));
 
         // Assert
-        Assert.Equal([("New.md", "Old.md")], _changes);
+        Assert.Equal(["New.md", "Old.md"], _changes);
     }
 
     [Theory]
     [InlineData("Home.md", "Home.md.tmp")]
     [InlineData("Home.md~", "Home.md")]
-    public void WhenRenameTouchesOneIgnoredPath_ThenItIsStillReported(string newName, string oldName)
+    public void WhenRenameTouchesOneIgnoredPath_ThenTheOtherPathIsReported(string newName, string oldName)
     {
         // Arrange
         using var watcher = CreateWatcher();
@@ -66,7 +66,7 @@ public class StorageFileWatcherTests
         watcher.SimulateFileEvent(new RenamedEventArgs(WatcherChangeTypes.Renamed, BasePath, newName, oldName));
 
         // Assert
-        Assert.Equal([(newName, oldName)], _changes);
+        Assert.Equal(["Home.md"], _changes);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class StorageFileWatcherTests
             var logger = new StartCountingLogger();
             using var watcher = new StorageFileWatcher(
                 directory.FullName,
-                (path, _) => changedPaths.Enqueue(path),
+                changedPaths.Enqueue,
                 () => Interlocked.Increment(ref eventsLostCount),
                 logger);
 
@@ -125,7 +125,7 @@ public class StorageFileWatcherTests
         {
             var eventsLostCount = 0;
             var logger = new StartCountingLogger();
-            using var watcher = new StorageFileWatcher(directory.FullName, (_, _) => { }, () => eventsLostCount++, logger);
+            using var watcher = new StorageFileWatcher(directory.FullName, _ => { }, () => eventsLostCount++, logger);
             watcher.Start();
 
             // Act
@@ -154,7 +154,7 @@ public class StorageFileWatcherTests
             var logger = new StartCountingLogger();
             using var watcher = new StorageFileWatcher(
                 directory.FullName,
-                (path, _) => changedPaths.Enqueue(path),
+                changedPaths.Enqueue,
                 () => Interlocked.Increment(ref eventsLostCount),
                 logger);
 
@@ -184,7 +184,7 @@ public class StorageFileWatcherTests
     public void WhenWatcherCannotStart_ThenItIsNotRunning()
     {
         // Arrange
-        using var watcher = new StorageFileWatcher(Path.Combine(BasePath, "Missing"), (_, _) => { }, () => { });
+        using var watcher = new StorageFileWatcher(Path.Combine(BasePath, "Missing"), _ => { }, () => { });
 
         // Act
         var exception = Record.Exception(watcher.Start);
@@ -205,7 +205,7 @@ public class StorageFileWatcherTests
             var flowsOfEvents = new ConcurrentQueue<string?>();
             using var watcher = new StorageFileWatcher(
                 directory.FullName,
-                (_, _) => flowsOfEvents.Enqueue(flow.Value),
+                _ => flowsOfEvents.Enqueue(flow.Value),
                 () => { });
 
             watcher.Start();
@@ -225,7 +225,7 @@ public class StorageFileWatcherTests
 
     // Not started: the events are simulated, so no file system watcher is needed.
     private StorageFileWatcher CreateWatcher()
-        => new(BasePath, (path, otherPath) => _changes.Add((path, otherPath)), () => { });
+        => new(BasePath, _changes.Add, () => { });
 
     // The watcher shows no other sign of a start: it logs one information each time it has started.
     private sealed class StartCountingLogger : ILogger

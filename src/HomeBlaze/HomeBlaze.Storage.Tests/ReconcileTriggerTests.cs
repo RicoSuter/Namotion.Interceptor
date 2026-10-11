@@ -38,7 +38,7 @@ public class ReconcileTriggerTests
         // Act
         trigger.NotifyChanged("First.md");
         _timeProvider.Advance(TimeSpan.FromMilliseconds(800));
-        trigger.NotifyChanged("Second.md", "Old.md");
+        trigger.NotifyChanged("Second.md");
         _timeProvider.Advance(TimeSpan.FromMilliseconds(800));
         var passesBeforeQuietPeriodEnds = _passes.Count;
         _timeProvider.Advance(TimeSpan.FromMilliseconds(200));
@@ -46,7 +46,7 @@ public class ReconcileTriggerTests
         // Assert
         Assert.Equal(0, passesBeforeQuietPeriodEnds);
         var pass = Assert.Single(_passes);
-        Assert.Equal(["First.md", "Old.md", "Second.md"], pass.NamedPaths.Order());
+        Assert.Equal(["First.md", "Second.md"], pass.NamedPaths.Order());
     }
 
     [Fact]

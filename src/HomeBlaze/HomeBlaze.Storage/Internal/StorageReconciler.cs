@@ -151,14 +151,14 @@ internal sealed class StorageReconciler
 
         var childrenByFolder = new Dictionary<string, Dictionary<string, IInterceptorSubject>>(StringComparer.Ordinal)
         {
-            [StoragePath.Root] = new()
+            [string.Empty] = new()
         };
 
         // Placed entries go first, so one that is in the tree never loses its key to a newcomer.
         // Within each group a folder comes before what is inside it.
         var candidates = _index.Entries
             .Where(entry => entry.IsFolder || entry.Subject != null)
-            .OrderBy(entry => entry.State != StorageEntryState.Placed)
+            .OrderBy(entry => !entry.IsPlaced)
             .ThenBy(entry => StoragePath.GetDepth(entry.Path))
             .ThenBy(entry => !entry.IsFolder)
             .ThenBy(entry => entry.Path, StringComparer.Ordinal)
@@ -171,17 +171,21 @@ internal sealed class StorageReconciler
             var key = entry.Key ?? (entry.IsFolder ? StoragePath.GetName(entry.Path) : GetChildKey(entry.Path, entry.Subject!));
             if (!childrenByFolder.TryGetValue(entry.Parent, out var siblings) || siblings.ContainsKey(key))
             {
-                if (entry.State != StorageEntryState.KeyTaken)
+                if (!entry.IsKeyTaken)
                 {
                     _logger?.LogWarning("Skipping '{Path}': key \"{Key}\" is taken or its folder is not placed", entry.Path, key);
                 }
 
                 Release(entry.Subject);
 
-                entry.State = StorageEntryState.KeyTaken;
                 entry.Key = key;
                 entry.Subject = null;
                 continue;
+            }
+
+            if (!entry.IsPlaced)
+            {
+                (newlyPlacedEntries ??= []).Add(entry);
             }
 
             if (entry.IsFolder)
@@ -191,12 +195,6 @@ internal sealed class StorageReconciler
             }
 
             siblings.Add(key, entry.Subject!);
-            if (entry.State != StorageEntryState.Placed)
-            {
-                (newlyPlacedEntries ??= []).Add(entry);
-            }
-
-            entry.State = StorageEntryState.Placed;
             entry.Key = key;
         }
 
@@ -315,8 +313,6 @@ internal sealed class StorageReconciler
 
     private bool IsKeyFree(string parent, string key)
     {
-        // A folder that is not in the tree is placed together with what is inside it. What has to be free then
-        // is the name of that folder, in the first folder above it that is in the tree.
         while (parent.Length > 0)
         {
             if (_index.TryGet(parent, out var folder))
@@ -326,7 +322,7 @@ internal sealed class StorageReconciler
                     return false;
                 }
 
-                if (folder.State == StorageEntryState.Placed)
+                if (folder.IsPlaced)
                 {
                     break;
                 }
@@ -338,7 +334,7 @@ internal sealed class StorageReconciler
 
         foreach (var entry in _index.Entries)
         {
-            if (entry.State == StorageEntryState.Placed && entry.Key == key && entry.Parent == parent)
+            if (entry.IsPlaced && entry.Key == key && entry.Parent == parent)
             {
                 return false;
             }
@@ -449,8 +445,7 @@ internal sealed class StorageReconciler
             return true;
         }
 
-        return entry is { State: StorageEntryState.KeyTaken, Key: not null } &&
-               IsKeyFree(entry.Parent, entry.Key);
+        return entry.IsKeyTaken && IsKeyFree(entry.Parent, entry.Key!);
     }
 
     private async Task AddAsync(
@@ -480,12 +475,7 @@ internal sealed class StorageReconciler
         }
         else
         {
-            IInterceptorSubject subject;
-            using (ExecutionContext.SuppressFlow())
-            {
-                subject = _subjectFactory.CreateFile(_storage, StoragePath.ToFullPath(listed.Path));
-            }
-
+            var subject = _subjectFactory.CreateFile(_storage, StoragePath.ToFullPath(listed.Path));
             if (subject is GenericFile genericFile)
             {
                 SetMetadata(genericFile, listed.Version);
@@ -509,15 +499,7 @@ internal sealed class StorageReconciler
 
     private IInterceptorSubject CreateFromJson(string path, string json, StorageVersion version)
     {
-        IInterceptorSubject subject;
-
-        // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
-        // assignment in Apply does.
-        using (ExecutionContext.SuppressFlow())
-        {
-            subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
-        }
-
+        var subject = _subjectFactory.CreateFromJson(_storage, StoragePath.ToFullPath(path), json);
         if (subject is JsonFile file)
         {
             SetMetadata(file, version);
@@ -650,13 +632,7 @@ internal sealed class StorageReconciler
             return;
         }
 
-        _index.Set(new StorageEntry
-        {
-            Path = listed.Path,
-            IsFolder = false,
-            Version = version,
-            State = StorageEntryState.Failed
-        });
+        _index.Set(new StorageEntry { Path = listed.Path, IsFolder = false, Version = version });
     }
 
     private Dictionary<string, IInterceptorSubject> GetChildren(string folder)
@@ -673,15 +649,13 @@ internal sealed class StorageReconciler
             return;
         }
 
-        // A copy, because the union of the first step is not what the folder holds after the second.
-        var assigned = new Dictionary<string, IInterceptorSubject>(children);
         if (folder.Length == 0)
         {
-            _storage.Children = assigned;
+            _storage.Children = children;
         }
         else
         {
-            ((VirtualFolder)GetEntry(folder).Subject!).Children = assigned;
+            ((VirtualFolder)GetEntry(folder).Subject!).Children = children;
         }
     }
 
@@ -696,8 +670,9 @@ internal sealed class StorageReconciler
     private async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
     {
         await using var stream = await OpenReadAsync(path, cancellationToken);
-        return await StorageHash.ComputeAsync(stream, cancellationToken)
-            .WithStorageTimeoutAsync("hashing", path, _timeProvider, cancellationToken);
+        var hashing = StorageHash.ComputeAsync(stream, cancellationToken);
+        await hashing.WithStorageTimeoutAsync("hashing", path, _timeProvider, cancellationToken);
+        return await hashing;
     }
 
     private async Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken)

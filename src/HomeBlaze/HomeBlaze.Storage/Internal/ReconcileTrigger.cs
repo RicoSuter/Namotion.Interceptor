@@ -74,23 +74,23 @@ internal sealed class ReconcileTrigger : IDisposable
                 }
 
                 _periodicTimer = _timeProvider.CreateTimer(
-                    static state => ((ReconcileTrigger)state!).Request(null, null, allNamed: false, atOnce: true),
+                    static state => ((ReconcileTrigger)state!).Request(null, allNamed: false, atOnce: true),
                     this, periodicInterval, periodicInterval);
             }
         }
     }
 
     /// <summary>
-    /// Reports that an event named the path, and for a rename the other path as well.
+    /// Reports that an event named the path.
     /// </summary>
-    public void NotifyChanged(string path, string? otherPath = null)
-        => Request(path, otherPath, allNamed: false, atOnce: false);
+    public void NotifyChanged(string path)
+        => Request(path, allNamed: false, atOnce: false);
 
     /// <summary>
     /// Reports that events were lost, so the next pass cannot rely on the named paths.
     /// </summary>
     public void NotifyEventsLost()
-        => Request(null, null, allNamed: true, atOnce: true);
+        => Request(null, allNamed: true, atOnce: true);
 
     /// <summary>
     /// Reports that a pass which this trigger did not start has not finished, so that it is retried like one
@@ -108,7 +108,7 @@ internal sealed class ReconcileTrigger : IDisposable
         }
     }
 
-    private void Request(string? path, string? otherPath, bool allNamed, bool atOnce)
+    private void Request(string? path, bool allNamed, bool atOnce)
     {
         lock (_lock)
         {
@@ -118,11 +118,6 @@ internal sealed class ReconcileTrigger : IDisposable
             if (path != null)
             {
                 _namedPaths.Add(path);
-            }
-
-            if (otherPath != null)
-            {
-                _namedPaths.Add(otherPath);
             }
 
             _allNamed |= allNamed;

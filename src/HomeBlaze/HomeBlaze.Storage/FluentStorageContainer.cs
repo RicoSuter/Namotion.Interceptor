@@ -55,12 +55,6 @@ public partial class FluentStorageContainer :
     /// <summary>Wraps the storage client when the storage connects.</summary>
     internal Func<IBlobStorage, IBlobStorage>? ClientDecorator { get; set; }
 
-    /// <summary>
-    /// The clock of the current connection, for file subjects of this library that limit their own reading of
-    /// a stream of the storage.
-    /// </summary>
-    internal TimeProvider ConnectionTimeProvider => _connection?.TimeProvider ?? TimeProvider;
-
     /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
     internal bool IsStorageUnresponsive => _connection is { IsStorageUnresponsive: true };
 
@@ -197,9 +191,7 @@ public partial class FluentStorageContainer :
         var baseDirectory = ((IInterceptorSubject)this).Context.TryGetService<IDataDirectoryProvider>()?.DataDirectory
             ?? Directory.GetCurrentDirectory();
 
-        return string.IsNullOrEmpty(connectionString)
-            ? baseDirectory
-            : Path.GetFullPath(connectionString, baseDirectory);
+        return Path.GetFullPath(connectionString, baseDirectory);
     }
 
     /// <summary>
@@ -359,7 +351,7 @@ public partial class FluentStorageContainer :
             }
 
             SetStatus(connection, StorageStatus.Connected);
-            _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Count);
+            _logger?.LogInformation("Storage loaded: {Count} entries.", connection.Index.Entries.Count);
         }, cancellationToken);
 
     /// <summary>
@@ -378,11 +370,7 @@ public partial class FluentStorageContainer :
                 // trigger started, or keeps the trigger from starting. The file watcher starts after it.
                 if (!_isStopped)
                 {
-                    var settings = connection.Settings;
-                    connection.StartTrigger(
-                        (namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed),
-                        TimeSpan.FromSeconds(settings.ReconcileIntervalSeconds),
-                        watchFiles: settings.EnableFileWatching && !settings.IsInMemory);
+                    connection.StartTrigger((namedPaths, allNamed) => ReconcileAsync(connection, namedPaths, allNamed));
                 }
 
                 return;
@@ -420,29 +408,30 @@ public partial class FluentStorageContainer :
         // stopped have raised no event, so every file counts as named.
         allNamed |= connection.TryStartFileWatcher();
 
+        var isFinished = true;
         try
         {
-            return await connection.Worker.RunAsync(async token =>
+            await connection.Worker.RunAsync(async token =>
             {
                 try
                 {
                     await connection.Reconciler.ReconcileAsync(namedPaths, allNamed, token);
                     SetStatus(connection, StorageStatus.Connected);
-                    return true;
                 }
                 catch (Exception exception) when (!token.IsCancellationRequested)
                 {
                     SetStatus(connection, StorageStatus.Error);
                     _logger?.LogError(exception, "Failed to reconcile the storage, another pass tries again");
-                    return false;
+                    isFinished = false;
                 }
             }, connection.Token);
         }
         catch (Exception exception) when (connection.IsEnded)
         {
             _logger?.LogDebug(exception, "A pass ended with its connection");
-            return true;
         }
+
+        return isFinished;
     }
 
     /// <summary>
@@ -455,24 +444,26 @@ public partial class FluentStorageContainer :
         if (connection is null or { IsEnded: true })
             return false;
 
+        var isWritten = false;
         try
         {
-            return await connection.Worker.RunAsync(async token =>
+            await connection.Worker.RunAsync(async token =>
             {
-                if (!connection.Index.TryGetPath(subject, out var path) || !connection.Index.TryGet(path, out var entry))
-                    return false;
+                if (!connection.Index.TryGetEntry(subject, out var entry))
+                    return;
 
-                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);
+                await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
+                isWritten = true;
 
-                _logger?.LogDebug("Saved subject to storage: {Path}", path);
-                return true;
+                _logger?.LogDebug("Saved subject to storage: {Path}", entry.Path);
             }, cancellationToken);
         }
         catch (OperationCanceledException) when (connection.IsEnded && !cancellationToken.IsCancellationRequested)
         {
             // The connection ended before the item ran, which is the same as no connection.
-            return false;
         }
+
+        return isWritten;
     }
 
     /// <summary>
@@ -500,7 +491,7 @@ public partial class FluentStorageContainer :
                 throw new InvalidOperationException($"A file already exists at '{path}'.");
 
             var entry = new StorageEntry { Path = relativePath, IsFolder = false, Subject = subject };
-            await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_subjectFactory.Serialize(subject)), token);
+            await WriteAndRecordAsync(connection, entry, Encoding.UTF8.GetBytes(_serializer.Serialize(subject)), token);
 
             connection.Index.EnsureFolders(relativePath);
             connection.Index.Set(entry);
@@ -552,8 +543,7 @@ public partial class FluentStorageContainer :
     private static async Task WriteAsync(
         StorageConnection connection, string path, byte[] content, CancellationToken cancellationToken)
     {
-        // Not disposed when the write fails: a write that was given up reads from it once the storage goes on,
-        // and would otherwise leave an empty file.
+        // Not disposed when the write fails, see TimeLimitedBlobStorage.
         var stream = new MemoryStream(content);
         await connection.Client.WriteAsync(path, stream, append: false, cancellationToken: cancellationToken);
         await stream.DisposeAsync();
@@ -599,8 +589,7 @@ public partial class FluentStorageContainer :
         var connection = Connection;
         var relativePath = StoragePath.Normalize(path);
 
-        // A write that was given up still reads its content once the storage goes on. The caller may have
-        // disposed its stream by then, which would cut the file short.
+        // Copied, because a write that was given up still reads its content, see TimeLimitedBlobStorage.
         using var buffer = new MemoryStream();
         await content.CopyToAsync(buffer, cancellationToken);
         var bytes = buffer.ToArray();
@@ -636,13 +625,24 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IStorageContainer - Deletes a blob from storage and removes from Children.
+    /// IStorageContainer - Deletes the file of a subject and removes the subject from Children.
     /// </summary>
+    /// <remarks>
+    /// A path without a subject in this storage is left alone and only logged: a folder, an ignored file, or a
+    /// file that no pass has loaded yet.
+    /// </remarks>
     public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
         var connection = Connection;
-        await RunOperationAsync(
-            connection, token => DeleteEntryAsync(connection, StoragePath.Normalize(path), token), cancellationToken);
+        var relativePath = StoragePath.Normalize(path);
+        await RunOperationAsync(connection, token =>
+        {
+            if (connection.Index.TryGet(relativePath, out var entry) && entry is { IsFolder: false, Subject: not null })
+                return DeleteEntryAsync(connection, entry, token);
+
+            _logger?.LogWarning("Cannot delete blob - no subject at: {Path}", relativePath);
+            return Task.CompletedTask;
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -662,31 +662,21 @@ public partial class FluentStorageContainer :
         await RunOperationAsync(connection, token =>
         {
             // A folder has an entry too, but no file that could be deleted.
-            if (!connection.Index.TryGetPath(subject, out var path) ||
-                !connection.Index.TryGet(path, out var entry) ||
-                entry.IsFolder)
-            {
+            if (!connection.Index.TryGetEntry(subject, out var entry) || entry.IsFolder)
                 throw new InvalidOperationException("Subject not found in storage registry");
-            }
 
-            return DeleteEntryAsync(connection, path, token);
+            return DeleteEntryAsync(connection, entry, token);
         }, cancellationToken);
     }
 
-    private async Task DeleteEntryAsync(StorageConnection connection, string relativePath, CancellationToken cancellationToken)
+    private async Task DeleteEntryAsync(StorageConnection connection, StorageEntry entry, CancellationToken cancellationToken)
     {
-        if (!connection.Index.TryGet(relativePath, out var entry) || entry.IsFolder || entry.Subject == null)
-        {
-            _logger?.LogWarning("Cannot delete blob - no subject at: {Path}", relativePath);
-            return;
-        }
-
-        await connection.Client.DeleteAsync(relativePath, cancellationToken: cancellationToken);
-        connection.Index.Remove(relativePath);
+        await connection.Client.DeleteAsync(entry.Path, cancellationToken: cancellationToken);
+        connection.Index.Remove(entry.Path);
         connection.Reconciler.Apply();
         connection.Reconciler.Release(entry.Subject);
 
-        _logger?.LogDebug("Deleted blob from storage: {Path}", relativePath);
+        _logger?.LogDebug("Deleted blob from storage: {Path}", entry.Path);
     }
 
     /// <summary>

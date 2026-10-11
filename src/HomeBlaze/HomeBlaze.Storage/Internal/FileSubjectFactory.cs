@@ -41,6 +41,9 @@ internal sealed class FileSubjectFactory
     /// </remarks>
     public IInterceptorSubject CreateFile(IStorageContainer storage, string path)
     {
+        // Without the flow of the caller, as for a subject from JSON: the constructor is code of the file type.
+        using var suppressedFlow = ExecutionContext.SuppressFlow();
+
         var mappedType = _typeRegistry.ResolveTypeForExtension(Path.GetExtension(path));
         return mappedType != null
             ? (IInterceptorSubject)ActivatorUtilities.CreateInstance(_serviceProvider, mappedType, storage, path)
@@ -48,17 +51,16 @@ internal sealed class FileSubjectFactory
     }
 
     /// <summary>
-    /// Serializes a subject to JSON.
-    /// </summary>
-    public string Serialize(IInterceptorSubject subject)
-        => _serializer.Serialize(subject);
-
-    /// <summary>
     /// Creates the subject of a JSON file from its text: the configurable subject it describes,
     /// or a <see cref="JsonFile"/> when the text is plain or invalid JSON.
     /// </summary>
     public IInterceptorSubject CreateFromJson(IStorageContainer storage, string path, string json)
     {
+        // A configurable subject enters the context when it is created, which runs lifecycle handlers as an
+        // assignment to the tree does. With the flow of the caller, work that a handler starts would count as
+        // part of the work item that creates the subject, and its calls into the storage would be refused.
+        using var suppressedFlow = ExecutionContext.SuppressFlow();
+
         try
         {
             // Every configurable type is a subject as well.

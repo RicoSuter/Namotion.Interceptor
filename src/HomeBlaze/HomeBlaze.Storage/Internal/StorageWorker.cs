@@ -48,17 +48,17 @@ internal sealed class StorageWorker : IDisposable
     /// <remarks>
     /// A call from within a running item of this worker is refused: the work is not run, and the returned task fails with an <see cref="InvalidOperationException"/>. Every flow that the item started counts as within it while the work of the item has not returned, also a flow the item does not await, such as a task or a timer it started. Code that runs on the worker therefore starts such work without the execution flow (<see cref="ExecutionContext.SuppressFlow"/>). Once the item has finished, a call from a flow it started is queued like any other.
     /// </remarks>
-    public Task<TResult> RunAsync<TResult>(Func<CancellationToken, Task<TResult>> work, CancellationToken cancellationToken)
+    public Task RunAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken)
     {
         // Queued, the call would wait for the item that waits for it, and nothing would ever run again. That
         // the flow carries an item is not enough: a task that an item started keeps the flow of that item
         // after it has finished.
         if (_itemOfFlow.Value is { IsFinished: false })
         {
-            return Task.FromException<TResult>(new InvalidOperationException(CallFromWithinItemMessage));
+            return Task.FromException(new InvalidOperationException(CallFromWithinItemMessage));
         }
 
-        var item = new WorkItem<TResult>(work, cancellationToken);
+        var item = new WorkItem(work, cancellationToken);
         if (!_queue.Writer.TryWrite(item))
         {
             item.Cancel(_disposalSource.Token);
@@ -66,14 +66,6 @@ internal sealed class StorageWorker : IDisposable
 
         return item.Completion;
     }
-
-    /// <inheritdoc cref="RunAsync{TResult}"/>
-    public Task RunAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken)
-        => RunAsync(async token =>
-        {
-            await work(token);
-            return true;
-        }, cancellationToken);
 
     private async Task ProcessQueueAsync()
     {
@@ -125,54 +117,43 @@ internal sealed class StorageWorker : IDisposable
         return _itemOfFlow.Value is { IsFinished: false } ? Task.CompletedTask : _loop;
     }
 
-    private abstract class WorkItem
+    private sealed class WorkItem(Func<CancellationToken, Task> work, CancellationToken cancellationToken)
     {
+        // Asynchronous continuations keep the caller's code off the worker loop.
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private volatile bool _isFinished;
 
         /// <summary>True once the work of the item has returned, or when it was not run at all.</summary>
         public bool IsFinished => _isFinished;
 
-        public abstract Task ExecuteAsync(CancellationToken disposalToken);
-
-        protected void MarkFinished() => _isFinished = true;
-    }
-
-    private sealed class WorkItem<TResult>(
-        Func<CancellationToken, Task<TResult>> work,
-        CancellationToken cancellationToken) : WorkItem
-    {
-        // Asynchronous continuations keep the caller's code off the worker loop.
-        private readonly TaskCompletionSource<TResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public Task<TResult> Completion => _completion.Task;
+        public Task Completion => _completion.Task;
 
         public void Cancel(CancellationToken cancelledToken) => _completion.TrySetCanceled(cancelledToken);
 
-        public override async Task ExecuteAsync(CancellationToken disposalToken)
+        public async Task ExecuteAsync(CancellationToken disposalToken)
         {
             var cancelledToken = cancellationToken.IsCancellationRequested ? cancellationToken : disposalToken;
             if (cancelledToken.IsCancellationRequested)
             {
-                MarkFinished();
+                _isFinished = true;
                 _completion.TrySetCanceled(cancelledToken);
                 return;
             }
 
             try
             {
-                TResult result;
                 try
                 {
-                    result = await work(cancellationToken);
+                    await work(cancellationToken);
                 }
                 finally
                 {
                     // Before the caller has the outcome: a flow of this item that goes on from there, such
                     // as a task that waited for the item, calls in after it and is queued.
-                    MarkFinished();
+                    _isFinished = true;
                 }
 
-                _completion.TrySetResult(result);
+                _completion.TrySetResult();
             }
             catch (OperationCanceledException exception)
             {

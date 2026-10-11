@@ -25,6 +25,9 @@ internal sealed class StorageConnection : IDisposable
 {
     private readonly CancellationTokenSource _endedSource = new();
     private readonly TimeLimitedBlobStorage _client;
+    // Null for a storage that is not on disk.
+    private readonly string? _storageDirectory;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger? _logger;
 
     private volatile ReconcileTrigger? _trigger;
@@ -44,8 +47,8 @@ internal sealed class StorageConnection : IDisposable
         _client = new TimeLimitedBlobStorage(
             client, timeProvider, logger, storageDirectory is null ? null : () => VerifyDirectory(storageDirectory));
         Settings = settings;
-        StorageDirectory = storageDirectory;
-        TimeProvider = timeProvider;
+        _storageDirectory = storageDirectory;
+        _timeProvider = timeProvider;
         Index = new StorageIndex();
         Reconciler = new StorageReconciler(_client, storage, subjectFactory, serializer, Index, timeProvider, logger, _endedSource.Token);
         // On the worker, which is the only one that reads the index, and after its last item: nothing places
@@ -54,7 +57,6 @@ internal sealed class StorageConnection : IDisposable
         _logger = logger;
     }
 
-    /// <summary>The settings the connection was created with.</summary>
     public StorageConnectionSettings Settings { get; }
 
     /// <summary>The storage. Every call on it returns within <see cref="StorageCallTimeout.Limit"/>.</summary>
@@ -63,12 +65,6 @@ internal sealed class StorageConnection : IDisposable
     /// <inheritdoc cref="TimeLimitedBlobStorage.IsUnresponsive"/>
     public bool IsStorageUnresponsive => _client.IsUnresponsive;
 
-    /// <summary>The directory of a storage on disk, null for any other storage.</summary>
-    public string? StorageDirectory { get; }
-
-    /// <summary>The clock for the timeouts and timers of the connection.</summary>
-    public TimeProvider TimeProvider { get; }
-
     /// <remarks>Only read and written on <see cref="Worker"/>, as is the tree that <see cref="Reconciler"/> assigns.</remarks>
     public StorageIndex Index { get; }
 
@@ -76,7 +72,6 @@ internal sealed class StorageConnection : IDisposable
 
     public StorageWorker Worker { get; }
 
-    /// <summary>Cancelled when the connection ends.</summary>
     public CancellationToken Token => _endedSource.Token;
 
     public bool IsEnded => _endedSource.IsCancellationRequested;
@@ -87,16 +82,14 @@ internal sealed class StorageConnection : IDisposable
     /// that makes the connection the current one, and so never after <see cref="StopTrigger"/>.
     /// </summary>
     /// <param name="runPass">Runs a pass of this connection, see <see cref="ReconcileTrigger"/>.</param>
-    /// <param name="periodicInterval">How often a pass runs without any change. Zero or less switches it off.</param>
-    /// <param name="watchFiles">Whether <see cref="StorageDirectory"/> is watched.</param>
-    public void StartTrigger(Func<IReadOnlySet<string>, bool, Task<bool>> runPass, TimeSpan periodicInterval, bool watchFiles)
+    public void StartTrigger(Func<IReadOnlySet<string>, bool, Task<bool>> runPass)
     {
-        var trigger = new ReconcileTrigger(runPass, periodicInterval, TimeProvider, _logger);
+        var trigger = new ReconcileTrigger(runPass, TimeSpan.FromSeconds(Settings.ReconcileIntervalSeconds), _timeProvider, _logger);
         _trigger = trigger;
 
-        if (watchFiles)
+        if (Settings.EnableFileWatching && _storageDirectory != null)
         {
-            _fileWatcher = new StorageFileWatcher(StorageDirectory!, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
+            _fileWatcher = new StorageFileWatcher(_storageDirectory, trigger.NotifyChanged, trigger.NotifyEventsLost, _logger);
         }
     }
 
@@ -127,7 +120,7 @@ internal sealed class StorageConnection : IDisposable
         {
             // A warning for the first failure only: every pass tries again.
             var level = Interlocked.Exchange(ref _hasFileWatcherFailedToStart, true) ? LogLevel.Debug : LogLevel.Warning;
-            _logger?.Log(level, exception, "File watching cannot start for: {Path}. It is tried again with every pass.", StorageDirectory);
+            _logger?.Log(level, exception, "File watching cannot start for: {Path}. It is tried again with every pass.", _storageDirectory);
             return false;
         }
     }

@@ -11,12 +11,13 @@ internal sealed class StorageIndex
 {
     private readonly Dictionary<string, StorageEntry> _entries = new(StringComparer.Ordinal);
 
-    public int Count => _entries.Count;
-
     /// <summary>
     /// True when an entry was added, replaced or removed since <see cref="MarkApplied"/>, and for a new index:
     /// the tree can still hold the subjects of an earlier connection.
     /// </summary>
+    /// <remarks>
+    /// Not set by a change of an entry itself. An entry that gets another subject is replaced with <see cref="Set"/>.
+    /// </remarks>
     public bool HasUnappliedChanges { get; private set; } = true;
 
     public IReadOnlyCollection<StorageEntry> Entries => _entries.Values;
@@ -24,19 +25,18 @@ internal sealed class StorageIndex
     public bool TryGet(string path, [MaybeNullWhen(false)] out StorageEntry entry)
         => _entries.TryGetValue(path, out entry);
 
-    public bool TryGetPath(IInterceptorSubject subject, [MaybeNullWhen(false)] out string path)
+    public bool TryGetEntry(IInterceptorSubject subject, [MaybeNullWhen(false)] out StorageEntry entry)
     {
-        // Scanned on purpose: a second dictionary would have to follow every change of an entry's subject.
-        foreach (var entry in _entries.Values)
+        foreach (var candidate in _entries.Values)
         {
-            if (ReferenceEquals(entry.Subject, subject))
+            if (ReferenceEquals(candidate.Subject, subject))
             {
-                path = entry.Path;
+                entry = candidate;
                 return true;
             }
         }
 
-        path = null;
+        entry = null;
         return false;
     }
 

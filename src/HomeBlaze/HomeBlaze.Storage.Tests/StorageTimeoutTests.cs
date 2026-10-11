@@ -98,9 +98,12 @@ public class StorageTimeoutTests : StorageTestBase
         var storage = await ConnectPausableAsync();
         WriteFile("First.gated");
         WriteFile("Second.md");
-        var metadataReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
-        await metadataReached;
+        await gate.WhenReachedAsync();
+        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        gate.Release();
+        await readReached;
 
         // Act
         await LetHangingCallTimeOutAsync();
@@ -280,31 +283,6 @@ public class StorageTimeoutTests : StorageTestBase
     }
 
     [Fact]
-    public async Task WhenMetadataCallBlocksWhileMarkdownFileLoads_ThenPassFailsAndLaterPassLoadsTheFile()
-    {
-        // Arrange
-        var storage = await ConnectPausableAsync();
-        WriteFile("Notes.md");
-        var metadataReached = _client!.BlockNext(nameof(IBlobStorage.GetBlobsAsync));
-        var pass = storage.ReconcileAsync();
-        await metadataReached;
-        var streamsOpenedBeforeMetadata = _client.OpenedStreamCount;
-
-        // Act
-        await LetHangingCallTimeOutAsync();
-        await pass;
-        var statusAfterFailedPass = storage.Status;
-        await ReleaseHangingCallAsync(storage);
-        await storage.ReconcileAsync();
-
-        // Assert: the only stream before the metadata call is the one that hashed the file, not one of the subject.
-        Assert.Equal(1, streamsOpenedBeforeMetadata);
-        Assert.Equal(StorageStatus.Error, statusAfterFailedPass);
-        Assert.Equal(StorageStatus.Connected, storage.Status);
-        Assert.Equal(["Notes.md"], storage.Children.Keys);
-    }
-
-    [Fact]
     public async Task WhenPassFailsAfterMovingSubject_ThenNextPassKeepsTheInstanceAttached()
     {
         // Arrange
@@ -314,10 +292,14 @@ public class StorageTimeoutTests : StorageTestBase
         var detaches = CountDetachesOf(motor);
         Directory.CreateDirectory(GetFullPath("Other"));
         File.Move(GetFullPath("Old/Motor.json"), GetFullPath("Other/Motor.json"));
-        WriteFile("Zeta.md");
-        var metadataReached = _client!.PauseNext(nameof(IBlobStorage.GetBlobsAsync));
+        WriteFile("Zeta.gated");
+        WriteFile("Zulu.md");
+        var gate = GatedFile.PauseNextLoad();
         var pass = storage.ReconcileAsync();
-        await metadataReached;
+        await gate.WhenReachedAsync();
+        var readReached = _client!.PauseNext(nameof(IBlobStorage.OpenReadAsync));
+        gate.Release();
+        await readReached;
 
         // Act
         await LetHangingCallTimeOutAsync();
