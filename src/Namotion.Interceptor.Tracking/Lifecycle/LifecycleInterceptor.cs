@@ -549,13 +549,23 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects)
     {
-        foreach (DictionaryEntry entry in dictionary)
+        // IDictionaryEnumerator hands out key and value separately, where foreach
+        // would box a DictionaryEntry per entry.
+        var enumerator = dictionary.GetEnumerator();
+        try
         {
-            if (entry.Value is IInterceptorSubject subjectItem)
+            while (enumerator.MoveNext())
             {
-                touchedSubjects?.Add(subjectItem);
-                collectedSubjects.Add((subjectItem, property, entry.Key));
+                if (enumerator.Value is IInterceptorSubject subjectItem)
+                {
+                    touchedSubjects?.Add(subjectItem);
+                    collectedSubjects.Add((subjectItem, property, enumerator.Key));
+                }
             }
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
         }
     }
 

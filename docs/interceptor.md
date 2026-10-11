@@ -14,7 +14,7 @@ The context is typically created once at application startup and shared across a
 
 ## Adding Services
 
-Services are registered using the fluent API. Services can be interceptors, handlers, or any custom service type:
+Services are registered using the fluent API. Services can be interceptors, handlers, or any custom service type. `WithService<TService>` only registers when no service of type `TService` is registered yet (including through fallback contexts), so a repeated call is a no-op; `AddService` always adds another instance:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -28,7 +28,9 @@ var context = InterceptorSubjectContext
 - `IReadInterceptor` - Intercepts property reads
 - `IWriteInterceptor` - Intercepts property writes
 - `IMethodInterceptor` - Intercepts method invocations
-- `ILifecycleHandler` - Handles subject attach/detach events
+- `ILifecycleInterceptor` - Notified when a subject is attached to or detached from the context
+
+The Tracking package adds `ILifecycleHandler` (`Namotion.Interceptor.Tracking.Lifecycle`, enabled by `WithLifecycle()`) for subject attach/detach and property reference events, see [Tracking](tracking.md#subject-lifecycle-tracking).
 
 Extension methods like `WithFullPropertyTracking()` or `WithRegistry()` register multiple related services at once.
 
@@ -118,11 +120,11 @@ person.Name = "John"
     │
     ▼
 ┌─ Interceptor 1 ─────────────────────────────┐
-│  (before next)  validate, transform, etc.   │
+│  (before next)  equality check              │
 │      │                                      │
 │      ▼                                      │
 │  ┌─ Interceptor 2 ───────────────────────┐  │
-│  │  (before next)  equality check        │  │
+│  │  (before next)  validate, transform   │  │
 │  │      │                                │  │
 │  │      ▼                                │  │
 │  │  ┌─ Interceptor 3 ─────────────────┐  │  │
@@ -132,15 +134,15 @@ person.Name = "John"
 │  │  │    _name = "John"  ← field set  │  │  │
 │  │  │      │                          │  │  │
 │  │  │      ▼                          │  │  │
-│  │  │  (after next)                   │  │  │
+│  │  │  (after next)  notify observers │  │  │
 │  │  └────────────────────────────────-┘  │  │
 │  │      │                                │  │
 │  │      ▼                                │  │
-│  │  (after next)  fire change event      │  │
+│  │  (after next)                         │  │
 │  └───────────────────────────────────────┘  │
 │      │                                      │
 │      ▼                                      │
-│  (after next)  notify observers             │
+│  (after next)                               │
 └─────────────────────────────────────────────┘
 ```
 
@@ -191,4 +193,4 @@ public class LoggingInterceptor : IWriteInterceptor
 }
 ```
 
-The pipeline is built once per property type and cached for performance.
+The pipeline is compiled per context and property type and cached. It is rebuilt when the context's services or fallback contexts change.
