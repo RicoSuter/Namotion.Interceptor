@@ -6,28 +6,23 @@
     _renderedEntries = entries;
     _renderedIsBusy = isBusy;
     _renderedTimeZoneVersion = TimeZoneVersion;
+    _renderedRowLimit = _rowLimit;
+    var hasEarlierRows = AgentTimelineRows.GetNewest(entries, _rowLimit, _rows);
 }
-@for (var index = 0; index < entries.Count; index++)
+@if (hasEarlierRows)
 {
-    var entry = entries[index];
-    var key = _keys.GetValue(entry, _ => new object());
-    if (entry is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true })
-    {
-        // Consecutive quiet runs collapse into one row showing the newest, keyed by the oldest so the row stays
-        // in place while the group grows.
-        var quietCount = 1;
-        while (index + 1 < entries.Count && entries[index + 1] is { Kind: AgentTimelineEntryKind.BackgroundRun, IsQuiet: true })
-        {
-            index++;
-            quietCount++;
-        }
-
-        <AgentTimelineEntryView @key="key" Entry="entries[index]" QuietCount="quietCount" TimeZoneVersion="TimeZoneVersion" />
-    }
-    else
-    {
-        <AgentTimelineEntryView @key="key" Entry="entry" TimeZoneVersion="TimeZoneVersion" />
-    }
+    @* The chat script keeps the row below this in place when earlier rows are added above it. *@
+    <div class="d-flex justify-center my-1" data-keeps-scroll-position>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.ExpandLess"
+                   OnClick="ShowEarlier" data-testid="agent-timeline-show-earlier">Show earlier</MudButton>
+    </div>
+}
+@foreach (var row in _rows)
+{
+    // Rows are keyed by their oldest entry, so a quiet group stays in place while it grows.
+    <div @key="_keys.GetValue(entries[row.FirstIndex], _ => new object())" data-testid="agent-timeline-row">
+        <AgentTimelineEntryView Entry="entries[row.LastIndex]" QuietCount="row.EntryCount" TimeZoneVersion="TimeZoneVersion" />
+    </div>
 }
 
 @if (isBusy)
@@ -38,10 +33,13 @@
 @code {
     // Rows are keyed by entry reference: records compare by value, so equal entries would collide as keys.
     private readonly ConditionalWeakTable<AgentTimelineEntry, object> _keys = new();
+    private readonly List<AgentTimelineRow> _rows = [];
 
+    private int _rowLimit = AgentTimelineRows.PageSize;
     private IReadOnlyList<AgentTimelineEntry>? _renderedEntries;
     private bool _renderedIsBusy;
     private int _renderedTimeZoneVersion;
+    private int _renderedRowLimit;
 
     [Parameter, EditorRequired]
     public LlmAgentBase Agent { get; set; } = null!;
@@ -49,9 +47,12 @@
     [Parameter]
     public int TimeZoneVersion { get; set; }
 
+    private void ShowEarlier() => _rowLimit += AgentTimelineRows.PageSize;
+
     // The timeline is an immutable snapshot that is replaced on every change, so a reference compare detects it.
     protected override bool ShouldRender() =>
         !ReferenceEquals(_renderedEntries, Agent.Timeline.Entries) ||
         _renderedIsBusy != Agent.IsBusy ||
-        _renderedTimeZoneVersion != TimeZoneVersion;
+        _renderedTimeZoneVersion != TimeZoneVersion ||
+        _renderedRowLimit != _rowLimit;
 }

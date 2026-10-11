@@ -33,7 +33,8 @@ export function attachEnterToSend(container, dotNetReference) {
 }
 
 // Keeps the timeline scrolled to the newest content while the reader is at the bottom. Scrolling up releases it, so
-// new content never moves the view; scrolling back to the bottom or pin() holds it again.
+// new content never moves the view; scrolling back to the bottom or pin() holds it again. Clicking inside an element
+// marked data-keeps-scroll-position, which adds rows above the row after it, keeps that row where it is.
 const bottomThreshold = 32;
 
 export function attachStickToBottom(scroller) {
@@ -44,6 +45,10 @@ export function attachStickToBottom(scroller) {
 
     let isPinned = true;
     let lastTop = scroller.scrollTop;
+    let heldRow = null;
+    let heldOffset = 0;
+
+    const offsetOf = element => element.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 
     const distanceToBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
 
@@ -58,6 +63,11 @@ export function attachStickToBottom(scroller) {
     // content grew, which is why the direction, not the distance alone, decides.
     const onScroll = () => {
         const top = scroller.scrollTop;
+        if (top !== lastTop) {
+            // The reader scrolled, or the browser's own scroll anchoring already kept the held row in place.
+            heldRow = null;
+        }
+
         if (top < lastTop) {
             isPinned = distanceToBottom() <= 1;
         } else if (!isPinned) {
@@ -70,14 +80,34 @@ export function attachStickToBottom(scroller) {
     // Observations are delivered once per frame after layout and before paint, so streamed text scrolls at most once
     // per frame and without showing the unscrolled state first. The content grows with entries and streamed text; the
     // scroller shrinks when the input grows or an on-screen keyboard opens.
+    // Browsers without scroll anchoring leave the view where it was when rows are added above, so the held row is
+    // moved back once it has moved.
     const resizeObserver = new ResizeObserver(() => {
+        if (heldRow) {
+            const moved = heldRow.isConnected ? offsetOf(heldRow) - heldOffset : 0;
+            if (!heldRow.isConnected || Math.abs(moved) >= 1) {
+                heldRow = null;
+                scroller.scrollTop += moved;
+                lastTop = scroller.scrollTop;
+            }
+        }
+
         if (isPinned) {
             scrollToBottom();
         }
     });
+
+    const onClick = event => {
+        const row = event.target.closest?.('[data-keeps-scroll-position]')?.nextElementSibling;
+        if (row) {
+            heldRow = row;
+            heldOffset = offsetOf(row);
+        }
+    };
     resizeObserver.observe(content);
     resizeObserver.observe(scroller);
     scroller.addEventListener('scroll', onScroll, { passive: true });
+    scroller.addEventListener('click', onClick, true);
     scrollToBottom();
 
     // The timeline is hidden until it starts at the bottom, so it does not show its top first.
@@ -91,6 +121,7 @@ export function attachStickToBottom(scroller) {
         dispose: () => {
             resizeObserver.disconnect();
             scroller.removeEventListener('scroll', onScroll);
+            scroller.removeEventListener('click', onClick, true);
         }
     };
 }

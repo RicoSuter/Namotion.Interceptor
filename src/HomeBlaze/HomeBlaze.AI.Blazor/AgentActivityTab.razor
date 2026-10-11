@@ -32,7 +32,7 @@
 
 @* Below the small breakpoint each run stacks into labeled lines instead of a wide table. *@
 <MudTable T="AgentTimelineEntry" Items="GetRuns()" Dense="true" Hover="true" Elevation="0" Outlined="true"
-          Breakpoint="Breakpoint.Xs" data-testid="agent-runs">
+          Breakpoint="Breakpoint.Xs" RowsPerPage="RunsPerPage" data-testid="agent-runs">
     <HeaderContent>
         <MudTh>Time</MudTh>
         <MudTh>Trigger</MudTh>
@@ -53,12 +53,20 @@
                      Style="max-width: 40ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;">@context.Text</MudText>
         </MudTd>
     </RowTemplate>
+    <PagerContent>
+        @if (GetRuns().Count > RunsPerPage)
+        {
+            <MudTablePager HideRowsPerPage="true" data-testid="agent-runs-pager" />
+        }
+    </PagerContent>
     <NoRecordsContent>
         <MudText Typo="Typo.body2" Class="mud-text-secondary">No background runs yet.</MudText>
     </NoRecordsContent>
 </MudTable>
 
 @code {
+    private const int RunsPerPage = 25;
+
     private IReadOnlyList<AgentTimelineEntry>? _runsSource;
     private List<AgentTimelineEntry> _runs = [];
 

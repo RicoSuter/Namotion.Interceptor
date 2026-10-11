@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using HomeBlaze.Abstractions;
+using System.Text.RegularExpressions;
 using HomeBlaze.AI.Agents;
 using HomeBlaze.AI.Agents.Cli;
 using HomeBlaze.E2E.Tests.Infrastructure;
@@ -17,6 +18,7 @@ namespace HomeBlaze.E2E.Tests;
 public class AgentPageTests
 {
     private const string AgentPath = "Agents/TestAgent";
+    private const string TimelineAgentPath = "Agents/TimelineAgent";
     private const int PageLoadTimeout = 30000;
     private const int ReplyTimeout = 30000;
 
@@ -145,6 +147,76 @@ public class AgentPageTests
             await WaitForDistanceToBottomAsync(page, timeline, "<= 32");
         });
     }
+
+    [Fact]
+    public async Task WhenTheTimelineIsLong_ThenTheChatShowsTheNewestRowsAndTheActivityTabPages()
+    {
+        // Arrange - a separate agent, so the seeded entries never reach the chat tests. Its storage is loaded once it
+        // runs; entries appended before that would be replaced by the stored timeline.
+        var page = await _fixture.CreatePageAsync();
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/{TimelineAgentPath}");
+        await Assertions.Expect(page.GetByTestId("agent-status")).ToContainTextAsync(
+            new Regex("Running|Unavailable|Error"), new() { Timeout = PageLoadTimeout });
+
+        var resolver = _fixture.ServerServices.GetRequiredService<SubjectPathResolver>();
+        var agent = Assert.IsType<ClaudeCliAgent>(resolver.ResolveSubject("/" + TimelineAgentPath, PathStyle.Canonical));
+        var start = DateTimeOffset.UtcNow.AddDays(-1);
+        try
+        {
+            // 60 questions alternating with 60 background runs, so every entry is its own row.
+            for (var index = 0; index < 120; index++)
+            {
+                await agent.Timeline.AppendAsync(index % 2 == 0
+                    ? new AgentTimelineEntry { Kind = AgentTimelineEntryKind.User, Timestamp = start.AddMinutes(index), Text = $"Question {index}" }
+                    : new AgentTimelineEntry { Kind = AgentTimelineEntryKind.BackgroundRun, Timestamp = start.AddMinutes(index), Text = $"Run {index}", Trigger = "poll" },
+                    CancellationToken.None);
+            }
+
+            await page.ReloadAsync();
+            var timeline = page.GetByTestId("agent-timeline");
+            var rows = page.GetByTestId("agent-timeline-row");
+
+            // Act & Assert - the chat starts with the newest 50 rows.
+            await Assertions.Expect(timeline).ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(rows).ToHaveCountAsync(50, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(rows.First).ToHaveTextAsync("Question 70");
+
+            // Show earlier adds 50 rows above and keeps the row that was first where it was.
+            await timeline.EvaluateAsync("timeline => timeline.scrollTop = 0");
+            var heldRow = rows.Filter(new() { HasText = "Question 70" });
+            var offsetBefore = await ReadOffsetInTimelineAsync(heldRow);
+            await page.GetByTestId("agent-timeline-show-earlier").ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(100, new() { Timeout = PageLoadTimeout });
+            Assert.Equal(offsetBefore, await ReadOffsetInTimelineAsync(heldRow), 2.0);
+
+            await timeline.EvaluateAsync("timeline => timeline.scrollTop = 0");
+            await page.GetByTestId("agent-timeline-show-earlier").ClickAsync();
+            await Assertions.Expect(rows).ToHaveCountAsync(120, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(page.GetByTestId("agent-timeline-show-earlier")).ToHaveCountAsync(0);
+
+            // The Activity tab pages the 60 runs, newest first.
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Activity" }).ClickAsync();
+            var runRows = page.GetByTestId("agent-runs").Locator("tbody tr");
+            await Assertions.Expect(runRows).ToHaveCountAsync(25, new() { Timeout = PageLoadTimeout });
+            await Assertions.Expect(runRows.First).ToContainTextAsync("Run 119");
+            var nextPage = page.GetByTestId("agent-runs-pager").GetByRole(AriaRole.Button, new() { Name = "Next page" });
+            await nextPage.ClickAsync();
+            await Assertions.Expect(runRows.First).ToContainTextAsync("Run 69");
+            await nextPage.ClickAsync();
+            await Assertions.Expect(runRows).ToHaveCountAsync(10);
+            await Assertions.Expect(runRows.Last).ToContainTextAsync("Run 1");
+        }
+        finally
+        {
+            DeleteAgentData(resolver, agent);
+        }
+    }
+
+    // Read after two animation frames, so the script that keeps the row in place has run.
+    private static Task<double> ReadOffsetInTimelineAsync(ILocator row) =>
+        row.EvaluateAsync<double>(
+            "row => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(" +
+            "row.getBoundingClientRect().top - row.closest('[data-testid=agent-timeline]').getBoundingClientRect().top))))");
 
     private static void Signal(string directory, string signal) =>
         File.WriteAllText(Path.Combine(directory, signal), string.Empty);
