@@ -1,21 +1,24 @@
 <div class="subject-type-picker" data-testid="subject-type-picker">
     <MudTextField T="string"
+                  @ref="_searchField"
                   Value="_searchText"
                   ValueChanged="OnSearchChanged"
                   Placeholder="Search types"
                   Immediate="true"
-                  AutoFocus="true"
+                  Class="subject-type-search"
                   Variant="Variant.Outlined"
                   Margin="Margin.Dense"
                   Adornment="Adornment.Start"
                   AdornmentIcon="@Icons.Material.Filled.Search"
+                  aria-label="Search types"
                   data-testid="type-search-input" />
 
     <div class="subject-type-picker-body">
-        <div class="subject-type-groups">
+        <div class="subject-type-groups" role="group" aria-label="Type groups">
             <button type="button"
                     class="subject-type-group"
                     aria-pressed="@GetAriaPressed(null)"
+                    aria-label="@GetGroupLabel("All", MatchCount)"
                     @onclick="() => SelectGroup(null)"
                     data-testid="type-group-all">
                 <span>All</span>
@@ -27,6 +30,7 @@
                 <button type="button"
                         class="subject-type-group"
                         aria-pressed="@GetAriaPressed(groupName)"
+                        aria-label="@GetGroupLabel(groupName, group.Matches.Count)"
                         @onclick="() => SelectGroup(groupName)"
                         data-testid="@($"type-group-{groupName.ToLowerInvariant()}")">
                     <span>@groupName</span>
@@ -38,14 +42,14 @@
         <div class="subject-type-list">
             @if (!_groups.Any(IsListed))
             {
-                <div class="subject-type-empty" data-testid="type-empty-state">
+                <div class="subject-type-empty" role="status" data-testid="type-empty-state">
                     <MudText Typo="Typo.body2">No types match</MudText>
                     @if (!string.IsNullOrWhiteSpace(_searchText))
                     {
                         <MudButton Variant="Variant.Text"
                                    Color="Color.Primary"
                                    OnClick="ClearSearch"
-                                   data-testid="type-clear-search">Clear search</MudButton>
+                                   data-testid="type-clear-search-button">Clear search</MudButton>
                     }
                 </div>
             }
@@ -55,7 +59,10 @@
                 {
                     @if (_selectedGroup is null)
                     {
-                        <MudText Typo="Typo.caption" Class="subject-type-section-header">@group.Name</MudText>
+                        <MudText Typo="Typo.caption"
+                                 Class="subject-type-section-header"
+                                 role="heading"
+                                 aria-level="3">@group.Name</MudText>
                     }
                     @foreach (var descriptor in group.Matches)
                     {
@@ -83,14 +90,21 @@
     .subject-type-picker {
         display: flex;
         flex-direction: column;
+        flex: 1 1 auto;
         gap: 12px;
+        min-height: 0;
+    }
+
+    /* MudBlazor lets an input grow, which would share the height with the list. */
+    .subject-type-picker > .subject-type-search {
+        flex: 0 0 auto;
     }
 
     .subject-type-picker-body {
         display: flex;
+        flex: 1 1 auto;
         gap: 16px;
-        height: calc(100vh - 400px);
-        min-height: 220px;
+        min-height: 0;
     }
 
     .subject-type-groups {
@@ -121,8 +135,9 @@
         background: var(--mud-palette-action-default-hover);
     }
 
-    /* The selected group already has the hover background and MudBlazor removes the outline of every button. */
-    .subject-type-group:focus-visible {
+    /* MudBlazor removes the outline of every button, and the selected group already has the hover background. */
+    .subject-type-group:focus-visible,
+    .subject-type-row:focus-visible {
         outline: 2px solid var(--mud-palette-primary);
         outline-offset: -2px;
     }
@@ -135,6 +150,7 @@
     .subject-type-list {
         flex: 1;
         min-width: 0;
+        min-height: 0;
         overflow-y: auto;
     }
 
@@ -186,6 +202,38 @@
         color: var(--mud-palette-text-secondary);
     }
 
+    /* A phone in landscape: one line per type, so that the list still shows several of them. */
+    @@media (max-height: 500px) {
+        .subject-type-picker {
+            gap: 8px;
+        }
+
+        .subject-type-picker > .mud-input-control.subject-type-search,
+        .subject-type-section-header {
+            margin-top: 0;
+        }
+
+        .subject-type-picker > .mud-input-control.subject-type-search {
+            margin-bottom: 0;
+        }
+
+        .subject-type-row-text {
+            flex-direction: row;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .subject-type-row-text > span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .subject-type-row-text > span:first-child {
+            flex-shrink: 0;
+        }
+    }
+
     @@media (max-width: 600px) {
         .subject-type-picker-body {
             flex-direction: column;
@@ -219,6 +267,7 @@
     [Parameter]
     public EventCallback<SubjectTypeDescriptor> OnTypeSelected { get; set; }
 
+    private MudTextField<string>? _searchField;
     private IReadOnlyList<SubjectTypeDescriptor>? _refreshedTypes;
     private string _searchText = "";
     private string? _selectedGroup;
@@ -226,6 +275,14 @@
     private bool _isRenderPending;
 
     private int MatchCount => _groups.Sum(group => group.Matches.Count);
+
+    /// <summary>
+    /// Moves the focus to the search field.
+    /// </summary>
+    public ValueTask FocusSearchAsync()
+    {
+        return _searchField?.FocusAsync() ?? ValueTask.CompletedTask;
+    }
 
     protected override void OnParametersSet()
     {
@@ -284,5 +341,10 @@
     private string GetAriaPressed(string? group)
     {
         return group == _selectedGroup ? "true" : "false";
+    }
+
+    private static string GetGroupLabel(string groupName, int matchCount)
+    {
+        return matchCount == 1 ? $"{groupName}, 1 type" : $"{groupName}, {matchCount} types";
     }
 }

@@ -53,6 +53,13 @@ public class SubjectSetupDialogTests
 
     private static ILocator CreateButton(IPage page) => page.Locator("[data-testid='create-button']");
 
+    private static ILocator BackButton(IPage page) => page.Locator("[data-testid='back-button']");
+
+    private static ILocator NameHelperText(IPage page, string text)
+    {
+        return Dialog(page).Locator(".mud-input-helper-text").Filter(new() { HasText = text });
+    }
+
     private async Task OpenSubjectBrowserAsync(IPage page)
     {
         await page.GotoAsync($"{_fixture.ServerAddress}");
@@ -145,7 +152,176 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(page.Locator("[data-testid='type-group-all']")).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveCountAsync(0);
         await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0);
+        await Assertions.Expect(BackButton(page)).ToHaveCountAsync(0);
         await Assertions.Expect(page.Locator("[data-testid='cancel-button']")).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task WhenTheDialogOpens_ThenThePickerIsDescribedForAssistiveTechnology()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        var allGroup = page.Locator("[data-testid='type-group-all']");
+        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+
+        // Act
+        await OpenDialogAsync(page);
+
+        // Assert - the placeholder alone would also give the input a name, so the attribute itself is read.
+        await Assertions.Expect(SearchInput(page)).ToHaveAttributeAsync("aria-label", "Search types");
+        await Assertions.Expect(page.GetByRole(AriaRole.Group, new() { Name = "Type groups" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Layouts", Exact = true, Level = 3 }))
+            .ToBeVisibleAsync();
+
+        // The visible text stays "Layouts 2", while the name that is read out says what the number counts.
+        var layoutsCount = int.Parse(await layoutsGroup.Locator("span").Last.InnerTextAsync());
+        Assert.True(layoutsCount > 1);
+        await Assertions.Expect(layoutsGroup).ToHaveTextAsync(new Regex($@"^\s*Layouts\s*{layoutsCount}\s*$"));
+        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-label", $"Layouts, {layoutsCount} types");
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = $"Layouts, {layoutsCount} types", Exact = true }))
+            .ToBeVisibleAsync();
+
+        // Act
+        await SearchInput(page).FillAsync("simulated motor");
+
+        // Assert
+        await Assertions.Expect(allGroup).ToHaveAttributeAsync("aria-label", "All, 1 type", new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-label", "Layouts, 0 types");
+
+        // Act
+        await SearchInput(page).FillAsync("no such type anywhere");
+
+        // Assert
+        await Assertions.Expect(page.Locator("[data-testid='type-empty-state']"))
+            .ToHaveAttributeAsync("role", "status", new() { Timeout = ElementVisibilityTimeout });
+    }
+
+    [Fact]
+    public async Task WhenATypeRowIsReachedWithTheKeyboard_ThenItShowsAFocusOutline()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        await Assertions.Expect(SearchInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act - the group buttons come before the rows, and how many there are depends on the loaded types.
+        var isTypeRowFocused = false;
+        for (var tabCount = 0; tabCount < 40 && !isTypeRowFocused; tabCount++)
+        {
+            await page.Keyboard.PressAsync("Tab");
+            isTypeRowFocused = await page.EvaluateAsync<bool>(
+                "() => document.activeElement?.matches(\"[data-testid^='type-row-']\") === true");
+        }
+
+        // Assert
+        Assert.True(isTypeRowFocused, "No type row was reached with the Tab key.");
+        var outline = await page.EvaluateAsync<string[]>(
+            "() => { const style = getComputedStyle(document.activeElement); return [style.outlineStyle, style.outlineWidth]; }");
+        Assert.Equal(["solid", "2px"], outline);
+    }
+
+    [Theory]
+    [InlineData(1300, 880)]
+    [InlineData(375, 812)]
+    [InlineData(812, 375)]
+    public async Task WhenTheViewportIsDesktopOrPhoneSized_ThenTheTypeListAndTheActionsStayInView(int width, int height)
+    {
+        // Arrange - the navigation to the browser is in a drawer that a narrow viewport closes, so the
+        // viewport is only resized once the pane is there.
+        var page = await _fixture.CreatePageAsync();
+        await OpenSubjectBrowserAsync(page);
+        await page.SetViewportSizeAsync(width, height);
+
+        // Act
+        await PaneCreateButton(page).ClickAsync();
+        await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Assert - everything is measured in one frame, because the dialog scales while it opens.
+        var pickerLayout = await page.EvaluateAsync<double[]>(
+            """
+            () => {
+                const isInViewport = box => box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth;
+                const list = document.querySelector('.subject-type-list').getBoundingClientRect();
+                const visibleRows = [...document.querySelectorAll("[data-testid^='type-row-']")]
+                    .map(row => row.getBoundingClientRect())
+                    .filter(row => row.height > 0 && row.top >= list.top - 0.5 && row.bottom <= list.bottom + 0.5 && isInViewport(row));
+                const content = document.querySelector('.mud-dialog-content');
+                const cancel = document.querySelector("[data-testid='cancel-button']").getBoundingClientRect();
+                return [visibleRows.length, content.scrollHeight - content.clientHeight, isInViewport(cancel) ? 1 : 0];
+            }
+            """);
+
+        Assert.True(pickerLayout[0] >= 3, $"Only {pickerLayout[0]} type rows are completely visible in the list.");
+        Assert.True(pickerLayout[1] <= 0, $"The dialog content scrolls by {pickerLayout[1]} pixels, although only the list should.");
+        Assert.True(pickerLayout[2] == 1, "The cancel button is outside the viewport.");
+
+        // Act
+        await PickTypeAsync(page, "shellydevice");
+
+        // Assert - left, top, right and bottom of "Back", "Cancel" and "Create", which share one line.
+        await Assertions.Expect(BackButton(page)).ToHaveTextAsync("Back");
+        var actionsLayout = await page.EvaluateAsync<double[]>(
+            """
+            () => ['back-button', 'cancel-button', 'create-button'].flatMap(testId => {
+                const box = document.querySelector(`[data-testid='${testId}']`).getBoundingClientRect();
+                const isInViewport = box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth;
+                return [box.left, box.top, box.right, isInViewport ? 1 : 0];
+            })
+            """);
+
+        Assert.Equal([1, 1, 1], new[] { actionsLayout[3], actionsLayout[7], actionsLayout[11] });
+        Assert.Equal(actionsLayout[1], actionsLayout[5], 0.5);
+        Assert.Equal(actionsLayout[1], actionsLayout[9], 0.5);
+        Assert.True(actionsLayout[2] <= actionsLayout[4], "\"Back\" overlaps \"Cancel\".");
+        Assert.True(actionsLayout[6] <= actionsLayout[8], "\"Cancel\" overlaps \"Create\".");
+    }
+
+    [Fact]
+    public async Task WhenTheDeviceIsATouchDevice_ThenNoFieldTakesTheFocus()
+    {
+        // Arrange - a field that takes the focus opens the on-screen keyboard over the list or the form.
+        var page = await _fixture.CreatePageAsync(new BrowserNewContextOptions { HasTouch = true, IsMobile = true });
+        await OpenSubjectBrowserAsync(page);
+        await page.SetViewportSizeAsync(375, 812);
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.focusedTestIds = [];
+                document.addEventListener('focusin', event => window.focusedTestIds.push(event.target.getAttribute('data-testid') ?? event.target.tagName));
+            }
+            """);
+
+        var allGroup = page.Locator("[data-testid='type-group-all']");
+        var layoutsGroup = page.Locator("[data-testid='type-group-layouts']");
+
+        // Act - each focus move follows its page from the server, so a later round trip, which the tap on
+        // a group is, has it behind it.
+        await PaneCreateButton(page).TapAsync();
+        await Assertions.Expect(TypeRows(page).First).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await layoutsGroup.TapAsync();
+        await Assertions.Expect(layoutsGroup).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = ElementVisibilityTimeout });
+
+        // Assert
+        await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync();
+        await Assertions.Expect(SearchInput(page)).Not.ToBeFocusedAsync();
+        var focusedAfterOpening = await page.EvaluateAsync<string[]>("() => window.focusedTestIds");
+        Assert.Contains("type-group-layouts", focusedAfterOpening);
+        Assert.DoesNotContain("type-search-input", focusedAfterOpening);
+
+        // Act - picking a type shows the name field, and "Back" shows the search field again.
+        await TypeRow(page, "gridlayout").TapAsync();
+        await Assertions.Expect(page.Locator("[data-testid='create-name-input']"))
+            .ToHaveValueAsync("GridLayout", new() { Timeout = ElementVisibilityTimeout });
+        await BackButton(page).TapAsync();
+        await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create subject", new() { Timeout = ElementVisibilityTimeout });
+        await allGroup.TapAsync();
+        await Assertions.Expect(allGroup).ToHaveAttributeAsync("aria-pressed", "true", new() { Timeout = ElementVisibilityTimeout });
+
+        // Assert
+        var focusedAfterGoingBack = await page.EvaluateAsync<string[]>("() => window.focusedTestIds");
+        Assert.Contains("type-group-all", focusedAfterGoingBack);
+        Assert.DoesNotContain("create-name-input", focusedAfterGoingBack);
+        Assert.DoesNotContain("type-search-input", focusedAfterGoingBack);
     }
 
     [Fact]
@@ -218,7 +394,7 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(0);
 
         // Act
-        await page.Locator("[data-testid='type-clear-search']").ClickAsync();
+        await page.Locator("[data-testid='type-clear-search-button']").ClickAsync();
 
         // Assert
         await Assertions.Expect(TypeRow(page, "motor")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -286,7 +462,7 @@ public class SubjectSetupDialogTests
         await Assertions.Expect(TypeRows(page)).ToHaveCountAsync(0);
 
         // Act
-        await page.Locator("[data-testid='type-clear-search']").ClickAsync();
+        await page.Locator("[data-testid='type-clear-search-button']").ClickAsync();
 
         // Assert
         await Assertions.Expect(TypeRow(page, "gridlayout")).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
@@ -307,10 +483,17 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Motor");
         await Assertions.Expect(NameInput(page)).ToHaveValueAsync("Motor");
+        await Assertions.Expect(NameInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(Dialog(page).GetByText(".json", new() { Exact = true })).ToBeVisibleAsync();
         await Assertions.Expect(Dialog(page).GetByText("Part of the subject's path, which is its ID.")).ToBeVisibleAsync();
 
+        // Other tests take the absence of this test id as "the dialog asks for no name".
+        await Assertions.Expect(page.Locator("[data-testid='create-name-input']")).ToHaveValueAsync("Motor");
+
         // The suggested name is valid as it is, so the motor's own required name is all that Create waits for.
+        // The dialog disables Create itself until a form reports, so the form must be there before this is read.
+        var motorNameInput = Dialog(page).GetByLabel("Name", new() { Exact = true });
+        await Assertions.Expect(motorNameInput).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
         // Act
@@ -318,6 +501,12 @@ public class SubjectSetupDialogTests
 
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act
+        await motorNameInput.FillAsync("");
+
+        // Assert
+        await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
     [Fact]
@@ -330,13 +519,21 @@ public class SubjectSetupDialogTests
         await PickTypeAsync(page, "inmemoryhistorystoresubject");
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create In-memory history");
 
+        // Only the in-memory form has this field, and only the SQLite form has a database path.
+        var inMemoryOnlyField = Dialog(page).GetByLabel("Max Points Per Property");
+        var sqliteOnlyField = Dialog(page).GetByLabel("Database Path");
+        await Assertions.Expect(inMemoryOnlyField).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(sqliteOnlyField).ToHaveCountAsync(0);
+
         // Act
-        await page.Locator("[data-testid='back-button']").ClickAsync();
+        await BackButton(page).ClickAsync();
 
         // Assert
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create subject");
         await Assertions.Expect(SearchInput(page)).ToHaveValueAsync("history");
+        await Assertions.Expect(SearchInput(page)).ToBeFocusedAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToHaveCountAsync(0);
+        await Assertions.Expect(BackButton(page)).ToHaveCountAsync(0);
 
         // Act
         await PickTypeAsync(page, "sqlitehistorystoresubject");
@@ -344,6 +541,39 @@ public class SubjectSetupDialogTests
         // Assert
         await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create SQLite history");
         await Assertions.Expect(NameInput(page)).ToHaveValueAsync("SqliteHistoryStoreSubject");
+        await Assertions.Expect(sqliteOnlyField).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await Assertions.Expect(inMemoryOnlyField).ToHaveCountAsync(0);
+    }
+
+    [Fact]
+    public async Task WhenAnotherTypeIsPickedAfterGoingBack_ThenAnEditedNameIsKeptAndAClearedNameIsSuggestedAgain()
+    {
+        // Arrange
+        var page = await _fixture.CreatePageAsync();
+        await OpenDialogAsync(page);
+        await PickTypeAsync(page, "motor");
+        await Assertions.Expect(NameInput(page)).ToHaveValueAsync("Motor");
+
+        // Act
+        await NameInput(page).FillAsync("Pump");
+        await BackButton(page).ClickAsync();
+        await PickTypeAsync(page, "shellydevice");
+
+        // Assert
+        await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Shelly device");
+        await Assertions.Expect(NameInput(page)).ToHaveValueAsync("Pump");
+
+        // Act
+        await NameInput(page).FillAsync("");
+        await Assertions.Expect(NameHelperText(page, "File name is required"))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+        await BackButton(page).ClickAsync();
+        await PickTypeAsync(page, "motor");
+
+        // Assert
+        await Assertions.Expect(DialogTitle(page)).ToHaveTextAsync("Create Motor");
+        await Assertions.Expect(NameInput(page)).ToHaveValueAsync("Motor");
+        await Assertions.Expect(NameHelperText(page, "File name is required")).ToHaveCountAsync(0);
     }
 
     [Fact]
@@ -353,17 +583,27 @@ public class SubjectSetupDialogTests
         var page = await _fixture.CreatePageAsync();
         await OpenDialogAsync(page);
 
+        var hostAddressInput = Dialog(page).GetByLabel("Host Address (IP or hostname)");
+
         // Act
         await PickTypeAsync(page, "shellydevice");
 
-        // Assert
+        // Assert - the dialog disables Create itself until a form reports, so the form must be there
+        // before this is read.
+        await Assertions.Expect(hostAddressInput).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
 
         // Act
-        await page.GetByLabel("Host Address (IP or hostname)").FillAsync("192.0.2.1");
+        await hostAddressInput.FillAsync("192.0.2.1");
 
         // Assert
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
+
+        // Act
+        await hostAddressInput.FillAsync("");
+
+        // Assert - only the form can have disabled it again.
+        await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 
     [Fact]
@@ -412,21 +652,20 @@ public class SubjectSetupDialogTests
 
         // Create is enabled here, so only the name can disable it below.
         await Assertions.Expect(CreateButton(page)).ToBeEnabledAsync(new() { Timeout = ElementVisibilityTimeout });
-        var helperText = Dialog(page).Locator(".mud-input-helper-text");
 
         // Act & Assert - the test root already contains History.json
         await NameInput(page).FillAsync("history");
-        await Assertions.Expect(helperText.Filter(new() { HasText = "This file name is already used" }))
+        await Assertions.Expect(NameHelperText(page, "This file name is already used"))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
 
         await NameInput(page).FillAsync("invalid/name");
-        await Assertions.Expect(helperText.Filter(new() { HasText = "File name contains invalid characters" }))
+        await Assertions.Expect(NameHelperText(page, "File name contains invalid characters"))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
 
         await NameInput(page).FillAsync("");
-        await Assertions.Expect(helperText.Filter(new() { HasText = "File name is required" }))
+        await Assertions.Expect(NameHelperText(page, "File name is required"))
             .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await Assertions.Expect(CreateButton(page)).ToBeDisabledAsync();
 
@@ -442,6 +681,7 @@ public class SubjectSetupDialogTests
         // of the host's life, which is why the name is unique per run.
         var name = $"CreatedMotor{Guid.NewGuid():N}";
         var filePath = Path.Combine(AppContext.BaseDirectory, "TestData", $"{name}.json");
+        var isCompleted = false;
         try
         {
             // Arrange
@@ -464,10 +704,18 @@ public class SubjectSetupDialogTests
                 () => FileContains(filePath, MotorName),
                 TimeSpan.FromSeconds(10),
                 message: "The created file does not contain the motor name that was entered in the form.");
+            isCompleted = true;
         }
         finally
         {
-            File.Delete(filePath);
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch (Exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+            }
         }
     }
 
@@ -495,7 +743,7 @@ public class SubjectSetupDialogTests
             TimeSpan.FromSeconds(10),
             message: "The motor that backs the form did not start.");
 
-        await page.Locator("[data-testid='back-button']").ClickAsync();
+        await BackButton(page).ClickAsync();
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
@@ -545,6 +793,7 @@ public class SubjectSetupDialogTests
         // (disabled) store stays in the live graph for the rest of the host's life.
         var gridPagePath = Path.Combine(AppContext.BaseDirectory, "TestData", "Demo", "Grid.md");
         var originalGridPage = await File.ReadAllBytesAsync(gridPagePath);
+        var isCompleted = false;
         try
         {
             // Arrange
@@ -589,10 +838,18 @@ public class SubjectSetupDialogTests
                 .ToBeVisibleAsync(new() { Timeout = PageLoadTimeout });
             await Assertions.Expect(page.GetByText("Status: Disabled"))
                 .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
+            isCompleted = true;
         }
         finally
         {
-            await File.WriteAllBytesAsync(gridPagePath, originalGridPage);
+            try
+            {
+                await File.WriteAllBytesAsync(gridPagePath, originalGridPage);
+            }
+            catch (Exception) when (!isCompleted)
+            {
+                // The failure of the test itself is the one to report.
+            }
         }
     }
 }

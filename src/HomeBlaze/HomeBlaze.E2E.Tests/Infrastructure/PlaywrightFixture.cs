@@ -75,7 +75,8 @@ public class PlaywrightFixture : IAsyncLifetime
     /// Creates a new browser context and page for isolated test execution.
     /// Closes the previous test's context, so only one is ever open.
     /// </summary>
-    public async Task<IPage> CreatePageAsync()
+    /// <param name="contextOptions">The options of the browser context, such as a touch device, or null for the defaults.</param>
+    public async Task<IPage> CreatePageAsync(BrowserNewContextOptions? contextOptions = null)
     {
         // An open context keeps its page's Blazor circuit alive, and the host renders every connected
         // circuit on each state change. Holding one per test for the whole run left the last tests
@@ -87,7 +88,7 @@ public class PlaywrightFixture : IAsyncLifetime
             await _context.CloseAsync();
         }
 
-        _context = await Browser.NewContextAsync();
+        _context = await Browser.NewContextAsync(contextOptions);
         return await _context.NewPageAsync();
     }
 }

@@ -1,33 +1,26 @@
 @using HomeBlaze.Components.Editors
+@using Microsoft.JSInterop
 
 @inject SubjectTypeCatalog TypeCatalog
 @inject SubjectFactory SubjectFactory
 @inject RootManager RootManager
 @inject ISnackbar Snackbar
+@inject IJSRuntime JsRuntime
 
 @implements IDisposable
 
+@* The first child would be the search field, which must not take the focus on a touch device. *@
 <MudDialog data-testid="create-subject-dialog"
-           Style="height: calc(100vh - 200px);"
-           DefaultFocus="DefaultFocus.FirstChild">
+           Class="subject-setup-dialog"
+           ContentClass="@(_selectedType is null ? "subject-setup-picker-content" : null)"
+           DefaultFocus="DefaultFocus.Element">
     <TitleContent>
-        <div style="display: flex; align-items: center; gap: 8px;">
-            @if (_selectedType is not null)
-            {
-                <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
-                               Size="Size.Small"
-                               OnClick="GoBack"
-                               Disabled="_isCreating"
-                               aria-label="Back to type selection"
-                               data-testid="back-button" />
-            }
-            <MudText Typo="Typo.h6" data-testid="create-dialog-title">@GetTitle()</MudText>
-        </div>
+        <MudText Typo="Typo.h6" data-testid="create-dialog-title">@GetTitle()</MudText>
     </TitleContent>
     <DialogContent>
         @* The picker stays in the tree while the configure page is shown, so its search and group survive "Back". *@
-        <div hidden="@(_selectedType is not null)">
-            <SubjectTypePicker Types="_types" OnTypeSelected="SelectType" />
+        <div class="subject-setup-picker-page" hidden="@(_selectedType is not null)">
+            <SubjectTypePicker @ref="_typePicker" Types="_types" OnTypeSelected="SelectType" />
         </div>
         @if (_selectedType is not null && _createdSubject is not null)
         {
@@ -43,6 +36,7 @@
                                   Label="@nameOptions.Label"
                                   Required="true"
                                   Immediate="true"
+                                  AutoFocus="_hasFinePointer"
                                   Adornment="@(nameOptions.Suffix.Length > 0 ? Adornment.End : Adornment.None)"
                                   AdornmentText="@nameOptions.Suffix"
                                   Validation="@((Func<string?, string?>)ValidateName)"
@@ -69,6 +63,13 @@
         }
     </DialogContent>
     <DialogActions>
+        @if (_selectedType is not null)
+        {
+            <MudButton OnClick="GoBack"
+                       Disabled="_isCreating"
+                       data-testid="back-button">Back</MudButton>
+            <MudSpacer />
+        }
         <MudButton OnClick="Cancel"
                    Disabled="_isCreating"
                    data-testid="cancel-button">Cancel</MudButton>
@@ -87,7 +88,40 @@
     </DialogActions>
 </MudDialog>
 
+<style>
+    /* MudBlazor caps a dialog at the viewport height less the app bar, which leaves a phone in landscape too little. */
+    .mud-dialog.subject-setup-dialog {
+        height: min(calc(100dvh - 16px), max(calc(100dvh - 200px), 480px));
+        max-height: calc(100dvh - 16px);
+    }
+
+    @@media (max-height: 500px) {
+        .mud-dialog.subject-setup-dialog .mud-dialog-title {
+            padding-top: 8px;
+            padding-bottom: 8px;
+        }
+
+        .mud-dialog.subject-setup-dialog .mud-dialog-content {
+            padding-top: 4px;
+            padding-bottom: 4px;
+        }
+    }
+
+    .mud-dialog .mud-dialog-content.subject-setup-picker-content,
+    .subject-setup-picker-content > .subject-setup-picker-page {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .subject-setup-picker-content > .subject-setup-picker-page {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+</style>
+
 @code {
+    private const string ModulePath = "./_content/HomeBlaze.Components/Dialogs/SubjectSetupDialog.razor.js";
+
     [CascadingParameter]
     private IMudDialogInstance? MudDialog { get; set; }
 
@@ -95,6 +129,9 @@
     public SubjectSetupOptions Options { get; set; } = new();
 
     private IReadOnlyList<SubjectTypeDescriptor> _types = [];
+    private SubjectTypePicker? _typePicker;
+    private bool _isSearchFocusPending;
+    private bool _hasFinePointer;
     private SubjectTypeDescriptor? _selectedType;
     private IInterceptorSubject? _createdSubject;
     private bool _isCreatedSubjectHandedOver;
@@ -158,7 +195,38 @@
         _selectedType = null;
         _editPanel = null;
         _isEditPanelValid = false;
+        _isSearchFocusPending = _hasFinePointer;
         RefreshDialog();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Focusing a field opens the on-screen keyboard of a touch device, over the list or the form.
+            _hasFinePointer = await HasFinePointerAsync();
+            _isSearchFocusPending = _hasFinePointer && _selectedType is null;
+        }
+
+        // The picker is hidden until the render that follows "Back", and a hidden field cannot take the focus.
+        if (_isSearchFocusPending && _typePicker is { } typePicker)
+        {
+            _isSearchFocusPending = false;
+            await typePicker.FocusSearchAsync();
+        }
+    }
+
+    private async Task<bool> HasFinePointerAsync()
+    {
+        try
+        {
+            await using var module = await JsRuntime.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            return await module.InvokeAsync<bool>("hasFinePointer");
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException)
+        {
+            return false;
+        }
     }
 
     private void OnNameChanged(string? name)
@@ -188,7 +256,6 @@
     private void RefreshDialog()
     {
         // The title is rendered by the dialog container, which only follows an explicit refresh.
-        StateHasChanged();
         MudDialog?.StateHasChanged();
     }
 
@@ -212,7 +279,6 @@
 
         // A second click while the awaits below are pending would run BeforeSave again and attach the subject twice.
         _isCreating = true;
-        RefreshDialog();
 
         try
         {
@@ -243,7 +309,6 @@
         finally
         {
             _isCreating = false;
-            RefreshDialog();
         }
     }
 
