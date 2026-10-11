@@ -111,7 +111,14 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Content = await reader.ReadToEndAsync(cancellationToken)
             .WithStorageTimeoutAsync("reading", FullPath, timeProvider, cancellationToken);
         Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
-        Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
+        var children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
+
+        // The load runs on the worker of the storage. Without the flow of that work, as for every assignment
+        // to the tree: lifecycle handlers run here for a page that is in the tree.
+        using (ExecutionContext.SuppressFlow())
+        {
+            Children = children;
+        }
     }
 
     [Query(Title = "Read Raw Content", Description = "Returns the markdown file source, including unevaluated {{ path }} expressions", Icon = "Description")]

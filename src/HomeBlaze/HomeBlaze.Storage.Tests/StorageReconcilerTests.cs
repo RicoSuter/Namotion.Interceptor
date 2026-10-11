@@ -2,6 +2,7 @@ using System.Text;
 using FluentStorage.Blobs;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
+using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
@@ -919,6 +920,32 @@ public class StorageReconcilerTests : StorageTestBase
     }
 
     [Fact]
+    public async Task WhenMarkdownFileLoadsEmbeddedSubjects_ThenLifecycleHandlersRunWithoutTheFlowOfThePass()
+    {
+        // Arrange
+        var firstBlock = $"```subject(first)\n{CallbackSubject.Serialize("first")}\n```\n";
+        var secondBlock = $"```subject(second)\n{CallbackSubject.Serialize("second")}\n```\n";
+        var storage = await ConnectAsync();
+        var recorder = new LifecycleFlowRecorder();
+        Context!.AddService<ILifecycleHandler>(recorder);
+
+        // Act: the first pass creates the page with one embedded subject. The second reloads the page that is
+        // in the tree by then, which updates that subject, creates another one and assigns both to the page.
+        WriteFile("Page.md", $"# Page\n\n{firstBlock}");
+        await storage.ReconcileAsync();
+        WriteFile("Page.md", $"# Page, changed\n\n{firstBlock}\n{secondBlock}");
+        await storage.ReconcileAsync();
+
+        // Assert
+        var page = Assert.IsType<MarkdownFile>(storage.Children["Page.md"]);
+        var changes = recorder.Changes;
+        Assert.Equal(2, changes.Count(change => change is { Subject: CallbackSubject, IsContextAttach: true }));
+        Assert.Contains(changes, change => ReferenceEquals(change.Subject, page.Children["second"]) && !change.IsContextAttach);
+        Assert.Contains(changes, change => change.Subject is HtmlSegment);
+        Assert.All(changes, change => Assert.True(change.IsFlowSuppressed, $"{change.Subject.GetType().Name}, context attach: {change.IsContextAttach}"));
+    }
+
+    [Fact]
     public async Task WhenSubjectFailsToRefreshAfterBlobIsWritten_ThenWriteSucceedsAndNextPassLoadsItAgain()
     {
         // Arrange
@@ -1116,7 +1143,7 @@ public class StorageReconcilerTests : StorageTestBase
 
         public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            if (change.Subject is Samples.Motor or MarkdownFile)
+            if (change.Subject is Samples.Motor or MarkdownFile or CallbackSubject or HtmlSegment)
             {
                 lock (_changes)
                 {

@@ -9,6 +9,12 @@ namespace HomeBlaze.Storage.Internal;
 /// </summary>
 internal sealed class StorageWorker : IDisposable
 {
+    internal const string CallFromWithinItemMessage =
+        "An operation of a storage was called from work that runs on the worker of that storage, such as the load " +
+        "of a file or the ApplyConfigurationAsync of a subject. The operation would wait for the work that waits " +
+        "for it. Start it once that work has returned, from a task that is started without the execution flow " +
+        "(ExecutionContext.SuppressFlow).";
+
     private readonly Channel<WorkItem> _queue =
         Channel.CreateUnbounded<WorkItem>(new UnboundedChannelOptions { SingleReader = true });
 
@@ -34,22 +40,19 @@ internal sealed class StorageWorker : IDisposable
     }
 
     /// <summary>
-    /// Runs the work after everything handed in before it. Work handed in from within a running item runs
-    /// inline, as part of that item. After disposal the returned task is cancelled, except for inline calls of
-    /// the item that is still running, which run as before.
+    /// Runs the work after everything handed in before it. After disposal the returned task is cancelled.
     /// </summary>
     /// <remarks>
-    /// A call from any flow that a running item started counts as part of that item for as long as the item or one of its inline calls runs. That includes a flow the item does not await, such as a task or a timer it started. Such a call runs inline, and therefore concurrently with the item unless the item awaits it. Code that runs on the worker must await its calls back into the worker, and must start detached work without the execution flow (<see cref="ExecutionContext.SuppressFlow"/>). The next item starts only after every inline call of the previous item has finished, so an inline call that never completes stalls the worker.
+    /// A call from within a running item of this worker is refused: the work is not run, and the returned task fails with an <see cref="InvalidOperationException"/>. Every flow that the item started counts as within it while the work of the item has not returned, also a flow the item does not await, such as a task or a timer it started. Code that runs on the worker therefore starts such work without the execution flow (<see cref="ExecutionContext.SuppressFlow"/>). Once the item has finished, a call from a flow it started is queued like any other.
     /// </remarks>
     public Task<TResult> RunAsync<TResult>(Func<CancellationToken, Task<TResult>> work, CancellationToken cancellationToken)
     {
-        // Queued, a call from within the running item would wait for the item that waits for it. That the flow
-        // carries an item is not enough: a task that an item started keeps the flow of that item after it has
-        // finished, and must not run next to a later item.
-        var itemOfFlow = _itemOfFlow.Value;
-        if (itemOfFlow != null && itemOfFlow.TryEnterInlineCall())
+        // Queued, the call would wait for the item that waits for it, and nothing would ever run again. That
+        // the flow carries an item is not enough: a task that an item started keeps the flow of that item
+        // after it has finished.
+        if (_itemOfFlow.Value is { IsFinished: false })
         {
-            return RunInlineAsync(itemOfFlow, work, cancellationToken);
+            return Task.FromException<TResult>(new InvalidOperationException(CallFromWithinItemMessage));
         }
 
         var item = new WorkItem<TResult>(work, cancellationToken);
@@ -69,22 +72,6 @@ internal sealed class StorageWorker : IDisposable
             return true;
         }, cancellationToken);
 
-    // Asynchronous, so that a cancelled token and a delegate that throws synchronously end up in the returned
-    // task, as they do for a queued call.
-    private static async Task<TResult> RunInlineAsync<TResult>(
-        WorkItem item, Func<CancellationToken, Task<TResult>> work, CancellationToken cancellationToken)
-    {
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return await work(cancellationToken);
-        }
-        finally
-        {
-            item.ExitInlineCall();
-        }
-    }
-
     private async Task ProcessQueueAsync()
     {
         await foreach (var item in _queue.Reader.ReadAllAsync())
@@ -99,10 +86,6 @@ internal sealed class StorageWorker : IDisposable
                 // An item reports its own outcome to its caller. Reaching this means that reporting failed.
                 _logger?.LogError(exception, "Storage work item failed outside of its own error handling");
             }
-
-            // The caller of the item already has its result. Inline calls that the item did not await still
-            // belong to it, and the next item must not start next to them.
-            await item.CloseWhenInlineCallsFinishedAsync();
         }
 
         try
@@ -125,90 +108,28 @@ internal sealed class StorageWorker : IDisposable
     }
 
     /// <summary>
-    /// Does what <see cref="Dispose"/> does and completes when the loop has ended: the running item and its
-    /// inline calls have finished, and what the worker does when it has stopped is done. Called from within a
-    /// running item of this worker, it completes at once.
+    /// Does what <see cref="Dispose"/> does and completes when the loop has ended: the running item has
+    /// finished, and what the worker does when it has stopped is done. Called from within a running item of
+    /// this worker, it completes at once.
     /// </summary>
     public Task StopAsync()
     {
         Dispose();
 
         // The loop ends after the item of this flow, which would wait for itself.
-        return _itemOfFlow.Value is { IsClosed: false } ? Task.CompletedTask : _loop;
+        return _itemOfFlow.Value is { IsFinished: false } ? Task.CompletedTask : _loop;
     }
 
     private abstract class WorkItem
     {
-        private readonly Lock _lock = new();
+        private volatile bool _isFinished;
 
-        private int _pendingInlineCalls;
-        private bool _isClosed;
-        private TaskCompletionSource? _inlineCallsFinished;
-
-        /// <summary>True once the loop has moved on from the item and its inline calls.</summary>
-        public bool IsClosed
-        {
-            get
-            {
-                lock (_lock)
-                {
-                    return _isClosed;
-                }
-            }
-        }
+        /// <summary>True once the work of the item has returned, or when it was not run at all.</summary>
+        public bool IsFinished => _isFinished;
 
         public abstract Task ExecuteAsync(CancellationToken disposalToken);
 
-        /// <summary>
-        /// Registers an inline call that <see cref="ExitInlineCall"/> must end. Returns false once the item is closed.
-        /// </summary>
-        public bool TryEnterInlineCall()
-        {
-            // Checked and registered under the lock that closing takes, so that no inline call starts once the
-            // loop has moved on.
-            lock (_lock)
-            {
-                if (_isClosed)
-                {
-                    return false;
-                }
-
-                _pendingInlineCalls++;
-                return true;
-            }
-        }
-
-        public void ExitInlineCall()
-        {
-            lock (_lock)
-            {
-                if (--_pendingInlineCalls == 0 && _inlineCallsFinished != null)
-                {
-                    _isClosed = true;
-                    _inlineCallsFinished.SetResult();
-                }
-            }
-        }
-
-        /// <summary>
-        /// Closes the item as soon as no inline call is pending. The returned task completes when it is closed.
-        /// </summary>
-        public Task CloseWhenInlineCallsFinishedAsync()
-        {
-            lock (_lock)
-            {
-                if (_pendingInlineCalls == 0)
-                {
-                    _isClosed = true;
-                    return Task.CompletedTask;
-                }
-
-                // Still open while calls are pending: one of them that calls the worker again would otherwise be
-                // queued behind the item it belongs to and wait for itself.
-                _inlineCallsFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                return _inlineCallsFinished.Task;
-            }
-        }
+        protected void MarkFinished() => _isFinished = true;
     }
 
     private sealed class WorkItem<TResult>(
@@ -227,13 +148,26 @@ internal sealed class StorageWorker : IDisposable
             var cancelledToken = cancellationToken.IsCancellationRequested ? cancellationToken : disposalToken;
             if (cancelledToken.IsCancellationRequested)
             {
+                MarkFinished();
                 _completion.TrySetCanceled(cancelledToken);
                 return;
             }
 
             try
             {
-                _completion.TrySetResult(await work(cancellationToken));
+                TResult result;
+                try
+                {
+                    result = await work(cancellationToken);
+                }
+                finally
+                {
+                    // Before the caller has the outcome: a flow of this item that goes on from there, such
+                    // as a task that waited for the item, calls in after it and is queued.
+                    MarkFinished();
+                }
+
+                _completion.TrySetResult(result);
             }
             catch (OperationCanceledException exception)
             {

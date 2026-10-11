@@ -320,8 +320,13 @@ public sealed partial class MarkdownContentParser
                     if (oldChildren.TryGetValue(subj.Name, out var existing) &&
                         existing.GetType().FullName == typeName)
                     {
-                        // Same key + same type: update and apply config
-                        _serializer.UpdateConfiguration(existing, subj.Json);
+                        // Same key + same type: update and apply config.
+                        // Without the execution flow, as for the creation below: it can attach nested subjects.
+                        using (ExecutionContext.SuppressFlow())
+                        {
+                            _serializer.UpdateConfiguration(existing, subj.Json);
+                        }
+
                         if (existing is IConfigurable configurable)
                         {
                             await configurable.ApplyConfigurationAsync(cancellationToken);
@@ -330,8 +335,15 @@ public sealed partial class MarkdownContentParser
                     }
                     else
                     {
-                        // Create new subject
-                        var newSubject = _serializer.Deserialize(subj.Json);
+                        // Create new subject. It enters the context here, which runs lifecycle handlers. A page
+                        // is parsed on the worker of its storage, and work that a handler starts with the flow
+                        // of that work could not call the storage while it runs.
+                        IConfigurable? newSubject;
+                        using (ExecutionContext.SuppressFlow())
+                        {
+                            newSubject = _serializer.Deserialize(subj.Json);
+                        }
+
                         if (newSubject != null)
                         {
                             // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)

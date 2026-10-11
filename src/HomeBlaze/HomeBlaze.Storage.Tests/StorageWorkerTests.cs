@@ -57,18 +57,108 @@ public class StorageWorkerTests
     }
 
     [Fact]
-    public async Task WhenItemCallsWorkerAgain_ThenInnerWorkRunsInline()
+    public async Task WhenItemCallsWorkerAgain_ThenCallIsRefusedAndLaterItemsRun()
     {
         // Arrange
         using var worker = new StorageWorker();
+        var wasRun = false;
 
         // Act
-        var result = await worker.RunAsync(
-            async token => await worker.RunAsync(_ => Task.FromResult("inner"), token),
+        var exception = await worker.RunAsync(
+            token => Record.ExceptionAsync(() => worker.RunAsync(_ =>
+            {
+                wasRun = true;
+                return Task.CompletedTask;
+            }, token)),
             CancellationToken.None).WaitAsync(Timeout);
+        var result = await worker.RunAsync(_ => Task.FromResult(42), CancellationToken.None).WaitAsync(Timeout);
 
         // Assert
-        Assert.Equal("inner", result);
+        Assert.Equal(StorageWorker.CallFromWithinItemMessage, Assert.IsType<InvalidOperationException>(exception).Message);
+        Assert.False(wasRun);
+        Assert.Equal(42, result);
+    }
+
+    [Fact]
+    public async Task WhenFlowStartedByItemCallsWorkerWhileItemRuns_ThenCallIsRefused()
+    {
+        // Arrange
+        using var worker = new StorageWorker();
+        var wasRun = false;
+        Task? forked = null;
+
+        // Act: the item does not await the task it starts, which carries the flow of the item.
+        await worker.RunAsync(async _ =>
+        {
+            forked = Task.Run(() => worker.RunAsync(_ =>
+            {
+                wasRun = true;
+                return Task.CompletedTask;
+            }, CancellationToken.None));
+
+            await Record.ExceptionAsync(() => forked);
+        }, CancellationToken.None).WaitAsync(Timeout);
+
+        // Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => forked!);
+        Assert.Equal(StorageWorker.CallFromWithinItemMessage, exception.Message);
+        Assert.False(wasRun);
+    }
+
+    [Fact]
+    public async Task WhenFlowStartedWithoutExecutionFlowCallsWorkerWhileItemRuns_ThenWorkIsQueuedAndRunsAfterTheItem()
+    {
+        // Arrange
+        using var worker = new StorageWorker();
+        var itemRelease = NewSignal();
+        var queued = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var order = new List<string>();
+
+        // Act
+        var item = worker.RunAsync(async token =>
+        {
+            using (ExecutionContext.SuppressFlow())
+            {
+                _ = Task.Run(() => queued.SetResult(worker.RunAsync(_ =>
+                {
+                    order.Add("started by the item");
+                    return Task.CompletedTask;
+                }, token)));
+            }
+
+            await itemRelease.Task;
+            order.Add("item finished");
+        }, CancellationToken.None);
+
+        var startedByItem = await queued.Task.WaitAsync(Timeout);
+        var wasWaitingForItem = !startedByItem.IsCompleted;
+        itemRelease.SetResult();
+        await Task.WhenAll(item, startedByItem).WaitAsync(Timeout);
+
+        // Assert
+        Assert.True(wasWaitingForItem);
+        Assert.Equal(["item finished", "started by the item"], order);
+    }
+
+    [Fact]
+    public async Task WhenFlowOfItemCallsWorkerOnceCallerHasTheOutcome_ThenWorkIsQueued()
+    {
+        // Arrange
+        using var worker = new StorageWorker();
+        ExecutionContext? flowOfItem = null;
+
+        // Act: nothing lies between the outcome of the item and the call, so the item must count as finished by then.
+        await worker.RunAsync(_ =>
+        {
+            flowOfItem = ExecutionContext.Capture();
+            return Task.CompletedTask;
+        }, CancellationToken.None);
+
+        Task<int>? call = null;
+        ExecutionContext.Run(flowOfItem!, _ => call = worker.RunAsync(_ => Task.FromResult(42), CancellationToken.None), null);
+
+        // Assert
+        Assert.Equal(42, await call!.WaitAsync(Timeout));
     }
 
     [Fact]
@@ -104,57 +194,13 @@ public class StorageWorkerTests
             }, CancellationToken.None);
         }, null);
 
-        var ranInline = lateWorkRan;
+        var ranNextToRunningItem = lateWorkRan;
         runningRelease.SetResult();
         await Task.WhenAll(running, lateWork!).WaitAsync(Timeout);
 
         // Assert
-        Assert.False(ranInline);
+        Assert.False(ranNextToRunningItem);
         Assert.True(lateWorkRan);
-    }
-
-    [Fact]
-    public async Task WhenFlowStartedByItemIsStillInWorker_ThenNextItemWaitsForIt()
-    {
-        // Arrange
-        using var worker = new StorageWorker();
-        var forkedStarted = NewSignal();
-        var forkedRelease = NewSignal();
-        var order = new List<string>();
-        Task? forked = null;
-
-        var first = worker.RunAsync(_ =>
-        {
-            // The item does not await the flow it starts, it only stays until that flow is in the worker.
-            forked = Task.Run(() => worker.RunAsync(async token =>
-            {
-                order.Add("forked started");
-                forkedStarted.SetResult();
-                await forkedRelease.Task;
-                await worker.RunAsync(_ =>
-                {
-                    order.Add("forked nested");
-                    return Task.CompletedTask;
-                }, token);
-                order.Add("forked finished");
-            }, CancellationToken.None));
-            return forkedStarted.Task;
-        }, CancellationToken.None);
-
-        var second = worker.RunAsync(_ =>
-        {
-            order.Add("second");
-            return Task.CompletedTask;
-        }, CancellationToken.None);
-
-        await first.WaitAsync(Timeout);
-
-        // Act
-        forkedRelease.SetResult();
-        await Task.WhenAll(forked!, second).WaitAsync(Timeout);
-
-        // Assert
-        Assert.Equal(["forked started", "forked nested", "forked finished", "second"], order);
     }
 
     [Fact]
@@ -166,21 +212,21 @@ public class StorageWorkerTests
         var outerRelease = NewSignal();
         var order = new List<string>();
         StorageWorker? inner = null;
-        string? nestedResult = null;
         Task? callIntoOuter = null;
 
         var outerItem = outer.RunAsync(async token =>
         {
             inner = new StorageWorker();
-            _ = inner.RunAsync(async innerToken =>
+            _ = inner.RunAsync(_ =>
             {
-                nestedResult = await inner.RunAsync(_ => Task.FromResult("nested"), innerToken);
+                // Refused if the item of the inner worker counted as part of the item of the outer one.
                 callIntoOuter = outer.RunAsync(_ =>
                 {
                     order.Add("call into outer");
                     return Task.CompletedTask;
-                }, innerToken);
+                }, CancellationToken.None);
                 innerItemFinished.SetResult();
+                return Task.CompletedTask;
             }, token);
 
             await outerRelease.Task;
@@ -195,47 +241,23 @@ public class StorageWorkerTests
         inner!.Dispose();
 
         // Assert
-        Assert.Equal("nested", nestedResult);
         Assert.Equal(["outer item finished", "call into outer"], order);
     }
 
     [Fact]
-    public async Task WhenInlineCallHasCancelledToken_ThenWorkIsNotRunAndTaskIsCancelled()
+    public async Task WhenItemOfOneWorkerCallsAnotherWorker_ThenWorkRunsAndItemCanAwaitIt()
     {
         // Arrange
-        using var worker = new StorageWorker();
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        var wasRun = false;
+        using var first = new StorageWorker();
+        using var second = new StorageWorker();
 
         // Act
-        var inline = await worker.RunAsync<Task>(_ => Task.FromResult(worker.RunAsync(_ =>
-        {
-            wasRun = true;
-            return Task.CompletedTask;
-        }, cancellation.Token)), CancellationToken.None).WaitAsync(Timeout);
-
-        // Assert
-        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => inline.WaitAsync(Timeout));
-        Assert.Equal(cancellation.Token, exception.CancellationToken);
-        Assert.False(wasRun);
-    }
-
-    [Fact]
-    public async Task WhenInlineWorkThrowsSynchronously_ThenTaskIsFaultedAndLaterItemsRun()
-    {
-        // Arrange
-        using var worker = new StorageWorker();
-
-        // Act
-        var inline = await worker.RunAsync<Task>(
-            _ => Task.FromResult<Task>(worker.RunAsync<int>(_ => throw new InvalidOperationException("failed"), CancellationToken.None)),
+        var result = await first.RunAsync(
+            token => second.RunAsync(_ => Task.FromResult("run by the second worker"), token),
             CancellationToken.None).WaitAsync(Timeout);
-        var result = await worker.RunAsync(_ => Task.FromResult(42), CancellationToken.None).WaitAsync(Timeout);
 
         // Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => inline);
-        Assert.Equal(42, result);
+        Assert.Equal("run by the second worker", result);
     }
 
     [Fact]

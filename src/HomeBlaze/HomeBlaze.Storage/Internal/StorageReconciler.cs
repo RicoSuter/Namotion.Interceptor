@@ -208,7 +208,8 @@ internal sealed class StorageReconciler
         // The connection that follows an ended one owns the tree.
         _connectionToken.ThrowIfCancellationRequested();
 
-        // Without the flow of this item, work that a lifecycle handler starts here queues its calls into the storage instead of running them inline.
+        // Without the flow of this item: work that a lifecycle handler starts here would otherwise count as
+        // part of the item, and its calls into the storage would be refused for as long as the item runs.
         using (ExecutionContext.SuppressFlow())
         {
             // In two steps when a subject moved, first everything that is added and then everything that is

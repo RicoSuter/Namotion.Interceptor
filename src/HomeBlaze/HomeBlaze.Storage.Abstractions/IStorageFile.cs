@@ -44,5 +44,13 @@ public interface IStorageFile
     /// Callback when the file changes on disk.
     /// Implementation decides whether to reload content or do nothing.
     /// </summary>
+    /// <remarks>
+    /// A storage can call this from the work that changes its hierarchy. The implementation may read from the
+    /// storage, but must not call an operation that changes it (<see cref="IStorageContainer.WriteBlobAsync"/>,
+    /// <see cref="IStorageContainer.DeleteBlobAsync"/>, <see cref="IStorageContainer.AddSubjectAsync"/>,
+    /// <see cref="IStorageContainer.DeleteSubjectAsync"/>, saving configuration): the storage refuses such a
+    /// call with an <see cref="InvalidOperationException"/>, also from a task that the implementation starts
+    /// and does not await, unless that task is started without the execution flow.
+    /// </remarks>
     Task OnFileChangedAsync(CancellationToken cancellationToken);
 }
