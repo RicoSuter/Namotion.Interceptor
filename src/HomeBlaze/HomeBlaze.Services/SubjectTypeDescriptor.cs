@@ -7,7 +7,7 @@ public sealed record SubjectTypeDescriptor(Type Type, string DisplayName, string
 {
     /// <summary>
     /// Returns whether every term occurs in the display name, the class name, the description or the group,
-    /// ignoring case. No terms match.
+    /// ignoring case. Without terms, every descriptor matches.
     /// </summary>
     public bool Matches(ReadOnlySpan<string> searchTerms)
     {

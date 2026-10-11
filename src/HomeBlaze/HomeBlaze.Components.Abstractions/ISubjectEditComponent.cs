@@ -20,8 +20,8 @@ public interface ISubjectEditComponent : ISubjectComponent
     /// Raised with the new value whenever <see cref="IsValid"/> changes.
     /// </summary>
     /// <remarks>
-    /// The create dialog enables "Create" from <see cref="IsValid"/>, so a component that changes its validity
-    /// without raising this event can leave the button in the wrong state.
+    /// The create dialog enables "Create" from <see cref="IsValid"/> and follows this event. A component that
+    /// changes its validity without raising it is only picked up at the next interaction in the dialog.
     /// </remarks>
     event Action<bool>? IsValidChanged;
 

@@ -152,8 +152,8 @@
 
         _types = TypeCatalog.GetCreatableTypes(existingSubjects);
 
-        // These events fire for every keystroke in the hosted form, and handling them as the dialog would render
-        // it, and with it that form, each time.
+        // These events fire on every keystroke in the hosted form, and a normal handler would re-render the
+        // dialog, and with it the form, each time.
         _refreshEditPanelIsValid = new NonRenderingEventReceiver(RefreshEditPanelIsValidAsync).HandleAsync;
     }
 

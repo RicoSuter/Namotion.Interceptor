@@ -1132,7 +1132,7 @@ Edit components provide configuration forms:
 | `IsCreating` | Set by the hosting panel: `true` while the subject is being created, `false` while it is edited |
 | `SaveAsync` | Persist changes |
 
-In the create dialog the "Create" button follows the component's `IsValid`, so a component raises `IsValidChanged` whenever `IsValid` changes. The handler of `@bind-Value:after` runs each time the bound value is committed, whichever way it changed (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not cover. A text field commits its value when it loses focus, and with `Immediate="true"` on every keystroke.
+A component raises `IsValidChanged` whenever `IsValid` changes. The remarks on `ISubjectEditComponent.IsValidChanged` describe what the create dialog does with it. The handler of `@bind-Value:after` runs each time the bound value is committed, whichever way it changed (typing, pasting, autofill), which a key handler such as `OnKeyUp` does not cover. A text field commits its value when it loses focus, and with `Immediate="true"` on every keystroke.
 
 ### Edit Component Lifecycle: OnInitialized vs OnParametersSet
 
