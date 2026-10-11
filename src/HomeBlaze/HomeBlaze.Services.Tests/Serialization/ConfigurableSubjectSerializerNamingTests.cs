@@ -63,7 +63,7 @@ public class ConfigurableSubjectSerializerNamingTests
         var json = _serializer.Serialize(parent);
 
         // Assert
-        Assert.Equal(_serializer.Serialize(parent, ConfigurationNaming.CamelCase), json);
+        Assert.Equal(_serializer.Serialize(parent, ConfigurationNaming.LowerCamelCase), json);
         Assert.Contains("\"childConfig\"", json);
     }
 
@@ -295,7 +295,7 @@ public class ConfigurableSubjectSerializerNamingTests
     }
 
     [Theory]
-    [InlineData(ConfigurationNaming.CamelCase)]
+    [InlineData(ConfigurationNaming.LowerCamelCase)]
     [InlineData(ConfigurationNaming.PropertyName)]
     public void WhenSingleValueIsChecked_ThenItIsJudgedTheSameInEveryNaming(ConfigurationNaming naming)
     {
@@ -321,9 +321,9 @@ public class ConfigurableSubjectSerializerNamingTests
 
     // A number for a text property is rejected only by the naming that reads its key.
     [Theory]
-    [InlineData(ConfigurationNaming.CamelCase, "SettingA", true)]
+    [InlineData(ConfigurationNaming.LowerCamelCase, "SettingA", true)]
     [InlineData(ConfigurationNaming.PropertyName, "SettingA", false)]
-    [InlineData(ConfigurationNaming.CamelCase, "settingA", false)]
+    [InlineData(ConfigurationNaming.LowerCamelCase, "settingA", false)]
     [InlineData(ConfigurationNaming.PropertyName, "settingA", true)]
     public void WhenValueObjectIsCheckedInANaming_ThenItIsJudgedWithTheNamesOfThatNaming(
         ConfigurationNaming naming, string key, bool expected)

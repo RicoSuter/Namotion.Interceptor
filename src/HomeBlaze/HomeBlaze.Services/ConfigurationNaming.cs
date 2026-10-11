@@ -7,12 +7,12 @@ namespace HomeBlaze.Services;
 public enum ConfigurationNaming
 {
     /// <summary>
-    /// The property name in camelCase. A property with an explicit JSON name is written with that name
-    /// and is read by it below the top level of a subject. At the top level of a subject, a value is
-    /// read by the camelCase of the property name only.
+    /// The property name in lower camel case, like <c>targetSpeed</c>. A property with an explicit JSON
+    /// name is written with that name and is read by it below the top level of a subject. At the top
+    /// level of a subject, a value is read by the lower camel case of the property name only.
     /// This is the naming of configuration files.
     /// </summary>
-    CamelCase,
+    LowerCamelCase,
 
     /// <summary>
     /// The property name as it is declared, also for a property with an explicit JSON name.

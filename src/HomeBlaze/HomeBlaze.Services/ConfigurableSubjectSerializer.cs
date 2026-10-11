@@ -20,7 +20,7 @@ namespace HomeBlaze.Services;
 /// </summary>
 /// <remarks>
 /// Every method that reads or writes JSON takes a <see cref="ConfigurationNaming"/>. It defaults to
-/// <see cref="ConfigurationNaming.CamelCase"/>, the naming of configuration files.
+/// <see cref="ConfigurationNaming.LowerCamelCase"/>, the naming of configuration files.
 /// </remarks>
 public class ConfigurableSubjectSerializer
 {
@@ -31,14 +31,14 @@ public class ConfigurableSubjectSerializer
 
     private readonly TypeProvider _typeProvider;
     private readonly IServiceProvider _serviceProvider;
-    private readonly JsonSerializerOptions _camelCaseOptions;
+    private readonly JsonSerializerOptions _lowerCamelCaseOptions;
     private readonly JsonSerializerOptions _propertyNameOptions;
 
     public ConfigurableSubjectSerializer(TypeProvider typeProvider, IServiceProvider serviceProvider)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
-        _camelCaseOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.CamelCase);
+        _lowerCamelCaseOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.LowerCamelCase);
         _propertyNameOptions = CreateOptions(typeProvider, serviceProvider, ConfigurationNaming.PropertyName);
     }
 
@@ -47,23 +47,23 @@ public class ConfigurableSubjectSerializer
         new()
         {
             TypeInfoResolver = new ConfigurationJsonTypeInfoResolver(typeProvider, serviceProvider, naming),
-            PropertyNamingPolicy = naming == ConfigurationNaming.CamelCase ? JsonNamingPolicy.CamelCase : null,
+            PropertyNamingPolicy = naming == ConfigurationNaming.LowerCamelCase ? JsonNamingPolicy.CamelCase : null,
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             Converters = { new JsonStringEnumConverter() }
         };
 
     private JsonSerializerOptions GetOptions(ConfigurationNaming naming) =>
-        naming == ConfigurationNaming.CamelCase ? _camelCaseOptions : _propertyNameOptions;
+        naming == ConfigurationNaming.LowerCamelCase ? _lowerCamelCaseOptions : _propertyNameOptions;
 
     // The configuration properties of the subject itself are matched by this name and not by the options.
     private static string GetJsonName(string propertyName, ConfigurationNaming naming) =>
-        naming == ConfigurationNaming.CamelCase ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
+        naming == ConfigurationNaming.LowerCamelCase ? JsonNamingPolicy.CamelCase.ConvertName(propertyName) : propertyName;
 
     /// <summary>
     /// Serializes an IConfigurable to JSON with $type discriminator.
     /// </summary>
-    public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+    public string Serialize(IInterceptorSubject subject, ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase)
     {
         if (subject is not IConfigurable configurableSubject)
         {
@@ -79,7 +79,7 @@ public class ConfigurableSubjectSerializer
     /// Deserializes JSON to an IConfigurable using $type discriminator.
     /// Uses ActivatorUtilities for DI-aware construction.
     /// </summary>
-    public IConfigurable? Deserialize(string json, ConfigurationNaming naming = ConfigurationNaming.CamelCase) =>
+    public IConfigurable? Deserialize(string json, ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase) =>
         Deserialize(json, created: null, naming);
 
     /// <summary>
@@ -92,7 +92,7 @@ public class ConfigurableSubjectSerializer
     /// <see cref="Release"/> then detaches. Call <see cref="Release"/> only after this method has returned or thrown.
     /// </remarks>
     public IConfigurable? Deserialize(
-        string json, Action<IInterceptorSubject>? created, ConfigurationNaming naming = ConfigurationNaming.CamelCase) =>
+        string json, Action<IInterceptorSubject>? created, ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase) =>
         Deserialize(json, created, skipped: null, naming);
 
     /// <summary>
@@ -111,7 +111,7 @@ public class ConfigurableSubjectSerializer
         string json,
         Action<IInterceptorSubject>? created,
         Action<SkippedConfigurationProperty>? skipped,
-        ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+        ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -285,7 +285,7 @@ public class ConfigurableSubjectSerializer
     /// passes a callback for the skipped properties.
     /// </remarks>
     public bool CanDeserialize(
-        string json, Type propertyType, ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+        string json, Type propertyType, ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase)
     {
         try
         {
@@ -304,7 +304,7 @@ public class ConfigurableSubjectSerializer
     /// Note: STJ doesn't support populating existing objects, so we deserialize each property individually.
     /// </summary>
     public void UpdateConfiguration(
-        IInterceptorSubject subject, string json, ConfigurationNaming naming = ConfigurationNaming.CamelCase) =>
+        IInterceptorSubject subject, string json, ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase) =>
         UpdateConfiguration(subject, json, skipped: null, naming);
 
     /// <summary>
@@ -321,7 +321,7 @@ public class ConfigurableSubjectSerializer
         IInterceptorSubject subject,
         string json,
         Action<SkippedConfigurationProperty>? skipped,
-        ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+        ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;

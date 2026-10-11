@@ -109,8 +109,8 @@ public class ConfigurableSubjectSerializerSkippedPropertyTests
     }
 
     [Theory]
-    [InlineData(true, ConfigurationNaming.CamelCase, CamelCaseJson)]
-    [InlineData(false, ConfigurationNaming.CamelCase, CamelCaseJson)]
+    [InlineData(true, ConfigurationNaming.LowerCamelCase, CamelCaseJson)]
+    [InlineData(false, ConfigurationNaming.LowerCamelCase, CamelCaseJson)]
     [InlineData(true, ConfigurationNaming.PropertyName, PropertyNameJson)]
     [InlineData(false, ConfigurationNaming.PropertyName, PropertyNameJson)]
     public void WhenCallerAsksForSkippedPropertiesAndValuesDoNotConvert_ThenDeserializeReportsEachOneAndReadsTheOthers(

@@ -28,13 +28,13 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     /// <param name="serviceProvider">Creates the configurable types that have no parameterless constructor.</param>
     /// <param name="naming">
     /// With <see cref="ConfigurationNaming.PropertyName"/> every property gets its declared name, whatever the
-    /// naming policy of the options is. With <see cref="ConfigurationNaming.CamelCase"/> the names are left
+    /// naming policy of the options is. With <see cref="ConfigurationNaming.LowerCamelCase"/> the names are left
     /// to the options.
     /// </param>
     public ConfigurationJsonTypeInfoResolver(
         TypeProvider typeProvider,
         IServiceProvider serviceProvider,
-        ConfigurationNaming naming = ConfigurationNaming.CamelCase)
+        ConfigurationNaming naming = ConfigurationNaming.LowerCamelCase)
     {
         _typeProvider = typeProvider;
         _serviceProvider = serviceProvider;
